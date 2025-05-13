@@ -1,15 +1,22 @@
+<div align="center">
+  <img src="https://github.com/ChawlaAvi/ag-ui/blob/main/AG-UI.jpeg?raw=true" alt="ag-ui Logo" style="max-width: 20px; height: auto;" />
+</div>
 
-[![AG-UI Working Group #1 – May 16](https://img.shields.io/badge/AG--UI%20Working%20Group%20%231%E2%80%94May%2016-blue?style=flat-square)](https://lu.ma/8supz1j0)
-[![Bring Agents Into Apps with AG-UI – May 16](https://img.shields.io/badge/Bring%20Agents%20Into%20Apps%20with%20AG--UI%E2%80%94May%2016-blue?style=flat-square)](https://lu.ma/c58yhgij)
 
-
-# <img src="https://github.com/user-attachments/assets/ebc0dd08-8732-4519-9b6c-452ce54d8058" alt="ag-ui Logo" height="42px" /> AG-UI: The Agent-User Interaction Protocol
+# <img src="https://github.com/user-attachments/assets/ebc0dd08-8732-4519-9b6c-452ce54d8058" alt="ag-ui Logo" height="30px" /> AG-UI: The Agent-User Interaction Protocol
 
 AG-UI is an open, lightweight, event-based protocol that standardizes **how AI agents connect to front-end applications**.
 
+- Just like MCP standardizes Agent-to-Tool interaction...
+- A2A by Google standardizes Agent-to-Agent interaction...
+- AG-UI standardizes Agent to User interaction.
+
+<div align="center">
+  <img src="https://github.com/ChawlaAvi/ag-ui/blob/main/ag-ui-demo.gif" alt="ag-ui Logo" style="max-width: 20px; height: auto;" />
+</div>
+
 ➡️ See demos of AG-UI-enabled applications [here](https://github.com/ag-ui-protocol/ag-ui?tab=readme-ov-file#ag-ui-compatible-agent-frameworks)
 
-<img src="https://github.com/user-attachments/assets/215227a5-9698-4d97-a46e-8904b95bfa08" alt="ag-ui Logo" style="max-width: 100px; height: auto;" />
 
 
 
