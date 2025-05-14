@@ -104,7 +104,7 @@ https://github.com/user-attachments/assets/a67d3d54-36b2-4c7a-ac69-a0ca01365d5b
 
 AG-UI provides ready-to-use client libraries for building connected experiences:
 
-- **React client** via [CopilotKit](http://copilotkit.ai/docs)
+- **React client** via [CopilotKit](https://docs.copilotkit.ai/)
 - Messaging clients (WhatsApp, WeChat, RCS) — WIP in collaboration with AWS SNS
 
 
