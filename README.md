@@ -110,7 +110,7 @@ AG-UI provides ready-to-use client libraries for building connected experiences:
 
 ## Build New AG-UI Framework Integrations
 
-Learn how to build AG-UI hooks for a new framework: [Framework Integration Guide](http://agui.com/build-hooks)
+Learn how to build AG-UI hooks for a new framework: [Framework Integration Guide](http://ag-ui.com/build-hooks)
 
 
 ## Community
