@@ -19,7 +19,7 @@ Make sure to have [Python](https://www.python.org/downloads/) and
 First, let's create a new project and set up Poetry for dependency management:
 
 ```bash
-poetry new my-endpoint && cd my-endpoint
+poetry new my-endpoint --python=">=3.12,<4.0" && cd my-endpoint
 ```
 
 ## Install Dependencies
@@ -27,7 +27,7 @@ poetry new my-endpoint && cd my-endpoint
 Now, let's install the necessary packages:
 
 ```bash
-poetry add ag-ui openai fastapi uvicorn
+poetry add ag-ui-protocol openai fastapi uvicorn
 ```
 
 ## Create a Basic Endpoint with FastAPI
