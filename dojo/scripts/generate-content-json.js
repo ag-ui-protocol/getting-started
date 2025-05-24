@@ -9,7 +9,7 @@ const config = {
   shared_state: ["agent.py", "page.tsx", "style.css", "README.mdx"],
   predictive_state_updates: ["agent.py", "page.tsx", "style.css", "README.mdx"],
   tool_based_generative_ui: ["agent.py", "page.tsx", "style.css", "README.mdx"],
-  weather_animations: ["page.tsx", "style.css", "README.mdx"],
+  weather_animations: ["agent.py", "page.tsx", "style.css", "README.mdx"],
 };
 
 // Define which files should come from the feature directory vs. the demo directory
