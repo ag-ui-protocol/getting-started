@@ -14,6 +14,8 @@ const humanInTheLoopAgent = new CustomAgent();
 const predictiveStateUpdatesAgent = new CustomAgent();
 const sharedStateAgent = new CustomAgent();
 const toolBasedGenerativeUIAgent = new CustomAgent();
+const myNewFeatureAgent = new CustomAgent();
+const weatherAnimationsAgent = new CustomAgent();
 
 const runtime = new CopilotRuntime({
   agents: {
@@ -23,6 +25,8 @@ const runtime = new CopilotRuntime({
     predictiveStateUpdatesAgent,
     sharedStateAgent,
     toolBasedGenerativeUIAgent,
+    myNewFeatureAgent,
+    weatherAnimationsAgent,
   },
 });
 

@@ -1,0 +1,44 @@
+/* Custom styles for My New Feature */
+
+.my-new-feature-container {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.feature-content {
+  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.feature-title {
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* CopilotKit chat customizations for this feature */
+.copilotKitChat {
+  background-color: var(--copilot-kit-background-color) !important;
+  border-left: 1px solid var(--copilot-kit-separator-color);
+}
+
+.copilotKitInput {
+  border-radius: 8px;
+  border: 1px solid var(--copilot-kit-separator-color) !important;
+  background-color: var(--copilot-kit-background-color);
+}
+
+/* Custom animations */
+.feature-data-update {
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
