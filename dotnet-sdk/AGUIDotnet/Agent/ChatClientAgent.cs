@@ -10,7 +10,7 @@ using Microsoft.Extensions.AI;
 
 namespace AGUIDotnet.Agent;
 
-public sealed record ChatClientAgentOptions
+public record ChatClientAgentOptions
 {
     /// <summary>
     /// Options to provide when using the provided chat client.
@@ -33,6 +33,9 @@ public sealed record ChatClientAgentOptions
     /// </para>
     /// <para>
     /// Switching this on will cause the agent to perform an initial typed extraction of the context if available, and then use that context for the agent run.
+    /// </para>
+    /// <para>
+    /// This is useful e.g. for frontends like CopilotKit that do not make useCopilotReadable context available to agents, instead relying on shared agent state - it does however provide the context in the system message.
     /// </para>
     /// </summary>
     public bool PerformAiContextExtraction { get; init; } = false;
@@ -58,7 +61,7 @@ public class ChatClientAgent : IAGUIAgent
 {
     private readonly IChatClient _chatClient;
     private readonly ChatClientAgentOptions _agentOptions;
-    private static readonly JsonSerializerOptions _jsonSerOpts = new(JsonSerializerDefaults.Web)
+    protected static readonly JsonSerializerOptions _jsonSerOpts = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
@@ -92,11 +95,6 @@ public class ChatClientAgent : IAGUIAgent
         // Ensure we have an empty tools list to start with.
         chatOpts.Tools ??= [];
 
-        // Do NOT support multiple tool calls (even if the caller has requested it).
-        // Frontend tools require us to short-circuit the function invocation loop provided out of the box by the abstraction library.
-        // todo: We may need to create a custom chat client wrapper that handles function invocation without the limitation.
-        chatOpts.AllowMultipleToolCalls = false;
-
         /*
         Prepare the backend tools by filtering out any frontend tools (there shouldn't be any, but just in case),
         and allow the derived type to modify the backend tools if needed.
@@ -104,6 +102,7 @@ public class ChatClientAgent : IAGUIAgent
         var backendTools = (await PrepareBackendTools(
             [.. chatOpts.Tools.OfType<AIFunction>().Where(f => f is not FrontendTool)],
             input,
+            events,
             cancellationToken
         )).Where(t => t is not FrontendTool).ToImmutableList();
 
@@ -126,20 +125,24 @@ public class ChatClientAgent : IAGUIAgent
             }
         }
 
-        // Re-init the tools list to only include the discovered backend and provided frontend tools
-        chatOpts.Tools = [.. backendTools, .. frontendTools];
+        if (frontendTools.IsEmpty && backendTools.IsEmpty)
+        {
+            chatOpts.Tools = null;
+            chatOpts.AllowMultipleToolCalls = null;
+        }
+        else
+        {
+            chatOpts.Tools = [.. backendTools, .. frontendTools];
+            chatOpts.AllowMultipleToolCalls = false;
+        }
 
         var context = await PrepareContext(input, cancellationToken);
         var mappedMessages = await MapAGUIMessagesToChatClientMessages(input, context, cancellationToken);
 
         var inFlightFrontendCalls = new HashSet<string>();
 
-        await events.WriteAsync(new RunStartedEvent
-        {
-            ThreadId = input.ThreadId,
-            RunId = input.RunId,
-            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        }, cancellationToken);
+        // Handle the run starting
+        await OnRunStartedAsync(input, events, cancellationToken);
 
         string? currentResponseId = null;
 
@@ -329,6 +332,7 @@ public class ChatClientAgent : IAGUIAgent
                         2. The user's age: 30
                         </input>
                         <output>
+                        ```json
                         [
                             {
                                 "name": "The name of the user,
@@ -339,11 +343,15 @@ public class ChatClientAgent : IAGUIAgent
                                 "value": "30"
                             }
                         ]
+                        ```
+                        </output>
                         </example>
                     </examples>
 
                     <existingContext>
+                    ```json
                     {{JsonSerializer.Serialize(input.Context, _jsonSerOpts)}}
+                    ```
                     </existingContext>
 
                     <providedSystemMessage>
@@ -371,21 +379,26 @@ public class ChatClientAgent : IAGUIAgent
     }
 
     /// <summary>
-    /// When overridden in a derived class, allows for customisation of how the context is injected into the system message.
+    /// When overridden in a derived class, allows for customisation of the system message used for the agent run.
     /// </summary>
     /// <remarks>
-    /// This is only used when the system message is overridden by the agent options. Default behaviour is to just append JSON-serialized context to the message.
+    /// This is only used when the system message is overridden by the agent options. Default behaviour is to honour the agent option for including context in the system message, falling back to the provided system message if not set.
     /// </remarks>
     /// <param name="input">The input to the agent for the run</param>
     /// <param name="systemMessage">The system message to use</param>
     /// <param name="context">The final context prepared for the agent</param>
     /// <returns>The final system message to use</returns>
-    protected virtual ValueTask<string> InjectContextIntoSystemMessage(
+    protected virtual ValueTask<string> PrepareSystemMessage(
         RunAgentInput input,
         string systemMessage,
         ImmutableList<Context> context
     )
     {
+        if (!_agentOptions.IncludeContextInSystemMessage)
+        {
+            return ValueTask.FromResult(systemMessage);
+        }
+
         return ValueTask.FromResult(
             $"{systemMessage}\n\nThe following context is available to you:\n```{JsonSerializer.Serialize(context, _jsonSerOpts)}```"
         );
@@ -415,9 +428,7 @@ public class ChatClientAgent : IAGUIAgent
                         .Prepend(new SystemMessage
                         {
                             Id = Guid.NewGuid().ToString(),
-                            Content = _agentOptions.IncludeContextInSystemMessage
-                                ? await InjectContextIntoSystemMessage(input, sysMessage, context)
-                                : sysMessage,
+                            Content = await PrepareSystemMessage(input, sysMessage, context)
                         })],
 
                 // Fallback to just preserving inbound messages as-is.
@@ -454,14 +465,38 @@ public class ChatClientAgent : IAGUIAgent
     /// </summary>
     /// <param name="backendTools">The backend tools already available via the provided chat client options</param>
     /// <param name="input">The run input provided to the agent</param>
+    /// <param name="events">The events channel writer to push AG-UI events into
     /// <returns>The backend tools to make available to the agent for the run</returns>
     protected virtual ValueTask<ImmutableList<AIFunction>> PrepareBackendTools(
         ImmutableList<AIFunction> backendTools,
         RunAgentInput input,
+        ChannelWriter<BaseEvent> events,
         CancellationToken cancellationToken = default
     )
     {
         // By default, zero modification.
         return ValueTask.FromResult(backendTools);
+    }
+
+    /// <summary>
+    /// When overridden in a derived class, allows for customisation of the handling for a run starting.
+    /// </summary>
+    /// <remarks>
+    /// The default implementation will emit a <see cref="RunStartedEvent"/> to the provided events channel.
+    /// </remarks>
+    /// <param name="input">The input to the agent for the current run.</param>
+    /// <param name="events">The events channel writer to push events into</param>
+    protected virtual async ValueTask OnRunStartedAsync(
+        RunAgentInput input,
+        ChannelWriter<BaseEvent> events,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await events.WriteAsync(new RunStartedEvent
+        {
+            ThreadId = input.ThreadId,
+            RunId = input.RunId,
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        }, cancellationToken);
     }
 }
