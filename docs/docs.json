@@ -80,6 +80,10 @@
                 "pages": ["sdk/python/encoder/overview"]
               }
             ]
+          },
+          {
+            "group": ".NET",
+            "pages": ["sdk/dotnet/overview"]
           }
         ]
       }
@@ -95,6 +99,11 @@
           "anchor": "Python SDK",
           "href": "https://docs.ag-ui.com/sdk/python/core/overview",
           "icon": "python"
+        },
+        {
+          "anchor": ".NET SDK",
+          "href": "https://docs.ag-ui.com/sdk/dotnet/core/overview",
+          "icon": "microsoft"
         }
       ]
     }
