@@ -331,11 +331,11 @@ public class ChatClientAgent : IAGUIAgent
                         <output>
                         [
                             {
-                                "name": "user_name",
+                                "name": "The name of the user,
                                 "value": "John Doe"
                             },
                             {
-                                "name": "user_age",
+                                "name": "The user's age",
                                 "value": "30"
                             }
                         ]
