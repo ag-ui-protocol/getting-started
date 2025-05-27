@@ -12,8 +12,8 @@ public sealed record FunctionCall
     public required string Name { get; init; }
 
     /// <summary>
-    /// The JSON-encoded arguments for the function call.
+    /// The JSON-encoded arguments (as a string) for the function call.
     /// </summary>
     [JsonPropertyName("arguments")]
-    public required JsonElement Arguments { get; init; }
+    public required string Arguments { get; init; }
 }
