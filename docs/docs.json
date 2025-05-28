@@ -83,7 +83,7 @@
           },
           {
             "group": ".NET",
-            "pages": ["sdk/dotnet/overview"]
+            "pages": ["sdk/dotnet/overview", "sdk/dotnet/agents", "sdk/dotnet/aspnet"]
           }
         ]
       }
