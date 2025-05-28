@@ -43,7 +43,7 @@ public record ChatClientAgentOptions
     /// <summary>
     /// When overriding the system message, whether to include provided or extracted context in the system message.
     /// </summary>
-    public bool IncludeContextInSystemMessage { get; init; } = true;
+    public bool IncludeContextInSystemMessage { get; init; } = false;
 }
 
 /// <summary>
