@@ -10,14 +10,21 @@ namespace AGUIDotnet.Agent;
 /// </summary>
 public sealed class EchoAgent : IAGUIAgent
 {
-    public async Task RunAsync(RunAgentInput input, ChannelWriter<BaseEvent> events, CancellationToken ct = default)
+    public async Task RunAsync(
+        RunAgentInput input,
+        ChannelWriter<BaseEvent> events,
+        CancellationToken ct = default
+    )
     {
-        await events.WriteAsync(new RunStartedEvent
-        {
-            ThreadId = input.ThreadId,
-            RunId = input.RunId,
-            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        }, ct);
+        await events.WriteAsync(
+            new RunStartedEvent
+            {
+                ThreadId = input.ThreadId,
+                RunId = input.RunId,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            },
+            ct
+        );
 
         var lastMessage = input.Messages.LastOrDefault();
 
@@ -26,47 +33,60 @@ public sealed class EchoAgent : IAGUIAgent
         switch (lastMessage)
         {
             case SystemMessage system:
-                foreach (var ev in EventHelpers.SendSimpleMessage($"Echoing system message:\n\n```\n{system.Content}\n```\n"))
+                foreach (var ev in EventHelpers.SendSimpleMessage(
+                    $"Echoing system message:\n\n```\n{system.Content}\n```\n"
+                ))
                 {
                     await events.WriteAsync(ev, ct);
                 }
                 break;
 
             case UserMessage user:
-                foreach (var ev in EventHelpers.SendSimpleMessage($"Echoing user message:\n\n```\n{user.Content}\n```\n"))
+                foreach (var ev in EventHelpers.SendSimpleMessage(
+                    $"Echoing user message:\n\n```\n{user.Content}\n```\n"
+                ))
                 {
                     await events.WriteAsync(ev, ct);
                 }
                 break;
 
             case AssistantMessage assistant:
-                foreach (var ev in EventHelpers.SendSimpleMessage($"Echoing assistant message:\n\n```\n{assistant.Content}\n```\n"))
+                foreach (var ev in EventHelpers.SendSimpleMessage(
+                    $"Echoing assistant message:\n\n```\n{assistant.Content}\n```\n"
+                ))
                 {
                     await events.WriteAsync(ev, ct);
                 }
                 break;
 
             case ToolMessage tool:
-                foreach (var ev in EventHelpers.SendSimpleMessage($"Echoing tool message for tool call '{tool.ToolCallId}':\n\n```\n{tool.Content}\n```\n"))
+                foreach (var ev in EventHelpers.SendSimpleMessage(
+                    $"Echoing tool message for tool call '{tool.ToolCallId}':\n\n```\n{tool.Content}\n```\n"
+                ))
                 {
                     await events.WriteAsync(ev, ct);
                 }
                 break;
 
             default:
-                foreach (var ev in EventHelpers.SendSimpleMessage($"Unknown message type: {lastMessage?.GetType().Name ?? "null"}"))
+                foreach (var ev in EventHelpers.SendSimpleMessage(
+                    $"Unknown message type: {lastMessage?.GetType().Name ?? "null"}"
+                ))
                 {
                     await events.WriteAsync(ev, ct);
                 }
                 break;
         }
 
-        await events.WriteAsync(new RunFinishedEvent
-        {
-            ThreadId = input.ThreadId,
-            RunId = input.RunId,
-            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        }, ct);
+        await events.WriteAsync(
+            new RunFinishedEvent
+            {
+                ThreadId = input.ThreadId,
+                RunId = input.RunId,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            },
+            ct
+        );
 
         events.Complete();
     }
