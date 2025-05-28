@@ -83,7 +83,26 @@
           },
           {
             "group": ".NET",
-            "pages": ["sdk/dotnet/overview", "sdk/dotnet/agents", "sdk/dotnet/aspnet"]
+            "pages": [
+              "sdk/dotnet/overview",
+              "sdk/dotnet/types",
+              "sdk/dotnet/events",
+              "sdk/dotnet/json",
+              {
+                "group": "Agents",
+                "pages": [
+                  "sdk/dotnet/agents",
+                  {
+                    "group": "IChatClient",
+                    "pages": [
+                      "/sdk/dotnet/agent-types/chatclientagent",
+                      "/sdk/dotnet/agent-types/statefulchatclientagent"
+                    ]
+                  }
+                ]
+              },
+              "sdk/dotnet/aspnet"
+            ]
           }
         ]
       }

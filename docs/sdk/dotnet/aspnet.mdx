@@ -13,6 +13,18 @@ For that reason the .NET SDK provides a simple extension method to register a
 POST endpoint that can be used to expose agents:
 
 ```csharp
+builder.Services.ConfigureHttpJsonOptions(opts =>
+{
+    // Necessary as the type discriminator is not the first property in the JSON objects used by the AG-UI protocol.
+    opts.SerializerOptions.AllowOutOfOrderMetadataProperties = true;
+    opts.SerializerOptions.WriteIndented = false;
+    opts.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+
+    // Necessary as consumers of the AG-UI protocol (e.g. Zod-powered schemas) will not accept null values for optional properties.
+    // So we need to ensure that null values are not serialized.
+    opts.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+});
+
 builder.Services.AddChatClient(
     new ChatClientBuilder(myProviderIChatClient)
         .UseFunctionInvocation()
