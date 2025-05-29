@@ -104,12 +104,12 @@ public class ChatClientAgent : IAGUIAgent
             input,
             events,
             cancellationToken
-        )).Where(t => t is not FrontendTool).ToImmutableList();
+        ).ConfigureAwait(false)).Where(t => t is not FrontendTool).ToImmutableList();
 
         var frontendTools = await PrepareFrontendTools(
             [.. input.Tools.Select(t => new FrontendTool(t))],
             input,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         var frontendToolNames = frontendTools.Select(t => t.Name).ToImmutableHashSet();
 
@@ -136,17 +136,17 @@ public class ChatClientAgent : IAGUIAgent
             chatOpts.AllowMultipleToolCalls = false;
         }
 
-        var context = await PrepareContext(input, cancellationToken);
-        var mappedMessages = await MapAGUIMessagesToChatClientMessages(input, context, cancellationToken);
+        var context = await PrepareContext(input, cancellationToken).ConfigureAwait(false);
+        var mappedMessages = await MapAGUIMessagesToChatClientMessages(input, context, cancellationToken).ConfigureAwait(false);
 
         var inFlightFrontendCalls = new HashSet<string>();
 
         // Handle the run starting
-        await OnRunStartedAsync(input, events, cancellationToken);
+        await OnRunStartedAsync(input, events, cancellationToken).ConfigureAwait(false);
 
         string? currentResponseId = null;
 
-        await foreach (var update in _chatClient.GetStreamingResponseAsync(mappedMessages, chatOpts, cancellationToken))
+        await foreach (var update in _chatClient.GetStreamingResponseAsync(mappedMessages, chatOpts, cancellationToken).ConfigureAwait(false))
         {
             /*
             The function invocation loop provided by the chat client abstractions will still yield function result contents
@@ -176,7 +176,7 @@ public class ChatClientAgent : IAGUIAgent
                                 {
                                     MessageId = currentResponseId,
                                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                                }, cancellationToken);
+                                }, cancellationToken).ConfigureAwait(false);
 
                                 currentResponseId = null;
                             }
@@ -190,7 +190,7 @@ public class ChatClientAgent : IAGUIAgent
                                 {
                                     MessageId = currentResponseId,
                                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                                }, cancellationToken);
+                                }, cancellationToken).ConfigureAwait(false);
                             }
 
                             Debug.Assert(currentResponseId is not null, "Handling text content without a current response message ID.");
@@ -203,7 +203,7 @@ public class ChatClientAgent : IAGUIAgent
                                     MessageId = currentResponseId,
                                     Delta = text.Text,
                                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                                }, cancellationToken);
+                                }, cancellationToken).ConfigureAwait(false);
                             }
                         }
                         break;
@@ -224,7 +224,7 @@ public class ChatClientAgent : IAGUIAgent
                                 {
                                     MessageId = currentResponseId,
                                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                                }, cancellationToken);
+                                }, cancellationToken).ConfigureAwait(false);
                                 currentResponseId = null;
                             }
 
@@ -240,7 +240,7 @@ public class ChatClientAgent : IAGUIAgent
                                 ToolCallName = functionCall.Name,
                                 ParentMessageId = update.MessageId,
                                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                            }, cancellationToken);
+                            }, cancellationToken).ConfigureAwait(false);
 
                             await events.WriteAsync(new ToolCallArgsEvent
                             {
@@ -249,13 +249,13 @@ public class ChatClientAgent : IAGUIAgent
                                 // todo: an alternative might be not exposing the underlying channel writer, and instead providing a structured type for emitting common events.
                                 Delta = JsonSerializer.Serialize(functionCall.Arguments, _jsonSerOpts),
                                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                            }, cancellationToken);
+                            }, cancellationToken).ConfigureAwait(false);
 
                             await events.WriteAsync(new ToolCallEndEvent
                             {
                                 ToolCallId = functionCall.CallId,
                                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                            }, cancellationToken);
+                            }, cancellationToken).ConfigureAwait(false);
                         }
 
                         break;
@@ -276,7 +276,7 @@ public class ChatClientAgent : IAGUIAgent
             {
                 MessageId = currentResponseId,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            }, cancellationToken);
+            }, cancellationToken).ConfigureAwait(false);
         }
 
         await events.WriteAsync(new RunFinishedEvent
@@ -284,7 +284,7 @@ public class ChatClientAgent : IAGUIAgent
             ThreadId = input.ThreadId,
             RunId = input.RunId,
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        }, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
 
         events.Complete();
     }
@@ -360,7 +360,7 @@ public class ChatClientAgent : IAGUIAgent
                     """
                 ),
                 cancellationToken: cancellationToken
-            );
+            ).ConfigureAwait(false);
 
         if (extractedContext.Usage is not null)
         {
@@ -428,7 +428,7 @@ public class ChatClientAgent : IAGUIAgent
                         .Prepend(new SystemMessage
                         {
                             Id = Guid.NewGuid().ToString(),
-                            Content = await PrepareSystemMessage(input, sysMessage, context)
+                            Content = await PrepareSystemMessage(input, sysMessage, context).ConfigureAwait(false)
                         })],
 
                 // Fallback to just preserving inbound messages as-is.
@@ -497,6 +497,6 @@ public class ChatClientAgent : IAGUIAgent
             ThreadId = input.ThreadId,
             RunId = input.RunId,
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-        }, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
     }
 }

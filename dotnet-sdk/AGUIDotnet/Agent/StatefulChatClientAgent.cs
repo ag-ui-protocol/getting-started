@@ -45,7 +45,7 @@ public class StatefulChatClientAgent<TState> : ChatClientAgent where TState : no
 
     protected override async ValueTask<string> PrepareSystemMessage(RunAgentInput input, string systemMessage, ImmutableList<Context> context)
     {
-        var coreMessage = await base.PrepareSystemMessage(input, systemMessage, context);
+        var coreMessage = await base.PrepareSystemMessage(input, systemMessage, context).ConfigureAwait(false);
 
         // Hijack the original system message to include some context to the LLM about the stateful nature of this agent.
         // Nudging it to use the state collaboration tools available to it.
@@ -77,7 +77,7 @@ public class StatefulChatClientAgent<TState> : ChatClientAgent where TState : no
     protected override async ValueTask<ImmutableList<AIFunction>> PrepareBackendTools(ImmutableList<AIFunction> backendTools, RunAgentInput input, ChannelWriter<BaseEvent> events, CancellationToken cancellationToken = default)
     {
         return [
-            .. await base.PrepareBackendTools(backendTools, input, events, cancellationToken),
+            .. await base.PrepareBackendTools(backendTools, input, events, cancellationToken).ConfigureAwait(false),
             AIFunctionFactory.Create(
                 RetrieveState,
                 name: "retrieve_state",
@@ -91,7 +91,7 @@ public class StatefulChatClientAgent<TState> : ChatClientAgent where TState : no
                         await events.WriteAsync(new StateDeltaEvent {
                             Delta = [.. delta.Operations.Cast<object>()],
                             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                        }, cancellationToken);
+                        }, cancellationToken).ConfigureAwait(false);
                     }
                 },
                 name: "update_state",
@@ -103,7 +103,7 @@ public class StatefulChatClientAgent<TState> : ChatClientAgent where TState : no
     protected override async ValueTask OnRunStartedAsync(RunAgentInput input, ChannelWriter<BaseEvent> events, CancellationToken cancellationToken = default)
     {
         // Allow the base behaviour of emitting the RunStartedEvent
-        await base.OnRunStartedAsync(input, events, cancellationToken);
+        await base.OnRunStartedAsync(input, events, cancellationToken).ConfigureAwait(false);
 
         // Take the initial state from the input if possible
         try
@@ -126,6 +126,6 @@ public class StatefulChatClientAgent<TState> : ChatClientAgent where TState : no
         {
             Snapshot = _currentState,
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        }, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
     }
 }

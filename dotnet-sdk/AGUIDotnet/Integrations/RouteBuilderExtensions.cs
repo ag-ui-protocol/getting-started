@@ -36,16 +36,16 @@ public static class RouteBuilderExtensions
             ) =>
             {
                 context.Response.ContentType = "text/event-stream";
-                await context.Response.Body.FlushAsync();
+                await context.Response.Body.FlushAsync().ConfigureAwait(true);
 
                 var serOptions = jsonOptions.Value.SerializerOptions;
                 var agent = agentFactory(context.RequestServices);
 
-                await foreach (var ev in agent.RunToCompletionAsync(input, context.RequestAborted))
+                await foreach (var ev in agent.RunToCompletionAsync(input, context.RequestAborted).ConfigureAwait(true))
                 {
                     var serializedEvent = JsonSerializer.Serialize(ev, serOptions);
-                    await context.Response.WriteAsync($"data: {serializedEvent}\n\n");
-                    await context.Response.Body.FlushAsync();
+                    await context.Response.WriteAsync($"data: {serializedEvent}\n\n").ConfigureAwait(true);
+                    await context.Response.Body.FlushAsync().ConfigureAwait(true);
 
                     // If the event is a RunFinishedEvent, we can break the loop.
                     if (ev is RunFinishedEvent)

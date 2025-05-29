@@ -35,7 +35,7 @@ public static class AgentExtensions
         {
             try
             {
-                await agent.RunAsync(input, channel.Writer, cancellationToken);
+                await agent.RunAsync(input, channel.Writer, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -56,7 +56,7 @@ public static class AgentExtensions
         }, cancellationToken);
 
         // Enumerate the events produced by the agent and yield them to the caller.
-        await foreach (var ev in channel.Reader.ReadAllAsync(cancellationToken))
+        await foreach (var ev in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
         {
             yield return ev;
         }

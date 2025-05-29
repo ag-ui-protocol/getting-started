@@ -24,11 +24,11 @@ public sealed class EchoAgent : IAGUIAgent
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             },
             ct
-        );
+        ).ConfigureAwait(false);
 
         var lastMessage = input.Messages.LastOrDefault();
 
-        await Task.Delay(500, ct);
+        await Task.Delay(500, ct).ConfigureAwait(false);
 
         switch (lastMessage)
         {
@@ -37,7 +37,7 @@ public sealed class EchoAgent : IAGUIAgent
                     $"Echoing system message:\n\n```\n{system.Content}\n```\n"
                 ))
                 {
-                    await events.WriteAsync(ev, ct);
+                    await events.WriteAsync(ev, ct).ConfigureAwait(false);
                 }
                 break;
 
@@ -46,7 +46,7 @@ public sealed class EchoAgent : IAGUIAgent
                     $"Echoing user message:\n\n```\n{user.Content}\n```\n"
                 ))
                 {
-                    await events.WriteAsync(ev, ct);
+                    await events.WriteAsync(ev, ct).ConfigureAwait(false);
                 }
                 break;
 
@@ -55,7 +55,7 @@ public sealed class EchoAgent : IAGUIAgent
                     $"Echoing assistant message:\n\n```\n{assistant.Content}\n```\n"
                 ))
                 {
-                    await events.WriteAsync(ev, ct);
+                    await events.WriteAsync(ev, ct).ConfigureAwait(false);
                 }
                 break;
 
@@ -64,7 +64,7 @@ public sealed class EchoAgent : IAGUIAgent
                     $"Echoing tool message for tool call '{tool.ToolCallId}':\n\n```\n{tool.Content}\n```\n"
                 ))
                 {
-                    await events.WriteAsync(ev, ct);
+                    await events.WriteAsync(ev, ct).ConfigureAwait(false);
                 }
                 break;
 
@@ -73,7 +73,7 @@ public sealed class EchoAgent : IAGUIAgent
                     $"Unknown message type: {lastMessage?.GetType().Name ?? "null"}"
                 ))
                 {
-                    await events.WriteAsync(ev, ct);
+                    await events.WriteAsync(ev, ct).ConfigureAwait(false);
                 }
                 break;
         }
@@ -86,7 +86,7 @@ public sealed class EchoAgent : IAGUIAgent
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             },
             ct
-        );
+        ).ConfigureAwait(false);
 
         events.Complete();
     }
