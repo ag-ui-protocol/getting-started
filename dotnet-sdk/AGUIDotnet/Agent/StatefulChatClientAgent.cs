@@ -10,6 +10,30 @@ namespace AGUIDotnet.Agent;
 
 public record StatefulChatClientAgentOptions<TState> : ChatClientAgentOptions where TState : notnull
 {
+    /// <summary>
+    /// The name to give to the function for retrieving the current shared state of the agent.
+    /// </summary>
+    public string StateRetrievalFunctionName { get; init; } = "retrieve_state";
+
+    /// <summary>
+    /// The description to give to the function for retrieving the current shared state of the agent.
+    /// </summary>
+    public string StateRetrievalFunctionDescription { get; init; } = "Retrieves the current shared state of the agent.";
+
+    /// <summary>
+    /// The name to give to the function for updating the current shared state of the agent.
+    /// </summary>
+    public string StateUpdateFunctionName { get; init; } = "update_state";
+
+    /// <summary>
+    /// The description to give to the function for updating the current shared state of the agent.
+    /// </summary>
+    public string StateUpdateFunctionDescription { get; init; } = "Updates the current shared state of the agent.";
+
+    /// <summary>
+    /// When <see cref="ChatClientAgentOptions.EmitBackendToolCalls"/> is <c>true</c>, this controls whether the frontend should be made aware of the state functions being called. 
+    /// </summary>
+    public bool EmitStateFunctionsToFrontend { get; init; } = true;
 }
 
 /// <summary>
@@ -22,6 +46,7 @@ public record StatefulChatClientAgentOptions<TState> : ChatClientAgentOptions wh
 public class StatefulChatClientAgent<TState> : ChatClientAgent where TState : notnull
 {
     private TState _currentState = default!;
+    private readonly StatefulChatClientAgentOptions<TState> _agentOptions;
 
     public StatefulChatClientAgent(IChatClient chatClient, TState initialState, StatefulChatClientAgentOptions<TState> agentOptions) : base(chatClient, agentOptions)
     {
@@ -30,6 +55,27 @@ public class StatefulChatClientAgent<TState> : ChatClientAgent where TState : no
             throw new ArgumentException("System message must be provided for a stateful agent.", nameof(agentOptions));
         }
 
+        if (string.IsNullOrWhiteSpace(agentOptions.StateRetrievalFunctionName))
+        {
+            throw new ArgumentException("State retrieval function name must be provided for a stateful agent.", nameof(agentOptions));
+        }
+
+        if (string.IsNullOrWhiteSpace(agentOptions.StateRetrievalFunctionDescription))
+        {
+            throw new ArgumentException("State retrieval function description must be provided for a stateful agent.", nameof(agentOptions));
+        }
+
+        if (string.IsNullOrWhiteSpace(agentOptions.StateUpdateFunctionName))
+        {
+            throw new ArgumentException("State update function name must be provided for a stateful agent.", nameof(agentOptions));
+        }
+
+        if (string.IsNullOrWhiteSpace(agentOptions.StateUpdateFunctionDescription))
+        {
+            throw new ArgumentException("State update function description must be provided for a stateful agent.", nameof(agentOptions));
+        }
+
+        _agentOptions = agentOptions;
         _currentState = initialState;
     }
 
@@ -41,6 +87,7 @@ public class StatefulChatClientAgent<TState> : ChatClientAgent where TState : no
     private void UpdateState(TState newState)
     {
         _currentState = newState;
+
     }
 
     protected override async ValueTask<string> PrepareSystemMessage(RunAgentInput input, string systemMessage, ImmutableList<Context> context)
@@ -80,8 +127,8 @@ public class StatefulChatClientAgent<TState> : ChatClientAgent where TState : no
             .. await base.PrepareBackendTools(backendTools, input, events, cancellationToken).ConfigureAwait(false),
             AIFunctionFactory.Create(
                 RetrieveState,
-                name: "retrieve_state",
-                description: "Retrieves the current shared state of the agent."
+                name: _agentOptions.StateRetrievalFunctionName,
+                description: _agentOptions.StateRetrievalFunctionDescription
             ),
             AIFunctionFactory.Create(
                 async (TState newState) => {
@@ -94,10 +141,32 @@ public class StatefulChatClientAgent<TState> : ChatClientAgent where TState : no
                         }, cancellationToken).ConfigureAwait(false);
                     }
                 },
-                name: "update_state",
-                description: "Updates the current shared state of the agent."
+                name: _agentOptions.StateUpdateFunctionName,
+                description: _agentOptions.StateUpdateFunctionDescription
             )
         ];
+    }
+
+    protected override async ValueTask<bool> ShouldEmitBackendToolCallData(string functionName)
+    {
+        // Short if we're not emitting backend tool calls at all.
+        if (!_agentOptions.EmitBackendToolCalls)
+        {
+            return false;
+        }
+
+        bool isStateFunction =
+           functionName == _agentOptions.StateRetrievalFunctionName ||
+           functionName == _agentOptions.StateUpdateFunctionName;
+
+        // If the function is a state function, only request to emit if the agent options allow it.
+        if (isStateFunction)
+        {
+            return _agentOptions.EmitStateFunctionsToFrontend;
+        }
+
+        // Let the base handle it otherwise.
+        return await base.ShouldEmitBackendToolCallData(functionName).ConfigureAwait(false);
     }
 
     protected override async ValueTask OnRunStartedAsync(RunAgentInput input, ChannelWriter<BaseEvent> events, CancellationToken cancellationToken = default)

@@ -163,7 +163,24 @@ agentsGroup.MapAgentEndpoint(
                 - You have a tool for setting the background colour on the frontend, whenever setting a recipe, please set the background to be inspired by it.
                 </rules>
                 """,
-                PerformAiContextExtraction = false
+                PerformAiContextExtraction = false,
+
+                EmitBackendToolCalls = true,
+                EmitStateFunctionsToFrontend = false,
+
+                ChatOptions = new ChatOptions
+                {
+                    Tools = [
+                        AIFunctionFactory.Create(
+                            async () => {
+                                await Task.Delay(5000); // simulated delay
+                                return DateTimeOffset.UtcNow;
+                            },
+                            name: "getCurrentDateTimeUtc",
+                            description: "Returns the current date and time in UTC."
+                        )
+                    ]
+                }
             }
         );
     }

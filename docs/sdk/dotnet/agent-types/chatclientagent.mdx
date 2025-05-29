@@ -59,16 +59,22 @@ public record ChatClientAgentOptions
     public bool PerformAiContextExtraction { get; init; } = false;
 
     public bool IncludeContextInSystemMessage { get; init; } = false;
+
+    public bool StripSystemMessagesWhenEmittingMessageSnapshots { get; init; } = true;
+
+    public bool EmitBackendToolCalls { get; init; } = true;
 }
 ```
 
-| Property                        | Type           | Description                                                                                                                                                                                               |
-| ------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ChatOptions`                   | `ChatOptions?` | The same options you're used to passing when using the `IChatClient` directly - configure LLM behaviour and register tools.                                                                               |
-| `PreserveInboundSystemMessages` | `bool`         | If true, the agent will preserve system messages from the input and not override them with its own. Defaults to true.                                                                                     |
-| `SystemMessage`                 | `string?`      | If set, this will override the system message passed in the `RunAgentInput`. Defaults to null, meaning it uses the input.                                                                                 |
-| `PerformAiContextExtraction`    | `bool`         | If true, the `IChatClient` will be used to try to extract `Context` from the input system message. Defaults to false.                                                                                     |
-| `IncludeContextInSystemMessage` | `bool`         | If true, the agent will include items in the final `Context` collection in the system message passed to the LLM. By default if and only if a custom `SystemMessage` has been provided. Defaults to false. |
+| Property                                          | Type           | Description                                                                                                                                                                                               |
+| ------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ChatOptions`                                     | `ChatOptions?` | The same options you're used to passing when using the `IChatClient` directly - configure LLM behaviour and register tools.                                                                               |
+| `PreserveInboundSystemMessages`                   | `bool`         | If true, the agent will preserve system messages from the input and not override them with its own. Defaults to true.                                                                                     |
+| `SystemMessage`                                   | `string?`      | If set, this will override the system message passed in the `RunAgentInput`. Defaults to null, meaning it uses the input.                                                                                 |
+| `PerformAiContextExtraction`                      | `bool`         | If true, the `IChatClient` will be used to try to extract `Context` from the input system message. Defaults to false.                                                                                     |
+| `IncludeContextInSystemMessage`                   | `bool`         | If true, the agent will include items in the final `Context` collection in the system message passed to the LLM. By default if and only if a custom `SystemMessage` has been provided. Defaults to false. |
+| `StripSystemMessagesWhenEmittingMessageSnapshots` | `bool`         | If true, the agent will strip system messages from the message snapshots it emits. Defaults to true.                                                                                                      |
+| `EmitBackendToolCalls`                            | `bool`         | If true, the agent will emit events for backend tool calls. Defaults to true.                                                                                                                             |
 
 ## AI Context Extraction
 
@@ -192,14 +198,23 @@ var agent = new ChatClientAgent(
 This exposes the `GetCurrentDateTime` function to the LLM, and will use the
 standard function calling mechanism in the `Microsoft.Extensions.AI` system.
 
-<Note>
-The agent will NOT emit Agent User Interaction Protocol events for backend tool calls, and as such the frontend will have no visibility into them.
+#### Backend Tool Call Visibility to the Frontend
 
-If you need frontend visibility, you can expose frontend tools for human in the
-loop flows, or use the `ChatClientAgent` as a base class and take advantage of
-deeper hooks into tool preparation and invocation.
+When the LLM calls a backend tool, you can use the `EmitBackendToolCalls` option
+on the `ChatClientAgentOptions` to control whether the agent emits information
+to the frontend about the backend tool call.
 
-</Note>
+<Warning>
+When this option is set to `true`, the agent will emit the necessary events, and issue a message snapshot upon completion of the run to communicate results.
+
+Use with caution, as this means the frontend will have full visibility into not
+only the tool call names, but the arguments and the serialized results of the
+tool calls - which could contain sensitive information.
+
+A filtration mechanism is provided if you derive your own agent from
+`ChatClientAgent`.
+
+</Warning>
 
 ```mermaid
 sequenceDiagram
@@ -271,6 +286,11 @@ protected virtual async ValueTask<ImmutableList<ChatMessage>> MapAGUIMessagesToC
     RunAgentInput input,
     ImmutableList<Context> context,
     CancellationToken cancellationToken = default
+)
+
+protected virtual ValueTask<bool> ShouldEmitBackendToolCallData
+(
+    string functionName
 )
 
 protected virtual async ValueTask OnRunStartedAsync
@@ -473,6 +493,17 @@ provides a way to modify it before it is used by the LLM.
 | `input`         | `RunAgentInput`          | The AG-UI RunAgentInput passed to the agent.                                     |
 | `systemMessage` | `string`                 | The system message provided in the options or passed in when calling the method. |
 | `context`       | `ImmutableList<Context>` | The context collection that was prepared in the `PrepareContext` method.         |
+
+### `ShouldEmitBackendToolCallData`
+
+When `ChatClientAgentOptions.EmitBackendToolCalls` is set to `true`, this method
+is called to determine whether the agent should emit the necessary data and do
+the handling needed to communicate information about this tool call to the
+frontend.
+
+| Argument       | Type     | Description                                                                                                                      |
+| -------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `functionName` | `string` | The name of the function that was called by the LLM. This is used to determine if the agent should emit data for this tool call. |
 
 ### `OnRunStartedAsync`
 

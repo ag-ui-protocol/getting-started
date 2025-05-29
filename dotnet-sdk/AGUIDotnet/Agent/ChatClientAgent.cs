@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Text.Json;
@@ -44,6 +45,25 @@ public record ChatClientAgentOptions
     /// When overriding the system message, whether to include provided or extracted context in the system message.
     /// </summary>
     public bool IncludeContextInSystemMessage { get; init; } = false;
+
+    /// <summary>
+    /// When emitting message snapshots back to the frontend, whether to strip out system messages from the snapshot.
+    /// </summary>
+    public bool StripSystemMessagesWhenEmittingMessageSnapshots { get; init; } = true;
+
+    // todo: introduce a filter mechanism to allow for selective tool call event emission?
+    /// <summary>
+    /// Whether to emit tool call events for backend tools that are invoked by the agent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This will cause the agent to emit tool call events AND a messages snapshot with the results to the frontend for ALL backend tools.
+    /// </para>
+    /// <para>
+    /// This means the frontend will see EVERYTHING about that tool call, including the arguments, the result, and any errors that may have occurred.
+    /// </para>
+    /// </remarks>
+    public bool EmitBackendToolCalls { get; init; } = true;
 }
 
 /// <summary>
@@ -106,6 +126,8 @@ public class ChatClientAgent : IAGUIAgent
             cancellationToken
         ).ConfigureAwait(false)).Where(t => t is not FrontendTool).ToImmutableList();
 
+        var backendToolNames = backendTools.Select(t => t.Name).ToImmutableHashSet();
+
         var frontendTools = await PrepareFrontendTools(
             [.. input.Tools.Select(t => new FrontendTool(t))],
             input,
@@ -114,7 +136,7 @@ public class ChatClientAgent : IAGUIAgent
         var frontendToolNames = frontendTools.Select(t => t.Name).ToImmutableHashSet();
 
         {
-            var conflictingTools = frontendToolNames.Intersect(backendTools.Select(t => t.Name).ToImmutableHashSet());
+            var conflictingTools = frontendToolNames.Intersect(backendToolNames);
 
             if (!conflictingTools.IsEmpty)
             {
@@ -139,27 +161,38 @@ public class ChatClientAgent : IAGUIAgent
         var context = await PrepareContext(input, cancellationToken).ConfigureAwait(false);
         var mappedMessages = await MapAGUIMessagesToChatClientMessages(input, context, cancellationToken).ConfigureAwait(false);
 
-        var inFlightFrontendCalls = new HashSet<string>();
+        /*
+        Track tool calls that we have encountered so we know what to do when seeing result content emitted
+        from the underlying chat client.
+        */
+        var knownFrontendToolCalls = new Dictionary<string, string>();
+        var knownBackendToolCalls = new Dictionary<string, string>();
 
         // Handle the run starting
         await OnRunStartedAsync(input, events, cancellationToken).ConfigureAwait(false);
 
-        string? currentResponseId = null;
+        // With the assumption that our primary response will be an assistant message, track the one we're currently building.
+        AssistantMessage? currentResponse = null;
+
+        /*
+        As the agent processes this run, we may need to emit message snapshots back to the frontend which
+        may differ from the original messages provided in the input as we've likely been producing text / tool calls as we go.
+
+        We want to strip out the inbound system messages as the frontend will re-communicate those on subsequent runs.
+
+        NOTE: CopilotKit seems to dupe system messages when receiving them back in a message snapshot, so this also helps guard against that.
+        */
+        var agUiMessages = _agentOptions.StripSystemMessagesWhenEmittingMessageSnapshots ?
+             [.. input.Messages.Where(m => m is not SystemMessage)]
+             : input.Messages.ToList();
+
+        // Tracks whether something in this run has necessitated a message sync to the frontend (mostly emitting backend tool call results).
+        var needsMessageSync = false;
+
+        // todo: introduce a RunContext type to hold all the run data to shuttle around to specific virtual methods to provide greater extensibility? (might just be easier to have people implement their own agent from the interface)
 
         await foreach (var update in _chatClient.GetStreamingResponseAsync(mappedMessages, chatOpts, cancellationToken).ConfigureAwait(false))
         {
-            /*
-            The function invocation loop provided by the chat client abstractions will still yield function result contents
-            for the frontend tools, even though we short-circuited the invocation loop.
-
-            We need to ensure we skip these updates, as they're not relevant and would confuse the frontend and subsequent runs.
-            */
-            if (update.Contents.OfType<FunctionResultContent>().Any(fr => inFlightFrontendCalls.Contains(fr.CallId)))
-            {
-                Debug.Assert(update.Contents.Count == 1, $"Expected on a single content item when ignoring dispatched frontend tool calls, but got {update.Contents.Count}.");
-                continue;
-            }
-
             foreach (var content in update.Contents)
             {
                 switch (content)
@@ -170,65 +203,89 @@ public class ChatClientAgent : IAGUIAgent
                             If this chunk update is not the same message as the current response, and we've encountered text content then
                             this implies the need to end the previous text response and start a new one.
                             */
-                            if (currentResponseId is not null && update.MessageId != currentResponseId)
+                            if (currentResponse is not null && update.MessageId != currentResponse.Id)
                             {
                                 await events.WriteAsync(new TextMessageEndEvent
                                 {
-                                    MessageId = currentResponseId,
+                                    MessageId = currentResponse.Id,
                                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                                 }, cancellationToken).ConfigureAwait(false);
 
-                                currentResponseId = null;
+                                agUiMessages.Add(currentResponse);
+                                currentResponse = null;
                             }
 
                             // If this is the first text content and we don't have a current response ID, we need to start a new text message.
-                            if (currentResponseId is null)
+                            if (currentResponse is null)
                             {
-                                currentResponseId = update.MessageId ?? Guid.NewGuid().ToString();
+                                currentResponse = new AssistantMessage
+                                {
+                                    Id = update.MessageId ?? Guid.NewGuid().ToString(),
+                                    Content = "",
+                                    ToolCalls = [],
+                                };
 
                                 await events.WriteAsync(new TextMessageStartEvent
                                 {
-                                    MessageId = currentResponseId,
+                                    MessageId = currentResponse.Id,
                                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                                 }, cancellationToken).ConfigureAwait(false);
                             }
 
-                            Debug.Assert(currentResponseId is not null, "Handling text content without a current response message ID.");
+                            Debug.Assert(currentResponse is not null, "Handling text content without a current response message");
 
                             // Only emit text content if it is not empty (we allow whitespace as that may have been chunked, and still be valid).
                             if (!string.IsNullOrEmpty(text.Text))
                             {
                                 await events.WriteAsync(new TextMessageContentEvent
                                 {
-                                    MessageId = currentResponseId,
+                                    MessageId = currentResponse.Id,
                                     Delta = text.Text,
                                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                                 }, cancellationToken).ConfigureAwait(false);
+
+                                // Append the text to the current response message we're building to mirror the events we're sending out.
+                                currentResponse = currentResponse with
+                                {
+                                    Content = currentResponse.Content + text.Text
+                                };
                             }
                         }
                         break;
 
-                    case DataContent data:
-                        {
-                            // todo: the AG-UI protocol does not current support data content, ignore these for now.
-                        }
-                        break;
-
-                    // We have a function call that we know is for a frontend tool.
-                    case FunctionCallContent functionCall when frontendToolNames.Contains(functionCall.Name):
+                    case FunctionCallContent functionCall:
                         {
                             // We need to end the current text message if we have one, in order to dispatch a frontend tool call.
-                            if (currentResponseId is not null)
+                            if (currentResponse is not null)
                             {
                                 await events.WriteAsync(new TextMessageEndEvent
                                 {
-                                    MessageId = currentResponseId,
+                                    MessageId = currentResponse.Id,
                                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                                 }, cancellationToken).ConfigureAwait(false);
-                                currentResponseId = null;
+
+                                agUiMessages.Add(currentResponse);
+                                currentResponse = null;
                             }
 
-                            inFlightFrontendCalls.Add(functionCall.CallId);
+                            // We need to track the frontend calls so we can avoid communicating their results as they don't technically exist in the backend.
+                            if (frontendToolNames.Contains(functionCall.Name))
+                            {
+                                knownFrontendToolCalls.Add(functionCall.CallId, functionCall.Name);
+                            }
+
+                            if (backendToolNames.Contains(functionCall.Name))
+                            {
+                                // We MUST track the tool call, so we can determine what function name it correlates with when we receive the result.
+                                knownBackendToolCalls.Add(functionCall.CallId, functionCall.Name);
+
+                                // If we don't want the frontend to see backend tool calls, skip over this content item.
+                                if (!_agentOptions.EmitBackendToolCalls ||
+                                    !await ShouldEmitBackendToolCallData(functionCall.Name).ConfigureAwait(false))
+                                {
+                                    continue;
+                                }
+                            }
 
                             /*
                             The FunctionInvokingChatClient has already rolled up the arguments for the function call,
@@ -256,10 +313,83 @@ public class ChatClientAgent : IAGUIAgent
                                 ToolCallId = functionCall.CallId,
                                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                             }, cancellationToken).ConfigureAwait(false);
+
+                            agUiMessages.Add(new AssistantMessage
+                            {
+                                Id = string.IsNullOrEmpty(update.MessageId) ? Guid.NewGuid().ToString() : update.MessageId,
+                                // todo: this ~ might ~ not be 100%, I'm unclear whether we might need to represent / concat text across multiple content items for a single message in the context of tool calls (especially if support for multiple tools is added).
+                                Content = string.IsNullOrEmpty(update.Text) ? null : update.Text,
+                                ToolCalls = [new ToolCall
+                                {
+                                    Id = functionCall.CallId,
+                                    Function = new FunctionCall {
+                                        Name = functionCall.Name,
+                                        Arguments = JsonSerializer.Serialize(functionCall.Arguments, _jsonSerOpts)
+                                    }
+                                }]
+                            });
                         }
 
                         break;
 
+                    // We only need to emit tool messages for backend tool calls, and only if we've been asked to
+                    case FunctionResultContent funcResult when _agentOptions.EmitBackendToolCalls:
+                        {
+                            // Ignore this as it's a frontend tool call result, we don't emit these (it's fake).
+                            if (knownFrontendToolCalls.ContainsKey(funcResult.CallId))
+                            {
+                                continue;
+                            }
+
+                            if (!knownBackendToolCalls.TryGetValue(funcResult.CallId, out var toolName))
+                            {
+                                throw new KeyNotFoundException($"Encountered a tool result for a backend tool call that we're not tracking: '{funcResult.CallId}'.");
+                            }
+
+                            // We don't want the frontend to see this particular backend tool call result, so skip it.
+                            if (!await ShouldEmitBackendToolCallData(toolName).ConfigureAwait(false))
+                            {
+                                continue;
+                            }
+
+                            if (currentResponse is not null)
+                            {
+                                await events.WriteAsync(new TextMessageEndEvent
+                                {
+                                    MessageId = currentResponse.Id,
+                                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                                }, cancellationToken).ConfigureAwait(false);
+
+                                agUiMessages.Add(currentResponse);
+                                currentResponse = null;
+                            }
+
+                            agUiMessages.Add(new ToolMessage
+                            {
+                                Id = update.MessageId ?? Guid.NewGuid().ToString(),
+                                // todo handle exception if the result was exceptional?
+                                Content = JsonSerializer.Serialize(funcResult.Result, _jsonSerOpts),
+                                ToolCallId = funcResult.CallId,
+                            });
+
+                            /*
+                            When we exit the streaming loop, we need to ensure that we emit a message snapshot
+                            todo:
+                                This was the only place putting this that led to "correct" behaviour, but unsure if it has to be done at the end of the run
+                                - admittedly doing it mid-run feels like it would confuse any frontend, and it did... awaiting a mechanism to dispatch tool call results as events instead
+                            */
+                            needsMessageSync = true;
+                        }
+
+                        break;
+
+                    case DataContent data:
+                        {
+                            // todo: the AG-UI protocol does not current support data content, ignore these for now.
+                        }
+                        break;
+
+                    // Track usage stats so the agent can be queried post-run for them
                     case UsageContent usage:
                         {
                             Usage.Add(usage.Details);
@@ -270,15 +400,29 @@ public class ChatClientAgent : IAGUIAgent
         }
 
         // We exited the streaming loop, so end the current text message if we have one.
-        if (currentResponseId is not null)
+        if (currentResponse is not null)
         {
             await events.WriteAsync(new TextMessageEndEvent
             {
-                MessageId = currentResponseId,
+                MessageId = currentResponse.Id,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            }, cancellationToken).ConfigureAwait(false);
+
+            agUiMessages.Add(currentResponse);
+            currentResponse = null;
+        }
+
+        if (needsMessageSync)
+        {
+            // Dispatch an update to push the tool message to the frontend.
+            await events.WriteAsync(new MessagesSnapshotEvent
+            {
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Messages = [.. agUiMessages]
             }, cancellationToken).ConfigureAwait(false);
         }
 
+        // todo: we could do with handling for run failure to dispatch error event (unsure how best to handle beyond a catch-all exception handler which feels blunt)
         await events.WriteAsync(new RunFinishedEvent
         {
             ThreadId = input.ThreadId,
@@ -477,6 +621,19 @@ public class ChatClientAgent : IAGUIAgent
         // By default, zero modification.
         return ValueTask.FromResult(backendTools);
     }
+
+    /// <summary>
+    /// When overridden in a derived class, allows for customisation of whether to emit backend tool call data for the given function name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// NOTE: This DOES NOT override <see cref="ChatClientAgentOptions.EmitBackendToolCalls"/> - if that is set to <c>false</c>, this method will not be called at all.
+    /// </para>
+    /// </remarks>
+    /// <param name="functionName">The name of the backend tool being asked about</param>
+    /// <returns>Whether to emit necessary data to the frontend about this tool call</returns>
+    protected virtual ValueTask<bool> ShouldEmitBackendToolCallData(string functionName)
+        => ValueTask.FromResult(_agentOptions.EmitBackendToolCalls);
 
     /// <summary>
     /// When overridden in a derived class, allows for customisation of the handling for a run starting.
