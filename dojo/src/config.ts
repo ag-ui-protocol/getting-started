@@ -60,6 +60,12 @@ const config: DemoConfig[] = [
       "Use collaboration to edit a document in real time with your Copilot",
     tags: ["State", "Streaming", "Tools"],
   }),
+  createDemoConfig({
+    id: "weather_animations",
+    name: "Weather Animations",
+    description: "Dynamic weather animations that respond to chat content and mood",
+    tags: ["Animations", "Context-Aware", "Visual Effects", "Mood Detection"],
+  }),
 ];
 
 export default config;
