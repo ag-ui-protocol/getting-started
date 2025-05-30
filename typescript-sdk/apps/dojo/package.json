@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@ag-ui/starter": "workspace:*",
+    "@ag-ui/vercel-ai-sdk": "workspace:*",
+    "@ai-sdk/openai": "^1.3.22",
     "@copilotkit/react-core": "1.8.12",
     "@copilotkit/react-ui": "1.8.12",
     "@copilotkit/runtime": "1.8.12",

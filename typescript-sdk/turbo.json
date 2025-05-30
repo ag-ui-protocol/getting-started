@@ -32,6 +32,11 @@
       "cache": false,
       "persistent": true
     },
+    "demo-viewer#dev": {
+      "dependsOn": ["^build", "generate"],
+      "cache": false,
+      "persistent": true
+    },
     "test": {
       "dependsOn": ["^build"],
       "outputs": []
