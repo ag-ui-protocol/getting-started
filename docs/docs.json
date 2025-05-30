@@ -80,6 +80,29 @@
                 "pages": ["sdk/python/encoder/overview"]
               }
             ]
+          },
+          {
+            "group": ".NET",
+            "pages": [
+              "sdk/dotnet/overview",
+              "sdk/dotnet/types",
+              "sdk/dotnet/events",
+              "sdk/dotnet/json",
+              {
+                "group": "Agents",
+                "pages": [
+                  "sdk/dotnet/agents",
+                  {
+                    "group": "IChatClient",
+                    "pages": [
+                      "/sdk/dotnet/agent-types/chatclientagent",
+                      "/sdk/dotnet/agent-types/statefulchatclientagent"
+                    ]
+                  }
+                ]
+              },
+              "sdk/dotnet/aspnet"
+            ]
           }
         ]
       }
@@ -95,6 +118,11 @@
           "anchor": "Python SDK",
           "href": "https://docs.ag-ui.com/sdk/python/core/overview",
           "icon": "python"
+        },
+        {
+          "anchor": ".NET SDK",
+          "href": "https://docs.ag-ui.com/sdk/dotnet/core/overview",
+          "icon": "microsoft"
         }
       ]
     }

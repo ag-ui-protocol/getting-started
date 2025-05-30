@@ -1,0 +1,340 @@
+---
+title: "Events"
+description:
+  "Documentation for the events used in the Agent User Interaction Protocol .NET
+  SDK"
+---
+
+# Events
+
+The Agent User Interaction Protocol .NET SDK uses a streaming event-based
+architecture. Events are the fundamental units of communication between agents
+and the frontend. This section documents the event types and their properties.
+
+## EventTypes Enum
+
+The `EventTypes` class defines all possible event types in the system:
+
+```csharp
+public static class EventTypes
+{
+    public const string TEXT_MESSAGE_START = "TEXT_MESSAGE_START";
+    public const string TEXT_MESSAGE_CONTENT = "TEXT_MESSAGE_CONTENT";
+    public const string TEXT_MESSAGE_END = "TEXT_MESSAGE_END";
+    public const string TOOL_CALL_START = "TOOL_CALL_START";
+    public const string TOOL_CALL_ARGS = "TOOL_CALL_ARGS";
+    public const string TOOL_CALL_END = "TOOL_CALL_END";
+    public const string STATE_SNAPSHOT = "STATE_SNAPSHOT";
+    public const string STATE_DELTA = "STATE_DELTA";
+    public const string MESSAGES_SNAPSHOT = "MESSAGES_SNAPSHOT";
+    public const string RAW = "RAW";
+    public const string CUSTOM = "CUSTOM";
+    public const string RUN_STARTED = "RUN_STARTED";
+    public const string RUN_FINISHED = "RUN_FINISHED";
+    public const string RUN_ERROR = "RUN_ERROR";
+    public const string STEP_STARTED = "STEP_STARTED";
+    public const string STEP_FINISHED = "STEP_FINISHED";
+}
+```
+
+## BaseEvent
+
+All events inherit from the `BaseEvent` type, which provides common properties
+shared across all event types.
+
+<Note>
+  The .NET SDK uses polymorphic serialization for events, with the{" "}
+  <code>type</code> discriminator field handled via attributes. Each event type
+  is a derived record of <code>BaseEvent</code>.
+</Note>
+
+```csharp
+public abstract record BaseEvent
+{
+    public long? Timestamp { get; init; }
+    public object? RawEvent { get; init; }
+}
+```
+
+| Property    | Type      | Description                                       |
+| ----------- | --------- | ------------------------------------------------- |
+| `Timestamp` | `long?`   | Timestamp when the event was created              |
+| `RawEvent`  | `object?` | Original event data if this event was transformed |
+
+## Lifecycle Events
+
+These events represent the lifecycle of an agent run.
+
+### RunStartedEvent
+
+Signals the start of an agent run.
+
+```csharp
+public sealed record RunStartedEvent : BaseEvent
+{
+    public required string ThreadId { get; init; }
+    public required string RunId { get; init; }
+}
+```
+
+| Property   | Type     | Description                   |
+| ---------- | -------- | ----------------------------- |
+| `ThreadId` | `string` | ID of the conversation thread |
+| `RunId`    | `string` | ID of the agent run           |
+
+### RunFinishedEvent
+
+Signals the successful completion of an agent run.
+
+```csharp
+public sealed record RunFinishedEvent : BaseEvent
+{
+    public required string ThreadId { get; init; }
+    public required string RunId { get; init; }
+}
+```
+
+| Property   | Type     | Description                   |
+| ---------- | -------- | ----------------------------- |
+| `ThreadId` | `string` | ID of the conversation thread |
+| `RunId`    | `string` | ID of the agent run           |
+
+### RunErrorEvent
+
+Signals an error during an agent run.
+
+```csharp
+public sealed record RunErrorEvent : BaseEvent
+{
+    public required string Message { get; init; }
+    public string? Code { get; init; }
+}
+```
+
+| Property  | Type      | Description   |
+| --------- | --------- | ------------- |
+| `Message` | `string`  | Error message |
+| `Code`    | `string?` | Error code    |
+
+### StepStartedEvent
+
+Signals the start of a step within an agent run.
+
+```csharp
+public sealed record StepStartedEvent : BaseEvent
+{
+    public required string StepName { get; init; }
+}
+```
+
+| Property   | Type     | Description      |
+| ---------- | -------- | ---------------- |
+| `StepName` | `string` | Name of the step |
+
+### StepFinishedEvent
+
+Signals the completion of a step within an agent run.
+
+```csharp
+public sealed record StepFinishedEvent : BaseEvent
+{
+    public required string StepName { get; init; }
+}
+```
+
+| Property   | Type     | Description      |
+| ---------- | -------- | ---------------- |
+| `StepName` | `string` | Name of the step |
+
+## Text Message Events
+
+These events represent the lifecycle of text messages in a conversation.
+
+### TextMessageStartEvent
+
+Signals the start of a text message.
+
+```csharp
+public sealed record TextMessageStartEvent : BaseEvent
+{
+    public required string MessageId { get; init; }
+    public string Role => MessageRoles.Assistant;
+}
+```
+
+| Property    | Type     | Description                       |
+| ----------- | -------- | --------------------------------- |
+| `MessageId` | `string` | Unique identifier for the message |
+| `Role`      | `string` | Role is always "assistant"        |
+
+### TextMessageContentEvent
+
+Represents a chunk of content in a streaming text message.
+
+```csharp
+public sealed record TextMessageContentEvent : BaseEvent
+{
+    public required string MessageId { get; init; }
+    public required string Delta { get; init; }
+}
+```
+
+| Property    | Type     | Description                               |
+| ----------- | -------- | ----------------------------------------- |
+| `MessageId` | `string` | Matches the ID from TextMessageStartEvent |
+| `Delta`     | `string` | Text content chunk (non-empty)            |
+
+### TextMessageEndEvent
+
+Signals the end of a text message.
+
+```csharp
+public sealed record TextMessageEndEvent : BaseEvent
+{
+    public required string MessageId { get; init; }
+}
+```
+
+| Property    | Type     | Description                               |
+| ----------- | -------- | ----------------------------------------- |
+| `MessageId` | `string` | Matches the ID from TextMessageStartEvent |
+
+## Tool Call Events
+
+These events represent the lifecycle of tool calls made by agents.
+
+### ToolCallStartEvent
+
+Signals the start of a tool call.
+
+```csharp
+public sealed record ToolCallStartEvent : BaseEvent
+{
+    public required string ToolCallId { get; init; }
+    public required string ToolCallName { get; init; }
+    public string? ParentMessageId { get; init; }
+}
+```
+
+| Property          | Type      | Description                         |
+| ----------------- | --------- | ----------------------------------- |
+| `ToolCallId`      | `string`  | Unique identifier for the tool call |
+| `ToolCallName`    | `string`  | Name of the tool being called       |
+| `ParentMessageId` | `string?` | ID of the parent message            |
+
+### ToolCallArgsEvent
+
+Represents a chunk of argument data for a tool call.
+
+```csharp
+public sealed record ToolCallArgsEvent : BaseEvent
+{
+    public required string ToolCallId { get; init; }
+    public required string Delta { get; init; }
+}
+```
+
+| Property     | Type     | Description                            |
+| ------------ | -------- | -------------------------------------- |
+| `ToolCallId` | `string` | Matches the ID from ToolCallStartEvent |
+| `Delta`      | `string` | Argument data chunk                    |
+
+### ToolCallEndEvent
+
+Signals the end of a tool call.
+
+```csharp
+public sealed record ToolCallEndEvent : BaseEvent
+{
+    public required string ToolCallId { get; init; }
+}
+```
+
+| Property     | Type     | Description                            |
+| ------------ | -------- | -------------------------------------- |
+| `ToolCallId` | `string` | Matches the ID from ToolCallStartEvent |
+
+## State Management Events
+
+These events are used to manage agent state.
+
+### StateSnapshotEvent
+
+Provides a complete snapshot of an agent's state.
+
+```csharp
+public sealed record StateSnapshotEvent : BaseEvent
+{
+    public required object Snapshot { get; init; }
+}
+```
+
+| Property   | Type     | Description             |
+| ---------- | -------- | ----------------------- |
+| `Snapshot` | `object` | Complete state snapshot |
+
+### StateDeltaEvent
+
+Provides a partial update to an agent's state using JSON Patch.
+
+```csharp
+public sealed record StateDeltaEvent : BaseEvent
+{
+    public required ImmutableList<object> Delta { get; init; } = ImmutableList<object>.Empty;
+}
+```
+
+| Property | Type                    | Description                         |
+| -------- | ----------------------- | ----------------------------------- |
+| `Delta`  | `ImmutableList<object>` | Collection of JSON Patch operations |
+
+### MessagesSnapshotEvent
+
+Provides a snapshot of all messages in a conversation.
+
+```csharp
+public sealed record MessagesSnapshotEvent : BaseEvent
+{
+    public required ImmutableList<BaseMessage> Messages { get; init; } = ImmutableList<BaseMessage>.Empty;
+}
+```
+
+| Property   | Type                         | Description                   |
+| ---------- | ---------------------------- | ----------------------------- |
+| `Messages` | `ImmutableList<BaseMessage>` | Collection of message objects |
+
+## Special Events
+
+### RawEvent
+
+Used to pass through events from external systems.
+
+```csharp
+public sealed record RawEvent : BaseEvent
+{
+    public required object Event { get; init; }
+    public string? Source { get; init; }
+}
+```
+
+| Property | Type      | Description         |
+| -------- | --------- | ------------------- |
+| `Event`  | `object`  | Original event data |
+| `Source` | `string?` | Source of the event |
+
+### CustomEvent
+
+Used for application-specific custom events.
+
+```csharp
+public sealed record CustomEvent : BaseEvent
+{
+    public required string Name { get; init; }
+    public required object Value { get; init; }
+}
+```
+
+| Property | Type     | Description                     |
+| -------- | -------- | ------------------------------- |
+| `Name`   | `string` | Name of the custom event        |
+| `Value`  | `object` | Value associated with the event |

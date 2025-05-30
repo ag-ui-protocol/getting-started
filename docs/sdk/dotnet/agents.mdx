@@ -1,0 +1,288 @@
+---
+title: "Overview"
+description: "Agent User Interaction Protocol .NET SDK Agent functionality"
+---
+
+# Agents
+
+The Agent User Interaction Protocol SDK provides out-of-the-box agent
+implementations that you can customise and build upon, as well as a low-level
+interface for implementing your own agents from scratch.
+
+## Low-Level
+
+You can implement your own agents using the low-level interface, which gives you
+the most flexibility and control over the agent's behaviour.
+
+Reasons you might want to use the interface directly include:
+
+- You need to implement a custom agent that uses a different agent framework.
+- You need to implement a custom agent that doesn't fit the standard LLM-backed
+  conversational flow.
+
+### The `IAGUIAgent` Interface
+
+```csharp
+public interface IAGUIAgent
+{
+    Task RunAsync(
+        RunAgentInput input,
+        ChannelWriter<BaseEvent> events,
+        CancellationToken cancellationToken = default
+    );
+}
+```
+
+All of the agents in the SDK implement this interface, which provides a simple
+and extensible contract for running Agent User Interaction Protocol compatible
+agents with the `RunAsync` method that takes the following parameters:
+
+| Property            | Type                       | Description                            |
+| ------------------- | -------------------------- | -------------------------------------- |
+| `input`             | `RunAgentInput`            | Input parameters for running the agent |
+| `events`            | `ChannelWriter<BaseEvent>` | Channel to write events to             |
+| `cancellationToken` | `CancellationToken`        | Token to cancel the operation          |
+
+#### Invocation Helpers
+
+You can construct your own channel to pass to the `RunAsync` method as follows:
+
+```csharp
+var channel = Channel.CreateUnbounded<BaseEvent>(
+    new UnboundedChannelOptions {
+        SingleReader = true,
+        SingleWriter = false,
+        AllowSynchronousContinuations = true,
+    }
+);
+
+_ = Task.Run(async () => {
+    await agent.RunAsync(
+        input,
+        channel.Writer,
+        cancellationToken
+    );
+});
+
+await foreach (var emittedEvent in
+    channel.Reader.ReadAllAsync(cancellationToken))
+{
+    // Handle the emitted event
+}
+```
+
+The SDK provides an extension method that takes care of this for you:
+
+```csharp
+await foreach(var emittedEvent in
+    agent.RunToCompletionAsync(input, cancellationToken))
+{
+    // Handle the emitted event
+}
+```
+
+### `EchoAgent` Example
+
+The SDK includes a simple `EchoAgent` that implements the interface:
+
+````csharp
+public sealed class EchoAgent : IAGUIAgent
+{
+    public async Task RunAsync(
+        RunAgentInput input,
+        ChannelWriter<BaseEvent> events,
+        CancellationToken ct = default
+    )
+    {
+        await events.WriteAsync(
+            new RunStartedEvent
+            {
+                ThreadId = input.ThreadId,
+                RunId = input.RunId,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            },
+            ct
+        );
+
+        var lastMessage = input.Messages.LastOrDefault();
+
+        await Task.Delay(500, ct);
+
+        switch (lastMessage)
+        {
+            case SystemMessage system:
+                foreach (var ev in EventHelpers.SendSimpleMessage(
+                    $"Echoing system message:\n\n```\n{system.Content}\n```\n"
+                ))
+                {
+                    await events.WriteAsync(ev, ct);
+                }
+                break;
+
+            case UserMessage user:
+                foreach (var ev in EventHelpers.SendSimpleMessage(
+                    $"Echoing user message:\n\n```\n{user.Content}\n```\n"
+                ))
+                {
+                    await events.WriteAsync(ev, ct);
+                }
+                break;
+
+            case AssistantMessage assistant:
+                foreach (var ev in EventHelpers.SendSimpleMessage(
+                    $"Echoing assistant message:\n\n```\n{assistant.Content}\n```\n"
+                ))
+                {
+                    await events.WriteAsync(ev, ct);
+                }
+                break;
+
+            case ToolMessage tool:
+                foreach (var ev in EventHelpers.SendSimpleMessage(
+                    $"Echoing tool message for tool call '{tool.ToolCallId}':\n\n```\n{tool.Content}\n```\n"
+                ))
+                {
+                    await events.WriteAsync(ev, ct);
+                }
+                break;
+
+            default:
+                foreach (var ev in EventHelpers.SendSimpleMessage(
+                    $"Unknown message type: {lastMessage?.GetType().Name ?? "null"}"
+                ))
+                {
+                    await events.WriteAsync(ev, ct);
+                }
+                break;
+        }
+
+        await events.WriteAsync(
+            new RunFinishedEvent
+            {
+                ThreadId = input.ThreadId,
+                RunId = input.RunId,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            },
+            ct
+        );
+
+        events.Complete();
+    }
+}
+````
+
+This simple agent echoes the last message it receives, but demonstrates the core
+lifecycle events and how to emit Agent User Interaction Protocol events using
+the provided channel writer.
+
+## `Microsoft.Extensions.AI` Integration
+
+<Note>
+  The SDK uses the `Microsoft.Extensions.AI` package, not the
+  `Microsoft.Extensions.AI.Abstractions` package, as it needs some of the
+  concrete implementations to handle function calling and other features.
+</Note>
+
+The SDK takes a dependency on the
+[Microsoft.Extensions.AI](https://learn.microsoft.com/en-us/dotnet/ai/microsoft-extensions-ai)
+package which means you can use the `IChatClient` abstractions to power your
+agents - and bring all the LLM providers you already use.
+
+### The `ChatClientAgent` Class
+
+This class can be used standalone or as a base class for your own agents. It
+provides for the core scenario of running an agent that involves an LLM
+conversational flow, and handles the boilerplate of emitting lifecycle events
+and handling backend and frontend tool calls.
+
+```csharp
+var myProviderIChatClient = GetProviderIChatClient();
+
+var chatClient = new ChatClientBuilder(myProviderIChatClient)
+    .UseFunctionInvocation()
+    .Build();
+
+var agent = new ChatClientAgent(
+    chatClient,
+    new ChatClientAgentOptions
+    {
+        SystemMessage = "You can override the system message passed in the RunAgentInput",
+        ChatOptions = new ChatOptions
+        {
+            Tools = [
+                AiFunctionFactory.Create(
+                    MyDotnetDelegate
+                )
+            ]
+        }
+    }
+);
+```
+
+<Card
+  title="ChatClientAgent Reference"
+  icon="cube"
+  href="/sdk/dotnet/agent-types/chatclientagent"
+  color="#3B82F6"
+  iconType="solid"
+>
+  Complete documentation of the `ChatClientAgent` class
+</Card>
+
+### The `StatefulChatClientAgent` Class
+
+This agent extends the `ChatClientAgent` class and is tailored for scenarios
+where the agent collaborates with the frontend to maintain a shared state.
+
+An example of this could be where you have some state in the frontend that
+represents the task the user is working on, and you want the agent to be able to
+read and write to that state.
+
+```csharp
+record Recipe(
+    string Name,
+    string Description,
+    string Ingredients,
+    string Instructions
+);
+
+var myProviderIChatClient = GetProviderIChatClient();
+var chatClient = new ChatClientBuilder(myProviderIChatClient)
+    .UseFunctionInvocation()
+    .Build();
+
+var agent = new StatefulChatClientAgent<Recipe>(
+    chatClient,
+    // Define initial state for the agent to begin with if not provided by the run input
+    new Recipe(),
+    new StatefulChatClientAgentOptions<Recipe>
+    {
+        SystemMessage = "You can override the system message passed in the RunAgentInput",
+        ChatOptions = new ChatOptions
+        {
+            Tools = [
+                AiFunctionFactory.Create(
+                    MyDotnetDelegate
+                )
+            ]
+        }
+    }
+)
+```
+
+This agent will use your provided system message, and tweak it to direct the LLM
+to read and write to the shared state of type `Recipe` that you provide.
+
+It registers new backend tools that allow the agent to do so, and emits the
+necessary Agent User Interaction Protocol events to keep the frontend in sync
+with the agent's state.
+
+<Card
+  title="StatefulChatClientAgent Reference"
+  icon="cube"
+  href="/sdk/dotnet/agent-types/statefulchatclientagent"
+  color="#3B82F6"
+  iconType="solid"
+>
+  Complete documentation of the `StatefulChatClientAgent` class
+</Card>
