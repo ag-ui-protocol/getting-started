@@ -14,7 +14,6 @@ class ConfiguredBaseModel(BaseModel):
         extra="forbid",
         alias_generator=to_camel,
         populate_by_name=True,
-        ser_json_by_alias=True
     )
 
 
