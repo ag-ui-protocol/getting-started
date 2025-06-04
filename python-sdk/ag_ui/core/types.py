@@ -2,9 +2,22 @@
 This module contains the types for the Agent User Interaction Protocol Python SDK.
 """
 
+from enum import Enum
 from typing import Any, List, Literal, Optional, Union, Annotated
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
+
+
+class Role(str, Enum):
+    """
+    The role of an actor.
+    """
+    DEVELOPER = "developer"
+    SYSTEM = "system"
+    ASSISTANT = "assistant"
+    USER = "user"
+    TOOL = "tool"
+
 
 class ConfiguredBaseModel(BaseModel):
     """
@@ -31,7 +44,7 @@ class ToolCall(ConfiguredBaseModel):
     A tool call, modelled after OpenAI tool calls.
     """
     id: str
-    type: Literal["function"]
+    type: Literal["function"] = Field("function", init=False)  # pyright: ignore[reportIncompatibleVariableOverride]
     function: FunctionCall
 
 
@@ -49,7 +62,7 @@ class DeveloperMessage(BaseMessage):
     """
     A developer message.
     """
-    role: Literal["developer"]
+    role: Literal[Role.DEVELOPER] = Field(Role.DEVELOPER, init=False)  # pyright: ignore[reportIncompatibleVariableOverride]
     content: str
 
 
@@ -57,7 +70,7 @@ class SystemMessage(BaseMessage):
     """
     A system message.
     """
-    role: Literal["system"]
+    role: Literal[Role.SYSTEM] = Field(Role.SYSTEM, init=False)  # pyright: ignore[reportIncompatibleVariableOverride]
     content: str
 
 
@@ -65,15 +78,14 @@ class AssistantMessage(BaseMessage):
     """
     An assistant message.
     """
-    role: Literal["assistant"]
+    role: Literal[Role.ASSISTANT] = Field(Role.ASSISTANT, init=False)  # pyright: ignore[reportIncompatibleVariableOverride]
     tool_calls: Optional[List[ToolCall]] = None
-
 
 class UserMessage(BaseMessage):
     """
     A user message.
     """
-    role: Literal["user"]
+    role: Literal[Role.USER] = Field(Role.USER, init=False)  # pyright: ignore[reportIncompatibleVariableOverride]
     content: str
 
 
@@ -82,7 +94,7 @@ class ToolMessage(ConfiguredBaseModel):
     A tool result message.
     """
     id: str
-    role: Literal["tool"]
+    role: Literal[Role.TOOL] = Field(Role.TOOL, init=False)
     content: str
     tool_call_id: str
 
@@ -91,9 +103,6 @@ Message = Annotated[
     Union[DeveloperMessage, SystemMessage, AssistantMessage, UserMessage, ToolMessage],
     Field(discriminator="role")
 ]
-
-
-Role = Literal["developer", "system", "assistant", "user", "tool"]
 
 
 class Context(ConfiguredBaseModel):

@@ -43,7 +43,6 @@ class TestEventEncoder(unittest.TestCase):
         """Test the encode_sse method"""
         # Create a test event with specific data
         event = TextMessageContentEvent(
-            type=EventType.TEXT_MESSAGE_CONTENT,
             message_id="msg_123",
             delta="Hello, world!",
             timestamp=1648214400000
@@ -83,7 +82,6 @@ class TestEventEncoder(unittest.TestCase):
         
         # Test with a more complex event
         content_event = TextMessageContentEvent(
-            type=EventType.TEXT_MESSAGE_CONTENT,
             message_id="msg_456",
             delta="Testing different events",
             timestamp=1648214400000
@@ -130,7 +128,6 @@ class TestEventEncoder(unittest.TestCase):
         # Test with another event that has optional fields
         # Create event with some optional fields set to None
         event_with_optional = ToolCallStartEvent(
-            type=EventType.TOOL_CALL_START,
             tool_call_id="call_123",
             tool_call_name="test_tool",
             parent_message_id=None,  # Optional field explicitly set to None
@@ -152,7 +149,6 @@ class TestEventEncoder(unittest.TestCase):
         """Test that events can be serialized to JSON with camelCase and deserialized back correctly"""
         # Create a complex event with multiple fields
         original_event = ToolCallStartEvent(
-            type=EventType.TOOL_CALL_START,
             tool_call_id="call_abc123",
             tool_call_name="search_tool",
             parent_message_id="msg_parent_456",

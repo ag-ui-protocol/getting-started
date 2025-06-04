@@ -28,7 +28,6 @@ class TestBaseTypes(unittest.TestCase):
         """Test serialization of a basic message"""
         user_msg = UserMessage(
             id="msg_123",
-            role="user",
             content="Hello, world!"
         )
         serialized = user_msg.model_dump(by_alias=True)
@@ -40,7 +39,6 @@ class TestBaseTypes(unittest.TestCase):
         """Test camel case serialization for ConfiguredBaseModel subclasses"""
         tool_call = ToolCall(
             id="call_123",
-            type="function",
             function=FunctionCall(name="test_function", arguments="{}")
         )
         serialized = tool_call.model_dump(by_alias=True)
@@ -51,7 +49,6 @@ class TestBaseTypes(unittest.TestCase):
         """Test camel case serialization for ToolMessage"""
         tool_msg = ToolMessage(
             id="tool_123",
-            role="tool",
             content="Tool result",
             tool_call_id="call_456"
         )
@@ -103,7 +100,6 @@ class TestBaseTypes(unittest.TestCase):
         """Test creating and serializing a developer message"""
         msg = DeveloperMessage(
             id="dev_123",
-            role="developer",
             content="Developer note"
         )
         serialized = msg.model_dump(by_alias=True)
@@ -114,7 +110,6 @@ class TestBaseTypes(unittest.TestCase):
         """Test creating and serializing a system message"""
         msg = SystemMessage(
             id="sys_123",
-            role="system",
             content="System instruction"
         )
         serialized = msg.model_dump(by_alias=True)
@@ -125,12 +120,10 @@ class TestBaseTypes(unittest.TestCase):
         """Test creating and serializing an assistant message with tool calls"""
         tool_call = ToolCall(
             id="call_456",
-            type="function",
             function=FunctionCall(name="get_data", arguments='{"param": "value"}')
         )
         msg = AssistantMessage(
             id="asst_123",
-            role="assistant",
             content="Assistant response",
             tool_calls=[tool_call]
         )
@@ -144,7 +137,6 @@ class TestBaseTypes(unittest.TestCase):
         """Test creating and serializing a user message"""
         msg = UserMessage(
             id="user_123",
-            role="user",
             content="User query"
         )
         serialized = msg.model_dump(by_alias=True)
