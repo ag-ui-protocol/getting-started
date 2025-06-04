@@ -2,7 +2,13 @@
 This module contains the EventEncoder class
 """
 
-from ag_ui.core.events import BaseEvent
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ag_ui.core.events import BaseEvent
+
 
 AGUI_MEDIA_TYPE = "application/vnd.ag-ui.event+proto"
 
@@ -10,8 +16,11 @@ class EventEncoder:
     """
     Encodes Agent User Interaction events.
     """
-    def __init__(self, accept: str = None):
-        pass
+    def __init__(self, accept: str | None = None) -> None:
+        """
+        Initializes the EventEncoder.
+        """
+        self.accept = accept
 
     def get_content_type(self) -> str:
         """
