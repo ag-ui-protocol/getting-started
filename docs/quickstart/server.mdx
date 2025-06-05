@@ -152,18 +152,20 @@ AG-UI events:
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from ag_ui.core import (
-  RunAgentInput,
-  Message,
-  EventType,
-  RunStartedEvent,
-  RunFinishedEvent,
-  TextMessageStartEvent,
-  TextMessageContentEvent,
-  TextMessageEndEvent
+    RunAgentInput,
+    Message,
+    EventType,
+    RunStartedEvent,
+    RunFinishedEvent,
+    TextMessageStartEvent,
+    TextMessageContentEvent,
+    TextMessageEndEvent
 )
 from ag_ui.encoder import EventEncoder
 import uuid
 from openai import OpenAI
+import dotenv
+import os
 
 app = FastAPI(title="AG-UI Endpoint")
 
@@ -175,18 +177,27 @@ async def my_endpoint(input_data: RunAgentInput):
 
         # Send run started event
         yield encoder.encode(
-          RunStartedEvent(
-            type=EventType.RUN_STARTED,
-            thread_id=input_data.thread_id,
-            run_id=input_data.run_id
-          )
+            RunStartedEvent(
+                type=EventType.RUN_STARTED,
+                thread_id=input_data.thread_id,
+                run_id=input_data.run_id
+            )
         )
 
         # Initialize OpenAI client
-        client = OpenAI()
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        # Convert AG-UI messages to OpenAI messages format
+        openai_messages = []
+        for msg in input_data.messages:
+            if msg.role in ["user", "system", "assistant"]:
+                openai_messages.append({
+                    "role": msg.role,
+                    "content": msg.content or ""
+                })
 
         # Generate a message ID for the assistant's response
-        message_id = uuid.uuid4()
+        message_id = str(uuid.uuid4())
 
         # Send text message start event
         yield encoder.encode(
@@ -206,7 +217,12 @@ async def my_endpoint(input_data: RunAgentInput):
 
         # Process the streaming response and send content events
         for chunk in stream:
-            if hasattr(chunk.choices[0].delta, "content") and chunk.choices[0].delta.content:
+            if (chunk.choices and 
+                len(chunk.choices) > 0 and 
+                chunk.choices[0].delta and 
+                hasattr(chunk.choices[0].delta, 'content') and 
+                chunk.choices[0].delta.content):
+                
                 content = chunk.choices[0].delta.content
                 yield encoder.encode(
                     TextMessageContentEvent(
@@ -226,11 +242,11 @@ async def my_endpoint(input_data: RunAgentInput):
 
         # Send run finished event
         yield encoder.encode(
-          RunFinishedEvent(
-            type=EventType.RUN_FINISHED,
-            thread_id=input_data.thread_id,
-            run_id=input_data.run_id
-          )
+            RunFinishedEvent(
+                type=EventType.RUN_FINISHED,
+                thread_id=input_data.thread_id,
+                run_id=input_data.run_id
+            )
         )
 
     return StreamingResponse(
@@ -249,6 +265,28 @@ restart the server:
 ```bash
 export OPENAI_API_KEY=your-api-key
 poetry run uvicorn my_endpoint.main:app --reload
+```
+
+Test your endpoint with:
+```bash
+curl -X POST http://localhost:8000/awp \                
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "threadId": "thread_123",
+    "runId": "run_456",
+    "state": {},
+    "messages": [
+      {
+        "id": "msg_1",
+        "role": "user",
+        "content": "Hello, how are you?"
+      }
+    ],
+    "tools": [],
+    "context": [],
+    "forwardedProps": {}
+  }'
 ```
 
 This implementation creates a fully functional AG-UI endpoint that processes
