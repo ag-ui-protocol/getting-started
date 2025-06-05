@@ -1,6 +1,6 @@
 {
   "name": "@ag-ui/agno",
-  "author": "Markus Ecker <markus.ecker@gmail.com>",
+  "author": "Manu Hortet <manu@agno.com>",
   "version": "0.0.1",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
