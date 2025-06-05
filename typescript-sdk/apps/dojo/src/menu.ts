@@ -45,4 +45,9 @@ export const menuIntegrations: MenuIntegrationConfig[] = [
       "shared_state",
     ],
   },
+  {
+    id: "agno",
+    name: "Agno",
+    features: ["agentic_chat"],
+  },
 ];

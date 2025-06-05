@@ -7,6 +7,7 @@ import { MastraAgent } from "@ag-ui/mastra";
 import { VercelAISDKAgent } from "@ag-ui/vercel-ai-sdk";
 import { openai } from "@ai-sdk/openai";
 import { LangGraphAgent } from "@ag-ui/langgraph";
+import { AgnoAgent } from "@ag-ui/agno";
 
 export const agentsIntegrations: AgentIntegrationConfig[] = [
   {
@@ -97,6 +98,16 @@ export const agentsIntegrations: AgentIntegrationConfig[] = [
         tool_based_generative_ui: new LangGraphAgent({
           deploymentUrl: "http://localhost:2024",
           graphId: "tool_based_generative_ui",
+        }),
+      };
+    },
+  },
+  {
+    id: "agno",
+    agents: async () => {
+      return {
+        agentic_chat: new AgnoAgent({
+          url: "http://localhost:8000/agui",
         }),
       };
     },

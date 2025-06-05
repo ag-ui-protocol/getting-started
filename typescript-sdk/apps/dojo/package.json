@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@ag-ui/agno": "workspace:*",
     "@ag-ui/langgraph": "workspace:*",
     "@ag-ui/mastra": "workspace:*",
     "@ag-ui/middleware-starter": "workspace:*",
