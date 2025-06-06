@@ -2,7 +2,9 @@
 This module contains the types for the Agent User Interaction Protocol Python SDK.
 """
 
-from typing import Any, List, Literal, Optional, Union, Annotated
+from __future__ import annotations
+
+from typing import Any, List, Literal, Optional, Annotated
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 
@@ -41,8 +43,8 @@ class BaseMessage(ConfiguredBaseModel):
     """
     id: str
     role: str
-    content: Optional[str] = None
-    name: Optional[str] = None
+    content: str | None = None
+    name: str | None = None
 
 
 class DeveloperMessage(BaseMessage):
@@ -88,7 +90,7 @@ class ToolMessage(ConfiguredBaseModel):
 
 
 Message = Annotated[
-    Union[DeveloperMessage, SystemMessage, AssistantMessage, UserMessage, ToolMessage],
+    DeveloperMessage | SystemMessage | AssistantMessage | UserMessage | ToolMessage,
     Field(discriminator="role")
 ]
 

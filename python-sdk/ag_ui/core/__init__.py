@@ -2,6 +2,8 @@
 This module contains the core types and events for the Agent User Interaction Protocol.
 """
 
+from __future__ import annotations
+
 from ag_ui.core.events import (
     EventType,
     BaseEvent,
