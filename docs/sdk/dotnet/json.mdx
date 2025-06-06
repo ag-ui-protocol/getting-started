@@ -1,0 +1,35 @@
+---
+title: "JSON"
+description: "Working with JSON in the .NET SDK"
+---
+
+# JSON Handling
+
+The Agent User Interaction Protocol .NET SDK uses the `System.Text.Json` types
+for handling JSON data.
+
+In order to provide the best handling when talking to the frontend, the
+following `JsonSerializerOptions` are recommended:
+
+```csharp
+new JsonSerializerOptions(JsonSerializerDefaults.Web) {
+    AllowOutOfOrderMetadataProperties = true,
+    WriteIndented = false,
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+}
+```
+
+`System.Text.Json` by default when handling polymorphic types expects the type
+discriminator (a metadata property) to be one of the first properties in the
+JSON object - which is not guaranteed by either the frontends you interact with
+or the JSON specification itself.
+
+Setting `AllowOutOfOrderMetadataProperties` to `true` allows the serializer to
+handle this case correctly.
+
+Some frontends (like Zod-powered schemas) may not accept null values for
+optional properties, so setting `DefaultIgnoreCondition` to
+`JsonIgnoreCondition.WhenWritingNull` ensures that null values are not
+serialized.

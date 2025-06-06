@@ -1,0 +1,265 @@
+---
+title: "Types"
+description:
+  "Documentation for the core types used in the Agent User Interaction Protocol
+  .NET SDK"
+---
+
+# Core Types
+
+The Agent User Interaction Protocol .NET SDK is built on a set of core types
+that represent the fundamental structures used throughout the system. This page
+documents these types and their properties.
+
+## RunAgentInput
+
+Input parameters for running an agent. In the HTTP API, this is the body of the
+`POST` request.
+
+```csharp
+public sealed record RunAgentInput
+{
+    public required string ThreadId { get; init; }
+    public required string RunId { get; init; }
+    public required JsonElement State { get; init; }
+    public required ImmutableList<BaseMessage> Messages { get; init; } = [];
+    public required ImmutableList<Tool> Tools { get; init; } = [];
+    public required ImmutableList<Context> Context { get; init; } = [];
+    public required JsonElement ForwardedProps { get; init; }
+}
+```
+
+| Property         | Type                         | Description                                         |
+| ---------------- | ---------------------------- | --------------------------------------------------- |
+| `ThreadId`       | `string`                     | ID of the conversation thread                       |
+| `RunId`          | `string`                     | ID of the current run                               |
+| `State`          | `JsonElement`                | Current state of the agent                          |
+| `Messages`       | `ImmutableList<BaseMessage>` | Collection of messages in the conversation          |
+| `Tools`          | `ImmutableList<Tool>`        | Collection of tools available to the agent          |
+| `Context`        | `ImmutableList<Context>`     | Collection of context objects provided to the agent |
+| `ForwardedProps` | `JsonElement`                | Additional properties forwarded to the agent        |
+
+## Message Types
+
+The SDK includes several message types that represent different kinds of
+messages in the system.
+
+<Note>
+  All message types inherit from <code>BaseMessage</code>. The <code>role</code>{" "}
+  property is determined by the concrete message type and is not a property of{" "}
+  <code>BaseMessage</code> itself. This polymorphic approach allows for
+  type-safe handling of different message roles in the .NET SDK.
+</Note>
+
+### BaseMessage
+
+A base class for all message types in the system.
+
+```csharp
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "role")]
+[JsonDerivedType(typeof(DeveloperMessage), MessageRoles.Developer)]
+[JsonDerivedType(typeof(SystemMessage), MessageRoles.System)]
+[JsonDerivedType(typeof(AssistantMessage), MessageRoles.Assistant)]
+[JsonDerivedType(typeof(UserMessage), MessageRoles.User)]
+[JsonDerivedType(typeof(ToolMessage), MessageRoles.Tool)]
+public abstract record BaseMessage
+{
+    public required string Id { get; init; }
+}
+```
+
+### MessageRoles
+
+Represents the possible roles a message sender can have.
+
+```csharp
+public static class MessageRoles
+{
+    public const string Developer = "developer";
+    public const string System = "system";
+    public const string Assistant = "assistant";
+    public const string User = "user";
+    public const string Tool = "tool";
+}
+```
+
+### DeveloperMessage
+
+Represents a message from a developer.
+
+```csharp
+public sealed record DeveloperMessage : BaseMessage
+{
+    public required string Content { get; init; }
+    public string? Name { get; init; }
+}
+```
+
+| Property  | Type      | Description                                      |
+| --------- | --------- | ------------------------------------------------ |
+| `Id`      | `string`  | Unique identifier for the message                |
+| `role`    | `string`  | Role of the message sender, fixed as "developer" |
+| `Content` | `string`  | Text content of the message (required)           |
+| `Name`    | `string?` | Optional name of the sender                      |
+
+### SystemMessage
+
+Represents a system message.
+
+```csharp
+public sealed record SystemMessage : BaseMessage
+{
+    public required string Content { get; init; }
+    public string? Name { get; init; }
+}
+```
+
+| Property  | Type      | Description                                   |
+| --------- | --------- | --------------------------------------------- |
+| `Id`      | `string`  | Unique identifier for the message             |
+| `role`    | `string`  | Role of the message sender, fixed as "system" |
+| `Content` | `string`  | Text content of the message (required)        |
+| `Name`    | `string?` | Optional name of the sender                   |
+
+### AssistantMessage
+
+Represents a message from an assistant.
+
+```csharp
+public sealed record AssistantMessage : BaseMessage
+{
+    public string? Content { get; init; }
+    public string? Name { get; init; }
+    public ImmutableList<ToolCall> ToolCalls { get; init; } = [];
+}
+```
+
+| Property    | Type                      | Description                                      |
+| ----------- | ------------------------- | ------------------------------------------------ |
+| `Id`        | `string`                  | Unique identifier for the message                |
+| `role`      | `string`                  | Role of the message sender, fixed as "assistant" |
+| `Content`   | `string?`                 | Text content of the message                      |
+| `Name`      | `string?`                 | Name of the sender                               |
+| `ToolCalls` | `ImmutableList<ToolCall>` | Tool calls made in this message                  |
+
+### UserMessage
+
+Represents a message from a user.
+
+```csharp
+public sealed record UserMessage : BaseMessage
+{
+    public required string Content { get; init; }
+    public string? Name { get; init; }
+}
+```
+
+| Property  | Type      | Description                                 |
+| --------- | --------- | ------------------------------------------- |
+| `Id`      | `string`  | Unique identifier for the message           |
+| `role`    | `string`  | Role of the message sender, fixed as "user" |
+| `Content` | `string`  | Text content of the message (required)      |
+| `Name`    | `string?` | Optional name of the sender                 |
+
+### ToolMessage
+
+Represents a message from a tool.
+
+```csharp
+public sealed record ToolMessage : BaseMessage
+{
+    public required string ToolCallId { get; init; }
+    public required string Content { get; init; }
+}
+```
+
+| Property     | Type     | Description                                  |
+| ------------ | -------- | -------------------------------------------- |
+| `Id`         | `string` | Unique identifier for the message            |
+| `role`       | `string` | Role of the message sender, fixed as "tool"  |
+| `ToolCallId` | `string` | ID of the tool call this message responds to |
+| `Content`    | `string` | Text content of the message                  |
+
+### ToolCall
+
+Represents a tool call made by an agent.
+
+```csharp
+public sealed record ToolCall
+{
+    public required string Id { get; init; }
+    public string Type => "function";
+    public required FunctionCall Function { get; init; }
+}
+```
+
+| Property   | Type           | Description                              |
+| ---------- | -------------- | ---------------------------------------- |
+| `Id`       | `string`       | Unique identifier for the tool call      |
+| `Type`     | `string`       | Type of the tool call, always "function" |
+| `Function` | `FunctionCall` | Details about the function being called  |
+
+#### FunctionCall
+
+Represents function name and arguments in a tool call.
+
+```csharp
+public sealed record FunctionCall
+{
+    public required string Name { get; init; }
+    public required string Arguments { get; init; }
+}
+```
+
+| Property    | Type     | Description                                      |
+| ----------- | -------- | ------------------------------------------------ |
+| `Name`      | `string` | Name of the function to call                     |
+| `Arguments` | `string` | JSON-encoded string of arguments to the function |
+
+## Context
+
+Represents a piece of contextual information provided to an agent.
+
+```csharp
+public sealed record Context
+{
+    public required string Description { get; init; }
+    public required string Value { get; init; }
+}
+```
+
+| Property      | Type     | Description                                 |
+| ------------- | -------- | ------------------------------------------- |
+| `Description` | `string` | Description of what this context represents |
+| `Value`       | `string` | The actual context value                    |
+
+## Tool
+
+Defines a tool that can be called by an agent.
+
+```csharp
+public sealed record Tool
+{
+    public required string Name { get; init; }
+    public required string Description { get; init; }
+    public required JsonElement Parameters { get; init; }
+}
+```
+
+| Property      | Type          | Description                                      |
+| ------------- | ------------- | ------------------------------------------------ |
+| `Name`        | `string`      | Name of the tool                                 |
+| `Description` | `string`      | Description of what the tool does                |
+| `Parameters`  | `JsonElement` | JSON Schema defining the parameters for the tool |
+
+## State
+
+Represents the state of an agent during execution.
+
+```csharp
+// State is represented as a JsonElement for flexibility
+JsonElement State
+```
+
+The state type is flexible and can hold any data structure needed by the agent
+implementation.
