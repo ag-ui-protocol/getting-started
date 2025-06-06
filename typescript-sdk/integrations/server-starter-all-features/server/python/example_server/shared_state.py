@@ -58,8 +58,33 @@ async def send_state_events():
             "skill_level": "Advanced",
             "special_preferences": ["Low Carb", "Spicy"],
             "cooking_time": "15 min",
-            "ingredients": "1 chicken breast, 1 tsp chili powder, Salt, Lettuce leaves",
-            "instructions": "1. Season chicken with chili powder and salt. 2. Sear until fully cooked. 3. Slice and wrap in lettuce."
+            "ingredients": [
+                {
+                    "icon": "🍗",
+                    "name": "chicken breast",
+                    "amount": "1",
+                },
+                {
+                    "icon": "🌶️",
+                    "name": "chili powder",
+                    "amount": "1 tsp",
+                },
+                {
+                    "icon": "🧂",
+                    "name": "Salt",
+                    "amount": "a pinch",
+                },
+                {
+                    "icon": "🥬",
+                    "name": "Lettuce leaves",
+                    "amount": "handful",
+                },
+            ],
+            "instructions": [
+                "Season chicken with chili powder and salt.",
+                "Sear until fully cooked.",
+                "Slice and wrap in lettuce.",
+            ]
         }
     }
 

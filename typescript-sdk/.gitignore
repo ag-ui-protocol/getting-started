@@ -40,3 +40,5 @@ yarn-error.log*
 # Generated files
 packages/proto/src/generated
 
+# LangGraph API
+**/**/.langgraph_api

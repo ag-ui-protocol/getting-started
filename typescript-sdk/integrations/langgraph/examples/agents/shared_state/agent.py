@@ -80,8 +80,16 @@ GENERATE_RECIPE_TOOL = {
                             "description": "The cooking time of the recipe"
                         },
                         "ingredients": {
-                            "type": "string",
-                            "description": "Entire list of ingredients for the recipe, including the new ingredients and the ones that are already in the recipe: The name + the actual emoji (not emoji code like '\x1f35e', but the actual emoji like 🥕) and amount. Like so: 🥕 Carrots (250g)"
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "icon": {"type": "string", "description": "The icon emoji (not emoji code like '\x1f35e', but the actual emoji like 🥕) of the ingredient"},
+                                    "name": {"type": "string"},
+                                    "amount": {"type": "string"}
+                                }
+                            },
+                            "description": "Entire list of ingredients for the recipe, including the new ingredients and the ones that are already in the recipe"
                         },
                         "instructions": {
                             "type": "array",
