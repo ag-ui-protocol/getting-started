@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
+    "clean": "pnpm -r clean",
     "build:clean": "pnpm -r clean && pnpm install && turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",

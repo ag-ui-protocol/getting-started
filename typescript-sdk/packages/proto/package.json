@@ -13,7 +13,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "lint": "eslint \"src/**/*.ts*\"",
-    "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
+    "clean": "rm -rf dist .turbo node_modules",
     "test": "jest",
     "generate": "mkdir -p ./src/generated && protoc --plugin=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=./src/generated --ts_proto_opt=esModuleInterop=true,outputJsonMethods=false,outputClientImpl=false -I ./src/proto ./src/proto/*.proto",
     "link:global": "pnpm link --global",
