@@ -14,7 +14,7 @@ async def run_x_num_steps(
 ) -> str:
     """Run a given number of steps"""
     state = await ctx.get("state", default={})
-    if state is None:
+    if not isinstance(state, dict) or "steps" not in state:
         state = {
             "steps": [
                 {
