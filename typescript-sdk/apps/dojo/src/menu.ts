@@ -50,4 +50,12 @@ export const menuIntegrations: MenuIntegrationConfig[] = [
     name: "Agno",
     features: ["agentic_chat"],
   },
+  {
+    id: "dify",
+    name: "Dify",
+    features: [
+      "agentic_chat",
+      "tool_based_generative_ui",
+    ],
+  },
 ];

@@ -17,7 +17,8 @@
     "paths": {
       "@/*": ["./src/*"]
     },
-    "stripInternal": true
+    "stripInternal": true,
+    "composite": true
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]
