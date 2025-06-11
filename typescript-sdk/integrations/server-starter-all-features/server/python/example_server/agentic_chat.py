@@ -19,6 +19,7 @@ from ag_ui.core import (
     ToolCallArgsEvent,
     ToolCallEndEvent
 )
+from ag_ui.core.events import TextMessageChunkEvent
 from ag_ui.encoder import EventEncoder
 
 async def agentic_chat_endpoint(input_data: RunAgentInput, request: Request):

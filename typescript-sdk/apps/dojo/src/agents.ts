@@ -8,7 +8,9 @@ import { VercelAISDKAgent } from "@ag-ui/vercel-ai-sdk";
 import { openai } from "@ai-sdk/openai";
 import { LangGraphAgent } from "@ag-ui/langgraph";
 import { AgnoAgent } from "@ag-ui/agno";
+import { HttpAgent } from "@ag-ui/client";
 
+HttpAgent
 export const agentsIntegrations: AgentIntegrationConfig[] = [
   {
     id: "middleware-starter",
@@ -22,7 +24,7 @@ export const agentsIntegrations: AgentIntegrationConfig[] = [
     id: "server-starter",
     agents: async () => {
       return {
-        agentic_chat: new ServerStarterAgent({ url: "http://localhost:8000/" }),
+        agentic_chat: new ServerStarterAgent({ url: "http://127.0.0.1:8000/" }),
       };
     },
   },
@@ -31,22 +33,22 @@ export const agentsIntegrations: AgentIntegrationConfig[] = [
     agents: async () => {
       return {
         agentic_chat: new ServerStarterAllFeaturesAgent({
-          url: "http://localhost:8000/agentic_chat",
+          url: "http://127.0.0.1:8000/agentic_chat",
         }),
         human_in_the_loop: new ServerStarterAllFeaturesAgent({
-          url: "http://localhost:8000/human_in_the_loop",
+          url: "http://127.0.0.1:8000/human_in_the_loop",
         }),
         agentic_generative_ui: new ServerStarterAllFeaturesAgent({
-          url: "http://localhost:8000/agentic_generative_ui",
+          url: "http://127.0.0.1:8000/agentic_generative_ui",
         }),
         tool_based_generative_ui: new ServerStarterAllFeaturesAgent({
-          url: "http://localhost:8000/tool_based_generative_ui",
+          url: "http://127.0.0.1:8000/tool_based_generative_ui",
         }),
         shared_state: new ServerStarterAllFeaturesAgent({
-          url: "http://localhost:8000/shared_state",
+          url: "http://127.0.0.1:8000/shared_state",
         }),
         predictive_state_updates: new ServerStarterAllFeaturesAgent({
-          url: "http://localhost:8000/predictive_state_updates",
+          url: "http://127.0.0.1:8000/predictive_state_updates",
         }),
       };
     },
@@ -55,7 +57,7 @@ export const agentsIntegrations: AgentIntegrationConfig[] = [
     id: "mastra",
     agents: async () => {
       const mastraClient = new MastraClient({
-        baseUrl: "http://localhost:4111",
+        baseUrl: "http://127.0.0.14111",
       });
 
       return MastraAgent.getRemoteAgents({
@@ -76,27 +78,27 @@ export const agentsIntegrations: AgentIntegrationConfig[] = [
     agents: async () => {
       return {
         agentic_chat: new LangGraphAgent({
-          deploymentUrl: "http://localhost:2024",
+          deploymentUrl: "http://127.0.0.12024",
           graphId: "agentic_chat",
         }),
         agentic_generative_ui: new LangGraphAgent({
-          deploymentUrl: "http://localhost:2024",
+          deploymentUrl: "http://127.0.0.12024",
           graphId: "agentic_generative_ui",
         }),
         human_in_the_loop: new LangGraphAgent({
-          deploymentUrl: "http://localhost:2024",
+          deploymentUrl: "http://127.0.0.12024",
           graphId: "human_in_the_loop",
         }),
         predictive_state_updates: new LangGraphAgent({
-          deploymentUrl: "http://localhost:2024",
+          deploymentUrl: "http://127.0.0.12024",
           graphId: "predictive_state_updates",
         }),
         shared_state: new LangGraphAgent({
-          deploymentUrl: "http://localhost:2024",
+          deploymentUrl: "http://127.0.0.12024",
           graphId: "shared_state",
         }),
         tool_based_generative_ui: new LangGraphAgent({
-          deploymentUrl: "http://localhost:2024",
+          deploymentUrl: "http://127.0.0.12024",
           graphId: "tool_based_generative_ui",
         }),
       };
@@ -107,9 +109,25 @@ export const agentsIntegrations: AgentIntegrationConfig[] = [
     agents: async () => {
       return {
         agentic_chat: new AgnoAgent({
-          url: "http://localhost:8000/agui",
+          url: "http://127.0.0.1:8000/agui",
         }),
       };
     },
   },
+  {
+    id: "llama-index",
+    agents: async () => {
+      return {
+        agentic_chat: new HttpAgent({
+          url: "http://127.0.0.1:9000/agentic_chat/run",
+        }),
+        human_in_the_loop: new HttpAgent({
+          url: "http://127.0.0.1:9000/human_in_the_loop/run",
+        }),
+        agentic_generative_ui: new HttpAgent({
+          url: "http://127.0.0.1:9000/agentic_generative_ui/run",
+        }),
+      };
+    },
+  }
 ];
