@@ -91,11 +91,11 @@ Finally, introduce your integration to the dojo by adding it to
 export const menuIntegrations: MenuIntegrationConfig[] = [
   // ...
 
-  configureIntegration({
+  {
     id: "openai",
     name: "OpenAI",
     features: ["agentic_chat"],
-  }),
+  },
 ]
 ```
 
@@ -119,7 +119,36 @@ export const agentsIntegrations: AgentIntegrationConfig[] = [
 ]
 ```
 
-## Step 2 – Start the dojo
+## Step 2 – Add package to dojo dependencies
+
+Open `apps/dojo/package.json` and add the package `@ag-ui/openai`:
+
+```json
+{
+  "name": "demo-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@ag-ui/agno": "workspace:*",
+    "@ag-ui/langgraph": "workspace:*",
+    "@ag-ui/mastra": "workspace:*",
+    "@ag-ui/middleware-starter": "workspace:*",
+    "@ag-ui/server-starter": "workspace:*",
+    "@ag-ui/server-starter-all-features": "workspace:*",
+    "@ag-ui/vercel-ai-sdk": "workspace:*",
+    "@ag-ui/openai": "workspace:*", <- Add this line
+
+  ... rest of package.json
+}
+```
+
+## Step 3 – Start the dojo
 
 Now let's see your work in action:
 
@@ -185,7 +214,7 @@ export class OpenAIAgent extends AbstractAgent {
 }
 ```
 
-## Step 3 – Bridge OpenAI with AG-UI
+## Step 4 – Bridge OpenAI with AG-UI
 
 Let's transform our stub into a real agent that streams completions from OpenAI.
 

@@ -58,17 +58,17 @@ cd ag-ui/typescript-sdk
 Copy the server-starter template to create your OpenAI server:
 
 ```bash
-cp -r integrations/server-starter integrations/openai
+cp -r integrations/server-starter integrations/openai-server
 ```
 
 ### Update metadata
 
-Open `integrations/openai/package.json` and update the fields to match your new
+Open `integrations/openai-server/package.json` and update the fields to match your new
 folder:
 
 ```json
 {
-  "name": "@ag-ui/openai",
+  "name": "@ag-ui/openai-server",
   "author": "Your Name <your-email@example.com>",
   "version": "0.0.1",
 
@@ -76,11 +76,12 @@ folder:
 }
 ```
 
-Next, update the class name inside `integrations/openai/src/index.ts`:
+Next, update the class name inside `integrations/openai-server/src/index.ts`:
 
 ```ts
-// change the name to OpenAIAgent
-export class OpenAIAgent extends AbstractAgent {}
+// change the name to OpenAIServerAgent
+export class ServerStarterAgent extends HttpAgent { }
+
 ```
 
 Finally, introduce your integration to the dojo by adding it to
@@ -91,11 +92,11 @@ Finally, introduce your integration to the dojo by adding it to
 export const menuIntegrations: MenuIntegrationConfig[] = [
   // ...
 
-  configureIntegration({
-    id: "openai",
-    name: "OpenAI",
+  {
+    id: "openai-server",
+    name: "OpenAI Server",
     features: ["agentic_chat"],
-  }),
+  },
 ]
 ```
 
@@ -103,23 +104,52 @@ And `apps/dojo/src/agents.ts`:
 
 ```ts
 // ...
-import { OpenAIAgent } from "@ag-ui/openai"
+import { OpenAIServerAgent } from "@ag-ui/openai-server"
 
 export const agentsIntegrations: AgentIntegrationConfig[] = [
   // ...
 
   {
-    id: "openai",
+    id: "openai-server",
     agents: async () => {
       return {
-        agentic_chat: new OpenAIAgent(),
+        agentic_chat: new OpenAIServerAgent(),
       }
     },
   },
 ]
 ```
 
-## Step 2 – Start the dojo and server
+## Step 2 – Add package to dojo dependencies
+
+Open `apps/dojo/package.json` and add the package `@ag-ui/openai-server`:
+
+```json
+{
+  "name": "demo-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@ag-ui/agno": "workspace:*",
+    "@ag-ui/langgraph": "workspace:*",
+    "@ag-ui/mastra": "workspace:*",
+    "@ag-ui/middleware-starter": "workspace:*",
+    "@ag-ui/server-starter": "workspace:*",
+    "@ag-ui/server-starter-all-features": "workspace:*",
+    "@ag-ui/vercel-ai-sdk": "workspace:*",
+    "@ag-ui/openai-server": "workspace:*", <- Add this line
+
+  ... rest of package.json
+}
+```
+
+## Step 3 – Start the dojo and server
 
 Now let's see your work in action. First, start your Python server:
 
@@ -208,7 +238,7 @@ async def agentic_chat_endpoint(input_data: RunAgentInput, request: Request):
     )
 ```
 
-## Step 3 – Bridge OpenAI with AG-UI
+## Step 4 – Bridge OpenAI with AG-UI
 
 Let's transform our stub into a real server that streams completions from
 OpenAI.
@@ -383,7 +413,7 @@ Let's break down what your server is doing:
    `TOOL_CALL_CHUNK`
 4. **Finish** – We emit `RUN_FINISHED` (or `RUN_ERROR` if something goes wrong)
 
-## Step 4 – Chat with your server
+## Step 5 – Chat with your server
 
 Reload the dojo page and start typing. You'll see GPT-4o streaming its answer in
 real-time, word by word.
