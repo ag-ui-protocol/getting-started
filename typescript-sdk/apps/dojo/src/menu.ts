@@ -53,6 +53,13 @@ export const menuIntegrations: MenuIntegrationConfig[] = [
   {
     id: "llama-index",
     name: "Llama Index",
-    features: ["agentic_chat", "human_in_the_loop", "agentic_generative_ui"],
+    features: [
+      "agentic_chat",
+      "human_in_the_loop",
+      "agentic_generative_ui",
+      "predictive_state_updates",
+      "shared_state",
+      "tool_based_generative_ui",
+    ],
   },
 ];
