@@ -1,4 +1,12 @@
-[![AG-UI Workshop – June 5](https://img.shields.io/badge/AG--UI%20Workshop%20%E2%80%94June%2005-blue?style=flat-square)](https://go.copilotkit.ai/ag-ui-working-group-3)
+
+  
+[![AG-UI Workshop – June 5](https://img.shields.io/badge/AG--UI%20Workshop%20%E2%80%94%20-blue?style=flat-square)](https://go.copilotkit.ai/ag-ui-build-an-agent-canvas)
+![Discord](https://img.shields.io/discord/1379082175625953370?logo=discord&logoColor=%23FFFFFF&label=Discord&color=%236963ff)
+[![Quickstart](https://img.shields.io/badge/Quickstart%20%E2%80%94-blue?style=flat-square)](https://go.copilotkit.ai/ag-ui-working-group-3)
+
+
+
+
 
 # <img src="https://github.com/user-attachments/assets/ebc0dd08-8732-4519-9b6c-452ce54d8058" alt="ag-ui Logo" height="42px" /> AG-UI: The Agent-User Interaction Protocol
 
@@ -10,33 +18,49 @@ AG-UI is an open, lightweight, event-based protocol that standardizes **how AI a
 
 # ➡️ Learn more (AG-UI Specification)
 
-AG-UI is an open, lightweight, event-based protocol for agent-human interaction, designed for simplicity & flexibility:
+<details>
+  <summary><strong>Click to expand</strong></summary>
 
-- During agent executions, agent backends **emit events _compatible_ with one of AG-UI's 16 standard event types**
-- Agent backends can **accept one of a few simple AG-UI compatible inputs** as arguments
+  AG-UI is an open, lightweight, event-based protocol for agent-human interaction, designed for simplicity & flexibility:
 
-**AG-UI includes a flexible middleware layer** that ensures compatibility across diverse environments:
+  - During agent executions, agent backends **emit events _compatible_ with one of AG-UI's 16 standard event types**
+  - Agent backends can **accept one of a few simple AG-UI compatible inputs** as arguments
 
-- Works with **any event transport** (SSE, WebSockets, webhooks, etc.)
-- Allows for **loose event format matching**, enabling broad agent and app interoperability
+  **AG-UI includes a flexible middleware layer** that ensures compatibility across diverse environments:
 
-It also ships with a **reference HTTP implementation** and **default connector** to help teams get started fast.
+  - Works with **any event transport** (SSE, WebSockets, webhooks, etc.)
+  - Allows for **loose event format matching**, enabling broad agent and app interoperability
 
-[Learn more at docs.ag-ui.com](https://ag-ui.com)
+  It also ships with a **reference HTTP implementation** and **default connector** to help teams get started fast.
 
-## Why AG-UI?
+  [Learn more at docs.ag-ui.com](https://ag-ui.com)
 
-AG-UI was developed based on real-world requirements and practical experience building in-app agent interactions.
+</details>
 
-It was shaped through:
+# ➡️ Why AG-UI?
 
-- Working with users in the CopilotKit community to understand the needs of agent-based interactions in applications
-- Collaborating closely with leading agent frameworks (LangGraph, Mastra, CrewAI, AG2, etc.)
-- Extracting common infrastructure patterns that emerged across varied frameworks into a standardized, open protocol
+<details>
+  <summary><strong>Click to expand</strong></summary>
 
-This practical approach has helped ensure that AG-UI is both flexible and immediately applicable in real-world use cases.
+  AG-UI was developed based on real-world requirements and practical experience building in-app agent interactions.
+
+  It was shaped through:
+
+  - Working with users in the CopilotKit community to understand the needs of agent-based interactions in applications  
+  - Collaborating closely with leading agent frameworks (LangGraph, Mastra, CrewAI, AG2, etc.)  
+  - Extracting common infrastructure patterns that emerged across varied frameworks into a standardized, open protocol
+
+  This practical approach has helped ensure that AG-UI is both flexible and immediately applicable in real-world use cases.
+
+</details>
 
 # ➡️ Build AG-UI-Powered Applications
+
+### 🧭 Get Started with One Command: 
+`npx-create-ag-ui-app`
+
+### 🌐 Check out the quickstart: 
+[Quickstart]()
 
 Play with this hello-world app here:
 https://agui-demo.vercel.app/
@@ -60,8 +84,9 @@ AG-UI works with several popular agent frameworks and frontend solutions:
 | [Mastra](https://mastra.ai/)                                       | ✅ Supported             | ➡️ [Live Demo / Getting Started Docs](https://v0-mastra-land.vercel.app/)    |
 | [CrewAI](https://crewai.com/)                                      | ✅ Supported             | ➡️ [Live Demo / Getting Started Docs](https://v0-crew-land.vercel.app/)      |
 | [AG2](https://ag2.ai/)                                             | ✅ Supported             | ➡️ [Live Demo / Getting Started Docs](https://v0-ag2-land.vercel.app/)       |
-| [Agno](https://github.com/agno-agi/agno)                           | 🛠️ In Progress           | –                                                                            |
-| [LlamaIndex](https://www.llamaindex.ai)                            | 🛠️ In Progress           | –                                                                            |
+| [Agno](https://github.com/agno-agi/agno)                           | ✅ Supported             | -                                               |
+| [LlamaIndex](https://www.llamaindex.ai)                            | ✅ Supported             | –                                                                            |
+| [Dify](https://dify.ai/)                                           | - In Progress             | –                                                                            |
 | [OpenAI Agent SDK](https://openai.github.io/openai-agents-python/) | 💡 Open to Contributions | –                                                                            |
 | [Google ADK](https://google.github.io/adk-docs/get-started/)       | 💡 Open to Contributions | –                                                                            |
 | [Vercel AI SDK](https://github.com/vercel/ai)                      | 💡 Open to Contributions | –                                                                            |
@@ -74,6 +99,11 @@ AG-UI works with several popular agent frameworks and frontend solutions:
 | ------------------------------------------------------------------ | ------------------------ | ---------------------------------------------------------------------------- |
 | [.NET]()                                                           | 🛠️ In Progress               | ➡️ [PR](https://github.com/ag-ui-protocol/ag-ui/pull/38)                 |
 | [Nim]()                                                            | 🛠️ In Progress               | ➡️ [PR](https://github.com/ag-ui-protocol/ag-ui/pull/29)                 |
+
+| Clients                                                 | Status                | AG-UI Resources                                                                 |
+| ------------------------------------------------------------------ | ------------------------ | ---------------------------------------------------------------------------- |
+| [CopilotKit](https://copilotkit.ai)                                | ✅ Supported                | ➡️ [PR](https://github.com/ag-ui-protocol/ag-ui/pull/38)                 
+
 
 ## Features
 
@@ -115,7 +145,7 @@ Join the Discord: https://discord.gg/Jd3FzfdJa8
 
 ### Upcoming Events
 
-- **[AG-UI: Workshop](https://go.copilotkit.ai/ag-ui-working-group-3)**  
+- **[AG-UI: Workshop](https://go.copilotkit.ai/ag-ui-build-an-agent-canvas)**  
   📅 Friday, June 5, 9:00 AM PT  
   🔗 [Register now](https://go.copilotkit.ai/ag-ui-working-group-3)
 
