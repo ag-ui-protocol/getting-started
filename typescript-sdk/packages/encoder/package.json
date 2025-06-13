@@ -13,7 +13,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "lint": "eslint \"src/**/*.ts*\"",
-    "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
+    "clean": "rm -rf dist .turbo node_modules",
     "test": "jest",
     "link:global": "pnpm link --global",
     "unlink:global": "pnpm unlink --global"

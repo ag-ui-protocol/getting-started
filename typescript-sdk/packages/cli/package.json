@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist .turbo node_modules",
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "link:global": "pnpm link --global",

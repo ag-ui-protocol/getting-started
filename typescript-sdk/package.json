@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
-    "build:clean": "pnpm -r clean && pnpm install && turbo run build",
+    "clean": "rm -rf dist .turbo node_modules && pnpm -r clean",
+    "build:clean": "rm -rf dist .turbo node_modules && pnpm -r clean && pnpm install && turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md,mdx}\"",
