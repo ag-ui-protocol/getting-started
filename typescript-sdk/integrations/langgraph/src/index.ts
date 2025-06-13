@@ -53,6 +53,7 @@ import {
   getStreamPayloadInput,
   langchainMessagesToAgui,
 } from "@/utils";
+import { AGUIEvent } from "@ag-ui/client";
 
 export type ProcessedEvents =
   | TextMessageStartEvent
@@ -89,6 +90,7 @@ export interface LangGraphAgentConfig extends AgentConfig {
   assistantConfig?: LangGraphConfig;
   agentName?: string;
   graphId: string;
+  agentId?: string;
 }
 
 export class LangGraphAgent extends AbstractAgent {
@@ -99,6 +101,7 @@ export class LangGraphAgent extends AbstractAgent {
   assistant?: Assistant;
   messagesInProcess: MessagesInProgressRecord;
   activeRun?: RunMetadata;
+  agentId: string;
   // @ts-expect-error no need to initialize subscriber right now
   subscriber: Subscriber<ProcessedEvents>;
 
@@ -107,6 +110,7 @@ export class LangGraphAgent extends AbstractAgent {
     this.messagesInProcess = {};
     this.agentName = config.agentName;
     this.graphId = config.graphId;
+    this.agentId = config.agentId || randomUUID();
     this.assistantConfig = config.assistantConfig;
     this.client =
       config?.client ??
@@ -738,6 +742,68 @@ export class LangGraphAgent extends AbstractAgent {
       messages: [...removedMessages, ...newMessages],
       tools: [...(state.tools ?? []), ...tools],
     };
+  }
+
+  async *stream(input: RunAgentInput): AsyncGenerator<AGUIEvent> {
+    // 强制类型断言，确保兼容
+    const { threadId, runId, messages, tools } = input as RunAgentInput;
+    const lastMessage = messages[messages.length - 1];
+
+    // 发送运行开始事件
+    yield {
+      type: EventType.RUN_STARTED,
+      timestamp: new Date(),
+      threadId,
+      runId,
+    };
+
+    // 发送文本消息开始事件
+    yield {
+      type: EventType.TEXT_MESSAGE_START,
+      timestamp: new Date(),
+      threadId,
+      runId,
+      messageId: lastMessage.id,
+      role: "assistant",
+    };
+
+    // 处理消息并生成响应
+    const response = await this.processMessage(lastMessage, tools || []);
+
+    // 发送文本消息内容事件
+    yield {
+      type: EventType.TEXT_MESSAGE_CONTENT,
+      timestamp: new Date(),
+      threadId,
+      runId,
+      messageId: lastMessage.id,
+      role: "assistant",
+      delta: response,
+    };
+
+    // 发送文本消息结束事件
+    yield {
+      type: EventType.TEXT_MESSAGE_END,
+      timestamp: new Date(),
+      threadId,
+      runId,
+      messageId: lastMessage.id,
+      role: "assistant",
+    };
+
+    // 发送运行结束事件
+    yield {
+      type: EventType.RUN_FINISHED,
+      timestamp: new Date(),
+      threadId,
+      runId,
+    };
+  }
+
+  private async processMessage(lastMessage: any, tools: any[]): Promise<string> {
+    // 这里可以根据实际业务逻辑处理消息和工具调用
+    // 目前简单返回消息内容
+    return lastMessage.content || "";
   }
 }
 

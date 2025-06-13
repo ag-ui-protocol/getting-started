@@ -8,6 +8,12 @@ import { VercelAISDKAgent } from "@ag-ui/vercel-ai-sdk";
 import { openai } from "@ai-sdk/openai";
 import { LangGraphAgent } from "@ag-ui/langgraph";
 import { AgnoAgent } from "@ag-ui/agno";
+import { DifyAgent } from "@ag-ui/dify";
+
+// 检查必要的环境变量
+if (!process.env.DIFY_API_KEY) {
+  console.warn("警告: DIFY_API_KEY 环境变量未设置。Dify 集成将无法正常工作。");
+}
 
 export const agentsIntegrations: AgentIntegrationConfig[] = [
   {
@@ -108,6 +114,31 @@ export const agentsIntegrations: AgentIntegrationConfig[] = [
       return {
         agentic_chat: new AgnoAgent({
           url: "http://localhost:8000/agui",
+        }),
+      };
+    },
+  },
+  {
+    id: "dify",
+    agents: async () => {
+      // 检查环境变量
+      if (!process.env.DIFY_API_KEY) {
+        throw new Error("DIFY_API_KEY 环境变量未设置");
+      }
+
+      console.log("Dify 环境变量:", {
+        DIFY_API_KEY: process.env.DIFY_API_KEY,
+        DIFY_API_BASE_URL: process.env.DIFY_API_BASE_URL
+      });
+
+      return {
+        agentic_chat: new DifyAgent({
+          apiKey: process.env.DIFY_API_KEY,
+          baseUrl: process.env.DIFY_API_BASE_URL,
+        }),
+        tool_based_generative_ui: new DifyAgent({
+          apiKey: process.env.DIFY_API_KEY,
+          baseUrl: process.env.DIFY_API_BASE_URL,
         }),
       };
     },
