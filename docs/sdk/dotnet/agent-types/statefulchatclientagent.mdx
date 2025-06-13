@@ -1,0 +1,103 @@
+---
+title: "StatefulChatClientAgent"
+description:
+  "Agent User Interaction Protocol .NET SDK StatefulChatClientAgent reference"
+---
+
+# The StatefulChatClientAgent
+
+The `StatefulChatClientAgent` is a specialised agent implementation that derives
+from `ChatClientAgent` in order to provide frontend-agent state collaboration.
+
+It relies on `ChatClientAgent` to provide all the same core functionality, but
+tweaks the system message to direct the LLM to actively read and write to the
+shared state of the agent, while registering new backend tools that allow the
+agent to do so.
+
+It emits the necessary Agent User Interaction Protocol events to handle state
+synchronisation between the frontend and the agent, allowing for a rapid
+bootstrapping of this common scenario.
+
+<Warning>
+This agent is experimental and may not provide the best results in all scenarios.
+
+It relies heavily on a hardcoded system message that wraps the configured one,
+and so may sometimes fail to always produce the expected behaviour or interact
+with the shared state in all cases.
+
+It is recommended to use this agent to bootstrap your proof of concept, and then
+use it as a reference to implement your own agent from `ChatClientAgent` or
+`IAGUIAgent` that is tailored to your specific use case.
+
+</Warning>
+
+## Usage
+
+```csharp
+record Recipe(
+    string Name,
+    string Description,
+    string Ingredients,
+    string Instructions
+);
+
+var myProviderIChatClient = GetProviderIChatClient();
+var chatClient = new ChatClientBuilder(myProviderIChatClient)
+    .UseFunctionInvocation()
+    .Build();
+
+var agent = new StatefulChatClientAgent<Recipe>(
+    chatClient,
+    // Define initial state for the agent to begin with if not provided by the run input
+    new Recipe(),
+    new StatefulChatClientAgentOptions<Recipe>
+    {
+        SystemMessage = "You can override the system message passed in the RunAgentInput",
+        ChatOptions = new ChatOptions
+        {
+            Tools = [
+                AiFunctionFactory.Create(
+                    MyDotnetDelegate
+                )
+            ]
+        }
+    }
+)
+```
+
+## Options
+
+The agent accepts an options type `StateChatClientAgentOptions<TState>` that
+derives from `ChatClientAgentOptions` and allows you to provide all the same
+options as you would to a `ChatClientAgent`.
+
+```csharp
+public record StatefulChatClientAgentOptions<TState> : ChatClientAgentOptions where TState : notnull
+{
+    public string StateRetrievalFunctionName { get; init; } = "retrieve_state";
+    public string StateRetrievalFunctionDescription { get; init; } = "Retrieves the current shared state of the agent.";
+    public string StateUpdateFunctionName { get; init; } = "update_state";
+    public string StateUpdateFunctionDescription { get; init; } = "Updates the current shared state of the agent.";
+    public bool EmitStateFunctionsToFrontend { get; init; } = true;
+}
+```
+
+| Option                              | Default Value                                        | Description                                                     |
+| ----------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------- |
+| `StateRetrievalFunctionName`        | `"retrieve_state"`                                   | Name of the function to retrieve the current shared state.      |
+| `StateRetrievalFunctionDescription` | `"Retrieves the current shared state of the agent."` | Description for the state retrieval function.                   |
+| `StateUpdateFunctionName`           | `"update_state"`                                     | Name of the function to update the current shared state.        |
+| `StateUpdateFunctionDescription`    | `"Updates the current shared state of the agent."`   | Description for the state update function.                      |
+| `EmitStateFunctionsToFrontend`      | `true`                                               | Whether to notify the frontend when state functions are called. |
+
+## Extending the Agent
+
+The agent can also be extended by deriving from it, but it does not currently
+offer any additional functionality beyond what `ChatClientAgent` provides, but
+it does allow you to override the same methods as you would be able to when
+deriving from `ChatClientAgent`.
+
+<Warning>
+  Beware deriving from this agent, as if you interfere with the methods it
+  overrides, you may as well just derive from `ChatClientAgent` instead.
+</Warning>

@@ -1,0 +1,51 @@
+---
+title: "ASP.NET"
+description: "Agent User Interaction Protocol .NET SDK ASP.NET integration"
+---
+
+The most common way to integrate Agent User Interaction Protocol agents
+currently is over HTTP which frontends like
+[CopilotKit](https://www.copilotkit.ai) can use via the AG-UI
+[HttpAgent](/concepts/agents#httpagent) agent implementation.
+
+For that reason the .NET SDK provides a simple extension method to register a
+[Minimal API](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/minimal-apis/overview)
+POST endpoint that can be used to expose agents:
+
+```csharp
+builder.Services.ConfigureHttpJsonOptions(opts =>
+{
+    // Necessary as the type discriminator is not the first property in the JSON objects used by the AG-UI protocol.
+    opts.SerializerOptions.AllowOutOfOrderMetadataProperties = true;
+    opts.SerializerOptions.WriteIndented = false;
+    opts.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+
+    // Necessary as consumers of the AG-UI protocol (e.g. Zod-powered schemas) will not accept null values for optional properties.
+    // So we need to ensure that null values are not serialized.
+    opts.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+});
+
+builder.Services.AddChatClient(
+    new ChatClientBuilder(myProviderIChatClient)
+        .UseFunctionInvocation()
+);
+
+var app = builder.Build();
+
+var agentsGroup = app.MapGroup("/agents");
+
+agentsGroup.MapAgentEndpoint(
+    "my-agent-name",
+    sp => {
+        var chatClient = sp.GetRequiredService<IChatClient>();
+        return new ChatClientAgent(chatClient);
+    }
+);
+```
+
+This will create a POST endpoint at `/agents/my-agent-name` that accepts the
+`RunAgentInput` body and returns a server-sent-events stream of the Agent User
+Interaction Protocol events by invoking the provided agent.
+
+You can configure the endpoint like any other one, including adding all the same
+authentication / authorization / policy behaviour you would expect from ASP.NET.
