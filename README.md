@@ -138,7 +138,7 @@ We welcome contributions! Here's how to get involved:
 
 4. **Community**
    - [Discord](https://discord.gg/Jd3FzfdJa8)
-   - [Upcoming Workshop](https://go.copilotkit.ai/ag-ui-working-group-3)
+   - [Upcoming Workshop](https://go.copilotkit.ai/ag-ui-build-an-agent-canvas)
    - [Book a Call](https://calendly.com/markus-copilotkit/ag-ui)
 
 [View Contribution Guide](https://go.copilotkit.ai/agui-contribute)
