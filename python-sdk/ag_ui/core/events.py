@@ -2,8 +2,10 @@
 This module contains the event types for the Agent User Interaction Protocol Python SDK.
 """
 
+from __future__ import annotations
+
 from enum import Enum
-from typing import Any, List, Literal, Optional, Union, Annotated
+from typing import Any, List, Literal, Optional, Annotated
 from pydantic import Field
 
 from .types import Message, State, ConfiguredBaseModel
@@ -38,8 +40,8 @@ class BaseEvent(ConfiguredBaseModel):
     Base event for all events in the Agent User Interaction Protocol.
     """
     type: EventType
-    timestamp: Optional[int] = None
-    raw_event: Optional[Any] = None
+    timestamp: int | None = None
+    raw_event: Any = None
 
 
 class TextMessageStartEvent(BaseEvent):
@@ -76,9 +78,9 @@ class TextMessageChunkEvent(BaseEvent):
     Event containing a chunk of text message content.
     """
     type: Literal[EventType.TEXT_MESSAGE_CHUNK]
-    message_id: Optional[str] = None
+    message_id: str | None = None
     role: Optional[Literal["assistant"]] = None
-    delta: Optional[str] = None
+    delta: str | None = None
 
 class ToolCallStartEvent(BaseEvent):
     """
@@ -87,7 +89,7 @@ class ToolCallStartEvent(BaseEvent):
     type: Literal[EventType.TOOL_CALL_START]
     tool_call_id: str
     tool_call_name: str
-    parent_message_id: Optional[str] = None
+    parent_message_id: str | None = None
 
 
 class ToolCallArgsEvent(BaseEvent):
@@ -111,10 +113,10 @@ class ToolCallChunkEvent(BaseEvent):
     Event containing a chunk of tool call content.
     """
     type: Literal[EventType.TOOL_CALL_CHUNK]
-    tool_call_id: Optional[str] = None
-    tool_call_name: Optional[str] = None
-    parent_message_id: Optional[str] = None
-    delta: Optional[str] = None
+    tool_call_id: str | None = None
+    tool_call_name: str | None = None
+    parent_message_id: str | None = None
+    delta: str | None = None
 
 class StateSnapshotEvent(BaseEvent):
     """
@@ -146,7 +148,7 @@ class RawEvent(BaseEvent):
     """
     type: Literal[EventType.RAW]
     event: Any
-    source: Optional[str] = None
+    source: str | None = None
 
 
 class CustomEvent(BaseEvent):
@@ -182,7 +184,7 @@ class RunErrorEvent(BaseEvent):
     """
     type: Literal[EventType.RUN_ERROR]
     message: str
-    code: Optional[str] = None
+    code: str | None = None
 
 
 class StepStartedEvent(BaseEvent):
@@ -202,25 +204,23 @@ class StepFinishedEvent(BaseEvent):
 
 
 Event = Annotated[
-    Union[
-        TextMessageStartEvent,
-        TextMessageContentEvent,
-        TextMessageEndEvent,
-        TextMessageChunkEvent,
-        ToolCallStartEvent,
-        ToolCallArgsEvent,
-        ToolCallEndEvent,
-        ToolCallChunkEvent,
-        StateSnapshotEvent,
-        StateDeltaEvent,
-        MessagesSnapshotEvent,
-        RawEvent,
-        CustomEvent,
-        RunStartedEvent,
-        RunFinishedEvent,
-        RunErrorEvent,
-        StepStartedEvent,
-        StepFinishedEvent,
-    ],
+    TextMessageStartEvent |
+    TextMessageContentEvent |
+    TextMessageEndEvent |
+    TextMessageChunkEvent |
+    ToolCallStartEvent |
+    ToolCallArgsEvent |
+    ToolCallEndEvent |
+    ToolCallChunkEvent |
+    StateSnapshotEvent |
+    StateDeltaEvent |
+    MessagesSnapshotEvent |
+    RawEvent |
+    CustomEvent |
+    RunStartedEvent |
+    RunFinishedEvent |
+    RunErrorEvent |
+    StepStartedEvent |
+    StepFinishedEvent,
     Field(discriminator="type")
 ]
