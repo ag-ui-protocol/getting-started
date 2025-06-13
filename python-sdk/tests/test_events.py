@@ -49,9 +49,7 @@ class TestEvents(unittest.TestCase):
     def test_text_message_start(self):
         """Test creating and serializing a TextMessageStartEvent event"""
         event = TextMessageStartEvent(
-            type=EventType.TEXT_MESSAGE_START,
             message_id="msg_123",
-            role="assistant",
             timestamp=1648214400000
         )
         self.assertEqual(event.message_id, "msg_123")
@@ -66,7 +64,6 @@ class TestEvents(unittest.TestCase):
     def test_text_message_content(self):
         """Test creating and serializing a TextMessageContentEvent event"""
         event = TextMessageContentEvent(
-            type=EventType.TEXT_MESSAGE_CONTENT,
             message_id="msg_123",
             delta="Hello, world!",
             timestamp=1648214400000
@@ -83,7 +80,6 @@ class TestEvents(unittest.TestCase):
     def test_text_message_end(self):
         """Test creating and serializing a TextMessageEndEvent event"""
         event = TextMessageEndEvent(
-            type=EventType.TEXT_MESSAGE_END,
             message_id="msg_123",
             timestamp=1648214400000
         )
@@ -97,7 +93,6 @@ class TestEvents(unittest.TestCase):
     def test_tool_call_start(self):
         """Test creating and serializing a ToolCallStartEvent event"""
         event = ToolCallStartEvent(
-            type=EventType.TOOL_CALL_START,
             tool_call_id="call_123",
             tool_call_name="get_weather",
             parent_message_id="msg_456",
@@ -117,7 +112,6 @@ class TestEvents(unittest.TestCase):
     def test_tool_call_args(self):
         """Test creating and serializing a ToolCallArgsEvent event"""
         event = ToolCallArgsEvent(
-            type=EventType.TOOL_CALL_ARGS,
             tool_call_id="call_123",
             delta='{"location": "New York"}',
             timestamp=1648214400000
@@ -134,7 +128,6 @@ class TestEvents(unittest.TestCase):
     def test_tool_call_end(self):
         """Test creating and serializing a ToolCallEndEvent event"""
         event = ToolCallEndEvent(
-            type=EventType.TOOL_CALL_END,
             tool_call_id="call_123",
             timestamp=1648214400000
         )
@@ -149,7 +142,6 @@ class TestEvents(unittest.TestCase):
         """Test creating and serializing a StateSnapshotEvent event"""
         state = {"conversation_state": "active", "user_info": {"name": "John"}}
         event = StateSnapshotEvent(
-            type=EventType.STATE_SNAPSHOT,
             snapshot=state,
             timestamp=1648214400000
         )
@@ -169,7 +161,6 @@ class TestEvents(unittest.TestCase):
             {"op": "add", "path": "/user_info/age", "value": 30}
         ]
         event = StateDeltaEvent(
-            type=EventType.STATE_DELTA,
             delta=delta,
             timestamp=1648214400000
         )
@@ -185,11 +176,10 @@ class TestEvents(unittest.TestCase):
     def test_messages_snapshot(self):
         """Test creating and serializing a MessagesSnapshotEvent event"""
         messages = [
-            UserMessage(id="user_1", role="user", content="Hello"),
-            AssistantMessage(id="asst_1", role="assistant", content="Hi there", tool_calls=[
+            UserMessage(id="user_1", content="Hello"),
+            AssistantMessage(id="asst_1", content="Hi there", tool_calls=[
                 ToolCall(
                     id="call_1",
-                    type="function",
                     function=FunctionCall(
                         name="get_weather",
                         arguments='{"location": "New York"}'
@@ -198,7 +188,6 @@ class TestEvents(unittest.TestCase):
             ])
         ]
         event = MessagesSnapshotEvent(
-            type=EventType.MESSAGES_SNAPSHOT,
             messages=messages,
             timestamp=1648214400000
         )
@@ -217,7 +206,6 @@ class TestEvents(unittest.TestCase):
         """Test creating and serializing a RawEvent"""
         raw_data = {"origin": "server", "data": {"key": "value"}}
         event = RawEvent(
-            type=EventType.RAW,
             event=raw_data,
             source="api",
             timestamp=1648214400000
@@ -234,7 +222,6 @@ class TestEvents(unittest.TestCase):
     def test_custom_event(self):
         """Test creating and serializing a CustomEvent"""
         event = CustomEvent(
-            type=EventType.CUSTOM,
             name="user_action",
             value={"action": "click", "element": "button"},
             timestamp=1648214400000
@@ -251,7 +238,6 @@ class TestEvents(unittest.TestCase):
     def test_run_started(self):
         """Test creating and serializing a RunStartedEvent event"""
         event = RunStartedEvent(
-            type=EventType.RUN_STARTED,
             thread_id="thread_123",
             run_id="run_456",
             timestamp=1648214400000
@@ -268,7 +254,6 @@ class TestEvents(unittest.TestCase):
     def test_run_finished(self):
         """Test creating and serializing a RunFinishedEvent event"""
         event = RunFinishedEvent(
-            type=EventType.RUN_FINISHED,
             thread_id="thread_123",
             run_id="run_456",
             timestamp=1648214400000
@@ -285,7 +270,6 @@ class TestEvents(unittest.TestCase):
     def test_run_error(self):
         """Test creating and serializing a RunErrorEvent event"""
         event = RunErrorEvent(
-            type=EventType.RUN_ERROR,
             message="An error occurred during execution",
             code="ERROR_001",
             timestamp=1648214400000
@@ -302,7 +286,6 @@ class TestEvents(unittest.TestCase):
     def test_step_started(self):
         """Test creating and serializing a StepStartedEvent event"""
         event = StepStartedEvent(
-            type=EventType.STEP_STARTED,
             step_name="process_data",
             timestamp=1648214400000
         )
@@ -316,7 +299,6 @@ class TestEvents(unittest.TestCase):
     def test_step_finished(self):
         """Test creating and serializing a StepFinishedEvent event"""
         event = StepFinishedEvent(
-            type=EventType.STEP_FINISHED,
             step_name="process_data",
             timestamp=1648214400000
         )
@@ -383,24 +365,8 @@ class TestEvents(unittest.TestCase):
         # TextMessageContentEvent delta cannot be empty
         with self.assertRaises(ValueError):
             TextMessageContentEvent(
-                type=EventType.TEXT_MESSAGE_CONTENT,
                 message_id="msg_123",
                 delta=""  # Empty delta, should fail
-            )
-        
-        # TextMessageStartEvent role must be "assistant"
-        with self.assertRaises(ValidationError):
-            TextMessageStartEvent(
-                type=EventType.TEXT_MESSAGE_START,
-                message_id="msg_123",
-                role="user"  # Invalid role, should be "assistant"
-            )
-        
-        # Event type must match the class
-        with self.assertRaises(ValidationError):
-            TextMessageEndEvent(
-                type=EventType.TEXT_MESSAGE_START,  # Wrong event type
-                message_id="msg_123"
             )
 
     def test_serialization_round_trip(self):
@@ -408,32 +374,25 @@ class TestEvents(unittest.TestCase):
         # Create events of different types
         events = [
             TextMessageStartEvent(
-                type=EventType.TEXT_MESSAGE_START,
                 message_id="msg_123",
-                role="assistant"
             ),
             TextMessageContentEvent(
-                type=EventType.TEXT_MESSAGE_CONTENT,
                 message_id="msg_123",
                 delta="Hello, world!"
             ),
             ToolCallStartEvent(
-                type=EventType.TOOL_CALL_START,
                 tool_call_id="call_123",
                 tool_call_name="get_weather"
             ),
             StateSnapshotEvent(
-                type=EventType.STATE_SNAPSHOT,
                 snapshot={"status": "active"}
             ),
             MessagesSnapshotEvent(
-                type=EventType.MESSAGES_SNAPSHOT,
                 messages=[
-                    UserMessage(id="user_1", role="user", content="Hello")
+                    UserMessage(id="user_1", content="Hello")
                 ]
             ),
             RunStartedEvent(
-                type=EventType.RUN_STARTED,
                 thread_id="thread_123",
                 run_id="run_456"
             )
@@ -475,7 +434,6 @@ class TestEvents(unittest.TestCase):
     def test_raw_event_with_null_source(self):
         """Test RawEvent with null source"""
         event = RawEvent(
-            type=EventType.RAW,
             event={"data": "test"},
             source=None  # Explicit None
         )
@@ -522,7 +480,6 @@ class TestEvents(unittest.TestCase):
         }
         
         event = StateSnapshotEvent(
-            type=EventType.STATE_SNAPSHOT,
             snapshot=complex_state,
             timestamp=1648214400000
         )
@@ -551,7 +508,6 @@ class TestEvents(unittest.TestCase):
         text = "Hello 你好 こんにちは 안녕하세요 👋 🌍 \n\t\"'\\/<>{}[]"
         
         event = TextMessageContentEvent(
-            type=EventType.TEXT_MESSAGE_CONTENT,
             message_id="msg_unicode",
             delta=text,
             timestamp=1648214400000
