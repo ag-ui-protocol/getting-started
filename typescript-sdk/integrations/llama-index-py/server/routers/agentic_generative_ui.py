@@ -1,37 +1,36 @@
 import asyncio
 import copy
 import jsonpatch
+from pydantic import BaseModel
 
 from llama_index.core.workflow import Context
 from llama_index.llms.openai import OpenAI
 from llama_index.protocols.ag_ui.server import get_ag_ui_workflow_router
 from llama_index.protocols.ag_ui.events import StateDeltaWorkflowEvent, StateSnapshotWorkflowEvent
 
+class Step(BaseModel):
+    description: str
+
+class Task(BaseModel):
+    steps: list[Step]
 
 # Genrative UI demo
-async def run_x_num_steps(
-    ctx: Context, num_steps: int,
+async def run_task(
+    ctx: Context, task: Task,
 ) -> str:
-    """Run a given number of steps"""
+    """Execute the list of steps needed to complete the task. Useful for anything the user wants to do."""
     state = await ctx.get("state", default={})
-    if not isinstance(state, dict) or "steps" not in state:
-        state = {
-            "steps": [
-                {
-                    "description": f"Step {i + 1}",
-                    "status": "pending"
-                }
-                for i in range(num_steps)
-            ]
-        }
-    else:
-        state["steps"].extend([
+    task = Task.model_validate(task)
+
+    state = {
+        "steps": [
             {
-                "description": f"Step {i + 1}",
+                "description": step.description,
                 "status": "pending"
             }
-            for i in range(num_steps)
-        ])
+            for step in task.steps
+        ]
+    }
 
     # Send initial state snapshot
     ctx.write_event_to_stream(
@@ -78,6 +77,6 @@ async def run_x_num_steps(
 
 agentic_generative_ui_router = get_ag_ui_workflow_router(
     llm=OpenAI(model="gpt-4.1"),
-    tools=[run_x_num_steps],
+    tools=[run_task],
     initial_state={},
 )
