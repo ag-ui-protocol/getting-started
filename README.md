@@ -1,127 +1,148 @@
-[![AG-UI Workshop – June 5](https://img.shields.io/badge/AG--UI%20Workshop%20%E2%80%94June%2005-blue?style=flat-square)](https://go.copilotkit.ai/ag-ui-build-an-agent-canvas)
-![Discord](https://img.shields.io/discord/1379082175625953370?logo=discord&logoColor=%23FFFFFF&label=Discord&color=%236963ff)
-
 # <img src="https://github.com/user-attachments/assets/ebc0dd08-8732-4519-9b6c-452ce54d8058" alt="ag-ui Logo" height="42px" /> AG-UI: The Agent-User Interaction Protocol
 
-AG-UI is an open, lightweight, event-based protocol that standardizes **how AI agents connect to front-end applications**.
+![0613](https://github.com/user-attachments/assets/bec3bc01-d8f2-4667-885e-028cbcbc8439)
 
-➡️ See demos of AG-UI-enabled applications [here](https://github.com/ag-ui-protocol/ag-ui?tab=readme-ov-file#ag-ui-compatible-agent-frameworks)
 
-<img src="https://github.com/user-attachments/assets/215227a5-9698-4d97-a46e-8904b95bfa08" alt="ag-ui Logo" style="max-width: 100px; height: auto;" />
+AG-UI is a lightweight, event-based protocol that standardizes how AI agents connect to front-end applications. Built for simplicity and flexibility, it enables seamless integration between your AI agents and user interfaces.
 
-# ➡️ Learn more (AG-UI Specification)
+[![AG-UI Workshop – June 5](https://img.shields.io/badge/AG--UI%20Workshop%20%E2%80%94June%2019-blue?style=flat-square)](https://go.copilotkit.ai/ag-ui-build-an-agent-canvas)
+![Discord](https://img.shields.io/discord/1379082175625953370?logo=discord&logoColor=%23FFFFFF&label=Discord&color=%236963ff)
 
-AG-UI is an open, lightweight, event-based protocol for agent-human interaction, designed for simplicity & flexibility:
 
-- During agent executions, agent backends **emit events _compatible_ with one of AG-UI's 16 standard event types**
-- Agent backends can **accept one of a few simple AG-UI compatible inputs** as arguments
 
-**AG-UI includes a flexible middleware layer** that ensures compatibility across diverse environments:
+## Quick Start
 
-- Works with **any event transport** (SSE, WebSockets, webhooks, etc.)
-- Allows for **loose event format matching**, enabling broad agent and app interoperability
+Choose your path:
 
-It also ships with a **reference HTTP implementation** and **default connector** to help teams get started fast.
+### 🚀 Building AG-UI Powered Applications
 
-[Learn more at docs.ag-ui.com](https://ag-ui.com)
+Create a new AG-UI application in seconds:
+
+```bash
+npx create-ag-ui-app my-agent-app
+```
+
+[View Documentation](https://ag-ui.com) · [Join Discord](https://discord.gg/Jd3FzfdJa8) · [Book a Call](https://calendly.com/markus-copilotkit/ag-ui)
+
+### 🔌 Building AG-UI Integrations
+
+```bash
+# Clone the repository
+git clone https://github.com/ag-ui-protocol/ag-ui.git
+
+# Install dependencies
+cd ag-ui
+npm install
+```
+
+[Integration Guide](https://ag-ui.com/integrations)
 
 ## Why AG-UI?
 
-AG-UI was developed based on real-world requirements and practical experience building in-app agent interactions.
+AG-UI was developed through real-world experience building in-app agent interactions. It provides:
 
-It was shaped through:
-
-- Working with users in the CopilotKit community to understand the needs of agent-based interactions in applications
-- Collaborating closely with leading agent frameworks (LangGraph, Mastra, CrewAI, AG2, etc.)
-- Extracting common infrastructure patterns that emerged across varied frameworks into a standardized, open protocol
-
-This practical approach has helped ensure that AG-UI is both flexible and immediately applicable in real-world use cases.
-
-# ➡️ Build AG-UI-Powered Applications
-
-Play with this hello-world app here:
-https://agui-demo.vercel.app/
-
-Video:
-
-https://github.com/user-attachments/assets/18c03330-1ebc-4863-b2b8-cc6c3a4c7bae
-
-## Select Your Language
-
-- [TypeScript](https://github.com/ag-ui-protocol/ag-ui/tree/main/typescript-sdk)
-- [Python](https://github.com/ag-ui-protocol/ag-ui/tree/main/python-sdk)
-
-## AG-UI Compatible Agent Frameworks
-
-AG-UI works with several popular agent frameworks and frontend solutions:
-
-| Framework                                                          | Status                   | AG-UI Resources                                                              |
-| ------------------------------------------------------------------ | ------------------------ | ---------------------------------------------------------------------------- |
-| [LangGraph](https://www.langchain.com/langgraph)                   | ✅ Supported             | ➡️ [Live Demo / Getting Started Docs](https://v0-langgraph-land.vercel.app/) |
-| [Mastra](https://mastra.ai/)                                       | ✅ Supported             | ➡️ [Live Demo / Getting Started Docs](https://v0-mastra-land.vercel.app/)    |
-| [CrewAI](https://crewai.com/)                                      | ✅ Supported             | ➡️ [Live Demo / Getting Started Docs](https://v0-crew-land.vercel.app/)      |
-| [AG2](https://ag2.ai/)                                             | ✅ Supported             | ➡️ [Live Demo / Getting Started Docs](https://v0-ag2-land.vercel.app/)       |
-| [Agno](https://github.com/agno-agi/agno)                           | 🛠️ In Progress           | –                                                                            |
-| [LlamaIndex](https://www.llamaindex.ai)                            | 🛠️ In Progress           | –                                                                            |
-| [OpenAI Agent SDK](https://openai.github.io/openai-agents-python/) | 💡 Open to Contributions | –                                                                            |
-| [Google ADK](https://google.github.io/adk-docs/get-started/)       | 💡 Open to Contributions | –                                                                            |
-| [Vercel AI SDK](https://github.com/vercel/ai)                      | 💡 Open to Contributions | –                                                                            |
-| [AWS Bedrock Agents](https://aws.amazon.com/bedrock/agents/)       | 💡 Open to Contributions | –                                                                            |
-| [Cloudflare Agents](https://developers.cloudflare.com/agents/)     | 💡 Open to Contributions | –                                                                            |
-| [Pydantic AI ](https://ai.pydantic.dev/)                           | 💡 Open to Contributions | –                                                                            |
-| [Strands Agents SDK](https://github.com/strands-agents/sdk-python) | 💡 Open to Contributions | –                                                                            |
-
-| Language SDK                                                      | Status                | AG-UI Resources                                                                 |
-| ------------------------------------------------------------------ | ------------------------ | ---------------------------------------------------------------------------- |
-| [.NET]()                                                           | 🛠️ In Progress               | ➡️ [PR](https://github.com/ag-ui-protocol/ag-ui/pull/38)                 |
-| [Nim]()                                                            | 🛠️ In Progress               | ➡️ [PR](https://github.com/ag-ui-protocol/ag-ui/pull/29)                 |
+- **Standardized Event Types**: 16 standard event types for consistent agent communication
+- **Flexible Middleware**: Works with any event transport (SSE, WebSockets, webhooks)
+- **Broad Compatibility**: Seamlessly integrates with popular agent frameworks
+- **Production Ready**: Includes reference HTTP implementation and default connector
 
 ## Features
 
-AG-UI-compatible agents **securely** and **efficiently** support:
+- 💬 Real-time agentic chat with streaming
+- 🔄 Bi-directional state synchronization
+- 🧩 Generative UI and structured messages
+- 🧠 Real-time context enrichment
+- 🛠️ Frontend tool integration
+- 🧑‍💻 Human-in-the-loop collaboration
 
-- 💬 Agentic chat with real-time streaming
-- 🔄 Bi-directional state sync (in and out of chat)
-- 🧩 Generative UI and structured messages (with delta streaming)
-- 🧠 Realtime context enrichment
-- 🛠️ Frontend tool use (tool calls)
-- 🧑‍💻 Human-in-the-loop and human-on-the-loop collaboration
+## Framework Support
 
-And more. [Learn more at ag-ui.com](https://ag-ui.com)
+AG-UI works with leading agent frameworks:
 
-## AG-UI Showcase: The AG-UI Dojo (Building-Blocks Viewer)
+| Framework | Status | Resources |
+|-----------|--------|-----------|
+| LangGraph | ✅ Supported | [Demo](https://v0-langgraph-land.vercel.app/) |
+| Mastra | ✅ Supported | [Demo](https://v0-mastra-land.vercel.app/) |
+| CrewAI | ✅ Supported | [Demo](https://v0-crew-land.vercel.app/) |
+| AG2 | ✅ Supported | [Demo](https://v0-ag2-land.vercel.app/) |
 
-The [ag-ui dojo](https://feature-viewer-langgraph.vercel.app/) showcases many of the building blocks that ag-ui supports.
+[View all supported frameworks →](https://ag-ui.com/frameworks)
 
-The building blocks are designed to be simple and focused -- between 50-200 lines of code.
+## Getting Started
 
-https://github.com/user-attachments/assets/a67d3d54-36b2-4c7a-ac69-a0ca01365d5b
+### For Application Builders
 
-## Client Libraries
+1. **Create Your App**
+   ```bash
+   npx create-ag-ui-app my-agent-app
+   ```
+   This sets up a complete AG-UI application with:
+   - TypeScript/React frontend
+   - Agent backend
+   - Development environment
+   - Example components
 
-AG-UI provides ready-to-use client libraries for building connected experiences:
+2. **Choose Your SDK**
+   - [TypeScript SDK](https://github.com/ag-ui-protocol/ag-ui/tree/main/typescript-sdk)
+   - [Python SDK](https://github.com/ag-ui-protocol/ag-ui/tree/main/python-sdk)
 
-- **React client** via [CopilotKit](https://docs.copilotkit.ai/)
-- Messaging clients (WhatsApp, WeChat, RCS) — WIP in collaboration with AWS SNS
+3. **Explore Examples**
+   - [AG-UI Dojo](https://feature-viewer-langgraph.vercel.app/) - Building blocks showcase
+   - [Hello World App](https://agui-demo.vercel.app/) - Basic implementation
 
-# ➡️ Contribute to AG-UI
+### For Framework Integrators
 
-Learn how to contribute to AG-UI: [AG-UI Contribution Guide](https://go.copilotkit.ai/agui-contribute)
+1. **Understand the Architecture**
+   - Server-side: Agent implementation and event processing
+   - Middleware: Event transport and protocol handling
+   - Client-side: UI integration and state management
 
-Book time with Markus Ecker, the creator of AG-UI: https://calendly.com/markus-copilotkit/ag-ui
+2. **Integration Process**
+   - Create a new directory in `/integrations` with your framework name
+   - Follow the [Integration Guide](https://ag-ui.com/integrations)
+   - For work in progress, use the `-wip` suffix (e.g., `OpenAIAgentsSDK-wip`)
 
-Join the Discord: https://discord.gg/Jd3FzfdJa8
+3. **Testing**
+   - Use the [AG-UI Dojo](https://feature-viewer-langgraph.vercel.app/) for validation
+   - Implement all core capabilities
+   - Verify event sequence and data format
 
-![Discord](https://img.shields.io/discord/1379082175625953370?logo=discord&logoColor=%23FFFFFF&label=Discord&color=%236963ff)
+## Live Demo
 
-## Community
+Try our interactive demo to see AG-UI in action:
 
-### Upcoming Events
-
-- **[AG-UI: Build an agent canvas with AG-UI](https://go.copilotkit.ai/ag-ui-build-an-agent-canvas)**  
-  📅 Friday, June 19, 9:00 AM PT  
-
+[Launch Demo](https://agui-demo.vercel.app/)
 
 ## Contributing
 
-We 💜 contributions! Whether you're fixing bugs, improving documentation, or building demos — your contributions make AG-UI better.
+We welcome contributions! Here's how to get involved:
+
+1. **Choose Your Path**
+   - Building applications with AG-UI
+   - Contributing framework integrations
+   - Improving documentation
+   - Adding new features
+
+2. **Development Setup**
+   ```bash
+   git clone https://github.com/ag-ui-protocol/ag-ui.git
+   cd ag-ui
+   npm install
+   ```
+
+3. **Integration Guidelines**
+   - Place new integrations in `/integrations`
+   - Use `-wip` suffix for work in progress
+   - Follow the [Integration Guide](https://ag-ui.com/integrations)
+   - Add tests and documentation
+
+4. **Community**
+   - [Discord](https://discord.gg/Jd3FzfdJa8)
+   - [Upcoming Workshop](https://go.copilotkit.ai/ag-ui-working-group-3)
+   - [Book a Call](https://calendly.com/markus-copilotkit/ag-ui)
+
+[View Contribution Guide](https://go.copilotkit.ai/agui-contribute)
+
+## License
+
+AG-UI is open source and available under the MIT License.
