@@ -127,14 +127,8 @@ export const agentsIntegrations: AgentIntegrationConfig[] = [
         agentic_generative_ui: new HttpAgent({
           url: "http://127.0.0.1:9000/agentic_generative_ui/run",
         }),
-        predictive_state_updates: new HttpAgent({
-          url: "http://127.0.0.1:9000/predictive_state_updates/run",
-        }),
         shared_state: new HttpAgent({
           url: "http://127.0.0.1:9000/shared_state/run",
-        }),
-        tool_based_generative_ui: new HttpAgent({
-          url: "http://127.0.0.1:9000/tool_based_generative_ui/run",
         }),
       };
     },
