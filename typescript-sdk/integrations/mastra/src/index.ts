@@ -27,7 +27,7 @@ import { registerApiRoute } from "@mastra/core/server";
 import type { Agent as LocalMastraAgent } from "@mastra/core/agent";
 import type { Context } from "hono";
 import { RuntimeContext } from "@mastra/core/runtime-context";
-import { randomUUID } from "crypto";
+import { randomUUID } from "@ag-ui/client";
 import { Observable } from "rxjs";
 import { MastraClient } from "@mastra/client-js";
 type RemoteMastraAgent = ReturnType<MastraClient["getAgent"]>;

@@ -26,7 +26,7 @@ import {
   ToolChoice,
   ToolSet,
 } from "ai";
-import { randomUUID } from "crypto";
+import { randomUUID } from "@ag-ui/client";
 import { z } from "zod";
 
 type ProcessedEvent =
