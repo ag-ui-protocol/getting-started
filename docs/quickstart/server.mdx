@@ -1,16 +1,30 @@
 ---
-title: "AG-UI Compatible Servers"
+title: "Server"
 description: "Implement AG-UI compatible servers"
 ---
 
-# Getting Started with AG-UI
+# Introduction
 
-AG-UI provides a concise, event-driven protocol that lets any agent stream rich,
-structured output to any client. In this quick-start guide, we'll walk through:
+A server implementation allows you to **emit AG-UI events directly from your agent or server**. This approach is ideal when you're building a new agent from scratch or want a dedicated service for your agent capabilities.
 
-1. Scaffolding a new AG-UI server that wraps **OpenAI's GPT-4o** model
-2. Registering your server with the **dojo**, our local web playground
-3. Streaming responses from OpenAI through AG-UI's unified interface
+## When to use a server implementation
+Server implementations allow you to directly emit AG-UI events from your agent or server. If you are not using an
+agent framework or haven't created a protocol for your agent framework yet, this is the best way to get started.
+
+Server implementations are also great for:
+- Building a **new agent frameworks** from scratch
+- **Maximum control** over how and what events are emitted
+- Exposing your agent as a **standalone API**
+
+## What you'll build
+
+In this guide, we'll create a standalone HTTP server that:
+1. Accepts AG-UI protocol requests
+2. Connects to OpenAI's GPT-4o model
+3. Streams responses back as AG-UI events
+4. Handles tool calls and state management
+
+Let's get started!
 
 ## Prerequisites
 

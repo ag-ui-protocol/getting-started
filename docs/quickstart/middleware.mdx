@@ -1,18 +1,33 @@
 ---
-title: "AG-UI Middleware Connectors"
+title: "Middleware"
 description:
-  "Connect AG-UI with existing protocols, in process agents or custom solutions
-  using TypeScript"
+  "Connect to existing protocols, in process agents or custom solutions via AG-UI"
 ---
 
-# Getting Started with AG-UI
+# Introduction
 
-AG-UI provides a concise, event-driven protocol that lets any agent stream rich,
-structured output to any client. In this quick-start guide, we'll walk through:
+A middleware implementation allows you to **translate existing protocols and applications to AG-UI events**. This approach creates a bridge between your existing system and AG-UI, making it perfect for adding agent capabilities to current applications.
 
-1. Scaffolding a new AG-UI integration that wraps **OpenAI's GPT-4o** model
-2. Registering your integration with the **dojo**, our local web playground
-3. Streaming responses from OpenAI through AG-UI's unified interface
+## When to use a middleware implementation
+Middleware is the flexible option. It allows you to translate existing protocols and applications to AG-UI events
+creating a bridge between your existing system and AG-UI.
+
+Middleware is great for:
+- Taking your **existing protocol or API** and **translating it universally**
+- Working within the confines of **an existing system or framework**
+- **When you don't have direct control** over the agent framework or system
+
+## What you'll build
+
+In this guide, we'll create a middleware agent that:
+1. Extends the `AbstractAgent` class
+2. Connects to OpenAI's GPT-4o model
+3. Translates OpenAI responses to AG-UI events
+4. Runs in-process with your application
+
+This approach gives you maximum flexibility to integrate with existing codebases while maintaining the full power of the AG-UI protocol.
+
+Let's get started!
 
 ## Prerequisites
 
