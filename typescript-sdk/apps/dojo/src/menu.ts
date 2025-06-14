@@ -50,4 +50,14 @@ export const menuIntegrations: MenuIntegrationConfig[] = [
     name: "Agno",
     features: ["agentic_chat"],
   },
+  {
+    id: "llama-index",
+    name: "Llama Index",
+    features: [
+      "agentic_chat",
+      "human_in_the_loop",
+      "agentic_generative_ui",
+      "shared_state",
+    ],
+  },
 ];
