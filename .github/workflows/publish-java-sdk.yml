@@ -1,0 +1,106 @@
+name: Publish Java SDK to Maven Central
+
+# Publish the Java SDKs to Maven Central. Manual trigger only.
+#
+# The Java SDK lives under sdks/community/java and is split into two independent
+# Maven reactors, which are released on separate cadences:
+#   * ag-ui  -> java-core, java-client, java-server
+#
+on:
+  # Manual trigger only - no automatic publishing
+  workflow_dispatch:
+    inputs:
+      component:
+        description: 'Which reactor(s) to publish'
+        required: true
+        type: choice
+        options:
+          - ag-ui
+          - all
+        default: all
+      dry_run:
+        description: 'Run in dry-run mode (test without uploading)'
+        required: false
+        type: boolean
+        default: false
+
+# SECURITY: Build/test and publish are split into separate jobs. Publishing
+# secrets (Sonatype credentials, GPG key) are only available in the publish job,
+# never in the same process tree as build-time code execution.
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654  # v5.2.0
+        with:
+          java-version: "17"
+          distribution: temurin
+          cache: maven
+
+      - name: Test ag-ui
+        if: inputs.component == 'ag-ui' || inputs.component == 'all'
+        run: mvn -B -f sdks/community/java/ag-ui/pom.xml install
+
+  publish:
+    name: Publish to Maven Central
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    environment: maven
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654  # v5.2.0
+        with:
+          java-version: "17"
+          distribution: temurin
+          cache: maven
+          # Configures ~/.m2/settings.xml with a "central" server whose
+          # credentials are read from the env vars below.
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_PASSWORD
+          # Imports the signing key used by the maven-gpg-plugin and wires the
+          # passphrase env var name into settings.xml.
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      # --- Dry-run: build, package the sources/javadoc jars and GPG-sign
+      # everything via the `release` profile, but stop at `install` (no upload).
+      - name: Dry-run ag-ui
+        if: inputs.dry_run == true && (inputs.component == 'ag-ui' || inputs.component == 'all')
+        env:
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: mvn -B -f sdks/community/java/ag-ui/pom.xml -Prelease install -DskipTests
+
+      # --- Publish: ag-ui first so an "all" run resolves it from the local
+      # repository
+      - name: Publish ag-ui to Maven Central
+        if: inputs.dry_run == false && (inputs.component == 'ag-ui' || inputs.component == 'all')
+        run: mvn -B -f sdks/community/java/ag-ui/pom.xml -Prelease deploy -DskipTests
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
