@@ -11,8 +11,8 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
-import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.SubmissionPublisher;
 import java.util.stream.Stream;
 
@@ -34,6 +34,18 @@ public final class HttpAgent implements Agent {
 
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofMinutes(5);
 
+    /**
+     * Shared executor used by the {@linkplain #HttpAgent(URI, Serializer) default
+     * constructor}. Consuming an SSE response is a long-lived blocking operation,
+     * so running it on a bounded pool shared across the JVM (such as
+     * {@code ForkJoinPool.commonPool()}) risks starving that pool — a burst of
+     * concurrent runs could occupy every worker and deadlock. A cached thread
+     * pool sidesteps this: it creates threads on demand (reusing idle ones) and
+     * is effectively unbounded, so a blocking stream read never starves other
+     * runs.
+     */
+    private static final Executor DEFAULT_EXECUTOR = Executors.newCachedThreadPool();
+
     private final URI endpoint;
     private final Serializer serializer;
     private final HttpClient httpClient;
@@ -41,14 +53,14 @@ public final class HttpAgent implements Agent {
     private final Duration requestTimeout;
 
     /**
-     * Creates an agent using a default {@link HttpClient} and the common
-     * {@link ForkJoinPool} for stream processing.
+     * Creates an agent using a default {@link HttpClient} and a cached thread
+     * pool for stream processing.
      *
      * @param endpoint   the URI of the remote AG-UI endpoint
      * @param serializer the serializer used to encode the input and decode events
      */
     public HttpAgent(URI endpoint, Serializer serializer) {
-        this(endpoint, serializer, HttpClient.newHttpClient(), ForkJoinPool.commonPool(),
+        this(endpoint, serializer, HttpClient.newHttpClient(), DEFAULT_EXECUTOR,
                 DEFAULT_REQUEST_TIMEOUT);
     }
 
@@ -96,13 +108,9 @@ public final class HttpAgent implements Agent {
                     httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
 
             if (response.statusCode() >= 400) {
-    String body;
-    try (Stream<String> lines = response.body()) {
-        body = lines.collect(Collectors.joining("\n"));   // drains + closes → releases connection
-    }
-    publisher.closeExceptionally(new HttpAgentException(
-            "AG-UI endpoint returned HTTP " + response.statusCode() + ": " + body));
-    return;
+                publisher.closeExceptionally(new HttpAgentException(
+                        "AG-UI endpoint returned HTTP " + response.statusCode()));
+                return;
             }
 
             SseEventParser parser = new SseEventParser();
