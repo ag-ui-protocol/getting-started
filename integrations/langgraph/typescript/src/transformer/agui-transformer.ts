@@ -192,6 +192,44 @@ export const aguiTransformer = (): StreamTransformer<{
   let latestState: State | null = null;
   let lastMessagesSnapshotHash = "";
   let lastStateSnapshotHash = "";
+  // Reasoning ids already surfaced from message additional_kwargs (below), so
+  // repeated flushes don't re-emit the same reasoning summary.
+  const emittedReasoningIds = new Set<string>();
+  // Set when a `messages`-channel reasoning content block streamed (the path
+  // above). When reasoning already streamed we must NOT also surface it from
+  // additional_kwargs, or the same summary would render twice.
+  let sawStreamingReasoning = false;
+
+  // OpenAI Responses reasoning rides on the assistant message's
+  // `additional_kwargs.reasoning` ({ id, summary: [{ text }], ... }) rather
+  // than as a `messages`-channel content block, so the streaming reasoning
+  // path above never sees it. Surface any such summary as a REASONING entity
+  // once the full message is known (flushSnapshots).
+  const emitMessageReasoning = (messages: any[]) => {
+    if (sawStreamingReasoning) return;
+    for (const msg of messages ?? []) {
+      const reasoning = msg?.additional_kwargs?.reasoning;
+      const id = reasoning?.id;
+      if (!id || emittedReasoningIds.has(id)) continue;
+      const summary = reasoning?.summary;
+      if (!Array.isArray(summary) || summary.length === 0) continue;
+      const text = summary
+        .map((p: any) => (p && typeof p.text === "string" ? p.text : ""))
+        .join("");
+      if (!text) continue;
+      emittedReasoningIds.add(id);
+      const messageId = String(id);
+      push({ type: EventType.REASONING_START, messageId });
+      push({
+        type: EventType.REASONING_MESSAGE_START,
+        messageId,
+        role: "reasoning",
+      });
+      push({ type: EventType.REASONING_MESSAGE_CONTENT, messageId, delta: text });
+      push({ type: EventType.REASONING_MESSAGE_END, messageId });
+      push({ type: EventType.REASONING_END, messageId });
+    }
+  };
 
   const cacheState = (state: State) => {
     if (!state || typeof state !== "object") return;
@@ -215,6 +253,9 @@ export const aguiTransformer = (): StreamTransformer<{
     }
 
     const lcMessages = state.messages ?? [];
+    // Surface reasoning summaries carried on message additional_kwargs before
+    // the snapshot, so consumers see the REASONING entity for this message.
+    emitMessageReasoning(lcMessages);
     const aguiMessages = langchainMessagesToAgui(lcMessages);
     const msgHash = JSON.stringify(aguiMessages);
     if (msgHash !== lastMessagesSnapshotHash) {
@@ -409,6 +450,7 @@ export const aguiTransformer = (): StreamTransformer<{
                 // content block as a single reasoning entity scoped to
                 // the current message + this content-block index.
                 if (!activeMessageId) break;
+                sawStreamingReasoning = true;
                 const reasoningId = `${activeMessageId}:r:${data.index}`;
                 reasoningBlocks.set(data.index, {
                   messageId: reasoningId,

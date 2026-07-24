@@ -432,6 +432,68 @@ describe("aguiTransformer", () => {
     });
   });
 
+  // OpenAI Responses reasoning rides on the assistant message's
+  // additional_kwargs.reasoning (not a messages-channel content block), so the
+  // transformer surfaces it from the flushed state as a REASONING entity.
+  describe("reasoning from message additional_kwargs", () => {
+    const aiMessage = (reasoning: unknown) => ({
+      id: "ai-1",
+      type: "ai",
+      content: "Here are my recommendations.",
+      additional_kwargs: { reasoning },
+      response_metadata: {},
+    });
+
+    it("emits a REASONING sequence from additional_kwargs.reasoning.summary", () => {
+      const { events, process } = harness();
+      process("values", {
+        namespace: [],
+        data: {
+          messages: [
+            aiMessage({
+              id: "rs_1",
+              type: "reasoning",
+              summary: [{ type: "summary_text", text: "I weighed reliability and value." }],
+            }),
+          ],
+        },
+      });
+      process("lifecycle", { data: { event: "completed" }, namespace: [] });
+
+      expect(only(events, EventType.REASONING_START).length).toBe(1);
+      expect(only(events, EventType.REASONING_END).length).toBe(1);
+      const content = events.find(
+        (e) => e.type === EventType.REASONING_MESSAGE_CONTENT,
+      ) as any;
+      expect(content?.delta).toBe("I weighed reliability and value.");
+    });
+
+    it("does not emit reasoning when the summary is empty", () => {
+      const { events, process } = harness();
+      process("values", {
+        namespace: [],
+        data: { messages: [aiMessage({ id: "rs_2", type: "reasoning", summary: [] })] },
+      });
+      process("lifecycle", { data: { event: "completed" }, namespace: [] });
+      expect(only(events, EventType.REASONING_START).length).toBe(0);
+    });
+
+    it("does not re-emit the same reasoning id across repeated flushes", () => {
+      const { events, process } = harness();
+      const msg = aiMessage({
+        id: "rs_3",
+        type: "reasoning",
+        summary: [{ type: "summary_text", text: "thinking" }],
+      });
+      process("values", { namespace: [], data: { messages: [msg] } });
+      process("lifecycle", { data: { event: "completed" }, namespace: [] });
+      // A second flush of the same state must not duplicate the reasoning.
+      process("values", { namespace: [], data: { messages: [msg], tick: 1 } });
+      process("lifecycle", { data: { event: "completed" }, namespace: [] });
+      expect(only(events, EventType.REASONING_START).length).toBe(1);
+    });
+  });
+
   // input.requested dedup, consistent with the tasks path.
   describe("input.requested dedup by id", () => {
     it("does not double-emit for a duplicated interrupt frame", () => {
