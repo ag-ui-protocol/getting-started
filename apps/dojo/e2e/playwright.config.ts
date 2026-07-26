@@ -54,11 +54,28 @@ export default defineConfig({
   use: {
     headless: true,
     viewport: { width: 1280, height: 720 },
-    // Video recording for failed tests
+    // Video recording. The cli-agent-orchestrator suite records on SUCCESS too,
+    // so the passing in-Dojo run is captured as shareable demo evidence (the
+    // dogfood: CAO rendering live in this Dojo, produced by our own CI — not a
+    // GIF pasted from another repo). All other suites keep videos only on
+    // failure.
     video: {
-      mode: "retain-on-failure", // Only keep videos for failed tests
+      mode:
+        process.env.PLAYWRIGHT_SUITE === "cli-agent-orchestrator"
+          ? "on"
+          : "retain-on-failure",
       size: { width: 1280, height: 720 },
     },
+    // Full Playwright trace (DOM + network + screenshots) for the CAO suite so
+    // the uploaded HTML report is a self-contained, replayable demo.
+    trace:
+      process.env.PLAYWRIGHT_SUITE === "cli-agent-orchestrator"
+        ? "on"
+        : "retain-on-failure",
+    screenshot:
+      process.env.PLAYWRIGHT_SUITE === "cli-agent-orchestrator"
+        ? "on"
+        : "only-on-failure",
     navigationTimeout: 30_000,
     actionTimeout: 10_000,
     // Test isolation - ensure clean state between tests

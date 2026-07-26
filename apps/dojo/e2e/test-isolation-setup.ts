@@ -7,8 +7,27 @@ async function globalSetup(config: FullConfig) {
 
   console.log("🧹 Setting up test isolation...");
 
-  // Launch browser to clear any persistent state
-  const browser = await chromium.launch();
+  // Launch browser to clear any persistent state.
+  // Playwright pins an exact browser build per release, so a cache populated by a
+  // different Playwright version resolves to a missing executable here. Bare, that
+  // surfaces as an opaque globalSetup stall rather than a failure, so translate it
+  // into the command that actually fixes it.
+  let browser: Awaited<ReturnType<typeof chromium.launch>>;
+  try {
+    browser = await chromium.launch();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("Executable doesn't exist")) {
+      throw new Error(
+        `Playwright browsers are not installed for this @playwright/test version.\n` +
+          `Run this from apps/dojo/e2e, then re-run the suite:\n\n` +
+          `  pnpm exec playwright install chromium chromium-headless-shell\n\n` +
+          `Original error: ${message}`,
+      );
+    }
+    throw error;
+  }
+
   const context = await browser.newContext();
 
   // Clear all storage

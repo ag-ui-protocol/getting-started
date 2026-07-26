@@ -25,6 +25,7 @@
     "@ag-ui/aws-strands": "workspace:*",
     "@ag-ui/claude-agent-sdk": "workspace:*",
     "@ag-ui/claude-managed-agents": "workspace:*",
+    "@ag-ui/cli-agent-orchestrator": "workspace:*",
     "@ag-ui/crewai": "workspace:*",
     "@ag-ui/langchain": "workspace:*",
     "@ag-ui/langgraph": "workspace:*",

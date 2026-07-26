@@ -464,6 +464,24 @@ projects:
       autoDeployTrigger: commit
       rootDir: integrations/claude-managed-agents/typescript
     - type: web
+      name: ag-ui-dojo-cli-agent-orchestrator
+      runtime: python
+      repo: https://github.com/ag-ui-protocol/ag-ui
+      plan: starter
+      scaling:
+        minInstances: 1
+        maxInstances: 3
+        targetMemoryPercent: 70
+        targetCPUPercent: 70
+      envVars:
+      - key: CAO_AGUI_MODE
+        value: mock
+      region: virginia
+      buildCommand: uv sync
+      startCommand: uv run dev
+      autoDeployTrigger: commit
+      rootDir: integrations/cli-agent-orchestrator/python/examples
+    - type: web
       name: ag-ui-dojo-app
       runtime: node
       repo: https://github.com/ag-ui-protocol/ag-ui
@@ -530,6 +548,8 @@ projects:
         value: https://ag-ui-dojo-claude-managed-agents-python.onrender.com
       - key: CLAUDE_MANAGED_AGENTS_TYPESCRIPT_URL
         value: https://ag-ui-dojo-claude-managed-agents-typescript.onrender.com
+      - key: CAO_URL
+        value: https://ag-ui-dojo-cli-agent-orchestrator.onrender.com
       - key: NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
         sync: false
       - key: NEXT_PUBLIC_POSTHOG_HOST

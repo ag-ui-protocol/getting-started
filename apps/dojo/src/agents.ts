@@ -42,6 +42,7 @@ import { A2AClient } from "@a2a-js/sdk/client";
 // import { LangChainAgent } from "@ag-ui/langchain";
 import { Ag2Agent } from "@ag-ui/ag2";
 import { LangroidHttpAgent } from "@ag-ui/langroid";
+import { CliAgentOrchestratorAgent } from "@ag-ui/cli-agent-orchestrator";
 import { WatsonxAgent } from "@ag-ui/watsonx";
 import { A2UIMiddleware } from "@ag-ui/a2ui-middleware";
 import {
@@ -699,6 +700,19 @@ export const agentsIntegrations = {
         shared_state: "shared_state",
         human_in_the_loop: "human_in_the_loop",
         tool_based_generative_ui: "tool_based_generative_ui",
+      },
+    ),
+
+  "cli-agent-orchestrator": async () =>
+    mapAgents(
+      (path) =>
+        new CliAgentOrchestratorAgent({ url: `${envVars.caoUrl}/${path}` }),
+      {
+        agentic_chat: "agentic-chat",
+        shared_state: "shared-state",
+        human_in_the_loop: "human-in-the-loop",
+        agentic_generative_ui: "agentic-generative-ui",
+        interrupt: "interrupt",
       },
     ),
 

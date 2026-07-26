@@ -442,6 +442,21 @@ const agentFilesMapper: Record<
       {},
     );
   },
+  "cli-agent-orchestrator": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/cli-agent-orchestrator/python/examples/server/${agentId}.py`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
   "microsoft-agent-framework-python": (agentKeys: string[]) => {
     return agentKeys.reduce(
       (acc, agentId) => ({
