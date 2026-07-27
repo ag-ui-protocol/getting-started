@@ -173,6 +173,42 @@ describe("message-finish closes non-text blocks", () => {
     expect(byType(dispatched, EventType.REASONING_MESSAGE_END)).toHaveLength(1);
     expect(byType(dispatched, EventType.REASONING_END)).toHaveLength(1);
   });
+
+  it("falls back to the snapshot converter's id formula when the block has no id", async () => {
+    // Snapshot copies are emitted as `${assistantId}-reasoning-${index}`
+    // (utils.ts). The streamed id must use the SAME formula, or the snapshot's
+    // replace semantics drop the streamed reasoning and the indicator vanishes.
+    const dispatched = await runV3([
+      makeChunk("messages", { event: "message-start", id: "m9" }),
+      makeChunk("messages", {
+        event: "content-block-start",
+        index: 0,
+        content: { type: "reasoning", reasoning: "no id here" },
+      }),
+      makeChunk("messages", { event: "message-finish" }),
+    ]);
+    const start = byType(dispatched, EventType.REASONING_START)[0] as any;
+    expect(start.messageId).toBe("m9-reasoning-0");
+  });
+
+  it("uses the provider's canonical reasoning id so the snapshot copy reconciles", async () => {
+    // The MESSAGES_SNAPSHOT reasoning copy is emitted under the block's
+    // canonical id (e.g. OpenAI `rs_…`); a synthetic streamed id would be
+    // dropped by the snapshot's replace semantics, wiping the indicator.
+    const dispatched = await runV3([
+      makeChunk("messages", { event: "message-start", id: "m1" }),
+      makeChunk("messages", {
+        event: "content-block-start",
+        index: 0,
+        content: { type: "reasoning", id: "rs_abc123", reasoning: "hmm" },
+      }),
+      makeChunk("messages", { event: "message-finish" }),
+    ]);
+    const start = byType(dispatched, EventType.REASONING_START)[0] as any;
+    expect(start.messageId).toBe("rs_abc123");
+    const end = byType(dispatched, EventType.REASONING_END)[0] as any;
+    expect(end.messageId).toBe("rs_abc123");
+  });
 });
 
 // ---------------------------------------------------------------------------

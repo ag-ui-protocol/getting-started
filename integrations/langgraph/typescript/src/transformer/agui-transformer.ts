@@ -449,9 +449,20 @@ export const aguiTransformer = (): StreamTransformer<{
                 // langchain-anthropic alias ("thinking"). Treat the
                 // content block as a single reasoning entity scoped to
                 // the current message + this content-block index.
+                // Prefer the provider's canonical reasoning id (e.g. OpenAI
+                // `rs_…`) so the streamed message reconciles with the
+                // MESSAGES_SNAPSHOT copy emitted under the same id — a
+                // synthetic id is dropped by the snapshot's replace
+                // semantics, wiping the reasoning indicator the moment the
+                // end-of-run snapshot lands.
+                // The fallback MUST use the same formula as the snapshot
+                // converter (`reasoningBlockToAguiMessage`, utils.ts) for the
+                // same reason.
                 if (!activeMessageId) break;
                 sawStreamingReasoning = true;
-                const reasoningId = `${activeMessageId}:r:${data.index}`;
+                const reasoningId =
+                  (data.content as { id?: string } | undefined)?.id ??
+                  `${activeMessageId}-reasoning-${data.index ?? 0}`;
                 reasoningBlocks.set(data.index, {
                   messageId: reasoningId,
                   messageStarted: false,

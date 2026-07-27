@@ -179,6 +179,39 @@ describe("aguiTransformer", () => {
       expect(only(events, EventType.REASONING_END).length).toBe(1);
     });
 
+    it("falls back to the snapshot converter's id formula when the block has no id", () => {
+      // Must match `reasoningBlockToAguiMessage` (utils.ts) so the snapshot copy
+      // reconciles with the streamed one instead of replacing it.
+      const { events, msg } = harness();
+      msg({ event: "message-start", id: "m9t" });
+      msg({
+        event: "content-block-start",
+        index: 0,
+        content: { type: "reasoning", reasoning: "no id" },
+      });
+      msg({ event: "message-finish" });
+      const start = only(events, EventType.REASONING_START)[0] as any;
+      expect(start.messageId).toBe("m9t-reasoning-0");
+    });
+
+    it("uses the provider's canonical reasoning id so the snapshot copy reconciles", () => {
+      // The MESSAGES_SNAPSHOT reasoning copy is emitted under the block's
+      // canonical id (e.g. OpenAI `rs_…`); a synthetic streamed id would be
+      // dropped by the snapshot's replace semantics, wiping the indicator.
+      const { events, msg } = harness();
+      msg({ event: "message-start", id: "m3rs" });
+      msg({
+        event: "content-block-start",
+        index: 0,
+        content: { type: "reasoning", id: "rs_xyz", reasoning: "x" },
+      });
+      msg({ event: "message-finish" });
+      const start = only(events, EventType.REASONING_START)[0] as any;
+      expect(start.messageId).toBe("rs_xyz");
+      const end = only(events, EventType.REASONING_END)[0] as any;
+      expect(end.messageId).toBe("rs_xyz");
+    });
+
     it("does not leak a tool block into the next message at the same index", () => {
       const { events, msg } = harness();
       // First message opens a tool at index 0 but never gets a block-finish.

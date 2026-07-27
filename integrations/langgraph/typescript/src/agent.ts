@@ -2761,8 +2761,20 @@ export class LangGraphAgent extends AbstractAgent {
           // Standardized v3 `reasoning` plus the older
           // langchain-anthropic `thinking` alias. One reasoning
           // entity scoped to (activeMessageId, content-block index).
+          // Prefer the provider's canonical reasoning id (e.g. OpenAI
+          // `rs_…`) so the streamed message reconciles with the
+          // MESSAGES_SNAPSHOT copy emitted under the same id — a synthetic
+          // id is dropped by the snapshot's replace semantics, wiping the
+          // reasoning indicator the moment the end-of-run snapshot lands.
           if (!run.activeMessageId) break;
-          const reasoningId = `${run.activeMessageId}:r:${data.index}`;
+          // Fallback MUST use the same formula as the MESSAGES_SNAPSHOT
+          // converter (`langchainMessagesToAgui` → `reasoningBlockToAguiMessage`,
+          // utils.ts), or the snapshot's reasoning copy lands under a different
+          // id, replace-semantics drop the streamed copy, and the reasoning
+          // indicator disappears when the snapshot arrives.
+          const reasoningId =
+            data.content?.id ??
+            `${run.activeMessageId}-reasoning-${data.index ?? 0}`;
           run.reasoningBlocks.set(data.index, {
             messageId: reasoningId,
             messageStarted: false,
