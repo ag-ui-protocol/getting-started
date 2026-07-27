@@ -467,7 +467,7 @@ def _build_agent(thread_id: str, stream_events: list, config=None) -> StrandsAge
     mock_inner.tool_registry = ToolRegistry()
     mock_inner.session_manager = None
     # Without this a bare MagicMock auto-creates a truthy `_session_manager`,
-    # flipping `_has_strands_session_manager` True and silently routing every
+    # making `_get_strands_session_manager` return it and silently routing every
     # test through the legacy (non-replay) path instead of the default
     # `replay_history_into_strands` one.
     mock_inner._session_manager = None

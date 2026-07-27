@@ -600,6 +600,61 @@ class TestCleanSchemaForGenai:
         result = _clean_schema_for_genai(schema)
         assert result["enum"] == ['{"foo": 1}']
 
+    # --- Mapping tests: oneOf -> anyOf ---
+
+    def test_maps_oneof_to_anyof(self):
+        """oneOf is mapped to anyOf (genai accepts anyOf but not oneOf)."""
+        schema = {
+            "oneOf": [
+                {"type": "string"},
+                {"type": "number"},
+            ]
+        }
+        result = _clean_schema_for_genai(schema)
+        assert "oneOf" not in result
+        assert len(result["anyOf"]) == 2
+        assert result["anyOf"][0]["type"] == "string"
+        assert result["anyOf"][1]["type"] == "number"
+
+    def test_maps_oneof_recursively_and_cleans_branches(self):
+        """A nested oneOf (e.g. from a zod discriminatedUnion) is mapped to
+        anyOf and each branch is cleaned, so the union structure survives
+        instead of being dropped by the allowlist."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "description": "discriminated union",
+                    "oneOf": [
+                        {
+                            "$comment": "branch A",
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "kind": {"const": "a"},
+                            },
+                        },
+                        {
+                            "type": "object",
+                            "properties": {"kind": {"const": "b"}},
+                        },
+                    ],
+                }
+            },
+        }
+        result = _clean_schema_for_genai(schema)
+        config = result["properties"]["config"]
+        assert "oneOf" not in config
+        any_of = config["anyOf"]
+        assert len(any_of) == 2
+        # branches are recursively cleaned: $-keys / rejected keys stripped,
+        # const mapped to enum
+        assert "$comment" not in any_of[0]
+        assert "additionalProperties" not in any_of[0]
+        assert any_of[0]["properties"]["kind"]["enum"] == ["a"]
+        # the sibling description is preserved alongside the mapped anyOf
+        assert config["description"] == "discriminated union"
+
     # --- Edge cases ---
 
     def test_handles_non_dict_input(self):
