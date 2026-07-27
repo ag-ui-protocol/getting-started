@@ -55,7 +55,7 @@ async function chatNode(state: AgentState, config?: RunnableConfig) {
   } else {
     // Default: OpenAI
     model = new ChatOpenAI({
-      model: "o4-mini",
+      model: "gpt-5.4",
       useResponsesApi: true,
       reasoning: { effort: "high", summary: "auto" },
     });

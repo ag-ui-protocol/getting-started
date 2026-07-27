@@ -1,14 +1,18 @@
 {
   "fixtures": [
     {
-      "match": { "userMessage": "best car to buy" },
+      "match": {
+        "userMessage": "best car to buy"
+      },
       "response": {
-        "reasoning": "The user wants a car recommendation. I should consider reliability, value, fuel economy, and driving experience. Toyota Camry scores highest overall. Honda Civic is best for fuel economy. Mazda3 for driving feel.",
-        "content": "Based on my analysis, here are the top recommendations:\n\n1. **Toyota Camry** - Best overall value with excellent reliability\n2. **Honda Civic** - Great fuel economy and low maintenance costs\n3. **Mazda3** - Best driving experience in its class\n\nThe Toyota Camry stands out for its combination of reliability, resale value, and comfort."
+        "reasoning": "**Providing car recommendations**\n\nThe user is asking a broad question: what's the best car to buy? I think it’s important to clarify a few factors like budget, needs, whether they want new or used, and their priorities. I could mention top picks by category, but I need to stay within my last knowledge cutoff in June 2024. I should avoid unsupported claims about current models beyond 2024. If I had to suggest, I'd say Toyota Corolla, RAV4, and Camry are solid all-around choices.**Clarifying car preferences**\n\nI think I should start by noting that the \"best\" car really depends on various factors. It would be helpful to ask the user about their budget, whether they prefer a new or used vehicle, the size they need, and even how the climate might affect their choice. This way, I can formulate a more tailored response that fits their specific circumstances and needs. Let’s make that clear to guide my recommendations!",
+        "content": "There isn’t one single “best” car for everyone.\n\nIf you want the **shortest practical answer**:\n\n- **Best all-around small car:** **Toyota Corolla**\n- **Best all-around midsize car:** **Toyota Camry**\n- **Best all-around compact SUV:** **Toyota RAV4**\n- **Best alternative picks:** **Honda Civic, Honda Accord, Honda CR-V**\n\nThose are usually the safest recommendations because they tend to offer:\n- strong reliability\n- good resale value\n- reasonable fuel economy\n- easy maintenance\n- wide parts/service availability\n\n### If I had to give just one answer\n**Buy a Toyota Corolla** if you want the safest “good decision” for most people.\n\n### Best by situation\n- **Best budget car:** Toyota Corolla / Honda Civic\n- **Best family sedan:** Toyota Camry / Honda Accord\n- **Best small SUV:** Toyota RAV4 / Honda CR-V\n- **Best hybrid:** Toyota Prius / Toyota Camry Hybrid / RAV4 Hybrid\n- **Best used-car bet:** Toyota Corolla, Camry, Honda Civic, Mazda3\n- **Best if you want fun + reliable:** Mazda3\n\n### What actually matters most\nThe “best” car depends on:\n1. **Budget**\n2. **New or used**\n3. **Sedan, SUV, or truck**\n4. **Gas, hybrid, or EV**\n5. **Need for space, AWD, or fuel savings**\n\nIf you want, I can give you the **best car for your specific budget and needs**—just tell me:\n- your budget\n- new or used\n- sedan/SUV/truck\n- gas/hybrid/EV\n- country you’re in"
       }
     },
     {
-      "match": { "userMessage": "explain step by step" },
+      "match": {
+        "userMessage": "explain step by step"
+      },
       "response": {
         "reasoning": "The user wants a structured explanation. I need to break down my reasoning process into clear numbered steps showing how I arrived at my conclusion.",
         "content": "Let me walk through this step by step:\n\n**Step 1:** First, I identified the key criteria - reliability, value, and practicality.\n\n**Step 2:** Then I compared models across these criteria.\n\n**Step 3:** Finally, I weighted the factors based on typical buyer priorities.\n\nThis systematic approach ensures a well-reasoned recommendation."
