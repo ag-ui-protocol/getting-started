@@ -144,3 +144,17 @@ class RequestStateSessionService(BaseSessionService):
 
     async def append_event(self, session: Session, event: Event) -> Event:
         return await self._inner.append_event(session=session, event=event)
+
+    async def flush(self) -> None:
+        """Delegate to the inner service's flush implementation.
+
+        ADK's ``Runner.close()`` calls ``session_service.flush()`` to persist
+        buffered state in write-behind session services. Without this override,
+        the wrapper inherits ``BaseSessionService.flush`` (a no-op) and any
+        buffering inner service is silently never flushed — causing data loss.
+
+        See https://github.com/ag-ui-protocol/ag-ui/issues/2206.
+        """
+        inner_flush = getattr(self._inner, "flush", None)
+        if inner_flush is not None:
+            await inner_flush()

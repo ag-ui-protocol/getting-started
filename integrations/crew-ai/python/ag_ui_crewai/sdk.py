@@ -1,5 +1,5 @@
 """
-This is a placeholder for the copilotkit_stream function.
+Streaming and state helpers (copilotkit_stream and related utilities) for the CrewAI AG-UI bridge.
 """
 
 import uuid
@@ -52,12 +52,12 @@ async def copilotkit_predict_state(
     all arguments are emitted under the state key.)
 
     ```python
-    from copilotkit.crewai import copilotkit_predict_state
+    from ag_ui_crewai import copilotkit_predict_state
 
     await copilotkit_predict_state(
         {
             "steps": {
-                "tool": "SearchTool",
+                "tool_name": "SearchTool",
                 "tool_argument": "steps",
             },
         }
@@ -110,7 +110,7 @@ async def copilotkit_emit_state(state: Any) -> Literal[True]:
     ### Examples
 
     ```python
-    from copilotkit.crewai import copilotkit_emit_state
+    from ag_ui_crewai import copilotkit_emit_state
 
     for i in range(10):
         await some_long_running_operation(i)
@@ -309,9 +309,9 @@ async def copilotkit_exit() -> Literal[True]:
     ### Examples
 
     ```python
-    from copilotkit.crewai import copilotkit_exit
+    from ag_ui_crewai.sdk import copilotkit_exit
 
-    def my_function():
+    async def my_function():
         await copilotkit_exit()
         return state
     ```

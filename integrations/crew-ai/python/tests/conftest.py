@@ -49,6 +49,17 @@ def _clear_endpoint_queues():
     saves us), but the CPU cost and the signal confusion grow with
     suite length. Reaching into ``_handlers`` directly is a pragmatic
     workaround — crewai does not expose a public teardown API.
+
+    TODO(CPK-7718): this snapshot/restore is coupled to the crewai
+    0.130.x internals. On crewai 1.x the single ``_handlers`` mapping
+    was split into ``_sync_handlers`` / ``_async_handlers``, so
+    ``getattr(bus, "_handlers", None)`` returns ``None`` and BOTH
+    ``_snapshot_handlers`` and ``_restore_handlers`` degrade into SILENT
+    no-ops — listeners would then accumulate across tests again with no
+    error surfaced. This is deliberately NOT fixed here; the crewai 1.x
+    upgrade (CPK-7718) must re-point this at the new attribute names (or
+    a public teardown API if one lands) rather than let the migration
+    paper over the regression.
     """
 
     # CR9 MEDIUM: ``handlers.clear()`` on the process-wide event bus
