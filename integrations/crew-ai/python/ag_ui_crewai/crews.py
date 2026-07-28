@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 import json
 import weakref
@@ -380,7 +381,17 @@ class ChatWithCrewFlow(Flow):
                 # run the crew
                 crew_function = crew_chat_create_tool_function(self.crew, messages)
                 args = json.loads(message["tool_calls"][0]["function"]["arguments"])
-                result = crew_function(**args)
+                # CPK-7719 (CPK-7717 defect 3 follow-up): ``crew_function`` is a
+                # SYNCHRONOUS ``crew.kickoff`` run. Calling it inline on the
+                # event loop blocked SSE flushing and prevented
+                # AGUI_CREWAI_FLOW_TIMEOUT_SECONDS / client-disconnect
+                # cancellation from firing until the crew returned. Offload it
+                # to a worker thread so frames keep flushing and the wall-clock
+                # ceiling / aclose() teardown can fire DURING the crew run.
+                # ``asyncio.to_thread`` copies the current contextvars (the
+                # scoped StreamFrame sink and ``flow_context``), so crew events
+                # still stream and ``copilotkit_*`` helpers keep working.
+                result = await asyncio.to_thread(crew_function, **args)
 
                 if isinstance(result, str):
                     self.state["outputs"] = result
@@ -403,16 +414,14 @@ class ChatWithCrewFlow(Flow):
                 # method-finish. NOTE on granularity: this emits ONE
                 # snapshot after the crew result lands. Per-tool /
                 # intermediate mutations *inside* the crew run are not yet
-                # observable here — surfacing those requires the CrewAI
-                # StreamFrame integration tracked in CPK-7719. Until then
-                # this is the finest granularity reachable without that
-                # work. First blocker for that ticket (not StreamFrame
-                # itself): ``result = crew_function(**args)`` above is a
-                # SYNCHRONOUS ``crew.kickoff`` run on the event loop inside
-                # this async ``@start()``, so it blocks SSE flushing and
-                # prevents AGUI_CREWAI_FLOW_TIMEOUT_SECONDS / client-
-                # disconnect cancellation from firing until the crew
-                # returns. CPK-7719 needs ``asyncio.to_thread`` here.
+                # surfaced as discrete events here (they DO now stream as
+                # crewai StreamFrames on the StreamFrame path, but the bridge
+                # translator drops crew/agent/task frames to stay
+                # behavior-preserving — surfacing them is a Parity-lane
+                # decision). The synchronous-kickoff blocker CPK-7719 called
+                # out is RESOLVED above: ``crew_function`` now runs via
+                # ``asyncio.to_thread`` so the ceiling / cancellation fire
+                # during the crew run.
                 await copilotkit_emit_state(self.state)
 
                 # Defect 2 (CPK-7717): a backend tool result on its own
