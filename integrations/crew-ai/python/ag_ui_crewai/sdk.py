@@ -13,7 +13,9 @@ from litellm.types.utils import (
 )
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 from crewai.flow.flow import FlowState
-from crewai.utilities.events import crewai_event_bus
+# CPK-7718: the event bus moved from ``crewai.utilities.events`` (0.x) to
+# ``crewai.events`` (1.x); ``_capabilities`` resolves whichever exists.
+from ._capabilities import crewai_event_bus
 from pydantic import BaseModel, Field, TypeAdapter
 from ag_ui.core import EventType, Message
 from .context import flow_context
@@ -284,7 +286,7 @@ def litellm_messages_to_ag_ui_messages(messages: List[LiteLLMMessage]) -> List[M
         # whitelist the fields we want to keep
         whitelist = ["content", "role", "tool_calls", "id", "name", "tool_call_id"]
         message_dict = {k: v for k, v in message_dict.items() if k in whitelist}
-        if not "id" in message_dict:
+        if "id" not in message_dict:
             message_dict["id"] = str(uuid.uuid4())
         # remove all None values
         message_dict = {k: v for k, v in message_dict.items() if v is not None}

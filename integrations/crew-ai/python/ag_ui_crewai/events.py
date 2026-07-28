@@ -2,7 +2,11 @@
 This file is used to bridge the events from the crewai event bus to the ag-ui event bus.
 """
 
-from crewai.utilities.events.base_events import BaseEvent
+# CPK-7718: ``BaseEvent`` moved from ``crewai.utilities.events.base_events``
+# (crewai 0.x) to ``crewai.events.base_events`` (crewai 1.x) and is no longer
+# re-exported at the events-package root. ``_capabilities`` resolves whichever
+# location exists.
+from ._capabilities import BaseEvent
 from ag_ui.core.events import (
   ToolCallChunkEvent,
   TextMessageChunkEvent,
