@@ -5,8 +5,11 @@ can be reused by either translator without coupling them.
 """
 
 import json
+import logging
 import uuid
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +85,14 @@ def to_string(value: Any) -> str:
         return ""
     if isinstance(value, str):
         return value
+    # Pydantic models are a common tool return type; serialize their fields
+    # rather than falling through to an opaque quoted repr via default=str.
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            value = model_dump()
+        except Exception as exc:  # noqa: BLE001 — never let stringification raise
+            logger.debug("model_dump() failed during stringification: %s", exc)
     try:
         return json.dumps(value, default=str)
     except (TypeError, ValueError):
@@ -90,6 +101,7 @@ def to_string(value: Any) -> str:
 
 __all__ = [
     "new_message_id",
+    "new_reasoning_id",
     "new_tool_call_id",
     "new_tool_result_id",
     "read_attr",

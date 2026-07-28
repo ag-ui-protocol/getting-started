@@ -63,7 +63,7 @@ class AGUIToOpenAITranslator:
         the request identifiers, state, context, forwarded props, and resume
         entries in a ``TranslatedInput`` result.
 
-        Context and resume entries pass through unchanged.Context is not
+        Context and resume entries pass through unchanged. Context is not
         automatically added to model input; use ``translate_context()`` when
         the model should receive it.
 
@@ -73,7 +73,9 @@ class AGUIToOpenAITranslator:
         Returns:
             OpenAI Agents SDK inputs and preserved AG-UI request metadata.
         """
-        resume = run_input.resume
+        # Read defensively — older RunAgentInput versions lack the field, the
+        # same reason parent_run_id below uses getattr (see types.py resume doc).
+        resume = getattr(run_input, "resume", None)
         return TranslatedInput(
             thread_id=run_input.thread_id,
             run_id=run_input.run_id,
@@ -135,7 +137,7 @@ class AGUIToOpenAITranslator:
 
         Example:
             prompt = "You are helpful."
-            ctx = translator.translate_context(bundle.context)
+            ctx = translator.translate_context(translated_input.context)
             if ctx:
                 prompt = f"{prompt}\\n\\nContext:\\n{ctx}"
 
@@ -148,7 +150,7 @@ class AGUIToOpenAITranslator:
         lines = [
             f"{item.description}: {item.value}"
             for item in items
-            if item.description or item.value
+            if item.description and item.value
         ]
         return "\n".join(lines)
 
@@ -271,7 +273,13 @@ class AGUIToOpenAITranslator:
             "type": "reasoning",
             "id": message.id,
             "encrypted_content": message.encrypted_value,
-            "summary": [{"type": "summary_text", "text": message.content or ""}],
+            # Omit the summary entry entirely when there's no text — some backends
+            # reject a summary_text with an empty string.
+            "summary": (
+                [{"type": "summary_text", "text": message.content}]
+                if message.content
+                else []
+            ),
         }
 
     def translate_assistant_message(
@@ -293,8 +301,9 @@ class AGUIToOpenAITranslator:
         items: list[dict[str, Any]] = []
         text = message.content or ""
         if text:
-            # Keep prior assistant text as an EasyInputMessageParam.
-            # Adding type="message" routes it to the SDK output-message converter.
+            # Keep prior assistant text as an EasyInputMessageParam (role+content).
+            # Do NOT add type="message" here: that reroutes it through the SDK's
+            # output-message converter instead of the EasyInputMessage path.
             items.append(
                 {
                     "role": "assistant",
@@ -321,10 +330,13 @@ class AGUIToOpenAITranslator:
         Returns:
             {"type": "function_call_output", ...}
         """
+        # Surface an error-only tool result: a ToolMessage may report failure in
+        # `error` with empty content (read defensively — the field is newer).
+        # Without this the model receives a blank output and cannot recover.
         return {
             "type": "function_call_output",
             "call_id": message.tool_call_id,
-            "output": message.content or "",
+            "output": message.content or getattr(message, "error", None) or "",
         }
 
     def translate_activity_message(
@@ -410,7 +422,9 @@ class AGUIToOpenAITranslator:
             unsupported.
         """
         if isinstance(content, str):
-            return [{"type": "input_text", "text": content}]
+            # Empty string carries nothing: return no parts so translate_user_message
+            # drops the turn instead of sending an empty content part the API rejects.
+            return [{"type": "input_text", "text": content}] if content else []
         if isinstance(content, list):
             parts: list[dict[str, Any]] = []
             for part in content:
@@ -418,7 +432,8 @@ class AGUIToOpenAITranslator:
                 if converted is not None:
                     parts.append(converted)
             return parts
-        return [{"type": "input_text", "text": to_string(content)}]
+        text = to_string(content)
+        return [{"type": "input_text", "text": text}] if text else []
 
     def translate_content_part(self, part: Any) -> dict[str, Any] | None:
         """Dispatch one content part to its per-type translator.
@@ -552,8 +567,13 @@ class AGUIToOpenAITranslator:
         if source_type == "url":
             return {"type": "input_file", "file_url": value}
         if source_type == "data":
+            # The Responses API requires a filename alongside base64 file_data;
+            # DocumentInputContent carries none, so synthesize one from the mime
+            # subtype (mirrors _binary_as_file).
+            subtype = (mime or "application/octet-stream").split("/")[-1] or "bin"
             return {
                 "type": "input_file",
+                "filename": f"document.{subtype}",
                 "file_data": f"data:{mime or 'application/octet-stream'};base64,{value}",
             }
         return None
@@ -651,7 +671,9 @@ class AGUIToOpenAITranslator:
         """
         if not mime:
             return "wav"
-        subtype = mime.split("/", 1)[-1].lower()
+        # Strip any parameters (e.g. "audio/wav; codecs=1") and whitespace before
+        # matching, so a parameterized-but-valid content type isn't dropped.
+        subtype = mime.split("/", 1)[-1].split(";", 1)[0].strip().lower()
         # Same audio, lots of names for it — fold the common ones together.
         if subtype in ("mpeg", "mpeg3", "mp3"):
             return "mp3"
@@ -731,13 +753,14 @@ class AGUIToOpenAITranslator:
         if part.url:
             return {"type": "input_file", "file_url": part.url}
         if part.data:
-            payload = {
+            # The Responses API requires a filename alongside base64 file_data;
+            # synthesize one from the mime subtype when the part carries none.
+            subtype = mime.split("/")[-1] or "bin"
+            return {
                 "type": "input_file",
+                "filename": part.filename or f"file.{subtype}",
                 "file_data": f"data:{mime};base64,{part.data}",
             }
-            if part.filename:
-                payload["filename"] = part.filename
-            return payload
         return None
 
 

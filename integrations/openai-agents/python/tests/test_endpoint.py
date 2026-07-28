@@ -128,3 +128,107 @@ def test_health_can_be_disabled():
     routes = {(route.path, method) for route in app.routes for method in route.methods}
     assert ("/my_agent", "POST") in routes
     assert ("/my_agent/health", "GET") not in routes
+
+
+def test_multiple_agents_on_one_app_get_unique_operation_ids(monkeypatch):
+    def fake_run_streamed(agent, *, input, run_config=None, **kwargs):
+        result = MagicMock(spec=RunResultStreaming)
+        result.stream_events.return_value = _empty_stream()
+        return result
+
+    monkeypatch.setattr(agent_module.Runner, "run_streamed", fake_run_streamed)
+
+    app = FastAPI()
+    add_openai_agents_fastapi_endpoint(
+        app, OpenAIAgentsAgent(Agent(name="one", instructions="hi")), "/one"
+    )
+    add_openai_agents_fastapi_endpoint(
+        app, OpenAIAgentsAgent(Agent(name="two", instructions="hi")), "/two"
+    )
+
+    # Mounting several agents must not collide on FastAPI-derived operation ids.
+    op_ids = [
+        operation["operationId"]
+        for path in app.openapi()["paths"].values()
+        for operation in path.values()
+    ]
+    assert len(op_ids) == len(set(op_ids)), f"operation ids must be unique: {op_ids}"
+
+
+def test_agent_error_is_logged_not_leaked_through_asgi(monkeypatch, caplog):
+    import logging
+
+    def fake_run_streamed(agent, *, input, run_config=None, **kwargs):
+        async def boom():
+            raise RuntimeError("kaboom")
+            yield  # pragma: no cover
+
+        result = MagicMock(spec=RunResultStreaming)
+        result.stream_events.return_value = boom()
+        return result
+
+    monkeypatch.setattr(agent_module.Runner, "run_streamed", fake_run_streamed)
+
+    app = FastAPI()
+    wrapper = OpenAIAgentsAgent(Agent(name="assistant", instructions="hi"))
+    add_openai_agents_fastapi_endpoint(app, wrapper, "/")
+
+    # raise_server_exceptions=True (default): if the re-raise escaped the
+    # generator it would surface here as a 500/exception. The client must still
+    # receive its RUN_ERROR frame and the error must be logged, not leaked.
+    with caplog.at_level(logging.ERROR):
+        with TestClient(app).stream("POST", "/", json=RUN_INPUT_JSON) as response:
+            assert response.status_code == 200
+            body = "".join(response.iter_text())
+
+    assert '"RUN_ERROR"' in body
+    assert "Agent run failed" in caplog.text
+
+
+def test_setup_error_before_streaming_still_emits_run_error(monkeypatch, caplog):
+    import logging
+
+    # Runner.run_streamed runs inside OpenAIAgentsAgent.run_streamed BEFORE
+    # to_agui, so a failure here never reaches to_agui's RUN_ERROR path. The
+    # endpoint must still surface a terminal RUN_ERROR rather than an empty 200.
+    def boom(agent, *, input, run_config=None, **kwargs):
+        raise RuntimeError("setup exploded")
+
+    monkeypatch.setattr(agent_module.Runner, "run_streamed", boom)
+
+    app = FastAPI()
+    wrapper = OpenAIAgentsAgent(Agent(name="assistant", instructions="hi"))
+    add_openai_agents_fastapi_endpoint(app, wrapper, "/")
+
+    with caplog.at_level(logging.ERROR):
+        with TestClient(app).stream("POST", "/", json=RUN_INPUT_JSON) as response:
+            assert response.status_code == 200
+            body = "".join(response.iter_text())
+
+    assert '"RUN_ERROR"' in body
+    assert "Agent run failed" in caplog.text
+
+
+def test_colliding_path_slugs_get_unique_operation_ids(monkeypatch):
+    def fake_run_streamed(agent, *, input, run_config=None, **kwargs):
+        result = MagicMock(spec=RunResultStreaming)
+        result.stream_events.return_value = _empty_stream()
+        return result
+
+    monkeypatch.setattr(agent_module.Runner, "run_streamed", fake_run_streamed)
+
+    # "/a/b" and "/a_b" both normalize to the slug "a_b"; the uniqueness guard
+    # must still hand out distinct operation ids.
+    app = FastAPI()
+    add_openai_agents_fastapi_endpoint(
+        app, OpenAIAgentsAgent(Agent(name="one", instructions="hi")), "/a/b"
+    )
+    add_openai_agents_fastapi_endpoint(
+        app, OpenAIAgentsAgent(Agent(name="two", instructions="hi")), "/a_b"
+    )
+    op_ids = [
+        operation["operationId"]
+        for path in app.openapi()["paths"].values()
+        for operation in path.values()
+    ]
+    assert len(op_ids) == len(set(op_ids)), f"operation ids must be unique: {op_ids}"

@@ -30,9 +30,10 @@ class TranslatedInput(BaseModel):
 
     Returned by ``AGUITranslator.to_openai()`` (or
     ``AGUIToOpenAITranslator.translate()`` directly, for advanced/per-mapping
-    use). Fields line up one-for-one with ``ag_ui.core.RunAgentInput`` — same
-    names, same required/optional split — so if you know the wire format you
-    already know this shape. Only ``messages`` and ``tools`` are actually
+    use). Fields mirror ``ag_ui.core.RunAgentInput`` by name, so if you know the
+    wire format you already know this shape. (``parent_run_id`` and ``resume``
+    are the newest core fields and are read defensively, so an older client may
+    not carry them.) Only ``messages`` and ``tools`` are actually
     translated into OpenAI Agents SDK types; everything else passes through
     unchanged for you to use however your app needs.
 
@@ -74,9 +75,16 @@ class TranslatedInput(BaseModel):
     None for a top-level run."""
 
     # ── Translated payload (the actual work the translator does) ────────
-    messages: list[TResponseInputItem]
+    messages: SkipValidation[list[TResponseInputItem]]
     """Responses-API input items, ready to pass to Runner.run*(input=...).
-    Pydantic validates these against the SDK's input-item types."""
+
+    Validation is skipped (like ``tools``). Two reasons: (1) audio parts use the
+    Chat-Completions ``input_audio`` shape, which is a valid model input for an
+    audio-capable agent but is not a member of the Responses input-item union, so
+    strict validation would reject an otherwise-usable request; (2) validating a
+    reasoning item's ``summary`` (typed ``Iterable`` in the SDK) materializes it as
+    a single-use ``ValidatorIterator`` that empties after one read. The SDK
+    validates the shape it actually consumes at run time."""
 
     tools: SkipValidation[list[FunctionTool]] = []
     """FunctionTool proxies for the client's tools. Merge these with your

@@ -131,14 +131,14 @@ function ApprovalCard({
   return (
     <div
       data-testid="approval-card"
-      className="rounded-xl w-[500px] p-6 shadow-lg border border-gray-200/80 bg-white"
+      className="rounded-xl w-[500px] p-6 shadow-lg border border-gray-200/80 bg-white dark:border-white/15 dark:bg-gray-900"
     >
       <h2 className="text-lg font-bold mb-2">Approval needed</h2>
-      <p className="text-sm text-gray-600 mb-4">
+      <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
         The agent wants to call{" "}
         <code className="font-mono">{pending.toolName}</code> with:
       </p>
-      <pre className="bg-gray-50 rounded-lg p-3 text-xs mb-4 overflow-x-auto">
+      <pre className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 text-xs mb-4 overflow-x-auto">
         {JSON.stringify(args, null, 2)}
       </pre>
       <div className="flex justify-center gap-4">
@@ -146,7 +146,7 @@ function ApprovalCard({
           type="button"
           data-testid="reject-button"
           onClick={onReject}
-          className="px-6 py-2 rounded-lg font-semibold bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300"
+          className="px-6 py-2 rounded-lg font-semibold bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
         >
           Reject
         </button>

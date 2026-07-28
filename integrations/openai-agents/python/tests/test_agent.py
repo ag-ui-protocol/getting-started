@@ -4,7 +4,7 @@ Tests for the OpenAIAgentsAgent wrapper.
 Covers orchestration only — the event mapping itself is the translator's job
 and has its own coverage:
 
-- ``run`` yields the translator-wrapped stream (RUN_STARTED first,
+- ``run_streamed`` yields the translator-wrapped stream (RUN_STARTED first,
   RUN_FINISHED last) for one AG-UI request.
 - Client-declared tools are merged onto a per-request ``clone`` — the wrapped
   static agent is never mutated; without tools no clone happens.
@@ -118,7 +118,10 @@ def test_run_keeps_server_tool_when_client_name_conflicts(patched_runner, caplog
     sdk_agent = Agent(name="assistant", instructions="hi", tools=[confirm])
     wrapper = OpenAIAgentsAgent(sdk_agent)
 
-    _collect(wrapper, _run_input(with_tool=True))
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        _collect(wrapper, _run_input(with_tool=True))
 
     assert patched_runner[0]["agent"] is sdk_agent
     assert [tool.name for tool in sdk_agent.tools] == ["confirm"]
@@ -140,6 +143,59 @@ def test_context_passes_through(patched_runner):
     wrapper = OpenAIAgentsAgent(Agent(name="assistant", instructions="hi"))
     _collect(wrapper, run_input)
     assert patched_runner[0]["context"] == run_input.context
+
+
+def test_explicit_context_overrides_agui_context(patched_runner):
+    # A caller that supplies its own SDK context gets exactly that object,
+    # not the AG-UI ambient context list.
+    sentinel = {"app": "context"}
+    run_input = _run_input()
+    run_input.context = [Context(description="Response language", value="German")]
+    wrapper = OpenAIAgentsAgent(
+        Agent(name="assistant", instructions="hi"), context=sentinel
+    )
+    _collect(wrapper, run_input)
+    assert patched_runner[0]["context"] is sentinel
+
+
+def test_no_context_defaults_to_none_not_empty_list(patched_runner):
+    # A context-less request must run with the SDK default (None), not [] —
+    # agents branching on `ctx.context is None` depend on this.
+    wrapper = OpenAIAgentsAgent(Agent(name="assistant", instructions="hi"))
+    _collect(wrapper, _run_input())  # _run_input has context=[]
+    assert patched_runner[0]["context"] is None
+
+
+def test_explicit_context_none_is_honored(patched_runner):
+    # context=None is a real SDK context, distinct from "not provided".
+    run_input = _run_input()
+    run_input.context = [Context(description="x", value="y")]
+    wrapper = OpenAIAgentsAgent(Agent(name="assistant", instructions="hi"), context=None)
+    _collect(wrapper, run_input)
+    assert patched_runner[0]["context"] is None
+
+
+def test_duplicate_client_tool_names_are_deduped(patched_runner, caplog):
+    import logging
+
+    run_input = RunAgentInput(
+        thread_id="t1",
+        run_id="r1",
+        messages=[UserMessage(id="m1", role="user", content="hi")],
+        tools=[
+            Tool(name="dup", description="a", parameters={"type": "object", "properties": {}}),
+            Tool(name="dup", description="b", parameters={"type": "object", "properties": {}}),
+        ],
+        state={},
+        context=[],
+        forwarded_props=None,
+    )
+    wrapper = OpenAIAgentsAgent(Agent(name="assistant", instructions="hi"))
+    with caplog.at_level(logging.WARNING):
+        _collect(wrapper, run_input)
+    ran_agent = patched_runner[0]["agent"]
+    assert [t.name for t in ran_agent.tools] == ["dup"], "duplicate client tool must be dropped"
+    assert "Ignoring duplicate client tool 'dup'" in caplog.text
 
 
 def test_to_agui_options_pass_through(patched_runner, monkeypatch):

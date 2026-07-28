@@ -79,6 +79,7 @@ const SubagentsView = () => {
       },
     ],
     available: "always",
+    consumerAgentId: "subagents",
   });
 
   useRenderTool({

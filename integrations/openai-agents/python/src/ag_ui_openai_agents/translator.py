@@ -196,7 +196,9 @@ class AGUITranslator:
             if emit_run_error:
                 yield RunErrorEvent(
                     type=EventType.RUN_ERROR,
-                    message=run_error_message or str(exc),
+                    # Only None means "use str(exc)"; an explicit "" is a
+                    # deliberate (empty) message and must be honored verbatim.
+                    message=run_error_message if run_error_message is not None else str(exc),
                 )
             raise
         finally:

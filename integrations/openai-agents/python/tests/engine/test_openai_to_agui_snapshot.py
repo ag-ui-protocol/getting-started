@@ -121,6 +121,15 @@ def test_snapshot_ids_match_streamed_event_ids():
     assert call_ids == streamed_call_ids == {"call_1"}
     assert result_ids == streamed_result_ids == {"call_1-result"}
 
+    # Guard against duplicate emission that the set comparisons above would
+    # silently collapse: each id must appear on the wire exactly once.
+    start_ids = [e.message_id for e in streamed if e.type == EventType.TEXT_MESSAGE_START]
+    call_start_ids = [e.tool_call_id for e in streamed if e.type == EventType.TOOL_CALL_START]
+    result_event_ids = [e.message_id for e in streamed if e.type == EventType.TOOL_CALL_RESULT]
+    assert len(start_ids) == len(set(start_ids))
+    assert len(call_start_ids) == len(set(call_start_ids))
+    assert len(result_event_ids) == len(set(result_event_ids))
+
 
 # ── tool call + result round-trip ────────────────────────────────────────
 
@@ -230,8 +239,15 @@ def test_text_message_closed_by_raw_event_before_commit_still_snapshots():
         item=SimpleNamespace(type="message", id="msg_real"), output_index=0
     )
     engine.translate_output_item_added(added)
+    # A text delta must actually open the (deferred) message window, so that
+    # output_item.done closes it and appends msg_real to _closed_text_ids —
+    # otherwise the commit reconciles as "new" and this never exercises the
+    # "skip" branch the regression is about.
+    engine.translate_text_delta(
+        SimpleNamespace(item_id="msg_real", output_index=0, delta="hello")
+    )
     engine.translate_output_item_done(done)
-    assert engine._snapshot_messages == []  # raw close alone never records
+    assert engine._snapshot_messages == []  # streamed close alone never records
 
     # The run-item commit arrives after — must still record, under the
     # same id the raw close already used.

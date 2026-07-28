@@ -10,4 +10,4 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_MODEL = os.getenv("OPENAI_DEFAULT_MODEL", "gpt-4.1-mini")
+DEFAULT_MODEL = os.getenv("OPENAI_DEFAULT_MODEL", "gpt-5.5")

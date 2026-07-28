@@ -10,6 +10,10 @@ from .translator import AGUITranslator
 
 logger = logging.getLogger(__name__)
 
+# Sentinel: distinguishes "caller passed context=None" (a real SDK context of
+# None) from "caller said nothing" (fall back to the AG-UI context list).
+_UNSET_CONTEXT: Any = object()
+
 
 class OpenAIAgentsAgent:
     """Wrap an OpenAI Agents SDK Agent so it speaks the AG-UI protocol.
@@ -39,6 +43,7 @@ class OpenAIAgentsAgent:
         description: str = "",
         translator: AGUITranslator | None = None,
         run_config: RunConfig | None = None,
+        context: Any = _UNSET_CONTEXT,
         start_custom_event: CustomEvent | None = None,
         initial_state: Any = None,
         final_state: Any = None,
@@ -57,6 +62,11 @@ class OpenAIAgentsAgent:
                 through engine subclasses.
             run_config: Run-wide OpenAI Agents SDK configuration. None uses the
                 SDK defaults.
+            context: The SDK run context (``TContext``) handed to tools, hooks,
+                and dynamic instructions via ``RunContextWrapper.context``. When
+                omitted, the AG-UI request's ambient ``context`` list is passed
+                through instead. Provide this when the wrapped agent's tools
+                expect an application-specific context object.
             start_custom_event: CustomEvent emitted after RUN_STARTED. Its value
                 may be static or a zero-argument sync/async factory.
             initial_state: Passed to AGUITranslator.to_agui unchanged.
@@ -76,6 +86,7 @@ class OpenAIAgentsAgent:
         self.description = description
         self._translator = translator or AGUITranslator()
         self._run_config = run_config
+        self._context = context
         self._start_custom_event = start_custom_event
         self._initial_state = initial_state
         self._final_state = final_state
@@ -106,6 +117,7 @@ class OpenAIAgentsAgent:
                 if (name := getattr(tool, "name", None)) is not None
             }
             client_tools = []
+            seen_client_names: set[str] = set()
             for tool in translated.tools:
                 if tool.name in server_tool_names:
                     logger.warning(
@@ -113,6 +125,13 @@ class OpenAIAgentsAgent:
                         tool.name,
                     )
                     continue
+                if tool.name in seen_client_names:
+                    logger.warning(
+                        "Ignoring duplicate client tool %r; the SDK cannot resolve two tools with one name",
+                        tool.name,
+                    )
+                    continue
+                seen_client_names.add(tool.name)
                 client_tools.append(tool)
 
             if client_tools:
@@ -120,11 +139,19 @@ class OpenAIAgentsAgent:
                     tools=[*self.agent.tools, *client_tools]
                 )
 
+        # Fall back to the AG-UI ambient context; normalize an empty list to
+        # None so a context-less request matches the SDK's own default (None),
+        # not [] — agents that branch on `ctx.context is None` rely on this.
+        context = (
+            self._context
+            if self._context is not _UNSET_CONTEXT
+            else (translated.context or None)
+        )
         result = Runner.run_streamed(
             run_agent,
             input=translated.messages,
             run_config=self._run_config,
-            context=translated.context,
+            context=context,
         )
 
         async for event in self._translator.to_agui(

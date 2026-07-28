@@ -355,6 +355,31 @@ def test_to_agui_run_error_message_overrides_exception_text():
     assert error.message == "Agent run failed"
 
 
+def test_to_agui_empty_run_error_message_is_honored_not_treated_as_unset():
+    # An explicit "" means "send an empty message" (suppress the raw text), only
+    # None falls back to str(exc). Guards against leaking exception detail.
+    class _ExplodingOutbound(_StubOutbound):
+        def translate(self, openai_event):
+            raise RuntimeError("raw internal detail")
+
+    translator = AGUITranslator(outbound_cls=_ExplodingOutbound)
+    collected: list = []
+
+    async def collect():
+        async for e in translator.to_agui(
+            _fake_stream("a"), _run_input(), run_error_message=""
+        ):
+            collected.append(e)
+
+    with pytest.raises(RuntimeError, match="raw internal detail"):
+        asyncio.run(collect())
+
+    error = collected[-1]
+    assert isinstance(error, RunErrorEvent)
+    assert error.message == ""
+    assert "raw internal detail" not in error.message
+
+
 def test_to_agui_closes_open_windows_before_run_error():
     # A client keying its teardown on *_END would spin forever on the
     # half-streamed message if the error path skipped the flush.

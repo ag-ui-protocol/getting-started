@@ -322,6 +322,7 @@ const ALL_SERVICES = {
         CLAUDE_AGENT_SDK_PYTHON_URL: "http://localhost:8019",
         CLAUDE_AGENT_SDK_TYPESCRIPT_URL: "http://localhost:8020",
         LANGROID_URL: "http://localhost:8021",
+        OPENAI_AGENTS_PYTHON_URL: "http://localhost:8024",
         NEXT_PUBLIC_CUSTOM_DOMAIN_TITLE:
           "cpkdojo.local___CopilotKit Feature Viewer",
       },
@@ -358,6 +359,7 @@ const ALL_SERVICES = {
         CLAUDE_AGENT_SDK_PYTHON_URL: "http://localhost:8019",
         CLAUDE_AGENT_SDK_TYPESCRIPT_URL: "http://localhost:8020",
         LANGROID_URL: "http://localhost:8021",
+        OPENAI_AGENTS_PYTHON_URL: "http://localhost:8024",
         NEXT_PUBLIC_CUSTOM_DOMAIN_TITLE:
           "cpkdojo.local___CopilotKit Feature Viewer",
       },
@@ -405,7 +407,7 @@ async function main() {
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL || "http://localhost:5555/v1",
     OPENAI_API_BASE: process.env.OPENAI_API_BASE || "http://localhost:5555/v1",
     OPENAI_API_KEY: process.env.OPENAI_API_KEY || "sk-mock",
-    OPENAI_CHAT_MODEL_ID: process.env.OPENAI_CHAT_MODEL_ID || "gpt-4o",
+    OPENAI_CHAT_MODEL_ID: process.env.OPENAI_CHAT_MODEL_ID || "gpt-5.5",
   };
 
   // LLMock: inject GOOGLE_GEMINI_BASE_URL so ADK middleware agents (which keep

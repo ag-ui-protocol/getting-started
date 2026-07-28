@@ -75,6 +75,7 @@ const DocsChat = () => {
       },
     ],
     available: "always",
+    consumerAgentId: "ag_ui_docs_copilot",
   });
 
   return (
