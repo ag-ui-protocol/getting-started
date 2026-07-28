@@ -107,6 +107,45 @@ _event_bus_has_flush = bool(crewai_event_bus is not None and callable(getattr(cr
 
 
 # --------------------------------------------------------------------------
+# StreamFrame streaming contract resolution (CPK-7719)
+# --------------------------------------------------------------------------
+# crewai landed a public, ordered streaming envelope — ``StreamFrame`` and the
+# ``AsyncStreamSession`` returned by ``Flow.astream()`` — in 1.6.0 (hardened in
+# 1.15.2). It supersedes the event-bus-listener bridge: a scoped stream sink
+# converts every emitted event into an ordered frame, and ``aclose()`` gives us
+# real cancellation. We RESOLVE the symbol (never version-gate) and, at the call
+# site, ALSO probe ``hasattr(flow, "astream")`` per-flow so test doubles that
+# implement only ``kickoff_async`` transparently fall back to the legacy path.
+#
+# On crewai 1.0-1.5 (StreamFrame absent) the bridge falls back to the legacy
+# bus-listener path with a one-time warning naming 1.6.
+_STREAMING_TYPES_MODULE, _STREAMING_TYPES_MODULE_NAME = _first_module(
+    ["crewai.types.streaming"]
+)
+StreamFrame = (
+    getattr(_STREAMING_TYPES_MODULE, "StreamFrame", None)
+    if _STREAMING_TYPES_MODULE is not None
+    else None
+)
+_stream_frame_available = StreamFrame is not None
+
+
+def flow_supports_stream_frames(flow: Any) -> bool:
+    """Return True when ``flow`` can be driven via the StreamFrame contract.
+
+    Two conditions, both required (CPK-7719):
+
+    * The installed crewai exposes ``StreamFrame`` (resolved once at import) —
+      i.e. crewai >= 1.6. On 1.0-1.5 this is ``None`` and we fall back.
+    * This SPECIFIC flow object exposes ``astream`` — real crewai ``Flow``
+      instances do, but the test doubles in ``tests/test_task_cancellation.py``
+      implement only ``kickoff_async`` and MUST keep taking the legacy path so
+      their cancellation / timeout coverage is unaffected.
+    """
+    return _stream_frame_available and hasattr(flow, "astream")
+
+
+# --------------------------------------------------------------------------
 # crew-chat helper resolution
 # --------------------------------------------------------------------------
 # The five crew-chat helpers moved from ``crewai.cli.crew_chat`` to
@@ -169,6 +208,7 @@ class _Capabilities:
     crew_chat_module: str | None
     crew_chat_available: bool
     litellm_available: bool
+    stream_frame_available: bool = False
     missing: tuple[str, ...] = field(default_factory=tuple)
 
     def warn_on_gaps(self) -> None:
@@ -201,6 +241,17 @@ class _Capabilities:
                 "or crewai[litellm].",
                 self.crewai_version,
             )
+        if not self.stream_frame_available:
+            # NOT a hard gap — the legacy bus-listener path still works. Emit
+            # an INFO-level note (not a WARNING) so operators on 1.0-1.5 know
+            # the richer StreamFrame transport unlocks at crewai>=1.6.
+            _LOGGER.info(
+                "ag-ui-crewai: crewai %s does not expose the StreamFrame "
+                "streaming contract (crewai.types.streaming.StreamFrame); the "
+                "FastAPI bridge will use the legacy event-bus-listener path. "
+                "Upgrade to crewai>=1.6 for the ordered StreamFrame transport.",
+                self.crewai_version,
+            )
 
 
 def _detect() -> _Capabilities:
@@ -220,6 +271,7 @@ def _detect() -> _Capabilities:
         crew_chat_module=_CREW_CHAT_MODULE_NAME,
         crew_chat_available=_crew_chat_available,
         litellm_available=_litellm_available,
+        stream_frame_available=_stream_frame_available,
         missing=tuple(missing),
     )
     caps.warn_on_gaps()
