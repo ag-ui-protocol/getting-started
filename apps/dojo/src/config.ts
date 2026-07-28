@@ -142,6 +142,19 @@ export const featureConfig: FeatureConfig[] = [
       "Automatic A2UI error recovery — invalid surfaces are regenerated (no wipe), with a tasteful hard-failure fallback",
     tags: ["A2UI", "Error Recovery", "Streaming"],
   }),
+  createFeatureConfig({
+    id: "crew_chat",
+    name: "Crew Chat",
+    description: "Chat with a CrewAI crew wrapped in a dict-state chat flow",
+    tags: ["Chat", "CrewAI", "Streaming"],
+  }),
+  createFeatureConfig({
+    id: "error_flow",
+    name: "Error Flow",
+    description:
+      "Backend flow that raises an error, surfaced to the client as a RunErrorEvent",
+    tags: ["CrewAI", "Error Handling"],
+  }),
 ];
 
 export default featureConfig;

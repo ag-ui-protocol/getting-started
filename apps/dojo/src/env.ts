@@ -57,7 +57,7 @@ export default function getEnvVars(): envVars {
       process.env.LANGGRAPH_TYPESCRIPT_URL || "http://localhost:2024",
     agnoUrl: process.env.AGNO_URL || "http://localhost:9001",
     llamaIndexUrl: process.env.LLAMA_INDEX_URL || "http://localhost:9000",
-    crewAiUrl: process.env.CREW_AI_URL || "http://localhost:9002",
+    crewAiUrl: process.env.CREW_AI_URL || "http://localhost:8003",
     agentSpecUrl: process.env.AGENT_SPEC_URL || "http://localhost:9003",
     pydanticAIUrl: process.env.PYDANTIC_AI_URL || "http://localhost:9000",
     adkMiddlewareUrl: process.env.ADK_MIDDLEWARE_URL || "http://localhost:8000",

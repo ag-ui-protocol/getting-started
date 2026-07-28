@@ -104,7 +104,7 @@ Covers the grace window, force-cancel join, AND outer-cancel recovery
 ## To run the dojo examples
 
 ```bash
-cd python/ag_ui_crewai
-poetry install
-poetry run dev
+cd integrations/crew-ai/python
+uv sync
+uv run dev
 ```

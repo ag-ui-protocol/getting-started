@@ -243,15 +243,6 @@ export const agentsIntegrations = {
         subgraphs: "subgraphs",
       },
     ),
-    // A2UI Chat with middleware
-    a2ui_chat: (() => {
-      const agent = new LangGraphAgent({
-        deploymentUrl: envVars.langgraphPythonUrl,
-        graphId: "a2ui_chat",
-      });
-      agent.use(new A2UIMiddleware({ injectA2UITool: true }));
-      return agent;
-    })(),
     a2ui_dynamic_schema: new LangGraphAgent({
       deploymentUrl: envVars.langgraphPythonUrl,
       graphId: "a2ui_dynamic_schema",
