@@ -1,7 +1,6 @@
 """
 AG-UI FastAPI server for CrewAI.
 """
-import copy
 import asyncio
 import logging
 import re
@@ -11,15 +10,22 @@ from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
 from ._env import _parse_env_float
+from ._copyutil import safe_deepcopy
 
-from crewai.utilities.events import (
+# CPK-7718: the flow/method lifecycle events, the event bus, and the listener
+# base moved from ``crewai.utilities.events`` (crewai 0.x) to ``crewai.events``
+# (crewai 1.x). ``_capabilities`` resolves whichever location exists and caches
+# the crewai capability probe (run once at import).
+from ._capabilities import (
+    CAPABILITIES,
     FlowStartedEvent,
     FlowFinishedEvent,
     MethodExecutionStartedEvent,
     MethodExecutionFinishedEvent,
+    BaseEventListener,
+    crewai_event_bus,
 )
 from crewai.flow.flow import Flow
-from crewai.utilities.events.base_event_listener import BaseEventListener
 
 from ag_ui.core import (
     RunAgentInput,
@@ -139,6 +145,22 @@ class _CeilingExceeded(Exception):
 # fresh hex key that is never reused across the process lifetime.
 QUEUES = {}
 QUEUES_LOCK = asyncio.Lock()
+
+# CPK-7718 breaking change #2: crewai 1.x no longer dispatches event-bus
+# handlers inline on the caller's thread. Sync handlers (all of ours) are now
+# submitted to a ThreadPoolExecutor; only ``LLMStreamChunkEvent`` keeps the
+# inline path. Every ``Bridged*`` handler in
+# ``FastAPICrewFlowEventListener.setup_listeners`` therefore runs on a WORKER
+# thread and must reach the per-request ``asyncio.Queue`` via
+# ``loop.call_soon_threadsafe`` — a bare ``put_nowait`` from off-loop corrupts
+# the queue's getter-wakeup. We capture the request's running loop in
+# ``create_queue`` (which is awaited on that loop) and stash it here, keyed by
+# the same UUID as ``QUEUES``.
+#
+# NOTE (CPK-7719): the StreamFrame integration removes this listener entirely,
+# so this loop-capture + call_soon_threadsafe plumbing is the INTERIM
+# thread-safe fix, not the final design.
+QUEUE_LOOPS: dict = {}
 
 # Attribute name we set on flow objects to carry their per-request queue
 # key. Module-level so tests and the listener callbacks share one
@@ -641,13 +663,33 @@ async def create_queue(flow: object) -> asyncio.Queue:
     # an arbitrary ``object``; crewai ``Flow`` instances accept
     # arbitrary attribute writes but the static-typing path must stay
     # clean.
+    # Capture the request's running loop so off-thread listener callbacks can
+    # enqueue via ``loop.call_soon_threadsafe`` (CPK-7718 #2). ``create_queue``
+    # is always awaited on the request loop, so this is that loop.
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # pragma: no cover - create_queue is always awaited
+        loop = None
     async with QUEUES_LOCK:
         queue = asyncio.Queue()
         QUEUES[queue_key] = queue
+        QUEUE_LOOPS[queue_key] = loop
         # Stamp only AFTER the queue is registered under its key so
         # a concurrent ``get_queue(flow)`` never observes the attr
         # pointing at a not-yet-present entry.
-        setattr(flow, _QUEUE_KEY_ATTR, queue_key)
+        #
+        # CPK-7718 #8: crewai 1.13+ made ``Flow`` a Pydantic ``BaseModel``.
+        # Try a normal ``setattr`` first (it honours any custom
+        # ``__setattr__`` — some callers/tests instrument the write — and works
+        # on crewai 1.15.x, which accepts our underscore-prefixed key); if a
+        # stricter Pydantic ``Flow`` rejects the undeclared attribute, fall back
+        # to ``object.__setattr__`` which bypasses Pydantic entirely. Either
+        # way the key lands in the instance ``__dict__`` and reads back via
+        # plain ``getattr`` (see ``get_queue``).
+        try:
+            setattr(flow, _QUEUE_KEY_ATTR, queue_key)
+        except (ValueError, AttributeError, TypeError):
+            object.__setattr__(flow, _QUEUE_KEY_ATTR, queue_key)
         return queue
 
 
@@ -708,6 +750,47 @@ def get_queue(flow: object) -> asyncio.Queue | None:
         return None
     return QUEUES.get(queue_key)
 
+
+def _get_queue_loop(flow: object) -> "asyncio.AbstractEventLoop | None":
+    """Return the request loop captured for ``flow`` in ``create_queue``.
+
+    Mirrors ``get_queue``'s lock-free contract (GIL-atomic ``dict.get``): the
+    off-thread listener callbacks read it without acquiring ``QUEUES_LOCK``.
+    """
+    queue_key = getattr(flow, _QUEUE_KEY_ATTR, None)
+    if queue_key is None:
+        return None
+    return QUEUE_LOOPS.get(queue_key)
+
+
+def _enqueue(source: object, event: object) -> None:
+    """Thread-safely enqueue ``event`` onto ``source``'s per-request queue.
+
+    CPK-7718 #2: crewai 1.x dispatches our sync bus handlers on a
+    ThreadPoolExecutor worker thread, so a bare ``queue.put_nowait`` would run
+    off the queue's owning loop and corrupt the getter-wakeup. We hop back onto
+    the captured request loop via ``call_soon_threadsafe``. If we happen to
+    already be on that loop (e.g. a future inline-dispatch path, or a unit test
+    driving the listener directly on the loop thread) we put directly to keep
+    behaviour synchronous. If no loop was captured, fall back to a direct put.
+    """
+    queue = get_queue(source)
+    if queue is None:
+        return
+    loop = _get_queue_loop(source)
+    if loop is None:
+        queue.put_nowait(event)
+        return
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is loop:
+        queue.put_nowait(event)
+    else:
+        loop.call_soon_threadsafe(queue.put_nowait, event)
+
+
 async def delete_queue(flow: object) -> None:
     """Delete the queue for a flow."""
     queue_key = getattr(flow, _QUEUE_KEY_ATTR, None)
@@ -715,6 +798,54 @@ async def delete_queue(flow: object) -> None:
         return
     async with QUEUES_LOCK:
         QUEUES.pop(queue_key, None)
+        QUEUE_LOOPS.pop(queue_key, None)
+
+
+# How long the run-end event-bus flush may block (seconds). crewai 1.x can drop
+# in-flight off-thread handlers at run end; ``flush`` waits for them. Bounded so
+# a stuck handler cannot pin teardown. Overridable for operators tuning
+# disconnect-heavy load (mirrors the other AGUI_CREWAI_* knobs' spirit).
+_EVENT_BUS_FLUSH_TIMEOUT = 5.0
+
+
+def _copy_flow(flow: object) -> object:
+    """Return a per-request isolated copy of ``flow``.
+
+    Delegates to ``_copyutil.safe_deepcopy`` — plain ``copy.deepcopy`` on
+    healthy crewai builds, pin-and-share fallback on the crewai 1.15.x
+    ``Flow`` deep-copy bug (CPK-7718 #10, a NEW breaking change beyond the
+    enumerated nine, found by running the suite on the 1.15.7 wheel). Isolation
+    of the per-request conversation state is preserved either way.
+    """
+    return safe_deepcopy(flow, what="flow")
+
+
+async def _flush_event_bus() -> None:
+    """Best-effort run-end flush of the crewai event bus (CPK-7718 #5).
+
+    crewai 1.x dispatches sync handlers off-thread and can drop in-flight
+    handlers at run end; ``flush(timeout=...)`` waits for them so resources
+    unwind and our late listener callbacks settle before the queue/context are
+    torn down. No-op on crewai builds without ``flush`` (0.x). Run in the
+    default executor so the bounded blocking wait does not stall the request
+    loop, and swallow failures — this is hygiene, not correctness-critical.
+    """
+    if not CAPABILITIES.event_bus_has_flush:
+        return
+    flush = getattr(crewai_event_bus, "flush", None)
+    if not callable(flush):
+        return
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, lambda: flush(_EVENT_BUS_FLUSH_TIMEOUT)
+        )
+    except Exception as exc:  # noqa: BLE001 - flush is best-effort
+        _LOGGER.debug(
+            "ag-ui-crewai event-bus flush at run end failed: %s",
+            type(exc).__name__,
+        )
+
 
 GLOBAL_EVENT_LISTENER = None
 
@@ -736,113 +867,126 @@ class FastAPICrewFlowEventListener(BaseEventListener):
     """
 
     def setup_listeners(self, crewai_event_bus):
-        """Setup listeners for the FastAPI CrewFlow event listener"""
+        """Setup listeners for the FastAPI CrewFlow event listener.
+
+        CPK-7718 #2: every callback below runs on a ThreadPoolExecutor WORKER
+        thread under crewai 1.x (sync handlers are no longer dispatched inline
+        on the caller's thread). All queue writes therefore go through
+        ``_enqueue``, which hops back onto the request loop via
+        ``call_soon_threadsafe``. The ``None`` happy-path sentinel is enqueued
+        the same way so it stays ordered behind the ``RUN_FINISHED`` event on
+        the loop.
+
+        CPK-7718 #3: crewai 1.x dispatch is now EXACT-TYPE (keyed on
+        ``type(event)``), not ``isinstance`` — a handler registered on a base
+        class silently stops receiving subclasses. Every ``.on(...)`` below is
+        registered on the EXACT event type we emit / crewai emits (the
+        lifecycle events and our concrete ``Bridged*`` classes), so exact-type
+        dispatch delivers to each handler as before. No handler is registered
+        on a shared base class.
+        """
         @crewai_event_bus.on(FlowStartedEvent)
         def _(source, event):  # pylint: disable=unused-argument
-            queue = get_queue(source)
-            if queue is not None:
-                queue.put_nowait(
-                    RunStartedEvent(
-                        type=EventType.RUN_STARTED,
-                         # will be replaced by the correct thread_id/run_id when sending the event
-                        thread_id="?",
-                        run_id="?",
-                    ),
-                )
+            _enqueue(
+                source,
+                RunStartedEvent(
+                    type=EventType.RUN_STARTED,
+                    # will be replaced by the correct thread_id/run_id when sending the event
+                    thread_id="?",
+                    run_id="?",
+                ),
+            )
         @crewai_event_bus.on(FlowFinishedEvent)
         def _(source, event):  # pylint: disable=unused-argument
-            queue = get_queue(source)
-            if queue is not None:
-                queue.put_nowait(
-                    RunFinishedEvent(
-                        type=EventType.RUN_FINISHED,
-                        thread_id="?",
-                        run_id="?",
-                    ),
-                )
-                queue.put_nowait(None)
+            _enqueue(
+                source,
+                RunFinishedEvent(
+                    type=EventType.RUN_FINISHED,
+                    thread_id="?",
+                    run_id="?",
+                ),
+            )
+            _enqueue(source, None)
         @crewai_event_bus.on(MethodExecutionStartedEvent)
         def _(source, event):
-            queue = get_queue(source)
-            if queue is not None:
-                queue.put_nowait(
-                    StepStartedEvent(
-                        type=EventType.STEP_STARTED,
-                        step_name=event.method_name
-                    )
+            _enqueue(
+                source,
+                StepStartedEvent(
+                    type=EventType.STEP_STARTED,
+                    step_name=event.method_name
                 )
+            )
         @crewai_event_bus.on(MethodExecutionFinishedEvent)
         def _(source, event):
-            queue = get_queue(source)
-            if queue is not None:
-                # source.state may be a Pydantic model (with .messages attr) or a plain dict
-                state = source.state
-                raw_messages = getattr(state, "messages", None) or (state.get("messages") if isinstance(state, dict) else None) or []
-                messages = litellm_messages_to_ag_ui_messages(raw_messages)
+            if get_queue(source) is None:
+                return
+            # source.state may be a Pydantic model (with .messages attr) or a plain dict
+            state = source.state
+            raw_messages = getattr(state, "messages", None) or (state.get("messages") if isinstance(state, dict) else None) or []
+            messages = litellm_messages_to_ag_ui_messages(raw_messages)
 
-                queue.put_nowait(
-                    MessagesSnapshotEvent(
-                        type=EventType.MESSAGES_SNAPSHOT,
-                        messages=messages
-                    )
+            _enqueue(
+                source,
+                MessagesSnapshotEvent(
+                    type=EventType.MESSAGES_SNAPSHOT,
+                    messages=messages
                 )
-                queue.put_nowait(
-                    StateSnapshotEvent(
-                        type=EventType.STATE_SNAPSHOT,
-                        snapshot=state if isinstance(state, dict) else state.model_dump() if hasattr(state, "model_dump") else {}
-                    )
+            )
+            _enqueue(
+                source,
+                StateSnapshotEvent(
+                    type=EventType.STATE_SNAPSHOT,
+                    snapshot=state if isinstance(state, dict) else state.model_dump() if hasattr(state, "model_dump") else {}
                 )
-                queue.put_nowait(
-                    StepFinishedEvent(
-                        type=EventType.STEP_FINISHED,
-                        step_name=event.method_name
-                    )
+            )
+            _enqueue(
+                source,
+                StepFinishedEvent(
+                    type=EventType.STEP_FINISHED,
+                    step_name=event.method_name
                 )
+            )
         @crewai_event_bus.on(BridgedTextMessageChunkEvent)
         def _(source, event):
-            queue = get_queue(source)
-            if queue is not None:
-                queue.put_nowait(
-                    TextMessageChunkEvent(
-                        type=EventType.TEXT_MESSAGE_CHUNK,
-                        message_id=event.message_id,
-                        role=event.role,
-                        delta=event.delta,
-                    )
+            _enqueue(
+                source,
+                TextMessageChunkEvent(
+                    type=EventType.TEXT_MESSAGE_CHUNK,
+                    message_id=event.message_id,
+                    role=event.role,
+                    delta=event.delta,
                 )
+            )
         @crewai_event_bus.on(BridgedToolCallChunkEvent)
         def _(source, event):
-            queue = get_queue(source)
-            if queue is not None:
-                queue.put_nowait(
-                    ToolCallChunkEvent(
-                        type=EventType.TOOL_CALL_CHUNK,
-                        tool_call_id=event.tool_call_id,
-                        tool_call_name=event.tool_call_name,
-                        delta=event.delta,
-                    )
+            _enqueue(
+                source,
+                ToolCallChunkEvent(
+                    type=EventType.TOOL_CALL_CHUNK,
+                    tool_call_id=event.tool_call_id,
+                    tool_call_name=event.tool_call_name,
+                    delta=event.delta,
                 )
+            )
         @crewai_event_bus.on(BridgedCustomEvent)
         def _(source, event):
-            queue = get_queue(source)
-            if queue is not None:
-                queue.put_nowait(
-                    CustomEvent(
-                        type=EventType.CUSTOM,
-                        name=event.name,
-                        value=event.value
-                    )
+            _enqueue(
+                source,
+                CustomEvent(
+                    type=EventType.CUSTOM,
+                    name=event.name,
+                    value=event.value
                 )
+            )
         @crewai_event_bus.on(BridgedStateSnapshotEvent)
         def _(source, event):
-            queue = get_queue(source)
-            if queue is not None:
-                queue.put_nowait(
-                    StateSnapshotEvent(
-                        type=EventType.STATE_SNAPSHOT,
-                        snapshot=event.snapshot
-                    )
+            _enqueue(
+                source,
+                StateSnapshotEvent(
+                    type=EventType.STATE_SNAPSHOT,
+                    snapshot=event.snapshot
                 )
+            )
 
 
 def _format_timeout_message(timeout: float | None) -> str:
@@ -1452,10 +1596,17 @@ async def _run_flow_event_stream(
                 allow_grace=allow_grace,
             )
         finally:
+            # CPK-7718 #5: flush the crewai event bus at run end so in-flight
+            # off-thread handlers settle before we drop the queue / reset the
+            # context var (crewai 1.x can otherwise drop them). Best-effort and
+            # a no-op on crewai builds without ``flush``.
             try:
-                await delete_queue(flow_copy)
+                await _flush_event_bus()
             finally:
-                flow_context.reset(token)
+                try:
+                    await delete_queue(flow_copy)
+                finally:
+                    flow_context.reset(token)
 
 
 def add_crewai_flow_fastapi_endpoint(app: FastAPI, flow: Flow, path: str = "/"):
@@ -1472,7 +1623,7 @@ def add_crewai_flow_fastapi_endpoint(app: FastAPI, flow: Flow, path: str = "/"):
     async def agentic_chat_endpoint(input_data: RunAgentInput, request: Request):
         """Agentic chat endpoint"""
 
-        flow_copy = copy.deepcopy(flow)
+        flow_copy = _copy_flow(flow)
 
         # Get the accept header from the request
         accept_header = request.headers.get("accept")
@@ -1544,7 +1695,7 @@ def add_crewai_crew_fastapi_endpoint(
     async def crew_endpoint(input_data: RunAgentInput, request: Request):
         """Crew chat endpoint with deferred initialization."""
         flow = await _get_flow()
-        flow_copy = copy.deepcopy(flow)
+        flow_copy = _copy_flow(flow)
 
         accept_header = request.headers.get("accept")
         encoder = EventEncoder(accept=accept_header)
