@@ -177,7 +177,7 @@ export interface ThinkingEndEvent extends BaseEvent {
 
 export interface StateSnapshotEvent extends BaseEvent {
   type: EventType.STATE_SNAPSHOT;
-  snapshot: any;
+  snapshot?: any;
 }
 
 export interface StateDeltaEvent extends BaseEvent {
@@ -212,14 +212,14 @@ export interface ActivityDeltaEvent extends BaseEvent {
 
 export interface RawEvent extends BaseEvent {
   type: EventType.RAW;
-  event: any;
+  event?: any;
   source?: string;
 }
 
 export interface CustomEvent extends BaseEvent {
   type: EventType.CUSTOM;
   name: string;
-  value: any;
+  value?: any;
 }
 
 // ---------------------------------------------------------------------------
@@ -405,53 +405,66 @@ export type EventPayloadOf<T extends EventType> = Omit<AGUIEventOf<T>, keyof Bas
 // Fields with .default() are optional in Props (callers can omit them)
 // ---------------------------------------------------------------------------
 
+/**
+ * Factory input for event `E`: the event minus its `type` discriminant.
+ *
+ * The `type?: never` member is load-bearing. `BaseEvent` carries an
+ * `[k: string]: unknown` index signature to mirror the wire-level passthrough
+ * behavior, and that index signature survives `Omit<E, "type">` — so without an
+ * explicit `type` declaration, `{ type: EventType.RUN_ERROR, ... }` would satisfy
+ * every event's Props and let a caller silently override the discriminant.
+ */
+export type EventProps<E extends BaseEvent> = Omit<E, "type"> & { type?: never };
+
 export type BaseEventProps = Omit<BaseEvent, "type">;
 
 // TextMessageStartEvent: role has .default("assistant") → optional in Props
 export type TextMessageStartEventProps = Omit<TextMessageStartEvent, "type" | "role"> & {
   role?: TextMessageRole;
+  type?: never;
 };
-export type TextMessageContentEventProps = Omit<TextMessageContentEvent, "type">;
-export type TextMessageEndEventProps = Omit<TextMessageEndEvent, "type">;
-export type TextMessageChunkEventProps = Omit<TextMessageChunkEvent, "type">;
+export type TextMessageContentEventProps = EventProps<TextMessageContentEvent>;
+export type TextMessageEndEventProps = EventProps<TextMessageEndEvent>;
+export type TextMessageChunkEventProps = EventProps<TextMessageChunkEvent>;
 
-export type ThinkingTextMessageStartEventProps = Omit<ThinkingTextMessageStartEvent, "type">;
-export type ThinkingTextMessageContentEventProps = Omit<ThinkingTextMessageContentEvent, "type">;
-export type ThinkingTextMessageEndEventProps = Omit<ThinkingTextMessageEndEvent, "type">;
+export type ThinkingTextMessageStartEventProps = EventProps<ThinkingTextMessageStartEvent>;
+export type ThinkingTextMessageContentEventProps = EventProps<ThinkingTextMessageContentEvent>;
+export type ThinkingTextMessageEndEventProps = EventProps<ThinkingTextMessageEndEvent>;
 
-export type ToolCallStartEventProps = Omit<ToolCallStartEvent, "type">;
-export type ToolCallArgsEventProps = Omit<ToolCallArgsEvent, "type">;
-export type ToolCallEndEventProps = Omit<ToolCallEndEvent, "type">;
-export type ToolCallChunkEventProps = Omit<ToolCallChunkEvent, "type">;
-export type ToolCallResultEventProps = Omit<ToolCallResultEvent, "type">;
+export type ToolCallStartEventProps = EventProps<ToolCallStartEvent>;
+export type ToolCallArgsEventProps = EventProps<ToolCallArgsEvent>;
+export type ToolCallEndEventProps = EventProps<ToolCallEndEvent>;
+export type ToolCallChunkEventProps = EventProps<ToolCallChunkEvent>;
+export type ToolCallResultEventProps = EventProps<ToolCallResultEvent>;
 
-export type ThinkingStartEventProps = Omit<ThinkingStartEvent, "type">;
-export type ThinkingEndEventProps = Omit<ThinkingEndEvent, "type">;
+export type ThinkingStartEventProps = EventProps<ThinkingStartEvent>;
+export type ThinkingEndEventProps = EventProps<ThinkingEndEvent>;
 
-export type StateSnapshotEventProps = Omit<StateSnapshotEvent, "type">;
-export type StateDeltaEventProps = Omit<StateDeltaEvent, "type">;
-export type MessagesSnapshotEventProps = Omit<MessagesSnapshotEvent, "type">;
+export type StateSnapshotEventProps = EventProps<StateSnapshotEvent>;
+export type StateDeltaEventProps = EventProps<StateDeltaEvent>;
+export type MessagesSnapshotEventProps = EventProps<MessagesSnapshotEvent>;
 
 // ActivitySnapshotEvent: replace has .optional().default(true) → optional in Props
 export type ActivitySnapshotEventProps = Omit<ActivitySnapshotEvent, "type" | "replace"> & {
   replace?: boolean;
+  type?: never;
 };
-export type ActivityDeltaEventProps = Omit<ActivityDeltaEvent, "type">;
+export type ActivityDeltaEventProps = EventProps<ActivityDeltaEvent>;
 
-export type RawEventProps = Omit<RawEvent, "type">;
-export type CustomEventProps = Omit<CustomEvent, "type">;
+export type RawEventProps = EventProps<RawEvent>;
+export type CustomEventProps = EventProps<CustomEvent>;
 
-export type RunStartedEventProps = Omit<RunStartedEvent, "type">;
-export type RunFinishedEventProps = Omit<RunFinishedEvent, "type">;
-export type RunErrorEventProps = Omit<RunErrorEvent, "type">;
+export type RunStartedEventProps = EventProps<RunStartedEvent>;
+export type RunFinishedEventProps = EventProps<RunFinishedEvent>;
+export type RunErrorEventProps = EventProps<RunErrorEvent>;
 
-export type StepStartedEventProps = Omit<StepStartedEvent, "type">;
-export type StepFinishedEventProps = Omit<StepFinishedEvent, "type">;
+export type StepStartedEventProps = EventProps<StepStartedEvent>;
+export type StepFinishedEventProps = EventProps<StepFinishedEvent>;
 
-export type ReasoningStartEventProps = Omit<ReasoningStartEvent, "type">;
-export type ReasoningMessageStartEventProps = Omit<ReasoningMessageStartEvent, "type">;
-export type ReasoningMessageContentEventProps = Omit<ReasoningMessageContentEvent, "type">;
-export type ReasoningMessageEndEventProps = Omit<ReasoningMessageEndEvent, "type">;
-export type ReasoningMessageChunkEventProps = Omit<ReasoningMessageChunkEvent, "type">;
-export type ReasoningEndEventProps = Omit<ReasoningEndEvent, "type">;
-export type ReasoningEncryptedValueEventProps = Omit<ReasoningEncryptedValueEvent, "type">;
+export type ReasoningStartEventProps = EventProps<ReasoningStartEvent>;
+export type ReasoningMessageStartEventProps = EventProps<ReasoningMessageStartEvent>;
+export type ReasoningMessageContentEventProps = EventProps<ReasoningMessageContentEvent>;
+export type ReasoningMessageEndEventProps = EventProps<ReasoningMessageEndEvent>;
+export type ReasoningMessageChunkEventProps = EventProps<ReasoningMessageChunkEvent>;
+export type ReasoningEndEventProps = EventProps<ReasoningEndEvent>;
+export type ReasoningEncryptedValueEventProps = EventProps<ReasoningEncryptedValueEvent>;

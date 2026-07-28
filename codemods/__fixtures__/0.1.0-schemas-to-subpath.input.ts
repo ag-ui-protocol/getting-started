@@ -2,7 +2,8 @@
 // Covers: pure schema import, pure type import, mixed import,
 //         existing @ag-ui/core/schemas import that should be merged into,
 //         type-only schema imports, per-specifier type imports,
-//         and namespace imports (which should be warned about and left alone).
+//         namespace imports (which should be warned about and left alone),
+//         and create*Event factories (which moved to the subpath too).
 
 // ── 1. Schemas only ──────────────────────────────────────────────────────────
 import { UserMessageSchema, EventSchemas } from "@ag-ui/core";
@@ -37,6 +38,16 @@ import { RunAgentInputSchema as RunInputAlias } from "@ag-ui/core";
 import type { BaseEventSchema as BaseEvent } from "@ag-ui/core/schemas";
 import { ContextSchema as Ctx } from "@ag-ui/core";
 
+// ── 11. Event factories — moved to the subpath with the schemas ─────────
+import { createTextMessageContentEvent, createRunStartedEvent } from "@ag-ui/core";
+
+// ── 12. Factory mixed with a type and the EventType enum (both stay) ─────────
+import {
+  EventType as EvType2,
+  createRunErrorEvent,
+  type BaseEvent as CoreBaseEvent,
+} from "@ag-ui/core";
+
 // ── Unrelated import — must not be touched ────────────────────────────────────
 import { z } from "zod";
 
@@ -67,4 +78,14 @@ export function checkRunInputAliased(raw: unknown) {
 // Case 10 usage — Ctx is a value import and must remain callable at runtime
 export function checkCtx(raw: unknown) {
   return Ctx.safeParse(raw);
+}
+
+// Case 11/12 usage — factories must resolve from the subpath after migration
+export function buildEvents() {
+  const content = createTextMessageContentEvent({ messageId: "m1", delta: "hi" });
+  const started = createRunStartedEvent({ threadId: "t1", runId: "r1" });
+  const failed = createRunErrorEvent({ message: "boom" });
+  const kind: typeof EvType2.RUN_ERROR = EvType2.RUN_ERROR;
+  const base: CoreBaseEvent = content;
+  return { content, started, failed, kind, base };
 }

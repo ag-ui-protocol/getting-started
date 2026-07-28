@@ -15,15 +15,17 @@
  *   type aliases — TypeScript must evaluate the complex generic before the
  *   constraint check, which is why the aliases are required.
  *
- * - `StateSnapshotEvent.snapshot`, `RawEvent.event`, `CustomEvent.value` use
- *   `z.any()` — same addQuestionMarks optionality quirk — so those event
- *   tests use the reverse `AsObject<HandWritten>.toExtend<_ISchema>()` form.
- *   The hand-written types for Tool, RunAgentInput, ToolsCapabilities, and
- *   AgentCapabilities now declare those z.any() fields as optional, matching
- *   the schema inference exactly, so they use strict `toEqualTypeOf`.
+ * - Every `z.any()` used as an object value is explicitly `.optional()` in the
+ *   schema, and the corresponding hand-written field is `?: any`. That covers
+ *   `Tool.parameters`, `RunAgentInput.state`, `RunAgentInput.forwardedProps`,
+ *   `StateSnapshotEvent.snapshot`, `RawEvent.event` and `CustomEvent.value`.
+ *   The optionality is not cosmetic: a bare `z.any()` is accepted when missing
+ *   on zod engine 4.0.x but rejected as `nonoptional` on 4.4.x, so leaving it
+ *   implicit would make the wire contract depend on the consumer's zod version.
+ *   See zod-version-conformance.test.ts.
  */
 import { describe, it, expectTypeOf } from "vitest";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 // --------------------------------------------------------------------------
 // Schema imports (from the schemas subpath module)

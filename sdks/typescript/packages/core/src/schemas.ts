@@ -3,12 +3,26 @@
 // it explicitly if you import from this module. The schemas mirror the types
 // exported from the main `@ag-ui/core` entry.
 //
-// Cross-version note: written to work on zod >= 3.24.0 AND zod 4.x.
-// API used here is stable across both majors:
-//   - z.enum([...]) instead of z.nativeEnum() (removed in zod 4)
-//   - z.record(z.string(), X) instead of z.record(X) (two-arg form required in zod 4)
+// Cross-version note: this module imports `zod/v4`, NOT `zod`.
+//
+// zod 3.25.0 shipped the whole zod 4 implementation at the `zod/v4` subpath, and
+// zod 4.x keeps `zod/v4` as an alias for its own classic entry. Both majors
+// therefore expose an identical `zod/v4` API, which is what lets a single set of
+// emitted .d.ts files type-check against either. Importing bare `zod` would bake
+// major-specific declaration shapes (`ZodEnum<[...]>`, five-parameter `ZodObject`,
+// `ZodEffects`) into the published types and break consumers on the other major.
+//
+// The supported peer range is `^3.25.0 || ^4.0.0`. zod 3.24.x has no `zod/v4`.
+//
+// Caveat: the zod/v4 *API surface* is stable across the range, but the *engine*
+// version is not — zod@3.25.x ships engine 4.0.0 while zod@4.4.x ships 4.4.x, and
+// their behavior differs in places. Most importantly, a bare `z.any()` object value
+// is accepted when missing on 4.0.0 but rejected as `nonoptional` on 4.4.x. Every
+// `z.any()` used as an object value below is therefore explicitly `.optional()` so
+// the protocol contract does not depend on which zod the consumer installed. See
+// __tests__/zod-version-conformance.test.ts.
 
-import { z } from "zod";
+import { z } from "zod/v4";
 import { EventType } from "./events";
 
 // ---------------------------------------------------------------------------
@@ -242,7 +256,8 @@ export const ContextSchema = z.object({
 export const ToolSchema = z.object({
   name: z.string(),
   description: z.string(),
-  parameters: z.any(),
+  // `.optional()` is load-bearing across the zod range — see the engine caveat above.
+  parameters: z.any().optional(),
   metadata: z.record(z.string(), z.any()).optional(),
 });
 
@@ -266,14 +281,17 @@ export const RunAgentInputSchema = z.object({
   threadId: z.string(),
   runId: z.string(),
   parentRunId: z.string().optional(),
-  state: z.any(),
+  state: z.any().optional(),
   messages: z.array(MessageSchema),
   tools: z.array(ToolSchema),
   context: z.array(ContextSchema),
-  forwardedProps: z.any(),
+  forwardedProps: z.any().optional(),
   resume: z.array(ResumeEntrySchema).optional(),
 });
 
+// `State` is unconstrained, so this carries no validation. It stays `z.any()` (not
+// `.optional()`) because it is also used standalone; object-value uses below add
+// `.optional()` at the use site.
 export const StateSchema = z.any();
 
 // ---------------------------------------------------------------------------
@@ -407,7 +425,7 @@ export const ThinkingEndEventSchema = BaseEventSchema.extend({
 
 export const StateSnapshotEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.STATE_SNAPSHOT),
-  snapshot: StateSchema,
+  snapshot: StateSchema.optional(),
 });
 
 export const StateDeltaEventSchema = BaseEventSchema.extend({
@@ -437,14 +455,14 @@ export const ActivityDeltaEventSchema = BaseEventSchema.extend({
 
 export const RawEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.RAW),
-  event: z.any(),
+  event: z.any().optional(),
   source: z.string().optional(),
 });
 
 export const CustomEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.CUSTOM),
   name: z.string(),
-  value: z.any(),
+  value: z.any().optional(),
 });
 
 export const RunStartedEventSchema = BaseEventSchema.extend({

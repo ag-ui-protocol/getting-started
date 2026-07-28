@@ -81,3 +81,79 @@ jobs:
 
       - name: Run tests
         run: pnpm run test
+
+  # The supported zod range is resolved from the registry rather than hardcoded, so
+  # zod releases that do not exist yet (4.5, 4.6, ...) are covered the day they ship
+  # instead of whenever someone remembers to extend a list.
+  resolve-zod-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      legs: ${{ steps.resolve.outputs.legs }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Resolve supported zod versions
+        id: resolve
+        run: |
+          legs="$(node sdks/typescript/consumer-tests/run.mjs --list | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+          echo "resolved legs: ${legs}"
+          echo "legs=${legs}" >> "$GITHUB_OUTPUT"
+
+  # Release gates for the zod peer range (see the review on PR #1637). The workspace
+  # pins zod 3.25.76, so the in-repo suite can only ever exercise one version. These
+  # legs install real tarballs into a throwaway consumer and check each supported
+  # zod separately, with skipLibCheck DISABLED so the published declarations are
+  # actually verified, then run a shared event corpus to prove the accept/reject
+  # contract is identical on every version. The "none" leg asserts the main
+  # @ag-ui/core entry works with no zod installed at all.
+  zod-matrix:
+    name: zod ${{ matrix.zod }}
+    needs: resolve-zod-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        zod: ${{ fromJSON(needs.resolve-zod-matrix.outputs.legs) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # v3.0.0
+        with:
+          version: "25.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271  # v6.0.9
+        with:
+          version: 10.33.4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm --filter "@ag-ui/core" --filter "@ag-ui/encoder" --filter "@ag-ui/proto" --filter "@ag-ui/client" run build
+
+      # Passed via env rather than interpolated into the run block, so the value
+      # never reaches the shell as template text.
+      - name: Packaged-consumer gates
+        env:
+          ZOD_VERSION: ${{ matrix.zod }}
+        run: node sdks/typescript/consumer-tests/run.mjs "$ZOD_VERSION"

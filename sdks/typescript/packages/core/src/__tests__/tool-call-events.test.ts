@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { EventType, type ToolCallStartEvent } from "../events";
 import { EventSchemas, ToolCallChunkEventSchema, ToolCallStartEventSchema } from "../schemas";
 

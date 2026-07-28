@@ -6,7 +6,14 @@ Automated transforms for upgrading code that depends on `@ag-ui/core`.
 
 ## 0.1.0-schemas-to-subpath
 
-**What it does.** Moves every `*Schema` import (and `EventSchemas`, the only "Schemas" plural export) from `@ag-ui/core` to the new `@ag-ui/core/schemas` subpath introduced in 0.1.0. If a file already has an import from `@ag-ui/core/schemas`, the moved specifiers are merged into it rather than creating a duplicate declaration. Type-only imports (`import type { ... }`) are preserved on the appropriate side. The transform is idempotent — running it twice produces the same output.
+**What it does.** Moves the exports that left the main `@ag-ui/core` entry in 0.1.0 to the new `@ag-ui/core/schemas` subpath:
+
+- every `*Schema` import (and `EventSchemas`, the only "Schemas" plural export)
+- every `create*Event` factory — these validate through `schema.parse(...)`, so they moved to the subpath with the schemas to keep the main entry dependency-free
+
+If a file already has an import from `@ag-ui/core/schemas`, the moved specifiers are merged into it rather than creating a duplicate declaration. Type-only imports (`import type { ... }`) are preserved on the appropriate side. The transform is idempotent — running it twice produces the same output.
+
+Imports from `@ag-ui/client` need no migration and are left alone — that package re-exports the subpath.
 
 **How to run it.**
 
@@ -38,6 +45,7 @@ The transform uses two complementary heuristics:
 
 1. Any imported name that ends with `"Schema"` is moved (e.g. `UserMessageSchema`, `AgentCapabilitiesSchema`).
 2. The name `EventSchemas` is explicitly matched (the only "Schemas" plural export).
+3. Any imported name matching `create<Something>Event` is moved (e.g. `createTextMessageStartEvent`, `createRunFinishedInterruptEvent`). Matched by shape rather than a curated list; since the transform only rewrites specifiers that were already imported from `@ag-ui/core`, an unrelated local `createFooEvent` is unaffected.
 
 The curated list in `SCHEMA_NAMES` inside the transform source mirrors the full public schema surface of `@ag-ui/core/schemas`. Both heuristics are applied, so unknown future schema additions (if they follow the naming convention) are also covered.
 

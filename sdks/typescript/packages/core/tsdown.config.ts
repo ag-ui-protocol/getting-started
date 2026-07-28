@@ -1,7 +1,10 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig((inlineConfig) => ({
-  entry: ["src/index.ts", "src/schemas.ts"],
+  // `schemas` is emitted from the schemas-entry barrel (schema defs + validating
+  // event factories) so the output filename stays dist/schemas.* for the
+  // `@ag-ui/core/schemas` export.
+  entry: { index: "src/index.ts", schemas: "src/schemas-entry.ts" },
   format: ["cjs", "esm"],
   dts: true,
   exports: true,

@@ -1,8 +1,14 @@
 /**
  * jscodeshift codemod: @ag-ui/core 0.0.x → 0.1.0
  *
- * Moves every `*Schema` import (and `EventSchemas`) from `@ag-ui/core` to the
- * new `@ag-ui/core/schemas` subpath. Type-only imports are preserved. Idempotent.
+ * Moves imports that no longer live on the main `@ag-ui/core` entry to the new
+ * `@ag-ui/core/schemas` subpath:
+ *
+ *   - every `*Schema` export (and `EventSchemas`)
+ *   - every `create*Event` factory — these validate through zod, so they moved
+ *     with the schemas to keep the main entry dependency-free
+ *
+ * Type-only imports are preserved. Idempotent.
  *
  * Usage:
  *   npx jscodeshift -t 0.1.0-schemas-to-subpath.ts --parser=tsx --extensions=ts,tsx src/
@@ -111,9 +117,18 @@ const SCHEMA_NAMES = new Set([
   "AgentCapabilitiesSchema",
 ]);
 
+// The validating event factories moved to the subpath alongside the schemas —
+// they call `schema.parse(...)`, which needs zod. Matched by shape rather than a
+// second curated list; the transform only ever rewrites imports that were already
+// coming from "@ag-ui/core", so an unrelated local `createFooEvent` is unaffected.
+const FACTORY_PATTERN = /^create[A-Z][A-Za-z0-9]*Event$/;
+
 /** Returns true if this imported name should move to @ag-ui/core/schemas. */
 const isSchemaSpecifier = (importedName: string): boolean =>
-  importedName.endsWith("Schema") || importedName === "EventSchemas" || SCHEMA_NAMES.has(importedName);
+  importedName.endsWith("Schema") ||
+  importedName === "EventSchemas" ||
+  SCHEMA_NAMES.has(importedName) ||
+  FACTORY_PATTERN.test(importedName);
 
 const CORE_SOURCE = "@ag-ui/core";
 const SCHEMAS_SOURCE = "@ag-ui/core/schemas";
