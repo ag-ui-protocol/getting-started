@@ -9,12 +9,32 @@ authors = [
 ]
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
-# Poetry caret ranges translated to explicit bounds; crewai pin preserved for CPK-7718.
+# Poetry caret ranges translated to explicit bounds.
+#
+# CPK-7718: floor crewai at 1.0 (not 1.15) — ``crewai.events`` and the
+# ``crewai[litellm]`` extra are stable across the whole 1.x line, so a 1.0
+# user gets a working bridge (with fewer capabilities) rather than a crash.
+# The bridge uses RUNTIME CAPABILITY DETECTION (see ``_capabilities.py``),
+# never version-gating, so ``crewai.__version__`` is used only for warning
+# text and the docs capability table. ``<2`` guards against the next major.
+#
+# ``litellm`` is a DIRECT dependency: we import ``acompletion`` and the
+# ``litellm.types`` symbols ourselves, and crewai moved litellm to the
+# optional ``crewai[litellm]`` extra at 1.0.0 — declaring it here resolves
+# our imports regardless of which crewai extras are installed (CPK-7718 #6).
+#
+# ``crewai-tools`` is declared so the crew-serving path (and downstream
+# demos) have the tools package available without a floating pin.
+#
+# ``ag-ui-protocol>=0.1.19`` (CPK-7721): 0.1.10 predated RUN_FINISHED.outcome
+# and was the loosest floor in the repo; 0.1.19 matches the in-repo SDK.
 dependencies = [
-    "ag-ui-protocol>=0.1.10",
+    "ag-ui-protocol>=0.1.19",
     "fastapi>=0.115.12,<0.116.0",
     "uvicorn>=0.34.3,<0.35.0",
-    "crewai>=0.130.0,<0.131.0",
+    "crewai>=1.0,<2",
+    "crewai-tools>=0.38.1",
+    "litellm>=1.60.2",
 ]
 
 [project.scripts]
