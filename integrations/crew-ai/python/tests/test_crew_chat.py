@@ -20,7 +20,15 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import crewai.cli.crew_chat as crew_chat_mod
+# CPK-7718 #7: the crew-chat helpers (and the two ``generate_*_with_ai``
+# network helpers ``_stub_llm_network`` patches) moved from
+# ``crewai.cli.crew_chat`` (0.x - 1.14) to ``crewai.utilities.crew_chat``
+# (1.15+). Resolve whichever the installed crewai exposes so the stub patches
+# the module ``generate_crew_chat_inputs`` actually calls into.
+try:
+    import crewai.utilities.crew_chat as crew_chat_mod
+except ImportError:  # pragma: no cover - crewai 0.x fallback
+    import crewai.cli.crew_chat as crew_chat_mod
 from crewai import Agent, Crew, LLM, Task
 from crewai.project import CrewBase, agent, crew, task
 from crewai.types.crew_chat import ChatInputs
@@ -339,12 +347,19 @@ async def test_chat_crew_output_from_raw_attribute():
 # --------------------------------------------------------------------------
 
 def test_completion_llm_kwargs_forwards_all_connection_fields_real_llm():
-    """A REAL ``crewai.LLM`` carrying Azure-style connection settings has
-    ALL of them forwarded (round-2 finding 1) — model, api_key, api_base,
-    api_version — plus provider-specific ``additional_params`` spread. The
-    reviewer's repro built exactly this LLM and saw only model+api_key."""
+    """A REAL ``crewai.LLM`` carrying custom connection settings has ALL of
+    them forwarded (round-2 finding 1) — model, api_key, api_base, api_version —
+    plus provider-specific ``additional_params`` spread. The reviewer's repro
+    built exactly this LLM and saw only model+api_key.
+
+    CPK-7718: the model string is ``gpt-4o`` rather than ``azure/deployment``
+    because crewai 1.x eagerly loads a NATIVE provider for ``azure/*`` that
+    requires the ``crewai[azure-ai-inference]`` extra — unrelated to the
+    (provider-agnostic) field forwarding under test. On crewai 1.x ``LLM``
+    routes ``api_version`` (and unknown kwargs) into ``additional_params``,
+    which ``_completion_llm_kwargs`` spreads — so the forwarding still holds."""
     real_llm = LLM(
-        model="azure/deployment",
+        model="gpt-4o",
         api_key="secret",
         api_base="https://azure.example",
         api_version="2024-02-01",
@@ -353,9 +368,11 @@ def test_completion_llm_kwargs_forwards_all_connection_fields_real_llm():
     flow = _new_crew_flow(chat_llm=real_llm)
     kwargs = flow._completion_llm_kwargs()
 
-    assert kwargs["model"] == "azure/deployment"
+    assert kwargs["model"] == "gpt-4o"
     assert kwargs["api_key"] == "secret"
     assert kwargs["api_base"] == "https://azure.example"
+    # api_version is forwarded (a direct attr on crewai 0.x, routed through
+    # additional_params on crewai 1.x — either way it lands in the kwargs).
     assert kwargs["api_version"] == "2024-02-01"
     # additional_params (litellm **kwargs on the crewai LLM) are spread.
     assert kwargs["custom_provider_param"] == "xyz"
@@ -363,13 +380,20 @@ def test_completion_llm_kwargs_forwards_all_connection_fields_real_llm():
 
 def test_completion_llm_kwargs_forwards_base_url_when_set_real_llm():
     """A REAL ``crewai.LLM`` with ``base_url`` (local/self-hosted) forwards
-    it (the original CopilotKit#2742 local-model repro)."""
+    it (the original CopilotKit#2742 local-model repro).
+
+    CPK-7718: crewai 1.x normalises the stored ``base_url`` (e.g. appends
+    ``/v1``), so we assert the forwarded value matches the LLM's OWN
+    ``base_url`` attribute rather than a hard-coded literal — the point under
+    test is that ``_completion_llm_kwargs`` forwards whatever the LLM exposes,
+    not crewai's normalisation policy."""
     real_llm = LLM(model="ollama/llama3", api_key="sk-local",
                    base_url="http://localhost:11434")
     kwargs = _new_crew_flow(chat_llm=real_llm)._completion_llm_kwargs()
-    assert kwargs["model"] == "ollama/llama3"
+    assert kwargs["model"] == real_llm.model
     assert kwargs["api_key"] == "sk-local"
-    assert kwargs["base_url"] == "http://localhost:11434"
+    assert kwargs["base_url"] == real_llm.base_url
+    assert real_llm.base_url  # sanity: the LLM actually carries a base_url
 
 
 def test_completion_llm_kwargs_omits_absent_connection_fields_real_llm():
@@ -445,7 +469,10 @@ async def test_chat_forwards_connection_fields_to_acompletion_real_llm():
     async def _noop_emit_state(_state):
         return True
 
-    real_llm = LLM(model="azure/deployment", api_key="secret",
+    # CPK-7718: ``gpt-4o`` (not ``azure/deployment``) — crewai 1.x eagerly
+    # loads a native azure provider needing an extra; the forwarding under test
+    # is provider-agnostic. ``api_version`` rides ``additional_params`` on 1.x.
+    real_llm = LLM(model="gpt-4o", api_key="secret",
                    api_base="https://azure.example", api_version="2024-02-01")
     flow = _new_crew_flow(chat_llm=real_llm)
     state = {"messages": [], "inputs": {}, "copilotkit": {"actions": []}}
@@ -462,7 +489,7 @@ async def test_chat_forwards_connection_fields_to_acompletion_real_llm():
 
     assert len(calls) == 2
     for call in calls:
-        assert call["model"] == "azure/deployment"
+        assert call["model"] == "gpt-4o"
         assert call["api_key"] == "secret"
         assert call["api_base"] == "https://azure.example"
         assert call["api_version"] == "2024-02-01"
@@ -483,8 +510,13 @@ async def test_additional_params_do_not_collide_with_call_owned_kwargs():
     additionally seed ``messages`` / ``tools`` / ``tool_choice`` sentinels
     into ``additional_params`` and assert the framework's own values are
     used, plus a benign custom param survives."""
+    # ``api_key`` is supplied because crewai 1.0.x's native OpenAI provider
+    # validates ``OPENAI_API_KEY`` at construction time (CPK-7718 floor test);
+    # it goes to the LLM's ``api_key`` attr, not ``additional_params``, so the
+    # collision preconditions below are unaffected.
     real_llm = LLM(
         model="gpt-4o",
+        api_key="k",
         parallel_tool_calls=True,
         messages="SHOULD_LOSE",
         tools="SHOULD_LOSE",
@@ -763,20 +795,33 @@ def test_cache_evicts_on_gc_and_regenerates_for_new_crew():
     its entry — eliminating the ``id(crew)`` reuse hazard where a freshly
     allocated wrapper inherits a collected wrapper's id and is silently
     served the wrong schema (round-3 finding 2). A brand-new crew therefore
-    regenerates rather than receiving the old schema."""
+    regenerates rather than receiving the old schema.
+
+    CPK-7718: on crewai 1.x, constructing a real ``ChatWithCrewFlow`` can no
+    longer be used to drive this invariant — crewai retains a traceback frame
+    from ``generate_crew_chat_inputs`` that pins the constructing frame (and
+    thus the ``crew`` local) alive, so a real crew is never collected during
+    the test regardless of wrapper type. We therefore exercise the eviction
+    mechanism DIRECTLY against the cache helpers (``_crew_inputs_cache_set`` /
+    ``_crew_inputs_cache_get`` / the ``evict_cb``), which is exactly the
+    round-3 id-reuse-safety logic under test — no crewai frame retention in the
+    path."""
     crews_mod._CREW_INPUTS_CACHE.clear()
 
-    crew_a = _make_real_crewbase(cls_name="CrewA")
-    with _stub_llm_network():
-        flow_a = crews_mod.ChatWithCrewFlow(crew=crew_a)
-    schema_a = flow_a.crew_chat_inputs
+    class _Key:
+        """Minimal weakref-able stand-in for a crew object (cache key)."""
+
+    schema_a = object()
+    crew_a = _Key()
+    crews_mod._crew_inputs_cache_set(crew_a, schema_a)
     ref_a = weakref.ref(crew_a)
 
-    # The live crew keeps its cache entry, keyed on ``id(crew)``.
+    # A live key keeps its cache entry, keyed on ``id(crew)``, and reads back.
     assert id(crew_a) in crews_mod._CREW_INPUTS_CACHE
+    assert crews_mod._crew_inputs_cache_get(crew_a) is schema_a
 
-    # Drop every strong reference to crew A and its flow, then collect.
-    del crew_a, flow_a
+    # Drop every strong reference to crew A, then collect.
+    del crew_a
     gc.collect()
 
     # The weak reference is dead => the ``evict_cb`` fired and popped the
@@ -784,12 +829,10 @@ def test_cache_evicts_on_gc_and_regenerates_for_new_crew():
     assert ref_a() is None
     assert len(crews_mod._CREW_INPUTS_CACHE) == 0
 
-    # A brand-new crew regenerates its own (distinct) schema.
-    crew_b = _make_real_crewbase(cls_name="CrewB")
-    with _stub_llm_network():
-        flow_b = crews_mod.ChatWithCrewFlow(crew=crew_b)
-    assert flow_b.crew_chat_inputs is not schema_a
-    assert flow_b.crew_chat_inputs.crew_name == "CrewB"
+    # A brand-new key is a cache MISS (regenerates rather than inheriting a
+    # stale schema under a reused id).
+    crew_b = _Key()
+    assert crews_mod._crew_inputs_cache_get(crew_b) is None
 
     crews_mod._CREW_INPUTS_CACHE.clear()
 

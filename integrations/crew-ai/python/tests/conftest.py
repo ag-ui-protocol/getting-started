@@ -11,17 +11,24 @@ fail with the same traceback — a clearer diagnostic than a confused test
 suite running against a half-initialised module.
 """
 
+import copy
+
 import pytest
 
 from ag_ui_crewai import endpoint as ep
 
-try:
-    # The crewai global event bus — used below to clear handlers
-    # registered by our listener singleton so they don't accumulate
-    # across tests (R5 MEDIUM #10).
-    from crewai.utilities.events import crewai_event_bus as _crewai_event_bus
-except Exception:  # pragma: no cover - import-time failure is a real bug
-    _crewai_event_bus = None
+# The crewai global event bus — used below to clear handlers registered by our
+# listener singleton so they don't accumulate across tests (R5 MEDIUM #10).
+# CPK-7718: the bus moved from ``crewai.utilities.events`` (0.x) to
+# ``crewai.events`` (1.x); ``_capabilities`` resolves whichever exists.
+from ag_ui_crewai._capabilities import crewai_event_bus as _crewai_event_bus
+
+# CPK-7718 #4: crewai 1.0.0 split the single ``_handlers`` mapping into
+# ``_sync_handlers`` / ``_async_handlers``. The autouse fixture below snapshots
+# whichever handler dict(s) the installed crewai exposes so listener isolation
+# keeps working across BOTH the 0.x single-dict and the 1.x split-dict shapes
+# (resolves the TODO(CPK-7718) that used to live here).
+_HANDLER_ATTRS = ("_sync_handlers", "_async_handlers", "_handlers")
 
 
 @pytest.fixture(autouse=True)
@@ -50,16 +57,12 @@ def _clear_endpoint_queues():
     suite length. Reaching into ``_handlers`` directly is a pragmatic
     workaround — crewai does not expose a public teardown API.
 
-    TODO(CPK-7718): this snapshot/restore is coupled to the crewai
-    0.130.x internals. On crewai 1.x the single ``_handlers`` mapping
-    was split into ``_sync_handlers`` / ``_async_handlers``, so
-    ``getattr(bus, "_handlers", None)`` returns ``None`` and BOTH
-    ``_snapshot_handlers`` and ``_restore_handlers`` degrade into SILENT
-    no-ops — listeners would then accumulate across tests again with no
-    error surfaced. This is deliberately NOT fixed here; the crewai 1.x
-    upgrade (CPK-7718) must re-point this at the new attribute names (or
-    a public teardown API if one lands) rather than let the migration
-    paper over the regression.
+    CPK-7718 #4 (resolved): crewai 1.0.0 split the single ``_handlers``
+    mapping into ``_sync_handlers`` / ``_async_handlers``. The
+    snapshot/restore helpers below iterate ``_HANDLER_ATTRS`` and act on
+    whichever dict(s) the installed crewai exposes, so listener isolation
+    keeps working across BOTH the 0.x single-dict and the 1.x split-dict
+    shapes rather than silently degrading to a no-op on 1.x.
     """
 
     # CR9 MEDIUM: ``handlers.clear()`` on the process-wide event bus
@@ -74,27 +77,35 @@ def _clear_endpoint_queues():
     def _snapshot_handlers():
         if _crewai_event_bus is None:
             return None
-        handlers = getattr(_crewai_event_bus, "_handlers", None)
-        if handlers is None:
-            return None
-        try:
-            return {k: list(v) for k, v in handlers.items()}
-        except Exception:  # pragma: no cover - defensive
-            return None
+        snapshot = {}
+        for attr in _HANDLER_ATTRS:
+            handlers = getattr(_crewai_event_bus, attr, None)
+            if handlers is None:
+                continue
+            try:
+                # CPK-7718 #4: crewai 1.x stores handlers as ``frozenset`` (the
+                # bus does set-union on registration); ``copy.copy`` preserves
+                # that container type, whereas a ``list(...)`` snapshot would
+                # corrupt it and break ``_register_handler`` on restore.
+                snapshot[attr] = {k: copy.copy(v) for k, v in handlers.items()}
+            except Exception:  # pragma: no cover - defensive
+                continue
+        return snapshot or None
 
     def _restore_handlers(snapshot):
-        if _crewai_event_bus is None or snapshot is None:
+        if _crewai_event_bus is None or not snapshot:
             return
-        handlers = getattr(_crewai_event_bus, "_handlers", None)
-        if handlers is None:
-            return
-        try:
-            handlers.clear()
-            for k, v in snapshot.items():
-                handlers[k] = list(v)
-        except Exception:  # pragma: no cover - defensive
-            # Unexpected handler-store shape; skip rather than crash.
-            pass
+        for attr, per_attr in snapshot.items():
+            handlers = getattr(_crewai_event_bus, attr, None)
+            if handlers is None:
+                continue
+            try:
+                handlers.clear()
+                for k, v in per_attr.items():
+                    handlers[k] = copy.copy(v)
+            except Exception:  # pragma: no cover - defensive
+                # Unexpected handler-store shape; skip rather than crash.
+                pass
 
     handlers_snapshot = _snapshot_handlers()
 

@@ -3,6 +3,7 @@ per-delta chunk events, ``copilotkit_predict_state``/``copilotkit_emit_state``,
 and the endpoint listener's translation of bridged events to wire events.
 No network."""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +22,40 @@ from ag_ui_crewai.sdk import (
     copilotkit_predict_state,
     copilotkit_stream,
 )
+
+
+async def _settle_bus(emit_result=None):
+    """Let off-thread crewai 1.x event-bus handlers land on the queue.
+
+    CPK-7718 #2: crewai 1.x dispatches our sync listener callbacks on a
+    ThreadPoolExecutor worker thread, and ``_enqueue`` hops the result back
+    onto the loop via ``call_soon_threadsafe``. A test that emits then drains
+    synchronously must wait for the handler to finish AND give the loop one
+    tick so the scheduled ``put_nowait`` runs.
+
+    When the test holds the ``emit`` result (a ``concurrent.futures.Future``,
+    or ``None`` when there are no handlers) we await it directly. When the emit
+    happens INSIDE an SDK call (predict_state / emit_state / copilotkit_stream)
+    we can't reach the future, so we ``flush`` the bus — which blocks until
+    in-flight handlers complete — off the loop, then tick.
+    """
+    if emit_result is not None:
+        try:
+            await asyncio.wrap_future(emit_result)
+        except Exception:  # noqa: BLE001 - handler errors surface elsewhere
+            pass
+    else:
+        from ag_ui_crewai._capabilities import crewai_event_bus
+        flush = getattr(crewai_event_bus, "flush", None)
+        if callable(flush):
+            try:
+                await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: flush(5.0)
+                )
+            except Exception:  # noqa: BLE001 - flush is best-effort
+                pass
+    # One extra tick for the call_soon_threadsafe-scheduled put_nowait.
+    await asyncio.sleep(0)
 
 
 # --------------------------------------------------------------------------
@@ -115,7 +150,7 @@ async def test_copilotkit_stream_reassembles_text_and_tool_calls():
 async def test_copilotkit_stream_emits_chunk_events_per_delta():
     """Reassembly emits a bridged TEXT_MESSAGE_CHUNK per text delta and a
     TOOL_CALL_CHUNK per argument delta, deltas passed through verbatim."""
-    from crewai.utilities.events import crewai_event_bus
+    from ag_ui_crewai._capabilities import crewai_event_bus
 
     flow_context.set(None)
     text_chunks = []
@@ -139,6 +174,8 @@ async def test_copilotkit_stream_emits_chunk_events_per_delta():
             yield _stream_chunk("msg-2", finish_reason="stop")
 
         await copilotkit_stream(_FakeStreamWrapper(_gen()))
+        # crewai 1.x runs these handlers off-thread; settle before asserting.
+        await _settle_bus()
 
     assert text_chunks == [("msg-2", "assistant", "A"), ("msg-2", "assistant", "B")]
     assert tool_chunks == [("c-1", "tool", "{}")]
@@ -173,6 +210,7 @@ async def test_copilotkit_predict_state_emits_custom_event():
             {"steps": {"tool_name": "SearchTool", "tool_argument": "steps"}}
         )
         assert result is True
+        await _settle_bus()
         items = _drain(queue)
     finally:
         await ep.delete_queue(flow)
@@ -195,6 +233,7 @@ async def test_copilotkit_emit_state_emits_state_snapshot():
     try:
         result = await copilotkit_emit_state({"progress": 5})
         assert result is True
+        await _settle_bus()
         items = _drain(queue)
     finally:
         await ep.delete_queue(flow)
@@ -212,20 +251,20 @@ async def test_copilotkit_emit_state_emits_state_snapshot():
 async def test_listener_translates_text_and_tool_chunks():
     """The listener maps bridged text/tool chunks onto wire
     TEXT_MESSAGE_CHUNK / TOOL_CALL_CHUNK events with payloads preserved."""
-    from crewai.utilities.events import crewai_event_bus
+    from ag_ui_crewai._capabilities import crewai_event_bus
 
     ep.FastAPICrewFlowEventListener()
     flow = _FakeFlow()
     queue = await ep.create_queue(flow)
     try:
-        crewai_event_bus.emit(flow, BridgedTextMessageChunkEvent(
+        await _settle_bus(crewai_event_bus.emit(flow, BridgedTextMessageChunkEvent(
             type=EventType.TEXT_MESSAGE_CHUNK,
             message_id="m1", role="assistant", delta="hi",
-        ))
-        crewai_event_bus.emit(flow, BridgedToolCallChunkEvent(
+        )))
+        await _settle_bus(crewai_event_bus.emit(flow, BridgedToolCallChunkEvent(
             type=EventType.TOOL_CALL_CHUNK,
             tool_call_id="tc1", tool_call_name="searchTool", delta='{"q":1}',
-        ))
+        )))
         items = _drain(queue)
     finally:
         await ep.delete_queue(flow)
@@ -245,7 +284,10 @@ async def test_listener_translates_text_and_tool_chunks():
 async def test_listener_emits_messages_and_state_snapshot_on_method_finish():
     """On flow-method finish the listener emits MESSAGES_SNAPSHOT +
     STATE_SNAPSHOT + STEP_FINISHED, in that order."""
-    from crewai.utilities.events import crewai_event_bus, MethodExecutionFinishedEvent
+    from ag_ui_crewai._capabilities import (
+        crewai_event_bus,
+        MethodExecutionFinishedEvent,
+    )
 
     state = {
         "messages": [{"role": "assistant", "content": "done", "id": "m9"}],
@@ -255,13 +297,13 @@ async def test_listener_emits_messages_and_state_snapshot_on_method_finish():
     flow = _FakeFlow(state=state)
     queue = await ep.create_queue(flow)
     try:
-        crewai_event_bus.emit(flow, MethodExecutionFinishedEvent(
+        await _settle_bus(crewai_event_bus.emit(flow, MethodExecutionFinishedEvent(
             type="method_execution_finished",
             method_name="chat",
             flow_name="ChatWithCrewFlow",
             result=None,
             state=state,
-        ))
+        )))
         items = _drain(queue)
     finally:
         await ep.delete_queue(flow)

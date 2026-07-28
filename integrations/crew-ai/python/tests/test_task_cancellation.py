@@ -1863,21 +1863,27 @@ async def test_conftest_preserves_external_bus_handlers_across_tests():
     including any registered by another library in the same process.
 
     We simulate an external subscriber by registering a plain callable
-    against a sentinel key in ``_crewai_event_bus._handlers`` BEFORE
-    the autouse fixture runs (by mutating the dict directly in-line
-    within the test), then asserting the handler is still present
-    at teardown — approximated here by re-reading the dict at the end
-    of the test body.
+    against a sentinel key in the bus handler dict BEFORE the autouse
+    fixture runs (by mutating the dict directly in-line within the test),
+    then asserting the handler is still present at teardown — approximated
+    here by re-reading the dict at the end of the test body.
+
+    CPK-7718 #4: crewai 1.0.0 split ``_handlers`` into ``_sync_handlers`` /
+    ``_async_handlers``; probe whichever the installed crewai exposes.
     """
     from ag_ui_crewai import endpoint as ep  # noqa: F401 - ensures conftest imported
     try:
-        from crewai.utilities.events import crewai_event_bus
+        from ag_ui_crewai._capabilities import crewai_event_bus
     except Exception:
         pytest.skip("crewai event bus not importable")
 
-    handlers = getattr(crewai_event_bus, "_handlers", None)
+    handlers = None
+    for _attr in ("_sync_handlers", "_async_handlers", "_handlers"):
+        handlers = getattr(crewai_event_bus, _attr, None)
+        if handlers is not None:
+            break
     if handlers is None:
-        pytest.skip("crewai event bus does not expose _handlers")
+        pytest.skip("crewai event bus does not expose a handler dict")
 
     sentinel_key = "__cr9_external_subscriber__"
     sentinel_handler = object()
