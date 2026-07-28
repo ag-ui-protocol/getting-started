@@ -24,7 +24,9 @@ from ._capabilities import (
     MethodExecutionFinishedEvent,
     BaseEventListener,
     crewai_event_bus,
+    flow_supports_stream_frames,
 )
+from ._frames import StreamFrameTranslator
 from crewai.flow.flow import Flow
 
 from ag_ui.core import (
@@ -1609,6 +1611,265 @@ async def _run_flow_event_stream(
                     flow_context.reset(token)
 
 
+async def _aclose_stream_session(
+    session: object,
+    *,
+    thread_id: str | None,
+    run_id: str | None,
+) -> None:
+    """Best-effort ``aclose()`` teardown for a crewai ``AsyncStreamSession``.
+
+    CPK-7719: ``aclose()`` replaces the legacy ``_cancel_and_join`` machinery on
+    the StreamFrame path — it cancels the background kickoff task crewai spawns
+    inside ``astream`` and closes the frame iterator. The OBSERVABLE behavior
+    (client-disconnect tears the run down, no leaked kickoff) must not regress.
+
+    Mirrors the ``_cancel_and_join`` uncancel dance (finding #2): on Python
+    3.11+ a bare ``await session.aclose()`` in a ``finally`` reached via outer
+    cancellation would re-raise ``CancelledError`` on entry (``Task.cancelling()``
+    is still non-zero), so ``aclose`` would never run and the kickoff task would
+    leak. We ``uncancel`` (via ``getattr`` for 3.10 compat) so the teardown
+    completes; the original in-flight cancellation resumes propagating once the
+    generator's ``finally`` unwinds.
+    """
+    aclose = getattr(session, "aclose", None)
+    if not callable(aclose):
+        return
+    current = asyncio.current_task()
+    uncancel = getattr(current, "uncancel", None)
+    if callable(uncancel):
+        uncancel()
+    try:
+        await aclose()
+    except asyncio.CancelledError:
+        # aclose itself was cancelled; re-raise so the cancellation is not
+        # silently swallowed (mirrors _cancel_and_join re-raise semantics).
+        raise
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        _LOGGER.debug(
+            "CrewAI astream aclose failed thread=%s run=%s cause=%s",
+            thread_id,
+            run_id,
+            type(exc).__name__,
+        )
+
+
+async def _run_flow_frame_stream(
+    *,
+    flow_copy: object,
+    encoder: EventEncoder,
+    input_data: RunAgentInput,
+    inputs: dict,
+    timeout: float | None,
+):
+    """StreamFrame-path driver (CPK-7719): drive ``flow.astream`` and yield
+    encoded AG-UI events.
+
+    The behavior-preserving replacement for ``_run_flow_event_stream`` on crewai
+    >= 1.6. Instead of a process-global bus listener enqueuing onto a per-flow
+    ``asyncio.Queue`` (keyed by a uuid stamped on the Flow), we consume the
+    ordered ``StreamFrame`` envelopes crewai's scoped stream sink produces and
+    map them through the single ``StreamFrameTranslator`` seam.
+
+    Every must-survive behavior of the legacy path is preserved by REUSING the
+    same helpers:
+
+    * the four-code RUN_ERROR taxonomy (``AGUI_CREWAI_FLOW_TIMEOUT`` /
+      ``AGUI_CREWAI_UPSTREAM_TIMEOUT`` / ``AGUI_CREWAI_FLOW_ERROR_<Class>``) via
+      ``_CeilingExceeded`` / ``_format_timeout_message`` / ``_sanitize_exception_code``;
+    * the wall-clock ceiling + env knobs (``timeout`` is ``_flow_timeout_seconds()``);
+    * ``_stamp_correlation_ids`` on every emitted event and
+      ``_run_error_extras`` (camelCase wire aliases) on every RUN_ERROR;
+    * client-disconnect teardown via ``aclose()`` (see ``_aclose_stream_session``).
+
+    ``flow_context`` is set so the ``sdk.copilotkit_*`` helpers can emit their
+    ``Bridged*`` events, which reach us as ``custom``-channel frames because
+    ``event_bus._prepare_event`` publishes to the scoped sink synchronously.
+    """
+    token = flow_context.set(flow_copy)
+    translator = StreamFrameTranslator(
+        thread_id=input_data.thread_id,
+        run_id=input_data.run_id,
+        state_provider=lambda: getattr(flow_copy, "state", {}),
+    )
+    # ``astream`` returns an AsyncStreamSession; iterating it spawns crewai's
+    # background kickoff task and streams ordered frames.
+    session = flow_copy.astream(inputs=inputs)  # type: ignore[attr-defined]
+    aiter = session.__aiter__()
+    try:
+        try:
+            deadline = (
+                time.monotonic() + timeout if timeout is not None else None
+            )
+            while True:
+                # Enforce the wall-clock ceiling per frame read via
+                # ``asyncio.wait_for``. On timeout it cancels the in-flight
+                # ``__anext__`` AND awaits its unwind before raising, so
+                # crewai's scoped stream sink / background kickoff task tear
+                # down cleanly on the current loop (a wrapper ``ensure_future``
+                # + ``asyncio.wait`` would instead copy the context per read
+                # and break crewai's sink token reset — verified against the
+                # 1.15.7 wheel). ``aclose()`` in the ``finally`` then fully
+                # drains the background task.
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise _CeilingExceeded(_format_timeout_message(timeout))
+                    try:
+                        frame = await asyncio.wait_for(
+                            aiter.__anext__(), timeout=remaining
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except (asyncio.TimeoutError, TimeoutError) as te:
+                        # ``wait_for``'s own timeout fires only once the
+                        # deadline is reached; an upstream ``TimeoutError``
+                        # raised by the flow propagates BEFORE that. Use the
+                        # wall clock to disambiguate (CR7 CRITICAL parity):
+                        # at/past the deadline => our ceiling; earlier => an
+                        # upstream read timeout that must NOT masquerade as
+                        # AGUI_CREWAI_FLOW_TIMEOUT.
+                        if time.monotonic() >= deadline:
+                            raise _CeilingExceeded(
+                                _format_timeout_message(timeout)
+                            ) from te
+                        raise
+                else:
+                    try:
+                        frame = await aiter.__anext__()
+                    except StopAsyncIteration:
+                        # Stream exhausted without a flow_finished frame (e.g.
+                        # a flow that raised HumanFeedbackPending). No
+                        # RUN_FINISHED — matches the legacy path, which only
+                        # emits RUN_FINISHED from a FlowFinishedEvent.
+                        break
+
+                for event in translator.translate(frame):
+                    _stamp_correlation_ids(
+                        event,
+                        thread_id=input_data.thread_id,
+                        run_id=input_data.run_id,
+                    )
+                    yield encoder.encode(event)
+
+                if translator.is_run_end(frame):
+                    # RUN_FINISHED just emitted; stop (mirrors the legacy
+                    # ``None`` end-sentinel right after RUN_FINISHED).
+                    break
+
+        except _CeilingExceeded as ceiling_exc:
+            ceiling_display = f"{timeout:g}s"
+            _LOGGER.warning(
+                "CrewAI flow exceeded ceiling thread=%s run=%s ceiling=%s detail=%s",
+                input_data.thread_id,
+                input_data.run_id,
+                ceiling_display,
+                ceiling_exc.args[0] if ceiling_exc.args else "",
+            )
+            message = (
+                f"thread={input_data.thread_id} run={input_data.run_id}: "
+                f"CrewAI flow exceeded ceiling={ceiling_display}"
+            )
+            yield encoder.encode(
+                RunErrorEvent(
+                    message=message,
+                    code="AGUI_CREWAI_FLOW_TIMEOUT",
+                    **_run_error_extras(input_data),
+                )
+            )
+        except (asyncio.TimeoutError, TimeoutError) as upstream_exc:
+            # An upstream ``TimeoutError`` bubbled out of the flow (e.g. a
+            # LiteLLM/httpx read timeout) — NOT our ceiling. Distinct code so
+            # alerting can tell the two apart (CR7 CRITICAL parity).
+            ceiling_display = (
+                "disabled" if timeout is None else f"{timeout:g}s"
+            )
+            _LOGGER.warning(
+                "CrewAI upstream timeout during kickoff thread=%s run=%s "
+                "ceiling=%s cause=%s",
+                input_data.thread_id,
+                input_data.run_id,
+                ceiling_display,
+                type(upstream_exc).__name__,
+            )
+            message = (
+                f"thread={input_data.thread_id} run={input_data.run_id}: "
+                f"CrewAI upstream timeout during kickoff "
+                f"(ceiling={ceiling_display} did not fire)"
+            )
+            yield encoder.encode(
+                RunErrorEvent(
+                    message=message,
+                    code="AGUI_CREWAI_UPSTREAM_TIMEOUT",
+                    **_run_error_extras(input_data),
+                )
+            )
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            _LOGGER.exception(
+                "CrewAI flow failed thread=%s run=%s cause=%s",
+                input_data.thread_id,
+                input_data.run_id,
+                type(e).__name__,
+            )
+            message = (
+                f"thread={input_data.thread_id} run={input_data.run_id}: "
+                f"CrewAI flow failed; see server logs"
+            )
+            sanitized_name = _sanitize_exception_code(type(e).__name__)
+            yield encoder.encode(
+                RunErrorEvent(
+                    message=message,
+                    code=f"AGUI_CREWAI_FLOW_ERROR_{sanitized_name}",
+                    **_run_error_extras(input_data),
+                )
+            )
+    finally:
+        # aclose() replaces _cancel_and_join on this path; run it
+        # unconditionally (including under outer cancellation) so the kickoff
+        # task never leaks, then reset the context var.
+        try:
+            await _aclose_stream_session(
+                session,
+                thread_id=input_data.thread_id,
+                run_id=input_data.run_id,
+            )
+        finally:
+            flow_context.reset(token)
+
+
+def _run_flow_stream(
+    *,
+    flow_copy: object,
+    encoder: EventEncoder,
+    input_data: RunAgentInput,
+    inputs: dict,
+    timeout: float | None,
+):
+    """Select the StreamFrame path (crewai >= 1.6 + a real ``astream`` flow) or
+    the legacy bus-listener path, returning the chosen async generator.
+
+    The probe is per-flow (``flow_supports_stream_frames``): the test doubles in
+    ``tests/test_task_cancellation.py`` implement only ``kickoff_async`` and so
+    transparently keep the legacy path (and its 27 cancellation tests). Real
+    crewai 1.6+ Flows take the StreamFrame path; crewai 1.0-1.5 falls back.
+    """
+    if flow_supports_stream_frames(flow_copy):
+        return _run_flow_frame_stream(
+            flow_copy=flow_copy,
+            encoder=encoder,
+            input_data=input_data,
+            inputs=inputs,
+            timeout=timeout,
+        )
+    return _run_flow_event_stream(
+        flow_copy=flow_copy,
+        encoder=encoder,
+        input_data=input_data,
+        inputs=inputs,
+        timeout=timeout,
+    )
+
+
 def add_crewai_flow_fastapi_endpoint(app: FastAPI, flow: Flow, path: str = "/"):
     """Adds a CrewAI endpoint to the FastAPI app."""
     global GLOBAL_EVENT_LISTENER # pylint: disable=global-statement
@@ -1641,7 +1902,7 @@ def add_crewai_flow_fastapi_endpoint(app: FastAPI, flow: Flow, path: str = "/"):
         timeout = _flow_timeout_seconds()
 
         return StreamingResponse(
-            _run_flow_event_stream(
+            _run_flow_stream(
                 flow_copy=flow_copy,
                 encoder=encoder,
                 input_data=input_data,
@@ -1710,7 +1971,7 @@ def add_crewai_crew_fastapi_endpoint(
         timeout = _flow_timeout_seconds()
 
         return StreamingResponse(
-            _run_flow_event_stream(
+            _run_flow_stream(
                 flow_copy=flow_copy,
                 encoder=encoder,
                 input_data=input_data,
