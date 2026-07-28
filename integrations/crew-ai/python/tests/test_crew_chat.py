@@ -643,6 +643,71 @@ async def test_crew_run_emits_state_snapshot():
     assert snapshots[-1].snapshot["outputs"] == "OUT"
 
 
+async def test_crew_run_executes_off_the_event_loop():
+    """CPK-7719 (CPK-7717 defect 3 follow-up): the synchronous ``crew.kickoff``
+    tool function runs on a WORKER thread (``asyncio.to_thread``), not inline on
+    the event loop — so SSE flushing / the wall-clock ceiling / client-disconnect
+    cancellation can fire DURING the crew run instead of being blocked until it
+    returns."""
+    import threading
+
+    loop_thread_id = threading.get_ident()
+    captured = {}
+
+    async def _fake_acompletion(**_kwargs):
+        return object()
+
+    stream_n = {"n": 0}
+
+    async def _fake_stream(_resp):
+        stream_n["n"] += 1
+        if stream_n["n"] == 1:
+            class _R:
+                choices = [{
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [{
+                            "id": "call-crew",
+                            "function": {"name": "dummy", "arguments": "{}"},
+                        }],
+                    }
+                }]
+            return _R()
+
+        class _F:
+            choices = [{"message": {"role": "assistant", "content": "done"}}]
+        return _F()
+
+    def _tool_factory(crew, messages):  # pylint: disable=unused-argument
+        def _fn(**_kwargs):
+            captured["thread_id"] = threading.get_ident()
+            return "OUT"
+        return _fn
+
+    flow = crews_mod.ChatWithCrewFlow.__new__(crews_mod.ChatWithCrewFlow)
+    flow.crew = type("C", (), {"chat_llm": "gpt-4o"})()
+    flow.crew_name = "dummy"
+    flow.crew_tool_schema = {
+        "type": "function",
+        "function": {"name": "dummy", "description": "", "parameters": {"type": "object"}},
+    }
+    flow.system_message = "sys"
+    state = {"messages": [], "inputs": {}, "copilotkit": {"actions": []}}
+
+    with _patch_instance_state(flow, state):
+        with patch.object(crews_mod, "acompletion", _fake_acompletion):
+            with patch.object(crews_mod, "copilotkit_stream", _fake_stream):
+                with patch.object(
+                    crews_mod, "crew_chat_create_tool_function", _tool_factory
+                ):
+                    await flow.chat()
+
+    assert state["outputs"] == "OUT"
+    assert "thread_id" in captured
+    # The crew function ran on a different (worker) thread, not the loop thread.
+    assert captured["thread_id"] != loop_thread_id
+
+
 # --------------------------------------------------------------------------
 # Real @CrewBase name read + unnamed-crew clear error
 # --------------------------------------------------------------------------
