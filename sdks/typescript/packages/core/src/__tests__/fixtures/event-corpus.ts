@@ -8,7 +8,7 @@
 // changes a verdict here, the matrix job goes red instead of the protocol
 // silently changing under consumers.
 //
-// Supported range: zod ^3.25.0 || ^4.0.0, exercised via the `zod/v4` subpath.
+// Supported range: zod ^3.25.18 || ^4.0.0, exercised via the `zod/v4` subpath.
 
 export interface AcceptCase {
   name: string;

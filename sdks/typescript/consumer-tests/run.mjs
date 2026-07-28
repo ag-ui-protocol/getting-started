@@ -19,13 +19,13 @@
  *                   entry really is dependency-free.
  *
  * Usage:
- *   node run.mjs                 # full matrix: every supported zod minor + no-zod
+ *   node run.mjs                 # the default legs (see DEFAULT_LEGS below)
  *   node run.mjs 4.4.3           # one version
  *   node run.mjs 3.25.76 4 none  # explicit legs ("none" = the no-zod gate)
- *   node run.mjs --list          # print the resolved matrix and exit
+ *   node run.mjs --list          # print the default legs and exit
  *
- * The matrix is RESOLVED FROM THE REGISTRY, not hardcoded, so zod releases that
- * do not exist yet (4.5, 4.6, ...) are picked up automatically.
+ * Any version can be passed ad hoc, so spot-checking a release that is not in the
+ * default list needs no code change: `node run.mjs 4.5.0`.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, cpSync, writeFileSync } from "node:fs";
@@ -41,9 +41,19 @@ const CORPUS = resolve(
   "packages/core/src/__tests__/fixtures/event-corpus.ts",
 );
 
-// Lowest zod that exposes the `zod/v4` subpath — 3.24.x does not have it, which
-// is why the supported range starts at 3.25.0 rather than 3.24.0.
-const MIN_ZOD3_MINOR = 25;
+// Deliberately a short, hand-maintained list rather than something resolved from
+// the registry: an explicit matrix is easier to reason about, and a CI job that
+// silently changes shape when a dependency publishes is worse than one that needs
+// a one-line edit. Add versions here when there is a reason to.
+//
+//   3.25.18 - the advertised floor, established by bisection. zod 3.24.x has no
+//             `zod/v4` subpath at all; 3.25.0 is a broken publish with no dist/;
+//             and 3.25.1-3.25.17 ship `zod/v4` declarations that fail TS variance
+//             checks under skipLibCheck:false. 3.25.18 is the first clean one.
+//   4.0.0  - the zod 4 floor.
+//   4.4.3  - latest zod 4 at time of writing.
+//   none   - no zod installed, proving the main @ag-ui/core entry is dep-free.
+const DEFAULT_LEGS = ["3.25.18", "4.0.0", "4.4.3", "none"];
 
 const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
 const pnpmCmd = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
@@ -63,27 +73,6 @@ function run(cmd, args, cwd, opts = {}) {
 /** node_modules/.bin/<name>, with the Windows shim extension when needed. */
 const binPath = (dir, name) =>
   join(dir, "node_modules", ".bin", process.platform === "win32" ? `${name}.cmd` : name);
-
-/**
- * Every zod version in `^3.25.0 || ^4.0.0`, reduced to the newest patch of each
- * minor line. Keeping one release per minor keeps the matrix small while still
- * covering every behavior generation of the v4 engine.
- */
-function resolveMatrix() {
-  const all = JSON.parse(run(npmCmd, ["view", "zod", "versions", "--json"], HERE));
-  const newestPerMinor = new Map();
-  for (const version of all) {
-    const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(version); // stable releases only
-    if (!m) continue;
-    const [major, minor, patch] = m.slice(1).map(Number);
-    if (major !== 3 && major !== 4) continue;
-    if (major === 3 && minor !== MIN_ZOD3_MINOR) continue; // on zod 3, only 3.25.x
-    const key = `${major}.${minor}`;
-    const prev = newestPerMinor.get(key);
-    if (!prev || prev.patch < patch) newestPerMinor.set(key, { version, patch });
-  }
-  return [...newestPerMinor.values()].map((v) => v.version);
-}
 
 /** `pnpm pack` (not npm) so `workspace:*` deps are rewritten to real versions. */
 function packAll(outDir) {
@@ -325,12 +314,12 @@ function runLeg(zod, tarballs) {
 
 const argv = process.argv.slice(2);
 if (argv[0] === "--list") {
-  console.log([...resolveMatrix(), "none"].join("\n"));
+  console.log(DEFAULT_LEGS.join("\n"));
   process.exit(0);
 }
 
-const legs = argv.length > 0 ? argv : [...resolveMatrix(), "none"];
-console.log(`Supported range: ^3.25.0 || ^4.0.0 (via the zod/v4 subpath)`);
+const legs = argv.length > 0 ? argv : DEFAULT_LEGS;
+console.log(`Supported range: ^3.25.18 || ^4.0.0 (via the zod/v4 subpath)`);
 console.log(`Legs: ${legs.join(", ")}`);
 
 const staging = mkdtempSync(join(tmpdir(), "agui-tarballs-"));

@@ -82,46 +82,30 @@ jobs:
       - name: Run tests
         run: pnpm run test
 
-  # The supported zod range is resolved from the registry rather than hardcoded, so
-  # zod releases that do not exist yet (4.5, 4.6, ...) are covered the day they ship
-  # instead of whenever someone remembers to extend a list.
-  resolve-zod-matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      legs: ${{ steps.resolve.outputs.legs }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
-        with:
-          node-version: "22"
-
-      - name: Resolve supported zod versions
-        id: resolve
-        run: |
-          legs="$(node sdks/typescript/consumer-tests/run.mjs --list | jq -R -s -c 'split("\n") | map(select(length > 0))')"
-          echo "resolved legs: ${legs}"
-          echo "legs=${legs}" >> "$GITHUB_OUTPUT"
-
   # Release gates for the zod peer range (see the review on PR #1637). The workspace
   # pins zod 3.25.76, so the in-repo suite can only ever exercise one version. These
-  # legs install real tarballs into a throwaway consumer and check each supported
-  # zod separately, with skipLibCheck DISABLED so the published declarations are
+  # legs install real tarballs into a throwaway consumer and check each zod
+  # separately, with skipLibCheck DISABLED so the published declarations are
   # actually verified, then run a shared event corpus to prove the accept/reject
-  # contract is identical on every version. The "none" leg asserts the main
-  # @ag-ui/core entry works with no zod installed at all.
+  # contract is identical on every version.
+  #
+  # The list is intentionally short and hand-maintained — keep it in sync with
+  # DEFAULT_LEGS in sdks/typescript/consumer-tests/run.mjs:
+  #   3.25.18 the advertised floor. 3.24.x has no `zod/v4` subpath; 3.25.0 is a
+  #           broken publish (no dist/); 3.25.1-3.25.17 ship `zod/v4` types that
+  #           fail TS variance checks under skipLibCheck:false
+  #   4.0.0   the zod 4 floor
+  #   4.4.3   latest zod 4 at time of writing
+  #   none    no zod installed, proving @ag-ui/core's main entry is dependency-free
+  # Add entries when there is a reason to; `node run.mjs <version>` spot-checks any
+  # other release locally without touching CI.
   zod-matrix:
     name: zod ${{ matrix.zod }}
-    needs: resolve-zod-matrix
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        zod: ${{ fromJSON(needs.resolve-zod-matrix.outputs.legs) }}
+        zod: ["3.25.18", "4.0.0", "4.4.3", "none"]
 
     steps:
       - name: Checkout code

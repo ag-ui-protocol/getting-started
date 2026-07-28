@@ -5,14 +5,17 @@
 //
 // Cross-version note: this module imports `zod/v4`, NOT `zod`.
 //
-// zod 3.25.0 shipped the whole zod 4 implementation at the `zod/v4` subpath, and
+// zod 3.25.x shipped the whole zod 4 implementation at the `zod/v4` subpath, and
 // zod 4.x keeps `zod/v4` as an alias for its own classic entry. Both majors
 // therefore expose an identical `zod/v4` API, which is what lets a single set of
 // emitted .d.ts files type-check against either. Importing bare `zod` would bake
 // major-specific declaration shapes (`ZodEnum<[...]>`, five-parameter `ZodObject`,
 // `ZodEffects`) into the published types and break consumers on the other major.
 //
-// The supported peer range is `^3.25.0 || ^4.0.0`. zod 3.24.x has no `zod/v4`.
+// The supported peer range is `^3.25.18 || ^4.0.0`. zod 3.24.x has no `zod/v4`
+// subpath at all, and 3.25.0-3.25.17 ship `zod/v4` declarations that fail TS
+// variance checks under `skipLibCheck: false` (3.25.0 has no dist/ whatsoever),
+// so 3.25.18 is the lowest release we can honestly claim to support.
 //
 // Caveat: the zod/v4 *API surface* is stable across the range, but the *engine*
 // version is not — zod@3.25.x ships engine 4.0.0 while zod@4.4.x ships 4.4.x, and
@@ -26,8 +29,8 @@ import { z } from "zod/v4";
 import { EventType } from "./events";
 
 // ---------------------------------------------------------------------------
-// EventType enum values as a z.enum tuple — works on zod 3.24+ and zod 4.
-// z.nativeEnum() was removed in zod 4, so we enumerate values explicitly.
+// EventType enum values as a z.enum tuple. z.nativeEnum() was removed in zod 4,
+// so the values are enumerated explicitly.
 // ---------------------------------------------------------------------------
 
 export const EventTypeSchema = z.enum([

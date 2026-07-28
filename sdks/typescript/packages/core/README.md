@@ -14,7 +14,7 @@ yarn add @ag-ui/core
 
 The main entry has **zero runtime dependencies**. If you also want the zod schemas
 and validating event factories from the `@ag-ui/core/schemas` subpath, install zod
-yourself — it is an optional peer dependency accepting `^3.25.0 || ^4.0.0`:
+yourself — it is an optional peer dependency accepting `^3.25.18 || ^4.0.0`:
 
 ```bash
 npm install zod

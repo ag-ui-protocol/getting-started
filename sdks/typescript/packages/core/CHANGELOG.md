@@ -5,9 +5,9 @@
 ### BREAKING CHANGES
 
 - `zod` is no longer a runtime dependency of `@ag-ui/core`. The package's main entry now ships only TypeScript types, value-level constants (`EventType`) and error classes (`AGUIError`, `AGUIConnectNotImplementedError`). No `*Schema` exports and no `create*Event` factories.
-- The zod schemas have moved to a new opt-in subpath: `@ag-ui/core/schemas`. zod is an optional peer dependency on the subpath, accepting `^3.25.0 || ^4.0.0` — install whichever major you prefer.
+- The zod schemas have moved to a new opt-in subpath: `@ag-ui/core/schemas`. zod is an optional peer dependency on the subpath, accepting `^3.25.18 || ^4.0.0` — install whichever major you prefer.
 - The `create*Event` factories moved to `@ag-ui/core/schemas` as well. They validate their input through `schema.parse(...)`, which needs zod, so keeping them on the main entry would have kept the zod dependency. Consumers of `@ag-ui/client` are unaffected — it re-exports the subpath.
-- The zod peer floor is `3.25.0`, not `3.24.0`. The schemas import zod's `zod/v4` subpath, which zod 3.24.x does not provide. Moving from 3.24.x to the latest 3.25.x is a patch-level upgrade within zod 3.
+- The zod peer floor is `3.25.18`, not `3.24.0`. The schemas import zod's `zod/v4` subpath: zod 3.24.x does not provide it at all, 3.25.0 is a broken publish with no `dist/`, and 3.25.1-3.25.17 ship `zod/v4` declarations that fail TS variance checks under `skipLibCheck: false`. 3.25.18 is the first clean release (found by bisection). Moving from an older 3.25.x is a patch-level upgrade within zod 3.
 - The internal `BinaryInputContentSchema` runtime check moved from `superRefine` to `.refine()`. Boolean validation is unchanged; the precise error path (`["id"]`) is no longer reported.
 
 ### Behavior changes
@@ -36,6 +36,6 @@ A jscodeshift codemod redirects both `*Schema` and `create*Event` imports:
 ### Internal package changes
 
 - `@ag-ui/client` and `@ag-ui/proto` now declare `zod` as a regular dependency and import `EventSchemas` from `@ag-ui/core/schemas` to validate incoming events. No public API change for consumers of these packages.
-- `@ag-ui/client`, `@ag-ui/proto` and `@ag-ui/core` all declare the same zod range (`^3.25.0 || ^4.0.0`); they previously disagreed, which produced unmet-peer warnings.
+- `@ag-ui/client`, `@ag-ui/proto` and `@ag-ui/core` all declare the same zod range (`^3.25.18 || ^4.0.0`); they previously disagreed, which produced unmet-peer warnings.
 - `@ag-ui/client`'s own legacy schemas (`src/legacy/types.ts`) also import `zod/v4`, so the package's published declarations no longer embed zod-major-specific types either.
-- New `sdks/typescript/consumer-tests/run.mjs` harness plus a `zod-matrix` CI job: real tarballs are installed into a throwaway consumer for every supported zod minor and type-checked with `skipLibCheck` **disabled**, then a shared event corpus is run through `EventSchemas` to assert identical accept/reject verdicts. The matrix is resolved from the registry, so new zod releases are covered as they ship. A no-zod leg proves the main entry is dependency-free.
+- New `sdks/typescript/consumer-tests/run.mjs` harness plus a `zod-matrix` CI job: real tarballs are installed into a throwaway consumer per zod version and type-checked with `skipLibCheck` **disabled**, then a shared event corpus is run through `EventSchemas` to assert identical accept/reject verdicts. Legs cover the 3.25.18 and 4.0.0 floors, the latest zod 4, and a no-zod leg proving the main entry is dependency-free.

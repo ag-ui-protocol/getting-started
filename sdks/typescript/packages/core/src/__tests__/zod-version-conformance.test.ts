@@ -1,7 +1,7 @@
 /**
  * Protocol conformance guard.
  *
- * `@ag-ui/core/schemas` supports zod `^3.25.0 || ^4.0.0` through the `zod/v4`
+ * `@ag-ui/core/schemas` supports zod `^3.25.18 || ^4.0.0` through the `zod/v4`
  * subpath. The API surface is identical across that range but the *engine*
  * version is not (zod@3.25.x ships engine 4.0.0, zod@4.4.x ships 4.4.x), and
  * engine releases have changed parse behavior — most notably, a bare `z.any()`

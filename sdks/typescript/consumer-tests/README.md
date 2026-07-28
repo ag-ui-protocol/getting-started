@@ -1,6 +1,6 @@
 # Packaged-consumer compatibility tests
 
-`@ag-ui/core/schemas` supports zod `^3.25.0 || ^4.0.0`. The workspace pins a single
+`@ag-ui/core/schemas` supports zod `^3.25.18 || ^4.0.0`. The workspace pins a single
 zod version (`pnpm.overrides.zod` in the root `package.json`), so the in-repo test
 suites can only ever exercise that one — they cannot prove the _published_ package
 works on the rest of the range. This harness closes that gap.
@@ -22,14 +22,14 @@ zod version, and runs three gates:
 pnpm --filter "@ag-ui/core" --filter "@ag-ui/encoder" \
      --filter "@ag-ui/proto" --filter "@ag-ui/client" run build
 
-# Full matrix: newest patch of every supported zod minor, plus the no-zod leg
+# The default legs (3.25.18, 4.0.0, 4.4.3, none)
 node sdks/typescript/consumer-tests/run.mjs
 
 # A single leg
 node sdks/typescript/consumer-tests/run.mjs 4.4.3
 node sdks/typescript/consumer-tests/run.mjs none
 
-# Print the resolved matrix without running anything
+# Print the default legs without running anything
 node sdks/typescript/consumer-tests/run.mjs --list
 ```
 
@@ -43,14 +43,27 @@ Expected output per leg:
   conformance ok
 ```
 
-## The matrix is not hardcoded
+## The version list
 
-`--list` queries the npm registry and reduces every version in `^3.25.0 || ^4.0.0`
-to the newest patch of each minor line. zod releases that do not exist yet (4.5,
-4.6, ...) are therefore covered the day they ship, rather than whenever someone
-remembers to extend a list. The `zod-matrix` job in
-`.github/workflows/unit-typescript-sdk.yml` resolves the same list into a GitHub
-Actions matrix, so each version is a separately reported leg.
+`DEFAULT_LEGS` in `run.mjs` and the `zod-matrix` matrix in
+`.github/workflows/unit-typescript-sdk.yml` hold the same short, hand-maintained
+list. Keep them in sync.
+
+| Leg | Why |
+|---|---|
+| `3.25.18` | The advertised floor, established by bisection. zod 3.24.x has no `zod/v4` subpath; 3.25.0 is a broken publish shipping only `src/`; 3.25.1-3.25.17 ship `zod/v4` declarations that fail TS variance checks (4x TS2636 inside zod's own `.d.ts`) under `skipLibCheck: false`. 3.25.18 is the first clean release. |
+| `4.0.0` | The zod 4 floor. |
+| `4.4.3` | Latest zod 4 at time of writing. |
+| `none` | No zod installed. |
+
+Deliberately explicit rather than resolved from the registry: a CI job that
+silently changes shape when a dependency publishes is worse than one that needs a
+one-line edit. Add entries when there is a reason to. Spot-checking a release
+that is not on the list needs no code change at all:
+
+```bash
+node sdks/typescript/consumer-tests/run.mjs 4.5.0
+```
 
 ## Adding cases
 
