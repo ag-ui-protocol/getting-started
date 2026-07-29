@@ -8,6 +8,7 @@ integrations/claude-agent-sdk/typescript/tsup.config.ts
 integrations/claude-managed-agents/typescript/tsdown.config.ts
 integrations/community/spring-ai/typescript/tsdown.config.ts
 integrations/crew-ai/typescript/tsdown.config.ts
+integrations/hermes/typescript/tsdown.config.ts
 integrations/langchain/typescript/tsdown.config.ts
 integrations/langgraph/typescript/tsdown.config.ts
 integrations/langroid/typescript/tsup.config.ts
