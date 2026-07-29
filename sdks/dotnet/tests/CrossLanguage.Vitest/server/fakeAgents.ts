@@ -321,8 +321,7 @@ export function rawEventRun(input: RunAgentInput): BaseEvent[] {
 
 /**
  * Server starts the run normally then emits RUN_ERROR. The C# client
- * surfaces this as an InvalidOperationException with the error message
- * (per ProtocolRuleTest.RunError_ThrowsInvalidOperationException).
+ * surfaces this as ErrorContent with the event's message and error code.
  */
 export function runErrorScenario(input: RunAgentInput): BaseEvent[] {
   const events: BaseEvent[] = [runStarted(input)];

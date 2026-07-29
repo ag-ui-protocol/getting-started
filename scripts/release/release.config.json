@@ -140,7 +140,7 @@
       "description": "CrewAI integration (Python)",
       "sharedVersion": false,
       "packages": [
-        { "name": "ag-ui-crewai", "path": "integrations/crew-ai/python", "ecosystem": "python", "buildSystem": "poetry" }
+        { "name": "ag-ui-crewai", "path": "integrations/crew-ai/python", "ecosystem": "python", "buildSystem": "uv" }
       ]
     },
     "integration-langchain": {

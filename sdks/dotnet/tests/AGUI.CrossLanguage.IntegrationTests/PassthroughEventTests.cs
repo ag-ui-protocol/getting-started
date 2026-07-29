@@ -74,26 +74,28 @@ public sealed class PassthroughEventTests
     }
 
     [Fact]
-    public async Task RunError_ThrowsInvalidOperationException()
+    public async Task RunError_SurfacesErrorContent()
     {
-        // Per ProtocolRuleTest.RunError_ThrowsInvalidOperationException
-        // the C# client surfaces RUN_ERROR as InvalidOperationException
-        // with the message verbatim. Same contract over the wire.
+        // RUN_ERROR crosses the language boundary as ErrorContent so callers
+        // can inspect both the error message and the protocol error code.
         using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(10) };
         AGUIChatClient client = new(new(http, $"{_fixture.BaseUrl}/run_error"));
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(20));
 
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        List<ChatResponseUpdate> updates = [];
+        await foreach (ChatResponseUpdate update in client
+            .GetStreamingResponseAsync(
+                [new(ChatRole.User, "fail")],
+                cancellationToken: cts.Token)
+            .ConfigureAwait(false))
         {
-            await foreach (ChatResponseUpdate _ in client
-                .GetStreamingResponseAsync(
-                    [new(ChatRole.User, "fail")],
-                    cancellationToken: cts.Token)
-                .ConfigureAwait(false))
-            {
-            }
-        });
+            updates.Add(update);
+        }
 
-        Assert.Contains("fake agent: simulated upstream failure", ex.Message);
+        ChatResponseUpdate errorUpdate = Assert.Single(updates, u => u.Contents.Any(c => c is ErrorContent));
+        ErrorContent error = Assert.IsType<ErrorContent>(Assert.Single(errorUpdate.Contents));
+        Assert.Equal("fake agent: simulated upstream failure", error.Message);
+        Assert.Equal("FAKE_AGENT_FAILURE", error.ErrorCode);
+        Assert.IsType<RunErrorEvent>(errorUpdate.RawRepresentation);
     }
 }

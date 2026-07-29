@@ -238,6 +238,151 @@ public sealed class ChatResponseUpdateAGUIExtensionsTest
 
     #endregion
 
+    #region Reasoning
+
+    [Fact]
+    public async Task ReasoningThenText_SharingProviderMessageId_EmitDistinctMessageIds()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("thinking")]
+            },
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("") { ProtectedData = "signed-blob" }]
+            },
+            new ChatResponseUpdate(ChatRole.Assistant, "visible answer")
+            {
+                MessageId = "msg-1"
+            });
+
+        var events = await CollectEvents(updates);
+
+        var reasoningStartId = events.OfType<ReasoningStartEvent>().Single().MessageId;
+        var reasoningMessageStartId = events.OfType<ReasoningMessageStartEvent>().Single().MessageId;
+        var textMessageId = events.OfType<TextMessageStartEvent>().Single().MessageId;
+        Assert.NotEqual(reasoningStartId, textMessageId);
+        Assert.NotEqual(reasoningMessageStartId, textMessageId);
+        Assert.Equal(reasoningMessageStartId, events.OfType<ReasoningMessageContentEvent>().Single().MessageId);
+        Assert.Equal(reasoningMessageStartId, events.OfType<ReasoningMessageEndEvent>().Single().MessageId);
+        Assert.Equal(reasoningMessageStartId, events.OfType<ReasoningEncryptedValueEvent>().Single().EntityId);
+    }
+
+    [Fact]
+    public async Task ReasoningDeltas_AcrossUpdates_ShareOneReasoningMessageId()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("first ")]
+            },
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("second")]
+            });
+
+        var events = await CollectEvents(updates);
+
+        var reasoningMessageId = events.OfType<ReasoningMessageStartEvent>().Single().MessageId;
+        Assert.All(
+            events.OfType<ReasoningMessageContentEvent>(),
+            e => Assert.Equal(reasoningMessageId, e.MessageId));
+    }
+
+    [Fact]
+    public async Task ReasoningBlocks_SeparatedByText_GetDistinctReasoningMessageIds()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("first block")]
+            },
+            new ChatResponseUpdate(ChatRole.Assistant, "interlude")
+            {
+                MessageId = "msg-1"
+            },
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("second block")]
+            });
+
+        var events = await CollectEvents(updates);
+
+        var reasoningIds = events.OfType<ReasoningMessageStartEvent>().Select(e => e.MessageId).ToList();
+        Assert.Equal(2, reasoningIds.Count);
+        Assert.NotEqual(reasoningIds[0], reasoningIds[1]);
+    }
+
+    [Fact]
+    public async Task ProtectedData_ArrivingWhileReasoningMessageOpen_BindsEntityIdToReasoningMessage()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("thinking")]
+            },
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("") { ProtectedData = "signed-blob" }]
+            });
+
+        var events = await CollectEvents(updates);
+
+        var reasoningMessageId = events.OfType<ReasoningMessageStartEvent>().Single().MessageId;
+        var encrypted = events.OfType<ReasoningEncryptedValueEvent>().Single();
+        Assert.Equal(reasoningMessageId, encrypted.EntityId);
+    }
+
+    [Fact]
+    public async Task ProtectedData_ArrivingBeforeReasoningMessageOpens_BindsEntityIdToReasoningMessage()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("") { ProtectedData = "signed-blob" }]
+            },
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("thinking")]
+            },
+            new ChatResponseUpdate(ChatRole.Assistant, "hello")
+            {
+                MessageId = "msg-1"
+            });
+
+        var events = await CollectEvents(updates);
+
+        var encryptedEntityId = events.OfType<ReasoningEncryptedValueEvent>().Single().EntityId;
+        var reasoningMessageId = events.OfType<ReasoningMessageStartEvent>().Single().MessageId;
+        var textMessageId = events.OfType<TextMessageStartEvent>().Single().MessageId;
+
+        Assert.Equal(reasoningMessageId, encryptedEntityId);
+        Assert.NotEqual(textMessageId, encryptedEntityId);
+    }
+
+    #endregion
+
     #region Role Mapping
 
     [Theory]

@@ -21,7 +21,7 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(IsPackable)' == 'true'">
-    <VersionPrefix Condition="'$(VersionPrefix)' == ''">0.0.3</VersionPrefix>
+    <VersionPrefix Condition="'$(VersionPrefix)' == ''">0.0.4</VersionPrefix>
     <Authors>AG-UI Protocol</Authors>
     <Company>AG-UI Protocol</Company>
     <Product>AG-UI .NET SDK</Product>

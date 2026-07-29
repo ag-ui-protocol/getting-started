@@ -189,7 +189,7 @@ jobs:
           echo "Detected mode: $MODE, scope: $SCOPE"
 
       - name: Checkout release ref
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ steps.meta.outputs.mode == 'prerelease' && github.ref || 'main' }}
@@ -212,12 +212,12 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           version: ">=0.8.0"
 
       - name: Setup Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
 
@@ -650,7 +650,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout release ref
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ needs.build.outputs.mode == 'prerelease' && github.ref || 'main' }}
@@ -957,7 +957,7 @@ jobs:
       # --- Python publish ---
       - name: Install uv
         if: needs.build.outputs.py_count != '0' || needs.build.outputs.pre_has_py_packages == 'true'
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           version: ">=0.8.0"
 
@@ -1189,7 +1189,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout release ref
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ needs.build.outputs.mode == 'prerelease' && github.ref || 'main' }}
@@ -1200,7 +1200,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1  # v5.4.0
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
         with:
           dotnet-version: |
             8.0.x
@@ -1277,6 +1277,122 @@ jobs:
             fi
           done < <(jq -c '.[]' dotnet-packages.json)
           ls -la artifacts/nuget
+
+      # ── Author signing (pack → SIGN → push) ────────────────────────────────
+      # Author-signs the packed *.nupkg in place with a DigiCert code-signing
+      # certificate stored (non-exportable, RSA-HSM) in Azure Key Vault, via
+      # NuGetKeyVaultSignTool + GitHub OIDC (no long-lived secret). This is the
+      # *author* signature that flips packages to "signed" on nuget.org;
+      # nuget.org's *repository* signature is applied automatically on push and
+      # is independent of this. Symbol packages (*.snupkg) are intentionally not
+      # author-signed, and assembly strong-naming (AGUI.snk) is a separate,
+      # untouched concern.
+      # Gated on the SIGNING_PROVIDER variable (set on the `nuget` environment):
+      #   unset / 'none'  → no signing (safe default; inert until provisioned)
+      #   'keyvault'      → sign via Azure Key Vault + NuGetKeyVaultSignTool
+      # Required config (see sdks/dotnet/docs/signing.md): the secrets
+      # AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID,
+      # AZURE_KEY_VAULT_URL, CODE_SIGNING_CERT_NAME on the `nuget` environment;
+      # plus the App Registration granted Key Vault "Crypto User" + "Certificate
+      # User" roles on the vault, and the cert registered on the nuget.org owner.
+      # NOTE: inert until SIGNING_PROVIDER=keyvault — safe to merge ahead of
+      # provisioning.
+
+      # Fail fast with an explicit list if signing is enabled but its
+      # configuration is incomplete — so a half-provisioned setup errors here
+      # with actionable output instead of deep inside the signing tool. Lists
+      # exactly which secrets the `nuget` environment still needs. See
+      # sdks/dotnet/docs/signing.md.
+      - name: Preflight — validate signing configuration
+        if: vars.SIGNING_PROVIDER != '' && vars.SIGNING_PROVIDER != 'none'
+        shell: bash
+        env:
+          PROVIDER: ${{ vars.SIGNING_PROVIDER }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_KEY_VAULT_URL: ${{ secrets.AZURE_KEY_VAULT_URL }}
+          CODE_SIGNING_CERT_NAME: ${{ secrets.CODE_SIGNING_CERT_NAME }}
+        run: |
+          set -euo pipefail
+          if [ "$PROVIDER" != "keyvault" ]; then
+            echo "::error::Unknown SIGNING_PROVIDER '${PROVIDER}' (expected 'none' or 'keyvault')"
+            exit 1
+          fi
+          missing=()
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_KEY_VAULT_URL CODE_SIGNING_CERT_NAME; do
+            if [ -z "${!name}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::SIGNING_PROVIDER='keyvault' but the 'nuget' environment is missing: ${missing[*]}"
+            echo "Provision these (see sdks/dotnet/docs/signing.md) before enabling signing."
+            exit 1
+          fi
+          echo "Signing configuration for 'keyvault' is complete."
+
+      # OIDC login for Key Vault access — reuses the job's id-token: write; no
+      # long-lived client secret is stored.
+      - name: Azure login (OIDC)
+        if: vars.SIGNING_PROVIDER == 'keyvault'
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43  # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Author-sign each *.nupkg with the Key Vault cert. NuGetKeyVaultSignTool
+      # signs one file per call, so we loop; *.snupkg are excluded. The private
+      # key never leaves the HSM — signing is a keys/sign op inside the vault.
+      - name: Author-sign packages (Azure Key Vault)
+        if: vars.SIGNING_PROVIDER == 'keyvault'
+        shell: pwsh
+        env:
+          AZURE_KEY_VAULT_URL: ${{ secrets.AZURE_KEY_VAULT_URL }}
+          CODE_SIGNING_CERT_NAME: ${{ secrets.CODE_SIGNING_CERT_NAME }}
+        run: |
+          dotnet tool install --global NuGetKeyVaultSignTool
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to install NuGetKeyVaultSignTool' }
+          $toolsDir = Join-Path $env:USERPROFILE '.dotnet\tools'
+          if ($env:PATH -notlike "*$toolsDir*") { $env:PATH = "$toolsDir;$env:PATH" }
+
+          # Short-lived Key Vault data-plane token from the OIDC login context.
+          $token = az account get-access-token --resource https://vault.azure.net --query accessToken -o tsv
+          if (-not $token) { throw 'Failed to obtain Key Vault access token' }
+          Write-Output "::add-mask::$token"
+
+          $pkgs = Get-ChildItem -Path artifacts/nuget -File | Where-Object { $_.Extension -eq '.nupkg' }
+          if ($pkgs.Count -eq 0) { throw 'No .nupkg found to sign' }
+          foreach ($pkg in $pkgs) {
+            Write-Host "Signing $($pkg.Name)"
+            NuGetKeyVaultSignTool sign $pkg.FullName `
+              --file-digest sha256 `
+              --timestamp-rfc3161 http://timestamp.digicert.com `
+              --timestamp-digest sha256 `
+              --azure-key-vault-url $env:AZURE_KEY_VAULT_URL `
+              --azure-key-vault-certificate $env:CODE_SIGNING_CERT_NAME `
+              --azure-key-vault-accesstoken $token
+            if ($LASTEXITCODE -ne 0) { throw "Signing failed for $($pkg.Name)" }
+          }
+
+      # Fail the release before publishing if signing was requested but didn't
+      # actually apply (verifies the author signature chains to a trusted root).
+      - name: Verify packages are signed
+        if: vars.SIGNING_PROVIDER == 'keyvault'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(artifacts/nuget/*.nupkg)
+          if [ ${#pkgs[@]} -eq 0 ]; then
+            echo "::error::No .nupkg found to verify after signing"
+            exit 1
+          fi
+          for pkg in "${pkgs[@]}"; do
+            echo "Verifying signature: ${pkg}"
+            dotnet nuget verify "${pkg}" --all
+          done
 
       - name: NuGet login
         id: nuget-login
@@ -1578,7 +1694,7 @@ jobs:
           echo "npm_intended=$NPM_INTENDED py_intended=$PY_INTENDED nuget_intended=$NUGET_INTENDED"
 
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -1625,7 +1741,7 @@ jobs:
         # secret is unset until the #engr incoming webhook is provisioned, and a
         # release must not go red merely because alerting isn't wired yet.
         if: steps.build_message.outputs.should_post == 'true' && env.SLACK_WEBHOOK != ''
-        uses: slackapi/slack-github-action@0d95c9a7becc1e6e297d76df9bc735c44f4cbcbc # v3.0.5
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_ENGR }}
           webhook-type: incoming-webhook
@@ -1653,7 +1769,7 @@ jobs:
            steps.intent.outputs.nuget_intended != 'false') &&
           env.SLACK_WEBHOOK != ''
         continue-on-error: true
-        uses: slackapi/slack-github-action@0d95c9a7becc1e6e297d76df9bc735c44f4cbcbc # v3.0.5
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_ENGR }}
           webhook-type: incoming-webhook

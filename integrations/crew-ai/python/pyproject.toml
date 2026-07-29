@@ -1,40 +1,55 @@
-[tool.poetry]
+[project]
 name = "ag-ui-crewai"
-version = "0.2.0"
+version = "0.2.1"
 description = "Implementation of the AG-UI protocol for CrewAI"
 license = "MIT"
-authors = ["Markus Ecker <markus.ecker@gmail.com>"]
+license-files = ["LICENSE"]
+authors = [
+    { name = "Markus Ecker", email = "markus.ecker@gmail.com" }
+]
 readme = "README.md"
+requires-python = ">=3.10,<3.14"
+# Poetry caret ranges translated to explicit bounds; crewai pin preserved for CPK-7718.
+dependencies = [
+    "ag-ui-protocol>=0.1.10",
+    "fastapi>=0.115.12,<0.116.0",
+    "uvicorn>=0.34.3,<0.35.0",
+    "crewai>=0.130.0,<0.131.0",
+]
+
+[project.scripts]
+dev = "ag_ui_crewai.dojo:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0,<9.0",
+    "pytest-asyncio>=0.24,<0.25",
+    # Dev-only; <0.29 guards against a breaking httpx 0.x minor.
+    "httpx>=0.27,<0.29",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Shared across wheel and sdist so the exclude list is not repeated per target.
+[tool.hatch.build]
 exclude = [
     "ag_ui_crewai/dojo.py",
     "ag_ui_crewai/examples/**",
 ]
 
-[tool.poetry.dependencies]
-python = "<3.14,>=3.10"
-ag-ui-protocol = ">=0.1.10"
-fastapi = "^0.115.12"
-uvicorn = "^0.34.3"
-crewai = "^0.130.0"
+[tool.hatch.build.targets.wheel]
+packages = ["ag_ui_crewai"]
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.0"
-pytest-asyncio = "^0.24"
-# Dev-only dep. Lower bound at 0.27 so transitive deps (fastapi test
-# client) continue to resolve to the current 0.28.x branch rather than
-# being accidentally downgraded. Upper bound <0.29 (finding #21) so a
-# breaking 0.x minor release (httpx is pre-1.0 and has historically
-# shipped transport-API breaks at minor-version boundaries) cannot
-# silently land in CI. Bump this ceiling deliberately when verified
-# against the new minor.
-httpx = ">=0.27,<0.29"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.poetry.scripts]
-dev = "ag_ui_crewai.dojo:main"
+# Lean sdist: package + metadata only (~31 KB), matching the pre-migration Poetry sdist.
+[tool.hatch.build.targets.sdist]
+include = [
+    "ag_ui_crewai",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

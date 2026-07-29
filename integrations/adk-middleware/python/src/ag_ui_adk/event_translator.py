@@ -273,6 +273,9 @@ class EventTranslator:
             self._predict_state_by_tool[mapping.tool].append(mapping)
         self._emitted_predict_state_for_tools: set[str] = set()  # Track which tools have had PredictState emitted
         self._emitted_confirm_for_tools: set[str] = set()  # Track which tools have had confirm_changes emitted
+        # Track tool call IDs we've already emitted a REASONING_ENCRYPTED_VALUE for,
+        # so partial/non-partial replays of the same function call don't duplicate it.
+        self._emitted_signature_tool_call_ids: set[str] = set()
 
         # Track tool call IDs that are associated with predictive state tools
         # We suppress TOOL_CALL_RESULT events for these since the frontend handles
@@ -435,7 +438,14 @@ class EventTranslator:
                         # Yield only non-LRO function call events
                         async for event in self._translate_function_calls(non_lro_calls):
                             yield event
-                        
+
+                    # Emit REASONING_ENCRYPTED_VALUE for thought signatures attached to
+                    # function_call parts. Gemini attaches the signature to the tool call
+                    # part (not the thought-text part), so the reasoning path above never
+                    # sees it. Runs for both LRO and non-LRO calls present in this event.
+                    async for event in self._translate_function_call_signatures(adk_event):
+                        yield event
+
             # Handle function responses and yield the tool response event
             # this is essential for scenerios when user has to render function response at frontend
             if hasattr(adk_event, 'get_function_responses'):
@@ -910,6 +920,64 @@ class EventTranslator:
                         # Clean up tracking
                         self._active_tool_calls.pop(fc.id, None)
     
+    async def _translate_function_call_signatures(
+        self,
+        adk_event: ADKEvent,
+    ) -> AsyncGenerator[BaseEvent, None]:
+        """Emit REASONING_ENCRYPTED_VALUE for thought signatures on function_call parts.
+
+        Gemini attaches ``thought_signature`` (the encrypted chain-of-thought that
+        led to a tool call) to the ``function_call`` part rather than to the
+        thought-text part. The thought-text path in ``_translate_reasoning_content``
+        therefore never sees it, and the encrypted reasoning would be dropped.
+
+        This emits a ``ReasoningEncryptedValueEvent`` with ``subtype="tool-call"``
+        keyed by the tool call id, mirroring the ``subtype="message"`` emission for
+        thought-text signatures. Deduplicated per tool call id so partial/non-partial
+        replays of the same function call don't emit it twice.
+
+        Args:
+            adk_event: The ADK event whose parts may carry function-call signatures.
+
+        Yields:
+            ReasoningEncryptedValueEvent for each function_call part with a signature.
+        """
+        import base64
+
+        content = getattr(adk_event, "content", None)
+        parts = getattr(content, "parts", None) if content is not None else None
+        if not parts:
+            return
+
+        for part in parts:
+            func_call = getattr(part, "function_call", None)
+            sig = getattr(part, "thought_signature", None)
+            # thought_signature is always opaque bytes when present; anything else
+            # (e.g. None, or an unset attribute) means there is no signature.
+            if func_call is None or not isinstance(sig, (bytes, bytearray)):
+                continue
+
+            tool_call_id = getattr(func_call, "id", None)
+            if (
+                not isinstance(tool_call_id, str)
+                or not tool_call_id
+                or tool_call_id in self._emitted_signature_tool_call_ids
+            ):
+                continue
+            self._emitted_signature_tool_call_ids.add(tool_call_id)
+
+            encrypted_value = base64.b64encode(sig).decode("ascii")
+            yield ReasoningEncryptedValueEvent(
+                type=EventType.REASONING_ENCRYPTED_VALUE,
+                subtype="tool-call",
+                entity_id=tool_call_id,
+                encrypted_value=encrypted_value,
+            )
+            logger.debug(
+                "🧠 Emitted reasoning encrypted value (tool-call signature) for %s",
+                tool_call_id,
+            )
+
     async def _translate_function_calls(
         self,
         function_calls: list[types.FunctionCall],
@@ -1292,6 +1360,7 @@ class EventTranslator:
         self._emitted_predict_state_for_tools.clear()
         self._emitted_confirm_for_tools.clear()
         self._predictive_state_tool_call_ids.clear()
+        self._emitted_signature_tool_call_ids.clear()
         self._deferred_confirm_events.clear()
         # Reset reasoning state
         self._is_reasoning = False

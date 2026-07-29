@@ -19,10 +19,10 @@ jobs:
   ruby:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         persist-credentials: false
-    - uses: ruby/setup-ruby@6e5d382445ae5590b7449d8b3bc8cb1c2c27f617  # v1.317.0
+    - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b  # v1.321.0
       with:
         ruby-version: '3.4'
         # Built-in cache is fork-safe (fork PRs can't write to base repo cache)

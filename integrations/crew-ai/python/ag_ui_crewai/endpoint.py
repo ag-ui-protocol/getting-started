@@ -20,7 +20,6 @@ from crewai.utilities.events import (
 )
 from crewai.flow.flow import Flow
 from crewai.utilities.events.base_event_listener import BaseEventListener
-from crewai import Crew
 
 from ag_ui.core import (
     RunAgentInput,
@@ -50,7 +49,7 @@ from .events import (
 )
 from .context import flow_context
 from .sdk import litellm_messages_to_ag_ui_messages
-from .crews import ChatWithCrewFlow
+from .crews import ChatWithCrewFlow, CrewBaseInstance
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,7 +72,15 @@ __all__ = [
     "add_crewai_crew_fastapi_endpoint",
     "crewai_prepare_inputs",
     "FastAPICrewFlowEventListener",
+    "CrewBaseInstance",
 ]
+
+
+# ``CrewBaseInstance`` (the structural type for a ``@CrewBase`` crew) now
+# lives in ``crews.py`` alongside ``ChatWithCrewFlow`` — which also
+# annotates its constructor with it — and is imported above. It stays in
+# ``__all__`` so downstream callers keep importing it from
+# ``ag_ui_crewai.endpoint`` (CPK-7717 review round 2, finding 2).
 
 # Sentinel to distinguish "no item delivered" from a legitimate ``None``
 # queue payload (the happy-path stream-end sentinel). Used by the
@@ -1494,8 +1501,18 @@ def add_crewai_flow_fastapi_endpoint(app: FastAPI, flow: Flow, path: str = "/"):
         )
 
 
-def add_crewai_crew_fastapi_endpoint(app: FastAPI, crew: Crew, path: str = "/"):
+def add_crewai_crew_fastapi_endpoint(
+    app: FastAPI, crew: CrewBaseInstance, path: str = "/"
+):
     """Adds a CrewAI crew endpoint to the FastAPI app.
+
+    ``crew`` must be a crew wrapper exposing a ``crew()`` factory (see
+    :class:`CrewBaseInstance`) — a ``@CrewBase``-decorated instance or an
+    equivalent wrapper — NOT a bare :class:`crewai.Crew`. The deferred
+    ``ChatWithCrewFlow`` construction calls ``crew.crew()`` and reads the
+    crew name via ``_read_crew_name`` (which accepts either a
+    ``@CrewBase``'s ``_crew_name`` or a hand-rolled ``.name``; CPK-7717
+    defect 5 / review round 3).
 
     ChatWithCrewFlow construction is deferred to first request because the
     constructor calls crew_chat_generate_crew_chat_inputs which makes an LLM

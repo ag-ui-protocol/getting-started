@@ -9,7 +9,7 @@ authors = [
 ]
 requires-python = ">=3.10, <3.15"
 dependencies = [
-    "ag-ui-protocol>=0.1.15",
+    "ag-ui-protocol>=0.1.18",
     # A2UI recovery/error-handling loop (OSS-158) — framework-agnostic validator +
     # validate→retry loop shared with the LangGraph adapter and the a2ui-middleware
     # paint gate. 0.0.3 carries the A2UIToolParams/guidelines API (OSS-248); published

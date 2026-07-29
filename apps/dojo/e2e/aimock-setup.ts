@@ -557,6 +557,91 @@ export async function setupLLMock(): Promise<void> {
     },
   });
 
+  // CrewAI crew-RUN path (CPK-7717 defect 2 & 3). Distinct from crew_exit:
+  // here the user asks the crew to do real work, so the assistant must call
+  // the CREW tool. That tool's function name is the crew name itself
+  // ("CrewChatCrew" == CrewChatCrew.name / ChatInputs.crew_name), NOT
+  // crew_exit. ChatWithCrewFlow.chat() then runs crew.kickoff() (whose own
+  // internal agent LLM call ALSO routes through aimock — see the kickoff
+  // fixture below), records the crew output on state (defect 3), and — the
+  // P0 fix — issues a follow-up completion with tool_choice="none" so the
+  // assistant SPEAKS about the result instead of going silent (defect 2).
+  const CREW_CHAT_CREW_TOOL = "CrewChatCrew";
+  // The crew's kickoff result string. It becomes both state.outputs (defect 3)
+  // and the `tool`-role message content the defect-2 follow-up sees, so the
+  // follow-up + generic-catch-all guards below match on this exact value.
+  const CREW_RUN_OUTPUT =
+    "The crew planned your team offsite: pick a date, book a venue, and send invites.";
+  const hasCrewRunTool = (req: { tools?: { function: { name: string } }[] }) =>
+    req.tools?.some((t) => t.function.name === CREW_CHAT_CREW_TOOL) ?? false;
+
+  // Turn 1 — primary chat() completion: the assistant calls the crew tool.
+  // Gated to the FIRST pass (no tool result yet) so it never re-fires on the
+  // defect-2 follow-up (whose request still carries the same last user msg
+  // and the crew tool in its tools list).
+  mockServer.addFixture({
+    match: {
+      predicate: (req) => {
+        const lastUser = req.messages.filter((m) => m.role === "user").pop();
+        return (
+          hasCrewRunTool(req) &&
+          !hasToolResult(req) &&
+          textOf(lastUser?.content).includes("plan a team offsite")
+        );
+      },
+    },
+    response: {
+      toolCalls: [
+        {
+          name: CREW_CHAT_CREW_TOOL,
+          arguments: JSON.stringify({ user_message: "Plan a team offsite" }),
+        },
+      ],
+    },
+  });
+
+  // Crew-internal kickoff: crew.kickoff() runs the "General Assistant" agent,
+  // whose single LLM call routes here. crewai's no-tools agent requires the
+  // EXACT "Thought:/Final Answer:" format or it retries — returning it means
+  // the crew resolves in one pass and str(crew_output) == CREW_RUN_OUTPUT.
+  // Matched via the role_playing marker "Your personal goal is", which is
+  // unique to the agent-execution prompt (absent from the primary chat()
+  // system message and from the crew description-generation calls).
+  mockServer.addFixture({
+    match: {
+      predicate: (req) => sysIncludes(req.messages, "Your personal goal is"),
+    },
+    response: {
+      content:
+        "Thought: I now can give a great answer\nFinal Answer: " +
+        CREW_RUN_OUTPUT,
+    },
+  });
+
+  // Turn 2 — defect-2 follow-up completion: after the crew tool result lands,
+  // chat() re-completes with tool_choice="none" so the assistant produces
+  // visible text about the crew result. Matched by the crew tool result in
+  // history (last message is the `tool` role carrying CREW_RUN_OUTPUT). Must
+  // beat the generic tool-result catch-all below, which is why that catch-all
+  // explicitly skips this case (mirroring its crew_exit skip).
+  mockServer.addFixture({
+    match: {
+      predicate: (req) => {
+        const last = req.messages[req.messages.length - 1];
+        return (
+          last?.role === "tool" &&
+          textOf(last.content) === CREW_RUN_OUTPUT &&
+          hasCrewRunTool(req)
+        );
+      },
+    },
+    response: {
+      content:
+        "The crew finished planning your team offsite: pick a date, book a " +
+        "venue, and send invites. Anything else?",
+    },
+  });
+
   // Shared state: ADK/Strands use generate_recipe (not updateWorkingMemory).
   // The JSON fixture in shared-state.json returns updateWorkingMemory which
   // only works for CopilotKit frameworks (Agno/LangGraph). These predicate
@@ -1338,6 +1423,10 @@ export async function setupLLMock(): Promise<void> {
           (t) => t.function.name === "crew_exit",
         );
         if (hasCrewExitTool && textOf(last.content) === "Crew exited")
+          return false;
+        // Don't match the CrewAI crew-RUN follow-up (defect 2) — it has a
+        // dedicated fixture keyed on the crew output string.
+        if (hasCrewRunTool(req) && textOf(last.content) === CREW_RUN_OUTPUT)
           return false;
         return true;
       },

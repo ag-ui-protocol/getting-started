@@ -644,4 +644,60 @@ describe("convertAGUIMessagesToMastra", () => {
       expect("id" in result[2]).toBe(false);
     });
   });
+
+  describe("message id sanitization (OpenAI Responses API charset)", () => {
+    // AI SDK v5's `openai(model)` defaults to the Responses API, which rejects
+    // any `input[].id` outside `^[A-Za-z0-9_-]+$`. Client-minted ids replayed as
+    // prior-turn history must be coerced or the whole multi-turn request 400s
+    // (AI_APICallError: Invalid 'input[N].id').
+
+    it("leaves an already-valid id unchanged (common case is a no-op)", () => {
+      const messages: Message[] = [
+        { id: "msg-AD-dWkWJNkAbXmQx", role: "user", content: "hi" },
+      ];
+
+      const result = convertAGUIMessagesToMastra(messages);
+
+      expect((result[0] as any).id).toBe("msg-AD-dWkWJNkAbXmQx");
+    });
+
+    it("replaces out-of-charset characters with dashes for all roles", () => {
+      const messages: Message[] = [
+        { id: "msg+AD/dWk=", role: "user", content: "hi" },
+        {
+          id: "msg:with.dots",
+          role: "assistant",
+          content: "hello",
+          toolCalls: [],
+        },
+        {
+          id: "tool id⚡",
+          role: "tool",
+          content: "result",
+          toolCallId: "tc-1",
+        },
+      ];
+
+      const result = convertAGUIMessagesToMastra(messages);
+
+      expect((result[0] as any).id).toBe("msg-AD-dWk-");
+      expect((result[1] as any).id).toBe("msg-with-dots");
+      expect((result[2] as any).id).toBe("tool-id-");
+      // Every sanitized id is now Responses-API-legal.
+      for (const msg of result) {
+        expect((msg as any).id).toMatch(/^[A-Za-z0-9_-]+$/);
+      }
+    });
+
+    it("is deterministic so Mastra's upsert-by-id dedup still matches", () => {
+      const messages: Message[] = [
+        { id: "msg+AD/dWk=", role: "user", content: "hi" },
+      ];
+
+      const first = convertAGUIMessagesToMastra(messages);
+      const second = convertAGUIMessagesToMastra(messages);
+
+      expect((first[0] as any).id).toBe((second[0] as any).id);
+    });
+  });
 });
