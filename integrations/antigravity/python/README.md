@@ -1,0 +1,264 @@
+# AG-UI ⚡ Google Antigravity
+
+Implementation of the [AG-UI protocol](https://github.com/ag-ui-protocol/ag-ui)
+for [Google Antigravity](https://github.com/google-antigravity/antigravity-sdk-python).
+
+Antigravity is not a Python agent loop. The SDK drives a bundled Go
+`localharness` subprocess over a WebSocket, and that subprocess does real file
+and shell work on the host. So this is an **ADK-class integration** — stateful
+and session-based — not a stateless LangGraph-class one. The stream translation
+is small; the session lifecycle is the substance.
+
+## Why the HITL story is unusually clean
+
+Antigravity's hooks and custom tools are **async, awaited, and carry no
+timeout**. When the model needs a human, the Go harness calls into Python and
+blocks on the returned coroutine. That awaited coroutine is a *native suspension
+primitive*: the integration emits AG-UI events, parks an `asyncio.Future`, lets
+the SSE response for run *N* close, and resolves the future from run *N+1*. The
+model's tool result is the tool's actual return value — no proxy tool, no
+fire-and-forget long-running-tool workaround.
+
+This depends on the Go side not abandoning a pending hook while the stream is
+closed, which the SDK source could not answer. It was verified empirically
+(`tests/test_parking_gate.py`, and the live gate described below): the harness
+survived **45 s and 180 s** parks with the consumer detached and resumed
+correctly in both cases.
+
+## Install
+
+```bash
+pip install ag-ui-antigravity
+```
+
+`google-antigravity` ships platform-specific wheels (~32 MB) that bundle the
+`localharness` binary; no separate download step is needed.
+
+## Usage
+
+```python
+from ag_ui_antigravity import AntigravityAgent, create_antigravity_app
+
+agent = AntigravityAgent(
+    model="gemini-3.6-flash",
+    api_key="...",                       # or GEMINI_API_KEY in the environment
+    system_instructions="You are a helpful assistant.",
+    workspaces=["/path/to/a/sandbox"],
+)
+
+app = create_antigravity_app(agent, path="/")
+```
+
+Serve several demo agents from one process by passing a mapping:
+
+```python
+app = create_antigravity_app({
+    "agentic_chat": chat_agent,
+    "human_in_the_loop": hitl_agent,
+})
+```
+
+### OpenAI-compatible endpoints
+
+```python
+agent = AntigravityAgent(model="gpt-4.1-mini", base_url="http://localhost:11434")
+```
+
+Pass the **root** URL, not `.../v1` — the harness appends
+`/v1/chat/completions` itself. (The SDK's own docstring example is misleading
+on this point.)
+
+## Event mapping
+
+| Antigravity `Step` / signal | AG-UI event(s) |
+|---|---|
+| `run()` entry | `RUN_STARTED` |
+| first `content_delta` on a step | `TEXT_MESSAGE_START` |
+| subsequent `content_delta` | `TEXT_MESSAGE_CONTENT` (the delta, not `content`) |
+| same step reaches `DONE` | `TEXT_MESSAGE_END` |
+| `thinking_delta` | `THINKING_TEXT_MESSAGE_*` |
+| `TOOL_CALL` (built-in / MCP) | `TOOL_CALL_START` / `ARGS` / `END` / `RESULT` |
+| `start_subagent` | `STEP_STARTED` / `STEP_FINISHED` around the delegated work |
+| `FINISH.structured_output` | `STATE_SNAPSHOT` (or `CUSTOM`) |
+| iterator exhaustion | `RUN_FINISHED` |
+| raised `Antigravity*Error` | `RUN_ERROR` (except a mid-stream cancel, which ends `RUN_FINISHED`) |
+| parked hook (question / approval) | `RUN_FINISHED` with an interrupt outcome |
+| parked frontend tool | `RUN_FINISHED`, no outcome — the client replies with a `ToolMessage` |
+| step with `status=ERROR` | `RUN_ERROR` |
+
+Two details that only show up against a live harness:
+
+* Steps whose `source` is `USER` are the harness echoing the prompt back. They
+  are never translated — doing so would replay the user's own message as
+  assistant output.
+* **Failures usually arrive as a step, not an exception.** `receive_steps()`
+  raises only for `source=SYSTEM` errors carrying HTTP 400/401/403. Rate limits,
+  5xx and model-side failures are *yielded* with `status=ERROR`, so a loop that
+  only catches exceptions reports them to the client as an empty success. The
+  run loop inspects `status` for exactly this reason.
+* **Built-in tool results have no fixed key.** The harness reports a tool's
+  outcome by *growing* the `args` dict at DONE, under a tool-specific name
+  (`list_directory` adds `results`). Some tools — `view_file` — add nothing at
+  all, because their output goes to the model out of band. The translator
+  therefore takes whatever keys appeared after the call was first seen, and
+  emits an empty `TOOL_CALL_RESULT` when there are none, so clients close the
+  tool card instead of leaving it spinning.
+
+## Human-in-the-loop
+
+Three cases, one primitive (emit → park a Future → resolve from the next run):
+
+* **Frontend tools** — every `RunAgentInput.tools` entry becomes a custom async
+  Antigravity tool built from its JSON Schema. The client answers with a
+  `ToolMessage` carrying the `tool_call_id`.
+* **Model questions** — `OnInteractionHook` maps `AskQuestionInteractionSpec`
+  onto a `RunFinishedInterruptOutcome`; the client answers via
+  `RunAgentInput.resume`.
+* **Tool approval** (`tool_approval=True`) — `PreToolCallDecideHook` round-trips
+  an approval interrupt. Registering it also satisfies the SDK's mandatory
+  safety guard, so write and MCP tools stop raising without a separate policy.
+  It needs a client that implements the interrupt protocol — the dojo answers
+  `ToolMessage`s, not `resume` entries, so the demos leave it off.
+
+### One turn, several runs
+
+An Antigravity *turn* that parks on a human spans several AG-UI *runs*, and on
+each later run the harness re-delivers the steps of that turn it has already
+sent. Three pieces of state are therefore scoped to the turn, not the run, and
+are retired together by `AntigravitySession.reset_stream()`:
+
+* the `receive_steps()` iterator (and any in-flight `__anext__()`, which is
+  parked rather than cancelled — cancelling discards the step being delivered),
+* the `EventTranslator`, which records which steps and tool calls it has
+  already finished,
+* the bridge's per-turn frontend-tool results.
+
+Without this, every run re-translates the same tool call, the client re-executes
+it, and the conversation never converges.
+
+### Repeated tool calls
+
+The harness escalates a slow custom tool to a **background task** and lets the
+model continue without waiting for it. The model then commonly re-issues the
+call — sometimes with slightly different arguments — which would make the client
+run a side-effecting action a second time.
+
+So a frontend tool is dispatched to the client **at most once per turn**. An
+identical repeat gets the cached result; a repeat with different arguments gets
+a plain statement of what already ran, so the model reports the result instead
+of retrying. Set `deduplicate_tool_calls=False` if a tool is genuinely meant to
+run repeatedly within one turn.
+
+### Built-in tools worth disabling
+
+The harness exposes its whole built-in toolset by default. `search_web` returns
+an *empty* summary unless the harness has Google credentials — the model then
+retries it indefinitely and the conversation never settles. Pass a
+`CapabilitiesConfig(enabled_tools=[...])` naming only what the agent needs;
+`BuiltinTools.FINISH` must stay, since the harness uses it to end a turn. The
+chat demos in `examples/` enable nothing else.
+
+## Sessions
+
+`SessionManager` keys a live `Conversation` by `thread_id`.
+
+* **Hot resume** — a session with a parked coroutine is pinned in memory and is
+  never evicted by the idle sweeper. A suspended coroutine cannot be serialized.
+* **Cold resume** — a recycled session with nothing parked is rebuilt from
+  `conversation_id` + `session_continuation_mode` + `save_dir`.
+
+Because Antigravity fixes the tool list in the harness config at connect time,
+a client that changes its `tools` between runs forces a cold-resume rebuild
+rather than running against a stale list.
+
+## Operational notes
+
+* **Sandboxing.** One subprocess with real filesystem and shell access per
+  `thread_id`. Multi-tenant hosting needs per-thread workspace isolation,
+  resource caps, and reliable cleanup. Always set `workspaces=[...]`.
+* **SDK churn.** `google-antigravity` is young; the dependency is pinned to
+  `<0.2.0` deliberately.
+
+### Known gaps in `google-antigravity` 0.1.8 (OpenAI-compatible path)
+
+These are upstream, not integration bugs. They affect only `base_url` usage:
+
+1. **No API-key field.** `GemmaEndpoint` carries only `base_url`, and the Go
+   harness reads no `OPENAI_API_KEY`. The path targets unauthenticated local
+   servers (Ollama, LM Studio). Authenticated endpoints need a proxy that
+   injects the header — see `examples/server/openai_proxy.py`.
+2. **Gemini-shaped tool schemas.** Custom-tool schemas are generated with
+   `api_option="GEMINI_API"`, emitting proto-style uppercase types (`"STRING"`)
+   that OpenAI rejects. The example proxy normalizes them. Tools registered via
+   `ToolWithSchema` — which is how this integration builds *frontend* tools —
+   pass their schema through untouched and are unaffected.
+3. **`session_continuation_mode` dropped.** `LocalOpenAIAgentConfig.create_strategy`
+   does not forward it, disabling cold resume. Worked around by
+   `_ResumableOpenAIConfig` in `agent.py`.
+
+## Not implemented yet
+
+Deliberate gaps, so the surface above is not mistaken for more than it is:
+
+* **Triggers** (async inbound messages) and **multimodal input** — the SDK
+  supports both; nothing here maps them to AG-UI yet.
+* **`STATE_DELTA`** — structured output is emitted as whole snapshots only.
+* **MCP servers** — passed through to the SDK config and covered by the
+  approval hook, but not exercised by a live test.
+* **`predictive_state_updates` / `shared_state`** dojo features — the state
+  plumbing exists (`STATE_SNAPSHOT` from `structured_output`) but no demo agent
+  is wired for them, so they are not listed in the dojo menu.
+* Subagent bracketing is unit-tested against recorded step shapes, not against
+  a live multi-agent run.
+
+## Development
+
+```bash
+uv sync
+uv run pytest          # 201 unit tests; live tests are deselected by default
+```
+
+The live checks start a real harness subprocess and call a real model:
+
+```bash
+export OPENAI_API_KEY=...
+uv run pytest tests/ -m live
+```
+
+`tests/test_parking_gate.py` is the important one — it re-verifies the Go-side
+no-timeout property the whole HITL design depends on. Raise the park duration
+to reproduce the long soak:
+
+```bash
+PARK_SECONDS=180 uv run pytest tests/test_parking_gate.py -m live
+```
+
+### Dojo
+
+```bash
+# terminal 1
+cd examples
+ANTIGRAVITY_USE_OPENAI=1 OPENAI_API_KEY=... uv run dev     # serves on :8027
+
+# terminal 2
+cd apps/dojo && pnpm dev
+```
+
+`pnpm run-dojo-everything` starts it alongside the other integrations.
+
+Then open `/antigravity/feature/agentic_chat`.
+
+## Verification status
+
+Verified against `google-antigravity` 0.1.8 and `gpt-4.1-mini` via the example
+shim:
+
+| Check | Result |
+|---|---|
+| 201 unit tests (translator, bridge, sessions, endpoint) | pass |
+| 6 live tests (streaming, multi-turn, frontend-tool park/resume, built-in tools, SSE, parking gate) | pass |
+| 15 TypeScript tests + typecheck + build | pass |
+| Harness parked with the stream closed, then resumed (manual soak at 45 s and 180 s; the committed default is 30 s) | pass |
+| Dojo `agentic_chat`, `human_in_the_loop`, `tool_based_generative_ui`, `backend_tool_rendering` | pass, in-browser |
+| Multi-tool turn (`"weather in Tokyo? then set the background…"`) converges in 2 runs, 8/8 trials | pass |
+| `/capabilities` payload against `AgentCapabilitiesSchema` (zod) | valid |

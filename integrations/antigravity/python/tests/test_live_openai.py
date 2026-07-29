@@ -1,0 +1,314 @@
+"""Live end-to-end tests: real harness subprocess, real model, real HTTP.
+
+Opt-in -- these start a Go subprocess and spend tokens:
+
+    export OPENAI_API_KEY=...
+    pytest tests/test_live_openai.py -m live
+
+They exercise the whole path the dojo uses: FastAPI endpoint -> SSE ->
+AntigravityAgent -> SessionManager -> Antigravity harness -> OpenAI.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+import tempfile
+import uuid
+
+import httpx
+import pytest
+
+sys.path.insert(
+    0, os.path.join(os.path.dirname(__file__), "..", "examples", "server")
+)
+
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.skipif(
+        not os.environ.get("OPENAI_API_KEY"),
+        reason="OPENAI_API_KEY is required for live tests",
+    ),
+]
+
+MODEL = os.environ.get("ANTIGRAVITY_TEST_MODEL", "gpt-4.1-mini")
+
+
+@pytest.fixture(scope="module")
+def base_url():
+    from openai_proxy import start_background
+
+    return start_background(port=8955)
+
+
+@pytest.fixture(scope="module")
+def workspace():
+    with tempfile.TemporaryDirectory(prefix="ag-ui-antigravity-") as path:
+        yield path
+
+
+def run_input(thread_id, prompt, *, tools=None, messages=None, resume=None):
+    payload = {
+        "threadId": thread_id,
+        "runId": str(uuid.uuid4()),
+        "state": {},
+        "messages": messages
+        or [{"id": str(uuid.uuid4()), "role": "user", "content": prompt}],
+        "tools": tools or [],
+        "context": [],
+        "forwardedProps": {},
+    }
+    if resume is not None:
+        payload["resume"] = resume
+    return payload
+
+
+async def collect(agent, payload):
+    from ag_ui.core import RunAgentInput
+
+    events = []
+    async for event in agent.run(RunAgentInput.model_validate(payload)):
+        events.append(event)
+    return events
+
+
+def text_of(events):
+    return "".join(
+        e.delta for e in events if e.type == "TEXT_MESSAGE_CONTENT"
+    )
+
+
+def types_of(events):
+    return [e.type for e in events]
+
+
+def assert_lifecycle(events):
+    """AG-UI's core contract: one RUN_STARTED, exactly one terminal event."""
+    types = types_of(events)
+    assert types[0] == "RUN_STARTED"
+    assert types.count("RUN_STARTED") == 1
+    terminals = [t for t in types if t in ("RUN_FINISHED", "RUN_ERROR")]
+    assert len(terminals) == 1, f"expected one terminal event, got {terminals}"
+    assert types[-1] == terminals[0]
+    if "RUN_ERROR" in types:
+        assert "RUN_FINISHED" not in types
+
+
+@pytest.mark.asyncio
+async def test_streams_text_and_bookends_the_run(base_url, workspace):
+    from ag_ui_antigravity import AntigravityAgent
+
+    agent = AntigravityAgent(
+        model=MODEL,
+        base_url=base_url,
+        system_instructions="Answer in one short sentence.",
+        workspaces=[workspace],
+    )
+    try:
+        events = await asyncio.wait_for(
+            collect(agent, run_input("live-1", "Say exactly: hello from antigravity")),
+            180,
+        )
+    finally:
+        await agent.close()
+
+    assert_lifecycle(events)
+    types = types_of(events)
+    assert "TEXT_MESSAGE_START" in types
+    assert types.index("TEXT_MESSAGE_START") < types.index("TEXT_MESSAGE_END")
+    assert "hello from antigravity" in text_of(events).lower()
+
+
+@pytest.mark.asyncio
+async def test_multi_turn_reuses_the_session_and_keeps_history(base_url, workspace):
+    from ag_ui_antigravity import AntigravityAgent
+
+    agent = AntigravityAgent(
+        model=MODEL,
+        base_url=base_url,
+        system_instructions="Answer in one short sentence.",
+        workspaces=[workspace],
+    )
+    thread = "live-multiturn"
+    try:
+        first = await asyncio.wait_for(
+            collect(agent, run_input(thread, "My favourite colour is octarine. Acknowledge.")),
+            180,
+        )
+        assert_lifecycle(first)
+
+        second = await asyncio.wait_for(
+            collect(agent, run_input(thread, "What is my favourite colour?")), 180
+        )
+        assert_lifecycle(second)
+        # History lives in the harness process, proving the session was reused.
+        assert "octarine" in text_of(second).lower()
+        assert agent.session_manager.stats()["live_sessions"] == 1
+    finally:
+        await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_frontend_tool_parks_then_resumes_across_two_runs(base_url, workspace):
+    """Park on a client-executed tool, resume on the next run -- end to end."""
+    from ag_ui_antigravity import AntigravityAgent
+
+    tool = {
+        "name": "get_user_favorite_color",
+        "description": "Returns the current user's favourite colour.",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    }
+    agent = AntigravityAgent(
+        model=MODEL,
+        base_url=base_url,
+        system_instructions=(
+            "Always call get_user_favorite_color to answer colour questions. "
+            "After it returns, state the colour verbatim in one short sentence."
+        ),
+        workspaces=[workspace],
+    )
+    thread = "live-frontend-tool"
+    try:
+        # ---- run N: the tool parks, the run ends, the SSE closes ----
+        first = await asyncio.wait_for(
+            collect(agent, run_input(thread, "What is my favourite colour?", tools=[tool])),
+            180,
+        )
+        assert_lifecycle(first)
+        starts = [e for e in first if e.type == "TOOL_CALL_START"]
+        assert len(starts) == 1, types_of(first)
+        assert starts[0].tool_call_name == "get_user_favorite_color"
+        tool_call_id = starts[0].tool_call_id
+        assert "TOOL_CALL_END" in types_of(first)
+
+        # The harness is now parked on our coroutine with no stream attached.
+        session = agent.session_manager.get(thread)
+        assert session is not None and session.is_parked
+
+        # ---- run N+1: the client answers; the model continues ----
+        second = await asyncio.wait_for(
+            collect(
+                agent,
+                run_input(
+                    thread,
+                    "",
+                    tools=[tool],
+                    messages=[
+                        {
+                            "id": str(uuid.uuid4()),
+                            "role": "tool",
+                            "content": "chartreuse",
+                            "toolCallId": tool_call_id,
+                        }
+                    ],
+                ),
+            ),
+            180,
+        )
+        assert_lifecycle(second)
+        assert "chartreuse" in text_of(second).lower(), text_of(second)
+        assert not agent.session_manager.get(thread).is_parked
+    finally:
+        await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_builtin_tool_calls_are_reported(base_url, workspace):
+    from ag_ui_antigravity import AntigravityAgent
+
+    target = os.path.join(workspace, "greeting.txt")
+    with open(target, "w") as handle:
+        handle.write("the magic word is xyzzy\n")
+
+    agent = AntigravityAgent(
+        model=MODEL,
+        base_url=base_url,
+        system_instructions=(
+            "You have filesystem tools. Use them to answer questions about files."
+        ),
+        workspaces=[workspace],
+    )
+    try:
+        events = await asyncio.wait_for(
+            collect(
+                agent,
+                run_input(
+                    "live-builtin",
+                    f"List the files in {workspace}, then read {target} "
+                    "and tell me the magic word.",
+                ),
+            ),
+            240,
+        )
+    finally:
+        await agent.close()
+
+    assert_lifecycle(events)
+    types = types_of(events)
+    assert "TOOL_CALL_START" in types, types
+    # Every built-in call must be closed AND resolved, or clients leave the
+    # tool card spinning forever.
+    assert types.count("TOOL_CALL_START") == types.count("TOOL_CALL_END")
+    assert types.count("TOOL_CALL_START") == types.count("TOOL_CALL_RESULT")
+
+    # Whether the model narrates the secret or just surfaces it through the
+    # tool card is its choice; the integration's job is that it reaches the
+    # client on one of the two channels.
+    surfaced = text_of(events).lower() + " ".join(
+        (e.content or "").lower() for e in events if e.type == "TOOL_CALL_RESULT"
+    )
+    assert "xyzzy" in surfaced, surfaced[:400]
+
+    # Which built-ins the model picks is its own business, but any
+    # list_directory call must surface the listing it produced at DONE.
+    listing_ids = {
+        e.tool_call_id
+        for e in events
+        if e.type == "TOOL_CALL_START" and e.tool_call_name == "list_directory"
+    }
+    for result in events:
+        if result.type == "TOOL_CALL_RESULT" and result.tool_call_id in listing_ids:
+            assert "greeting.txt" in (result.content or ""), result.content
+
+
+@pytest.mark.asyncio
+async def test_sse_endpoint_serves_the_wire_format(base_url, workspace):
+    """Full HTTP path: FastAPI -> EventSourceResponse -> data: {json}."""
+    from ag_ui_antigravity import AntigravityAgent, create_antigravity_app
+
+    agent = AntigravityAgent(
+        model=MODEL,
+        base_url=base_url,
+        system_instructions="Answer in one short sentence.",
+        workspaces=[workspace],
+    )
+    app = create_antigravity_app({"agentic_chat": agent})
+
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", timeout=180
+        ) as client:
+            frames = []
+            async with client.stream(
+                "POST",
+                "/agentic_chat",
+                json=run_input("live-sse", "Say exactly: sse works"),
+            ) as response:
+                assert response.status_code == 200
+                assert "text/event-stream" in response.headers["content-type"]
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        frames.append(json.loads(line[len("data: "):]))
+    finally:
+        await agent.close()
+
+    assert frames[0]["type"] == "RUN_STARTED"
+    assert frames[0]["threadId"] == "live-sse"
+    assert frames[-1]["type"] == "RUN_FINISHED"
+    text = "".join(
+        f["delta"] for f in frames if f["type"] == "TEXT_MESSAGE_CONTENT"
+    )
+    assert "sse works" in text.lower()
