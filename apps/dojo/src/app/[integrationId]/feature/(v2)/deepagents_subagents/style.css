@@ -19,3 +19,16 @@
 .subagent-toolcall-body { margin: 0; padding: 0.5rem 0.625rem; white-space: pre-wrap; word-break: break-word; color: #334155; font-family: ui-monospace, Menlo, monospace; font-size: 0.6875rem; max-height: 180px; overflow: auto; }
 .subagent-toolcall-result { border-top: 1px dashed #e5e7eb; color: #475569; }
 @media (prefers-color-scheme: dark) { .subagent-toolcall { border-color: #334155; background: #0f172a; } .subagent-toolcall-head { background: #1e293b; } .subagent-toolcall-name { color: #e2e8f0; } .subagent-toolcall-body { color: #cbd5e1; } }
+
+/* Human-in-the-loop approval prompt (rendered by useInterrupt when a subagent
+   pauses via interrupt()). */
+.subagent-hitl { border: 1px solid #fcd34d; background: #fffbeb; border-radius: 0.625rem; padding: 0.75rem 0.875rem; margin: 0.5rem 0; max-width: 42rem; }
+.subagent-hitl-title { font-weight: 600; color: #92400e; font-size: 0.875rem; }
+.subagent-hitl-summary { margin-top: 0.375rem; color: #451a03; font-size: 0.8125rem; line-height: 1.35; }
+.subagent-hitl-actions { display: flex; gap: 0.5rem; margin-top: 0.625rem; }
+.subagent-hitl-actions button { font-size: 0.8125rem; font-weight: 600; padding: 0.3125rem 0.75rem; border-radius: 0.5rem; cursor: pointer; border: 1px solid transparent; }
+.subagent-hitl-approve { background: #16a34a; color: #fff; }
+.subagent-hitl-approve:hover { background: #15803d; }
+.subagent-hitl-reject { background: #fff; color: #b91c1c; border-color: #fca5a5; }
+.subagent-hitl-reject:hover { background: #fef2f2; }
+@media (prefers-color-scheme: dark) { .subagent-hitl { border-color: #b45309; background: #1c1403; } .subagent-hitl-title { color: #fcd34d; } .subagent-hitl-summary { color: #fde68a; } .subagent-hitl-reject { background: #1c1403; color: #fca5a5; } }

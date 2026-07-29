@@ -6,6 +6,7 @@ import {
   useAgent,
   UseAgentUpdate,
   useConfigureSuggestions,
+  useInterrupt,
   useSubagent,
   CopilotChat,
   CopilotChatConfigurationProvider,
@@ -350,12 +351,63 @@ function SubagentAttributionDemo() {
   useConfigureSuggestions({
     suggestions: [
       {
-        title: "Run the subagents",
-        message:
-          "Research the topic of octopus intelligence using your subagents and summarize the findings.",
+        title: "Ask (needs approval)",
+        message: "Why is the sky blue? Answer in one sentence.",
       },
     ],
     available: "always",
+  });
+
+  // HITL: the research subagent pauses via interrupt() before finalizing its
+  // answer. The LangGraph integration surfaces that as an `on_interrupt` event;
+  // useInterrupt renders this Approve/Reject prompt in the chat and resolve()
+  // sends the decision back with Command(resume=...) on the same thread, so the
+  // subagent continues from where it paused.
+  useInterrupt({
+    render: ({ event, resolve }) => {
+      // The `on_interrupt` payload arrives as a JSON string (the integration
+      // serializes the interrupt value), so parse it back into the object our
+      // subagent tool passed to interrupt().
+      const raw = event?.value;
+      let value: { summary?: string; question?: string } = {};
+      if (typeof raw === "string") {
+        try {
+          value = JSON.parse(raw);
+        } catch {
+          value = { question: raw };
+        }
+      } else if (raw && typeof raw === "object") {
+        value = raw as { summary?: string; question?: string };
+      }
+      return (
+        <div className="subagent-hitl" data-testid="subagent-hitl">
+          <div className="subagent-hitl-title">
+            ⏸ {value.question ?? "Approve this action?"}
+          </div>
+          {value.summary ? (
+            <div className="subagent-hitl-summary">{value.summary}</div>
+          ) : null}
+          <div className="subagent-hitl-actions">
+            <button
+              type="button"
+              className="subagent-hitl-approve"
+              data-testid="subagent-hitl-approve"
+              onClick={() => resolve({ approved: true })}
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              className="subagent-hitl-reject"
+              data-testid="subagent-hitl-reject"
+              onClick={() => resolve({ approved: false })}
+            >
+              Reject
+            </button>
+          </div>
+        </div>
+      );
+    },
   });
 
   return (

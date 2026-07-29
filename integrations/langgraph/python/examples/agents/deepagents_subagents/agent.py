@@ -1,20 +1,21 @@
-"""A deepagents supervisor that delegates to three specialized research
-subagents via the `task` tool, running them in parallel.
+"""A deepagents supervisor that delegates to a research subagent which pauses
+for human approval (HITL) before finalizing — the interrupt happens INSIDE the
+subagent.
 
-This demo exercises AG-UI SUBAGENT_STARTED / SUBAGENT_FINISHED attribution: a
-single research question fans out into three concurrent `task` delegations,
-each surfaced as its own subagent run with a distinct `subagent_id`. The dojo
-groups every subagent's messages (text + tool calls) under its own collapsible
-header, so a run shows three independent, concurrently-streaming groups.
-
-Each specialist is prompted to USE its tools (write_todos to plan, write_file
-to record notes) before answering, so the subagents produce visible tool-call
-activity — not just a text answer.
+This demo exercises AG-UI subagent attribution AND human-in-the-loop via a
+LangGraph `interrupt()` raised inside a subagent. The subagent calls the
+`request_human_approval` tool, which interrupts; the interrupt propagates to the
+top-level run, AG-UI surfaces it as an `on_interrupt` event, the dojo renders an
+Approve/Reject prompt (via CopilotKit's `useInterrupt`), and the user's decision
+is fed back with `Command(resume=...)` on the same thread so the subagent
+continues from where it paused.
 """
 
 import os
 
+from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+from langgraph.types import interrupt
 
 from deepagents import create_deep_agent
 from deepagents.middleware.subagents import SubAgent
@@ -22,106 +23,74 @@ from deepagents.middleware.subagents import SubAgent
 model = ChatOpenAI(model="gpt-4o-mini")
 
 
-def _specialist_prompt(role: str, focus: str, notes_file: str) -> str:
-    """Build a specialist system prompt that mandates tool use before answering.
+@tool
+def request_human_approval(answer_summary: str) -> str:
+    """Request the user's approval before finalizing your answer.
 
-    deepagents gives every subagent the built-in todo + filesystem tools
-    (write_todos, write_file, …) via middleware. Instructing the specialist to
-    use them makes the subagent's work visible as tool-call cards in the dojo,
-    rather than collapsing to a single text reply.
+    Args:
+        answer_summary: a one- or two-sentence summary of the answer you intend
+            to give the user.
+
+    Returns the user's decision.
     """
-    return (
-        f"You are a {role}. Focus area: {focus}.\n\n"
-        "Always do ALL of the following, in order, before writing your answer:\n"
-        "1. Call `write_todos` to lay out the 2-3 sub-questions you will cover.\n"
-        f"2. Call `write_file` to save your working notes to `{notes_file}`.\n"
-        "3. Then give a concise (3-5 sentence) assessment of your focus area.\n\n"
-        "Use the tools every time - do not answer from memory without first "
-        "planning with write_todos and recording notes with write_file. Be "
-        "specific and avoid hedging."
+    # interrupt() pauses the whole run (checkpointed at the top level) until the
+    # client resumes with Command(resume=<decision>). The dict is the payload the
+    # dojo renders in its approval UI.
+    decision = interrupt(
+        {
+            "type": "approval",
+            "summary": answer_summary,
+            "question": "The research assistant wants to finalize this answer. Approve?",
+        }
     )
+    return f"The user responded with: {decision}"
 
 
-cognition_researcher: SubAgent = {
-    "name": "cognition_researcher",
+research_assistant: SubAgent = {
+    "name": "research_assistant",
     "description": (
-        "Researches cognitive abilities: problem-solving, learning, memory, "
-        "tool use, and reasoning. Delegate for any question about how a "
-        "subject thinks or learns."
+        "Researches the user's question and MUST get human approval before "
+        "finalizing its answer."
     ),
-    "system_prompt": _specialist_prompt(
-        "cognition research specialist",
-        "cognitive abilities — problem-solving, learning, memory, reasoning",
-        "cognition_notes.md",
+    "system_prompt": (
+        "You are a research assistant. When given a question:\n"
+        "1. Decide on a concise (2-3 sentence) answer.\n"
+        "2. You MUST call the `request_human_approval` tool exactly once, passing "
+        "a short summary of that intended answer, and wait for the decision.\n"
+        "3. If the user's decision indicates approval, give the final answer. If "
+        "they did NOT approve, briefly revise into a shorter, safer answer and "
+        "give that instead.\n"
+        "NEVER give a final answer without first calling `request_human_approval`."
     ),
+    "tools": [request_human_approval],
 }
 
-behavior_researcher: SubAgent = {
-    "name": "behavior_researcher",
-    "description": (
-        "Researches behavior: social interaction, communication, and "
-        "personality. Delegate for any question about how a subject acts or "
-        "interacts."
-    ),
-    "system_prompt": _specialist_prompt(
-        "behavioral research specialist",
-        "observable behavior — social interaction, communication, personality",
-        "behavior_notes.md",
-    ),
-}
+SUPERVISOR_PROMPT = """You are a research supervisor with one specialist subagent: \
+`research_assistant`.
 
-neuroscience_researcher: SubAgent = {
-    "name": "neuroscience_researcher",
-    "description": (
-        "Researches the biological substrate: nervous system, brain or neural "
-        "structure, and the mechanisms behind behavior. Delegate for any "
-        "question about the underlying biology."
-    ),
-    "system_prompt": _specialist_prompt(
-        "neuroscience research specialist",
-        "biological substrate — nervous system organization, neural mechanisms",
-        "neuroscience_notes.md",
-    ),
-}
+For EVERY user question you MUST delegate to it: call the `task` tool once with \
+`subagent_type="research_assistant"` and pass the user's question as the \
+description. Do not answer from your own knowledge. Once the subagent returns, \
+relay its final answer to the user in one short paragraph."""
 
-SUBAGENTS = [cognition_researcher, behavior_researcher, neuroscience_researcher]
-
-SUPERVISOR_PROMPT = """You are a research supervisor with three specialist \
-subagents: `cognition_researcher`, `behavior_researcher`, and \
-`neuroscience_researcher`.
-
-For EVERY user question you MUST consult ALL THREE specialists, and you MUST run \
-them IN PARALLEL. In a SINGLE step, emit three `task` tool calls at once — one \
-with `subagent_type="cognition_researcher"`, one with \
-`subagent_type="behavior_researcher"`, and one with \
-`subagent_type="neuroscience_researcher"` — each asking that specialist to \
-research its angle of the user's question.
-
-Do NOT call the specialists one at a time, and do NOT wait for one to finish \
-before starting the next — issue all three task calls together so they execute \
-concurrently. Once all three have responded, synthesize their findings into a \
-single, concise final answer for the user."""
-
-# Conditionally use a checkpointer based on the environment (matches the
-# pattern used by the sibling example agents).
+# HITL requires a checkpointer so the interrupt can be persisted and resumed.
 is_fast_api = os.environ.get("LANGGRAPH_FAST_API", "false").lower() == "true"
 
 if is_fast_api:
-    # For CopilotKit and other contexts, use MemorySaver
     from langgraph.checkpoint.memory import MemorySaver
 
     graph = create_deep_agent(
         model=model,
         tools=[],
         system_prompt=SUPERVISOR_PROMPT,
-        subagents=SUBAGENTS,
+        subagents=[research_assistant],
         checkpointer=MemorySaver(),
     )
 else:
-    # When running in LangGraph API/dev, don't use a custom checkpointer
+    # LangGraph API/dev provides its own persistence.
     graph = create_deep_agent(
         model=model,
         tools=[],
         system_prompt=SUPERVISOR_PROMPT,
-        subagents=SUBAGENTS,
+        subagents=[research_assistant],
     )

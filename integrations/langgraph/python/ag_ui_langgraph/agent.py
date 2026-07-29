@@ -798,6 +798,12 @@ class LangGraphAgent:
             for ev in self.handle_node_change(None):
                 yield ev
 
+            # Finish any open subagents before RUN_FINISHED. This is required
+            # even on the interrupt path: an interrupt surfaces the pause by
+            # ENDING the run with RUN_FINISHED, and the AG-UI client forbids
+            # RUN_FINISHED while a subagent is still active. A subagent suspended
+            # at a HITL interrupt is therefore finished here; on resume it
+            # re-emits SUBAGENT_STARTED (the run replays) and finishes again.
             for sub_ev in drain_subagents(self.active_run):
                 yield self._dispatch_event(sub_ev)
 
