@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import tempfile
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Sequence
 
 from ag_ui.core import (
@@ -38,6 +39,7 @@ from google.antigravity import (
 from google.antigravity import types as ag_types
 
 from .event_translator import EventTranslator, step_failure
+from .harness_pool import HarnessPool, to_pooled
 from .session_manager import SessionLimitExceeded, SessionManager, tool_signature
 from .ui_bridge import UIBridge
 
@@ -70,6 +72,44 @@ class _ResumableOpenAIConfig(LocalOpenAIAgentConfig):
         return strategy
 
 
+class _PooledLocalAgentConfig(LocalAgentConfig):
+    """Native path, sharing a harness process via ``HarnessPool``.
+
+    ``create_strategy`` is the SDK's documented seam for choosing how a backend
+    is reached, and ``ConnectionStrategy`` is where process management belongs,
+    so pooling is selected here and nowhere else. ``Agent`` is untouched.
+    """
+
+    harness_pool: HarnessPool
+
+    def create_strategy(self, *, tool_runner: Any, hook_runner: Any):
+        return to_pooled(
+            super().create_strategy(
+                tool_runner=tool_runner, hook_runner=hook_runner
+            ),
+            pool=self.harness_pool,
+        )
+
+
+class _PooledResumableOpenAIConfig(_ResumableOpenAIConfig):
+    """OpenAI-compatible path, sharing a harness process.
+
+    Composes with ``_ResumableOpenAIConfig`` rather than duplicating it: the
+    superclass restores ``session_continuation_mode`` first, then the strategy
+    is wrapped so it takes its process from the pool.
+    """
+
+    harness_pool: HarnessPool
+
+    def create_strategy(self, *, tool_runner: Any, hook_runner: Any):
+        return to_pooled(
+            super().create_strategy(
+                tool_runner=tool_runner, hook_runner=hook_runner
+            ),
+            pool=self.harness_pool,
+        )
+
+
 class AntigravityAgent:
     """Wraps a Google Antigravity agent for the AG-UI protocol."""
 
@@ -100,6 +140,10 @@ class AntigravityAgent:
         parked_timeout_seconds: int = 7200,
         max_sessions: int = 50,
         session_manager: Optional[SessionManager] = None,
+        # Harness process pooling
+        max_conversations_per_process: int = 8,
+        harness_idle_grace_seconds: float = 30.0,
+        harness_pool: Optional[HarnessPool] = None,
     ):
         """Creates the adapter.
 
@@ -115,6 +159,13 @@ class AntigravityAgent:
           tool_approval: Route every non-frontend tool call through an AG-UI
             approval interrupt. Also satisfies the SDK's mandatory safety guard.
           structured_output_as: ``"state"`` (STATE_SNAPSHOT) or ``"custom"``.
+          max_conversations_per_process: How many conversations share one Go
+            harness process. Antigravity configures tools, model, capabilities
+            and ``workspaces`` per *conversation* (over the WebSocket) and only
+            ``save_dir``/``env`` per *process*, so sharing is safe and costs
+            ~1 MB per extra idle conversation instead of ~95 MB. The default is
+            chosen for blast radius -- one dead process takes every conversation
+            on it -- not for memory. Set to 1 for one process per thread.
           deduplicate_tool_calls: Dispatch a frontend tool to the client at most
             once per Antigravity turn. An identical repeat is answered from the
             cached result; a repeat with different arguments gets a plain
@@ -153,10 +204,43 @@ class AntigravityAgent:
             parked_timeout_seconds=parked_timeout_seconds,
             max_sessions=max_sessions,
         )
+        # Owned unless injected, and torn down by close() in that case only.
+        self._owns_pool = harness_pool is None
+        self._pool = harness_pool or HarnessPool(
+            max_conversations_per_process=max_conversations_per_process,
+            idle_grace_seconds=harness_idle_grace_seconds,
+        )
 
     @property
     def session_manager(self) -> SessionManager:
         return self._sessions
+
+    @property
+    def harness_pool(self) -> HarnessPool:
+        return self._pool
+
+    def _resolved_save_dir(self) -> str:
+        """One save directory for every session this adapter creates.
+
+        Left to itself the SDK calls ``tempfile.mkdtemp()`` per *config*, so
+        each session would get a fresh directory. That breaks two things:
+
+        * cold resume, which reconstructs a conversation from
+          ``conversation_id`` + ``save_dir`` -- against a brand-new empty
+          directory the harness has nothing to restore;
+        * pooling, since ``save_dir`` is fixed at process start and is part of
+          the pool's partition key, so a per-session directory means a process
+          per session.
+
+        Created lazily so an adapter that never runs leaves no directory behind.
+        """
+        if self._save_dir is None:
+            self._save_dir = tempfile.mkdtemp(prefix="ag_ui_antigravity_")
+            logger.info(
+                "No save_dir given; this adapter's sessions will share %s",
+                self._save_dir,
+            )
+        return self._save_dir
 
     def builtin_enabled(self, tool: "ag_types.BuiltinTools") -> bool:
         """True when ``tool`` survives this agent's ``CapabilitiesConfig``.
@@ -187,7 +271,13 @@ class AntigravityAgent:
         )
 
     async def close(self) -> None:
-        await self._sessions.stop()
+        # Sessions first: each one disconnects its conversation and returns its
+        # slot, so the pool has nothing live left to tear down.
+        try:
+            await self._sessions.stop()
+        finally:
+            if self._owns_pool:
+                await self._pool.shutdown()
 
     # ------------------------------------------------------------------
     # Config construction
@@ -223,7 +313,7 @@ class AntigravityAgent:
             "mcp_servers": self._mcp_servers,
             "subagents": self._subagents,
             "workspaces": self._workspaces,
-            "save_dir": self._save_dir,
+            "save_dir": self._resolved_save_dir(),
             "response_schema": self._response_schema,
         }
         if previous_conversation_id:
@@ -245,8 +335,11 @@ class AntigravityAgent:
 
         if self._base_url:
             return Agent(
-                _ResumableOpenAIConfig(
-                    model=self._model, base_url=self._base_url, **common
+                _PooledResumableOpenAIConfig(
+                    model=self._model,
+                    base_url=self._base_url,
+                    harness_pool=self._pool,
+                    **common,
                 )
             )
         config_kwargs = dict(common)
@@ -254,7 +347,9 @@ class AntigravityAgent:
             config_kwargs["model"] = self._model
         if self._api_key:
             config_kwargs["api_key"] = self._api_key
-        return Agent(LocalAgentConfig(**config_kwargs))
+        return Agent(
+            _PooledLocalAgentConfig(harness_pool=self._pool, **config_kwargs)
+        )
 
     # ------------------------------------------------------------------
     # Run
