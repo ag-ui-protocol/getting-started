@@ -565,15 +565,17 @@ def test_native_thinking_flushed_before_next_event():
     assert [e.type for e in out] == [
         EventType.REASONING_MESSAGE_END,
         EventType.REASONING_END,
-        EventType.TEXT_MESSAGE_CHUNK,
+        EventType.TEXT_MESSAGE_START,
+        EventType.TEXT_MESSAGE_CONTENT,
     ]
-    # Closed: a later non-thinking event no longer re-flushes.
+    # Closed: a later non-thinking event no longer re-flushes reasoning, and the
+    # same open message_id continues with CONTENT (no fresh START).
     again = tr.translate(
         BridgedTextMessageChunkEvent(
             type=EventType.TEXT_MESSAGE_CHUNK, message_id="m", role="assistant", delta="!"
         )
     )
-    assert [e.type for e in again] == [EventType.TEXT_MESSAGE_CHUNK]
+    assert [e.type for e in again] == [EventType.TEXT_MESSAGE_CONTENT]
 
 
 def test_native_thinking_flushed_on_finalize():
@@ -774,7 +776,7 @@ class _NativeThinkingFlow(Flow):
 async def test_litellm_reasoning_closes_before_answer_text_e2e():
     """The full reasoning lifecycle is emitted, and it CLOSES
     (REASONING_MESSAGE_END + REASONING_END) BEFORE the first answer
-    TEXT_MESSAGE_CHUNK. Deleting either ``_close_reasoning()`` hook in
+    TEXT_MESSAGE_START. Deleting either ``_close_reasoning()`` hook in
     ``sdk.py`` moves the close after the text (only the finally would fire), so
     this ordering assertion fails."""
     payloads = _decode_sse(await _collect(ep._run_flow_frame_stream(
@@ -787,10 +789,10 @@ async def test_litellm_reasoning_closes_before_answer_text_e2e():
     types = [p["type"] for p in payloads]
     for t in (
         "REASONING_START", "REASONING_MESSAGE_START", "REASONING_MESSAGE_CONTENT",
-        "REASONING_MESSAGE_END", "REASONING_END", "TEXT_MESSAGE_CHUNK",
+        "REASONING_MESSAGE_END", "REASONING_END", "TEXT_MESSAGE_START",
     ):
         assert t in types, types
-    first_text = types.index("TEXT_MESSAGE_CHUNK")
+    first_text = types.index("TEXT_MESSAGE_START")
     # Every reasoning event precedes the answer text.
     assert types.index("REASONING_START") < first_text
     assert types.index("REASONING_MESSAGE_END") < first_text

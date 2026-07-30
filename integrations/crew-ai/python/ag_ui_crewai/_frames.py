@@ -48,16 +48,14 @@ raw event by ``frame.id`` the moment its frame is consumed, so our buffer stays
 proportional to in-flight (not total) frames. If a future crewai release makes
 frame retention opt-out, revisit the session consumption in ``endpoint.py``.
 
-SWAPPABLE EMISSION SHAPE: CrewAI is currently
-the only integration emitting TEXT_MESSAGE_CHUNK / TOOL_CALL_CHUNK (chunks)
-rather than the START/CONTENT/END triples the six other integrations emit. That
-final choice belongs to a Parity-lane ticket, not this migration. The translator
-therefore routes LLM text / LLM-tool-call emission through a single
-``emission_shape`` strategy that DEFAULTS to ``"chunks"`` so this migration is
-byte-for-byte behavior-preserving on that channel. The ``"triples"`` strategy is
-a deliberate NotImplementedError placeholder for the STREAMED channel. The
-BACKEND tool path has the full args up front, so it implements both shapes and
-just follows ``emission_shape``.
+EMISSION SHAPE: streamed LLM text / tool-call output ships as START/CONTENT/END
+triples by default (the canonical discrete form any AG-UI consumer can apply);
+``emission_shape="chunks"`` opts back into the previous CHUNK form. The message /
+tool-call open-close lifecycle lives in a single ``EmissionShaper`` shared by both
+transports, so the wire shape never depends on the installed crewai version. STEP,
+reasoning, backend-tool and MCP lifecycles are owned elsewhere; the shaper only
+tracks the streamed text message and streamed tool calls, and is flushed before
+any boundary that must not interleave with an open message.
 
 MCP EVENTS are the ONE exception to "chunks-only": crewai's discrete
 MCP tool executions (name + full args + result arrive together, not streamed)
@@ -88,6 +86,9 @@ from ag_ui.core import (
 from ag_ui.core.events import (
     RawEvent,
     TextMessageChunkEvent,
+    TextMessageStartEvent,
+    TextMessageContentEvent,
+    TextMessageEndEvent,
     ToolCallChunkEvent,
     ToolCallStartEvent,
     ToolCallArgsEvent,
@@ -219,6 +220,196 @@ def _agent_role(event: Any) -> str:
     return _coerce_name(role, "agent")
 
 
+class EmissionShaper:
+    """Streamed text / tool-call open-close state for START/CONTENT/END triples.
+
+    Shared by both transports: the StreamFrame translator delegates its streamed
+    text / tool handling here, and the legacy driver runs its wire events through
+    :meth:`reshape`. Under ``"chunks"`` it is a pure passthrough of the CHUNK wire
+    (no open-close reshaping), the opt-out for clients that prefer chunks.
+    """
+
+    def __init__(
+        self,
+        shape: str = "triples",
+        *,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        if shape not in _SUPPORTED_EMISSION_SHAPES:
+            raise ValueError(
+                f"Unknown emission_shape {shape!r}; "
+                f"expected one of {sorted(_SUPPORTED_EMISSION_SHAPES)}"
+            )
+        self.shape = shape
+        self._thread_id = thread_id
+        self._run_id = run_id
+        self._text_open = False
+        self._open_message_id: str | None = None
+        self._open_tool_calls: list[str] = []
+        self._closed_tool_calls: set[str] = set()
+
+    @property
+    def open_tool_calls(self) -> tuple[str, ...]:
+        return tuple(self._open_tool_calls)
+
+    def text(self, event: Any) -> list[Any]:
+        message_id = getattr(event, "message_id", None)
+        role = getattr(event, "role", None)
+        delta = getattr(event, "delta", None)
+        if self.shape == "chunks":
+            return [
+                TextMessageChunkEvent(
+                    type=EventType.TEXT_MESSAGE_CHUNK,
+                    message_id=message_id,
+                    role=role,
+                    delta=delta,
+                )
+            ]
+        out: list[Any] = []
+        if (
+            self._text_open and message_id is not None
+            and message_id != self._open_message_id
+        ) or self._open_tool_calls:
+            out.extend(self.flush())
+        if not self._text_open:
+            self._text_open = True
+            # message_id is a required str on the triple events; a producer that
+            # omits it gets a generated id so START/CONTENT/END stay paired.
+            self._open_message_id = message_id or uuid.uuid4().hex
+            out.append(
+                TextMessageStartEvent(
+                    type=EventType.TEXT_MESSAGE_START,
+                    message_id=self._open_message_id,
+                    role=role or "assistant",
+                )
+            )
+        if delta is not None:
+            out.append(
+                TextMessageContentEvent(
+                    type=EventType.TEXT_MESSAGE_CONTENT,
+                    message_id=self._open_message_id,
+                    delta=delta,
+                )
+            )
+        return out
+
+    def tool(self, event: Any) -> list[Any]:
+        tool_call_id = getattr(event, "tool_call_id", None)
+        tool_call_name = getattr(event, "tool_call_name", None)
+        delta = getattr(event, "delta", None)
+        if self.shape == "chunks":
+            # Pure passthrough of the CHUNK wire as received.
+            return [
+                ToolCallChunkEvent(
+                    type=EventType.TOOL_CALL_CHUNK,
+                    tool_call_id=tool_call_id,
+                    tool_call_name=tool_call_name,
+                    parent_message_id=getattr(event, "parent_message_id", None),
+                    delta=delta,
+                )
+            ]
+        out: list[Any] = []
+        if self._text_open:
+            out.extend(self.flush(tools=False))
+        if tool_call_id is not None and tool_call_id in self._open_tool_calls:
+            if delta is not None:
+                out.append(
+                    ToolCallArgsEvent(
+                        type=EventType.TOOL_CALL_ARGS,
+                        tool_call_id=tool_call_id,
+                        delta=delta,
+                    )
+                )
+            return out
+        if tool_call_id is not None and tool_call_id in self._closed_tool_calls:
+            _LOGGER.error(
+                "ag-ui-crewai dropped a TOOL_CALL_CHUNK for the already-closed call "
+                "%r: reopening it would duplicate the tool call client-side "
+                "(thread=%s run=%s)",
+                tool_call_id,
+                self._thread_id,
+                self._run_id,
+            )
+            return out
+        if tool_call_id is None or tool_call_name is None:
+            _LOGGER.error(
+                "ag-ui-crewai dropped a TOOL_CALL_CHUNK with no open call to attach "
+                "to: the first chunk must carry tool_call_id and tool_call_name "
+                "(got id=%r name=%r, thread=%s run=%s)",
+                tool_call_id,
+                tool_call_name,
+                self._thread_id,
+                self._run_id,
+            )
+            return out
+        self._open_tool_calls.append(tool_call_id)
+        out.append(
+            ToolCallStartEvent(
+                type=EventType.TOOL_CALL_START,
+                tool_call_id=tool_call_id,
+                tool_call_name=tool_call_name,
+                parent_message_id=getattr(event, "parent_message_id", None),
+            )
+        )
+        if delta is not None:
+            out.append(
+                ToolCallArgsEvent(
+                    type=EventType.TOOL_CALL_ARGS,
+                    tool_call_id=tool_call_id,
+                    delta=delta,
+                )
+            )
+        return out
+
+    def flush(self, *, tools: bool = True) -> list[Any]:
+        """Close the open streamed text message, and (when ``tools``) tool calls."""
+        if self.shape == "chunks":
+            return []
+        out: list[Any] = []
+        if self._text_open:
+            out.append(
+                TextMessageEndEvent(
+                    type=EventType.TEXT_MESSAGE_END,
+                    message_id=self._open_message_id,
+                )
+            )
+            self._text_open = False
+            self._open_message_id = None
+        if tools and self._open_tool_calls:
+            for tool_call_id in reversed(self._open_tool_calls):
+                out.append(
+                    ToolCallEndEvent(
+                        type=EventType.TOOL_CALL_END, tool_call_id=tool_call_id
+                    )
+                )
+                self._closed_tool_calls.add(tool_call_id)
+            self._open_tool_calls = []
+        return out
+
+    def reshape(self, event: Any) -> list[Any]:
+        """Reshape one already-wire event (the legacy driver's queue output).
+
+        Streamed text / tool chunks become triples; a boundary event flushes the
+        open streamed message / tool call first, so the legacy transport emits the
+        same shape as the StreamFrame path. Passthrough under ``"chunks"``.
+        """
+        if self.shape == "chunks":
+            return [event]
+        event_type = getattr(event, "type", None)
+        if event_type == EventType.TEXT_MESSAGE_CHUNK:
+            return self.text(event)
+        if event_type == EventType.TOOL_CALL_CHUNK:
+            return self.tool(event)
+        if event_type == EventType.STATE_SNAPSHOT or event_type == EventType.CUSTOM:
+            # Progressive side-channel: does NOT close the streamed message/tools.
+            return [event]
+        if event_type == EventType.MESSAGES_SNAPSHOT:
+            # Method-finish authoritative snapshot: close streamed sequences first.
+            return [*self.flush(), event]
+        return [*self.flush(), event]
+
+
 class StreamFrameTranslator:
     """Stateless-ish mapper from a RAW crewai/bridge event to AG-UI events.
 
@@ -240,7 +431,7 @@ class StreamFrameTranslator:
         thread_id: str,
         run_id: str,
         state_provider: Callable[[], Any],
-        emission_shape: str = "chunks",
+        emission_shape: str = "triples",
         hitl_options: HITLOptions | None = None,
         resumed: bool = False,
     ) -> None:
@@ -253,6 +444,11 @@ class StreamFrameTranslator:
         self._run_id = run_id
         self._state_provider = state_provider
         self.emission_shape = emission_shape
+        # The streamed text / tool-call triple lifecycle, shared with the legacy
+        # driver via ``reshape`` so the shape never depends on the transport.
+        self._shaper = EmissionShaper(
+            emission_shape, thread_id=thread_id, run_id=run_id
+        )
         self._hitl_options = hitl_options or HITLOptions()
         # True for a RESUMED run: the method that was suspended finishes in a run
         # that never saw its start, so its step has to be opened before it can be
@@ -357,7 +553,38 @@ class StreamFrameTranslator:
         events = self._translate_non_thinking(event)
         return prefix + events if prefix else events
 
+    # Event types after which an open streamed text message / tool call must be
+    # closed: any run/step/tool boundary. Text and tool chunks manage their own
+    # lifecycle; STATE_SNAPSHOT / CUSTOM are progressive side-channels that do NOT
+    # close the streamed message; reasoning is a separate channel.
+    _MESSAGE_FLUSH_BOUNDARIES = frozenset(
+        {
+            _FLOW_FINISHED,
+            _METHOD_STARTED,
+            _METHOD_FINISHED,
+            _METHOD_FAILED,
+            _CREW_STARTED,
+            _CREW_COMPLETED,
+            _CREW_FAILED,
+            _AGENT_STARTED,
+            _AGENT_COMPLETED,
+            _AGENT_ERROR,
+            _TOOL_USAGE_FINISHED,
+            EventType.TOOL_CALL_RESULT,
+        }
+    )
+
     def _translate_non_thinking(self, event: Any) -> list[Any]:
+        # Close any open streamed message / tool call before a boundary event so a
+        # triple never spans a step, snapshot, tool result, or terminal.
+        event_type = getattr(event, "type", None)
+        if event_type in self._MESSAGE_FLUSH_BOUNDARIES or is_mcp_event(event):
+            flush = self._shaper.flush()
+            if flush:
+                return flush + self._dispatch_non_thinking(event)
+        return self._dispatch_non_thinking(event)
+
+    def _dispatch_non_thinking(self, event: Any) -> list[Any]:
         event_type = getattr(event, "type", None)
 
         if event_type == _FLOW_STARTED:
@@ -540,6 +767,15 @@ class StreamFrameTranslator:
         # legacy listener.
         return []
 
+    def close_pending(self) -> list[Any]:
+        """Close open streamed message / tool sequences before a terminal RUN_ERROR.
+
+        Open STEPS / reasoning are left to the error path\'s own handling; this only
+        balances the streamed triples the shaper owns so a RUN_ERROR mid-message does
+        not leave an unterminated START on the wire.
+        """
+        return self._shaper.flush()
+
     def finalize(self) -> list[Any]:
         """Belt-and-braces terminal.
 
@@ -562,7 +798,8 @@ class StreamFrameTranslator:
         # already self-closed so this is a no-op), then STEP_FINISHED (drain
         # boundaries deepest-first so no dangling STEP_STARTED; also balances a
         # method an interrupt paused mid-flight), then the terminal event.
-        events: list[Any] = self.flush_open_reasoning()
+        events: list[Any] = list(self._shaper.flush())
+        events.extend(self.flush_open_reasoning())
         events.extend(step_finished_event(b) for b in self._tracker.drain_all())
         interrupt = self._build_interrupt()
         if interrupt is not None:
@@ -859,46 +1096,13 @@ class StreamFrameTranslator:
             )
         return events
 
-    # -- emission-shape strategy (default "chunks") -----------------------
+    # -- emission-shape strategy (delegated to the shared shaper) ----------
 
     def _text_events(self, event: Any) -> list[Any]:
-        if self.emission_shape == "chunks":
-            return [
-                TextMessageChunkEvent(
-                    type=EventType.TEXT_MESSAGE_CHUNK,
-                    message_id=getattr(event, "message_id", None),
-                    role=getattr(event, "role", None),
-                    delta=getattr(event, "delta", None),
-                )
-            ]
-        # TODO(Parity lane): emit TEXT_MESSAGE_START / _CONTENT / _END
-        # triples here to match the other six integrations. Do NOT flip the
-        # default in this migration (it must stay behavior-preserving on the
-        # wire).
-        raise NotImplementedError(
-            "emission_shape='triples' is a Parity-lane placeholder; "
-            "the StreamFrame migration ships the behavior-preserving "
-            "'chunks' shape only."
-        )
+        return self._shaper.text(event)
 
     def _tool_events(self, event: Any) -> list[Any]:
-        if self.emission_shape == "chunks":
-            return [
-                ToolCallChunkEvent(
-                    type=EventType.TOOL_CALL_CHUNK,
-                    tool_call_id=getattr(event, "tool_call_id", None),
-                    tool_call_name=getattr(event, "tool_call_name", None),
-                    parent_message_id=getattr(event, "parent_message_id", None),
-                    delta=getattr(event, "delta", None),
-                )
-            ]
-        # TODO(Parity lane): TOOL_CALL_START / _ARGS / _END triples — see
-        # the note in ``_text_events``.
-        raise NotImplementedError(
-            "emission_shape='triples' is a Parity-lane placeholder; "
-            "the StreamFrame migration ships the behavior-preserving "
-            "'chunks' shape only."
-        )
+        return self._shaper.tool(event)
 
     # -- backend tool execution -------------------------------------------
 
@@ -1115,6 +1319,7 @@ _RECOGNIZED_EVENT_TYPES = frozenset(
         _FLOW_FINISHED,
         _METHOD_STARTED,
         _METHOD_FINISHED,
+        _METHOD_FAILED,
         EventType.TEXT_MESSAGE_CHUNK,
         EventType.TOOL_CALL_CHUNK,
         EventType.CUSTOM,

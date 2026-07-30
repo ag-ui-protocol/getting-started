@@ -882,6 +882,7 @@ def _reasoning_capability(llm: Any = None) -> dict:
 def get_capabilities(
     *,
     llm: Any = None,
+    emission_shape: str | None = None,
     emit_raw_events: bool | None = None,
 ) -> dict:
     """Return the CrewAI bridge's capability declaration.
@@ -926,9 +927,32 @@ def get_capabilities(
     # ``_config`` is a leaf (``_env`` + stdlib only), imported locally purely to
     # keep this module's "crewai / litellm / stdlib only" property for every path
     # that never calls ``get_capabilities``.
-    from ._config import DEFAULT_EMIT_RAW_EVENTS, resolve_emit_raw_events
+    from ._config import (
+        DEFAULT_EMIT_RAW_EVENTS,
+        resolve_emission_shape,
+        resolve_emit_raw_events,
+    )
 
     resolved_raw = resolve_emit_raw_events(emit_raw_events)
+    resolved_shape = resolve_emission_shape(emission_shape)
+    text_events = (
+        [EventType.TEXT_MESSAGE_CHUNK.value]
+        if resolved_shape == "chunks"
+        else [
+            EventType.TEXT_MESSAGE_START.value,
+            EventType.TEXT_MESSAGE_CONTENT.value,
+            EventType.TEXT_MESSAGE_END.value,
+        ]
+    )
+    tool_events = (
+        [EventType.TOOL_CALL_CHUNK.value]
+        if resolved_shape == "chunks"
+        else [
+            EventType.TOOL_CALL_START.value,
+            EventType.TOOL_CALL_ARGS.value,
+            EventType.TOOL_CALL_END.value,
+        ]
+    )
     return {
         "identity": {"type": "crewai", "crewaiVersion": CAPABILITIES.crewai_version},
         "humanInTheLoop": {
@@ -955,12 +979,12 @@ def get_capabilities(
             "streamFrames": CAPABILITIES.stream_frame_available,
         },
         "wireShape": {
-            # This build streams LLM text / tool calls as CHUNK events. MCP tool
-            # executions are the exception: their name, args and result arrive
-            # together, so they already emit canonical TOOL_CALL_* triples.
-            "emissionShape": "chunks",
-            "textMessages": [EventType.TEXT_MESSAGE_CHUNK.value],
-            "toolCalls": [EventType.TOOL_CALL_CHUNK.value],
+            # START/CONTENT/END triples by default; "chunks" is a compatibility
+            # opt-out. MCP tool executions always use triples (name, args and result
+            # arrive together, not streamed), independent of this setting.
+            "emissionShape": resolved_shape,
+            "textMessages": text_events,
+            "toolCalls": tool_events,
             "mcpToolCalls": [
                 EventType.TOOL_CALL_START.value,
                 EventType.TOOL_CALL_ARGS.value,

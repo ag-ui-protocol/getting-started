@@ -26,6 +26,15 @@ DEFAULT_EMIT_RAW_EVENTS = False
 
 EMIT_RAW_EVENTS_ENV_VAR = "AGUI_CREWAI_EMIT_RAW_EVENTS"
 
+# Wire shape for streamed text / tool-call output. Triples (START/CONTENT/END) is
+# the canonical discrete form and the shipped default; "chunks" is a compatibility
+# opt-out. Kept here (a leaf module) so the capability declaration can report it
+# without importing the streaming stack.
+SUPPORTED_EMISSION_SHAPES = frozenset({"triples", "chunks"})
+DEFAULT_EMISSION_SHAPE = "triples"
+
+EMISSION_SHAPE_ENV_VAR = "AGUI_CREWAI_EMISSION_SHAPE"
+
 # Vocabulary ``_parse_env_bool`` accepts, so the "was this value used?" check stays
 # in step with the parser instead of duplicating its token list.
 _BOOL_TOKENS = _TRUE_VALUES | _FALSE_VALUES
@@ -75,4 +84,30 @@ def resolve_emit_raw_events(emit_raw_events: bool | None) -> bool:
     resolved = _parse_env_bool(EMIT_RAW_EVENTS_ENV_VAR, DEFAULT_EMIT_RAW_EVENTS)
     used = raw is not None and raw.strip().casefold() in _BOOL_TOKENS
     _warn_if_env_value_ignored(EMIT_RAW_EVENTS_ENV_VAR, raw, used)
+    return resolved
+
+
+def resolve_emission_shape(emission_shape: str | None) -> str:
+    """Resolve the wire shape: explicit argument > env var > shipped default."""
+    if emission_shape is not None:
+        if not isinstance(emission_shape, str):
+            raise ValueError(
+                f"emission_shape must be a string, got "
+                f"{type(emission_shape).__name__} ({emission_shape!r})"
+            )
+        normalized = emission_shape.strip().casefold()
+        if normalized not in SUPPORTED_EMISSION_SHAPES:
+            raise ValueError(
+                f"Unknown emission_shape {emission_shape!r}; "
+                f"expected one of {sorted(SUPPORTED_EMISSION_SHAPES)}"
+            )
+        return normalized
+    raw = os.environ.get(EMISSION_SHAPE_ENV_VAR)
+    resolved = DEFAULT_EMISSION_SHAPE
+    used = False
+    if raw is not None:
+        token = raw.strip().casefold()
+        if token in SUPPORTED_EMISSION_SHAPES:
+            resolved, used = token, True
+    _warn_if_env_value_ignored(EMISSION_SHAPE_ENV_VAR, raw, used)
     return resolved

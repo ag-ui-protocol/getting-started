@@ -53,6 +53,35 @@ add_crewai_flow_fastapi_endpoint(app, MyFlow(), "/flow")
 
 ## Protocol surface
 
+### Wire shape: START / CONTENT / END triples (default)
+
+Text and tool-call output is emitted as `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT`
+/ `TEXT_MESSAGE_END` and `TOOL_CALL_START` / `TOOL_CALL_ARGS` / `TOOL_CALL_END`, the
+protocol's canonical discrete form. `emission_shape="chunks"` (or
+`AGUI_CREWAI_EMISSION_SHAPE=chunks`) opts back into the previous
+`TEXT_MESSAGE_CHUNK` / `TOOL_CALL_CHUNK` form.
+
+```python
+add_crewai_flow_fastapi_endpoint(app, MyFlow(), "/flow")                     # triples
+add_crewai_flow_fastapi_endpoint(app, MyFlow(), "/flow", emission_shape="chunks")
+```
+
+The two shapes are **not** equivalent. In `chunks` mode a `copilotkit_emit_state` /
+`copilotkit_predict_state` call that lands between two tool-call argument deltas makes
+`@ag-ui/client`'s chunk transform close the call and then throw on the next delta;
+triples keep the call open server-side, because the server knows more deltas are
+coming and the client does not. Triples are also the form any consumer can apply
+directly (`apply/default.ts` throws if a chunk reaches it untransformed), so a raw
+SSE reader (the Python SDK, conformance tooling, custom clients) needs no
+chunk-transform stage.
+
+Both transports (the crewai >= 1.6 `StreamFrame` path and the legacy
+event-bus-listener fallback) route through one `EmissionShaper`, so the event shape
+and payload never depend on the installed crewai version. A run never ends with an
+open sequence: any open message, tool call, or step is closed before `RUN_FINISHED`.
+MCP tool executions always use triples regardless of this setting: their name, args
+and result arrive together rather than streamed.
+
 ### RAW passthrough (opt-in, default OFF)
 
 `emit_raw_events=True` mirrors the crewai events this bridge does **not** map onto

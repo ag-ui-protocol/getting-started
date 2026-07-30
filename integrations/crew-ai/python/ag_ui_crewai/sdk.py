@@ -3,6 +3,7 @@ Streaming and state helpers (copilotkit_stream and related utilities) for the Cr
 """
 
 import copy
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import (
@@ -46,6 +47,8 @@ from .events import (
 )
 from ._reasoning import reasoning_from_delta
 from .utils import yield_control, convert_litellm_multimodal_to_agui
+
+_LOGGER = logging.getLogger(__name__)
 
 class CopilotKitProperties(BaseModel):
     """CopilotKit properties"""
@@ -449,7 +452,19 @@ async def _copilotkit_stream_custom_stream_wrapper(response: CustomStreamWrapper
                 index = getattr(tool_call, "index", None)
                 last_entry = tool_calls_by_index.get(last_tool_key)
                 if index is not None:
-                    key = index
+                    existing = tool_calls_by_index.get(index)
+                    if (
+                        delta_id is not None
+                        and existing is not None
+                        and existing.get("id") not in (None, delta_id)
+                    ):
+                        # A different id reusing this index is a NEW call, not a
+                        # continuation: keep the calls separate so neither is
+                        # overwritten and their arguments do not merge.
+                        key = ("auto", auto_key)
+                        auto_key += 1
+                    else:
+                        key = index
                 elif delta_id is not None and last_entry is not None \
                         and last_entry.get("id") == delta_id:
                     # No index, but this delta re-echoes the current call's id:
@@ -470,7 +485,10 @@ async def _copilotkit_stream_custom_stream_wrapper(response: CustomStreamWrapper
 
                 entry = tool_calls_by_index.get(key)
                 if entry is None:
-                    entry = {"id": delta_id, "name": delta_name, "arguments": ""}
+                    entry = {
+                        "id": delta_id, "name": delta_name,
+                        "arguments": "", "streamed": False,
+                    }
                     tool_calls_by_index[key] = entry
                 else:
                     # id/name can arrive on a later delta than the first.
@@ -486,24 +504,40 @@ async def _copilotkit_stream_custom_stream_wrapper(response: CustomStreamWrapper
 
                 if delta_arguments is not None:
                     entry["arguments"] += delta_arguments
-                    crewai_event_bus.emit(
-                        flow,
-                        BridgedToolCallChunkEvent(
-                            type=EventType.TOOL_CALL_CHUNK,
-                            tool_call_id=entry["id"],
-                            tool_call_name=entry["name"],
-                            # Associate the streamed tool call with THIS assistant
-                            # message so the client keeps it in place when the
-                            # terminal MESSAGES_SNAPSHOT re-sends the message;
-                            # otherwise it becomes a standalone message with a
-                            # fresh id and the snapshot drops the chip below the
-                            # a2ui surface.
-                            parent_message_id=message_id,
-                            delta=delta_arguments,
-                        )
+
+                # Emit only once the call has BOTH an id and a name: the triples
+                # shaper needs both to open a TOOL_CALL_START, and it stamps the
+                # accumulated id/name on every chunk so a provider that streams
+                # identity or arguments out of order still produces a valid stream.
+                if entry["id"] is None or entry["name"] is None:
+                    continue
+                if not entry["streamed"]:
+                    # First wire chunk for this call: stream the arguments
+                    # accumulated so far (fragments that arrived before the
+                    # id/name), so the live TOOL_CALL_ARGS match the final
+                    # ModelResponse instead of losing the prefix.
+                    entry["streamed"] = True
+                    delta_out = entry["arguments"] or None
+                elif delta_arguments is not None:
+                    delta_out = delta_arguments
+                else:
+                    # Identity-only continuation with no new args: nothing to send.
+                    continue
+                crewai_event_bus.emit(
+                    flow,
+                    BridgedToolCallChunkEvent(
+                        type=EventType.TOOL_CALL_CHUNK,
+                        tool_call_id=entry["id"],
+                        tool_call_name=entry["name"],
+                        # Associate the streamed tool call with THIS assistant
+                        # message so the client keeps it in place when the terminal
+                        # MESSAGES_SNAPSHOT re-sends the message.
+                        parent_message_id=message_id,
+                        delta=delta_out,
                     )
-                    # yield control to the event loop
-                    await yield_control()
+                )
+                # yield control to the event loop
+                await yield_control()
 
         # Stream finish reason
         finish_reason = choice["finish_reason"]
@@ -519,6 +553,16 @@ async def _copilotkit_stream_custom_stream_wrapper(response: CustomStreamWrapper
         # mid-reasoning.
         _close_reasoning()
 
+    incomplete = [
+        e for e in tool_calls_by_index.values()
+        if e["id"] is None or e["name"] is None
+    ]
+    if incomplete:
+        _LOGGER.error(
+            "ag-ui-crewai dropped %d incomplete tool call(s) that never received "
+            "both an id and a name",
+            len(incomplete),
+        )
     tool_calls = [
         ChatCompletionMessageToolCall(
             function=LiteLLMFunction(
@@ -528,7 +572,11 @@ async def _copilotkit_stream_custom_stream_wrapper(response: CustomStreamWrapper
             id=tool_call["id"],
             type="function"
         )
+        # Insertion order preserves the provider's ordering; keys are
+        # heterogeneous so are not sortable. Skip any call that never received both
+        # an id and a name (it never reached the wire either).
         for tool_call in tool_calls_by_index.values()
+        if tool_call["id"] is not None and tool_call["name"] is not None
     ]
     return ModelResponse(
         id=message_id,
