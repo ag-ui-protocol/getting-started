@@ -8,8 +8,10 @@ export const verifyEvents =
   (source$: Observable<BaseEvent>): Observable<BaseEvent> => {
     const log = resolveDebugLogger(debugLogger);
     // Declare variables in closure to maintain state across events
-    let activeMessages = new Map<string, boolean>(); // Map of message ID -> active status
-    let activeToolCalls = new Map<string, boolean>(); // Map of tool call ID -> active status
+    // Value carries the owning subagentId (if any) so continuation/close events
+    // can be checked for attribution consistency.
+    let activeMessages = new Map<string, { subagentId?: string }>(); // message ID -> owner
+    let activeToolCalls = new Map<string, { subagentId?: string }>(); // tool call ID -> owner
     let runFinished = false;
     let runError = false; // New flag to track if RUN_ERROR has been sent
     // New flags to track first/last event requirements
@@ -32,6 +34,32 @@ export const verifyEvents =
       runFinished = false;
       runError = false;
       runStarted = true;
+    };
+
+    // Subagent attribution consistency: a continuation/close event must not
+    // disagree with the subagent that owns its message / tool call (the opener).
+    // An absent tag is always allowed (the field is optional, and Phase-1
+    // attribution may be used without Phase-2 SUBAGENT_* lifecycle events — so we
+    // deliberately do NOT require the tag to reference an "active" subagent here,
+    // which would reject valid attribution-only streams).
+    const subagentTagError = (
+      evType: EventType,
+      evSubagentId: string | undefined,
+      owner: { subagentId?: string } | undefined,
+      entityKind: string,
+      entityId: string,
+    ): AGUIError | undefined => {
+      if (evSubagentId === undefined) return undefined;
+      if (
+        owner &&
+        owner.subagentId !== undefined &&
+        owner.subagentId !== evSubagentId
+      ) {
+        return new AGUIError(
+          `Cannot send '${evType}': subagentId '${evSubagentId}' does not match the ${entityKind} '${entityId}' opener's subagent '${owner.subagentId}'.`,
+        );
+      }
+      return undefined;
     };
 
     return source$.pipe(
@@ -104,7 +132,13 @@ export const verifyEvents =
               );
             }
 
-            activeMessages.set(messageId, true);
+            {
+              const subErr = subagentTagError(
+                eventType, (event as any).subagentId, undefined, "message", messageId,
+              );
+              if (subErr) return throwError(() => subErr);
+            }
+            activeMessages.set(messageId, { subagentId: (event as any).subagentId });
             return of(event);
           }
 
@@ -121,6 +155,10 @@ export const verifyEvents =
               );
             }
 
+            const subErr = subagentTagError(
+              eventType, (event as any).subagentId, activeMessages.get(messageId), "message", messageId,
+            );
+            if (subErr) return throwError(() => subErr);
             return of(event);
           }
 
@@ -137,6 +175,10 @@ export const verifyEvents =
               );
             }
 
+            const subErr = subagentTagError(
+              eventType, (event as any).subagentId, activeMessages.get(messageId), "message", messageId,
+            );
+            if (subErr) return throwError(() => subErr);
             // Remove message from active set
             activeMessages.delete(messageId);
             return of(event);
@@ -156,7 +198,13 @@ export const verifyEvents =
               );
             }
 
-            activeToolCalls.set(toolCallId, true);
+            {
+              const subErr = subagentTagError(
+                eventType, (event as any).subagentId, undefined, "tool call", toolCallId,
+              );
+              if (subErr) return throwError(() => subErr);
+            }
+            activeToolCalls.set(toolCallId, { subagentId: (event as any).subagentId });
             return of(event);
           }
 
@@ -173,6 +221,10 @@ export const verifyEvents =
               );
             }
 
+            const subErr = subagentTagError(
+              eventType, (event as any).subagentId, activeToolCalls.get(toolCallId), "tool call", toolCallId,
+            );
+            if (subErr) return throwError(() => subErr);
             return of(event);
           }
 
@@ -189,6 +241,10 @@ export const verifyEvents =
               );
             }
 
+            const subErr = subagentTagError(
+              eventType, (event as any).subagentId, activeToolCalls.get(toolCallId), "tool call", toolCallId,
+            );
+            if (subErr) return throwError(() => subErr);
             // Remove tool call from active set
             activeToolCalls.delete(toolCallId);
             return of(event);

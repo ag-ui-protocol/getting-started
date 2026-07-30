@@ -83,11 +83,13 @@ export const TextMessageContentEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.TEXT_MESSAGE_CONTENT),
   messageId: z.string(),
   delta: z.string(),
+  subagentId: z.string().optional(),
 });
 
 export const TextMessageEndEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.TEXT_MESSAGE_END),
   messageId: z.string(),
+  subagentId: z.string().optional(),
 });
 
 export const TextMessageChunkEventSchema = BaseEventSchema.extend({
@@ -135,11 +137,13 @@ export const ToolCallArgsEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.TOOL_CALL_ARGS),
   toolCallId: z.string(),
   delta: z.string(),
+  subagentId: z.string().optional(),
 });
 
 export const ToolCallEndEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.TOOL_CALL_END),
   toolCallId: z.string(),
+  subagentId: z.string().optional(),
 });
 
 export const ToolCallResultEventSchema = BaseEventSchema.extend({
@@ -206,6 +210,7 @@ export const ActivityDeltaEventSchema = BaseEventSchema.extend({
   messageId: z.string(),
   activityType: z.string(),
   patch: z.array(z.any()),
+  subagentId: z.string().optional(),
 });
 
 export const RawEventSchema = BaseEventSchema.extend({
@@ -302,11 +307,13 @@ export const ReasoningMessageContentEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.REASONING_MESSAGE_CONTENT),
   messageId: z.string(),
   delta: z.string(),
+  subagentId: z.string().optional(),
 });
 
 export const ReasoningMessageEndEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.REASONING_MESSAGE_END),
   messageId: z.string(),
+  subagentId: z.string().optional(),
 });
 
 export const ReasoningMessageChunkEventSchema = BaseEventSchema.extend({
@@ -319,6 +326,7 @@ export const ReasoningMessageChunkEventSchema = BaseEventSchema.extend({
 export const ReasoningEndEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.REASONING_END),
   messageId: z.string(),
+  subagentId: z.string().optional(),
 });
 
 export const ReasoningEncryptedValueEventSchema = BaseEventSchema.extend({
@@ -326,6 +334,7 @@ export const ReasoningEncryptedValueEventSchema = BaseEventSchema.extend({
   subtype: ReasoningEncryptedValueSubtypeSchema,
   entityId: z.string(),
   encryptedValue: z.string(),
+  subagentId: z.string().optional(),
 });
 
 export const SubagentStartedEventSchema = BaseEventSchema.extend({
@@ -334,11 +343,19 @@ export const SubagentStartedEventSchema = BaseEventSchema.extend({
   name: z.string(),
   description: z.string().optional(),
   parentSubagentId: z.string().optional(),
+  // Link back to the tool call (and the message that held it) that spawned this
+  // subagent, for the agents-as-tools pattern (e.g. deepagents `task`). Lets a
+  // consumer correlate the subagent to its spawning call without inspecting
+  // rawEvent.metadata.
+  parentToolCallId: z.string().optional(),
+  parentMessageId: z.string().optional(),
 });
 
 export const SubagentFinishedEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.SUBAGENT_FINISHED),
   subagentId: z.string(),
+  // The subagent's completion payload, mirroring RUN_FINISHED.result.
+  result: z.any().optional(),
 });
 
 export const SubagentErrorEventSchema = BaseEventSchema.extend({

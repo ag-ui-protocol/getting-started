@@ -161,13 +161,14 @@ class TestDispatchStamping(unittest.TestCase):
         )
         self.assertEqual(ev.subagent_id, "orig")
 
-    def test_does_not_stamp_continuation_event(self):
+    def test_stamps_continuation_event_when_in_subagent(self):
+        # Continuation/close events are now tagged too, so the stream is
+        # self-describing per event (no messageId reconstruction needed).
         agent = self._agent("tools:s1")
         ev = agent._dispatch_event(
             TextMessageContentEvent(type=EventType.TEXT_MESSAGE_CONTENT, message_id="m1", delta="x")
         )
-        # continuation events have no subagent_id field / must not be stamped
-        self.assertIsNone(getattr(ev, "subagent_id", None))
+        self.assertEqual(ev.subagent_id, "tools:s1")
 
     def test_does_not_stamp_subagent_lifecycle_event(self):
         agent = self._agent("tools:s1")
@@ -292,6 +293,11 @@ class TestFinishSubagentOnTaskEnd(unittest.TestCase):
 
     def test_capture_records_name_description_and_run_id(self):
         agent = self._agent()
+        # A pending supervisor `task` call (captured from the stream) is popped
+        # FIFO to link the subagent back to its spawning call.
+        agent.active_run["pending_task_calls"] = [
+            {"tool_call_id": "call-1", "parent_message_id": "msg-1"}
+        ]
         agent._capture_subagent_task_meta({
             "event": "on_tool_start",
             "run_id": "run-task-1",
@@ -300,9 +306,15 @@ class TestFinishSubagentOnTaskEnd(unittest.TestCase):
         })
         self.assertEqual(
             agent.active_run["subagent_task_meta"]["tools:sub1"],
-            {"name": "researcher", "description": "dig"},
+            {
+                "name": "researcher",
+                "description": "dig",
+                "parent_tool_call_id": "call-1",
+                "parent_message_id": "msg-1",
+            },
         )
         self.assertEqual(agent.active_run["subagent_task_runs"]["run-task-1"], "tools:sub1")
+        self.assertEqual(agent.active_run["pending_task_calls"], [])  # consumed
 
     def test_task_end_finishes_exactly_the_subagent_it_started(self):
         agent = self._agent()
@@ -374,3 +386,35 @@ class TestCrossTurnPersistence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSubagentNewFields(unittest.TestCase):
+    def test_started_carries_parent_links_from_task_meta(self):
+        ar = {"active_subagents": {}, "current_subagent_id": None,
+              "subagent_task_meta": {"tools:s1": {
+                  "name": "alpha", "description": "d",
+                  "parent_tool_call_id": "call-1", "parent_message_id": "msg-1"}}}
+        evs = reconcile_subagents(ar, "tools:s1|model:x", "alpha", set())
+        self.assertEqual([e.type for e in evs], [EventType.SUBAGENT_STARTED])
+        self.assertEqual(evs[0].parent_tool_call_id, "call-1")
+        self.assertEqual(evs[0].parent_message_id, "msg-1")
+        self.assertIsNone(evs[0].parent_subagent_id)
+        self.assertEqual(evs[0].description, "d")
+
+    def test_finish_includes_result_from_command_output(self):
+        agent = _make_agent()
+        agent.active_run = {"active_subagents": {"tools:sub1": "alpha"},
+                            "current_subagent_id": "tools:sub1",
+                            "subagent_task_runs": {"run-1": "tools:sub1"}}
+
+        class _ToolMsg:
+            content = "the subagent result"
+
+        class _Cmd:
+            update = {"messages": [_ToolMsg()]}
+
+        evs = agent._finish_subagent_on_task_end(
+            {"event": "on_tool_end", "run_id": "run-1", "data": {"output": _Cmd()}}
+        )
+        self.assertEqual([e.type for e in evs], [EventType.SUBAGENT_FINISHED])
+        self.assertEqual(evs[0].result, "the subagent result")

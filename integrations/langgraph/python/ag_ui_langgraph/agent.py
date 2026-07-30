@@ -138,20 +138,33 @@ def derive_subagent_context(ns: str, lc_agent_name: Optional[str], subgraphs) ->
     root_name = leading.split(":")[0]
     if root_name in subgraphs:
         return None  # declared subgraph, handled elsewhere
+    # The leading `tools:<uuid>` segment is the (top-level) subagent id. Note we
+    # cannot reliably derive parent_subagent_id from the namespace: a subagent's
+    # own inner ToolNode also appears as a `tools:<uuid>` segment, so it is
+    # indistinguishable from a genuine nested-subagent boundary. parent is left
+    # None until a more precise signal (e.g. lc-agent-name nesting) is available.
     return SubagentContext(subagent_id=leading, name=lc_agent_name, parent_subagent_id=None)
 
 
-# Creation/standalone event types that carry a `subagent_id` field and should
-# be stamped with the currently active subagent id at the _dispatch_event
-# chokepoint. Deliberately excludes continuation events (e.g.
-# TEXT_MESSAGE_CONTENT, TOOL_CALL_ARGS), run-lifecycle events, MESSAGES_SNAPSHOT,
-# and the SUBAGENT_* lifecycle events themselves (which already carry their own
-# subagent_id explicitly).
+# Event types that carry a `subagent_id` field and should be stamped with the
+# currently active subagent id at the _dispatch_event chokepoint. Every in-window
+# event is tagged so the stream is self-describing per event (a consumer never
+# has to reconstruct attribution from a prior event's messageId/toolCallId).
+# Excludes only the run-lifecycle events, MESSAGES_SNAPSHOT (its messages are
+# tagged individually), and the SUBAGENT_* lifecycle events (which carry their
+# own subagent_id explicitly). STATE_SNAPSHOT/STATE_DELTA are never emitted for a
+# subagent (see the state-suppression in the stream loop), so they stay here only
+# for the parent's benefit.
 _SUBAGENT_ATTRIBUTABLE_EVENT_TYPES = frozenset({
     EventType.TEXT_MESSAGE_START, EventType.TEXT_MESSAGE_CHUNK,
+    EventType.TEXT_MESSAGE_CONTENT, EventType.TEXT_MESSAGE_END,
     EventType.TOOL_CALL_START, EventType.TOOL_CALL_CHUNK, EventType.TOOL_CALL_RESULT,
+    EventType.TOOL_CALL_ARGS, EventType.TOOL_CALL_END,
     EventType.REASONING_START, EventType.REASONING_MESSAGE_START,
-    EventType.ACTIVITY_SNAPSHOT, EventType.STATE_SNAPSHOT, EventType.STATE_DELTA,
+    EventType.REASONING_MESSAGE_CONTENT, EventType.REASONING_MESSAGE_END,
+    EventType.REASONING_END,
+    EventType.ACTIVITY_SNAPSHOT, EventType.ACTIVITY_DELTA,
+    EventType.STATE_SNAPSHOT, EventType.STATE_DELTA,
     EventType.STEP_STARTED, EventType.STEP_FINISHED, EventType.CUSTOM, EventType.RAW,
 })
 
@@ -181,6 +194,8 @@ def reconcile_subagents(active_run, ns, lc_agent_name, subgraphs) -> list:
             name=name,
             description=description,
             parent_subagent_id=ctx.parent_subagent_id,
+            parent_tool_call_id=task_meta.get("parent_tool_call_id"),
+            parent_message_id=task_meta.get("parent_message_id"),
         ))
     return events
 
@@ -317,9 +332,15 @@ class LangGraphAgent:
         active_run = getattr(self, "active_run", None)
         if active_run is None:
             return
+        # Pop the matching supervisor `task` tool call (FIFO — the supervisor
+        # emits them in order) to link this subagent back to its spawning call.
+        pending = active_run.get("pending_task_calls") or []
+        task_call = pending.pop(0) if pending else {}
         active_run.setdefault("subagent_task_meta", {})[subagent_id] = {
             "name": tool_input.get("subagent_type"),
             "description": tool_input.get("description"),
+            "parent_tool_call_id": task_call.get("tool_call_id"),
+            "parent_message_id": task_call.get("parent_message_id"),
         }
         # Map this `task` invocation's run_id to its subagent_id so the matching
         # OnToolEnd can finish exactly this subagent (see
@@ -356,8 +377,18 @@ class LangGraphAgent:
         del active_run["active_subagents"][subagent_id]
         if active_run.get("current_subagent_id") == subagent_id:
             active_run["current_subagent_id"] = None
+        # The subagent's output is the `task` tool's result. deepagents returns a
+        # Command whose state update carries the ToolMessage; surface its content
+        # as the finished subagent's `result` (mirrors RUN_FINISHED.result).
+        result = None
+        output = (event.get("data") or {}).get("output")
+        update = getattr(output, "update", None)
+        if isinstance(update, dict):
+            msgs = update.get("messages")
+            if msgs:
+                result = getattr(msgs[0], "content", None)
         return [SubagentFinishedEvent(
-            type=EventType.SUBAGENT_FINISHED, subagent_id=subagent_id,
+            type=EventType.SUBAGENT_FINISHED, subagent_id=subagent_id, result=result,
         )]
 
     def _accumulate_subagent_message(self, event: ProcessedEvents) -> None:
@@ -490,6 +521,7 @@ class LangGraphAgent:
             "current_subagent_id": None,
             "subagent_task_meta": {},
             "subagent_task_runs": {},
+            "pending_task_calls": [],
             "subagent_messages": {},
             "subagent_tool_call_owner": {},
             # Subagent messages the client echoed back from prior turns, split
@@ -747,6 +779,11 @@ class LangGraphAgent:
                             # not yet run, so current_graph_state does not yet reflect
                             # the forthcoming state update.
                             self.active_run["state_reliable"] = False
+                    elif self.active_run.get("current_subagent_id"):
+                        # Subagents don't emit STATE_SNAPSHOT — only the parent
+                        # agent's state is surfaced. The subagent's messages still
+                        # reach the client via MESSAGES_SNAPSHOT, so nothing is lost.
+                        pass
                     else:
                         yield self._dispatch_event(
                             StateSnapshotEvent(
@@ -1800,6 +1837,16 @@ class LangGraphAgent:
                 # behaviour where ``has_function_streaming=True`` blocked the
                 # OnToolEnd re-emit for opted-out tool calls.
                 self.active_run["streamed_tool_call_ids"].add(tool_call_data["id"])
+                # Capture the supervisor's `task` delegation calls so the subagent
+                # each one spawns can carry parentToolCallId / parentMessageId on
+                # its SUBAGENT_STARTED. The supervisor emits every task call before
+                # the corresponding subagent runs, so a FIFO match (popped in
+                # _capture_subagent_task_meta) lines them up in order.
+                if tool_call_data.get("name") == "task":
+                    self.active_run.setdefault("pending_task_calls", []).append({
+                        "tool_call_id": tool_call_data["id"],
+                        "parent_message_id": chunk_id,
+                    })
                 if should_emit_tool_calls:
                     yield self._dispatch_event(
                         ToolCallStartEvent(
@@ -2359,9 +2406,14 @@ class LangGraphAgent:
             state_values = {}
         else:
             state_values = state.values
-        yield self._dispatch_event(
-            StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot=self.get_state_snapshot(state_values))
-        )
+        # Only the parent agent emits STATE_SNAPSHOT; while a subagent is active
+        # its (subgraph) state is not surfaced. The MESSAGES_SNAPSHOT below is
+        # still emitted and carries the subagent's messages (merged + tagged), so
+        # attribution and history survive without leaking subagent state.
+        if not self.active_run.get("current_subagent_id"):
+            yield self._dispatch_event(
+                StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot=self.get_state_snapshot(state_values))
+            )
 
         snapshot_messages = self._filter_orphan_tool_messages(state_values.get("messages", []))
         agui_messages = self._merge_subagent_messages(

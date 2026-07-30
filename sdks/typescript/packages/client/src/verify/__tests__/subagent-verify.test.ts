@@ -222,4 +222,39 @@ describe("verifyEvents subagent lifecycle", () => {
     expect(events.length).toBe(4);
     expect(events[3].type).toBe(EventType.RUN_FINISHED);
   });
+
+  // Test: a continuation/close event tagged with a different subagent than its
+  // opener is rejected.
+  it("should reject a close event whose subagentId differs from its opener", async () => {
+    const inputEvents: BaseEvent[] = [
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      {
+        type: EventType.TEXT_MESSAGE_START,
+        messageId: "m1",
+        role: "assistant",
+        subagentId: "s1",
+      } as TextMessageStartEvent,
+      {
+        type: EventType.TEXT_MESSAGE_END,
+        messageId: "m1",
+        subagentId: "s2", // <-- disagrees with the opener's s1
+      } as TextMessageEndEvent,
+    ];
+
+    const events: BaseEvent[] = [];
+    let caught: unknown;
+    try {
+      await firstValueFrom(
+        verifyEvents(false)(from(inputEvents)).pipe(
+          tap((e) => events.push(e)),
+          toArray(),
+        ),
+      );
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(AGUIError);
+    expect((caught as Error).message).toMatch(/does not match/i);
+  });
 });
