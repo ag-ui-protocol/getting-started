@@ -78,10 +78,37 @@ def chat_only_capabilities() -> CapabilitiesConfig:
     )
 
 
+# Each AntigravityAgent owns a HarnessPool by default, so a server hosting
+# several demo agents would get one harness process per *agent* rather than one
+# for the server. Nothing about an agent's config prevents sharing: tools,
+# instructions, model and workspaces all ride in HarnessConfig, per
+# conversation. Only save_dir and env are fixed at process start, so pinning
+# both here puts every demo in one pool partition -- and one process.
+_SHARED_SAVE_DIR = os.path.join(WORKSPACE, ".sessions")
+os.makedirs(_SHARED_SAVE_DIR, exist_ok=True)
+_SHARED_POOL = None
+
+
+def shared_pool():
+    """The one pool every demo agent draws from."""
+    global _SHARED_POOL
+    if _SHARED_POOL is None:
+        from ag_ui_antigravity.harness_pool import HarnessPool
+
+        _SHARED_POOL = HarnessPool()
+    return _SHARED_POOL
+
+
 def build(**kwargs):
     """Creates an AntigravityAgent with the demo's shared model/workspace."""
     from ag_ui_antigravity import AntigravityAgent
 
-    defaults = dict(model=MODEL, base_url=BASE_URL, workspaces=[WORKSPACE])
+    defaults = dict(
+        model=MODEL,
+        base_url=BASE_URL,
+        workspaces=[WORKSPACE],
+        harness_pool=shared_pool(),
+        save_dir=_SHARED_SAVE_DIR,
+    )
     defaults.update(kwargs)
     return AntigravityAgent(**defaults)
