@@ -159,6 +159,25 @@ a plain statement of what already ran, so the model reports the result instead
 of retrying. Set `deduplicate_tool_calls=False` if a tool is genuinely meant to
 run repeatedly within one turn.
 
+### Server-side tools
+
+Pass your own Python callables as `tools=[...]` and they run in this process,
+with the call and its result streamed to the client — that is what the dojo's
+`backend_tool_rendering` demo draws its weather card from.
+
+The adapter emits those events itself rather than reading them off the step
+stream, because the harness reports a custom tool as a **single**
+`TOOL_CALL`/`ACTIVE` step: there is no DONE step, and `Step` carries no result
+field at all, since the return value goes back over the WebSocket straight to
+the model. A client waiting for a `TOOL_CALL_RESULT` from the step stream would
+wait forever. Built-in tools are different — the harness re-reports those at
+DONE with their output folded into the call arguments.
+
+The wrapper preserves each function's signature and docstring, so the SDK still
+derives the same tool schema. Return a JSON-serializable value (or a string);
+a raised exception is reported to the client as
+`There was an error executing <tool>: ...` and re-raised.
+
 ### Built-in tools worth disabling
 
 The harness exposes its whole built-in toolset by default. `search_web` returns

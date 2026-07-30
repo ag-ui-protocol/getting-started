@@ -1,6 +1,8 @@
 """UI bridge tests -- the park/resolve primitive behind every HITL case."""
 
 import asyncio
+import inspect
+import json
 
 import pytest
 from ag_ui.core import Tool as AGUITool
@@ -540,3 +542,139 @@ class TestConcurrentDeduplication:
             await asyncio.wait_for(first, 1)
         with pytest.raises(RuntimeError, match="session closed"):
             await asyncio.wait_for(second, 1)
+
+
+class TestServerTools:
+    """Server-side tools must report their own results.
+
+    Antigravity runs a custom Python tool through the SDK's ToolRunner and the
+    harness reports it as a single TOOL_CALL/ACTIVE step -- no DONE step, and no
+    result field on Step at all, because the return value goes back over the
+    WebSocket straight to the model. So the step stream can never yield a
+    TOOL_CALL_RESULT and a client rendering the call would spin forever.
+    """
+
+    async def test_call_emits_triplet_then_the_real_result(self):
+        bridge = UIBridge()
+
+        async def get_weather(location: str) -> str:
+            """Gets the weather.
+
+            Args:
+              location: The city.
+            """
+            return '{"temperature": 22}'
+
+        (wrapped,) = bridge.build_server_tools([get_weather])
+        assert await wrapped(location="Tokyo") == '{"temperature": 22}'
+
+        kinds = [e.type for e in bridge.drain()]
+        assert [k if isinstance(k, str) else k.value for k in kinds] == [
+            "TOOL_CALL_START",
+            "TOOL_CALL_ARGS",
+            "TOOL_CALL_END",
+            "TOOL_CALL_RESULT",
+        ]
+
+    async def test_result_carries_the_return_value(self):
+        bridge = UIBridge()
+
+        async def get_weather(location: str) -> dict:
+            """Gets the weather.
+
+            Args:
+              location: The city.
+            """
+            return {"temperature": 22, "conditions": "sunny"}
+
+        (wrapped,) = bridge.build_server_tools([get_weather])
+        await wrapped(location="Tokyo")
+        events = bridge.drain()
+
+        args = json.loads(events[1].delta)
+        assert args == {"location": "Tokyo"}
+        # A dict is serialized; the client parses it back. Without this the
+        # weather card falls through to its `?? 0` defaults.
+        assert json.loads(events[3].content) == {
+            "temperature": 22,
+            "conditions": "sunny",
+        }
+        assert events[0].tool_call_id == events[3].tool_call_id
+        assert events[0].tool_call_name == "get_weather"
+
+    async def test_sync_tools_are_supported(self):
+        bridge = UIBridge()
+
+        def add(a: int, b: int) -> int:
+            """Adds two numbers.
+
+            Args:
+              a: First.
+              b: Second.
+            """
+            return a + b
+
+        (wrapped,) = bridge.build_server_tools([add])
+        assert await wrapped(a=2, b=3) == 5
+        assert json.loads(bridge.drain()[3].content) == 5
+
+    async def test_failure_is_reported_in_content_and_reraised(self):
+        bridge = UIBridge()
+
+        async def boom(location: str) -> str:
+            """Always fails.
+
+            Args:
+              location: The city.
+            """
+            raise RuntimeError("upstream is down")
+
+        (wrapped,) = bridge.build_server_tools([boom])
+        with pytest.raises(RuntimeError, match="upstream is down"):
+            await wrapped(location="Tokyo")
+
+        events = bridge.drain()
+        # ToolCallResultEvent has no error channel, so it travels in content --
+        # an empty result would render as a successful call.
+        assert "There was an error executing boom" in events[3].content
+        assert "upstream is down" in events[3].content
+
+    def test_signature_is_preserved_for_schema_derivation(self):
+        """The SDK derives the tool schema by introspecting the function.
+
+        A wrapper taking bare **kwargs would erase the parameters and the model
+        would be handed a tool it cannot call correctly.
+        """
+        bridge = UIBridge()
+
+        async def get_weather(location: str) -> str:
+            """Gets the weather.
+
+            Args:
+              location: The city.
+            """
+            return "{}"
+
+        (wrapped,) = bridge.build_server_tools([get_weather])
+        assert wrapped.__name__ == "get_weather"
+        assert wrapped.__doc__ == get_weather.__doc__
+        assert list(inspect.signature(wrapped).parameters) == ["location"]
+
+    def test_names_are_registered_for_suppression(self):
+        """The adapter suppresses step-driven events for these names.
+
+        Without that the call would be emitted twice: once from the ACTIVE step
+        and once by the wrapper.
+        """
+        bridge = UIBridge()
+
+        async def get_weather(location: str) -> str:
+            """Gets the weather.
+
+            Args:
+              location: The city.
+            """
+            return "{}"
+
+        bridge.build_server_tools([get_weather])
+        assert "get_weather" in bridge.server_tool_names

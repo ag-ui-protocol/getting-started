@@ -289,7 +289,11 @@ class AntigravityAgent:
         input_data: RunAgentInput,
         previous_conversation_id: Optional[str],
     ) -> Agent:
-        tools: List[Any] = list(self._static_tools)
+        # Wrapped so each call emits TOOL_CALL_START/ARGS/END and, crucially,
+        # a TOOL_CALL_RESULT: the harness reports a custom tool as a single
+        # ACTIVE step and never reports its return value, so the step stream
+        # alone would leave the client's tool card spinning forever.
+        tools: List[Any] = bridge.build_server_tools(self._static_tools)
         if self._enable_frontend_tools and input_data.tools:
             tools.extend(bridge.build_frontend_tools(list(input_data.tools)))
 
@@ -488,7 +492,7 @@ class AntigravityAgent:
                 structured_output_as=self._structured_output_as,
                 emit_builtin_tool_calls=self._emit_builtin_tool_calls,
             )
-            for name in bridge.frontend_tool_names:
+            for name in bridge.frontend_tool_names | bridge.server_tool_names:
                 session.translator.suppress_tool(name)
         translator = session.translator
 

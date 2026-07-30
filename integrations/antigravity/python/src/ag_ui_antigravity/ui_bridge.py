@@ -40,11 +40,13 @@ Two details the SDK forces on us:
 from __future__ import annotations
 
 import asyncio
+import functools
+import inspect
 import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from ag_ui.core import (
     BaseEvent,
@@ -52,6 +54,7 @@ from ag_ui.core import (
     Tool as AGUITool,
     ToolCallArgsEvent,
     ToolCallEndEvent,
+    ToolCallResultEvent,
     ToolCallStartEvent,
 )
 from google.antigravity import types as ag_types
@@ -100,6 +103,7 @@ class UIBridge:
         # tool_call_id -> pending id, for resolving ToolMessages.
         self._by_tool_call: Dict[str, str] = {}
         self._frontend_tool_names: set[str] = set()
+        self._server_tool_names: set[str] = set()
         self._deduplicate = deduplicate_tool_calls
         # tool name -> (args, Future[result]) claimed by its first dispatch
         # this turn. Keyed on name alone, so a concurrent call with *different*
@@ -145,6 +149,10 @@ class UIBridge:
     @property
     def frontend_tool_names(self) -> set[str]:
         return set(self._frontend_tool_names)
+
+    @property
+    def server_tool_names(self) -> set[str]:
+        return set(self._server_tool_names)
 
     # ------------------------------------------------------------------
     # Registry
@@ -224,6 +232,88 @@ class UIBridge:
             built.append(self._build_frontend_tool(tool))
             self._frontend_tool_names.add(tool.name)
         return built
+
+    def build_server_tools(self, tools: Sequence[Callable[..., Any]]) -> List[Any]:
+        """Wraps server-side tools so their results reach the client.
+
+        A custom Python tool is executed by the SDK's own ``ToolRunner``, and the
+        harness reports it as a *single* ``TOOL_CALL``/``ACTIVE`` step: there is
+        no DONE step and no result field anywhere on ``Step``. The return value
+        goes back over the WebSocket straight to the model. So the step stream
+        alone can never produce a ``TOOL_CALL_RESULT``, and a client rendering
+        the call would spin forever waiting for one.
+
+        This process runs the tool, though, so the value is right here. Each
+        tool is wrapped to emit the call and its result directly -- the same
+        shape ``_build_frontend_tool`` uses -- and the step-driven events for
+        these names are suppressed so nothing is emitted twice.
+
+        Built-in tools are unaffected: the harness *does* re-report those at DONE
+        with their output folded into the args, which is what
+        ``_extract_builtin_result`` reads.
+        """
+        built: List[Any] = []
+        for tool in tools:
+            built.append(self._build_server_tool(tool))
+        return built
+
+    def _build_server_tool(self, tool: Callable[..., Any]) -> Callable[..., Any]:
+        bridge = self
+        name = getattr(tool, "__name__", "tool")
+        is_async = inspect.iscoroutinefunction(tool)
+
+        # functools.wraps sets __wrapped__, and inspect.signature follows it, so
+        # the SDK still derives the same tool schema from the original function.
+        @functools.wraps(tool)
+        async def _invoke(*args: Any, **kwargs: Any) -> Any:
+            tool_call_id = str(uuid.uuid4())
+            bridge.emit(
+                ToolCallStartEvent(
+                    type="TOOL_CALL_START",
+                    tool_call_id=tool_call_id,
+                    tool_call_name=name,
+                )
+            )
+            bridge.emit(
+                ToolCallArgsEvent(
+                    type="TOOL_CALL_ARGS",
+                    tool_call_id=tool_call_id,
+                    delta=_safe_tool_json(kwargs or {}),
+                )
+            )
+            bridge.emit(
+                ToolCallEndEvent(type="TOOL_CALL_END", tool_call_id=tool_call_id)
+            )
+            try:
+                result = tool(*args, **kwargs)
+                if is_async or inspect.isawaitable(result):
+                    result = await result
+            except Exception as exc:
+                # ToolCallResultEvent has no error channel, so the failure has to
+                # travel in content -- the same wording built-in failures use.
+                bridge.emit(
+                    ToolCallResultEvent(
+                        type="TOOL_CALL_RESULT",
+                        message_id=str(uuid.uuid4()),
+                        tool_call_id=tool_call_id,
+                        content=f"There was an error executing {name}: {exc}",
+                    )
+                )
+                raise
+            bridge.emit(
+                ToolCallResultEvent(
+                    type="TOOL_CALL_RESULT",
+                    message_id=str(uuid.uuid4()),
+                    tool_call_id=tool_call_id,
+                    content=(
+                        result if isinstance(result, str) else _safe_tool_json(result)
+                    ),
+                )
+            )
+            return result
+
+        bridge._server_tool_names.add(name)
+        return _invoke
 
     def _build_frontend_tool(self, tool: AGUITool) -> ToolWithSchema:
         bridge = self
@@ -552,3 +642,11 @@ def _jsonable(value: Any) -> Any:
         return value
     except (TypeError, ValueError):
         return str(value)
+
+
+def _safe_tool_json(value: Any) -> str:
+    """Serializes a tool payload, never raising on an exotic return value."""
+    try:
+        return json.dumps(value)
+    except (TypeError, ValueError):
+        return json.dumps(value, default=str)

@@ -312,3 +312,63 @@ async def test_sse_endpoint_serves_the_wire_format(base_url, workspace):
         f["delta"] for f in frames if f["type"] == "TEXT_MESSAGE_CONTENT"
     )
     assert "sse works" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_server_side_tool_reports_its_result(base_url, workspace):
+    """A backend tool's return value must reach the client.
+
+    The harness reports a custom Python tool as a single TOOL_CALL/ACTIVE step
+    -- no DONE step, no result on Step -- because the value goes back over the
+    WebSocket straight to the model. The adapter emits the call and its result
+    itself; without that the dojo's backend_tool_rendering card spins forever.
+    """
+    import json
+
+    from ag_ui_antigravity import AntigravityAgent
+
+    async def get_weather(location: str) -> str:
+        """Gets the current weather for a location.
+
+        Args:
+          location: The city to look up.
+        """
+        return json.dumps({"temperature": 22, "conditions": "Clear sky"})
+
+    agent = AntigravityAgent(
+        model=MODEL,
+        base_url=base_url,
+        workspaces=[workspace],
+        save_dir=os.path.join(workspace, "save"),
+        system_instructions=(
+            "Use get_weather for any weather question, then summarise it in "
+            "one short sentence."
+        ),
+        tools=[get_weather],
+        enable_frontend_tools=False,
+        enable_ask_question=False,
+    )
+    try:
+        events = await collect(
+            agent, run_input("server-tool", "What's the weather in Tokyo?")
+        )
+    finally:
+        await agent.close()
+
+    assert_lifecycle(events)
+    types = types_of(events)
+
+    starts = [e for e in events if e.type == "TOOL_CALL_START"]
+    assert [e.tool_call_name for e in starts] == ["get_weather"], (
+        "expected exactly one get_weather call, got "
+        f"{[e.tool_call_name for e in starts]}"
+    )
+
+    results = [e for e in events if e.type == "TOOL_CALL_RESULT"]
+    assert len(results) == 1, f"expected one TOOL_CALL_RESULT, got {len(results)}"
+    assert json.loads(results[0].content)["temperature"] == 22
+    assert results[0].tool_call_id == starts[0].tool_call_id
+
+    # Ordering the client depends on: the call is bookended before its result.
+    assert types.index("TOOL_CALL_END") < types.index("TOOL_CALL_RESULT")
+    assert "22" in text_of(events) or "Tokyo" in text_of(events)
