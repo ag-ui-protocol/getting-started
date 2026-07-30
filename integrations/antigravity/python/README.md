@@ -277,7 +277,7 @@ Agents that must not share process-level storage should keep separate
 * **SDK churn.** `google-antigravity` is young; the dependency is pinned to
   `<0.2.0` deliberately.
 
-### Known gaps in `google-antigravity` 0.1.8 (OpenAI-compatible path)
+### Known gaps in `google-antigravity` 0.1.8–0.1.9 (OpenAI-compatible path)
 
 These are upstream, not integration bugs. They affect only `base_url` usage:
 
@@ -293,6 +293,21 @@ These are upstream, not integration bugs. They affect only `base_url` usage:
 3. **`session_continuation_mode` dropped.** `LocalOpenAIAgentConfig.create_strategy`
    does not forward it, disabling cold resume. Worked around by
    `_ResumableOpenAIConfig` in `agent.py`.
+
+### Tool calls do not stream their arguments
+
+Not specific to the OpenAI path, and not workable around: the harness hands over
+a tool call **fully formed, in a single step**. Measured with a custom tool
+whose argument was 1850 characters — still one `TOOL_CALL` step carrying the
+complete arguments. Presumably the Go side parses the model's tool-call JSON
+before dispatching, since it needs valid JSON to invoke anything, and surfaces
+the parsed call rather than the token stream.
+
+So `TOOL_CALL_ARGS` arrives as one delta rather than filling in progressively.
+There are no fragments to forward; this would need the harness to expose partial
+tool-call deltas. What *does* stream is the call lifecycle: the call is emitted
+as soon as the harness dispatches it, so a client renders its pending state
+while the tool runs and swaps in the result when it returns.
 
 ## Not implemented yet
 
