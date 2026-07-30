@@ -124,7 +124,32 @@ class SubagentContext:
     parent_subagent_id: Optional[str] = None
 
 
-def derive_subagent_context(ns: str, lc_agent_name: Optional[str], subgraphs) -> Optional[SubagentContext]:
+def _record_subagent_boundaries(ns: str, known: set) -> None:
+    """Record `tools:<uuid>` segments that are genuine subagent boundaries.
+
+    A boundary is a `tools:` segment directly followed by a non-`tools` node
+    (the subagent's own model/middleware). A regular inner tool's ToolNode is a
+    leaf (never followed by such a node), so it is never recorded — which is how
+    a nested subagent is told apart from a subagent's own tool call.
+    """
+    if not ns:
+        return
+    segs = ns.split("|")
+    for i, seg in enumerate(segs):
+        if (
+            seg.split(":")[0] == "tools"
+            and i + 1 < len(segs)
+            and segs[i + 1].split(":")[0] != "tools"
+        ):
+            known.add(seg)
+
+
+def derive_subagent_context(
+    ns: str,
+    lc_agent_name: Optional[str],
+    subgraphs,
+    known_subagent_segments: Optional[set] = None,
+) -> Optional[SubagentContext]:
     """Return a SubagentContext when an event originates inside a deepagents
     subagent, else None.
 
@@ -138,11 +163,27 @@ def derive_subagent_context(ns: str, lc_agent_name: Optional[str], subgraphs) ->
     root_name = leading.split(":")[0]
     if root_name in subgraphs:
         return None  # declared subgraph, handled elsewhere
-    # The leading `tools:<uuid>` segment is the (top-level) subagent id. Note we
-    # cannot reliably derive parent_subagent_id from the namespace: a subagent's
-    # own inner ToolNode also appears as a `tools:<uuid>` segment, so it is
-    # indistinguishable from a genuine nested-subagent boundary. parent is left
-    # None until a more precise signal (e.g. lc-agent-name nesting) is available.
+    segs = ns.split("|")
+    # A `tools:<uuid>` segment is a genuine subagent boundary only when it is
+    # directly followed by a non-`tools` node (the subagent's own model /
+    # middleware) — a *regular* inner tool's ToolNode is a leaf and is never
+    # followed by agent machinery. `known_subagent_segments` accumulates those
+    # boundaries across the stream (see reconcile_subagents). The subagent chain
+    # for this event is the boundary segments present in its ns, in order: the
+    # deepest is the current subagent, the one above it is its parent. This
+    # distinguishes a nested subagent (tools:A|tools:B|model) from a subagent's
+    # own inner tool call (tools:A|tools:B|tools:C), which the naive
+    # deepest-segment approach conflated.
+    if known_subagent_segments:
+        chain = [s for s in segs if s in known_subagent_segments]
+        if chain:
+            return SubagentContext(
+                subagent_id=chain[-1],
+                name=lc_agent_name,
+                parent_subagent_id=chain[-2] if len(chain) >= 2 else None,
+            )
+    # Fallback (no accumulated boundary info, e.g. standalone callers): the
+    # leading segment is the subagent, with no derivable parent.
     return SubagentContext(subagent_id=leading, name=lc_agent_name, parent_subagent_id=None)
 
 
@@ -176,7 +217,9 @@ def reconcile_subagents(active_run, ns, lc_agent_name, subgraphs) -> list:
     stamping. SUBAGENT_FINISHED is emitted by drain_subagents before RUN_FINISHED
     (unique-started + all-closed-before-run-end is protocol-valid; precise per-subagent
     finish timing is deferred for this step)."""
-    ctx = derive_subagent_context(ns, lc_agent_name, subgraphs)
+    known = active_run.setdefault("subagent_segments", set())
+    _record_subagent_boundaries(ns, known)
+    ctx = derive_subagent_context(ns, lc_agent_name, subgraphs, known)
     new_id = ctx.subagent_id if ctx else None
     active_run["current_subagent_id"] = new_id
     events = []
@@ -325,8 +368,12 @@ class LangGraphAgent:
         tool_input = (event.get("data") or {}).get("input")
         if not isinstance(tool_input, dict) or "subagent_type" not in tool_input:
             return
+        # The task on_tool_start runs *in* the new subagent's own ToolNode, so the
+        # deepest `tools:` segment of its ns is the new subagent's id (matches the
+        # chain derivation in reconcile_subagents). Single-level: same as before.
         ns = (event.get("metadata") or {}).get("langgraph_checkpoint_ns", "")
-        subagent_id = ns.split("|")[0] if ns else ""
+        tool_segs = [s for s in ns.split("|") if s.split(":")[0] == "tools"] if ns else []
+        subagent_id = tool_segs[-1] if tool_segs else (ns.split("|")[0] if ns else "")
         if not subagent_id:
             return
         active_run = getattr(self, "active_run", None)
@@ -522,6 +569,7 @@ class LangGraphAgent:
             "subagent_task_meta": {},
             "subagent_task_runs": {},
             "pending_task_calls": [],
+            "subagent_segments": set(),
             "subagent_messages": {},
             "subagent_tool_call_owner": {},
             # Subagent messages the client echoed back from prior turns, split

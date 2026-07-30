@@ -418,3 +418,27 @@ class TestSubagentNewFields(unittest.TestCase):
         )
         self.assertEqual([e.type for e in evs], [EventType.SUBAGENT_FINISHED])
         self.assertEqual(evs[0].result, "the subagent result")
+
+
+class TestNestedSubagentParent(unittest.TestCase):
+    def test_parent_derived_from_boundary_segments(self):
+        # Mirrors the real nested-run namespaces (supervisor -> outer -> inner):
+        #   outer events:  tools:a|model
+        #   inner events:  tools:a|tools:b|model
+        #   inner's tool:  tools:a|tools:b|tools:c   (c is NOT a subagent)
+        ar = {"active_subagents": {}, "current_subagent_id": None,
+              "subagent_segments": set()}
+
+        e1 = reconcile_subagents(ar, "tools:a|model:x", "outer", set())
+        self.assertEqual([e.subagent_id for e in e1], ["tools:a"])
+        self.assertIsNone(e1[0].parent_subagent_id)
+
+        e2 = reconcile_subagents(ar, "tools:a|tools:b|model:y", "inner", set())
+        self.assertEqual([e.subagent_id for e in e2], ["tools:b"])
+        self.assertEqual(e2[0].parent_subagent_id, "tools:a")  # <-- the parent link
+
+        # inner running its OWN tool: c is a leaf, not a subagent boundary, so the
+        # event stays attributed to inner (tools:b) and emits no new SUBAGENT_STARTED.
+        e3 = reconcile_subagents(ar, "tools:a|tools:b|tools:c", "inner", set())
+        self.assertEqual(e3, [])
+        self.assertEqual(ar["current_subagent_id"], "tools:b")
