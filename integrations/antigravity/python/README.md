@@ -9,6 +9,9 @@ and shell work on the host. So this is an **ADK-class integration** — stateful
 and session-based — not a stateless LangGraph-class one. The stream translation
 is small; the session lifecycle is the substance.
 
+Sessions share those subprocesses rather than owning one each — see
+[Harness pooling](#harness-pooling).
+
 ## Why the HITL story is unusually clean
 
 Antigravity's hooks and custom tools are **async, awaited, and carry no
@@ -178,10 +181,54 @@ Because Antigravity fixes the tool list in the harness config at connect time,
 a client that changes its `tools` between runs forces a cold-resume rebuild
 rather than running against a stale list.
 
+## Harness pooling
+
+Sessions do **not** get a subprocess each. A `HarnessPool` shares one
+`localharness` process between up to `max_conversations_per_process` (default 8)
+conversations, because Antigravity configures a harness twice:
+
+| sent | when | contains |
+|---|---|---|
+| `InputConfig` | process stdin at startup | `save_dir`, `env` |
+| `HarnessConfig` | WebSocket, **per conversation** | tools, model, system instructions, capabilities, MCP servers, hooks, subagents, `response_schema`, `conversation_id`, **`workspaces`** |
+
+Almost everything varying per thread — including `workspaces`, so per-thread
+filesystem isolation is unaffected — is per-conversation. Only `save_dir` and
+`env` are process-wide, and they form the pool's partition key.
+
+Measured with 8 concurrent conversations (`gpt-4.1-mini`, one turn each):
+
+| | pooled (1 process) | one process each |
+|---|---|---|
+| idle | **101 MB** | 752 MB |
+| mid-turn | **154 MB** | 1040 MB |
+| wall clock | 12.7 s | 12.3 s |
+
+So an extra idle conversation costs ~1 MB rather than ~95 MB. Throughput is
+unchanged; per-turn p50 rises ~1.3× only when all 8 turn simultaneously. A
+20-second tool call in one conversation was measured **not** to delay its
+neighbours (median inflation 0.95× against a control).
+
+Set `max_conversations_per_process=1` to go back to one process per thread.
+
+* **Blast radius.** One dead process fails every conversation on it. They raise
+  promptly rather than hanging (`test_process_death_raises_rather_than_hangs`),
+  but this is the tradeoff pooling buys — hence the modest default.
+* **Parked sessions.** Parking and pooling compose: a conversation parked on a
+  human does not block its co-tenants
+  (`test_a_parked_conversation_does_not_block_its_siblings`). But a parked
+  session pins its process, and the pool cannot know in advance which
+  conversations will park, so under park-heavy load the saving is bounded by
+  fragmentation rather than by the ~1 MB marginal figure.
+* **Not a tenancy boundary.** `save_dir` is shared by every conversation on a
+  process. Use `workspaces` for isolation, and give tenants separate `save_dir`
+  values (which partitions them onto separate processes) if storage must be
+  isolated too.
+
 ## Operational notes
 
-* **Sandboxing.** One subprocess with real filesystem and shell access per
-  `thread_id`. Multi-tenant hosting needs per-thread workspace isolation,
+* **Sandboxing.** Real filesystem and shell access, scoped per conversation by
+  `workspaces`. Multi-tenant hosting needs per-thread workspace isolation,
   resource caps, and reliable cleanup. Always set `workspaces=[...]`.
 * **SDK churn.** `google-antigravity` is young; the dependency is pinned to
   `<0.2.0` deliberately.
