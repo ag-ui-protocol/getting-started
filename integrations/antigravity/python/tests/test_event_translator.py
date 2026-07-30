@@ -292,7 +292,7 @@ class TestToolCalls:
         assert types.count("TOOL_CALL_END") == 1
         results = [e for e in events if e.type == "TOOL_CALL_RESULT"]
         assert len(results) == 1
-        assert results[0].content == ""
+        assert "without returning any output" in results[0].content
 
 
     async def test_builtin_calls_can_be_hidden_from_the_client(self):
@@ -325,8 +325,44 @@ class TestToolCalls:
         args = [e for e in events if e.type == "TOOL_CALL_ARGS"][0]
         assert "_unserializable" in args.delta
 
-    async def test_shrinking_args_are_re_sent_whole_rather_than_diffed(self):
-        """Only a growing prefix can be sent as a delta."""
+    async def test_args_deltas_always_concatenate_into_one_json_document(self):
+        """The client does `function.arguments += delta`, so everything emitted
+        for one call must join into exactly ONE parseable JSON document.
+
+        A grown JSON object is not a string extension of the smaller one (the
+        closing brace moves), so re-sending the whole dict on any change gives
+        the client `{...}{...}` -- unparseable, and for a built-in it also
+        leaks the tool's result into its arguments.
+        """
+        t = EventTranslator()
+        running = ag_types.ToolCall(
+            name="list_directory", args={"directory_path": "/ws"}, id="tc-1"
+        )
+        grown = ag_types.ToolCall(
+            name="list_directory",
+            args={"directory_path": "/ws", "results": [{"name": "secret.txt"}]},
+            id="tc-1",
+        )
+        events = await collect(
+            t,
+            [
+                step(tool_calls=[running]),
+                step(tool_calls=[running]),
+                step(tool_calls=[grown], status=ag_types.StepStatus.DONE),
+            ],
+        )
+
+        buffer = "".join(
+            e.delta for e in events if e.type == "TOOL_CALL_ARGS"
+        )
+        parsed = json.loads(buffer)  # would raise on `{...}{...}`
+        assert parsed == {"directory_path": "/ws"}
+        assert "results" not in parsed, "the result leaked into the arguments"
+
+        result = [e for e in events if e.type == "TOOL_CALL_RESULT"][0]
+        assert "secret.txt" in result.content
+
+    async def test_a_shape_change_does_not_corrupt_the_buffer(self):
         t = EventTranslator()
         events = await collect(
             t,
@@ -339,8 +375,16 @@ class TestToolCalls:
                 step(tool_calls=[ag_types.ToolCall(name="t", args={"z": 9}, id="tc-1")]),
             ],
         )
-        deltas = [e.delta for e in events if e.type == "TOOL_CALL_ARGS"]
-        assert deltas[-1] == '{"z": 9}'
+        buffer = "".join(e.delta for e in events if e.type == "TOOL_CALL_ARGS")
+        assert json.loads(buffer) == {"a": 1, "b": 2}
+
+    async def test_empty_args_still_produce_a_parseable_buffer(self):
+        t = EventTranslator()
+        events = await collect(
+            t, [step(tool_calls=[ag_types.ToolCall(name="t", args={}, id="tc-1")])]
+        )
+        buffer = "".join(e.delta for e in events if e.type == "TOOL_CALL_ARGS")
+        assert json.loads(buffer) == {}
 
     async def test_several_keys_added_at_done_are_returned_as_one_json_result(self):
         t = EventTranslator()
@@ -779,3 +823,62 @@ class TestThinkingBracketing:
                 assert depth == 1, "THINKING_END without a START"
                 depth -= 1
         assert depth == 0, "unclosed thinking step at end of run"
+
+
+class TestBuiltinFailures:
+    """TOOL_CALL_RESULT has no error field, so a failure has to say so in
+    `content`. An empty string is indistinguishable from a tool that
+    legitimately produced nothing, and the client renders it as success."""
+
+    async def test_a_reported_error_is_named_in_the_result(self):
+        t = EventTranslator()
+        running = ag_types.ToolCall(
+            name="run_command", args={"command": "rm /nope"}, id="tc-1"
+        )
+        failed = ag_types.ToolCall(
+            name="run_command",
+            args={"command": "rm /nope", "error": "permission denied"},
+            id="tc-1",
+        )
+        events = await collect(
+            t,
+            [
+                step(tool_calls=[running]),
+                step(tool_calls=[failed], status=ag_types.StepStatus.DONE),
+            ],
+        )
+        content = [e for e in events if e.type == "TOOL_CALL_RESULT"][0].content
+        assert "error executing run_command" in content
+        assert "permission denied" in content
+
+    async def test_no_output_is_distinguishable_from_a_failure(self):
+        t = EventTranslator()
+        call = ag_types.ToolCall(name="view_file", args={"file_path": "/a"}, id="tc-2")
+        events = await collect(
+            t,
+            [
+                step(tool_calls=[call]),
+                step(tool_calls=[call], status=ag_types.StepStatus.DONE),
+            ],
+        )
+        content = [e for e in events if e.type == "TOOL_CALL_RESULT"][0].content
+        assert content, "an empty result reads as success to the client"
+        assert "view_file" in content
+        assert "error" not in content.lower()
+
+    async def test_a_real_result_is_unchanged(self):
+        t = EventTranslator()
+        running = ag_types.ToolCall(name="list_directory", args={"p": "/"}, id="tc-3")
+        done = ag_types.ToolCall(
+            name="list_directory", args={"p": "/", "results": ["a.txt"]}, id="tc-3"
+        )
+        events = await collect(
+            t,
+            [
+                step(tool_calls=[running]),
+                step(tool_calls=[done], status=ag_types.StepStatus.DONE),
+            ],
+        )
+        content = [e for e in events if e.type == "TOOL_CALL_RESULT"][0].content
+        assert "a.txt" in content
+        assert "error" not in content.lower()

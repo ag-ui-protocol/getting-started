@@ -360,22 +360,35 @@ class EventTranslator:
 
             # Antigravity hands us the whole args dict (it does not stream arg
             # fragments), so emit only the delta beyond what we already sent.
+            # TOOL_CALL_ARGS deltas are CONCATENATED by the client
+            # (`function.arguments += delta`), so everything emitted for one
+            # call must join into exactly one JSON document. Antigravity hands
+            # over the whole args dict each time rather than streaming
+            # fragments, and at DONE it *grows* that dict with the tool's
+            # result -- and a grown JSON object is not a string extension of
+            # the smaller one, because the closing brace moves. Diffing the
+            # two therefore re-sent the entire dict, so the client's buffer
+            # became `{...}{...}`: unparseable, with the result leaked into the
+            # arguments. Send the args once, and let the result travel on
+            # TOOL_CALL_RESULT where it belongs.
             args_json = _safe_json(call.args)
-            already = self._emitted_args.get(key, "")
-            # A flushed call is already bookended; args after its END would be
-            # out of order. The grown args are its result, delivered below.
+            already = self._emitted_args.get(key)
             if flushed:
+                # Already bookended; args after its END would be out of order.
                 self._emitted_args[key] = args_json
-            elif args_json != already:
-                delta = (
-                    args_json[len(already):]
-                    if args_json.startswith(already)
-                    else args_json
+            elif already is None:
+                yield ToolCallArgsEvent(
+                    type="TOOL_CALL_ARGS", tool_call_id=tool_call_id, delta=args_json
                 )
-                if delta:
-                    yield ToolCallArgsEvent(
-                        type="TOOL_CALL_ARGS", tool_call_id=tool_call_id, delta=delta
-                    )
+                self._emitted_args[key] = args_json
+            elif args_json.startswith(already) and args_json != already:
+                # Genuine append-only growth (a harness that does stream
+                # fragments): the suffix keeps the buffer a single document.
+                yield ToolCallArgsEvent(
+                    type="TOOL_CALL_ARGS",
+                    tool_call_id=tool_call_id,
+                    delta=args_json[len(already):],
+                )
                 self._emitted_args[key] = args_json
 
             if step.status == ag_types.StepStatus.DONE:
@@ -399,7 +412,7 @@ class EventTranslator:
                     message_id=str(uuid.uuid4()),
                     tool_call_id=tool_call_id,
                     content=_extract_builtin_result(
-                        call, self._input_arg_keys.get(key, set())
+                        call, self._input_arg_keys.get(key, set()), tool_name=name
                     ),
                 )
                 # Close the bracket after the call it wraps, not before.
@@ -472,21 +485,39 @@ def _safe_json(value: Any) -> str:
         return json.dumps({"_unserializable": str(value)})
 
 
-def _extract_builtin_result(call: ag_types.ToolCall, input_keys: set) -> str:
-    """Returns a completed built-in tool's result payload, or "" if none.
+# Keys the harness uses to report a failure rather than a result.
+_ERROR_KEYS = ("error", "err", "failure", "exception", "stderr")
+
+
+def _extract_builtin_result(
+    call: ag_types.ToolCall, input_keys: set, *, tool_name: str = ""
+) -> str:
+    """Returns a completed built-in tool's result payload.
 
     The harness surfaces results under tool-specific keys -- ``list_directory``
     grows a ``results`` key, ``search_web`` a different one -- so rather than
     guessing names, we take whatever keys appeared *after* the call was first
-    observed. Tools like ``view_file`` add nothing (their output is fed to the
-    model out of band), which yields "".
+    observed.
+
+    ``ToolCallResultEvent`` has no error channel, so a failure has to travel in
+    ``content``. It says so in words: an empty string would be
+    indistinguishable from a tool that legitimately produced no output (which
+    ``view_file`` does -- its output goes to the model out of band), and the
+    client would render a failed call as a completed one.
     """
-    args = call.args or {}
-    if not isinstance(args, dict):
-        return ""
+    args = call.args if isinstance(call.args, dict) else {}
+    label = tool_name or (
+        call.name.value if hasattr(call.name, "value") else str(call.name)
+    )
+
+    for key in _ERROR_KEYS:
+        detail = args.get(key)
+        if detail:
+            return f"There was an error executing {label}: {detail}"
+
     produced = {k: v for k, v in args.items() if k not in input_keys}
     if not produced:
-        return ""
+        return f"{label} completed without returning any output."
     if len(produced) == 1:
         (value,) = produced.values()
         return value if isinstance(value, str) else _safe_json(value)

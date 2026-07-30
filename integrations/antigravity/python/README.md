@@ -100,9 +100,16 @@ Two details that only show up against a live harness:
   outcome by *growing* the `args` dict at DONE, under a tool-specific name
   (`list_directory` adds `results`). Some tools — `view_file` — add nothing at
   all, because their output goes to the model out of band. The translator
-  therefore takes whatever keys appeared after the call was first seen, and
-  emits an empty `TOOL_CALL_RESULT` when there are none, so clients close the
-  tool card instead of leaving it spinning.
+  therefore takes whatever keys appeared after the call was first seen. A
+  failure is reported in words (`TOOL_CALL_RESULT` has no error channel), and
+  so is "completed with no output" — an empty string would make the two
+  indistinguishable and render a failed call as a successful one.
+* **`TOOL_CALL_ARGS` deltas are concatenated by the client**
+  (`function.arguments += delta`), so everything sent for one call must join
+  into a single JSON document. Antigravity hands over the whole args dict each
+  time rather than streaming fragments, and *grows* it with the result at DONE
+  — and a grown JSON object is not a string extension of the smaller one. The
+  args are therefore sent once; the result travels on `TOOL_CALL_RESULT`.
 
 ## Human-in-the-loop
 
@@ -215,7 +222,7 @@ Deliberate gaps, so the surface above is not mistaken for more than it is:
 
 ```bash
 uv sync
-uv run pytest          # 201 unit tests; live tests are deselected by default
+uv run pytest          # 239 unit tests; live tests are deselected by default
 ```
 
 The live checks start a real harness subprocess and call a real model:
@@ -255,7 +262,7 @@ shim:
 
 | Check | Result |
 |---|---|
-| 201 unit tests (translator, bridge, sessions, endpoint) | pass |
+| 239 unit tests (translator, bridge, sessions, endpoint) | pass |
 | 6 live tests (streaming, multi-turn, frontend-tool park/resume, built-in tools, SSE, parking gate) | pass |
 | 15 TypeScript tests + typecheck + build | pass |
 | Harness parked with the stream closed, then resumed (manual soak at 45 s and 180 s; the committed default is 30 s) | pass |
