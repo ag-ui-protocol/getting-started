@@ -211,6 +211,31 @@ neighbours (median inflation 0.95× against a control).
 
 Set `max_conversations_per_process=1` to go back to one process per thread.
 
+### Several agents in one server
+
+Each `AntigravityAgent` owns a pool, so a server hosting four agents gets four
+harness processes — a ~95 MB floor per agent, independent of traffic. It does
+not affect scaling (threads of one agent still share), and it affects nothing
+about correctness, but it is silent: you find out by counting processes.
+
+Sharing needs **both** a pool and a `save_dir`. Passing only `harness_pool=`
+changes nothing, because each agent otherwise mints its own `tempfile.mkdtemp()`
+save directory and `save_dir` is half the pool's partition key:
+
+```python
+from ag_ui_antigravity.harness_pool import HarnessPool
+
+pool = HarnessPool()
+save_dir = "/var/lib/myapp/antigravity"      # both, or you still get a process each
+
+chat = AntigravityAgent(model=..., harness_pool=pool, save_dir=save_dir)
+research = AntigravityAgent(model=..., harness_pool=pool, save_dir=save_dir)
+```
+
+Agents that must not share process-level storage should keep separate
+`save_dir` values — they will land on separate processes by design. See
+`examples/server/api/_common.py`.
+
 * **Blast radius.** One dead process fails every conversation on it. They raise
   promptly rather than hanging (`test_process_death_raises_rather_than_hangs`),
   but this is the tradeoff pooling buys — hence the modest default.
