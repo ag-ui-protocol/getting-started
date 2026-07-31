@@ -285,6 +285,29 @@ Agents that must not share process-level storage should keep separate
 * **SDK churn.** `google-antigravity` is young; the dependency is pinned to
   `<0.2.0` deliberately.
 
+### Keep workspace paths short
+
+A long workspace path makes runs fail intermittently, and the failure looks
+nothing like its cause.
+
+If a prompt leads the model to write an absolute path into a tool call — "read
+`/var/folders/0t/pq2_7rn97834lcsvc_qy4t8r0000gn/T/ag-ui-antigravity-wz_4xjbd/notes.txt`"
+— it sometimes reproduces that path wrongly, truncating it or repeating a chunk
+of it. macOS temp directories are ~75 characters of high-entropy text, which is
+about the worst case. Measured on `gpt-4.1-mini`: **0/14 runs failed with a
+9-character workspace path, 2/14 with a 75-character one.**
+
+The harness treats the resulting bad path as a fatal
+`AntigravityExecutionError` rather than returning the error for the model to
+retry, so the whole run dies mid-tool-call with
+`RUN_ERROR: The model produced an invalid tool call`. Nothing in that message
+points at path length.
+
+Set `ANTIGRAVITY_WORKSPACE` (or `workspaces=[...]`) to something short and
+stable — `/srv/agents/w1`, not a generated temp directory. This is a model
+limitation rather than an integration bug: it reproduces identically on older
+commits.
+
 ### Known gaps in `google-antigravity` 0.1.8–0.1.9 (OpenAI-compatible path)
 
 These are upstream, not integration bugs. They affect only `base_url` usage:

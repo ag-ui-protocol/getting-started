@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import sys
 import tempfile
 import uuid
@@ -47,6 +48,22 @@ def base_url():
 def workspace():
     with tempfile.TemporaryDirectory(prefix="ag-ui-antigravity-") as path:
         yield path
+
+
+@pytest.fixture(scope="module")
+def short_workspace():
+    """A workspace with a deliberately short path.
+
+    macOS temp directories are ~75 characters of high-entropy text. A model
+    asked to repeat one back inside a tool call gets it wrong often enough to
+    make a test flaky, and the harness treats a bad path as fatal.
+    """
+    path = os.path.join("/tmp", f"agw{os.getpid()}")
+    os.makedirs(path, exist_ok=True)
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def run_input(thread_id, prompt, *, tools=None, messages=None, resume=None):
@@ -212,6 +229,58 @@ async def test_frontend_tool_parks_then_resumes_across_two_runs(base_url, worksp
         assert not agent.session_manager.get(thread).is_parked
     finally:
         await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_builtin_tool_calls_are_reported(base_url, short_workspace):
+    """Built-in tools are executed by the harness and reported to the client.
+
+    Uses `short_workspace`, not the shared `workspace` fixture, and that is
+    load-bearing. This prompt asks the model to echo an absolute path back into
+    a tool call, and with a long random temp path it garbles it -- measured at
+    0/14 failures on a 9-character path against 2/14 on a 75-character one,
+    with captured errors showing the path truncated or a chunk duplicated. The
+    harness treats the resulting bad path as a fatal
+    AntigravityExecutionError rather than handing it back to the model, so the
+    run dies mid-tool-call. See "Keep workspace paths short" in the README.
+    """
+    from ag_ui_antigravity import AntigravityAgent
+
+    target = os.path.join(short_workspace, "greeting.txt")
+    with open(target, "w") as handle:
+        handle.write("the magic word is xyzzy\n")
+
+    agent = AntigravityAgent(
+        model=MODEL,
+        base_url=base_url,
+        system_instructions=(
+            "You have filesystem tools. Use them to answer questions about files."
+        ),
+        workspaces=[short_workspace],
+    )
+    try:
+        events = await asyncio.wait_for(
+            collect(
+                agent,
+                run_input(
+                    "live-builtin",
+                    f"List the files in {short_workspace}, then read {target} "
+                    "and tell me the magic word.",
+                ),
+            ),
+            240,
+        )
+    finally:
+        await agent.close()
+
+    assert_lifecycle(events)
+    types = types_of(events)
+    assert "TOOL_CALL_START" in types, types
+    # Every built-in call must be closed AND resolved, or clients leave the
+    # tool card spinning forever.
+    assert types.count("TOOL_CALL_START") == types.count("TOOL_CALL_END")
+    assert types.count("TOOL_CALL_START") == types.count("TOOL_CALL_RESULT")
+    assert "xyzzy" in text_of(events).lower(), text_of(events)
 
 
 @pytest.mark.asyncio
