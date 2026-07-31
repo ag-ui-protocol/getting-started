@@ -10,7 +10,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
 dependencies = [
-    "ag-ui-protocol>=0.1.15",
+    "ag-ui-protocol==0.1.20.dev1785518626",
     "ag-ui-a2ui-toolkit>=0.0.4",
     "langchain>=1.2.0",
     "langchain-core>=0.3.0",
