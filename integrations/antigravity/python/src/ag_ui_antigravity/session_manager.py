@@ -321,6 +321,11 @@ class SessionManager:
                 agent=agent,
                 bridge=bridge,
                 tool_signature=signature,
+                # Always None in practice: the SDK only assigns a conversation
+                # id once a message has been exchanged, and nothing has been
+                # yet. Kept because _close_locked reads it first and falls back
+                # to the live agent, which is where the real value lives -- read
+                # `session.agent.conversation_id`, not this, when you want it.
                 conversation_id=agent.conversation_id,
                 # Carried across a cold resume: the rebuilt harness restores the
                 # same conversation, so those prompts are still in its history.

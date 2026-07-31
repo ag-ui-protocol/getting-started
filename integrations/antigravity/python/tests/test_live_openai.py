@@ -247,6 +247,18 @@ async def test_builtin_tool_calls_are_reported(base_url, workspace):
 
     assert_lifecycle(events)
     types = types_of(events)
+    # KNOWN INTERMITTENT: this run sometimes terminates in RUN_ERROR partway
+    # through a built-in tool call, leaving the call bookended but unresolved.
+    # Reproduced on the pre-pooling commit (b3f04029) at a similar rate, so it
+    # is upstream flakiness in the harness or the model, not a regression in
+    # this integration. Asserted explicitly so the failure names the cause
+    # instead of surfacing as a confusing missing-result count.
+    errors = [e for e in events if e.type == "RUN_ERROR"]
+    assert not errors, (
+        "the run errored partway through a built-in tool call: "
+        f"{[e.message for e in errors]}"
+    )
+
     assert "TOOL_CALL_START" in types, types
     # Every built-in call must be closed AND resolved, or clients leave the
     # tool card spinning forever.
@@ -372,3 +384,87 @@ async def test_server_side_tool_reports_its_result(base_url, workspace):
     # Ordering the client depends on: the call is bookended before its result.
     assert types.index("TOOL_CALL_END") < types.index("TOOL_CALL_RESULT")
     assert "22" in text_of(events) or "Tokyo" in text_of(events)
+
+
+@pytest.mark.asyncio
+async def test_cold_resume_rebuilds_the_session_and_keeps_history(base_url, workspace):
+    """The documented persistence pattern, driven through the adapter.
+
+    `persistence.md` is explicit that Antigravity's answer to "come back later"
+    is to close the agent and reopen it with the same `conversation_id` and
+    `save_dir`. The adapter does that on its own whenever the client's tool set
+    changes between runs, which forces a rebuild rather than running against a
+    stale tool list.
+
+    The unit tests only prove the config carries the right fields, and the
+    pooled test proves a strategy rehydrates history. Neither exercises this
+    path end to end -- which is how a bug that gave every session its own
+    `tempfile.mkdtemp()` save directory (so resume restored nothing) survived
+    until it was found by hand.
+    """
+    from ag_ui.core import Tool as AGUITool
+
+    from ag_ui_antigravity import AntigravityAgent
+
+    def tool(name):
+        return AGUITool(
+            name=name,
+            description=f"Does {name}.",
+            parameters={"type": "object", "properties": {}},
+        ).model_dump()
+
+    agent = AntigravityAgent(
+        model=MODEL,
+        base_url=base_url,
+        system_instructions="Answer in one short sentence. Remember what you are told.",
+        workspaces=[workspace],
+    )
+    thread = "live-cold-resume"
+    try:
+        first = await asyncio.wait_for(
+            collect(
+                agent,
+                run_input(
+                    thread,
+                    "Remember this: my passphrase is octarine. Acknowledge.",
+                    tools=[tool("alpha")],
+                ),
+            ),
+            180,
+        )
+        assert_lifecycle(first)
+        before = agent.session_manager.get(thread)
+        assert before is not None
+        # Read it off the live agent: `session.conversation_id` is snapshotted
+        # at creation, before any message has been exchanged, so the SDK always
+        # reports None there. `_close_locked` falls back to the agent for
+        # exactly this reason.
+        conversation_id = before.agent.conversation_id
+        assert conversation_id, "no conversation_id to resume from"
+
+        # A changed tool set is the adapter's own cold-resume trigger: the
+        # harness fixes the tool list at connect time, so the session must be
+        # rebuilt rather than run against a stale one.
+        second = await asyncio.wait_for(
+            collect(
+                agent,
+                run_input(
+                    thread, "What is my passphrase?", tools=[tool("beta")]
+                ),
+            ),
+            180,
+        )
+        assert_lifecycle(second)
+
+        after = agent.session_manager.get(thread)
+        assert after is not None
+        assert after is not before, "the session was not rebuilt"
+        assert after.agent.conversation_id == conversation_id, (
+            "the rebuild started a new conversation instead of resuming the old "
+            f"one: {after.agent.conversation_id} != {conversation_id}"
+        )
+        assert "octarine" in text_of(second).lower(), (
+            f"cold resume lost the history: {text_of(second)!r}"
+        )
+    finally:
+        await agent.close()
