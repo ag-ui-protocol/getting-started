@@ -191,8 +191,16 @@ chat demos in `examples/` enable nothing else.
 
 `SessionManager` keys a live `Conversation` by `thread_id`.
 
-* **Hot resume** — a session with a parked coroutine is pinned in memory and is
-  never evicted by the idle sweeper. A suspended coroutine cannot be serialized.
+* **Hot resume** — a session with a parked coroutine stays in memory, because a
+  suspended coroutine cannot be serialized. It gets a longer grace period than
+  an idle session rather than an exemption: `parked_timeout_seconds` (2 h)
+  instead of `session_timeout_seconds` (30 min). A run in flight holds the
+  session lock and is never reclaimed.
+
+  A session occupies memory for its whole life, not only while parked — from
+  the first message on a `thread_id` until it times out, is evicted at
+  `max_sessions`, or is rebuilt because the client's tool set changed. Parking
+  does not allocate anything; it extends how long the allocation is held.
 * **Cold resume** — a recycled session with nothing parked is rebuilt from
   `conversation_id` + `session_continuation_mode` + `save_dir`.
 
