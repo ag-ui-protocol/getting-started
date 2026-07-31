@@ -25,10 +25,21 @@ if ! (cd "$REPO_ROOT" && node -e "require('semver')") 2>/dev/null; then
   exit 1
 fi
 
+# `autoPublish: false` marks a scope as SEQUENCED SEPARATELY: it is enrolled in
+# release.config.json (so it is discoverable, canary-selectable, and covered by the
+# scope-dropdown guards) but is skipped by this automatic stable sweep. Without it a
+# not-yet-on-NuGet package would be detected as NEW (404) and published on the very
+# next stable release. Flipping the flag to true (or removing it) is the reviewed,
+# git-tracked "graduation" event that enrolls the scope in the shared train.
+# Omitted => true, so every already-shipping scope keeps its current behavior.
+# NOTE: the predicate is `!= false`, NOT `(.autoPublish // true)` — jq's `//` treats
+# BOTH null and false as absent, so `false // true` evaluates to true and would
+# silently publish every scope this flag is meant to hold back.
 DOTNET_PACKAGES=$(jq -c '
   [
     .scopes | to_entries[]
     | select(any(.value.packages[]; .ecosystem == "dotnet"))
+    | select(.value.autoPublish != false)
     | .value.versionSource as $versionSource
     | .value.packages[]
     | select(.ecosystem == "dotnet")

@@ -62,6 +62,7 @@ jobs:
           dotnet build src/AGUI.Protobuf/AGUI.Protobuf.csproj -c Release
           dotnet build src/AGUI.Client/AGUI.Client.csproj -c Release
           dotnet build src/AGUI.Server/AGUI.Server.csproj -c Release
+          dotnet build src/AGUI.A2UI/AGUI.A2UI.csproj -c Release
 
       # Run the self-contained test projects directly rather than the whole
       # AGUI.slnx: the AGUIDojoServer sample references a sibling agent-framework
@@ -69,6 +70,7 @@ jobs:
       - name: Run unit tests
         run: |
           dotnet test tests/AGUI.Abstractions.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.A2UI.UnitTests -c Release -p:SignAssembly=false
           dotnet test tests/AGUI.Client.UnitTests -c Release -p:SignAssembly=false
           dotnet test tests/AGUI.Formatting.UnitTests -c Release -p:SignAssembly=false
           dotnet test tests/AGUI.Protobuf.UnitTests -c Release -p:SignAssembly=false

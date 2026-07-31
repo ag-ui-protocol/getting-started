@@ -111,6 +111,7 @@ on:
           - sdk-py
           - sdk-py-a2ui-toolkit
           - sdk-dotnet
+          - sdk-dotnet-a2ui
           - sdk-ts
           - sdk-ts-a2ui-toolkit
           - create-ag-ui-app
@@ -1230,6 +1231,7 @@ jobs:
         run: |
           set -euo pipefail
           dotnet test tests/AGUI.Abstractions.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.A2UI.UnitTests -c Release -p:SignAssembly=false
           dotnet test tests/AGUI.Client.UnitTests -c Release -p:SignAssembly=false
           dotnet test tests/AGUI.Formatting.UnitTests -c Release -p:SignAssembly=false
           dotnet test tests/AGUI.Protobuf.UnitTests -c Release -p:SignAssembly=false
@@ -1246,6 +1248,7 @@ jobs:
           dotnet build src/AGUI.Protobuf/AGUI.Protobuf.csproj -c Release --no-incremental
           dotnet build src/AGUI.Client/AGUI.Client.csproj -c Release --no-incremental
           dotnet build src/AGUI.Server/AGUI.Server.csproj -c Release --no-incremental
+          dotnet build src/AGUI.A2UI/AGUI.A2UI.csproj -c Release --no-incremental
 
       - name: Pack NuGet packages
         shell: bash
@@ -1602,7 +1605,7 @@ jobs:
               NUGET_INTENDED=true
             else
               # Map the dispatch scope to its ecosystem. The explicit NuGet arm
-              # catches sdk-dotnet. The *-py glob catches the sdk-py /
+              # catches the sdk-dotnet* scopes. The *-py glob catches the sdk-py /
               # integration-*-py PyPI scopes; the explicit Python names cover
               # PyPI scopes that do NOT end in -py. Everything else is npm. This
               # only affects FAILURE paging — success arms use the real
@@ -1614,7 +1617,7 @@ jobs:
               # verify-release-scope-dropdowns.sh asserts this list maps every
               # config scope to the correct ecosystem, so it cannot drift.
               case "$SCOPE" in
-                sdk-dotnet)
+                sdk-dotnet|sdk-dotnet-a2ui)
                   NUGET_INTENDED=true ;;
                 integration-agent-spec|integration-langroid|sdk-py-a2ui-toolkit)
                   PY_INTENDED=true ;;

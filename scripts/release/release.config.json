@@ -24,6 +24,15 @@
         { "name": "AGUI.Server", "path": "sdks/dotnet/src/AGUI.Server", "ecosystem": "dotnet" }
       ]
     },
+    "sdk-dotnet-a2ui": {
+      "description": "A2UI .NET SDK package (sequenced separately from the sdk-dotnet train; versioned with the cross-language A2UI family)",
+      "sharedVersion": false,
+      "versionSource": "sdks/dotnet/src/AGUI.A2UI/AGUI.A2UI.csproj",
+      "autoPublish": false,
+      "packages": [
+        { "name": "AGUI.A2UI", "path": "sdks/dotnet/src/AGUI.A2UI", "ecosystem": "dotnet" }
+      ]
+    },
     "create-ag-ui-app": {
       "description": "create-ag-ui-app CLI (independently versioned)",
       "sharedVersion": false,

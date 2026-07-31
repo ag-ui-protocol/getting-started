@@ -37,7 +37,11 @@ if ! (cd "$REPO_ROOT" && node -e "require('semver')") 2>/dev/null; then
 fi
 
 # Build allowlist: every TypeScript package name listed under any scope.
-ALLOWLIST=$(jq -r '[.scopes[].packages[] | select(.ecosystem == "typescript") | .name] | sort | unique | join("\n")' "$CONFIG")
+# Scopes marked `autoPublish: false` are sequenced separately: enrolled in
+# release.config.json but skipped by this automatic sweep until they graduate (see
+# detect-dotnet-version-changes.sh for the rationale). Omitted => true; the predicate is
+# `!= false` because jq's `//` treats false as absent (`false // true` == true).
+ALLOWLIST=$(jq -r '[.scopes[] | select(.autoPublish != false) | .packages[] | select(.ecosystem == "typescript") | .name] | sort | unique | join("\n")' "$CONFIG")
 if [ -z "$ALLOWLIST" ]; then
   echo "ERROR: release.config.json has no TypeScript packages" >&2
   exit 1

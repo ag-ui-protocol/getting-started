@@ -4,6 +4,12 @@
     <TargetFrameworks>$(TargetFrameworksCore)</TargetFrameworks>
     <RootNamespace>AGUI.A2UI</RootNamespace>
     <PackageId>AGUI.A2UI</PackageId>
+    <!-- Sequenced separately from the sdk-dotnet train (release.config.json scope
+         `sdk-dotnet-a2ui`). This overrides the shared default in Directory.Build.props so
+         A2UI moves on its own cadence, pinned to the cross-language A2UI family version
+         shared by @ag-ui/a2ui-toolkit and ag-ui-a2ui-toolkit — NOT to the .NET SDK's
+         VersionPrefix, which those siblings' SDK trains (0.0.57 / 0.1.19) already diverge from. -->
+    <VersionPrefix>0.0.4</VersionPrefix>
     <Description>A2UI (agent-generated UI) toolkit and IChatClient adapter for the AG-UI protocol: injects the generate_a2ui tool, drives a render_a2ui subagent with a validate-and-retry recovery loop, and streams surfaces progressively.</Description>
     <PackageTags>$(PackageTags);a2ui;generative-ui;adapter;streaming;chat;microsoft-extensions-ai</PackageTags>
   </PropertyGroup>

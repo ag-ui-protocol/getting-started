@@ -24,7 +24,11 @@ fi
 # source of truth prevents drift between the version-bumper (prepare-release.ts)
 # and the publisher (this script) — if a Python package is enrolled in the
 # config it gets both bumped and published.
-PY_PACKAGES=$(jq -c '[.scopes[].packages[] | select(.ecosystem == "python") | {dir: .path, build_system: .buildSystem}]' "$CONFIG")
+# Scopes marked `autoPublish: false` are sequenced separately: enrolled in
+# release.config.json but skipped by this automatic sweep until they graduate (see
+# detect-dotnet-version-changes.sh for the rationale). Omitted => true; the predicate is
+# `!= false` because jq's `//` treats false as absent (`false // true` == true).
+PY_PACKAGES=$(jq -c '[.scopes[] | select(.autoPublish != false) | .packages[] | select(.ecosystem == "python") | {dir: .path, build_system: .buildSystem}]' "$CONFIG")
 if [ -z "$PY_PACKAGES" ] || [ "$PY_PACKAGES" = "[]" ]; then
   echo "ERROR: release.config.json has no Python packages" >&2
   exit 1
