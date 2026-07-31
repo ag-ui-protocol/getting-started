@@ -11,13 +11,29 @@ namespace AGUI.A2UI;
 public sealed class A2UIChatClientOptions
 {
     /// <summary>
-    /// Gets whether to inject the <c>generate_a2ui</c> tool. <see langword="null"/> (the
-    /// default) means "auto": the per-run forwarded <c>injectA2UITool</c> flag wins when
-    /// present, otherwise injection is on because wrapping with <see cref="A2UIChatClient"/>
-    /// is itself the opt-in. An explicit value here is the backend override and is used only
-    /// when the run forwards no flag, so a client-sent <see langword="false"/> still wins.
+    /// Gets whether to inject the <c>generate_a2ui</c> tool. The per-run forwarded
+    /// <c>injectA2UITool</c> flag wins when present; this value is the backend opt-in used
+    /// only when the run forwards no flag, so a client-sent <see langword="false"/> still
+    /// wins. <see langword="null"/> (the default) means <b>off</b> — matching the sibling
+    /// adapters' "no <c>injectA2UITool</c>, no injection" contract (ADK
+    /// <c>a2ui["inject_a2ui_tool"]</c>, AWS Strands / Mastra <c>a2ui.injectA2UITool</c>).
+    /// Set <see langword="true"/> to opt in on a host that does not forward the flag.
     /// </summary>
     public bool? InjectA2UITool { get; init; }
+
+    /// <summary>
+    /// Gets the name under which the A2UI middleware injected its <c>render_a2ui</c> proxy
+    /// tool, which is dropped from the planner's tool list so the model calls
+    /// <c>generate_a2ui</c> instead of painting a surface directly (bypassing the subagent and
+    /// the validate-and-retry loop). Defaults to
+    /// <see cref="A2UIConstants.RenderA2UIToolName"/>.
+    /// </summary>
+    /// <remarks>
+    /// Only needed when the host configured the middleware with a custom name
+    /// (<c>injectA2UITool: "myName"</c>). When the run forwards that string form, the
+    /// forwarded name takes precedence over this value.
+    /// </remarks>
+    public string? InjectedRenderToolName { get; init; }
 
     /// <summary>
     /// Gets the shared toolkit parameters (tool name/description, guidelines, default surface

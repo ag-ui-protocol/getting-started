@@ -328,7 +328,12 @@ internal static class ChatClientAgentFactory
         // still balance a mid-stream failure.
         A2UIChatClientOptions resolved = new()
         {
-            InjectA2UITool = options.InjectA2UITool,
+            // Backend opt-in — the `config` half of the siblings' `forwarded ?? config` rule
+            // (ADK `a2ui["inject_a2ui_tool"]`, AWS Strands / Mastra `a2ui.injectA2UITool`),
+            // which exists precisely for a host that does not forward the runtime flag. The
+            // dojo forwards `injectA2UITool` only for langgraph* / mastra-agent-local, so these
+            // demos opt in server-side. A client-sent `false` still wins.
+            InjectA2UITool = options.InjectA2UITool ?? true,
             ToolParams = options.ToolParams,
             StreamingToolCallArgumentExtractor = OpenAIStreamingToolArguments.Extract,
         };

@@ -26,6 +26,10 @@ public sealed class A2UIChatClientTest
         var subagent = new MidStreamThrowingSubagentClient();
         var options = new A2UIChatClientOptions
         {
+            // Injection is off unless the run forwards injectA2UITool or the backend opts in
+            // (the sibling "no injectA2UITool, no injection" contract). This test drives the
+            // decorator directly with no RunAgentInput, so it opts in explicitly.
+            InjectA2UITool = true,
             StreamingToolCallArgumentExtractor = u => u.RawRepresentation as IEnumerable<AGUIToolCallArgumentFragment>,
         };
         var client = new A2UIChatClient(planner, subagent, options);

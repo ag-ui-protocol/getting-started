@@ -17,6 +17,8 @@ AGUI.A2UI.A2UIChatClientOptions
 AGUI.A2UI.A2UIChatClientOptions.A2UIChatClientOptions() -> void
 AGUI.A2UI.A2UIChatClientOptions.InjectA2UITool.get -> bool?
 AGUI.A2UI.A2UIChatClientOptions.InjectA2UITool.init -> void
+AGUI.A2UI.A2UIChatClientOptions.InjectedRenderToolName.get -> string?
+AGUI.A2UI.A2UIChatClientOptions.InjectedRenderToolName.init -> void
 AGUI.A2UI.A2UIChatClientOptions.StreamingToolCallArgumentExtractor.get -> System.Func<Microsoft.Extensions.AI.ChatResponseUpdate!, System.Collections.Generic.IEnumerable<AGUI.Server.AGUIToolCallArgumentFragment!>?>?
 AGUI.A2UI.A2UIChatClientOptions.StreamingToolCallArgumentExtractor.init -> void
 AGUI.A2UI.A2UIChatClientOptions.ToolParams.get -> AGUI.A2UI.A2UIToolParams?
