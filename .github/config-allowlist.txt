@@ -3,6 +3,7 @@ integrations/a2a/typescript/tsdown.config.ts
 integrations/adk-middleware/typescript/tsdown.config.ts
 integrations/ag2/typescript/tsdown.config.ts
 integrations/agno/typescript/tsdown.config.ts
+integrations/antigravity/typescript/tsdown.config.ts
 integrations/aws-strands/typescript/tsdown.config.ts
 integrations/claude-agent-sdk/typescript/tsup.config.ts
 integrations/claude-managed-agents/typescript/tsdown.config.ts
