@@ -336,12 +336,22 @@ def convert_adk_event_to_ag_ui_message(event: ADKEvent) -> Optional[Message]:
                 if part.text:
                     text_parts.append(part.text)
                 elif part.function_call:
+                    # `id` and `args` are optional fields on google.genai's
+                    # FunctionCall, so the attributes always exist and simply
+                    # default to None. Test the value, not the attribute:
+                    # hasattr/getattr-with-default never fire, which left the
+                    # ToolCall id as None (a pydantic error that dropped the
+                    # whole event) and serialized absent args as "None".
+                    # Mirrors event_translator._translate_function_calls_to_tool_calls.
+                    function_call = part.function_call
+                    tool_call_id = getattr(function_call, 'id', None) or event.id
+                    args = getattr(function_call, 'args', None)
                     tool_calls.append(ToolCall(
-                        id=getattr(part.function_call, 'id', event.id),
+                        id=tool_call_id,
                         type="function",
                         function=FunctionCall(
-                            name=part.function_call.name,
-                            arguments=serialize_tool_args(part.function_call.args) if hasattr(part.function_call, 'args') else "{}"
+                            name=function_call.name,
+                            arguments=serialize_tool_args(args) if args else "{}"
                         )
                     ))
             
