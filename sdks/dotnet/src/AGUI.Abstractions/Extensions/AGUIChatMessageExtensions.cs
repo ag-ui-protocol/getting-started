@@ -31,6 +31,15 @@ public static class AGUIChatMessageExtensions
 
         foreach (var message in aguiMessages)
         {
+            // Activity messages are frontend-only and are never forwarded to the agent, so a
+            // client that sends one anyway is ignored rather than failing the run. Dropped
+            // before the tool-call bookkeeping below so the message stays fully transparent:
+            // it must not split a run of parallel tool calls that is mid-coalesce.
+            if (message is AGUIActivityMessage)
+            {
+                continue;
+            }
+
             if (message is AGUIAssistantMessage toolCallAssistant && toolCallAssistant.ToolCalls is { Count: > 0 })
             {
                 pendingToolCallContents ??= new List<AIContent>();
@@ -62,6 +71,29 @@ public static class AGUIChatMessageExtensions
                 yield return new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId };
                 pendingToolCallContents = null;
                 pendingToolCallId = null;
+            }
+
+            // Reasoning is the model's own thinking rather than its output, and the spec has
+            // clients send it back on subsequent turns. Microsoft.Extensions.AI models that as
+            // TextReasoningContent on an assistant turn; encryptedValue becomes ProtectedData,
+            // the opaque provider blob MEAI round-trips untouched, which is what keeps encrypted
+            // chain-of-thought continuous across turns (store:false / ZDR).
+            if (message is AGUIReasoningMessage reasoningMessage)
+            {
+                var reasoningContents = new List<AIContent>
+                {
+                    new TextReasoningContent(reasoningMessage.Content)
+                    {
+                        ProtectedData = reasoningMessage.EncryptedValue
+                    }
+                };
+
+                yield return new ChatMessage(ChatRole.Assistant, reasoningContents)
+                {
+                    MessageId = message.Id
+                };
+
+                continue;
             }
 
             var role = MapChatRole(message.Role);
@@ -127,7 +159,6 @@ public static class AGUIChatMessageExtensions
                     AGUIAssistantMessage assistant => assistant.Content ?? string.Empty,
                     AGUISystemMessage system => system.Content,
                     AGUIDeveloperMessage developer => developer.Content,
-                    AGUIReasoningMessage reasoning => reasoning.Content,
                     _ => string.Empty,
                 };
 
@@ -268,12 +299,23 @@ public static class AGUIChatMessageExtensions
     /// </summary>
     /// <param name="role">The AG-UI role string.</param>
     /// <returns>The corresponding <see cref="ChatRole"/>.</returns>
+    /// <remarks>
+    /// <see cref="AGUIRoles.Reasoning"/> maps to <see cref="ChatRole.Assistant"/>; the reasoning
+    /// text itself is carried as <see cref="TextReasoningContent"/> by
+    /// <see cref="AsChatMessages"/>. <see cref="AGUIRoles.Activity"/> has no chat-role
+    /// equivalent — it is frontend-only and never forwarded to the agent, so
+    /// <see cref="AsChatMessages"/> drops those messages instead of calling this method.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <paramref name="role"/> has no <see cref="ChatRole"/> equivalent.
+    /// </exception>
     public static ChatRole MapChatRole(string role) =>
         string.Equals(role, AGUIRoles.System, StringComparison.OrdinalIgnoreCase) ? ChatRole.System :
         string.Equals(role, AGUIRoles.User, StringComparison.OrdinalIgnoreCase) ? ChatRole.User :
         string.Equals(role, AGUIRoles.Assistant, StringComparison.OrdinalIgnoreCase) ? ChatRole.Assistant :
         string.Equals(role, AGUIRoles.Developer, StringComparison.OrdinalIgnoreCase) ? s_developerChatRole :
         string.Equals(role, AGUIRoles.Tool, StringComparison.OrdinalIgnoreCase) ? ChatRole.Tool :
+        string.Equals(role, AGUIRoles.Reasoning, StringComparison.OrdinalIgnoreCase) ? ChatRole.Assistant :
         throw new InvalidOperationException($"Unknown chat role: {role}");
 
     private static string SerializeFunctionResult(FunctionResultContent functionResult, string? fallbackText)

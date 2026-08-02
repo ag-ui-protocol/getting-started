@@ -578,4 +578,153 @@ public sealed class AGUIChatMessageExtensionsTest
         Assert.Equal(2, assistantMessages.Count);
         Assert.All(assistantMessages, m => Assert.Single(m.Contents.OfType<FunctionCallContent>()));
     }
+
+    // https://github.com/ag-ui-protocol/ag-ui/issues/2290
+    // Reasoning messages are "meant to be sent back to the agent for further processing on
+    // subsequent turns", so a conforming client re-sends them and every turn after the first
+    // must keep working.
+    [Fact]
+    public void AsChatMessages_ReasoningMessage_MapsToAssistantReasoningContent()
+    {
+        var aguiMessages = new AGUIMessage[]
+        {
+            new AGUIReasoningMessage { Id = "reason-1", Content = "Counting the objectives." }
+        };
+
+        var chatMessage = Assert.Single(aguiMessages.AsChatMessages());
+
+        Assert.Equal(ChatRole.Assistant, chatMessage.Role);
+        Assert.Equal("reason-1", chatMessage.MessageId);
+        var reasoning = Assert.IsType<TextReasoningContent>(Assert.Single(chatMessage.Contents));
+        Assert.Equal("Counting the objectives.", reasoning.Text);
+        Assert.Null(reasoning.ProtectedData);
+    }
+
+    // encryptedValue is the whole point of round-tripping reasoning (store:false / ZDR), so it
+    // must survive as ProtectedData -- MEAI's home for opaque provider blobs.
+    [Fact]
+    public void AsChatMessages_ReasoningMessageWithEncryptedValue_PreservesProtectedData()
+    {
+        var aguiMessages = new AGUIMessage[]
+        {
+            new AGUIReasoningMessage
+            {
+                Id = "reason-1",
+                Content = "Redacted summary.",
+                EncryptedValue = "gAAAAABn-opaque-blob"
+            }
+        };
+
+        var chatMessage = Assert.Single(aguiMessages.AsChatMessages());
+
+        var reasoning = Assert.IsType<TextReasoningContent>(Assert.Single(chatMessage.Contents));
+        Assert.Equal("Redacted summary.", reasoning.Text);
+        Assert.Equal("gAAAAABn-opaque-blob", reasoning.ProtectedData);
+    }
+
+    // Activity is frontend-only ("never forwarded to the agent"), so a client that sends one
+    // anyway should be ignored rather than 500.
+    [Fact]
+    public void AsChatMessages_ActivityMessage_IsSkipped()
+    {
+        var aguiMessages = new AGUIMessage[]
+        {
+            new AGUIUserMessage { Id = "m1", Content = "Hello" },
+            new AGUIActivityMessage
+            {
+                Id = "act-1",
+                ActivityType = "search",
+                Content = JsonDocument.Parse("""{"query":"objectives"}""").RootElement
+            },
+            new AGUIUserMessage { Id = "m2", Content = "Still there?" }
+        };
+
+        var chatMessages = aguiMessages.AsChatMessages().ToList();
+
+        Assert.Equal(2, chatMessages.Count);
+        Assert.Equal(new[] { "m1", "m2" }, chatMessages.Select(m => m.MessageId));
+    }
+
+    // A skipped activity message must be fully transparent: it cannot split a run of parallel
+    // tool calls that AsChatMessages is coalescing, or the reconstructed history goes invalid.
+    [Fact]
+    public void AsChatMessages_ActivityBetweenParallelToolCalls_DoesNotSplitRun()
+    {
+        var aguiMessages = new AGUIMessage[]
+        {
+            new AGUIAssistantMessage { Id = "asst-1", Content = string.Empty, ToolCalls = new List<AGUIToolCall> { new AGUIToolCall { Id = "tc_1", Type = "function", Function = new AGUIToolCallFunction { Name = "get_weather", Arguments = "{}" } } } },
+            new AGUIActivityMessage { Id = "act-1", ActivityType = "thinking", Content = JsonDocument.Parse("{}").RootElement },
+            new AGUIAssistantMessage { Id = "asst-2", Content = string.Empty, ToolCalls = new List<AGUIToolCall> { new AGUIToolCall { Id = "tc_2", Type = "function", Function = new AGUIToolCallFunction { Name = "get_user_location", Arguments = "{}" } } } },
+        };
+
+        var chatMessage = Assert.Single(aguiMessages.AsChatMessages());
+
+        Assert.Equal(ChatRole.Assistant, chatMessage.Role);
+        Assert.Equal(new[] { "tc_1", "tc_2" }, chatMessage.Contents.OfType<FunctionCallContent>().Select(c => c.CallId));
+    }
+
+    [Fact]
+    public void MapChatRole_Reasoning_MapsToAssistant()
+    {
+        Assert.Equal(ChatRole.Assistant, AGUIChatMessageExtensions.MapChatRole(AGUIRoles.Reasoning));
+    }
+
+    // The exact turn-2 payload from #2290: a conforming client echoes the reasoning message it
+    // was streamed, which used to fail the whole run with "Unknown chat role: reasoning".
+    [Fact]
+    public void RunAgentInput_WithReasoningMessage_DeserializesAndConverts()
+    {
+        var json = """
+            {
+              "threadId": "t-1",
+              "runId": "r-2",
+              "messages": [
+                { "id": "1", "role": "user",      "content": "How many objectives are listed?" },
+                { "id": "2", "role": "reasoning", "content": "**Counting objectives** ... 4 items." },
+                { "id": "3", "role": "assistant", "content": "There are 4 objectives listed." },
+                { "id": "4", "role": "user",      "content": "How many agreed actions are listed?" }
+              ],
+              "context": []
+            }
+            """;
+
+        var input = JsonSerializer.Deserialize(json, AGUIJsonSerializerContext.Default.RunAgentInput);
+
+        Assert.NotNull(input);
+        Assert.IsType<AGUIReasoningMessage>(input.Messages[1]);
+
+        var chatMessages = input.Messages.AsChatMessages().ToList();
+
+        Assert.Equal(4, chatMessages.Count);
+        var reasoning = Assert.IsType<TextReasoningContent>(Assert.Single(chatMessages[1].Contents));
+        Assert.Equal("**Counting objectives** ... 4 items.", reasoning.Text);
+    }
+
+    // Drift guard: AGUIRoles, AGUIMessageJsonConverter and AsChatMessages are three separate
+    // lists that must agree. Anything the converter can deserialize, AsChatMessages must
+    // consume without throwing -- that gap is what #2290 was.
+    [Theory]
+    [InlineData(AGUIRoles.System, """{ "id": "m", "role": "system", "content": "be brief" }""")]
+    [InlineData(AGUIRoles.User, """{ "id": "m", "role": "user", "content": "hi" }""")]
+    [InlineData(AGUIRoles.Assistant, """{ "id": "m", "role": "assistant", "content": "hello" }""")]
+    [InlineData(AGUIRoles.Developer, """{ "id": "m", "role": "developer", "content": "note" }""")]
+    [InlineData(AGUIRoles.Tool, """{ "id": "m", "role": "tool", "toolCallId": "tc_1", "content": "done" }""")]
+    [InlineData(AGUIRoles.Activity, """{ "id": "m", "role": "activity", "activityType": "search", "content": {} }""")]
+    [InlineData(AGUIRoles.Reasoning, """{ "id": "m", "role": "reasoning", "content": "thinking" }""")]
+    public void AsChatMessages_EveryDeserializableRole_DoesNotThrow(string role, string messageJson)
+    {
+        var json = $$"""
+            { "threadId": "t", "runId": "r", "messages": [ {{messageJson}} ], "context": [] }
+            """;
+
+        var input = JsonSerializer.Deserialize(json, AGUIJsonSerializerContext.Default.RunAgentInput);
+
+        Assert.NotNull(input);
+        Assert.Equal(role, Assert.Single(input.Messages).Role);
+
+        // Must not throw. Activity is intentionally dropped; every other role yields a message.
+        var chatMessages = input.Messages.AsChatMessages().ToList();
+
+        Assert.Equal(role == AGUIRoles.Activity ? 0 : 1, chatMessages.Count);
+    }
 }
