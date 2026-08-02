@@ -5,6 +5,8 @@ AGUI.Server.ChatResponseUpdateAGUIExtensions
 static AGUI.Server.ChatResponseUpdateAGUIExtensions.AsAGUIEventStreamAsync(this System.Collections.Generic.IAsyncEnumerable<Microsoft.Extensions.AI.ChatResponseUpdate!>! updates, AGUI.Server.ChatRequestContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<AGUI.Abstractions.BaseEvent!>!
 AGUI.Server.AGUIStreamOptions
 AGUI.Server.AGUIStreamOptions.AGUIStreamOptions() -> void
+AGUI.Server.AGUIStreamOptions.IncludeRawEvents.get -> bool
+AGUI.Server.AGUIStreamOptions.IncludeRawEvents.init -> void
 AGUI.Server.AGUIStreamOptions.MapInterrupt(System.Func<Microsoft.Extensions.AI.AIContent!, AGUI.Abstractions.AGUIInterrupt?>! mapper) -> AGUI.Server.AGUIStreamOptions!
 AGUI.Server.AGUIStreamOptions.MapContent(System.Func<Microsoft.Extensions.AI.AIContent!, System.Collections.Generic.IEnumerable<AGUI.Abstractions.BaseEvent!>?>! mapper) -> AGUI.Server.AGUIStreamOptions!
 AGUI.Server.AGUIStreamOptions.MapCall(string! toolName, System.Func<Microsoft.Extensions.AI.FunctionCallContent!, System.Collections.Generic.IEnumerable<AGUI.Abstractions.BaseEvent!>!>! mapper) -> AGUI.Server.AGUIStreamOptions!

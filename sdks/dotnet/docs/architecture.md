@@ -79,7 +79,9 @@ On the server, the negotiating `AGUIResults.Events` result picks the formatter f
 
 ### Tool mapping with AGUIStreamOptions
 
-`AGUIStreamOptions` is the configuration object passed to `ToChatRequestContext` and consumed by `AsAGUIEventStreamAsync`. It is method-only — no public getters or setters; everything is configured fluently.
+`AGUIStreamOptions` is the configuration object passed to `ToChatRequestContext` and consumed by `AsAGUIEventStreamAsync`. Mappings are configured fluently through the `Map*` methods; plain toggles are init-only properties set in an object initializer.
+
+One toggle exists today: **`IncludeRawEvents`** (default `true`) controls whether the converter serializes each `ChatResponseUpdate` and attaches it as the `rawEvent` field of the `TEXT_MESSAGE_*`, `TOOL_CALL_*`, and `REASONING_ENCRYPTED_VALUE` events derived from it. This attachment is a .NET-only behavior — neither the TypeScript nor the Python SDK populates `rawEvent` from the server side — and it is not cheap: on a typical streaming response the attached payloads outweigh the events carrying them several times over. Setting it to `false` skips the serialization entirely. Events supplied by the caller (via `RawRepresentation` or a `Map*` mapping) keep whatever `RawEvent` they were given either way.
 
 The most common use case is state management. Suppose your agent has a `write_document` tool that writes a markdown document. You want the frontend to update a live preview as the document is written. Without tool mapping, you'd have to intercept the stream manually and inject `StateSnapshotEvent`s. With tool mapping:
 

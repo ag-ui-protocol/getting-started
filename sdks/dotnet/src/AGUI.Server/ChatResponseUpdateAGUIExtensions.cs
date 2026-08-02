@@ -196,8 +196,12 @@ public static class ChatResponseUpdateAGUIExtensions
                 yield return RunStartedEvent.Create(threadId, runId, context.Input.ParentRunId);
             }
 
-            // Serialize the raw ChatResponseUpdate once for attaching to emitted events
-            var raw = JsonSerializer.SerializeToElement(chatResponse, jsonSerializerOptions.GetTypeInfo(typeof(ChatResponseUpdate)));
+            // Serialize the raw ChatResponseUpdate once for attaching to emitted events.
+            // Skipped entirely when the caller opted out, so neither the serialization work nor the
+            // wire bytes are paid for.
+            JsonElement? raw = options.IncludeRawEvents
+                ? JsonSerializer.SerializeToElement(chatResponse, jsonSerializerOptions.GetTypeInfo(typeof(ChatResponseUpdate)))
+                : null;
 
             string? effectiveMessageId = null;
             foreach (var content in chatResponse.Contents)

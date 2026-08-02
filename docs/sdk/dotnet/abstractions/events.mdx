@@ -61,6 +61,11 @@ public abstract class BaseEvent
 | `Timestamp` | `timestamp` | `long?` | Optional event timestamp |
 | `RawEvent` | `rawEvent` | `JsonElement?` | Optional original event data |
 
+On the server, `AsAGUIEventStreamAsync` fills `RawEvent` in with the originating
+`ChatResponseUpdate` by default. Turn it off with
+[`AGUIStreamOptions.IncludeRawEvents`](/sdk/dotnet/hosting/extensibility#includerawevents)
+when no client reads the field.
+
 ## Lifecycle Events
 
 Lifecycle events represent the run and step lifecycle.
