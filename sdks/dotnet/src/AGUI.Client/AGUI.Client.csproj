@@ -7,7 +7,7 @@
     <PackageTags>$(PackageTags);client;http;chat;microsoft-extensions-ai;sse</PackageTags>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(SignAssembly)' != 'true'">
+  <ItemGroup>
     <InternalsVisibleTo Include="AGUI.Client.UnitTests" />
     <InternalsVisibleTo Include="AGUI.Hosting.AspNetCore.IntegrationTests" />
   </ItemGroup>

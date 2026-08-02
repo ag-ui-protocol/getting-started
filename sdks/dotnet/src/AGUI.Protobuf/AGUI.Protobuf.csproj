@@ -7,7 +7,7 @@
     <PackageTags>$(PackageTags);protobuf;binary;codec;transport;serialization</PackageTags>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(SignAssembly)' != 'true'">
+  <ItemGroup>
     <InternalsVisibleTo Include="AGUI.Protobuf.UnitTests" />
     <InternalsVisibleTo Include="CrossLanguage.TestServer" />
   </ItemGroup>
