@@ -469,6 +469,32 @@ describe("header forwarding via onRequest hook", () => {
   });
 });
 
+describe("clone run-local state isolation", () => {
+  it("creates fresh run-local state on the cloned agent", () => {
+    const agent = new LangGraphAgent({
+      graphId: "test-graph",
+      deploymentUrl: "http://localhost:8000",
+    });
+
+    (agent as any).emittedToolCallStartIds.add("tool-call-1");
+    (agent as any).eventsStreamActive = true;
+
+    const cloned = agent.clone() as LangGraphAgent;
+
+    expect(cloned).toBeInstanceOf(LangGraphAgent);
+    expect((cloned as any).emittedToolCallStartIds).toBeInstanceOf(Set);
+    expect((cloned as any).emittedToolCallStartIds).not.toBe(
+      (agent as any).emittedToolCallStartIds,
+    );
+    expect([...(cloned as any).emittedToolCallStartIds]).toEqual([]);
+    expect((cloned as any).eventsStreamActive).toBe(false);
+    expect((agent as any).emittedToolCallStartIds.has("tool-call-1")).toBe(
+      true,
+    );
+    expect((agent as any).eventsStreamActive).toBe(true);
+  });
+});
+
 // ─── Part C: forwarded-headers payload injection ─────────────────────────────
 //
 // CopilotKit Runtime writes per-request x-* headers (correlation IDs, x-aimock-context,
@@ -595,12 +621,19 @@ describe("langGraphDefaultMergeState forwards props into ag-ui state", () => {
       context: [],
       forwardedProps,
     } as any;
-    return (agent as any).langGraphDefaultMergeState({ messages: [] }, [], input);
+    return (agent as any).langGraphDefaultMergeState(
+      { messages: [] },
+      [],
+      input,
+    );
   }
 
   it("surfaces each configured forwarded prop under its ag-ui state key", () => {
     const forwarded = Object.fromEntries(
-      Object.entries(FORWARDED_PROPS_TO_AGUI).map(([fp, [, sample]]) => [fp, sample]),
+      Object.entries(FORWARDED_PROPS_TO_AGUI).map(([fp, [, sample]]) => [
+        fp,
+        sample,
+      ]),
     );
     const result = mergeWith(forwarded);
     for (const [aguiKey, sample] of Object.values(FORWARDED_PROPS_TO_AGUI)) {
@@ -642,9 +675,7 @@ describe("dispatchInterruptFinish produces correct AG-UI protocol events", () =>
       lgInterrupts: [{ value: { reason: "confirm" }, id: "int-1" }],
     });
 
-    const finished = events.find(
-      (e: any) => e.type === "RUN_FINISHED",
-    );
+    const finished = events.find((e: any) => e.type === "RUN_FINISHED");
     expect(finished).toBeDefined();
     expect(finished.outcome.type).toBe("interrupt");
     expect(finished.outcome.interrupts).toHaveLength(1);
@@ -703,9 +734,7 @@ describe("dispatchInterruptFinish produces correct AG-UI protocol events", () =>
     );
     expect(customEvents).toHaveLength(0);
 
-    const finished = events.find(
-      (e: any) => e.type === "RUN_FINISHED",
-    );
+    const finished = events.find((e: any) => e.type === "RUN_FINISHED");
     expect(finished.outcome.type).toBe("interrupt");
   });
 
@@ -721,9 +750,7 @@ describe("dispatchInterruptFinish produces correct AG-UI protocol events", () =>
       lgInterrupts: [{ value: { reason: "r" }, id: "int-1" }],
     });
 
-    const finished = events.find(
-      (e: any) => e.type === "RUN_FINISHED",
-    );
+    const finished = events.find((e: any) => e.type === "RUN_FINISHED");
     expect(finished.outcome.type).toBe("interrupt");
     expect(finished.outcome.interrupts).toHaveLength(1);
   });
@@ -782,7 +809,9 @@ describe("prepareStream input.resume protocol", () => {
       tools: [],
       context: [],
       forwardedProps: { command: { resume: "legacy_value" } },
-      resume: [{ interruptId: "i1", status: "resolved", payload: { new: true } }],
+      resume: [
+        { interruptId: "i1", status: "resolved", payload: { new: true } },
+      ],
     };
 
     (agent as any).client.threads.getState = vi.fn().mockResolvedValue({
@@ -798,7 +827,9 @@ describe("prepareStream input.resume protocol", () => {
     ]);
 
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("both input.resume and forwardedProps.command.resume"),
+      expect.stringContaining(
+        "both input.resume and forwardedProps.command.resume",
+      ),
     );
 
     const payload = capturedPayload.value!;
@@ -849,7 +880,9 @@ describe("prepareStream input.resume protocol", () => {
       tools: [],
       context: [],
       forwardedProps: {},
-      resume: [{ interruptId: "i1", status: "resolved", payload: { approved: true } }],
+      resume: [
+        { interruptId: "i1", status: "resolved", payload: { approved: true } },
+      ],
     };
 
     (agent as any).client.threads.getState = vi.fn().mockResolvedValue({
@@ -925,9 +958,7 @@ describe("prepareStream input.resume protocol", () => {
       "messages-tuple",
     ]);
 
-    const finished = events.find(
-      (e: any) => e.type === "RUN_FINISHED",
-    );
+    const finished = events.find((e: any) => e.type === "RUN_FINISHED");
     expect(finished).toBeDefined();
     expect(finished.outcome.type).toBe("interrupt");
     expect(finished.outcome.interrupts).toHaveLength(1);

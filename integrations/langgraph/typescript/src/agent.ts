@@ -223,7 +223,8 @@ export class LangGraphAgent extends AbstractAgent {
   constructor(config: LangGraphAgentConfig) {
     super(config);
     this.config = config;
-    this.enableLegacyOnInterruptEvent = config.enableLegacyOnInterruptEvent ?? true;
+    this.enableLegacyOnInterruptEvent =
+      config.enableLegacyOnInterruptEvent ?? true;
     this.emitInterruptOutcome = config.emitInterruptOutcome ?? false;
     this.messagesInProcess = {};
     this.agentName = config.agentName;
@@ -281,6 +282,7 @@ export class LangGraphAgent extends AbstractAgent {
       client: this.client,
       enableLegacyOnInterruptEvent: this.enableLegacyOnInterruptEvent,
       emitInterruptOutcome: this.emitInterruptOutcome,
+      pendingInterrupts: structuredClone(this.pendingInterrupts ?? []),
 
       assistant: this.assistant,
       activeRun: this.activeRun ? structuredClone(this.activeRun) : undefined,
@@ -288,6 +290,8 @@ export class LangGraphAgent extends AbstractAgent {
       cancelSent: this.cancelSent,
       subgraphs: this.subgraphs ? new Set(this.subgraphs) : new Set(),
       currentSubgraph: ROOT_SUBGRAPH_NAME,
+      emittedToolCallStartIds: new Set<string>(),
+      eventsStreamActive: false,
     });
 
     // Rebuild client so onRequest captures the cloned agent's headers
@@ -702,7 +706,10 @@ export class LangGraphAgent extends AbstractAgent {
           openInterrupts: this.interruptsToAGUI(interrupts),
         }),
       };
-    } else if (effectiveCommand?.resume && typeof effectiveCommand.resume === "string") {
+    } else if (
+      effectiveCommand?.resume &&
+      typeof effectiveCommand.resume === "string"
+    ) {
       try {
         effectiveCommand.resume = JSON.parse(effectiveCommand.resume);
       } catch {
@@ -1773,7 +1780,8 @@ export class LangGraphAgent extends AbstractAgent {
       // one: the snapshot converter re-emits this same reasoning under that
       // id, and only a matching id lets the client reconcile the streamed
       // copy with the snapshot copy instead of rendering both.
-      const messageId = reasoningData.id ?? this.pendingReasoningId ?? randomUUID();
+      const messageId =
+        reasoningData.id ?? this.pendingReasoningId ?? randomUUID();
       this.pendingReasoningId = undefined;
       this.dispatchEvent({
         type: EventType.REASONING_START,
@@ -2116,8 +2124,7 @@ export class LangGraphAgent extends AbstractAgent {
    * bubbles. See #1317.
    */
   private getOrPinTextMessageId(fallbackId: string): string {
-    const messageId =
-      this.activeRun!.currentTextMessageId ?? fallbackId;
+    const messageId = this.activeRun!.currentTextMessageId ?? fallbackId;
     this.activeRun!.currentTextMessageId = messageId;
     return messageId;
   }
