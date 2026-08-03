@@ -26,6 +26,7 @@ from .types import (
     MessagesInProgressRecord,
     SchemaKeys,
     MessageInProgress,
+    ThinkingProcess,
     RunMetadata,
     LangGraphEventTypes,
     CustomEventNames,
@@ -122,6 +123,11 @@ class SubagentContext:
     subagent_id: str
     name: str
     parent_subagent_id: Optional[str] = None
+
+
+# Lane key for root/supervisor-level streaming state (events with no subagent).
+# Subagent lanes use the derived subagent id (e.g. "tools:<uuid>").
+_ROOT_LANE = "__root__"
 
 
 def _record_subagent_boundaries(ns: str, known: set) -> None:
@@ -558,7 +564,10 @@ class LangGraphAgent:
             "id": input.run_id,
             "thread_id": thread_id,
             "mode": "start",
-            "reasoning_process": None,
+            "reasoning_processes": {},
+            "pending_reasoning_ids": {},
+            "current_text_message_ids": {},
+            "current_text_message_nodes": {},
             "node_name": None,
             "has_function_streaming": False,
             "streamed_tool_call_ids": set(),
@@ -807,7 +816,7 @@ class LangGraphAgent:
                 manually_emitted = self.active_run.get("manually_emitted_state")
                 updated_state = manually_emitted if manually_emitted is not None else current_graph_state
                 has_state_diff = updated_state != state
-                if exiting_node or (has_state_diff and not self.get_message_in_progress(self.active_run["id"])):
+                if exiting_node or (has_state_diff and not self.has_any_message_in_progress(self.active_run["id"])):
                     state = updated_state
                     self.active_run["prev_node_name"] = self.active_run["node_name"]
                     current_graph_state.update(updated_state)
@@ -918,6 +927,13 @@ class LangGraphAgent:
                     yield self._dispatch_event(sub_ev)
             raise
         finally:
+            # Drop this run's in-flight lane slots so no streaming state (which
+            # is instance-level, keyed by run id) survives into a later run.
+            # Per-run state living inside active_run (reasoning/pin/subagent
+            # maps) is discarded with active_run itself below.
+            active_run = getattr(self, "active_run", None)
+            if active_run is not None:
+                self.messages_in_process.pop(active_run.get("id"), None)
             self.active_run = None
 
     async def prepare_stream(self, input: RunAgentInput, agent_state: State, config: RunnableConfig) -> PreparedStream:
@@ -1169,15 +1185,67 @@ class LangGraphAgent:
             "config": config
         }
 
-    def get_message_in_progress(self, run_id: str) -> Optional[MessageInProgress]:
-        return self.messages_in_process.get(run_id)
+    def _current_lane(self) -> str:
+        """The current subagent "lane" for per-subagent streaming state.
 
-    def set_message_in_progress(self, run_id: str, data: MessageInProgress) -> None:
-        current_message_in_progress = self.messages_in_process.get(run_id) or {}
-        self.messages_in_process[run_id] = {
+        Transient stream state (in-flight message/tool call, reasoning, text
+        pin) is keyed by this lane so concurrently-streaming subagents never
+        clobber each other. The lane is the derived subagent id for the event
+        currently being processed (set by reconcile_subagents before the event
+        is handled), or "__root__" for the root/supervisor.
+
+        Scope: deepagents runs each parallel `task` subagent in its own
+        checkpoint namespace, so every concurrent *subagent* stream derives a
+        distinct id and thus a distinct lane — the case this fix targets.
+        Concurrent streams that carry NO subagent identity (e.g. two ordinary
+        model nodes or two declared subgraphs fanning out in a hand-built
+        graph) all map to "__root__" and would still interleave into one lane;
+        that is a pre-existing limitation of attribution-less parallel
+        streaming, not something lanes can resolve (there is no id to separate
+        them by).
+        """
+        active_run = getattr(self, "active_run", None)
+        return (active_run.get("current_subagent_id") if active_run else None) or _ROOT_LANE
+
+    def _get_reasoning_process(self, lane: Optional[str] = None) -> Optional[ThinkingProcess]:
+        lane = lane if lane is not None else self._current_lane()
+        return (self.active_run.get("reasoning_processes") or {}).get(lane)
+
+    def _set_reasoning_process(self, value: Optional[ThinkingProcess], lane: Optional[str] = None) -> None:
+        lane = lane if lane is not None else self._current_lane()
+        procs = self.active_run.setdefault("reasoning_processes", {})
+        if value is None:
+            procs.pop(lane, None)
+        else:
+            procs[lane] = value
+
+    def get_message_in_progress(self, run_id: str, lane: Optional[str] = None) -> Optional[MessageInProgress]:
+        lane = lane if lane is not None else self._current_lane()
+        return (self.messages_in_process.get(run_id) or {}).get(lane)
+
+    def set_message_in_progress(self, run_id: str, data: MessageInProgress, lane: Optional[str] = None) -> None:
+        lane = lane if lane is not None else self._current_lane()
+        lanes = self.messages_in_process.setdefault(run_id, {})
+        current_message_in_progress = lanes.get(lane) or {}
+        lanes[lane] = {
             **current_message_in_progress,
             **data,
         }
+
+    def clear_message_in_progress(self, run_id: str, lane: Optional[str] = None) -> None:
+        lane = lane if lane is not None else self._current_lane()
+        lanes = self.messages_in_process.get(run_id)
+        if lanes is not None:
+            lanes[lane] = None
+
+    def has_any_message_in_progress(self, run_id: str) -> bool:
+        """True if any lane in this run has an open in-flight message/tool call.
+
+        Used by the node-exit state-snapshot gate: a snapshot must not be
+        emitted while *any* subagent is mid-message, not just the current lane.
+        """
+        lanes = self.messages_in_process.get(run_id) or {}
+        return any(bool(v) for v in lanes.values())
 
     def get_schema_keys(self, config: RunnableConfig) -> SchemaKeys:
         try:
@@ -1720,7 +1788,7 @@ class LangGraphAgent:
                         raw_event=event,
                     )
                 )
-                self.messages_in_process[self.active_run["id"]] = None
+                self.clear_message_in_progress(self.active_run["id"])
                 current_stream = None
                 has_current_stream = False
                 # Re-evaluate the booleans against the now-closed stream.
@@ -1761,8 +1829,9 @@ class LangGraphAgent:
                 return
 
             # Handle redacted_thinking blocks (encrypted reasoning content)
-            if encrypted_reasoning_data and self.active_run.get('reasoning_process', None) is not None:
-                reasoning_message_id = self.active_run["reasoning_process"]["message_id"]
+            reasoning_process = self._get_reasoning_process()
+            if encrypted_reasoning_data and reasoning_process is not None:
+                reasoning_message_id = reasoning_process["message_id"]
                 yield self._dispatch_event(
                     ReasoningEncryptedValueEvent(
                         type=EventType.REASONING_ENCRYPTED_VALUE,
@@ -1773,16 +1842,16 @@ class LangGraphAgent:
                 )
                 return
 
-            if reasoning_data is None and self.active_run.get('reasoning_process', None) is not None:
-                reasoning_message_id = self.active_run["reasoning_process"]["message_id"]
+            if reasoning_data is None and reasoning_process is not None:
+                reasoning_message_id = reasoning_process["message_id"]
                 # Emit signature as encrypted value if accumulated during reasoning
-                if self.active_run["reasoning_process"].get("signature"):
+                if reasoning_process.get("signature"):
                     yield self._dispatch_event(
                         ReasoningEncryptedValueEvent(
                             type=EventType.REASONING_ENCRYPTED_VALUE,
                             subtype="message",
                             entity_id=reasoning_message_id,
-                            encrypted_value=self.active_run["reasoning_process"]["signature"],
+                            encrypted_value=reasoning_process["signature"],
                         )
                     )
                 yield self._dispatch_event(
@@ -1797,7 +1866,7 @@ class LangGraphAgent:
                         message_id=reasoning_message_id,
                     )
                 )
-                self.active_run["reasoning_process"] = None
+                self._set_reasoning_process(None)
 
             if tool_call_used_to_predict_state:
                 yield self._dispatch_event(
@@ -1840,7 +1909,7 @@ class LangGraphAgent:
                     )
 
                 if text_stream_id:
-                    self.messages_in_process[self.active_run["id"]] = None
+                    self.clear_message_in_progress(self.active_run["id"])
                     current_stream = None
                     has_current_stream = False
                 is_message_end_event = False
@@ -1853,7 +1922,7 @@ class LangGraphAgent:
                 yield self._dispatch_event(
                     TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=current_stream["id"], raw_event=event)
                 )
-                self.messages_in_process[self.active_run["id"]] = None
+                self.clear_message_in_progress(self.active_run["id"])
                 current_stream = None
                 has_current_stream = False
                 is_message_end_event = False
@@ -1866,7 +1935,7 @@ class LangGraphAgent:
                 yield self._dispatch_event(
                     ToolCallEndEvent(type=EventType.TOOL_CALL_END, tool_call_id=current_stream["tool_call_id"], raw_event=event)
                 )
-                self.messages_in_process[self.active_run["id"]] = None
+                self.clear_message_in_progress(self.active_run["id"])
                 return
 
 
@@ -1874,7 +1943,7 @@ class LangGraphAgent:
                 yield self._dispatch_event(
                     TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=current_stream["id"], raw_event=event)
                 )
-                self.messages_in_process[self.active_run["id"]] = None
+                self.clear_message_in_progress(self.active_run["id"])
                 return
 
             if is_tool_call_start_event:
@@ -1934,7 +2003,9 @@ class LangGraphAgent:
                     return
 
                 if bool(current_stream and current_stream.get("id")) == False:
-                    message_id = self._get_or_pin_text_message_id(chunk_id)
+                    message_id = self._get_or_pin_text_message_id(
+                        chunk_id, (event.get("metadata") or {}).get("langgraph_node")
+                    )
                     yield self._dispatch_event(
                         TextMessageStartEvent(
                             type=EventType.TEXT_MESSAGE_START,
@@ -1969,14 +2040,14 @@ class LangGraphAgent:
                     ToolCallEndEvent(type=EventType.TOOL_CALL_END, tool_call_id=self.get_message_in_progress(self.active_run["id"])["tool_call_id"], raw_event=event)
                 )
                 if resolved:
-                    self.messages_in_process[self.active_run["id"]] = None
+                    self.clear_message_in_progress(self.active_run["id"])
                 yield resolved
             elif self.get_message_in_progress(self.active_run["id"]) and self.get_message_in_progress(self.active_run["id"]).get("id"):
                 resolved = self._dispatch_event(
                     TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=self.get_message_in_progress(self.active_run["id"])["id"], raw_event=event)
                 )
                 if resolved:
-                    self.messages_in_process[self.active_run["id"]] = None
+                    self.clear_message_in_progress(self.active_run["id"])
                 yield resolved
 
         elif event_type == LangGraphEventTypes.OnCustomEvent:
@@ -2191,19 +2262,23 @@ class LangGraphAgent:
         # opens the reasoning message under it, WITHOUT opening a message here
         # — a summary-less (store=true) reasoning item must keep rendering
         # nothing.
+        # Reasoning state is per-subagent-lane so concurrently-reasoning
+        # subagents don't clobber each other (see _current_lane).
+        lane = self._current_lane()
         if not reasoning_data["text"]:
             if reasoning_data.get("id"):
-                self.active_run["pending_reasoning_id"] = reasoning_data["id"]
+                self.active_run.setdefault("pending_reasoning_ids", {})[lane] = reasoning_data["id"]
             return
 
         reasoning_step_index = reasoning_data.get("index", 0)
 
-        if (self.active_run.get("reasoning_process") and
-                self.active_run["reasoning_process"].get("index") is not None and
-                self.active_run["reasoning_process"]["index"] != reasoning_step_index):
+        reasoning_process = self._get_reasoning_process(lane)
+        if (reasoning_process and
+                reasoning_process.get("index") is not None and
+                reasoning_process["index"] != reasoning_step_index):
 
-            reasoning_message_id = self.active_run["reasoning_process"]["message_id"]
-            if self.active_run["reasoning_process"].get("type"):
+            reasoning_message_id = reasoning_process["message_id"]
+            if reasoning_process.get("type"):
                 yield self._dispatch_event(
                     ReasoningMessageEndEvent(
                         type=EventType.REASONING_MESSAGE_END,
@@ -2216,9 +2291,10 @@ class LangGraphAgent:
                     message_id=reasoning_message_id,
                 )
             )
-            self.active_run["reasoning_process"] = None
+            self._set_reasoning_process(None, lane)
+            reasoning_process = None
 
-        if not self.active_run.get("reasoning_process"):
+        if not reasoning_process:
             # Prefer the provider's canonical reasoning id (e.g. OpenAI
             # ``rs_…``) when the stream carried one: the snapshot converter
             # (_reasoning_block_to_agui_message) re-emits this same reasoning
@@ -2227,7 +2303,7 @@ class LangGraphAgent:
             # both.
             message_id = (
                 reasoning_data.get("id")
-                or self.active_run.pop("pending_reasoning_id", None)
+                or (self.active_run.get("pending_reasoning_ids") or {}).pop(lane, None)
                 or str(uuid.uuid4())
             )
             yield self._dispatch_event(
@@ -2236,30 +2312,31 @@ class LangGraphAgent:
                     message_id=message_id,
                 )
             )
-            self.active_run["reasoning_process"] = {
+            reasoning_process = {
                 "index": reasoning_step_index,
                 "message_id": message_id,
             }
+            self._set_reasoning_process(reasoning_process, lane)
 
-        if self.active_run["reasoning_process"].get("type") != reasoning_data["type"]:
+        if reasoning_process.get("type") != reasoning_data["type"]:
             yield self._dispatch_event(
                 ReasoningMessageStartEvent(
                     type=EventType.REASONING_MESSAGE_START,
-                    message_id=self.active_run["reasoning_process"]["message_id"],
+                    message_id=reasoning_process["message_id"],
                     role="reasoning",
                 )
             )
-            self.active_run["reasoning_process"]["type"] = reasoning_data["type"]
+            reasoning_process["type"] = reasoning_data["type"]
 
         # Accumulate signature if present (Anthropic extended thinking)
         if reasoning_data.get("signature"):
-            self.active_run["reasoning_process"]["signature"] = reasoning_data["signature"]
+            reasoning_process["signature"] = reasoning_data["signature"]
 
-        if self.active_run["reasoning_process"].get("type"):
+        if reasoning_process.get("type"):
             yield self._dispatch_event(
                 ReasoningMessageContentEvent(
                     type=EventType.REASONING_MESSAGE_CONTENT,
-                    message_id=self.active_run["reasoning_process"]["message_id"],
+                    message_id=reasoning_process["message_id"],
                     delta=reasoning_data["text"]
                 )
             )
@@ -2328,19 +2405,31 @@ class LangGraphAgent:
             f"(thread_id={thread_id!r}, snapshots_scanned={len(history_list)})"
         )
 
-    def _get_or_pin_text_message_id(self, fallback_id: str) -> str:
+    def _get_or_pin_text_message_id(self, fallback_id: str, node: Optional[str] = None) -> str:
         """Returns the message_id to use for a TEXT_MESSAGE_START emission,
-        pinning the first id per node. chunk_id changes per LLM invocation,
-        so a text→tool→text sequence within one node would otherwise render
-        as multiple bubbles; pinning keeps them in one. handle_node_change
-        clears the pin on every node transition, so different nodes (e.g. a
-        supervisor routing to specialist agents) get fresh ids and stay in
-        separate bubbles. See #1317.
+        pinning the first id per (subagent lane, node). chunk_id changes per
+        LLM invocation, so a text→tool→text sequence within one node would
+        otherwise render as multiple bubbles; pinning keeps them in one. The
+        pin is reset when the lane's own node changes, so different nodes (e.g.
+        a supervisor routing to specialist agents) get fresh ids and stay in
+        separate bubbles. Keying by lane + the lane's node (rather than a
+        global node) means concurrently-streaming subagents keep independent
+        bubbles and one subagent's node change never re-mints another's. See
+        #1317.
         """
-        stored = self.active_run.get("current_text_message_id")
-        message_id = stored if stored is not None else fallback_id
-        self.active_run["current_text_message_id"] = message_id
-        return message_id
+        lane = self._current_lane()
+        pins = self.active_run.setdefault("current_text_message_ids", {})
+        pin_nodes = self.active_run.setdefault("current_text_message_nodes", {})
+        # Reset when this lane has no pin yet, or when THIS LANE's node actually
+        # changed. The reset is driven by the lane's own node rather than the
+        # global node_name, which thrashes under concurrent subagents (a node
+        # change in subagent A must not re-mint subagent B's bubble). A missing
+        # node (None) never forces a reset, so absent metadata can't fragment a
+        # bubble.
+        if pins.get(lane) is None or (node is not None and pin_nodes.get(lane) != node):
+            pins[lane] = fallback_id
+            pin_nodes[lane] = node
+        return pins[lane]
 
     def handle_node_change(self, node_name: Optional[str]) -> Generator[ProcessedEvents, None, None]:
         """
@@ -2363,10 +2452,6 @@ class LangGraphAgent:
             if node_name:
                 for event in self.start_step(node_name):
                     yield event
-
-            # Clear the pinned text message id: a new node should mint its own
-            # bubble. See RunMetadata.current_text_message_id.
-            self.active_run["current_text_message_id"] = None
 
         self.active_run["node_name"] = node_name
 
