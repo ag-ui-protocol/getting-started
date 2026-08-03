@@ -122,6 +122,28 @@
         { "name": "ag-ui-claude-sdk", "path": "integrations/claude-agent-sdk/python", "ecosystem": "python", "buildSystem": "uv" }
       ]
     },
+    "integration-claude-managed-agents-ts": {
+      "description": "Claude Managed Agents integration (TypeScript)",
+      "sharedVersion": false,
+      "packages": [
+        { "name": "@ag-ui/claude-managed-agents", "path": "integrations/claude-managed-agents/typescript", "ecosystem": "typescript" }
+      ]
+    },
+    "integration-claude-managed-agents-py": {
+      "description": "Claude Managed Agents integration (Python)",
+      "sharedVersion": false,
+      "packages": [
+        { "name": "ag-ui-claude-managed-agents", "path": "integrations/claude-managed-agents/python", "ecosystem": "python", "buildSystem": "uv" }
+      ]
+    },
+    "integration-claude-managed-agents-dotnet": {
+      "description": "Claude Managed Agents integration (.NET)",
+      "sharedVersion": true,
+      "versionSource": "integrations/claude-managed-agents/dotnet/Directory.Build.props",
+      "packages": [
+        { "name": "AGUI.ClaudeManagedAgents", "path": "integrations/claude-managed-agents/dotnet/src/AGUI.ClaudeManagedAgents", "ecosystem": "dotnet" }
+      ]
+    },
     "integration-cloudflare-agents": {
       "description": "Cloudflare Agents integration (community, TypeScript)",
       "sharedVersion": false,
@@ -140,7 +162,7 @@
       "description": "CrewAI integration (Python)",
       "sharedVersion": false,
       "packages": [
-        { "name": "ag-ui-crewai", "path": "integrations/crew-ai/python", "ecosystem": "python", "buildSystem": "poetry" }
+        { "name": "ag-ui-crewai", "path": "integrations/crew-ai/python", "ecosystem": "python", "buildSystem": "uv" }
       ]
     },
     "integration-langchain": {

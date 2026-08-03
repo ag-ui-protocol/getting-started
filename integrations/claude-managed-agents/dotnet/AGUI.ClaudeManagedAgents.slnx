@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AGUI.ClaudeManagedAgents/AGUI.ClaudeManagedAgents.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AGUI.ClaudeManagedAgents.Tests/AGUI.ClaudeManagedAgents.Tests.csproj" />
+  </Folder>
+  <Folder Name="/examples/">
+    <Project Path="examples/AGUIDojoServer/AGUIDojoServer.csproj" />
+  </Folder>
+</Solution>

@@ -115,6 +115,7 @@ AG-UI was born from CopilotKit's initial **partnership** with LangGraph and Crew
 | Framework | Status | AG-UI Resources |
 | ---------- | ------- | ---------------- |
 | [Claude Agent SDK](https://github.com/ag-ui-protocol/ag-ui/tree/main/integrations/claude-agent-sdk) | ✅ Supported | 🎮 [Demos](https://dojo.ag-ui.com/claude-agent-sdk-python/feature/shared_state) |
+| [Claude Managed Agents](https://github.com/ag-ui-protocol/ag-ui/tree/main/integrations/claude-managed-agents) | ✅ Supported | 🎮 [Demos](https://dojo.ag-ui.com/claude-managed-agents-typescript/feature/agentic_chat) |
 | [Langroid](https://github.com/ag-ui-protocol/ag-ui/tree/main/integrations/langroid) | ✅ Supported | 🎮 [Demos](https://dojo.ag-ui.com/langroid/feature/shared_state) |
 | [OpenAI Agent SDK](https://openai.github.io/openai-agents-python/) | 🛠️ In Progress | – |
 | [Cloudflare Agents](https://developers.cloudflare.com/agents/) | 🛠️ In Progress | – |
