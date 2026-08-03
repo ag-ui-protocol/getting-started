@@ -6,6 +6,7 @@ from ag_ui.core import (
     EventType,
     TextMessageStartEvent,
     TextMessageContentEvent,
+    ToolCallResultEvent,
     SubagentStartedEvent,
     AssistantMessage,
 )
@@ -116,6 +117,16 @@ class TestReconcileSubagents(unittest.TestCase):
         self.assertIsNone(ar["current_subagent_id"])
         reconcile_subagents(ar, "tools:s2|model:b", "writer", set())
         self.assertEqual(ar["current_subagent_id"], "tools:s2")
+
+    def test_reconcile_stores_subagent_parent(self):
+        """reconcile records each subagent's parent so a finish can restore
+        it (bug #3). Top-level parent is None; a nested child's parent is the
+        outer subagent."""
+        ar = _run()
+        reconcile_subagents(ar, "tools:outer|model:x", "outer", set())
+        reconcile_subagents(ar, "tools:outer|tools:child|model:y", "child", set())
+        self.assertIsNone(ar["subagent_parents"]["tools:outer"])
+        self.assertEqual(ar["subagent_parents"]["tools:child"], "tools:outer")
 
 
 def _make_agent():
@@ -329,6 +340,85 @@ class TestFinishSubagentOnTaskEnd(unittest.TestCase):
         self.assertEqual(agent.active_run["active_subagents"], {})
         self.assertIsNone(agent.active_run["current_subagent_id"])
 
+    def test_finish_restores_parent_for_nested_subagent(self):
+        """When a nested child finishes, the `task` result belongs to the
+        invoking (outer) subagent — current_subagent_id must return to the
+        parent, not the root (bug #3)."""
+        agent = self._agent()
+        agent.active_run["subagent_task_runs"]["run-child"] = "tools:child"
+        agent.active_run["active_subagents"]["tools:child"] = "writer"
+        agent.active_run["subagent_parents"] = {"tools:child": "tools:outer"}
+        agent.active_run["current_subagent_id"] = "tools:child"
+        agent._finish_subagent_on_task_end(
+            {"event": "on_tool_end", "run_id": "run-child"}
+        )
+        self.assertEqual(agent.active_run["current_subagent_id"], "tools:outer")
+
+    def test_nested_task_result_is_attributed_to_outer_subagent(self):
+        """End-to-end observable of bug #3: after a nested child finishes, the
+        `task` TOOL_CALL_RESULT dispatched at that level is stamped with the
+        outer (invoking) subagent, and the child's parent entry is popped."""
+        agent = self._agent()
+        agent.active_run["subagent_task_runs"]["run-child"] = "tools:child"
+        agent.active_run["active_subagents"]["tools:child"] = "writer"
+        agent.active_run["subagent_parents"] = {"tools:child": "tools:outer"}
+        agent.active_run["current_subagent_id"] = "tools:child"
+
+        agent._finish_subagent_on_task_end(
+            {"event": "on_tool_end", "run_id": "run-child"}
+        )
+        # The `task` result now dispatched belongs to the outer subagent.
+        ev = agent._dispatch_event(ToolCallResultEvent(
+            type=EventType.TOOL_CALL_RESULT,
+            message_id="tr-1",
+            tool_call_id="call-child",
+            content="child done",
+        ))
+        self.assertEqual(ev.subagent_id, "tools:outer")
+        self.assertNotIn("tools:child", agent.active_run["subagent_parents"])
+
+    def test_finish_restores_none_for_top_level_subagent(self):
+        """A top-level subagent's parent is the root, so finishing it returns
+        current_subagent_id to None — unchanged single-level behavior."""
+        agent = self._agent()
+        agent.active_run["subagent_task_runs"]["run-1"] = "tools:sub1"
+        agent.active_run["active_subagents"]["tools:sub1"] = "researcher"
+        agent.active_run["subagent_parents"] = {"tools:sub1": None}
+        agent.active_run["current_subagent_id"] = "tools:sub1"
+        agent._finish_subagent_on_task_end(
+            {"event": "on_tool_end", "run_id": "run-1"}
+        )
+        self.assertIsNone(agent.active_run["current_subagent_id"])
+
+    def test_parallel_task_calls_link_each_subagent_fifo(self):
+        """Two subagents fanned out in one turn each get their OWN
+        parentToolCallId (bug #4: previously only the first was queued, so the
+        second got None)."""
+        agent = self._agent()
+        agent.active_run["pending_task_calls"] = [
+            {"tool_call_id": "call-a", "parent_message_id": "msg-1"},
+            {"tool_call_id": "call-b", "parent_message_id": "msg-1"},
+        ]
+        agent._capture_subagent_task_meta({
+            "event": "on_tool_start", "run_id": "run-a",
+            "data": {"input": {"subagent_type": "researcher", "description": "A"}},
+            "metadata": {"langgraph_checkpoint_ns": "tools:subA|model:x"},
+        })
+        agent._capture_subagent_task_meta({
+            "event": "on_tool_start", "run_id": "run-b",
+            "data": {"input": {"subagent_type": "writer", "description": "B"}},
+            "metadata": {"langgraph_checkpoint_ns": "tools:subB|model:y"},
+        })
+        self.assertEqual(
+            agent.active_run["subagent_task_meta"]["tools:subA"]["parent_tool_call_id"],
+            "call-a",
+        )
+        self.assertEqual(
+            agent.active_run["subagent_task_meta"]["tools:subB"]["parent_tool_call_id"],
+            "call-b",
+        )
+        self.assertEqual(agent.active_run["pending_task_calls"], [])
+
     def test_inner_tool_end_does_not_finish_subagent_early(self):
         # A subagent's inner tool (grep/write_file) shares the subagent's
         # checkpoint ns but has a DIFFERENT run_id, so its OnToolEnd must NOT
@@ -347,6 +437,117 @@ class TestFinishSubagentOnTaskEnd(unittest.TestCase):
         self.assertEqual(
             agent._finish_subagent_on_task_end({"event": "on_chain_end"}), []
         )
+
+
+class TestRobustParentLinkJoin(unittest.TestCase):
+    """Parent-call links are matched by the per-call ToolNode dispatch
+    namespace, not FIFO, so reordered tool starts (async wrappers, HITL, or
+    default concurrent scheduling) can't swap sibling subagents' links (P2)."""
+
+    def _agent(self):
+        agent = _make_agent()
+        agent.active_run = {
+            "active_subagents": {},
+            "current_subagent_id": None,
+            "subagent_task_meta": {},
+            "subagent_task_runs": {},
+            "pending_task_calls": [
+                {"tool_call_id": "call-a", "parent_message_id": "msg-1"},
+                {"tool_call_id": "call-b", "parent_message_id": "msg-1"},
+            ],
+            "task_tool_call_ids_by_ns": {},
+        }
+        return agent
+
+    def _dispatch(self, agent, ns, call_ids, run_id="run-x"):
+        calls = [call_ids] if isinstance(call_ids, str) else call_ids
+        agent._capture_task_tool_dispatch({
+            "event": "on_chain_start",
+            "name": "tools",
+            "run_id": run_id,
+            "metadata": {"langgraph_node": "tools", "langgraph_checkpoint_ns": ns},
+            "data": {"input": [
+                {"type": "tool_call", "id": c, "name": "task", "args": {}} for c in calls
+            ]},
+        })
+
+    def _task_start(self, agent, ns, run_id, subagent_type, parent_ids=None):
+        agent._capture_subagent_task_meta({
+            "event": "on_tool_start",
+            "run_id": run_id,
+            "parent_ids": parent_ids or [],
+            "data": {"input": {"subagent_type": subagent_type, "description": subagent_type}},
+            "metadata": {"langgraph_checkpoint_ns": ns},
+        })
+
+    def test_reordered_tool_starts_do_not_swap_parent_links(self):
+        agent = self._agent()
+        # ToolNode dispatches arrive in tool_calls order (A, then B)...
+        self._dispatch(agent, "tools:subA", "call-a", "run-A")
+        self._dispatch(agent, "tools:subB", "call-b", "run-B")
+        # ...but the task on_tool_start events arrive REVERSED (B, then A).
+        self._task_start(agent, "tools:subB", "task-run-B", "writer")
+        self._task_start(agent, "tools:subA", "task-run-A", "researcher")
+        meta = agent.active_run["subagent_task_meta"]
+        # Each subagent is still linked to ITS OWN call — FIFO would have
+        # swapped these (B->call-a, A->call-b).
+        self.assertEqual(meta["tools:subB"]["parent_tool_call_id"], "call-b")
+        self.assertEqual(meta["tools:subA"]["parent_tool_call_id"], "call-a")
+        self.assertEqual(meta["tools:subB"]["parent_message_id"], "msg-1")
+        self.assertEqual(meta["tools:subA"]["parent_message_id"], "msg-1")
+        self.assertEqual(agent.active_run["pending_task_calls"], [])
+
+    def test_fifo_fallback_when_no_dispatch_captured(self):
+        # Older/batched ToolNode shape: no per-call dispatch captured -> FIFO.
+        agent = self._agent()
+        self._task_start(agent, "tools:subA", "task-run-A", "researcher")
+        self.assertEqual(
+            agent.active_run["subagent_task_meta"]["tools:subA"]["parent_tool_call_id"],
+            "call-a",
+        )
+
+    def test_batched_multi_task_dispatch_left_to_fifo(self):
+        # A single ToolNode namespace carrying TWO task calls is ambiguous, so
+        # _capture_task_tool_dispatch records nothing and FIFO is used.
+        agent = self._agent()
+        self._dispatch(agent, "tools:x", ["call-a", "call-b"])
+        self.assertEqual(agent.active_run["task_tool_call_ids_by_ns"], {})
+        # The subagent then falls through to FIFO (first queued call).
+        self._task_start(agent, "tools:x", "task-run-x", "researcher")
+        self.assertEqual(
+            agent.active_run["subagent_task_meta"]["tools:x"]["parent_tool_call_id"],
+            "call-a",
+        )
+
+    def test_nested_uncaptured_child_does_not_match_ancestor(self):
+        """Regression for the ancestor-run fallback bug: a nested child whose
+        own dispatch was NOT captured (batched) must fall to FIFO, NOT borrow
+        the outer subagent's captured call via a parent_ids/run-id scan."""
+        agent = self._agent()
+        # pending is [call-a, call-b]; add the child's second call.
+        agent.active_run["pending_task_calls"].append(
+            {"tool_call_id": "call-c", "parent_message_id": "msg-1"}
+        )
+        # Outer dispatch captured; outer subagent starts and claims call-a by ns.
+        self._dispatch(agent, "tools:outer", "call-a", run_id="run-outer")
+        self._task_start(agent, "tools:outer", "task-run-outer", "outer")
+        self.assertEqual(
+            agent.active_run["subagent_task_meta"]["tools:outer"]["parent_tool_call_id"],
+            "call-a",
+        )
+        # Child dispatch is BATCHED (two calls in one ns) -> not captured.
+        self._dispatch(agent, "tools:outer|tools:child", ["call-b", "call-c"],
+                       run_id="run-child")
+        self.assertNotIn("tools:outer|tools:child",
+                         agent.active_run["task_tool_call_ids_by_ns"])
+        # Child task start: ns uncaptured; parent_ids includes the outer
+        # ToolNode run. Must fall to FIFO (call-b), NOT borrow the outer's
+        # call-a. (With the old run-id fallback this returned call-a.)
+        self._task_start(agent, "tools:outer|tools:child", "task-run-child", "writer",
+                         parent_ids=["run-outer"])
+        link = agent.active_run["subagent_task_meta"]["tools:child"]["parent_tool_call_id"]
+        self.assertEqual(link, "call-b")
+        self.assertNotEqual(link, "call-a")
 
 
 class TestCrossTurnPersistence(unittest.TestCase):

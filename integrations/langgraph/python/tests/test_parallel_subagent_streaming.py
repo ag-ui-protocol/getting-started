@@ -44,7 +44,9 @@ def _fresh_active_run(run_id: str = "run-1") -> dict:
         "current_subagent_id": None,
         "subagent_task_meta": {},
         "subagent_task_runs": {},
+        "subagent_parents": {},
         "pending_task_calls": [],
+        "seen_task_call_ids": set(),
         "subagent_segments": set(),
         "subagent_messages": {},
         "subagent_tool_call_owner": {},
@@ -320,6 +322,62 @@ class TestLaneAwareTextPin(unittest.TestCase):
 
         starts = [e.message_id for e in agent.dispatched if e.type == EventType.TEXT_MESSAGE_START]
         self.assertEqual(starts, ["m1", "m2"])
+
+
+class TestParallelTaskCallCapture(unittest.TestCase):
+    def test_all_parallel_task_calls_queued_from_one_chunk(self):
+        """A supervisor fanning out several `task` calls in a single model
+        chunk must queue ALL of them (bug #4: only tool_call_chunks[0] was
+        captured, so the 2nd+ subagent got parentToolCallId=None)."""
+        agent = _make_agent()
+        chunk = {
+            "event": LangGraphEventTypes.OnChatModelStream,
+            "metadata": {"emit-messages": True, "emit-tool-calls": True},
+            "data": {"chunk": {
+                "id": "asst-1",
+                "content": "",
+                "tool_call_chunks": [
+                    {"id": "call-a", "name": "task", "args": ""},
+                    {"id": "call-b", "name": "task", "args": ""},
+                ],
+                "response_metadata": {},
+            }},
+        }
+        _feed(agent, chunk, None)
+        self.assertEqual(
+            agent.active_run["pending_task_calls"],
+            [
+                {"tool_call_id": "call-a", "parent_message_id": "asst-1"},
+                {"tool_call_id": "call-b", "parent_message_id": "asst-1"},
+            ],
+        )
+
+    def test_task_call_not_requeued_when_name_and_id_recur(self):
+        """Some providers repeat both name and id across a tool call's chunks;
+        the seen-set must keep it queued exactly once (dedupe by tool_call_id).
+        Both chunks carry name="task" + id="call-a" so the guard that actually
+        fires is the seen-set, not the name check."""
+        agent = _make_agent()
+        chunk1 = {
+            "event": LangGraphEventTypes.OnChatModelStream,
+            "metadata": {"emit-messages": True, "emit-tool-calls": True},
+            "data": {"chunk": {"id": "asst-1", "content": "",
+                "tool_call_chunks": [{"id": "call-a", "name": "task", "args": ""}],
+                "response_metadata": {}}},
+        }
+        chunk2 = {
+            "event": LangGraphEventTypes.OnChatModelStream,
+            "metadata": {"emit-messages": True, "emit-tool-calls": True},
+            "data": {"chunk": {"id": "asst-1", "content": "",
+                "tool_call_chunks": [{"id": "call-a", "name": "task", "args": '{"x":1}'}],
+                "response_metadata": {}}},
+        }
+        _feed(agent, chunk1, None)
+        _feed(agent, chunk2, None)
+        self.assertEqual(
+            agent.active_run["pending_task_calls"],
+            [{"tool_call_id": "call-a", "parent_message_id": "asst-1"}],
+        )
 
 
 class TestNoCrossRunState(unittest.TestCase):

@@ -237,6 +237,10 @@ def reconcile_subagents(active_run, ns, lc_agent_name, subgraphs) -> list:
         name = task_meta.get("name") or ctx.name
         description = task_meta.get("description")
         active_run["active_subagents"][new_id] = name
+        # Remember this subagent's parent so, when it finishes, control (and
+        # the `task` tool result attribution) returns to the parent rather than
+        # the root. None for a top-level subagent (parent is the root).
+        active_run.setdefault("subagent_parents", {})[new_id] = ctx.parent_subagent_id
         events.append(SubagentStartedEvent(
             type=EventType.SUBAGENT_STARTED,
             subagent_id=new_id,
@@ -357,6 +361,51 @@ class LangGraphAgent:
 
         return event
 
+    def _capture_task_tool_dispatch(self, event: dict) -> None:
+        """Map each `task` ToolNode dispatch to its originating tool_call_id.
+
+        Current LangChain ``create_agent`` schedules every pending tool call as
+        its own ``Send("tools", [tool_call])``, so the ToolNode's
+        ``on_chain_start`` carries that single tool call (with its id) in
+        ``data.input`` and a ``langgraph_checkpoint_ns`` equal to the namespace
+        the spawned subagent's own ``task`` ``on_tool_start`` reports. Recording
+        ns -> tool_call_id here lets _capture_subagent_task_meta attach the
+        EXACT spawning call to each subagent by namespace, instead of matching
+        by FIFO order — which breaks when tool starts are reordered (async tool
+        wrappers, per-call HITL interrupts, or even default concurrent
+        scheduling). Only a single-call ToolNode dispatch is captured;
+        batched/ambiguous shapes are left to the FIFO fallback.
+        """
+        if event.get("event") != LangGraphEventTypes.OnChainStart.value:
+            return
+        metadata = event.get("metadata") or {}
+        if metadata.get("langgraph_node") != "tools" and event.get("name") != "tools":
+            return
+        node_input = (event.get("data") or {}).get("input")
+        candidates: List[Any] = []
+        if isinstance(node_input, list):
+            candidates = node_input
+        elif isinstance(node_input, dict):
+            if node_input.get("type") == "tool_call":
+                candidates = [node_input]
+            elif isinstance(node_input.get("tool_call"), dict):
+                candidates = [node_input["tool_call"]]
+        task_calls = [
+            c for c in candidates
+            if isinstance(c, dict) and c.get("name") == "task" and isinstance(c.get("id"), str)
+        ]
+        # A single task call per ToolNode namespace is the unambiguous case.
+        # Multiple in one namespace (older batched shapes) fall back to FIFO.
+        if len(task_calls) != 1:
+            return
+        active_run = getattr(self, "active_run", None)
+        if active_run is None:
+            return
+        tool_call_id = task_calls[0]["id"]
+        ns = metadata.get("langgraph_checkpoint_ns")
+        if ns:
+            active_run.setdefault("task_tool_call_ids_by_ns", {})[ns] = tool_call_id
+
     def _capture_subagent_task_meta(self, event: dict) -> None:
         """Record a subagent invocation's declared name + description from the
         deepagents ``task`` delegation tool's ``on_tool_start``.
@@ -385,10 +434,38 @@ class LangGraphAgent:
         active_run = getattr(self, "active_run", None)
         if active_run is None:
             return
-        # Pop the matching supervisor `task` tool call (FIFO — the supervisor
-        # emits them in order) to link this subagent back to its spawning call.
+        # Link this subagent back to the EXACT `task` call that spawned it,
+        # keyed by the subagent's checkpoint namespace — which equals the
+        # namespace of its per-call ToolNode dispatch captured in
+        # _capture_task_tool_dispatch. This does not rely on FIFO emission
+        # order (which tool-start reordering can violate). FIFO remains a
+        # fallback ONLY when no per-call dispatch was captured for this exact
+        # namespace (older/batched ToolNode shapes, or a renamed tool node).
+        #
+        # Note: we deliberately do NOT fall back to matching a ToolNode run_id
+        # from parent_ids. The ns and the run_id are recorded together by the
+        # same dispatch capture, so a namespace miss means this subagent's own
+        # dispatch was never captured — and its own ToolNode run_id is likewise
+        # absent. A parent_ids scan could then only match an *ancestor*
+        # subagent's dispatch (e.g. a nested child matching its outer parent),
+        # which is always wrong. FIFO is the correct degradation instead.
         pending = active_run.get("pending_task_calls") or []
-        task_call = pending.pop(0) if pending else {}
+        originating_tool_call_id = (active_run.get("task_tool_call_ids_by_ns") or {}).get(ns)
+        task_call = {}
+        if originating_tool_call_id is not None:
+            match_index = next(
+                (i for i, c in enumerate(pending)
+                 if c.get("tool_call_id") == originating_tool_call_id),
+                None,
+            )
+            if match_index is not None:
+                task_call = pending.pop(match_index)
+            else:
+                # The exact call is known even if no streamed chunk supplied its
+                # parent_message_id (e.g. tool-call emission not yet observed).
+                task_call = {"tool_call_id": originating_tool_call_id}
+        elif pending:
+            task_call = pending.pop(0)
         active_run.setdefault("subagent_task_meta", {})[subagent_id] = {
             "name": tool_input.get("subagent_type"),
             "description": tool_input.get("description"),
@@ -428,8 +505,14 @@ class LangGraphAgent:
         if subagent_id not in active_run.get("active_subagents", {}):
             return []
         del active_run["active_subagents"][subagent_id]
+        # Control returns to the subagent that INVOKED this one: the `task`
+        # tool's result (and any further events at this level) belongs to the
+        # parent, not the root. Restore current_subagent_id to the finishing
+        # subagent's parent — None for a top-level subagent, so single-level
+        # behavior (result attributed to root) is unchanged.
+        parent_subagent_id = (active_run.get("subagent_parents") or {}).pop(subagent_id, None)
         if active_run.get("current_subagent_id") == subagent_id:
-            active_run["current_subagent_id"] = None
+            active_run["current_subagent_id"] = parent_subagent_id
         # The subagent's output is the `task` tool's result. deepagents returns a
         # Command whose state update carries the ToolMessage; surface its content
         # as the finished subagent's `result` (mirrors RUN_FINISHED.result).
@@ -577,7 +660,10 @@ class LangGraphAgent:
             "current_subagent_id": None,
             "subagent_task_meta": {},
             "subagent_task_runs": {},
+            "subagent_parents": {},
             "pending_task_calls": [],
+            "seen_task_call_ids": set(),
+            "task_tool_call_ids_by_ns": {},
             "subagent_segments": set(),
             "subagent_messages": {},
             "subagent_tool_call_owner": {},
@@ -697,6 +783,10 @@ class LangGraphAgent:
                     async for ev in self.get_state_and_messages_snapshots(config):
                         yield ev
 
+                # Record each `task` ToolNode dispatch (its on_chain_start
+                # precedes the task's on_tool_start) so the subagent can be
+                # linked to its EXACT spawning tool call by namespace, not FIFO.
+                self._capture_task_tool_dispatch(event)
                 # Capture declared subagent name/description from the `task`
                 # tool BEFORE reconcile_subagents fires SUBAGENT_STARTED for the
                 # subagent it spawns (task on_tool_start precedes the subagent's
@@ -1803,6 +1893,29 @@ class LangGraphAgent:
             chunk_content = _chunk_get(chunk, "content", None) if chunk else None
             chunk_id = _chunk_get(chunk, "id", None) if chunk else None
 
+            # Capture EVERY `task` delegation call in this chunk (with its
+            # tool_call_id and the assistant chunk id as parent_message_id) so
+            # each spawned subagent can carry parentToolCallId / parentMessageId
+            # on its SUBAGENT_STARTED. A supervisor can fan out several `task`
+            # calls in one turn; scanning the whole tool_call_chunks list (not
+            # just [0]) queues all of them. Dedupe by tool_call_id because a
+            # call's id recurs across its arg-streaming chunks.
+            #
+            # These queued records are matched to subagents by the per-call
+            # ToolNode dispatch namespace in _capture_subagent_task_meta (see
+            # _capture_task_tool_dispatch), NOT by emission order, so reordered
+            # tool starts don't swap sibling links. FIFO order is only a fallback
+            # for older/batched ToolNode shapes.
+            for _tcc in tool_call_chunks_list:
+                if _tcc.get("name") == "task" and _tcc.get("id"):
+                    seen_tasks = self.active_run.setdefault("seen_task_call_ids", set())
+                    if _tcc["id"] not in seen_tasks:
+                        seen_tasks.add(_tcc["id"])
+                        self.active_run.setdefault("pending_task_calls", []).append({
+                            "tool_call_id": _tcc["id"],
+                            "parent_message_id": chunk_id,
+                        })
+
             reasoning_data = resolve_reasoning_content(chunk) if chunk else None
             encrypted_reasoning_data = resolve_encrypted_reasoning_content(chunk) if chunk else None
             # Use an explicit ``is not None`` check so empty-string deltas
@@ -1954,16 +2067,6 @@ class LangGraphAgent:
                 # behaviour where ``has_function_streaming=True`` blocked the
                 # OnToolEnd re-emit for opted-out tool calls.
                 self.active_run["streamed_tool_call_ids"].add(tool_call_data["id"])
-                # Capture the supervisor's `task` delegation calls so the subagent
-                # each one spawns can carry parentToolCallId / parentMessageId on
-                # its SUBAGENT_STARTED. The supervisor emits every task call before
-                # the corresponding subagent runs, so a FIFO match (popped in
-                # _capture_subagent_task_meta) lines them up in order.
-                if tool_call_data.get("name") == "task":
-                    self.active_run.setdefault("pending_task_calls", []).append({
-                        "tool_call_id": tool_call_data["id"],
-                        "parent_message_id": chunk_id,
-                    })
                 if should_emit_tool_calls:
                     yield self._dispatch_event(
                         ToolCallStartEvent(
