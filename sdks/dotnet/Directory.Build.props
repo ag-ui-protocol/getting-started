@@ -20,6 +20,25 @@
     <NoWarn>$(NoWarn);RS0041</NoWarn>
   </PropertyGroup>
 
+  <!-- Strong-naming applies to every project, not just the packable ones. A strong-named
+       assembly can only grant InternalsVisibleTo to another strong-named assembly, so the
+       test projects that consume internals have to be signed with the same key. Signing
+       only the packable projects is what forced `-p:SignAssembly=false` on every local
+       `dotnet test` invocation. -->
+  <PropertyGroup>
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)AGUI.snk</AssemblyOriginatorKeyFile>
+  </PropertyGroup>
+
+  <!-- Public key of AGUI.snk (`sn -tp` / AssemblyName.GetPublicKey). The .NET SDK appends
+       `PublicKey=$(PublicKey)` to every InternalsVisibleTo item that has no explicit Key
+       metadata, which is what keeps friend references valid while signing is on. Left
+       unset when signing is off (`-p:SignAssembly=false`) so the attribute is emitted
+       without a key and unsigned builds keep working. -->
+  <PropertyGroup Condition="'$(SignAssembly)' == 'true'">
+    <PublicKey>002400000480000014010000060200000024000052534131000800000100010003c58522a6fc234108611a833bb9351f3d9b10b03e457ef23134657b4cdcdf5bf7ea692b683930d58448129e909dfa7d45c8d55bba536f5404507c7a7fd4b776d97db0cda2bf27b2fb7480175e76b0e0f4d4670052fdb656af89fc68bffe46725d1f879add87f8ac2cb5f1c4f69cbb2b0fc61b1afee74798563dd40f636e987c14f0422cb0af0b3aec4755ddff3976a134f4461e0c2fef00a9cb0724c4bf8b60ec50eddbfaf39178bef9a6078881022e42334b19bce76095a7e4930ec619a5985e9677d86b7ea6989629bd3647f955a3b5cf21a93d922621cb1c536b2cc4e6f7c9c1d0ec7347aa5b399878e6a94c27eaededcd86d12c9730f0dd3618900d61c6</PublicKey>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(IsPackable)' == 'true'">
     <VersionPrefix Condition="'$(VersionPrefix)' == ''">0.0.4</VersionPrefix>
     <Authors>AG-UI Protocol</Authors>
@@ -37,8 +56,6 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <Deterministic>true</Deterministic>
-    <SignAssembly>true</SignAssembly>
-    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)AGUI.snk</AssemblyOriginatorKeyFile>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <EnablePackageValidation>true</EnablePackageValidation>

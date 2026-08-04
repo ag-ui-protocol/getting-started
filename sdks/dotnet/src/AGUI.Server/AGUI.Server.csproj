@@ -8,7 +8,7 @@
     <PackageTags>$(PackageTags);server;adapter;streaming;chat;microsoft-extensions-ai</PackageTags>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(SignAssembly)' != 'true'">
+  <ItemGroup>
     <InternalsVisibleTo Include="AGUI.Server.UnitTests" />
   </ItemGroup>
 

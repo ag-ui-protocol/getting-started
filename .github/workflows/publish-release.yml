@@ -1234,12 +1234,12 @@ jobs:
         working-directory: sdks/dotnet
         run: |
           set -euo pipefail
-          dotnet test tests/AGUI.Abstractions.UnitTests -c Release -p:SignAssembly=false
-          dotnet test tests/AGUI.Client.UnitTests -c Release -p:SignAssembly=false
-          dotnet test tests/AGUI.Formatting.UnitTests -c Release -p:SignAssembly=false
-          dotnet test tests/AGUI.Protobuf.UnitTests -c Release -p:SignAssembly=false
-          dotnet test tests/AGUI.Server.UnitTests -c Release -p:SignAssembly=false
-          dotnet test tests/AGUI.Hosting.AspNetCore.IntegrationTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.Abstractions.UnitTests -c Release
+          dotnet test tests/AGUI.Client.UnitTests -c Release
+          dotnet test tests/AGUI.Formatting.UnitTests -c Release
+          dotnet test tests/AGUI.Protobuf.UnitTests -c Release
+          dotnet test tests/AGUI.Server.UnitTests -c Release
+          dotnet test tests/AGUI.Hosting.AspNetCore.IntegrationTests -c Release
 
       # The integration lives in its own solution with its own
       # Directory.Build.props, so the SDK suites above do not cover it.

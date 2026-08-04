@@ -68,14 +68,14 @@ jobs:
       # checkout that is not present in CI, so a solution-wide build would fail.
       - name: Run unit tests
         run: |
-          dotnet test tests/AGUI.Abstractions.UnitTests -c Release -p:SignAssembly=false
-          dotnet test tests/AGUI.Client.UnitTests -c Release -p:SignAssembly=false
-          dotnet test tests/AGUI.Formatting.UnitTests -c Release -p:SignAssembly=false
-          dotnet test tests/AGUI.Protobuf.UnitTests -c Release -p:SignAssembly=false
-          dotnet test tests/AGUI.Server.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.Abstractions.UnitTests -c Release
+          dotnet test tests/AGUI.Client.UnitTests -c Release
+          dotnet test tests/AGUI.Formatting.UnitTests -c Release
+          dotnet test tests/AGUI.Protobuf.UnitTests -c Release
+          dotnet test tests/AGUI.Server.UnitTests -c Release
 
       - name: Run integration tests
-        run: dotnet test tests/AGUI.Hosting.AspNetCore.IntegrationTests -c Release -p:SignAssembly=false
+        run: dotnet test tests/AGUI.Hosting.AspNetCore.IntegrationTests -c Release
 
   cross-language:
     name: dotnet / cross-language (TS <-> C#)
@@ -150,5 +150,5 @@ jobs:
 
       # Phase 2: C# AGUIChatClient drives the TypeScript fake-agent server.
       - name: Cross-language Phase 2 (C# client -> TS server)
-        run: dotnet test tests/AGUI.CrossLanguage.IntegrationTests -c Release -p:SignAssembly=false
+        run: dotnet test tests/AGUI.CrossLanguage.IntegrationTests -c Release
         working-directory: sdks/dotnet
