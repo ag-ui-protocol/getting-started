@@ -6,11 +6,13 @@ description: "Customize AG-UI stream conversion with AGUIStreamOptions"
 # Extensibility
 
 `AGUIStreamOptions` customizes how `ChatResponseUpdate` streams are converted
-to AG-UI events. It is fluent and method-only: create an instance, register
-`Map*` hooks, and pass it to `ToChatRequestContext`.
+to AG-UI events. Mapping is fluent and method-based: create an instance,
+register `Map*` hooks, and pass it to `ToChatRequestContext`. Plain toggles such
+as [`IncludeRawEvents`](#includerawevents) are init-only properties, so set them
+in an object initializer before chaining.
 
 ```csharp
-var streamOptions = new AGUIStreamOptions()
+var streamOptions = new AGUIStreamOptions { IncludeRawEvents = false }
     .MapResultAsStateSnapshot("create_plan");
 
 var ctx = input.ToChatRequestContext(jsonSerializerOptions, streamOptions);
@@ -38,6 +40,36 @@ maps:
   layer emits it verbatim. This is often the simplest way for a custom
   `IChatClient` wrapper to inject `StateSnapshotEvent`, `CustomEvent`, or
   `RawEvent` values.
+</Note>
+
+## IncludeRawEvents
+
+By default the converter serializes each `ChatResponseUpdate` and attaches it as
+the `rawEvent` field of every event derived from that update — the
+`TEXT_MESSAGE_*`, `TOOL_CALL_*`, and `REASONING_ENCRYPTED_VALUE` events. It lets
+a client inspect the provider payload behind an event, but it is not free: on a
+typical streaming response the `rawEvent` payloads are several times the size of
+the events that carry them, because a short text delta ships alongside a full
+serialized update.
+
+Set `IncludeRawEvents` to `false` when no client reads the field. This skips the
+serialization altogether, so you save the per-update CPU and allocations as well
+as the bytes.
+
+```csharp
+var streamOptions = new AGUIStreamOptions { IncludeRawEvents = false };
+
+var ctx = input.ToChatRequestContext(jsonSerializerOptions, streamOptions);
+```
+
+The event sequence is unchanged — only the `rawEvent` field is omitted. Events
+you supply yourself keep whatever `RawEvent` you set on them, whether they come
+from `ChatResponseUpdate.RawRepresentation` or from a `Map*` callback; the
+toggle only governs the payload the converter attaches on your behalf.
+
+<Note>
+  This applies to both transports. `rawEvent` rides the protobuf encoding as
+  well as SSE, so the saving is the same either way.
 </Note>
 
 ## MapContent

@@ -10,9 +10,11 @@ namespace AGUI.Server;
 /// Options for configuring how <see cref="ChatResponseUpdate"/> streams are converted to AG-UI event streams.
 /// </summary>
 /// <remarks>
-/// Configuration is entirely method-based and fluent — there are no public setters. Construct an
-/// instance and call the <c>Map*</c> helpers to register mappings for tool calls, tool results,
-/// custom interrupts, and otherwise-unmapped <see cref="AIContent"/> instances.
+/// Mapping configuration is method-based and fluent — the <c>Map*</c> helpers register mappings for
+/// tool calls, tool results, custom interrupts, and otherwise-unmapped <see cref="AIContent"/>
+/// instances, and each returns the same instance so calls can be chained. Plain toggles such as
+/// <see cref="IncludeRawEvents"/> are init-only properties, so combine the two with an object
+/// initializer: <c>new AGUIStreamOptions { IncludeRawEvents = false }.MapResultAsStateSnapshot("x")</c>.
 /// </remarks>
 public sealed class AGUIStreamOptions
 {
@@ -20,6 +22,26 @@ public sealed class AGUIStreamOptions
     private readonly Dictionary<string, Func<FunctionCallContent, IEnumerable<BaseEvent>>> _callMappings = new(StringComparer.Ordinal);
     private List<Func<AIContent, AGUIInterrupt?>>? _interruptMappers;
     private List<Func<AIContent, IEnumerable<BaseEvent>?>>? _contentMappers;
+
+    /// <summary>
+    /// Gets a value indicating whether the originating <see cref="ChatResponseUpdate"/> is serialized
+    /// and attached as <see cref="BaseEvent.RawEvent"/> to the events derived from it. Defaults to
+    /// <see langword="true"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The attachment applies to the <c>TEXT_MESSAGE_*</c>, <c>TOOL_CALL_*</c>, and
+    /// <c>REASONING_ENCRYPTED_VALUE</c> events produced from an update; events the SDK synthesizes on
+    /// its own (<c>RUN_STARTED</c>, <c>RUN_FINISHED</c>) and events supplied by a caller — whether via
+    /// <see cref="ChatResponseUpdate.RawRepresentation"/> or a registered mapping — are never touched.
+    /// </para>
+    /// <para>
+    /// Setting this to <see langword="false"/> skips the serialization entirely, which removes both the
+    /// wire cost (the payload is typically several times the size of a small text delta) and the
+    /// per-update serialization work. Turn it off unless a client actually reads <c>rawEvent</c>.
+    /// </para>
+    /// </remarks>
+    public bool IncludeRawEvents { get; init; } = true;
 
     /// <summary>
     /// Registers a fallback that maps an <see cref="AIContent"/> to an <see cref="AGUIInterrupt"/>.

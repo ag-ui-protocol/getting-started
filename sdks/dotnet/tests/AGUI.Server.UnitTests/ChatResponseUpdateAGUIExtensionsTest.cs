@@ -1344,6 +1344,112 @@ public sealed class ChatResponseUpdateAGUIExtensionsTest
         Assert.NotNull(content.RawEvent);
     }
 
+    [Fact]
+    public void IncludeRawEvents_DefaultsToTrue()
+    {
+        Assert.True(new AGUIStreamOptions().IncludeRawEvents);
+    }
+
+    [Fact]
+    public async Task IncludeRawEventsFalse_OmitsRawEventFromTextEvents()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate(ChatRole.Assistant, "Hello") { MessageId = "msg-1" },
+            new ChatResponseUpdate(ChatRole.Assistant, " world") { MessageId = "msg-1" });
+
+        var events = await CollectEvents(updates, NoRawEvents());
+
+        Assert.NotEmpty(events.OfType<TextMessageContentEvent>());
+        Assert.All(events, e => Assert.Null(e.RawEvent));
+    }
+
+    [Fact]
+    public async Task IncludeRawEventsFalse_OmitsRawEventFromToolCallEvents()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                Contents = [new FunctionCallContent("call-1", "search", new Dictionary<string, object?> { ["q"] = "x" })]
+            },
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Tool,
+                Contents = [new FunctionResultContent("call-1", "done")]
+            });
+
+        var events = await CollectEvents(updates, NoRawEvents());
+
+        Assert.Null(events.OfType<ToolCallStartEvent>().Single().RawEvent);
+        Assert.Null(events.OfType<ToolCallArgsEvent>().Single().RawEvent);
+        Assert.Null(events.OfType<ToolCallEndEvent>().Single().RawEvent);
+        Assert.Null(events.OfType<ToolCallResultEvent>().Single().RawEvent);
+    }
+
+    [Fact]
+    public async Task IncludeRawEventsFalse_OmitsRawEventFromReasoningEncryptedValue()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                Contents = [new TextReasoningContent("") { ProtectedData = "signed-blob" }]
+            });
+
+        var withRaw = await CollectEvents(updates, new AGUIStreamOptions());
+        Assert.NotNull(withRaw.OfType<ReasoningEncryptedValueEvent>().Single().RawEvent);
+
+        var events = await CollectEvents(updates, NoRawEvents());
+        Assert.Null(events.OfType<ReasoningEncryptedValueEvent>().Single().RawEvent);
+    }
+
+    [Fact]
+    public async Task IncludeRawEventsFalse_PreservesCallerSuppliedRawEvent()
+    {
+        var passthrough = new CustomEvent
+        {
+            Name = "mine",
+            Value = JsonDocument.Parse("""{"a":1}""").RootElement,
+            RawEvent = JsonDocument.Parse("""{"keep":"me"}""").RootElement,
+        };
+
+        var events = await CollectEvents(
+            ToAsyncEnumerable(new ChatResponseUpdate { RawRepresentation = passthrough }),
+            NoRawEvents());
+
+        var emitted = Assert.Single(events.OfType<CustomEvent>());
+        Assert.Equal("me", emitted.RawEvent!.Value.GetProperty("keep").GetString());
+    }
+
+    [Fact]
+    public async Task IncludeRawEventsFalse_ProducesIdenticalEventSequence()
+    {
+        static IAsyncEnumerable<ChatResponseUpdate> Updates() => ToAsyncEnumerable(
+            new ChatResponseUpdate(ChatRole.Assistant, "Hello") { MessageId = "msg-1" },
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new FunctionCallContent("call-1", "search", new Dictionary<string, object?> { ["q"] = "x" })]
+            },
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Tool,
+                Contents = [new FunctionResultContent("call-1", "done")]
+            });
+
+        var withRaw = await CollectEvents(Updates(), new AGUIStreamOptions());
+        var withoutRaw = await CollectEvents(Updates(), NoRawEvents());
+
+        Assert.Equal(
+            withRaw.ConvertAll(e => e.Type),
+            withoutRaw.ConvertAll(e => e.Type));
+        Assert.Contains(withRaw, e => e.RawEvent is not null);
+        Assert.All(withoutRaw, e => Assert.Null(e.RawEvent));
+    }
+
+    private static AGUIStreamOptions NoRawEvents() => new() { IncludeRawEvents = false };
+
     #endregion
 
     #region Unicode and Special Characters (GAP-7)
@@ -1540,6 +1646,13 @@ public sealed class ChatResponseUpdateAGUIExtensionsTest
             options.MapContent(content => unmappedUpdateHandler(null!, content));
         }
 
+        return await CollectEvents(updates, options).ConfigureAwait(false);
+    }
+
+    private static async Task<List<BaseEvent>> CollectEvents(
+        IAsyncEnumerable<ChatResponseUpdate> updates,
+        AGUIStreamOptions options)
+    {
         var events = new List<BaseEvent>();
         await foreach (var evt in updates.AsAGUIEventStreamAsync(BuildContext(options)).ConfigureAwait(false))
         {

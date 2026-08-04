@@ -37,7 +37,7 @@ internal sealed class ReasoningMessageTracker
             Delta = delta
         };
 
-    public BaseEvent EmitEncryptedValue(string encryptedValue, JsonElement raw) =>
+    public BaseEvent EmitEncryptedValue(string encryptedValue, JsonElement? raw) =>
         new ReasoningEncryptedValueEvent
         {
             Subtype = "message",
