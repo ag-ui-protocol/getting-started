@@ -42,6 +42,9 @@ on:
           - integration-aws-strands-ts
           - integration-claude-agent-sdk-py
           - integration-claude-agent-sdk-ts
+          - integration-claude-managed-agents-dotnet
+          - integration-claude-managed-agents-py
+          - integration-claude-managed-agents-ts
           - integration-cloudflare-agents
           - integration-crewai-py
           - integration-crewai-ts

@@ -47,7 +47,7 @@ jobs:
           node-version: "22"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271  # v6.0.9
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
         with:
           version: 10.33.4
 
@@ -204,7 +204,7 @@ jobs:
           node-version: "22"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271  # v6.0.9
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
         with:
           version: 10.33.4
 
@@ -317,7 +317,7 @@ jobs:
           echo "OPENAI_API_KEY=${OPENAI_API_KEY}" > .env
 
       - name: Run dojo+agents
-        uses: JarvusInnovations/background-action@2428e7b970a846423095c79d43f759abf979a635  # v1.0.7
+        uses: JarvusInnovations/background-action@1f5e5fa2462e48a95f97b54b4842d076d1008e3b  # v2.0.0
         if: ${{ join(matrix.services, ',') != '' && contains(join(matrix.services, ','), 'dojo') }}
         env:
           # Backend tool-rendering demos call the live open-meteo API, which

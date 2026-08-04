@@ -29,6 +29,16 @@
 # static lists for the exceptional scopes. check_notify_case below asserts those
 # lists project every config scope to the correct ecosystem, so this
 # hand-maintained list cannot drift.
+#
+# FOURTH projection guarded here: a .NET version lives in a Directory.Build.props,
+# not in a manifest that publish-release.yml's `**/package.json` /
+# `**/pyproject.toml` globs match. Two places therefore carry a static list of
+# .NET `versionSource` paths — the workflow's push trigger (which decides whether
+# a stable release starts at all) and the same pre-checkout `Compute release
+# intent` step's PUSH branch (which decides whether a NuGet failure pages
+# anyone). check_dotnet_version_sources below asserts both lists are exactly the
+# config's .NET versionSource set, so enrolling a new .NET scope cannot silently
+# leave a bump untriggered or a build failure unpaged.
 
 set -euo pipefail
 
@@ -263,11 +273,69 @@ check_notify_case() {
   return "$rc_local"
 }
 
+# Every .NET scope's `versionSource`, which is what both static lists must hold.
+check_dotnet_version_sources() {
+  local file="$1"
+  local rc_local=0
+
+  local expected
+  expected=$(jq -r '
+    .scopes[]
+    | select(any(.packages[]; .ecosystem == "dotnet"))
+    | .versionSource // empty
+  ' "$CONFIG" | sort -u)
+
+  if [ -z "$expected" ]; then
+    echo "ERROR: release.config.json declares .NET packages but no scope names a versionSource." >&2
+    echo "Fix: give every .NET scope a \"versionSource\" pointing at its Directory.Build.props." >&2
+    return 1
+  fi
+
+  # The push trigger's paths: the only quoted list items at this indent.
+  local actual_paths
+  actual_paths=$(grep -oE '^      - "[^"]*Directory\.Build\.props"$' "$file" \
+    | sed -E 's/^      - "(.*)"$/\1/' | sort -u)
+
+  # The push classifier's static list, kept on one line for exactly this reason.
+  local actual_classifier
+  actual_classifier=$(grep -oE 'DOTNET_VERSION_SOURCES="[^"]*"' "$file" \
+    | sed -E 's/^DOTNET_VERSION_SOURCES="(.*)"$/\1/' | tr ' ' '\n' | grep -v '^$' | sort -u)
+
+  if [ "$actual_paths" != "$expected" ]; then
+    echo "ERROR: publish-release.yml push paths do not match the .NET versionSource set." >&2
+    echo "" >&2
+    echo "--- diff (expected versionSources  vs  push paths) ---" >&2
+    diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual_paths") >&2 || true
+    echo "" >&2
+    echo "Fix: list every .NET scope's versionSource under on.push.paths, or a version" >&2
+    echo "bump there will never start a release." >&2
+    rc_local=1
+  fi
+
+  if [ "$actual_classifier" != "$expected" ]; then
+    echo "ERROR: publish-release.yml push-intent classifier does not match the .NET versionSource set." >&2
+    echo "" >&2
+    echo "--- diff (expected versionSources  vs  DOTNET_VERSION_SOURCES) ---" >&2
+    diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual_classifier") >&2 || true
+    echo "" >&2
+    echo "Fix: set DOTNET_VERSION_SOURCES in the notify job's 'Compute release intent'" >&2
+    echo "step to every .NET scope's versionSource, or a failed build on a bump there" >&2
+    echo "reads as 'NuGet was never intended' and the failure page is swallowed." >&2
+    rc_local=1
+  fi
+
+  if [ "$rc_local" -eq 0 ]; then
+    echo "OK: publish-release.yml .NET push paths and push-intent classifier match release.config.json"
+  fi
+  return "$rc_local"
+}
+
 rc=0
 check_workflow "publish-release.yml" "$PUBLISH_WF" || rc=1
 check_workflow "prepare-release.yml" "$PREPARE_WF" || rc=1
 check_workflow "canary.yml" "$CANARY_WF" || rc=1
 check_notify_case "$PUBLISH_WF" || rc=1
+check_dotnet_version_sources "$PUBLISH_WF" || rc=1
 
 if [ "$rc" -ne 0 ]; then
   exit 1

@@ -1,5 +1,5 @@
 """
-An example demonstrating agentic generative UI.
+An example demonstrating human-in-the-loop.
 """
 
 from crewai.flow.flow import Flow, start, router, listen
@@ -63,7 +63,7 @@ class AgentState(CopilotKitState):
 
 class HumanInTheLoopFlow(Flow[AgentState]):
     """
-    This is a sample flow that uses the CopilotKit framework to create a chat agent.
+    This is a sample flow that demonstrates a human-in-the-loop agent.
     """
 
     @start()

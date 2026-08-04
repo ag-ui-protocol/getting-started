@@ -1,0 +1,84 @@
+# Every unit-*.yml in this repository is called "unit", so this workflow must not
+# key its concurrency group off github.workflow: doing so would put it in the
+# same group as unit-dotnet-sdk.yml on the same ref, and each push would cancel
+# the other's in-flight run. Both the display name and the group are unique.
+name: unit / claude-managed-agents (.NET)
+
+on:
+  push:
+    branches: [main]
+    # GitHub Actions does not support YAML anchors, so the two filters repeat.
+    paths:
+      - "integrations/claude-managed-agents/dotnet/**"
+      - "sdks/dotnet/src/**"
+      # The library builds against the .NET SDK by project reference, so the
+      # files that govern that build have to trigger it too.
+      - "sdks/dotnet/Directory.Build.props"
+      - "sdks/dotnet/Directory.Build.targets"
+      - "sdks/dotnet/Directory.Packages.props"
+      - "sdks/dotnet/global.json"
+      - "sdks/dotnet/nuget.config"
+      - ".github/workflows/unit-claude-managed-agents-dotnet.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "integrations/claude-managed-agents/dotnet/**"
+      - "sdks/dotnet/src/**"
+      # The library builds against the .NET SDK by project reference, so the
+      # files that govern that build have to trigger it too.
+      - "sdks/dotnet/Directory.Build.props"
+      - "sdks/dotnet/Directory.Build.targets"
+      - "sdks/dotnet/Directory.Packages.props"
+      - "sdks/dotnet/global.json"
+      - "sdks/dotnet/nuget.config"
+      - ".github/workflows/unit-claude-managed-agents-dotnet.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unit-claude-managed-agents-dotnet-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  claude-managed-agents-dotnet:
+    name: claude-managed-agents-dotnet
+    runs-on: depot-ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: integrations/claude-managed-agents/dotnet
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          # global.json pins the 10.0 SDK; 8.0/9.0 runtimes are needed
+          # because the library multi-targets net8.0/net9.0/net10.0.
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Build (library, example, tests)
+        run: dotnet build -c Release
+
+      - name: Run unit tests
+        run: dotnet test tests/AGUI.ClaudeManagedAgents.Tests -c Release --no-build
+
+      # The package is enrolled for release, so packing has to keep working: a
+      # missing README, a bad PackageId or an unpackable target framework should
+      # fail here rather than in the release pipeline.
+      - name: Pack the NuGet package
+        run: dotnet pack src/AGUI.ClaudeManagedAgents -c Release --no-build -o ./artifacts
+
+      - name: Check the produced package files
+        run: |
+          set -euo pipefail
+          ls -1 ./artifacts
+          test -n "$(find ./artifacts -name 'AGUI.ClaudeManagedAgents.*.nupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.ClaudeManagedAgents.*.snupkg' -print -quit)"

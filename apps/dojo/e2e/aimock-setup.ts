@@ -2,6 +2,8 @@ import { LLMock, type ChatMessage } from "@copilotkit/aimock";
 import * as path from "node:path";
 import { registerA2UIRecoveryFixtures } from "./a2ui-recovery-fixtures";
 import { registerA2UIADKFixtures } from "./a2ui-adk-fixtures";
+import { registerA2UICrewAIFixtures } from "./a2ui-crewai-fixtures";
+import { registerInterruptCrewAIFixtures } from "./interrupt-crewai-fixtures";
 
 // Configurable so parallel worktrees / runs don't collide on one aimock port.
 const MOCK_PORT = Number(process.env.AIMOCK_PORT) || 5555;
@@ -31,6 +33,16 @@ export async function setupLLMock(): Promise<void> {
   // OSS-162 A2UI recovery showcase fixtures (predicate fixtures, must precede
   // the generic loadFixtureFile below).
   registerA2UIRecoveryFixtures(mockServer);
+
+  // CrewAI A2UI fixtures (gpt-4o, scoped to CrewAI-unique prompts so
+  // they never intercept the LangGraph/ADK demos). Predicate fixtures, before
+  // the generic loader.
+  registerA2UICrewAIFixtures(mockServer);
+
+  // CrewAI interrupt (suspend/resume) fixtures: the extract call before the
+  // pause and the confirm call after the resume. Scoped to this flow's own
+  // system prompts, before the generic loader.
+  registerInterruptCrewAIFixtures(mockServer);
 
   // Extract text from message content — handles both string and array-of-parts
   // (Strands SDK sends content as [{type: "text", text: "..."}])
@@ -554,6 +566,91 @@ export async function setupLLMock(): Promise<void> {
     },
     response: {
       content: "Goodbye! The crew has been shut down. Have a great day!",
+    },
+  });
+
+  // CrewAI crew-RUN path (CPK-7717 defect 2 & 3). Distinct from crew_exit:
+  // here the user asks the crew to do real work, so the assistant must call
+  // the CREW tool. That tool's function name is the crew name itself
+  // ("CrewChatCrew" == CrewChatCrew.name / ChatInputs.crew_name), NOT
+  // crew_exit. ChatWithCrewFlow.chat() then runs crew.kickoff() (whose own
+  // internal agent LLM call ALSO routes through aimock — see the kickoff
+  // fixture below), records the crew output on state (defect 3), and — the
+  // P0 fix — issues a follow-up completion with tool_choice="none" so the
+  // assistant SPEAKS about the result instead of going silent (defect 2).
+  const CREW_CHAT_CREW_TOOL = "CrewChatCrew";
+  // The crew's kickoff result string. It becomes both state.outputs (defect 3)
+  // and the `tool`-role message content the defect-2 follow-up sees, so the
+  // follow-up + generic-catch-all guards below match on this exact value.
+  const CREW_RUN_OUTPUT =
+    "The crew planned your team offsite: pick a date, book a venue, and send invites.";
+  const hasCrewRunTool = (req: { tools?: { function: { name: string } }[] }) =>
+    req.tools?.some((t) => t.function.name === CREW_CHAT_CREW_TOOL) ?? false;
+
+  // Turn 1 — primary chat() completion: the assistant calls the crew tool.
+  // Gated to the FIRST pass (no tool result yet) so it never re-fires on the
+  // defect-2 follow-up (whose request still carries the same last user msg
+  // and the crew tool in its tools list).
+  mockServer.addFixture({
+    match: {
+      predicate: (req) => {
+        const lastUser = req.messages.filter((m) => m.role === "user").pop();
+        return (
+          hasCrewRunTool(req) &&
+          !hasToolResult(req) &&
+          textOf(lastUser?.content).includes("plan a team offsite")
+        );
+      },
+    },
+    response: {
+      toolCalls: [
+        {
+          name: CREW_CHAT_CREW_TOOL,
+          arguments: JSON.stringify({ user_message: "Plan a team offsite" }),
+        },
+      ],
+    },
+  });
+
+  // Crew-internal kickoff: crew.kickoff() runs the "General Assistant" agent,
+  // whose single LLM call routes here. crewai's no-tools agent requires the
+  // EXACT "Thought:/Final Answer:" format or it retries — returning it means
+  // the crew resolves in one pass and str(crew_output) == CREW_RUN_OUTPUT.
+  // Matched via the role_playing marker "Your personal goal is", which is
+  // unique to the agent-execution prompt (absent from the primary chat()
+  // system message and from the crew description-generation calls).
+  mockServer.addFixture({
+    match: {
+      predicate: (req) => sysIncludes(req.messages, "Your personal goal is"),
+    },
+    response: {
+      content:
+        "Thought: I now can give a great answer\nFinal Answer: " +
+        CREW_RUN_OUTPUT,
+    },
+  });
+
+  // Turn 2 — defect-2 follow-up completion: after the crew tool result lands,
+  // chat() re-completes with tool_choice="none" so the assistant produces
+  // visible text about the crew result. Matched by the crew tool result in
+  // history (last message is the `tool` role carrying CREW_RUN_OUTPUT). Must
+  // beat the generic tool-result catch-all below, which is why that catch-all
+  // explicitly skips this case (mirroring its crew_exit skip).
+  mockServer.addFixture({
+    match: {
+      predicate: (req) => {
+        const last = req.messages[req.messages.length - 1];
+        return (
+          last?.role === "tool" &&
+          textOf(last.content) === CREW_RUN_OUTPUT &&
+          hasCrewRunTool(req)
+        );
+      },
+    },
+    response: {
+      content:
+        "The crew finished planning your team offsite: pick a date, book a " +
+        "venue, and send invites. Anything else?",
     },
   });
 
@@ -1339,6 +1436,10 @@ export async function setupLLMock(): Promise<void> {
         );
         if (hasCrewExitTool && textOf(last.content) === "Crew exited")
           return false;
+        // Don't match the CrewAI crew-RUN follow-up (defect 2) — it has a
+        // dedicated fixture keyed on the crew output string.
+        if (hasCrewRunTool(req) && textOf(last.content) === CREW_RUN_OUTPUT)
+          return false;
         return true;
       },
     },
@@ -1347,25 +1448,36 @@ export async function setupLLMock(): Promise<void> {
 
   // Universal catch-all: matches any request that wasn't handled above.
   // Appended LAST so specific fixtures always take priority.
-  // Log unmatched requests for debugging fixture mismatches.
+  //
+  // The diagnostic lives in the RESPONSE FACTORY, not in the predicate. Since
+  // aimock 1.34.0 the matcher no longer returns on first match — it evaluates
+  // every candidate's `match.predicate` and only then selects a winner, so a
+  // side effect inside a predicate fires on every single request. A response
+  // factory runs only when this fixture is the one actually served, i.e. only
+  // on a genuine fixture miss, which is what this log is for.
   mockServer.addFixture({
+    // endpoint: "chat" is load-bearing. A *function* response skips aimock's
+    // per-endpoint response-shape gate, so an unscoped catch-all becomes
+    // eligible for image/speech/transcription/video requests it could never
+    // match before, turning their honest 404 into a mis-attributed 500.
     match: {
-      predicate: (req) => {
-        const lastUser = req.messages.filter((m) => m.role === "user").pop();
-        const userText = lastUser ? textOf(lastUser.content) : "(no user msg)";
-        const toolNames =
-          req.tools?.map((t) => t.function.name).join(",") || "(no tools)";
-        const contentType = lastUser ? typeof lastUser.content : "N/A";
-        const contentSample = lastUser
-          ? JSON.stringify(lastUser.content).slice(0, 120)
-          : "N/A";
-        console.error(
-          `[aimock CATCH-ALL] model=${req.model} lastUser="${userText.slice(0, 80)}" tools=[${toolNames}] msgs=${req.messages.length} contentType=${contentType} content=${contentSample}`,
-        );
-        return true;
-      },
+      endpoint: "chat",
+      predicate: () => true,
     },
-    response: { content: "I understand. How can I help you with that?" },
+    response: (req) => {
+      const lastUser = req.messages.filter((m) => m.role === "user").pop();
+      const userText = lastUser ? textOf(lastUser.content) : "(no user msg)";
+      const toolNames =
+        req.tools?.map((t) => t.function.name).join(",") || "(no tools)";
+      const contentType = lastUser ? typeof lastUser.content : "N/A";
+      const contentSample = lastUser
+        ? JSON.stringify(lastUser.content).slice(0, 120)
+        : "N/A";
+      console.error(
+        `[aimock CATCH-ALL] model=${req.model} lastUser="${userText.slice(0, 80)}" tools=[${toolNames}] msgs=${req.messages.length} contentType=${contentType} content=${contentSample}`,
+      );
+      return { content: "I understand. How can I help you with that?" };
+    },
   });
 
   // Log fixture counts for debugging

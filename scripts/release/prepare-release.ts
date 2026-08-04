@@ -11,7 +11,8 @@
  * For TypeScript packages, edits package.json.
  * For Python packages, edits pyproject.toml using regex (handles both
  * [project].version and [tool.poetry].version).
- * For .NET packages, edits sdks/dotnet/Directory.Build.props VersionPrefix.
+ * For .NET packages, edits the VersionPrefix in the Directory.Build.props the
+ * scope names as its `versionSource`.
  *
  * Outputs JSON to stdout:
  *   { "scope": "...", "packages": [{ "name", "oldVersion", "newVersion", "file", "path" }] }
@@ -348,12 +349,21 @@ function writeDotnetVersion(propsPath: string, newVersion: string): void {
   fs.writeFileSync(propsPath, next, "utf-8");
 }
 
-function getVersionFilePath(repoRoot: string, pkg: PackageConfig): string {
+function getVersionFilePath(repoRoot: string, pkg: PackageConfig, versionSource?: string): string {
   if (pkg.ecosystem === "typescript") {
     return path.join(repoRoot, pkg.path, "package.json");
   }
   if (pkg.ecosystem === "dotnet") {
-    return path.join(repoRoot, "sdks/dotnet/Directory.Build.props");
+    // A .NET version lives in a shared Directory.Build.props rather than the
+    // csproj, and each .NET scope names its own. Assuming the SDK's file bumps
+    // the wrong package as soon as a second .NET scope exists, so the scope has
+    // to declare it.
+    if (!versionSource) {
+      throw new Error(
+        `Scope for ${pkg.name} must declare a "versionSource" pointing at its Directory.Build.props`
+      );
+    }
+    return path.join(repoRoot, versionSource);
   }
   return path.join(repoRoot, pkg.path, "pyproject.toml");
 }
@@ -368,8 +378,8 @@ function readVersionFile(filePath: string, ecosystem: PackageConfig["ecosystem"]
   return readPyVersion(filePath);
 }
 
-function readVersion(repoRoot: string, pkg: PackageConfig): string {
-  const filePath = getVersionFilePath(repoRoot, pkg);
+function readVersion(repoRoot: string, pkg: PackageConfig, versionSource?: string): string {
+  const filePath = getVersionFilePath(repoRoot, pkg, versionSource);
   return readVersionFile(filePath, pkg.ecosystem);
 }
 
@@ -383,8 +393,8 @@ function writeVersionFile(filePath: string, ecosystem: PackageConfig["ecosystem"
   }
 }
 
-function writeVersion(repoRoot: string, pkg: PackageConfig, newVersion: string): void {
-  const filePath = getVersionFilePath(repoRoot, pkg);
+function writeVersion(repoRoot: string, pkg: PackageConfig, newVersion: string, versionSource?: string): void {
+  const filePath = getVersionFilePath(repoRoot, pkg, versionSource);
   writeVersionFile(filePath, pkg.ecosystem, newVersion);
 }
 
@@ -455,15 +465,15 @@ function main(): void {
     for (const pkg of scopeConfig.packages) {
       const filePath = versionSourceEcosystem === "dotnet"
         ? versionSourcePath
-        : getVersionFilePath(repoRoot, pkg);
+        : getVersionFilePath(repoRoot, pkg, scopeConfig.versionSource);
       const relPath = path.relative(repoRoot, filePath);
 
       const versionToWrite = pkg.ecosystem === 'python' ? toPep440(newVersion) : newVersion;
 
       if (versionSourceEcosystem !== "dotnet" && !args.dryRun) {
-        writeVersion(repoRoot, pkg, versionToWrite);
+        writeVersion(repoRoot, pkg, versionToWrite, scopeConfig.versionSource);
         // Verify
-        const written = readVersion(repoRoot, pkg);
+        const written = readVersion(repoRoot, pkg, scopeConfig.versionSource);
         if (written !== versionToWrite) {
           console.error(`ERROR: Verification failed for ${pkg.name}: expected ${versionToWrite}, got ${written}`);
           process.exit(1);
@@ -483,17 +493,17 @@ function main(): void {
   } else {
     // Each package has its own version
     for (const pkg of scopeConfig.packages) {
-      const filePath = getVersionFilePath(repoRoot, pkg);
+      const filePath = getVersionFilePath(repoRoot, pkg, scopeConfig.versionSource);
       const relPath = path.relative(repoRoot, filePath);
-      const currentVersion = readVersion(repoRoot, pkg);
+      const currentVersion = readVersion(repoRoot, pkg, scopeConfig.versionSource);
       const newVersion = computeNewVersion(currentVersion, args.bump, args.preid, pkg.ecosystem);
 
       console.error(`[${args.scope}] ${pkg.name}: ${currentVersion} -> ${newVersion}`);
 
       if (!args.dryRun) {
-        writeVersion(repoRoot, pkg, newVersion);
+        writeVersion(repoRoot, pkg, newVersion, scopeConfig.versionSource);
         // Verify
-        const written = readVersion(repoRoot, pkg);
+        const written = readVersion(repoRoot, pkg, scopeConfig.versionSource);
         if (written !== newVersion) {
           console.error(`ERROR: Verification failed for ${pkg.name}: expected ${newVersion}, got ${written}`);
           process.exit(1);

@@ -7,7 +7,7 @@ backend tool rendering, shared state, and generative UI).
 
 ## Requirements
 
-- Python 3.12 or 3.13 (the project is pinned to `<3.14`)
+- Python 3.10 – 3.13 (the project is pinned to `<3.14`)
 - Poetry 1.8+ (ships with the repo via `curl -sSL https://install.python-poetry.org | python3 -`)
 - An API key for your chosen model provider (see Environment Variables below)
 - (Optional) AG-UI repo running locally so you can point the Dojo at these routes
