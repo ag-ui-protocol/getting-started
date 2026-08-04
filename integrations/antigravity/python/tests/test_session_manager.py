@@ -513,3 +513,57 @@ class TestReclaimNeverKillsALiveRun:
             await manager.stop()
         assert manager.stats()["live_sessions"] == 0
         assert session.agent.exited is True
+
+
+class TestAThreadThatComesBackLater:
+    """A swept thread must resume its conversation, not start over.
+
+    The harness leaves the trajectory in `save_dir` when a session goes, so
+    forgetting the conversation id strands data that is still on disk: the user
+    returns after the idle timeout and the agent has amnesia. Verified live in
+    `test_live_openai.py::test_an_evicted_thread_resumes_when_it_returns`.
+    """
+
+    async def test_a_swept_thread_resumes_its_conversation(self):
+        manager = SessionManager(session_timeout_seconds=0)
+        first = await manager.get_or_create(
+            "t1", signature=tool_signature(["a"]), factory=factory
+        )
+        original_id = first.agent.conversation_id
+        first.forwarded_prompts.update({"m1", "m2"})
+
+        await asyncio.sleep(0.01)
+        assert await manager.sweep() == 1
+        assert manager.get("t1") is None
+
+        revived = await manager.get_or_create(
+            "t1", signature=tool_signature(["a"]), factory=factory
+        )
+        assert revived.agent.resumed_from == original_id, (
+            "the returning thread started a new conversation instead of "
+            "resuming the one still on disk"
+        )
+        # Those prompts are in the restored history; re-sending would duplicate
+        # them in the harness' transcript.
+        assert revived.forwarded_prompts == {"m1", "m2"}
+
+    async def test_an_explicit_close_is_also_remembered(self):
+        manager = SessionManager()
+        first = await manager.get_or_create(
+            "t1", signature=tool_signature(["a"]), factory=factory
+        )
+        original_id = first.agent.conversation_id
+        await manager.close("t1")
+
+        revived = await manager.get_or_create(
+            "t1", signature=tool_signature(["a"]), factory=factory
+        )
+        assert revived.agent.resumed_from == original_id
+
+    async def test_an_unknown_thread_starts_fresh(self):
+        manager = SessionManager()
+        session = await manager.get_or_create(
+            "never-seen", signature=tool_signature(["a"]), factory=factory
+        )
+        assert session.agent.resumed_from is None
+        assert session.forwarded_prompts == set()

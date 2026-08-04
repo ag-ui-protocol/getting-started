@@ -174,6 +174,14 @@ class SessionManager:
         parked_timeout_seconds: int = 7200,
     ):
         self._sessions: Dict[str, AntigravitySession] = {}
+        # thread_id -> (conversation_id, forwarded_prompt_ids) for threads whose
+        # session is no longer live. The harness keeps the trajectory in
+        # `save_dir` after the session goes, so without remembering the id the
+        # data is still on disk but unreachable -- a thread that idles out and
+        # comes back would start with amnesia. Deliberately unbounded for now:
+        # one short string plus a small set per thread ever seen. Cap it (LRU or
+        # TTL) before running this at a scale where that matters.
+        self._remembered: Dict[str, tuple] = {}
         self._session_timeout = session_timeout_seconds
         # A parked session is pinned so its suspended coroutine survives, but
         # an unanswered request must not pin it forever: a user who closes the
@@ -338,6 +346,19 @@ class SessionManager:
                         f"{len(self._sessions)} of {self._max_sessions} in use."
                     )
 
+            if recycled is None:
+                # No live session for this thread, but we may have closed one
+                # earlier -- resume its conversation rather than starting over.
+                remembered = self._remembered.get(thread_id)
+                if remembered is not None:
+                    recycled, carried = remembered[0], set(remembered[1])
+                    logger.info(
+                        "Thread %s returned after its session was closed; "
+                        "resuming conversation %s.",
+                        thread_id,
+                        recycled,
+                    )
+
             bridge = bridge_factory()
             agent = factory(bridge, recycled)
             await agent.__aenter__()
@@ -402,13 +423,20 @@ class SessionManager:
         # Flagged before the awaits below: a run suspended inside one of them
         # must not resume onto a session the manager has abandoned.
         session.closed = True
+        # Read before the teardown below, and recorded whatever the caller
+        # asked for: a swept session is exactly the case that needs remembering.
+        conversation_id = session.conversation_id or getattr(
+            session.agent, "conversation_id", None
+        )
+        forwarded = set(session.forwarded_prompts)
+        if conversation_id:
+            self._remembered[thread_id] = (conversation_id, forwarded)
+
         recycled = None
         carried: set = set()
         if keep_conversation_id:
-            recycled = session.conversation_id or getattr(
-                session.agent, "conversation_id", None
-            )
-            carried = set(session.forwarded_prompts)
+            recycled = conversation_id
+            carried = set(forwarded)
         session.bridge.fail_all(
             RuntimeError("The Antigravity session was closed before the client replied.")
         )

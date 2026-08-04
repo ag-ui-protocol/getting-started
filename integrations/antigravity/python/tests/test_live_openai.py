@@ -466,3 +466,59 @@ async def test_cold_resume_rebuilds_the_session_and_keeps_history(base_url, work
         )
     finally:
         await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_an_evicted_thread_resumes_when_it_returns(base_url, workspace):
+    """A thread that idles out and comes back keeps its history.
+
+    The trajectory stays in `save_dir` after the session is swept, so this is
+    only a matter of remembering the conversation id. Before that was kept, a
+    returning user got a brand-new conversation and the agent had amnesia while
+    its history sat unreachable on disk.
+    """
+    from ag_ui_antigravity import AntigravityAgent
+    from ag_ui_antigravity.session_manager import SessionManager
+
+    agent = AntigravityAgent(
+        model=MODEL,
+        base_url=base_url,
+        system_instructions="Answer in one short sentence. Remember what you are told.",
+        workspaces=[workspace],
+        save_dir=os.path.join(workspace, "evict-save"),
+        session_manager=SessionManager(
+            session_timeout_seconds=0, cleanup_interval_seconds=1
+        ),
+    )
+    thread = "live-evicted"
+    try:
+        first = await asyncio.wait_for(
+            collect(agent, run_input(thread, "Remember: the codeword is zarquon.")),
+            180,
+        )
+        assert_lifecycle(first)
+        before = agent.session_manager.get(thread).agent.conversation_id
+        assert before
+
+        # Let the idle sweeper reclaim it.
+        for _ in range(30):
+            await asyncio.sleep(1)
+            if agent.session_manager.stats()["live_sessions"] == 0:
+                break
+        assert agent.session_manager.stats()["live_sessions"] == 0, (
+            "the session was never swept, so this proves nothing"
+        )
+
+        second = await asyncio.wait_for(
+            collect(agent, run_input(thread, "What is the codeword?")), 180
+        )
+        assert_lifecycle(second)
+        after = agent.session_manager.get(thread).agent.conversation_id
+        assert after == before, (
+            f"started a new conversation instead of resuming: {after} != {before}"
+        )
+        assert "zarquon" in text_of(second).lower(), (
+            f"the returning thread lost its history: {text_of(second)!r}"
+        )
+    finally:
+        await agent.close()

@@ -202,7 +202,16 @@ chat demos in `examples/` enable nothing else.
   `max_sessions`, or is rebuilt because the client's tool set changed. Parking
   does not allocate anything; it extends how long the allocation is held.
 * **Cold resume** — a recycled session with nothing parked is rebuilt from
-  `conversation_id` + `session_continuation_mode` + `save_dir`.
+  `conversation_id` + `session_continuation_mode` + `save_dir`. This covers a
+  thread that comes back **after** its session was swept, not only one rebuilt
+  in place: the manager keeps `thread_id -> (conversation_id, forwarded
+  prompts)` for closed sessions, so a user returning past the idle timeout
+  continues where they left off rather than meeting an agent with amnesia while
+  their history sits unreachable in `save_dir`.
+
+  That map is currently unbounded — one short string and a small set per thread
+  the process has ever seen. Cap it (LRU or TTL) before running at a scale where
+  that matters.
 
 Because Antigravity fixes the tool list in the harness config at connect time,
 a client that changes its `tools` between runs forces a cold-resume rebuild
