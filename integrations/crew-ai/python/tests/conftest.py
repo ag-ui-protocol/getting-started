@@ -12,16 +12,45 @@ suite running against a half-initialised module.
 """
 
 import copy
+import os
+import shutil
+import tempfile
 
 import pytest
 
-from ag_ui_crewai import endpoint as ep
+# Redirect crewai's on-disk storage root BEFORE anything imports crewai.
+#
+# crewai resolves its storage root at MODULE-IMPORT time (``crewai.rag.chromadb.
+# constants`` calls ``db_storage_path()``, which ``mkdir(parents=True)``s the
+# directory), so merely importing the bridge writes into the developer's home
+# directory and a per-test fixture would already be too late. The root comes from
+# ``CREWAI_STORAGE_DIR``, which MUST be absolute: ``db_storage_path`` treats a
+# relative value as an appdirs *app name* (landing back in ``$HOME``) while
+# ``LanceDBStorage`` treats it as a *directory* (landing in the cwd).
+#
+# This only makes the TEST RUN hermetic. The import-time write itself is crewai's
+# behaviour, not the bridge's, and cannot be suppressed from library code without
+# setting environment variables on the user's behalf.
+_OWNED_STORAGE_DIR = None
+if not os.environ.get("CREWAI_STORAGE_DIR"):
+    _OWNED_STORAGE_DIR = tempfile.mkdtemp(prefix="ag-ui-crewai-tests-")
+    os.environ["CREWAI_STORAGE_DIR"] = _OWNED_STORAGE_DIR
+
+from ag_ui_crewai import endpoint as ep  # noqa: E402
 
 # The crewai global event bus — used below to clear handlers registered by our
 # listener singleton so they don't accumulate across tests.
 # The bus moved from ``crewai.utilities.events`` (0.x) to
 # ``crewai.events`` (1.x); ``_capabilities`` resolves whichever exists.
-from ag_ui_crewai._capabilities import crewai_event_bus as _crewai_event_bus
+from ag_ui_crewai._capabilities import crewai_event_bus as _crewai_event_bus  # noqa: E402
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_crewai_storage_dir():
+    """Remove the temporary crewai storage root this session created, if any."""
+    yield
+    if _OWNED_STORAGE_DIR:
+        shutil.rmtree(_OWNED_STORAGE_DIR, ignore_errors=True)
 
 # crewai 1.0.0 split the single ``_handlers`` mapping into
 # ``_sync_handlers`` / ``_async_handlers``. The autouse fixture below snapshots

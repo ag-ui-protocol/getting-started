@@ -604,9 +604,9 @@ def test_stream_frame_probe_is_per_flow_and_version_consistent():
 
 # -- translator wire shape (default = chunks) -------------------------------
 
-def test_translator_produces_current_chunk_wire_shape():
-    """The default translator maps bridge/lifecycle events onto exactly the
-    events the legacy listener produced — chunks, not triples."""
+def test_translator_produces_triples_wire_shape():
+    """The default translator maps bridge/lifecycle events onto START/CONTENT/END
+    triples, closing each open sequence before the next boundary."""
     state = {"messages": [{"role": "assistant", "content": "hi", "id": "m1"}]}
     tr = frames_mod.StreamFrameTranslator(
         thread_id="t-1", run_id="r-1", state_provider=lambda: state,
@@ -617,47 +617,54 @@ def test_translator_produces_current_chunk_wire_shape():
     ]
     assert tr.run_started is True
     start_ev = tr.translate(_ev("method_execution_started", method_name="chat"))
-    assert start_ev[0].type == EventType.STEP_STARTED
+    assert [e.type for e in start_ev] == [EventType.STEP_STARTED]
     assert start_ev[0].step_name == "chat"
 
     text = tr.translate(_ev(
         "TEXT_MESSAGE_CHUNK", message_id="m1", role="assistant", delta="hi",
     ))
-    assert len(text) == 1
-    assert text[0].type == EventType.TEXT_MESSAGE_CHUNK
-    assert (text[0].message_id, text[0].role, text[0].delta) == ("m1", "assistant", "hi")
+    assert [e.type for e in text] == [
+        EventType.TEXT_MESSAGE_START, EventType.TEXT_MESSAGE_CONTENT,
+    ]
+    assert text[0].message_id == "m1" and text[0].role == "assistant"
+    assert text[1].delta == "hi"
 
+    # Opening a tool call closes the open text message first.
     tool = tr.translate(_ev(
         "TOOL_CALL_CHUNK", tool_call_id="tc1", tool_call_name="searchTool",
         delta='{"q":1}',
     ))
-    assert tool[0].type == EventType.TOOL_CALL_CHUNK
-    assert (tool[0].tool_call_id, tool[0].tool_call_name, tool[0].delta) == (
-        "tc1", "searchTool", '{"q":1}'
-    )
+    assert [e.type for e in tool] == [
+        EventType.TEXT_MESSAGE_END,
+        EventType.TOOL_CALL_START,
+        EventType.TOOL_CALL_ARGS,
+    ]
+    assert (tool[1].tool_call_id, tool[1].tool_call_name) == ("tc1", "searchTool")
+    assert tool[2].delta == '{"q":1}'
 
+    # A side-channel CUSTOM / STATE_SNAPSHOT does NOT close the open tool call.
     custom = tr.translate(_ev("CUSTOM", name="PredictState", value=[1]))
-    assert custom[0].type == EventType.CUSTOM
-    assert (custom[0].name, custom[0].value) == ("PredictState", [1])
-
+    assert [e.type for e in custom] == [EventType.CUSTOM]
     snap = tr.translate(_ev("STATE_SNAPSHOT", snapshot={"p": 5}))
-    assert snap[0].type == EventType.STATE_SNAPSHOT
-    assert snap[0].snapshot == {"p": 5}
+    assert [e.type for e in snap] == [EventType.STATE_SNAPSHOT]
+    assert tr._shaper.open_tool_calls == ("tc1",)
 
+    # method_finished closes the open tool call, then the snapshots + STEP_FINISHED.
     finished = tr.translate(_ev("method_execution_finished", method_name="chat"))
     assert [e.type for e in finished] == [
-        EventType.MESSAGES_SNAPSHOT, EventType.STATE_SNAPSHOT, EventType.STEP_FINISHED,
+        EventType.TOOL_CALL_END,
+        EventType.MESSAGES_SNAPSHOT,
+        EventType.STATE_SNAPSHOT,
+        EventType.STEP_FINISHED,
     ]
-    assert finished[0].messages[0].id == "m1"
-    assert finished[2].step_name == "chat"
+    assert finished[1].messages[0].id == "m1"
+    assert finished[3].step_name == "chat"
 
     fin = tr.translate(_ev("flow_finished"))
-    assert fin[0].type == EventType.RUN_FINISHED
+    assert [e.type for e in fin] == [EventType.RUN_FINISHED]
     assert tr.run_finished is True
-    # Idempotent: a second flow_finished never re-emits RUN_FINISHED.
     assert tr.translate(_ev("flow_finished")) == []
 
-    # Native crewai channels / unknown events are dropped (behavior-preserving).
     assert tr.translate(_ev("llm_stream_chunk", chunk="x")) == []
     assert tr.translate(_ev("cc_env")) == []
 
@@ -680,10 +687,10 @@ def test_translator_maps_tool_call_result():
     ) == ("m1", "c1", '{"a2ui_operations":[]}', "tool")
 
 
-def test_translator_preserves_tool_chunk_parent_message_id():
-    """The tool-call chunk carries parent_message_id so the client keeps the
-    tool call on its assistant message when the terminal MESSAGES_SNAPSHOT
-    re-sends it (no re-anchor below streamed activities)."""
+def test_translator_preserves_tool_call_parent_message_id():
+    """The default (triples) TOOL_CALL_START carries parent_message_id so the
+    client keeps the tool call on its assistant message when the terminal
+    MESSAGES_SNAPSHOT re-sends it (no re-anchor below streamed activities)."""
     tr = frames_mod.StreamFrameTranslator(
         thread_id="t", run_id="r", state_provider=dict,
     )
@@ -691,28 +698,32 @@ def test_translator_preserves_tool_chunk_parent_message_id():
         "TOOL_CALL_CHUNK", tool_call_id="c1", tool_call_name="generate_a2ui",
         parent_message_id="m1", delta="{}",
     ))
-    assert out[0].type == EventType.TOOL_CALL_CHUNK
-    assert out[0].parent_message_id == "m1"
+    start = next(e for e in out if e.type == EventType.TOOL_CALL_START)
+    assert start.parent_message_id == "m1"
 
 
-def test_translator_emission_shape_is_swappable_and_defaults_to_chunks():
-    """The emission shape is a single seam defaulting to chunks; the parity
-    'triples' shape is a documented NotImplementedError placeholder."""
+def test_translator_emission_shape_defaults_to_triples_with_chunks_opt_out():
+    """The wire shape is a single seam: triples by default, chunks on opt-out,
+    unknown values rejected at construction."""
     tr = frames_mod.StreamFrameTranslator(
         thread_id="t", run_id="r", state_provider=dict,
     )
-    assert tr.emission_shape == "chunks"
+    assert tr.emission_shape == "triples"
 
     with pytest.raises(ValueError):
         frames_mod.StreamFrameTranslator(
             thread_id="t", run_id="r", state_provider=dict, emission_shape="bogus",
         )
 
-    triples = frames_mod.StreamFrameTranslator(
-        thread_id="t", run_id="r", state_provider=dict, emission_shape="triples",
+    chunks = frames_mod.StreamFrameTranslator(
+        thread_id="t", run_id="r", state_provider=dict, emission_shape="chunks",
     )
-    with pytest.raises(NotImplementedError):
-        triples.translate(_ev("TEXT_MESSAGE_CHUNK", message_id="m", delta="x"))
+    out = chunks.translate(_ev("TEXT_MESSAGE_CHUNK", message_id="m", delta="x"))
+    assert [e.type for e in out] == [EventType.TEXT_MESSAGE_CHUNK]
+    tool = chunks.translate(_ev(
+        "TOOL_CALL_CHUNK", tool_call_id="c", tool_call_name="fn", delta="{}",
+    ))
+    assert [e.type for e in tool] == [EventType.TOOL_CALL_CHUNK]
 
 
 # -- backend tool execution ------------------------------------------------
@@ -1011,11 +1022,10 @@ class _BridgeEmittingFlow(Flow):
 
 
 @requires_stream_frames
-async def test_frame_path_end_to_end_matches_legacy_wire_shape():
+async def test_frame_path_end_to_end_emits_triples():
     """Driving a real Flow through the StreamFrame path yields RUN_STARTED,
-    STEP_STARTED, per-delta TEXT_MESSAGE_CHUNK, a CUSTOM, then
-    MESSAGES/STATE snapshot + STEP_FINISHED + RUN_FINISHED — the same wire
-    shape the legacy listener produced."""
+    STEP_STARTED, a TEXT_MESSAGE_START / _CONTENT+ / _END triple, a CUSTOM, then
+    MESSAGES/STATE snapshot + STEP_FINISHED + RUN_FINISHED."""
     from ag_ui.encoder import EventEncoder
 
     flow = _BridgeEmittingFlow()
@@ -1032,20 +1042,25 @@ async def test_frame_path_end_to_end_matches_legacy_wire_shape():
 
     assert types[0] == "RUN_STARTED"
     assert types[-1] == "RUN_FINISHED"
-    assert types.count("TEXT_MESSAGE_CHUNK") == 2
+    # One text message: a single START/END pair around two CONTENT deltas.
+    assert types.count("TEXT_MESSAGE_START") == 1
+    assert types.count("TEXT_MESSAGE_END") == 1
+    assert types.count("TEXT_MESSAGE_CONTENT") == 2
+    assert "TEXT_MESSAGE_CHUNK" not in types
     assert "STEP_STARTED" in types
     assert "STEP_FINISHED" in types
     assert "CUSTOM" in types
     assert "MESSAGES_SNAPSHOT" in types
-    # No START/CONTENT/END triples — behavior-preserving chunk shape.
-    assert not any(t.endswith("_START") or t.endswith("_END") for t in types
-                   if t not in ("RUN_STARTED",))
     # Correlation ids are stamped, not the listener's "?" placeholders.
     run_started = next(p for p in payloads if p["type"] == "RUN_STARTED")
     assert run_started["threadId"] == "t-1"
     assert run_started["runId"] == "r-1"
-    text_deltas = [p["delta"] for p in payloads if p["type"] == "TEXT_MESSAGE_CHUNK"]
+    text_deltas = [
+        p["delta"] for p in payloads if p["type"] == "TEXT_MESSAGE_CONTENT"
+    ]
     assert text_deltas == ["Hello ", "world"]
+    # The text message closes before the run ends.
+    assert types.index("TEXT_MESSAGE_END") < types.index("RUN_FINISHED")
 
 
 class _BackendToolFlow(Flow):
@@ -1209,10 +1224,10 @@ async def test_frame_path_two_completions_emit_single_run_lifecycle():
     assert types[-1] == "RUN_FINISHED"
 
     # The follow-up text reaches the client, inside the run.
-    assert "TEXT_MESSAGE_CHUNK" in types, types
-    follow = next(p for p in payloads if p["type"] == "TEXT_MESSAGE_CHUNK")
+    assert "TEXT_MESSAGE_CONTENT" in types, types
+    follow = next(p for p in payloads if p["type"] == "TEXT_MESSAGE_CONTENT")
     assert follow["delta"] == "Crew is done."
-    assert types.index("TEXT_MESSAGE_CHUNK") < types.index("RUN_FINISHED")
+    assert types.index("TEXT_MESSAGE_CONTENT") < types.index("RUN_FINISHED")
 
 
 # -- Review invariants: raw-payload fidelity, nested non-leak, terminal
@@ -1639,6 +1654,87 @@ async def test_frame_path_raising_astream_emits_run_error_and_resets_context():
     assert flow_context.get(None) is None
 
 
+async def test_frame_path_finalize_closes_open_message_before_run_finished():
+    """A message left open at flow_finished (no method boundary to flush it) is
+    closed by finalize(): TEXT_MESSAGE_END precedes RUN_FINISHED, so a happy-path
+    run never ends with an open sequence."""
+    from ag_ui.encoder import EventEncoder
+
+    class _AstreamFlow:
+        state = {}
+
+        def astream(self, inputs=None):
+            return session
+
+    flow_copy = _AstreamFlow()
+    session = _FakeStreamSession(
+        [
+            _ev("flow_started", event_id="fs"),
+            _ev(EventType.TEXT_MESSAGE_CHUNK, event_id="t1",
+                message_id="m1", role="assistant", delta="hi"),
+            _ev("flow_finished", event_id="ff"),
+        ],
+        source=flow_copy,
+    )
+    payloads = _decode_sse(await _collect(ep._run_flow_frame_stream(
+        flow_copy=flow_copy,
+        encoder=EventEncoder(),
+        input_data=_make_run_input(),
+        inputs={},
+        timeout=30.0,
+    )))
+    types = [p["type"] for p in payloads]
+    assert "TEXT_MESSAGE_START" in types
+    assert "RUN_FINISHED" in types
+    assert types.index("TEXT_MESSAGE_END") < types.index("RUN_FINISHED")
+
+
+async def test_frame_path_close_pending_closes_open_message_before_run_error():
+    """When astream raises with a message still open, close_pending() closes it so
+    TEXT_MESSAGE_END precedes the terminal RUN_ERROR (the error path leaves no open
+    sequence dangling, same close-before-terminal guarantee as the happy path)."""
+    from ag_ui.encoder import EventEncoder
+
+    class _Boom(Exception):
+        pass
+
+    class _RaiseAfterTextSession(_FakeStreamSession):
+        async def _agen(self):
+            from crewai.events.stream_context import publish_stream_event
+
+            for ev in self._events:
+                publish_stream_event(self._source, ev)
+                yield _Frame(ev.type, id=ev.event_id)
+            raise _Boom("stream failed with a message still open")
+
+    class _AstreamFlow:
+        state = {}
+
+        def astream(self, inputs=None):
+            return session
+
+    flow_copy = _AstreamFlow()
+    session = _RaiseAfterTextSession(
+        [
+            _ev("flow_started", event_id="fs"),
+            _ev(EventType.TEXT_MESSAGE_CHUNK, event_id="t1",
+                message_id="m1", role="assistant", delta="hi"),
+        ],
+        source=flow_copy,
+    )
+    payloads = _decode_sse(await _collect(ep._run_flow_frame_stream(
+        flow_copy=flow_copy,
+        encoder=EventEncoder(),
+        input_data=_make_run_input(),
+        inputs={},
+        timeout=30.0,
+    )))
+    types = [p["type"] for p in payloads]
+    assert types[-1] == "RUN_ERROR"
+    assert "TEXT_MESSAGE_END" in types
+    assert types.index("TEXT_MESSAGE_END") < types.index("RUN_ERROR")
+
+
 # -- drain the terminal tail; don't cancel kickoff mid-finalize ---
 
 async def test_frame_path_drains_tail_after_run_finished():
@@ -1982,3 +2078,221 @@ def test_mapped_events_are_never_duplicated_as_raw():
     # and must never be RAW-duplicated. A genuinely unmapped llm event still is.
     assert frames_mod.is_recognized_event(_ev("llm_thinking_chunk")) is True
     assert frames_mod.is_recognized_event(_ev("llm_stream_chunk")) is False
+
+
+# -- Wire-shape (triples) state-machine invariants --------------------------
+
+def _shaper(shape="triples"):
+    return frames_mod.EmissionShaper(shape, thread_id="t", run_id="r")
+
+
+def test_parallel_tool_calls_stay_separate_and_close_in_order():
+    """crewai streams parallel calls; each id gets its own START/ARGS, and a flush
+    closes them innermost-first. A single-slot model mis-attributed the arguments."""
+    sh = _shaper()
+    a = sh.tool(_ev("TOOL_CALL_CHUNK", tool_call_id="a", tool_call_name="fa", delta='{"x":'))
+    b = sh.tool(_ev("TOOL_CALL_CHUNK", tool_call_id="b", tool_call_name="fb", delta='{"y":'))
+    assert [e.type for e in a] == [EventType.TOOL_CALL_START, EventType.TOOL_CALL_ARGS]
+    assert [e.type for e in b] == [EventType.TOOL_CALL_START, EventType.TOOL_CALL_ARGS]
+    a2 = sh.tool(_ev("TOOL_CALL_CHUNK", tool_call_id="a", delta='1}'))
+    assert [e.type for e in a2] == [EventType.TOOL_CALL_ARGS] and a2[0].tool_call_id == "a"
+    ends = sh.flush()
+    assert [(e.type, e.tool_call_id) for e in ends] == [
+        (EventType.TOOL_CALL_END, "b"), (EventType.TOOL_CALL_END, "a"),
+    ]
+
+
+def test_side_channel_events_do_not_close_open_tool_calls():
+    """A STATE_SNAPSHOT / CUSTOM between two argument deltas must NOT close the
+    call: litellm stamps the id on the first delta only, so a reopened call could
+    not carry its identity and its arguments would truncate."""
+    sh = _shaper()
+    sh.tool(_ev("TOOL_CALL_CHUNK", tool_call_id="a", tool_call_name="fa", delta='{"x":'))
+    # A side-channel event reshaped through the shaper leaves the tool call open.
+    assert [e.type for e in sh.reshape(_ev("STATE_SNAPSHOT", snapshot={}))] == [
+        EventType.STATE_SNAPSHOT
+    ]
+    assert sh.open_tool_calls == ("a",)
+    cont = sh.tool(_ev("TOOL_CALL_CHUNK", tool_call_id="a", delta='1}'))
+    assert [e.type for e in cont] == [EventType.TOOL_CALL_ARGS]
+
+
+def test_late_delta_for_a_closed_tool_call_is_dropped_not_reopened():
+    """Reopening a closed id would emit a second TOOL_CALL_START for it, which the
+    client turns into a duplicate tool call."""
+    sh = _shaper()
+    sh.tool(_ev("TOOL_CALL_CHUNK", tool_call_id="a", tool_call_name="fa", delta="{}"))
+    sh.flush()  # closes "a"
+    assert sh.tool(_ev("TOOL_CALL_CHUNK", tool_call_id="a", delta="!")) == []
+
+
+def test_switching_from_a_tool_call_to_text_closes_the_call():
+    sh = _shaper()
+    sh.tool(_ev("TOOL_CALL_CHUNK", tool_call_id="a", tool_call_name="fa", delta="{}"))
+    out = sh.text(_ev("TEXT_MESSAGE_CHUNK", message_id="m", delta="hi"))
+    assert [e.type for e in out] == [
+        EventType.TOOL_CALL_END,
+        EventType.TEXT_MESSAGE_START,
+        EventType.TEXT_MESSAGE_CONTENT,
+    ]
+
+
+def test_run_finished_reshape_closes_an_open_message_first():
+    """The shaper owns the message / tool lifecycle: a RUN_FINISHED reshaped on the
+    legacy path closes an open text message before the terminal. (Closing open
+    STEPS before RUN_FINISHED is the attribution tracker's job, exercised via the
+    translator in the e2e tests.)"""
+    sh = _shaper()
+    sh.text(_ev("TEXT_MESSAGE_CHUNK", message_id="m", delta="partial"))
+    from ag_ui.core import RunFinishedEvent
+    out = sh.reshape(RunFinishedEvent(
+        type=EventType.RUN_FINISHED, thread_id="t", run_id="r"))
+    assert [e.type for e in out] == [
+        EventType.TEXT_MESSAGE_END, EventType.RUN_FINISHED,
+    ]
+
+
+def test_chunks_opt_out_is_pure_passthrough():
+    sh = _shaper("chunks")
+    t = sh.text(_ev("TEXT_MESSAGE_CHUNK", message_id="m", delta="x"))
+    assert [e.type for e in t] == [EventType.TEXT_MESSAGE_CHUNK]
+    assert sh.flush() == []
+    from ag_ui.core import RunFinishedEvent
+    rf = sh.reshape(RunFinishedEvent(
+        type=EventType.RUN_FINISHED, thread_id="t", run_id="r"))
+    assert [e.type for e in rf] == [EventType.RUN_FINISHED]
+
+
+def test_both_transports_emit_identical_triples_for_one_stream():
+    """The whole point of the flip: shape does not depend on the transport. Drive
+    the same logical stream through the frame translator and the legacy reshaper
+    and assert identical output."""
+    logical = [
+        ("flow_started", {}),
+        ("method_execution_started", {"method_name": "chat"}),
+        ("TEXT_MESSAGE_CHUNK", {"message_id": "m1", "role": "assistant", "delta": "Hi"}),
+        ("TOOL_CALL_CHUNK", {"tool_call_id": "c1", "tool_call_name": "fn", "delta": "{}"}),
+        ("method_execution_finished", {"method_name": "chat"}),
+        ("flow_finished", {}),
+    ]
+    # frame path: raw events through the translator
+    tr = frames_mod.StreamFrameTranslator(
+        thread_id="t", run_id="r", state_provider=lambda: {"messages": []},
+    )
+    frame_types = []
+    for t, kw in logical:
+        frame_types += [e.type for e in tr.translate(_ev(t, **kw))]
+
+    # legacy path: the listener's WIRE events through the shaper's reshape
+    from ag_ui.core import (
+        RunStartedEvent, RunFinishedEvent, StepStartedEvent, StepFinishedEvent,
+        MessagesSnapshotEvent, StateSnapshotEvent,
+    )
+    from ag_ui.core.events import TextMessageChunkEvent, ToolCallChunkEvent
+    wire = [
+        RunStartedEvent(type=EventType.RUN_STARTED, thread_id="t", run_id="r"),
+        StepStartedEvent(type=EventType.STEP_STARTED, step_name="chat"),
+        TextMessageChunkEvent(type=EventType.TEXT_MESSAGE_CHUNK, message_id="m1", role="assistant", delta="Hi"),
+        ToolCallChunkEvent(type=EventType.TOOL_CALL_CHUNK, tool_call_id="c1", tool_call_name="fn", delta="{}"),
+        MessagesSnapshotEvent(type=EventType.MESSAGES_SNAPSHOT, messages=[]),
+        StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot={}),
+        StepFinishedEvent(type=EventType.STEP_FINISHED, step_name="chat"),
+        RunFinishedEvent(type=EventType.RUN_FINISHED, thread_id="t", run_id="r"),
+    ]
+    sh = _shaper()
+    legacy_types = []
+    for e in wire:
+        legacy_types += [x.type for x in sh.reshape(e)]
+
+    assert frame_types == legacy_types, (frame_types, legacy_types)
+    assert EventType.TEXT_MESSAGE_START in frame_types
+    assert EventType.TOOL_CALL_END in frame_types
+
+
+# -- R1 review fixes: double-emit, buffered args, None-id message ------------
+
+def test_mapped_events_are_not_double_emitted_as_raw():
+    """is_recognized_event must cover every type translate() maps (the crew/agent
+    lifecycle, method_failed, and MCP), or emit_raw_events mirrors them
+    as RAW alongside the translated STEP/TOOL/CUSTOM events."""
+    for t in (
+        "flow_started", "flow_finished", "method_execution_started",
+        "method_execution_finished", "method_execution_failed",
+        "crew_kickoff_started", "crew_kickoff_completed", "agent_execution_started",
+        "agent_execution_completed",
+    ):
+        assert frames_mod.is_recognized_event(_ev(t)) is True, t
+    # MCP events are recognized dynamically.
+    from ag_ui_crewai import mcp as mcp_mod
+    mcp_ev = _ev("mcp_tool_execution_started")
+    assert frames_mod.is_recognized_event(mcp_ev) is mcp_mod.is_mcp_event(mcp_ev)
+    # An unmapped native event is still eligible for RAW.
+    assert frames_mod.is_recognized_event(_ev("llm_stream_chunk")) is False
+
+
+async def test_tool_args_streamed_before_identity_are_flushed_when_identity_arrives():
+    """A provider that streams argument fragments before the tool id/name must not
+    lose the prefix on the wire: the first emit sends the accumulated arguments,
+    and the final ModelResponse agrees."""
+    flow_context.set(None)
+    emitted = []
+    from ag_ui_crewai._capabilities import crewai_event_bus
+    with crewai_event_bus.scoped_handlers():
+        @crewai_event_bus.on(BridgedToolCallChunkEvent)
+        def _on(source, event):  # pylint: disable=unused-argument
+            emitted.append(event)
+
+        def d(index, call_id, name, args):
+            item = _tool_call_delta(call_id=call_id, name=name, arguments=args)
+            item.index = index
+            return item
+
+        async def _gen():
+            # args first, identity later, all under index 0
+            yield _stream_chunk("msg-1", tool_calls=[d(0, None, None, '{"q":')])
+            yield _stream_chunk("msg-1", tool_calls=[d(0, "c1", "searchTool", '1}')])
+            yield _stream_chunk("msg-1", finish_reason="tool_calls")
+
+        resp = await copilotkit_stream(_FakeStreamWrapper(_gen()))
+        await _settle_bus()
+
+    streamed = "".join(e.delta for e in emitted if e.delta)
+    assert streamed == '{"q":1}', [e.delta for e in emitted]
+    assert all(e.tool_call_id == "c1" for e in emitted)
+    assert resp.choices[0].message.tool_calls[0].function.arguments == '{"q":1}'
+
+
+def test_shaper_text_with_none_message_id_opens_once_and_closes():
+    """A chunk stream with no message_id must still produce exactly one
+    START/CONTENT/END, not a fresh START per delta with no END."""
+    sh = _shaper()
+    a = sh.text(_ev("TEXT_MESSAGE_CHUNK", message_id=None, delta="one"))
+    b = sh.text(_ev("TEXT_MESSAGE_CHUNK", message_id=None, delta="two"))
+    assert [e.type for e in a] == [EventType.TEXT_MESSAGE_START, EventType.TEXT_MESSAGE_CONTENT]
+    assert [e.type for e in b] == [EventType.TEXT_MESSAGE_CONTENT]
+    assert [e.type for e in sh.flush()] == [EventType.TEXT_MESSAGE_END]
+
+
+def test_parent_message_id_is_preserved_on_every_path_and_shape():
+    """A tool call must attach to the streamed assistant message via
+    parent_message_id on both transports and in both shapes; dropping it makes the
+    client render the call as a separate message."""
+    chunk_ev = _ev(
+        "TOOL_CALL_CHUNK", tool_call_id="c1", tool_call_name="fn", delta="{}",
+        parent_message_id="m1",
+    )
+    # triples: TOOL_CALL_START carries it
+    start = _shaper("triples").tool(chunk_ev)[0]
+    assert start.type == EventType.TOOL_CALL_START and start.parent_message_id == "m1"
+    # chunks: the passthrough chunk carries it
+    chunk = _shaper("chunks").tool(chunk_ev)[0]
+    assert chunk.type == EventType.TOOL_CALL_CHUNK and chunk.parent_message_id == "m1"
+    # legacy listener rebuild forwards it (so the shaper can stamp it downstream)
+    from ag_ui.core.events import ToolCallChunkEvent
+    rebuilt = ToolCallChunkEvent(
+        type=EventType.TOOL_CALL_CHUNK, tool_call_id="c1", tool_call_name="fn",
+        delta="{}", parent_message_id="m1",
+    )
+    reshaped_start = _shaper("triples").reshape(rebuilt)[0]
+    assert reshaped_start.type == EventType.TOOL_CALL_START
+    assert reshaped_start.parent_message_id == "m1"

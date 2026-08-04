@@ -20,6 +20,7 @@ from ag_ui_crewai import endpoint as ep
 def _clean_protocol_env(monkeypatch):
     """Clear the RAW env var: otherwise an exported AGUI_CREWAI_EMIT_RAW_EVENTS makes
     these tests assert the ambient environment rather than the shipped defaults."""
+    monkeypatch.delenv(config_mod.EMISSION_SHAPE_ENV_VAR, raising=False)
     monkeypatch.delenv(config_mod.EMIT_RAW_EVENTS_ENV_VAR, raising=False)
 
 
@@ -363,4 +364,66 @@ def test_endpoint_factories_reject_a_bad_raw_flag_at_registration():
     with pytest.raises(ValueError):
         ep.add_crewai_flow_fastapi_endpoint(
             FastAPI(), _Flow(), "/flow", emit_raw_events="false"
+        )
+
+
+def test_emission_shape_resolution_precedence_and_validation(monkeypatch):
+    """Explicit argument > env var > shipped default (triples); a wrong-typed or
+    unknown value raises rather than silently mis-shaping the wire."""
+    monkeypatch.delenv(config_mod.EMISSION_SHAPE_ENV_VAR, raising=False)
+    assert config_mod.resolve_emission_shape(None) == "triples"
+    assert config_mod.resolve_emission_shape("Chunks") == "chunks"
+
+    monkeypatch.setenv(config_mod.EMISSION_SHAPE_ENV_VAR, "chunks")
+    assert config_mod.resolve_emission_shape(None) == "chunks"
+    # Explicit argument wins over the env var.
+    assert config_mod.resolve_emission_shape("triples") == "triples"
+
+    for bad in ("bogus", 123):
+        with pytest.raises(ValueError):
+            config_mod.resolve_emission_shape(bad)
+
+
+def test_unrecognised_emission_shape_env_is_warned_not_silently_ignored(
+    monkeypatch, caplog
+):
+    import logging
+
+    monkeypatch.setenv(config_mod.EMISSION_SHAPE_ENV_VAR, "tripples")
+    monkeypatch.setattr(config_mod, "_ENV_WARN_SEEN", set())
+    with caplog.at_level(logging.WARNING, logger="ag_ui_crewai._config"):
+        assert config_mod.resolve_emission_shape(None) == "triples"
+    assert any("tripples" in r.getMessage() for r in caplog.records), caplog.text
+
+
+def test_get_capabilities_reports_the_resolved_wire_shape():
+    """The declaration reflects the shape the endpoint will actually emit."""
+    triples = get_capabilities()["wireShape"]
+    assert triples["emissionShape"] == "triples"
+    assert triples["textMessages"] == [
+        "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END"
+    ]
+    assert triples["toolCalls"] == [
+        "TOOL_CALL_START", "TOOL_CALL_ARGS", "TOOL_CALL_END"
+    ]
+    # MCP tool executions are triples regardless of the streaming shape.
+    assert triples["mcpToolCalls"][0] == "TOOL_CALL_START"
+
+    chunks = get_capabilities(emission_shape="chunks")["wireShape"]
+    assert chunks["emissionShape"] == "chunks"
+    assert chunks["textMessages"] == ["TEXT_MESSAGE_CHUNK"]
+    assert chunks["toolCalls"] == ["TOOL_CALL_CHUNK"]
+
+    with pytest.raises(ValueError):
+        get_capabilities(emission_shape="bogus")
+
+
+def test_endpoint_factory_rejects_a_bad_emission_shape_at_registration():
+    class _Flow:
+        def kickoff_async(self, inputs=None):  # pragma: no cover - never called
+            raise AssertionError
+
+    with pytest.raises(ValueError):
+        ep.add_crewai_flow_fastapi_endpoint(
+            FastAPI(), _Flow(), "/flow", emission_shape="bogus"
         )

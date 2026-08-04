@@ -26,6 +26,23 @@ DEFAULT_EMIT_RAW_EVENTS = False
 
 EMIT_RAW_EVENTS_ENV_VAR = "AGUI_CREWAI_EMIT_RAW_EVENTS"
 
+# Wire shape for streamed text / tool-call output. Triples (START/CONTENT/END) is
+# the canonical discrete form and the shipped default; "chunks" is a compatibility
+# opt-out. Kept here (a leaf module) so the capability declaration can report it
+# without importing the streaming stack.
+SUPPORTED_EMISSION_SHAPES = frozenset({"triples", "chunks"})
+DEFAULT_EMISSION_SHAPE = "triples"
+
+EMISSION_SHAPE_ENV_VAR = "AGUI_CREWAI_EMISSION_SHAPE"
+# Per-thread memory isolation (crew and agent) ships ON: sharing one namespace across
+# every AG-UI ``threadId`` leaks one chat's remembered facts into another, which
+# is a privacy bug rather than a feature. The opt-out exists because a
+# deployment may WANT one durable knowledge base behind every chat; turning it
+# off restores the pre-fix "one namespace per crew name" behaviour exactly.
+DEFAULT_THREAD_SCOPED_MEMORY = True
+
+THREAD_SCOPED_MEMORY_ENV_VAR = "AGUI_CREWAI_THREAD_SCOPED_MEMORY"
+
 # Vocabulary ``_parse_env_bool`` accepts, so the "was this value used?" check stays
 # in step with the parser instead of duplicating its token list.
 _BOOL_TOKENS = _TRUE_VALUES | _FALSE_VALUES
@@ -76,3 +93,52 @@ def resolve_emit_raw_events(emit_raw_events: bool | None) -> bool:
     used = raw is not None and raw.strip().casefold() in _BOOL_TOKENS
     _warn_if_env_value_ignored(EMIT_RAW_EVENTS_ENV_VAR, raw, used)
     return resolved
+
+
+def resolve_emission_shape(emission_shape: str | None) -> str:
+    """Resolve the wire shape: explicit argument > env var > shipped default."""
+    if emission_shape is not None:
+        if not isinstance(emission_shape, str):
+            raise ValueError(
+                f"emission_shape must be a string, got "
+                f"{type(emission_shape).__name__} ({emission_shape!r})"
+            )
+        normalized = emission_shape.strip().casefold()
+        if normalized not in SUPPORTED_EMISSION_SHAPES:
+            raise ValueError(
+                f"Unknown emission_shape {emission_shape!r}; "
+                f"expected one of {sorted(SUPPORTED_EMISSION_SHAPES)}"
+            )
+        return normalized
+    raw = os.environ.get(EMISSION_SHAPE_ENV_VAR)
+    resolved = DEFAULT_EMISSION_SHAPE
+    used = False
+    if raw is not None:
+        token = raw.strip().casefold()
+        if token in SUPPORTED_EMISSION_SHAPES:
+            resolved, used = token, True
+    _warn_if_env_value_ignored(EMISSION_SHAPE_ENV_VAR, raw, used)
+    return resolved
+def resolve_thread_scoped_memory() -> bool:
+    """Resolve per-thread crew-memory isolation: env var > shipped default (on).
+
+    Env-only, and re-read per request rather than resolved once at registration:
+    unlike ``emit_raw_events`` there is no endpoint-factory argument to conflict
+    with, and an operator flipping the variable should not have to know which
+    call it was frozen at.
+
+    Deliberately NOT ``_parse_env_bool``: that parser treats anything outside its
+    true-set as false, which is the right fail-safe for an option that ships OFF
+    but the wrong one here: a typo would silently DISABLE isolation and restore
+    the cross-thread leak. Only a recognised false token turns it off; anything
+    else keeps the shipped default and warns once.
+    """
+    raw = os.environ.get(THREAD_SCOPED_MEMORY_ENV_VAR)
+    if raw is None:
+        return DEFAULT_THREAD_SCOPED_MEMORY
+    token = raw.strip().casefold()
+    used = token in _BOOL_TOKENS
+    _warn_if_env_value_ignored(THREAD_SCOPED_MEMORY_ENV_VAR, raw, used)
+    if not used:
+        return DEFAULT_THREAD_SCOPED_MEMORY
+    return token in _TRUE_VALUES

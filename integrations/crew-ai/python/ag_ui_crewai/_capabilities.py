@@ -303,6 +303,14 @@ _CREWAI_MODULE, _ = _first_module(["crewai"])
 _Flow = getattr(_CREWAI_MODULE, "Flow", None) if _CREWAI_MODULE else None
 _Crew = getattr(_CREWAI_MODULE, "Crew", None) if _CREWAI_MODULE else None
 
+# ``BaseAgent`` is the base every crewai agent derives from, including a user's
+# own subclass, so it is the wider net for "this attribute is an agent".
+# ``crewai.Agent`` is the fallback for a build that does not expose it.
+_BASE_AGENT_MODULE, _ = _first_module(["crewai.agents.agent_builder.base_agent"])
+_Agent = (
+    getattr(_BASE_AGENT_MODULE, "BaseAgent", None) if _BASE_AGENT_MODULE else None
+) or (getattr(_CREWAI_MODULE, "Agent", None) if _CREWAI_MODULE else None)
+
 
 def _kwarg_in_signature(func: Any, name: str) -> bool:
     """True when ``func`` declares a parameter ``name`` (or accepts ``**kwargs``).
@@ -561,6 +569,43 @@ def warn_multimodal_files_gap() -> None:
         "'crewai[file-processing]' extra.",
         CAPABILITIES.crewai_version,
     )
+# Memory-isolation resolution
+# --------------------------------------------------------------------------
+# crewai 1.x replaced the 0.x short-term / entity / long-term stores with ONE
+# ``Memory`` object over ONE store, namespaced by a ``root_scope`` string that
+# ``Crew.create_crew_memory`` derives from the CREW NAME. Nothing in that path
+# derives from the AG-UI ``threadId``, so two chats served by the same endpoint
+# read and write the same namespace.
+#
+# The isolation primitive is ``Memory.scope(path)``, which returns a
+# ``MemoryScope`` view whose reads and writes are confined to ``path`` and
+# below. ``Crew._memory`` is typed ``Memory | MemoryScope | MemorySlice``, so a
+# view is a first-class thing to hand a crew, not a hack.
+#
+# Resolved (never version-gated) so a build without the unified memory API
+# degrades to "no isolation, one warning" rather than crashing. The warning is
+# emitted at the CALL SITE (``_memory``) rather than from ``warn_on_gaps``: an
+# operator who never sets ``memory=True`` has no gap to hear about, and an
+# import-time warning for them would be pure noise.
+_MEMORY_MODULE, _MEMORY_MODULE_NAME = _first_module(["crewai.memory.unified_memory"])
+Memory = getattr(_MEMORY_MODULE, "Memory", None) if _MEMORY_MODULE is not None else None
+
+# crewai's own scope-name sanitizer (``crewai.memory.utils``). Used so a
+# bridge-built scope segment is normalised exactly the way crewai normalises the
+# crew-name segment sitting above it. ``_memory`` carries an equivalent fallback
+# for builds that do not expose it.
+_MEMORY_UTILS_MODULE, _ = _first_module(["crewai.memory.utils"])
+sanitize_scope_name = (
+    getattr(_MEMORY_UTILS_MODULE, "sanitize_scope_name", None)
+    if _MEMORY_UTILS_MODULE is not None
+    else None
+)
+
+# Both are required: the type (to recognise a crew's memory) and the view
+# factory (to derive a per-thread namespace from it).
+_memory_scope_available = Memory is not None and callable(
+    getattr(Memory, "scope", None)
+)
 
 
 @dataclass(frozen=True)
@@ -602,6 +647,12 @@ class _Capabilities:
     human_feedback_resume_available: bool = False
     human_feedback_request_id_supported: bool = False
     crewai_files_available: bool = False
+    # Per-thread memory isolation: informational. ``_memory`` keys off the
+    # resolved symbols and warns once at the call site, so this is NOT listed in
+    # ``missing`` (which drives import-time warnings that would fire for every
+    # operator, including the majority who never enable crew memory).
+    memory_scope_available: bool = False
+    memory_module: str | None = None
     missing: tuple[str, ...] = field(default_factory=tuple)
 
     def warn_on_gaps(self) -> None:
@@ -705,6 +756,8 @@ def _detect() -> _Capabilities:
         human_feedback_resume_available=_human_feedback_resume_available,
         human_feedback_request_id_supported=_human_feedback_request_id_supported,
         crewai_files_available=_crewai_files_available,
+        memory_scope_available=_memory_scope_available,
+        memory_module=_MEMORY_MODULE_NAME,
         missing=tuple(missing),
     )
     caps.warn_on_gaps()
@@ -882,6 +935,7 @@ def _reasoning_capability(llm: Any = None) -> dict:
 def get_capabilities(
     *,
     llm: Any = None,
+    emission_shape: str | None = None,
     emit_raw_events: bool | None = None,
 ) -> dict:
     """Return the CrewAI bridge's capability declaration.
@@ -926,9 +980,32 @@ def get_capabilities(
     # ``_config`` is a leaf (``_env`` + stdlib only), imported locally purely to
     # keep this module's "crewai / litellm / stdlib only" property for every path
     # that never calls ``get_capabilities``.
-    from ._config import DEFAULT_EMIT_RAW_EVENTS, resolve_emit_raw_events
+    from ._config import (
+        DEFAULT_EMIT_RAW_EVENTS,
+        resolve_emission_shape,
+        resolve_emit_raw_events,
+    )
 
     resolved_raw = resolve_emit_raw_events(emit_raw_events)
+    resolved_shape = resolve_emission_shape(emission_shape)
+    text_events = (
+        [EventType.TEXT_MESSAGE_CHUNK.value]
+        if resolved_shape == "chunks"
+        else [
+            EventType.TEXT_MESSAGE_START.value,
+            EventType.TEXT_MESSAGE_CONTENT.value,
+            EventType.TEXT_MESSAGE_END.value,
+        ]
+    )
+    tool_events = (
+        [EventType.TOOL_CALL_CHUNK.value]
+        if resolved_shape == "chunks"
+        else [
+            EventType.TOOL_CALL_START.value,
+            EventType.TOOL_CALL_ARGS.value,
+            EventType.TOOL_CALL_END.value,
+        ]
+    )
     return {
         "identity": {"type": "crewai", "crewaiVersion": CAPABILITIES.crewai_version},
         "humanInTheLoop": {
@@ -955,12 +1032,12 @@ def get_capabilities(
             "streamFrames": CAPABILITIES.stream_frame_available,
         },
         "wireShape": {
-            # This build streams LLM text / tool calls as CHUNK events. MCP tool
-            # executions are the exception: their name, args and result arrive
-            # together, so they already emit canonical TOOL_CALL_* triples.
-            "emissionShape": "chunks",
-            "textMessages": [EventType.TEXT_MESSAGE_CHUNK.value],
-            "toolCalls": [EventType.TOOL_CALL_CHUNK.value],
+            # START/CONTENT/END triples by default; "chunks" is a compatibility
+            # opt-out. MCP tool executions always use triples (name, args and result
+            # arrive together, not streamed), independent of this setting.
+            "emissionShape": resolved_shape,
+            "textMessages": text_events,
+            "toolCalls": tool_events,
             "mcpToolCalls": [
                 EventType.TOOL_CALL_START.value,
                 EventType.TOOL_CALL_ARGS.value,

@@ -53,6 +53,35 @@ add_crewai_flow_fastapi_endpoint(app, MyFlow(), "/flow")
 
 ## Protocol surface
 
+### Wire shape: START / CONTENT / END triples (default)
+
+Text and tool-call output is emitted as `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT`
+/ `TEXT_MESSAGE_END` and `TOOL_CALL_START` / `TOOL_CALL_ARGS` / `TOOL_CALL_END`, the
+protocol's canonical discrete form. `emission_shape="chunks"` (or
+`AGUI_CREWAI_EMISSION_SHAPE=chunks`) opts back into the previous
+`TEXT_MESSAGE_CHUNK` / `TOOL_CALL_CHUNK` form.
+
+```python
+add_crewai_flow_fastapi_endpoint(app, MyFlow(), "/flow")                     # triples
+add_crewai_flow_fastapi_endpoint(app, MyFlow(), "/flow", emission_shape="chunks")
+```
+
+The two shapes are **not** equivalent. In `chunks` mode a `copilotkit_emit_state` /
+`copilotkit_predict_state` call that lands between two tool-call argument deltas makes
+`@ag-ui/client`'s chunk transform close the call and then throw on the next delta;
+triples keep the call open server-side, because the server knows more deltas are
+coming and the client does not. Triples are also the form any consumer can apply
+directly (`apply/default.ts` throws if a chunk reaches it untransformed), so a raw
+SSE reader (the Python SDK, conformance tooling, custom clients) needs no
+chunk-transform stage.
+
+Both transports (the crewai >= 1.6 `StreamFrame` path and the legacy
+event-bus-listener fallback) route through one `EmissionShaper`, so the event shape
+and payload never depend on the installed crewai version. A run never ends with an
+open sequence: any open message, tool call, or step is closed before `RUN_FINISHED`.
+MCP tool executions always use triples regardless of this setting: their name, args
+and result arrive together rather than streamed.
+
 ### RAW passthrough (opt-in, default OFF)
 
 `emit_raw_events=True` mirrors the crewai events this bridge does **not** map onto
@@ -78,6 +107,56 @@ RAW mirrors never precede `RUN_STARTED`. crewai raises some events before the fl
 opens, and a `RAW` first event makes the reference client reject the whole stream, so
 those are held and released once the run has opened. Both RAW buffers are bounded; a
 saturated buffer degrades mirroring (logged) rather than the run.
+
+### Memory is isolated per `threadId` (default ON)
+
+A crew served with `Crew(memory=True)` keeps its memories in one on-disk store,
+namespaced by the *crew name*. Nothing in that namespace derives from the AG-UI
+`threadId`, so without help every chat served by an endpoint reads and writes the
+same namespace and one user's remembered facts surface in another user's chat.
+(Setting `inputs["id"] = thread_id` does not help: that scopes crewai's flow-state
+persistence, a different subsystem.) `Agent(memory=True)` has the same shape one
+level down: the agent builds its *own* memory, which crewai prefers over the
+crew's.
+
+The bridge closes that by giving each request a `MemoryScope` view of the crew's
+memory — and of each agent's own memory — rooted at a path derived from the
+request's `threadId`. Threads are mutually invisible; each still sees its own
+history across sequential runs. One physical store, no directory-per-thread
+sprawl.
+
+Because crewai picks the executing agent off `task.agent` (or `manager_agent`
+under the hierarchical process) and reaches the crew's memory through
+`agent.crew`, the request gets shallow *views* of the crew, its agents and its
+tasks, wired to each other. Nothing shared between concurrent requests is
+mutated, and everything below the views (tools, LLMs, knowledge, the store
+itself) stays shared.
+
+```bash
+# Opt out: restore the pre-fix behaviour of one memory namespace per crew,
+# shared by every chat. Useful when the crew is a durable knowledge base
+# rather than a per-conversation memory.
+AGUI_CREWAI_THREAD_SCOPED_MEMORY=false
+```
+
+Limitations, in order of how likely you are to hit them:
+
+- **Only crews and agents the bridge can reach are scoped.** That means the crew
+  you passed to `add_crewai_crew_fastapi_endpoint`, plus any crew or standalone
+  agent your `Flow` holds as an attribute (a crew's own agents and tasks come
+  with it). A crew or agent *constructed inside* a flow method is created after
+  this point and is not scoped; construct it as a flow attribute, or pass it a
+  `Memory` you scope yourself.
+- **Per-request views are shallow.** Each request runs against copies of the
+  crew, its agents and its tasks, so `crew.tasks[0].output` on the object you
+  built is not filled in by a bridge-served run; read the run's result off the
+  AG-UI event stream instead.
+- **Isolation is logical, not physical.** All threads share one store and one
+  embedder; a scope keeps reads and writes inside a namespace, it is not a
+  security boundary against code that queries the store directly.
+- **Older crewai degrades rather than crashing.** The bridge probes for crewai's
+  unified memory view API at runtime. On a build without it, isolation is not
+  active and the bridge logs one warning saying exactly that.
 
 ### `get_capabilities()`
 

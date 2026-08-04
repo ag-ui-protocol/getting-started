@@ -35,13 +35,19 @@ from ._capabilities import (
     HumanFeedbackPending,
 )
 from ._checkpoint import build_checkpoint_kwargs
-from ._frames import StreamFrameTranslator, CREW_AGENT_LIFECYCLE_TYPES
-from ._config import resolve_emit_raw_events as _resolve_emit_raw_events
 from ._frames import (
+    CREW_AGENT_LIFECYCLE_TYPES,
+    EmissionShaper,
+    StreamFrameTranslator,
+    is_backend_tool_event,
     is_recognized_event,
     log_raw_loss,
     raw_event_for,
-    is_backend_tool_event,
+)
+from ._config import (
+    DEFAULT_EMISSION_SHAPE,
+    resolve_emission_shape,
+    resolve_emit_raw_events,
 )
 from ._hitl import (
     HITLOptions,
@@ -49,6 +55,7 @@ from ._hitl import (
     resume_requested,
 )
 from ._reasoning import is_thinking_event
+from ._memory import apply_thread_memory_scope
 from .mcp import is_mcp_event, register_mcp_listeners, translate_mcp_event
 from .attribution import flat_method_attribution
 from crewai.flow.flow import Flow
@@ -1333,6 +1340,7 @@ async def _run_flow_event_stream(
     timeout: float | None,
     checkpoint_kwargs: dict | None = None,
     emit_raw_events: bool = False,
+    emission_shape: str = DEFAULT_EMISSION_SHAPE,
 ):
     """Drive a single flow kickoff and yield encoded AG-UI events.
 
@@ -1380,6 +1388,13 @@ async def _run_flow_event_stream(
     # main ``try:`` block, the registered queue is orphaned — nothing deletes
     # it. Wrap both in a narrow ``try/except`` that ``delete_queue``'s on
     # failure so the registration is symmetric.
+    # One shaper for the whole run: the legacy listener enqueues final wire events
+    # (chunks + lifecycle), and ``shaper.reshape`` turns them into the same shape
+    # the StreamFrame path emits, so the wire shape never depends on the transport.
+    shaper = EmissionShaper(
+        emission_shape, thread_id=input_data.thread_id, run_id=input_data.run_id
+    )
+
     queue = await create_queue(flow_copy)
     try:
         token = flow_context.set(flow_copy)
@@ -1502,12 +1517,13 @@ async def _run_flow_event_stream(
                         # for today's extras events (StepStarted,
                         # MessagesSnapshot, ...) since they don't declare the
                         # fields.
-                        _stamp_correlation_ids(
-                            item_local,
-                            thread_id=input_data.thread_id,
-                            run_id=input_data.run_id,
-                        )
-                        yield encoder.encode(item_local)
+                        for shaped in shaper.reshape(item_local):
+                            _stamp_correlation_ids(
+                                shaped,
+                                thread_id=input_data.thread_id,
+                                run_id=input_data.run_id,
+                            )
+                            yield encoder.encode(shaped)
 
                     # Budget exhausted: exit regardless of what the
                     # current pass produced. Log only when we cut a
@@ -1688,13 +1704,13 @@ async def _run_flow_event_stream(
                 # fields (see _stamp_correlation_ids). RUN_STARTED /
                 # RUN_FINISHED always do; future correlated events are covered
                 # automatically.
-                _stamp_correlation_ids(
-                    item,
-                    thread_id=input_data.thread_id,
-                    run_id=input_data.run_id,
-                )
-
-                yield encoder.encode(item)
+                for shaped in shaper.reshape(item):
+                    _stamp_correlation_ids(
+                        shaped,
+                        thread_id=input_data.thread_id,
+                        run_id=input_data.run_id,
+                    )
+                    yield encoder.encode(shaped)
 
         except _KickoffCancelled:
             # Kickoff task was cancelled externally (not by our teardown path,
@@ -1713,6 +1729,8 @@ async def _run_flow_event_stream(
                 # the client-facing message all agree on "kickoff".
                 f"CrewAI kickoff was cancelled"
             )
+            for _pending in shaper.flush():
+                yield encoder.encode(_pending)
             yield encoder.encode(
                 RunErrorEvent(
                     message=message,
@@ -1741,6 +1759,8 @@ async def _run_flow_event_stream(
                 f"thread={input_data.thread_id} run={input_data.run_id}: "
                 f"CrewAI flow exceeded ceiling={ceiling_display}"
             )
+            for _pending in shaper.flush():
+                yield encoder.encode(_pending)
             yield encoder.encode(
                 RunErrorEvent(
                     message=message,
@@ -1775,6 +1795,8 @@ async def _run_flow_event_stream(
                 f"CrewAI upstream timeout during kickoff "
                 f"(ceiling={ceiling_display} did not fire)"
             )
+            for _pending in shaper.flush():
+                yield encoder.encode(_pending)
             yield encoder.encode(
                 RunErrorEvent(
                     message=message,
@@ -1804,6 +1826,8 @@ async def _run_flow_event_stream(
             # ``^[A-Z][A-Z0-9_]+$`` convention peer events follow and break
             # downstream regex-matchers.
             sanitized_name = _sanitize_exception_code(type(e).__name__)
+            for _pending in shaper.flush():
+                yield encoder.encode(_pending)
             yield encoder.encode(
                 RunErrorEvent(
                     message=message,
@@ -1946,6 +1970,7 @@ async def _run_flow_frame_stream(
     checkpoint_kwargs: dict | None = None,
     hitl_options: HITLOptions | None = None,
     emit_raw_events: bool = False,
+    emission_shape: str = DEFAULT_EMISSION_SHAPE,
 ):
     """StreamFrame-path driver: drive ``flow.astream`` and yield encoded AG-UI
     events.
@@ -1994,6 +2019,7 @@ async def _run_flow_frame_stream(
         run_id=input_data.run_id,
         state_provider=lambda: getattr(flow_copy, "state", {}),
         hitl_options=hitl_options,
+        emission_shape=emission_shape,
     )
 
     def _closing_reasoning_frames():
@@ -2289,6 +2315,8 @@ async def _run_flow_frame_stream(
                 f"thread={input_data.thread_id} run={input_data.run_id}: "
                 f"CrewAI flow exceeded ceiling={ceiling_display}"
             )
+            for _pending in translator.close_pending():
+                yield encoder.encode(_pending)
             for reasoning_frame in _closing_reasoning_frames():
                 yield reasoning_frame
             yield encoder.encode(
@@ -2318,6 +2346,8 @@ async def _run_flow_frame_stream(
                 f"CrewAI upstream timeout during kickoff "
                 f"(ceiling={ceiling_display} did not fire)"
             )
+            for _pending in translator.close_pending():
+                yield encoder.encode(_pending)
             for reasoning_frame in _closing_reasoning_frames():
                 yield reasoning_frame
             yield encoder.encode(
@@ -2339,6 +2369,8 @@ async def _run_flow_frame_stream(
                 f"CrewAI flow failed; see server logs"
             )
             sanitized_name = _sanitize_exception_code(type(e).__name__)
+            for _pending in translator.close_pending():
+                yield encoder.encode(_pending)
             for reasoning_frame in _closing_reasoning_frames():
                 yield reasoning_frame
             yield encoder.encode(
@@ -2376,6 +2408,7 @@ def _run_flow_stream(
     checkpoint_kwargs: dict | None = None,
     hitl_options: HITLOptions | None = None,
     emit_raw_events: bool = False,
+    emission_shape: str = DEFAULT_EMISSION_SHAPE,
 ):
     """Select the StreamFrame path (crewai >= 1.6 + a real ``astream`` flow) or
     the legacy bus-listener path, returning the chosen async generator.
@@ -2398,6 +2431,7 @@ def _run_flow_stream(
             checkpoint_kwargs=checkpoint_kwargs,
             hitl_options=hitl_options,
             emit_raw_events=emit_raw_events,
+            emission_shape=emission_shape,
         )
     return _run_flow_event_stream(
         flow_copy=flow_copy,
@@ -2407,6 +2441,7 @@ def _run_flow_stream(
         timeout=timeout,
         checkpoint_kwargs=checkpoint_kwargs,
         emit_raw_events=emit_raw_events,
+        emission_shape=emission_shape,
     )
 
 
@@ -2512,6 +2547,11 @@ async def _run_flow_resume_stream(
             )
         )
         return
+
+    # ``from_pending`` built its own instance for THIS request, so scoping it
+    # mutates nothing shared. A resumed run is still one thread's conversation,
+    # and its crew writes to memory like any other run.
+    apply_thread_memory_scope(resumed_flow, thread_id)
 
     token = flow_context.set(resumed_flow)
     translator = StreamFrameTranslator(
@@ -2726,14 +2766,20 @@ def add_crewai_flow_fastapi_endpoint(
     emit_interrupt_outcome: bool = False,
     enable_legacy_on_interrupt_event: bool = True,
     emit_raw_events: bool | None = None,
+    emission_shape: str | None = None,
 ):
     """Adds a CrewAI endpoint to the FastAPI app.
 
     ``emit_raw_events`` opts into RAW passthrough: the crewai events this bridge does
     not map (its llm / agent / task / tool channels, nested-flow lifecycle, internals)
-    are mirrored onto AG-UI ``RAW`` events. Off by default. Resolved at registration,
-    so a non-bool raises here rather than per request; ``None`` reads
+    are mirrored onto AG-UI ``RAW`` events. Off by default; ``None`` reads
     ``AGUI_CREWAI_EMIT_RAW_EVENTS``.
+
+    ``emission_shape`` selects the wire shape for text / tool-call output:
+    ``"triples"`` (START/CONTENT/END, the default) or ``"chunks"`` (the previous
+    CHUNK form); ``None`` reads ``AGUI_CREWAI_EMISSION_SHAPE``. Both it and
+    ``emit_raw_events`` resolve at registration, so a bad value fails once at
+    startup rather than per request.
 
     Async human-in-the-loop: when the flow pauses on an ``@human_feedback``
     method whose provider raises ``HumanFeedbackPending`` (see
@@ -2780,7 +2826,8 @@ def add_crewai_flow_fastapi_endpoint(
 
     # Resolved HERE, not per request: a wrong-typed argument should fail once at
     # startup rather than on every call.
-    resolved_emit_raw_events = _resolve_emit_raw_events(emit_raw_events)
+    resolved_emit_raw_events = resolve_emit_raw_events(emit_raw_events)
+    resolved_emission_shape = resolve_emission_shape(emission_shape)
 
     @app.post(path)
     async def agentic_chat_endpoint(input_data: RunAgentInput, request: Request):
@@ -2816,6 +2863,11 @@ def add_crewai_flow_fastapi_endpoint(
             )
 
         flow_copy = _copy_flow(flow)
+        # Copying the flow does NOT isolate crew memory: crewai keeps it in a
+        # shared on-disk store namespaced by crew name, so every threadId would
+        # otherwise read and write the same namespace. Scope it here, before a
+        # run driver is selected, so both drivers are covered.
+        apply_thread_memory_scope(flow_copy, input_data.thread_id)
 
         inputs = crewai_prepare_inputs(
             state=input_data.state,
@@ -2840,6 +2892,7 @@ def add_crewai_flow_fastapi_endpoint(
                 checkpoint_kwargs=checkpoint_kwargs,
                 hitl_options=hitl_options,
                 emit_raw_events=resolved_emit_raw_events,
+                emission_shape=resolved_emission_shape,
             ),
             media_type=encoder.get_content_type(),
         )
@@ -2851,6 +2904,7 @@ def add_crewai_crew_fastapi_endpoint(
     path: str = "/",
     *,
     emit_raw_events: bool | None = None,
+    emission_shape: str | None = None,
 ):
     """Adds a CrewAI crew endpoint to the FastAPI app.
 
@@ -2871,7 +2925,8 @@ def add_crewai_crew_fastapi_endpoint(
     if GLOBAL_EVENT_LISTENER is None and not CAPABILITIES.stream_frame_available:
         GLOBAL_EVENT_LISTENER = FastAPICrewFlowEventListener()
 
-    resolved_emit_raw_events = _resolve_emit_raw_events(emit_raw_events)
+    resolved_emit_raw_events = resolve_emit_raw_events(emit_raw_events)
+    resolved_emission_shape = resolve_emission_shape(emission_shape)
 
     _cached_flow = None
     # Dedicated per-endpoint lock so two concurrent first-requests cannot
@@ -2908,6 +2963,11 @@ def add_crewai_crew_fastapi_endpoint(
 
         flow = await _get_flow()
         flow_copy = _copy_flow(flow)
+        # Copying the flow does NOT isolate crew memory: crewai keeps it in a
+        # shared on-disk store namespaced by crew name, so every threadId would
+        # otherwise read and write the same namespace. Scope it here, before a
+        # run driver is selected, so both drivers are covered.
+        apply_thread_memory_scope(flow_copy, input_data.thread_id)
 
         inputs = crewai_prepare_inputs(
             state=input_data.state,
@@ -2932,6 +2992,7 @@ def add_crewai_crew_fastapi_endpoint(
                 timeout=timeout,
                 checkpoint_kwargs=checkpoint_kwargs,
                 emit_raw_events=resolved_emit_raw_events,
+                emission_shape=resolved_emission_shape,
             ),
             media_type=encoder.get_content_type(),
         )
