@@ -39,11 +39,37 @@ from google.antigravity import (
 from google.antigravity import types as ag_types
 
 from .event_translator import EventTranslator, step_failure
-from .harness_pool import HarnessPool, to_pooled
+from .harness_pool import HarnessPool, HarnessProcessDied, to_pooled
 from .session_manager import SessionLimitExceeded, SessionManager, tool_signature
 from .ui_bridge import UIBridge
 
 logger = logging.getLogger(__name__)
+
+
+def _is_harness_lost(exc: BaseException) -> bool:
+    """True when the failure means this conversation's harness process is gone.
+
+    A conversation is pinned to one process for its whole life -- the pool has
+    no migration path -- so a transport failure is terminal for the session,
+    not for the run. Left in place it fails every later run on the thread, and
+    can hang one on a socket nobody will answer, which holds `session.lock` and
+    makes the session unsweepable as well.
+
+    Deliberately broad: a false positive costs one process boot and a cold
+    resume, which restores the history anyway, while a false negative wedges
+    the thread for the lifetime of the server. Model and tool errors do not
+    match, and must not -- the session is healthy after those.
+    """
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, (HarnessProcessDied, ConnectionError, EOFError)):
+            return True
+        module = type(exc).__module__.split(".")[0]
+        if module == "websockets":
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
 
 
 class _ResumableOpenAIConfig(LocalOpenAIAgentConfig):
@@ -371,6 +397,9 @@ class AntigravityAgent:
         )
 
         terminal_sent = False
+        # Bound before the try: the harness-lost check in the handler
+        # below runs even when get_or_create itself is what failed.
+        session: Optional[Any] = None
         try:
             self._sessions.start()
             signature = tool_signature([t.name for t in (input_data.tools or [])])
@@ -412,6 +441,18 @@ class AntigravityAgent:
                 )
         except Exception as exc:  # broad: any failure must reach the client
             logger.exception("Antigravity run failed")
+            # A transport failure can surface here rather than inside
+            # _run_locked -- `conversation.send()` runs before that try block --
+            # so the session has to be marked here too, or the next run reuses
+            # a conversation whose process is gone and hangs on it.
+            if session is not None and _is_harness_lost(exc):
+                session.harness_lost = True
+                logger.warning(
+                    "Harness lost for thread %s (%s); the session will be "
+                    "rebuilt on the next run.",
+                    thread_id,
+                    type(exc).__name__,
+                )
             if not terminal_sent:
                 terminal_sent = True
                 yield RunErrorEvent(
@@ -533,6 +574,17 @@ class AntigravityAgent:
             # subprocess. Cancellation needs this just as much as failure --
             # it used to skip it and pin the harness for the process lifetime.
             bridge.abandon_pending()
+            if error is not None and _is_harness_lost(error):
+                # Do not reuse this session: mark it so the next run on this
+                # thread rebuilds via cold resume instead of talking to a
+                # process that no longer exists.
+                session.harness_lost = True
+                logger.warning(
+                    "Harness lost for thread %s (%s); the session will be "
+                    "rebuilt on the next run.",
+                    input_data.thread_id,
+                    type(error).__name__,
+                )
             await session.reset_stream()
 
         async for event in translator.close():

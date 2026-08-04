@@ -74,6 +74,13 @@ class AntigravitySession:
     # reference and can be suspended in an await at that moment, so it has to
     # be able to notice that the session it is using is no longer live.
     closed: bool = False
+    # Set when a run fails at the transport layer, i.e. the harness process
+    # this conversation is pinned to has gone. A conversation cannot migrate
+    # between processes, so the session is unusable and every later run on the
+    # thread would fail -- or worse, hang on a socket nobody will ever answer,
+    # holding `lock` and making the session unsweepable too. The next run
+    # rebuilds it via cold resume instead.
+    harness_lost: bool = False
     # Serializes runs on the same thread; AG-UI clients can retry or
     # double-submit, and the SDK rejects concurrent receive_steps().
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -273,6 +280,24 @@ class SessionManager:
             recycled: Optional[str] = None
             carried: set = set()
             existing = self._sessions.get(thread_id)
+            if existing is not None and existing.harness_lost:
+                # History from before the crash is usually lost, and that is
+                # upstream: the harness writes the trajectory through SQLite's
+                # WAL and opens it again with `immutable=1`, which ignores WAL
+                # files. A killed process leaves everything uncheckpointed, so
+                # the resume sees an empty conversation and
+                # CREATE_OR_RESUME quietly starts a new one. Measured: 0 steps
+                # visible without the WAL, 4 with it.
+                logger.warning(
+                    "Harness for thread %s is gone; rebuilding the session. "
+                    "Conversation history from before the failure is likely "
+                    "lost.",
+                    thread_id,
+                )
+                recycled, carried = await self._close_locked(
+                    thread_id, keep_conversation_id=True, force=True
+                )
+                existing = None
             if existing is not None:
                 if existing.tool_signature == signature or existing.is_parked:
                     if existing.tool_signature != signature:

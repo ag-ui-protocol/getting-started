@@ -582,3 +582,66 @@ async def test_churn_leaves_no_harness_processes(base_url, tmp_path):
     await asyncio.sleep(1.0)
     leaked = set(harness_pids()) - before
     assert not leaked, f"leaked harness processes: {leaked}"
+
+
+@pytest.mark.asyncio
+async def test_a_thread_recovers_after_its_harness_dies(base_url, tmp_path):
+    """A crashed harness must not wedge the thread forever.
+
+    A conversation is pinned to one process for life, so when that process dies
+    the session is unusable. Before this was handled, the run after the failing
+    one did not merely error -- it hung on a socket nobody would ever answer,
+    holding `session.lock`. `_expired()` returns False while the lock is held,
+    so the session could never be swept either: one crash killed the thread for
+    the lifetime of the server and leaked its slot against `max_sessions`.
+
+    Note the pre-crash history does not survive, and that is upstream: the
+    harness writes trajectories through SQLite's WAL and reopens them with
+    `immutable=1`, which ignores WAL files, so a killed process leaves an
+    empty-looking conversation behind.
+    """
+    from ag_ui.core import EventType, RunAgentInput, UserMessage
+
+    from ag_ui_antigravity import AntigravityAgent
+
+    adapter = AntigravityAgent(
+        model=MODEL,
+        base_url=base_url,
+        save_dir=str(tmp_path / "save"),
+        workspaces=[str(tmp_path)],
+        system_instructions="Reply with exactly the word PONG.",
+        enable_frontend_tools=False,
+        enable_ask_question=False,
+    )
+    thread = "crash-recovery"
+
+    async def turn(run_id):
+        events = [
+            e
+            async for e in adapter.run(
+                RunAgentInput(
+                    thread_id=thread, run_id=run_id, state={},
+                    messages=[UserMessage(id=run_id, role="user", content="ping")],
+                    tools=[], context=[], forwarded_props={},
+                )
+            )
+        ]
+        return events[-1].type
+
+    try:
+        assert await turn("r1") == EventType.RUN_FINISHED
+
+        process = next(iter(adapter.harness_pool._processes.values()))[0]
+        process._process.kill()
+        await asyncio.wait_for(process.dead.wait(), timeout=10)
+
+        # The run that meets the corpse reports it rather than hanging.
+        assert await asyncio.wait_for(turn("r2"), timeout=60) == EventType.RUN_ERROR
+
+        # THE REGRESSION: this one used to hang forever.
+        assert await asyncio.wait_for(turn("r3"), timeout=120) == (
+            EventType.RUN_FINISHED
+        ), "the thread did not recover after its harness died"
+        assert adapter.harness_pool.stats()["processes"] == 1
+    finally:
+        await adapter.close()

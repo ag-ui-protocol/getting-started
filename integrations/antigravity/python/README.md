@@ -285,6 +285,25 @@ Agents that must not share process-level storage should keep separate
 * **SDK churn.** `google-antigravity` is young; the dependency is pinned to
   `<0.2.0` deliberately.
 
+### A crashed harness loses its history
+
+A conversation is pinned to one harness process for its whole life -- there is
+no migration -- so if that process dies the session is gone with it. The run
+that meets the corpse reports `RUN_ERROR`, and the next run on that thread
+rebuilds the session automatically and carries on.
+
+What does not survive is the conversation history. The harness writes
+trajectories through SQLite's WAL and reopens them with `immutable=1`, which
+ignores WAL files, so a killed process leaves everything uncheckpointed:
+measured after a `SIGKILL`, the main database showed **0 steps while its
+465 KB WAL held all 4**. The resume therefore sees an empty conversation and
+`CREATE_OR_RESUME` quietly starts a new one. This is upstream and not
+something the integration can work around; a clean shutdown checkpoints
+normally and resumes fine.
+
+The rebuild logs a warning naming the thread, so silent context loss is at
+least visible in the logs.
+
 ### Keep workspace paths short
 
 A long workspace path makes runs fail intermittently, and the failure looks
