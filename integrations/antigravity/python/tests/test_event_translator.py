@@ -210,7 +210,16 @@ class TestThinking:
 
 
 class TestToolCalls:
-    async def test_tool_call_closes_text_before_starting(self):
+    async def test_a_tool_call_stays_inside_the_assistant_message(self):
+        """The call belongs to the message that made it, so that message stays open.
+
+        Closing it first splits one assistant turn into two. CopilotKit's Slack
+        renderer clears its "is thinking…" status on the first posted reply and
+        latches it, then re-arms the status at TOOL_CALL_END -- so a narration
+        posted ahead of the call leaves the indicator spinning long after the
+        answer lands. Keeping the message open is also what makes
+        `parentMessageId` meaningful.
+        """
         t = EventTranslator()
         call = ag_types.ToolCall(name="view_file", args={"path": "/tmp/x"}, id="tc-1")
         events = await collect(
@@ -226,9 +235,32 @@ class TestToolCalls:
             ],
         )
         order = types_of(events)
-        assert order.index("TEXT_MESSAGE_END") < order.index("TOOL_CALL_START")
+        start = order.index("TOOL_CALL_START")
+        assert "TEXT_MESSAGE_END" not in order[:start], (
+            "the assistant message was closed before the tool call"
+        )
         assert "TOOL_CALL_ARGS" in order
         assert order.count("TOOL_CALL_END") == 1
+
+        opened = next(e for e in events if e.type == "TEXT_MESSAGE_START")
+        started = next(e for e in events if e.type == "TOOL_CALL_START")
+        assert started.parent_message_id == opened.message_id, (
+            "the tool call is orphaned from the message that made it"
+        )
+
+    async def test_a_tool_call_still_closes_an_open_thinking_block(self):
+        """THINKING_* is its own bracketed region and must not wrap the call."""
+        t = EventTranslator()
+        call = ag_types.ToolCall(name="view_file", args={"path": "/tmp/x"}, id="tc-1")
+        events = await collect(
+            t,
+            [
+                step(thinking_delta="hmm"),
+                step(step_index=2, tool_calls=[call]),
+            ],
+        )
+        order = types_of(events)
+        assert order.index("THINKING_END") < order.index("TOOL_CALL_START")
 
     async def test_args_are_not_re_emitted_across_step_repeats(self):
         t = EventTranslator()

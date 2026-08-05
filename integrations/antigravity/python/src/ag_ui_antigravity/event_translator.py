@@ -138,12 +138,17 @@ class EventTranslator:
             self._message_ids[step.step_index] = str(uuid.uuid4())
         return self._message_ids[step.step_index]
 
-    async def _close_open_blocks(self) -> AsyncGenerator[BaseEvent, None]:
-        """Closes any open text/thinking block. Must run before other events."""
+    async def _close_open_thinking(self) -> AsyncGenerator[BaseEvent, None]:
+        """Closes an open thinking block, leaving any text message open."""
         if self._open_thinking:
             yield ThinkingTextMessageEndEvent(type="THINKING_TEXT_MESSAGE_END")
             yield ThinkingEndEvent(type="THINKING_END")
             self._open_thinking = False
+
+    async def _close_open_blocks(self) -> AsyncGenerator[BaseEvent, None]:
+        """Closes any open text/thinking block. Must run before other events."""
+        async for event in self._close_open_thinking():
+            yield event
         if self._open_text is not None:
             yield TextMessageEndEvent(
                 type="TEXT_MESSAGE_END", message_id=self._open_text
@@ -345,13 +350,32 @@ class EventTranslator:
             tool_call_id = self._tool_call_ids[key]
 
             if key not in self._open_tool_calls and not flushed:
-                async for event in self._close_open_blocks():
+                # Deliberately NOT closing the open text block first.
+                #
+                # A tool call belongs to the assistant message that made it, so
+                # closing that message and starting the call outside it splits
+                # one turn into two. On Slack that posts a bare "I'm about to
+                # run X" message ahead of the call, and CopilotKit's renderer
+                # clears its "is thinking…" status on the first posted reply,
+                # latches `postedReply`, then re-arms the status at
+                # TOOL_CALL_END -- after which nothing clears it again and the
+                # indicator spins long after the answer has landed.
+                #
+                # Only the thinking block has to close: THINKING_* is its own
+                # bracketed region, and leaving it open around a tool call
+                # would nest two brackets. The verifier tracks messages and
+                # tool calls in separate maps, so an open TEXT_MESSAGE does not
+                # block TOOL_CALL_START.
+                async for event in self._close_open_thinking():
                     yield event
                 yield ToolCallStartEvent(
                     type="TOOL_CALL_START",
                     tool_call_id=tool_call_id,
                     tool_call_name=name,
-                    parent_message_id=self._message_ids.get(step.step_index),
+                    # The message this call belongs to. Keyed by step index this
+                    # was always None: a tool call is its own step and never has
+                    # a text message of its own, so the lookup could not hit.
+                    parent_message_id=self._open_text,
                 )
                 self._open_tool_calls.add(key)
                 self._input_arg_keys[key] = set(
