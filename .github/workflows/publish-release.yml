@@ -65,7 +65,9 @@ on:
     paths:
       - "**/package.json"
       - "**/pyproject.toml"
+      # Every Directory.Build.props that carries a released .NET VersionPrefix.
       - "sdks/dotnet/Directory.Build.props"
+      - "integrations/claude-managed-agents/dotnet/Directory.Build.props"
   workflow_dispatch:
     inputs:
       mode:
@@ -91,6 +93,9 @@ on:
           - integration-aws-strands-ts
           - integration-claude-agent-sdk-py
           - integration-claude-agent-sdk-ts
+          - integration-claude-managed-agents-dotnet
+          - integration-claude-managed-agents-py
+          - integration-claude-managed-agents-ts
           - integration-cloudflare-agents
           - integration-crewai-py
           - integration-crewai-ts
@@ -189,19 +194,19 @@ jobs:
           echo "Detected mode: $MODE, scope: $SCOPE"
 
       - name: Checkout release ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ steps.meta.outputs.mode == 'prerelease' && github.ref || 'main' }}
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
         with:
           version: "10.33.4"
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: "22"
 
@@ -212,12 +217,12 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           version: ">=0.8.0"
 
       - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
 
@@ -650,7 +655,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout release ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ needs.build.outputs.mode == 'prerelease' && github.ref || 'main' }}
@@ -660,13 +665,13 @@ jobs:
       # --- TypeScript publish ---
       - name: Setup pnpm
         if: needs.build.outputs.ts_count != '0' || needs.build.outputs.pre_ts_count != '0'
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
         with:
           version: "10.33.4"
 
       - name: Setup Node
         if: needs.build.outputs.ts_count != '0' || needs.build.outputs.pre_ts_count != '0'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: "22"
           registry-url: https://registry.npmjs.org
@@ -957,7 +962,7 @@ jobs:
       # --- Python publish ---
       - name: Install uv
         if: needs.build.outputs.py_count != '0' || needs.build.outputs.pre_has_py_packages == 'true'
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           version: ">=0.8.0"
 
@@ -1189,7 +1194,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout release ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ needs.build.outputs.mode == 'prerelease' && github.ref || 'main' }}
@@ -1200,7 +1205,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9  # v4.3.1
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
         with:
           dotnet-version: |
             8.0.x
@@ -1236,16 +1241,29 @@ jobs:
           dotnet test tests/AGUI.Server.UnitTests -c Release -p:SignAssembly=false
           dotnet test tests/AGUI.Hosting.AspNetCore.IntegrationTests -c Release -p:SignAssembly=false
 
+      # The integration lives in its own solution with its own
+      # Directory.Build.props, so the SDK suites above do not cover it.
+      - name: Run claude-managed-agents .NET tests
+        if: >
+          contains(needs.build.outputs.dotnet_packages, 'AGUI.ClaudeManagedAgents') ||
+          contains(needs.build.outputs.pre_dotnet_packages_json, 'AGUI.ClaudeManagedAgents')
+        shell: bash
+        working-directory: integrations/claude-managed-agents/dotnet
+        run: dotnet test tests/AGUI.ClaudeManagedAgents.Tests -c Release
+
+      # Built from the detected set rather than a hand-kept list, so a package
+      # outside sdks/dotnet (an integration with its own Directory.Build.props)
+      # is not packed --no-build against a build that never happened.
       - name: Build .NET packages
         shell: bash
-        working-directory: sdks/dotnet
         run: |
           set -euo pipefail
-          dotnet build src/AGUI.Abstractions/AGUI.Abstractions.csproj -c Release --no-incremental
-          dotnet build src/AGUI.Formatting/AGUI.Formatting.csproj -c Release --no-incremental
-          dotnet build src/AGUI.Protobuf/AGUI.Protobuf.csproj -c Release --no-incremental
-          dotnet build src/AGUI.Client/AGUI.Client.csproj -c Release --no-incremental
-          dotnet build src/AGUI.Server/AGUI.Server.csproj -c Release --no-incremental
+          while read -r pkg; do
+            NAME=$(echo "$pkg" | jq -r '.name')
+            PKG_PATH=$(echo "$pkg" | jq -r '.path')
+            echo "Building ${NAME} from ${PKG_PATH}"
+            dotnet build "${PKG_PATH}/${NAME}.csproj" -c Release --no-incremental
+          done < <(jq -c '.[]' dotnet-packages.json)
 
       - name: Pack NuGet packages
         shell: bash
@@ -1254,11 +1272,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts/nuget
-          BASE_VERSION=$(sed -nE 's/.*<VersionPrefix[^>]*>([^<]+)<\/VersionPrefix>.*/\1/p' sdks/dotnet/Directory.Build.props | head -n1)
           while read -r pkg; do
             NAME=$(echo "$pkg" | jq -r '.name')
             VERSION=$(echo "$pkg" | jq -r '.version')
             PKG_PATH=$(echo "$pkg" | jq -r '.path')
+            # Each package's own Directory.Build.props, from release.config.json's
+            # versionSource: a second .NET scope has a different base version.
+            PROPS=$(echo "$pkg" | jq -r '.file')
+            BASE_VERSION=$(sed -nE 's/.*<VersionPrefix[^>]*>([^<]+)<\/VersionPrefix>.*/\1/p' "$PROPS" | head -n1)
+            if [ -z "$BASE_VERSION" ]; then
+              echo "::error::Could not read VersionPrefix from ${PROPS} for ${NAME}"
+              exit 1
+            fi
             CSPROJ="${PKG_PATH}/${NAME}.csproj"
             EXTRA_ARGS=()
             if [ "$MODE" = "prerelease" ]; then
@@ -1277,6 +1302,122 @@ jobs:
             fi
           done < <(jq -c '.[]' dotnet-packages.json)
           ls -la artifacts/nuget
+
+      # ── Author signing (pack → SIGN → push) ────────────────────────────────
+      # Author-signs the packed *.nupkg in place with a DigiCert code-signing
+      # certificate stored (non-exportable, RSA-HSM) in Azure Key Vault, via
+      # NuGetKeyVaultSignTool + GitHub OIDC (no long-lived secret). This is the
+      # *author* signature that flips packages to "signed" on nuget.org;
+      # nuget.org's *repository* signature is applied automatically on push and
+      # is independent of this. Symbol packages (*.snupkg) are intentionally not
+      # author-signed, and assembly strong-naming (AGUI.snk) is a separate,
+      # untouched concern.
+      # Gated on the SIGNING_PROVIDER variable (set on the `nuget` environment):
+      #   unset / 'none'  → no signing (safe default; inert until provisioned)
+      #   'keyvault'      → sign via Azure Key Vault + NuGetKeyVaultSignTool
+      # Required config (see sdks/dotnet/docs/signing.md): the secrets
+      # AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID,
+      # AZURE_KEY_VAULT_URL, CODE_SIGNING_CERT_NAME on the `nuget` environment;
+      # plus the App Registration granted Key Vault "Crypto User" + "Certificate
+      # User" roles on the vault, and the cert registered on the nuget.org owner.
+      # NOTE: inert until SIGNING_PROVIDER=keyvault — safe to merge ahead of
+      # provisioning.
+
+      # Fail fast with an explicit list if signing is enabled but its
+      # configuration is incomplete — so a half-provisioned setup errors here
+      # with actionable output instead of deep inside the signing tool. Lists
+      # exactly which secrets the `nuget` environment still needs. See
+      # sdks/dotnet/docs/signing.md.
+      - name: Preflight — validate signing configuration
+        if: vars.SIGNING_PROVIDER != '' && vars.SIGNING_PROVIDER != 'none'
+        shell: bash
+        env:
+          PROVIDER: ${{ vars.SIGNING_PROVIDER }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_KEY_VAULT_URL: ${{ secrets.AZURE_KEY_VAULT_URL }}
+          CODE_SIGNING_CERT_NAME: ${{ secrets.CODE_SIGNING_CERT_NAME }}
+        run: |
+          set -euo pipefail
+          if [ "$PROVIDER" != "keyvault" ]; then
+            echo "::error::Unknown SIGNING_PROVIDER '${PROVIDER}' (expected 'none' or 'keyvault')"
+            exit 1
+          fi
+          missing=()
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_KEY_VAULT_URL CODE_SIGNING_CERT_NAME; do
+            if [ -z "${!name}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::SIGNING_PROVIDER='keyvault' but the 'nuget' environment is missing: ${missing[*]}"
+            echo "Provision these (see sdks/dotnet/docs/signing.md) before enabling signing."
+            exit 1
+          fi
+          echo "Signing configuration for 'keyvault' is complete."
+
+      # OIDC login for Key Vault access — reuses the job's id-token: write; no
+      # long-lived client secret is stored.
+      - name: Azure login (OIDC)
+        if: vars.SIGNING_PROVIDER == 'keyvault'
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca  # v3.0.1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Author-sign each *.nupkg with the Key Vault cert. NuGetKeyVaultSignTool
+      # signs one file per call, so we loop; *.snupkg are excluded. The private
+      # key never leaves the HSM — signing is a keys/sign op inside the vault.
+      - name: Author-sign packages (Azure Key Vault)
+        if: vars.SIGNING_PROVIDER == 'keyvault'
+        shell: pwsh
+        env:
+          AZURE_KEY_VAULT_URL: ${{ secrets.AZURE_KEY_VAULT_URL }}
+          CODE_SIGNING_CERT_NAME: ${{ secrets.CODE_SIGNING_CERT_NAME }}
+        run: |
+          dotnet tool install --global NuGetKeyVaultSignTool
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to install NuGetKeyVaultSignTool' }
+          $toolsDir = Join-Path $env:USERPROFILE '.dotnet\tools'
+          if ($env:PATH -notlike "*$toolsDir*") { $env:PATH = "$toolsDir;$env:PATH" }
+
+          # Short-lived Key Vault data-plane token from the OIDC login context.
+          $token = az account get-access-token --resource https://vault.azure.net --query accessToken -o tsv
+          if (-not $token) { throw 'Failed to obtain Key Vault access token' }
+          Write-Output "::add-mask::$token"
+
+          $pkgs = Get-ChildItem -Path artifacts/nuget -File | Where-Object { $_.Extension -eq '.nupkg' }
+          if ($pkgs.Count -eq 0) { throw 'No .nupkg found to sign' }
+          foreach ($pkg in $pkgs) {
+            Write-Host "Signing $($pkg.Name)"
+            NuGetKeyVaultSignTool sign $pkg.FullName `
+              --file-digest sha256 `
+              --timestamp-rfc3161 http://timestamp.digicert.com `
+              --timestamp-digest sha256 `
+              --azure-key-vault-url $env:AZURE_KEY_VAULT_URL `
+              --azure-key-vault-certificate $env:CODE_SIGNING_CERT_NAME `
+              --azure-key-vault-accesstoken $token
+            if ($LASTEXITCODE -ne 0) { throw "Signing failed for $($pkg.Name)" }
+          }
+
+      # Fail the release before publishing if signing was requested but didn't
+      # actually apply (verifies the author signature chains to a trusted root).
+      - name: Verify packages are signed
+        if: vars.SIGNING_PROVIDER == 'keyvault'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(artifacts/nuget/*.nupkg)
+          if [ ${#pkgs[@]} -eq 0 ]; then
+            echo "::error::No .nupkg found to verify after signing"
+            exit 1
+          fi
+          for pkg in "${pkgs[@]}"; do
+            echo "Verifying signature: ${pkg}"
+            dotnet nuget verify "${pkg}" --all
+          done
 
       - name: NuGet login
         id: nuget-login
@@ -1486,7 +1627,7 @@ jobs:
               NUGET_INTENDED=true
             else
               # Map the dispatch scope to its ecosystem. The explicit NuGet arm
-              # catches sdk-dotnet. The *-py glob catches the sdk-py /
+              # catches the .NET scopes. The *-py glob catches the sdk-py /
               # integration-*-py PyPI scopes; the explicit Python names cover
               # PyPI scopes that do NOT end in -py. Everything else is npm. This
               # only affects FAILURE paging — success arms use the real
@@ -1498,7 +1639,7 @@ jobs:
               # verify-release-scope-dropdowns.sh asserts this list maps every
               # config scope to the correct ecosystem, so it cannot drift.
               case "$SCOPE" in
-                sdk-dotnet)
+                integration-claude-managed-agents-dotnet|sdk-dotnet)
                   NUGET_INTENDED=true ;;
                 integration-agent-spec|integration-langroid|sdk-py-a2ui-toolkit)
                   PY_INTENDED=true ;;
@@ -1563,9 +1704,19 @@ jobs:
                 if echo "$FILES" | grep -qE '(^|/)pyproject\.toml$'; then
                   PY_INTENDED=true
                 fi
-                if echo "$FILES" | grep -qx 'sdks/dotnet/Directory.Build.props'; then
-                  NUGET_INTENDED=true
-                fi
+                # Every enrolled .NET versionSource. A .NET version lives in a
+                # Directory.Build.props rather than in a manifest the globs above
+                # catch, so this list is static and must cover each .NET scope —
+                # otherwise a failed build on an integration's version bump reads
+                # as "NuGet was never intended" and the failure page is swallowed.
+                # verify-release-scope-dropdowns.sh keeps it in step with
+                # release.config.json (and with the push trigger's paths).
+                DOTNET_VERSION_SOURCES="sdks/dotnet/Directory.Build.props integrations/claude-managed-agents/dotnet/Directory.Build.props"
+                for props in $DOTNET_VERSION_SOURCES; do
+                  if printf '%s\n' "$FILES" | grep -qxF "$props"; then
+                    NUGET_INTENDED=true
+                  fi
+                done
               fi
             fi
           fi
@@ -1578,17 +1729,17 @@ jobs:
           echo "npm_intended=$NPM_INTENDED py_intended=$PY_INTENDED nuget_intended=$NUGET_INTENDED"
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: "10.33.4"
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
 
@@ -1625,7 +1776,7 @@ jobs:
         # secret is unset until the #engr incoming webhook is provisioned, and a
         # release must not go red merely because alerting isn't wired yet.
         if: steps.build_message.outputs.should_post == 'true' && env.SLACK_WEBHOOK != ''
-        uses: slackapi/slack-github-action@b0fa283ad8fea605de13dc3f449259339835fc52 # v2.1.0
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_ENGR }}
           webhook-type: incoming-webhook
@@ -1653,7 +1804,7 @@ jobs:
            steps.intent.outputs.nuget_intended != 'false') &&
           env.SLACK_WEBHOOK != ''
         continue-on-error: true
-        uses: slackapi/slack-github-action@b0fa283ad8fea605de13dc3f449259339835fc52 # v2.1.0
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_ENGR }}
           webhook-type: incoming-webhook

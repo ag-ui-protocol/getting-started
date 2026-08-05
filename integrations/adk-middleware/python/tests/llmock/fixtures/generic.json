@@ -50,7 +50,8 @@
         "toolCalls": [
           {
             "name": "context_checking_tool",
-            "arguments": "{}"
+            "arguments": "{}",
+            "id": "call_context_checking_tool_1"
           }
         ]
       }

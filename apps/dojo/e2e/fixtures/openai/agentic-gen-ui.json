@@ -6,7 +6,8 @@
         "toolCalls": [
           {
             "name": "generate_task_steps_generative_ui",
-            "arguments": "{\"steps\":[{\"description\":\"Gather ingredients: cocoa, butter, eggs, sugar, flour\",\"status\":\"pending\"},{\"description\":\"Melt butter and mix with cocoa and sugar\",\"status\":\"pending\"},{\"description\":\"Add eggs and flour, mix until smooth\",\"status\":\"pending\"},{\"description\":\"Pour into greased pan and bake at 350F for 25 minutes\",\"status\":\"pending\"}]}"
+            "arguments": "{\"steps\":[{\"description\":\"Gather ingredients: cocoa, butter, eggs, sugar, flour\",\"status\":\"pending\"},{\"description\":\"Melt butter and mix with cocoa and sugar\",\"status\":\"pending\"},{\"description\":\"Add eggs and flour, mix until smooth\",\"status\":\"pending\"},{\"description\":\"Pour into greased pan and bake at 350F for 25 minutes\",\"status\":\"pending\"}]}",
+            "id": "call_generate_task_steps_generative_ui_1"
           }
         ]
       }
@@ -17,7 +18,8 @@
         "toolCalls": [
           {
             "name": "generate_task_steps_generative_ui",
-            "arguments": "{\"steps\":[{\"description\":\"Design and build a spacecraft capable of Mars transit\",\"status\":\"pending\"},{\"description\":\"Assemble crew and run mission simulations\",\"status\":\"pending\"},{\"description\":\"Launch from Earth and navigate to Mars\",\"status\":\"pending\"},{\"description\":\"Land on Mars surface and establish base camp\",\"status\":\"pending\"}]}"
+            "arguments": "{\"steps\":[{\"description\":\"Design and build a spacecraft capable of Mars transit\",\"status\":\"pending\"},{\"description\":\"Assemble crew and run mission simulations\",\"status\":\"pending\"},{\"description\":\"Launch from Earth and navigate to Mars\",\"status\":\"pending\"},{\"description\":\"Land on Mars surface and establish base camp\",\"status\":\"pending\"}]}",
+            "id": "call_generate_task_steps_generative_ui_2"
           }
         ]
       }

@@ -4,11 +4,11 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - "crates/**"
-      - ".github/workflows/rust.yml"
-      - "tests/**"
-      - "Cargo.toml"
-      - ".cargo/**"
+      - "sdks/community/rust/crates/**"
+      - "sdks/community/rust/**/tests/**"
+      - "sdks/community/rust/Cargo.toml"
+      - "sdks/community/rust/.cargo/**"
+      - ".github/workflows/rust-lint-test.yml"
   pull_request:
     branches: [ "main" ]
     paths:
@@ -20,7 +20,7 @@ on:
 
 defaults:
   run:
-    working-directory: ./rust
+    working-directory: ./sdks/community/rust
 
 permissions:
   contents: read
@@ -39,12 +39,12 @@ jobs:
       CARGO_TERM_COLOR: always
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
       # Built-in cache is fork-safe (fork PRs can't write to base repo cache)
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.8.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
 
       - name: Build
         run: cargo build --verbose
@@ -59,7 +59,11 @@ jobs:
         run: cargo publish -p ag-ui-core --dry-run
 
       - name: Publish ag-ui-client dry-run
-        run: cargo publish -p ag-ui-client --dry-run
+        # Documented interim: packaging-only (--no-verify skips the compile-verify).
+        # cargo publish drops the workspace [patch.crates-io] override and would
+        # compile against the stale ag-ui-core 0.1.0 on crates.io. Drop --no-verify
+        # once ag-ui-core is republished to crates.io.
+        run: cargo publish -p ag-ui-client --dry-run --no-verify
 
       - name: Run tests
         run: cargo test --verbose

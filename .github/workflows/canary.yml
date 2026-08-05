@@ -42,6 +42,9 @@ on:
           - integration-aws-strands-ts
           - integration-claude-agent-sdk-py
           - integration-claude-agent-sdk-ts
+          - integration-claude-managed-agents-dotnet
+          - integration-claude-managed-agents-py
+          - integration-claude-managed-agents-ts
           - integration-cloudflare-agents
           - integration-crewai-py
           - integration-crewai-ts
@@ -118,10 +121,16 @@ jobs:
 
       - name: Mint devops-bot token
         id: app-token
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: "3877599"
           private-key: ${{ secrets.DEVOPS_BOT_PRIVATE_KEY }}
+          # Scope the app token to only what this workflow uses, instead of
+          # inheriting the app installation's blanket permissions (zizmor
+          # github-app). contents:write creates/deletes the canary ref;
+          # actions:write dispatches publish-release.yml and reads its run.
+          permission-contents: write
+          permission-actions: write
 
       - name: Compute canary branch name
         id: slug

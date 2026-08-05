@@ -164,7 +164,14 @@ internal static class EventStreamConverter
 
                 case RunErrorEvent errorEvent:
                     runError = true;
-                    throw new System.InvalidOperationException(errorEvent.Message);
+                    yield return new ChatResponseUpdate(ChatRole.Assistant,
+                        [new ErrorContent(errorEvent.Message) { ErrorCode = errorEvent.Code }])
+                    {
+                        ConversationId = conversationId,
+                        ResponseId = responseId,
+                        RawRepresentation = errorEvent
+                    };
+                    break;
 
                 case TextMessageStartEvent textStart:
                     textMessageBuilder.AddTextStart(textStart);

@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 # Attribute set on proxy tools so we can distinguish them from native tools.
 _PROXY_MARKER = "_ag_ui_proxy"
 
+# Placeholder result the proxy returns server-side. The real result is produced
+# on the client and reconciled back in on the following run.
+PROXY_RESULT_PLACEHOLDER = "Forwarded to client"
+
 
 def create_proxy_tool(ag_ui_tool: AgUiTool) -> PythonAgentTool:
     """Convert an AG-UI ``Tool`` into a Strands ``PythonAgentTool``.
@@ -52,7 +56,7 @@ def create_proxy_tool(ag_ui_tool: AgUiTool) -> PythonAgentTool:
         return {
             "toolUseId": tool_use["toolUseId"],
             "status": "success",
-            "content": [{"text": "Forwarded to client"}],
+            "content": [{"text": PROXY_RESULT_PLACEHOLDER}],
         }
 
     # ToolFunc protocol requires __name__

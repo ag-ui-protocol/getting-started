@@ -45,13 +45,36 @@ independent.
 The hosting layer handles the protocol details for you:
 
 - Converts `RunAgentInput.Messages` into `ChatMessage` values
+- Translates `RunAgentInput.Resume` into MEAI approval and interrupt response
+  content
 - Installs client-declared tools on `ChatOptions`
 - Stores the original input under
   `ChatOptions.AdditionalProperties[AGUIConstants.RunAgentInputKey]`
-- Emits `RUN_STARTED` and `RUN_FINISHED`
+- Emits `RUN_STARTED` and terminal `RUN_FINISHED` outcomes
 - Maps text, reasoning, tool calls, tool results, state, raw events, and
   interrupts to AG-UI events
 - Streams the result as Server-Sent Events
+
+## Verification and framework ownership
+
+Server tests verify that `RunAgentInput` becomes `ChatMessage` and
+`ChatOptions`, resume payloads become standard MEAI response content, lifecycle
+events are emitted, and streamed `ChatResponseUpdate` values become the
+expected text, reasoning, tool, state, raw, custom, and interrupt events. Raw
+AG-UI events, including `RUN_ERROR`, pass through when supplied on
+`ChatResponseUpdate.RawRepresentation`.
+
+```bash
+cd sdks/dotnet
+dotnet test tests/AGUI.Server.UnitTests/
+dotnet test tests/AGUI.Hosting.AspNetCore.IntegrationTests/
+```
+
+The SDK owns the shared AG-UI and `Microsoft.Extensions.AI` bridge.
+Framework-specific mappings belong to the consuming framework. For example,
+Microsoft Agent Framework can use `AGUI.Server` for the common bridge, then map
+its own workflow, step, and agent events with `AGUIStreamOptions` or raw AG-UI
+events.
 
 ## Server and client together
 

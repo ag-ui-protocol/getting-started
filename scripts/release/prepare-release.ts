@@ -11,12 +11,14 @@
  * For TypeScript packages, edits package.json.
  * For Python packages, edits pyproject.toml using regex (handles both
  * [project].version and [tool.poetry].version).
- * For .NET packages, edits sdks/dotnet/Directory.Build.props VersionPrefix.
+ * For .NET packages, edits the VersionPrefix in the Directory.Build.props the
+ * scope names as its `versionSource`.
  *
  * Outputs JSON to stdout:
  *   { "scope": "...", "packages": [{ "name", "oldVersion", "newVersion", "file", "path" }] }
  */
 
+import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -327,6 +329,53 @@ function writePyVersion(pyprojectPath: string, newVersion: string): void {
   fs.writeFileSync(pyprojectPath, lines.join('\n'), "utf-8");
 }
 
+/**
+ * Re-lock a uv-managed Python package after its version has been bumped.
+ *
+ * uv.lock carries an entry for the package it locks -- the one whose ``source``
+ * is ``{ editable = "." }`` -- so editing pyproject.toml alone leaves that entry
+ * one version stale. Every release did exactly that, so every release shipped a
+ * stale lock: four consecutive aws-strands releases are each a one-line,
+ * one-file commit, and ag_ui_adk drifted five releases deep before anyone
+ * noticed. #2313 repaired the accumulated drift; this stops it recurring.
+ *
+ * ``uv lock`` may also flush latent metadata corrections that have nothing to do
+ * with the bump -- it rewrites the whole file once it has any reason to, and what
+ * it writes reflects the package metadata in uv's cache at that moment. Observed:
+ * the same uv binary added an ``exceptiongroup`` dependency marker on Aug 4 that
+ * it had not added on Jul 30, because the cache had refreshed from PyPI in
+ * between. Those are corrections rather than corruption, and the companion
+ * ``uv lock --check`` CI gate is what keeps them from piling up: with locks kept
+ * continuously current, a release bump has nothing extra to flush and its diff
+ * stays to the version line.
+ *
+ * Packages with no uv.lock (poetry-managed, or unlocked) are skipped. A missing
+ * ``uv`` is fatal rather than skipped -- silently shipping a stale lock is the
+ * exact failure this exists to prevent.
+ */
+function relockPythonPackage(pyprojectPath: string): void {
+  const pkgDir = path.dirname(pyprojectPath);
+  if (!fs.existsSync(path.join(pkgDir, "uv.lock"))) return;
+
+  try {
+    // stdout belongs to this script's JSON summary -- discard uv's so the
+    // summary stays parseable, and pass its stderr through for diagnostics.
+    execFileSync("uv", ["lock"], {
+      cwd: pkgDir,
+      stdio: ["ignore", "ignore", "inherit"],
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(
+        `uv is required to re-lock ${pkgDir} after a version bump, but was not ` +
+          `found on PATH. Install uv (https://docs.astral.sh/uv/) -- without it ` +
+          `the release would publish a uv.lock pinning the previous version.`,
+      );
+    }
+    throw error;
+  }
+}
+
 function readDotnetVersion(propsPath: string): string {
   const content = fs.readFileSync(propsPath, "utf-8");
   const match = content.match(/<VersionPrefix(?:\s+[^>]*)?>([^<]+)<\/VersionPrefix>/);
@@ -348,12 +397,21 @@ function writeDotnetVersion(propsPath: string, newVersion: string): void {
   fs.writeFileSync(propsPath, next, "utf-8");
 }
 
-function getVersionFilePath(repoRoot: string, pkg: PackageConfig): string {
+function getVersionFilePath(repoRoot: string, pkg: PackageConfig, versionSource?: string): string {
   if (pkg.ecosystem === "typescript") {
     return path.join(repoRoot, pkg.path, "package.json");
   }
   if (pkg.ecosystem === "dotnet") {
-    return path.join(repoRoot, "sdks/dotnet/Directory.Build.props");
+    // A .NET version lives in a shared Directory.Build.props rather than the
+    // csproj, and each .NET scope names its own. Assuming the SDK's file bumps
+    // the wrong package as soon as a second .NET scope exists, so the scope has
+    // to declare it.
+    if (!versionSource) {
+      throw new Error(
+        `Scope for ${pkg.name} must declare a "versionSource" pointing at its Directory.Build.props`
+      );
+    }
+    return path.join(repoRoot, versionSource);
   }
   return path.join(repoRoot, pkg.path, "pyproject.toml");
 }
@@ -368,8 +426,8 @@ function readVersionFile(filePath: string, ecosystem: PackageConfig["ecosystem"]
   return readPyVersion(filePath);
 }
 
-function readVersion(repoRoot: string, pkg: PackageConfig): string {
-  const filePath = getVersionFilePath(repoRoot, pkg);
+function readVersion(repoRoot: string, pkg: PackageConfig, versionSource?: string): string {
+  const filePath = getVersionFilePath(repoRoot, pkg, versionSource);
   return readVersionFile(filePath, pkg.ecosystem);
 }
 
@@ -380,11 +438,12 @@ function writeVersionFile(filePath: string, ecosystem: PackageConfig["ecosystem"
     writeDotnetVersion(filePath, newVersion);
   } else {
     writePyVersion(filePath, newVersion);
+    relockPythonPackage(filePath);
   }
 }
 
-function writeVersion(repoRoot: string, pkg: PackageConfig, newVersion: string): void {
-  const filePath = getVersionFilePath(repoRoot, pkg);
+function writeVersion(repoRoot: string, pkg: PackageConfig, newVersion: string, versionSource?: string): void {
+  const filePath = getVersionFilePath(repoRoot, pkg, versionSource);
   writeVersionFile(filePath, pkg.ecosystem, newVersion);
 }
 
@@ -409,7 +468,12 @@ function computeNewVersion(
 
 function main(): void {
   const args = parseArgs();
-  const repoRoot = path.resolve(__dirname, "../..");
+  // Normally the repo this script ships in. Overridable so tests can point the
+  // whole thing -- config, package files, lockfiles -- at a throwaway fixture
+  // tree, since the write path cannot otherwise be exercised without editing
+  // the real repo.
+  const repoRoot =
+    process.env.PREPARE_RELEASE_ROOT ?? path.resolve(__dirname, "../..");
 
   const configPath = path.join(repoRoot, "scripts/release/release.config.json");
   const config: ReleaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -455,15 +519,15 @@ function main(): void {
     for (const pkg of scopeConfig.packages) {
       const filePath = versionSourceEcosystem === "dotnet"
         ? versionSourcePath
-        : getVersionFilePath(repoRoot, pkg);
+        : getVersionFilePath(repoRoot, pkg, scopeConfig.versionSource);
       const relPath = path.relative(repoRoot, filePath);
 
       const versionToWrite = pkg.ecosystem === 'python' ? toPep440(newVersion) : newVersion;
 
       if (versionSourceEcosystem !== "dotnet" && !args.dryRun) {
-        writeVersion(repoRoot, pkg, versionToWrite);
+        writeVersion(repoRoot, pkg, versionToWrite, scopeConfig.versionSource);
         // Verify
-        const written = readVersion(repoRoot, pkg);
+        const written = readVersion(repoRoot, pkg, scopeConfig.versionSource);
         if (written !== versionToWrite) {
           console.error(`ERROR: Verification failed for ${pkg.name}: expected ${versionToWrite}, got ${written}`);
           process.exit(1);
@@ -483,17 +547,17 @@ function main(): void {
   } else {
     // Each package has its own version
     for (const pkg of scopeConfig.packages) {
-      const filePath = getVersionFilePath(repoRoot, pkg);
+      const filePath = getVersionFilePath(repoRoot, pkg, scopeConfig.versionSource);
       const relPath = path.relative(repoRoot, filePath);
-      const currentVersion = readVersion(repoRoot, pkg);
+      const currentVersion = readVersion(repoRoot, pkg, scopeConfig.versionSource);
       const newVersion = computeNewVersion(currentVersion, args.bump, args.preid, pkg.ecosystem);
 
       console.error(`[${args.scope}] ${pkg.name}: ${currentVersion} -> ${newVersion}`);
 
       if (!args.dryRun) {
-        writeVersion(repoRoot, pkg, newVersion);
+        writeVersion(repoRoot, pkg, newVersion, scopeConfig.versionSource);
         // Verify
-        const written = readVersion(repoRoot, pkg);
+        const written = readVersion(repoRoot, pkg, scopeConfig.versionSource);
         if (written !== newVersion) {
           console.error(`ERROR: Verification failed for ${pkg.name}: expected ${newVersion}, got ${written}`);
           process.exit(1);

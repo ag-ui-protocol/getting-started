@@ -595,8 +595,17 @@ export const defaultApplyEvents = (
             // snapshot.
             const snapshotMap = new Map(newMessages.map((m) => [m.id, m]));
 
-            // `activity` messages are always client-only — backends never include
-            // them in MESSAGES_SNAPSHOT — so they are always preserved.
+            // `activity` messages are only sometimes client-only. They never
+            // travel back to the backend — `prepareRunAgentInput` strips them
+            // from RunAgentInput — so a backend that does not track them cannot
+            // put them in the snapshot, and the local copies must be preserved.
+            // But a backend that does track them re-delivers the whole set it
+            // owns. Since a MESSAGES_SNAPSHOT is a snapshot of every message,
+            // once it carries any activity the backend is declaring the complete
+            // activity set, and one it leaves out has been removed — preserving
+            // it would make the local copy undeletable. So when the snapshot
+            // itself carries activity, treat it as the source of truth for
+            // activity messages and apply the normal replace semantics.
             //
             // `reasoning` messages are only sometimes client-only. Most backends
             // never include reasoning in the snapshot (it exists purely as
@@ -609,9 +618,11 @@ export const defaultApplyEvents = (
             // copy would render the same reasoning twice. So when the snapshot
             // itself carries reasoning, treat it as the source of truth for
             // reasoning messages too and apply the normal replace semantics.
+            const snapshotHasActivity = newMessages.some((m) => m.role === "activity");
             const snapshotHasReasoning = newMessages.some((m) => m.role === "reasoning");
             const isPreservedClientOnly = (m: Message) =>
-              m.role === "activity" || (m.role === "reasoning" && !snapshotHasReasoning);
+              (m.role === "activity" && !snapshotHasActivity) ||
+              (m.role === "reasoning" && !snapshotHasReasoning);
 
             // Step 1 + 2: Keep preserved client-only messages as-is, keep
             // messages present in the snapshot (replaced with snapshot version),

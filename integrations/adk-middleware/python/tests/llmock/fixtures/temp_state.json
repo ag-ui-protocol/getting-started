@@ -6,7 +6,8 @@
         "toolCalls": [
           {
             "name": "check_temp_state_tool",
-            "arguments": "{}"
+            "arguments": "{}",
+            "id": "call_check_temp_state_tool_1"
           }
         ]
       }

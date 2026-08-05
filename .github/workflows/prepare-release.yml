@@ -24,6 +24,9 @@ on:
           - integration-aws-strands-ts
           - integration-claude-agent-sdk-py
           - integration-claude-agent-sdk-ts
+          - integration-claude-managed-agents-dotnet
+          - integration-claude-managed-agents-py
+          - integration-claude-managed-agents-ts
           - integration-cloudflare-agents
           - integration-crewai-py
           - integration-crewai-ts
@@ -83,7 +86,7 @@ jobs:
     steps:
       - name: Find existing release/next PR (stacking target)
         id: existing
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -107,7 +110,7 @@ jobs:
             }
 
       - name: Checkout repo
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -115,19 +118,27 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: "10.33.4"
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
 
       - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+
+      # prepare-release.ts re-locks any uv-managed Python package it bumps, so uv
+      # must be on PATH or the bump aborts rather than shipping a stale lock.
+      # Same pinned action and floor as unit-python-sdk.yml.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ">=0.8.0"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -195,10 +206,16 @@ jobs:
       - name: Mint devops-bot token
         id: app-token
         if: inputs.dry_run != true && steps.bump.outputs.changed_count != '0'
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: "3877599"
           private-key: ${{ secrets.DEVOPS_BOT_PRIVATE_KEY }}
+          # Scope the app token to only what this workflow uses, instead of
+          # inheriting the app installation's blanket permissions (zizmor
+          # github-app). contents:write pushes the release/next branch;
+          # pull-requests:write creates/updates the release PR.
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Configure git credentials for push
         if: inputs.dry_run != true && steps.bump.outputs.changed_count != '0'
@@ -294,7 +311,7 @@ jobs:
 
       - name: Create or update release PR
         if: inputs.dry_run != true && steps.bump.outputs.changed_count != '0'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           HAS_EXISTING: ${{ steps.existing.outputs.has_existing }}
           EXISTING_PR: ${{ steps.existing.outputs.pr_number }}

@@ -38,7 +38,7 @@ from ag_ui.core import (
 )
 from strands.tools.registry import ToolRegistry
 
-from ag_ui_strands.agent import StrandsAgent
+from ag_ui_strands.agent import StrandsAgent, _build_strands_history
 from ag_ui_strands.config import StrandsAgentConfig, ToolBehavior
 
 
@@ -96,6 +96,51 @@ def _run_input(
 
 async def _collect(agent: StrandsAgent, inp: RunAgentInput) -> list:
     return [e async for e in agent.run(inp)]
+
+
+def test_strands_history_bundles_parallel_tool_results():
+    messages = [
+        UserMessage(id="u1", role="user", content="hi"),
+        AssistantMessage(
+            id="a1",
+            role="assistant",
+            content="",
+            tool_calls=[
+                ToolCall(
+                    id="tooluse_1",
+                    type="function",
+                    function=FunctionCall(name="my_tool", arguments="{}"),
+                ),
+                ToolCall(
+                    id="tooluse_2",
+                    type="function",
+                    function=FunctionCall(name="my_tool", arguments="{}"),
+                ),
+                ToolCall(
+                    id="tooluse_3",
+                    type="function",
+                    function=FunctionCall(name="my_tool", arguments="{}"),
+                ),
+            ],
+        ),
+        ToolMessage(id="t1", role="tool", tool_call_id="tooluse_1", content='{"ok":1}'),
+        ToolMessage(id="t2", role="tool", tool_call_id="tooluse_2", content='{"ok":2}'),
+        ToolMessage(id="t3", role="tool", tool_call_id="tooluse_3", content='{"ok":3}'),
+    ]
+
+    native = _build_strands_history(messages)
+
+    assert len(native) == 3
+    assert native[2]["role"] == "user"
+    tool_results = [
+        block["toolResult"] for block in native[2]["content"] if "toolResult" in block
+    ]
+    assert len(tool_results) == 3
+    assert {result["toolUseId"] for result in tool_results} == {
+        "tooluse_1",
+        "tooluse_2",
+        "tooluse_3",
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -44,7 +44,7 @@ public sealed class ProtocolRuleTest
     }
 
     [Fact]
-    public async Task RunError_ThrowsInvalidOperationException()
+    public async Task RunError_ProducesErrorContentUpdate()
     {
         var events = new BaseEvent[]
         {
@@ -52,22 +52,28 @@ public sealed class ProtocolRuleTest
             new RunErrorEvent { Message = "Something failed", Code = "ERR01" }
         };
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => ProcessEventsAsync(events));
-        Assert.Contains("Something failed", ex.Message);
+        var result = await ProcessEventsAsync(events);
+        var update = result[1];
+        var error = Assert.IsType<ErrorContent>(Assert.Single(update.Contents));
+        Assert.Equal("Something failed", error.Message);
+        Assert.Equal("ERR01", error.ErrorCode);
+        Assert.IsType<RunErrorEvent>(update.RawRepresentation);
+        Assert.Equal("t1", update.ConversationId);
+        Assert.Equal("r1", update.ResponseId);
     }
 
     [Fact]
-    public async Task RunErrorAsFirstEvent_ThrowsInvalidOperationException()
+    public async Task RunErrorAsFirstEvent_ProducesErrorContentUpdate()
     {
         var events = new BaseEvent[]
         {
             new RunErrorEvent { Message = "Immediate failure" }
         };
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => ProcessEventsAsync(events));
-        Assert.Contains("Immediate failure", ex.Message);
+        var result = await ProcessEventsAsync(events);
+        var error = Assert.IsType<ErrorContent>(Assert.Single(Assert.Single(result).Contents));
+        Assert.Equal("Immediate failure", error.Message);
+        Assert.Null(error.ErrorCode);
     }
 
     [Fact]
@@ -694,11 +700,7 @@ public sealed class ProtocolRuleTest
             new RunErrorEvent { Message = "Immediate failure" }
         };
 
-        // RunErrorEvent as first event is allowed by the verifier; our ProcessEventsAsync
-        // then throws as part of handling, which is the expected application behavior.
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => ProcessEventsAsync(events));
-        Assert.Contains("Immediate failure", ex.Message);
+        Assert.Single(await ProcessEventsAsync(events));
     }
 
     [Fact]
@@ -719,7 +721,7 @@ public sealed class ProtocolRuleTest
     [Fact]
     public async Task Lifecycle_NoEventsAfterRunError()
     {
-        // RunError terminates the stream — subsequent events are never processed.
+        // RunError emits an ErrorContent update and terminates the run; subsequent events are rejected.
         var events = new BaseEvent[]
         {
             new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
@@ -729,7 +731,7 @@ public sealed class ProtocolRuleTest
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => ProcessEventsAsync(events));
-        Assert.Contains("boom", ex.Message);
+        Assert.Contains("already errored", ex.Message);
     }
 
     [Fact]
@@ -782,7 +784,7 @@ public sealed class ProtocolRuleTest
     [Fact]
     public async Task Lifecycle_RunErrorAfterRunFinished_StillTerminal()
     {
-        // After RUN_FINISHED, RUN_ERROR is allowed but makes run terminal
+        // RUN_ERROR remains allowed after RUN_FINISHED, emits an ErrorContent update, and makes the stream terminal.
         var events = new BaseEvent[]
         {
             new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
@@ -793,7 +795,7 @@ public sealed class ProtocolRuleTest
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => ProcessEventsAsync(events));
-        Assert.Contains("late error", ex.Message);
+        Assert.Contains("already errored", ex.Message);
     }
 
     // ────────────────────────────────────────────────
@@ -914,9 +916,9 @@ public sealed class ProtocolRuleTest
     }
 
     [Fact]
-    public async Task MultiRun_RunErrorBlocksSubsequentEventsInSameRun()
+    public async Task MultiRun_RunErrorBlocksAnotherRunInSameStream()
     {
-        // RunError terminates the stream — the second RunStarted is never reached.
+        // RunError emits an ErrorContent update and prevents another run from starting in the same stream.
         var events = new BaseEvent[]
         {
             new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
@@ -926,7 +928,7 @@ public sealed class ProtocolRuleTest
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => ProcessEventsAsync(events));
-        Assert.Contains("boom", ex.Message);
+        Assert.Contains("already errored", ex.Message);
     }
 
     // ────────────────────────────────────────────────

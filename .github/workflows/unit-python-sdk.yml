@@ -10,6 +10,8 @@ on:
       - "integrations/adk-middleware/python/**"
       - "integrations/aws-strands/python/**"
       - "integrations/langroid/python/**"
+      - "integrations/crew-ai/python/**"
+      - "integrations/claude-managed-agents/python/**"
       - ".github/workflows/unit-python-sdk.yml"
   pull_request:
     branches: [main]
@@ -20,9 +22,9 @@ on:
       - "integrations/adk-middleware/python/**"
       - "integrations/aws-strands/python/**"
       - "integrations/langroid/python/**"
+      - "integrations/crew-ai/python/**"
+      - "integrations/claude-managed-agents/python/**"
       - ".github/workflows/unit-python-sdk.yml"
-
-# Note: crew-ai uses Poetry (no uv.lock) — skipped for now.
 
 permissions:
   contents: read
@@ -33,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -50,20 +52,24 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           version: ">=0.8.0"
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: sdks/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-${{ hashFiles('sdks/python/uv.lock') }}
 
       - name: Install dependencies
         working-directory: sdks/python
-        run: uv sync
+        # --locked fails the build if uv.lock is out of step with
+        # pyproject.toml. Release bumps used to edit pyproject alone,
+        # leaving every released package's lock a version stale (#2313,
+        # #2314); this is what stops that drifting again unnoticed.
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: sdks/python
@@ -74,7 +80,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -91,20 +97,20 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           version: ">=0.8.0"
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: integrations/langgraph/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-langgraph-${{ hashFiles('integrations/langgraph/python/uv.lock') }}
 
       - name: Install dependencies
         working-directory: integrations/langgraph/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/langgraph/python
@@ -115,7 +121,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -132,20 +138,20 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           version: ">=0.8.0"
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: integrations/watsonx/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-watsonx-${{ hashFiles('integrations/watsonx/python/uv.lock') }}
 
       - name: Install dependencies
         working-directory: integrations/watsonx/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/watsonx/python
@@ -156,7 +162,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -173,20 +179,20 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           version: ">=0.8.0"
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: integrations/adk-middleware/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-adk-middleware-${{ hashFiles('integrations/adk-middleware/python/uv.lock') }}
 
       - name: Install dependencies
         working-directory: integrations/adk-middleware/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/adk-middleware/python
@@ -205,7 +211,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -222,13 +228,13 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           version: ">=0.8.0"
 
       - name: Install dependencies
         working-directory: integrations/adk-middleware/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Force google-adk 2.x
         working-directory: integrations/adk-middleware/python
@@ -259,7 +265,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -276,20 +282,20 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           version: ">=0.8.0"
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: integrations/aws-strands/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-aws-strands-${{ hashFiles('integrations/aws-strands/python/uv.lock') }}
 
       - name: Install dependencies
         working-directory: integrations/aws-strands/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/aws-strands/python
@@ -300,7 +306,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -317,21 +323,106 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           version: ">=0.8.0"
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: integrations/langroid/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-langroid-${{ hashFiles('integrations/langroid/python/uv.lock') }}
 
       - name: Install dependencies
         working-directory: integrations/langroid/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/langroid/python
         run: uv run python -m unittest discover tests -v
+
+  crewai-python:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect fork PR
+        id: fork-check
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" && \
+                "${GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME}" != "${{ github.repository }}" ]]; then
+            echo "prefix=fork-" >> "$GITHUB_OUTPUT"
+          else
+            echo "prefix=" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: ">=0.8.0"
+
+      - name: Load cached venv
+        id: cached-uv-dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: integrations/crew-ai/python/.venv
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-crewai-${{ hashFiles('integrations/crew-ai/python/uv.lock') }}
+
+      - name: Install dependencies
+        working-directory: integrations/crew-ai/python
+        run: uv sync --locked
+
+      - name: Run tests
+        working-directory: integrations/crew-ai/python
+        run: uv run python -m pytest tests/ -v
+
+  claude-managed-agents-python:
+    name: claude-managed-agents-python
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect fork PR
+        id: fork-check
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" && \
+                "$HEAD_REPO" != "$BASE_REPO" ]]; then
+            echo "prefix=fork-" >> "$GITHUB_OUTPUT"
+          else
+            echo "prefix=" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REPO: ${{ github.repository }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: ">=0.8.0"
+
+      - name: Load cached venv
+        id: cached-uv-dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: integrations/claude-managed-agents/python/.venv
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-claude-managed-agents-${{ hashFiles('integrations/claude-managed-agents/python/uv.lock') }}
+
+      - name: Install dependencies
+        working-directory: integrations/claude-managed-agents/python
+        run: uv sync --locked
+
+      - name: Run tests
+        working-directory: integrations/claude-managed-agents/python
+        run: uv run python -m pytest tests/ -v

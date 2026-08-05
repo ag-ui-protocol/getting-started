@@ -205,6 +205,7 @@ def create_strands_app(
     agent: "Any",
     path: str = "/",
     ping_path: str | None = "/ping",
+    origins: Optional[List[str]] = None,
 ) -> "Any":
     """Create a FastAPI app with a single Strands agent endpoint and optional ping endpoint.
 
@@ -212,6 +213,10 @@ def create_strands_app(
         agent: The StrandsAgent instance
         path: Path for the agent endpoint (default: "/")
         ping_path: Path for the ping endpoint (default: "/ping"). Pass None to disable.
+        origins: Allowed CORS origins. Defaults to ``["*"]`` (wildcard) for local
+            development. Credentials are only enabled when explicit, non-wildcard
+            origins are supplied — a wildcard origin can never be combined with
+            ``allow_credentials=True``.
     """
     from fastapi import FastAPI
     from .endpoint import add_strands_fastapi_endpoint, add_ping
@@ -220,10 +225,12 @@ def create_strands_app(
 
     # Add CORS middleware
     from fastapi.middleware.cors import CORSMiddleware
+    cors_origins = origins or ["*"]
+    is_wildcard = "*" in cors_origins
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials=bool(origins) and not is_wildcard,
         allow_methods=["*"],
         allow_headers=["*"],
     )

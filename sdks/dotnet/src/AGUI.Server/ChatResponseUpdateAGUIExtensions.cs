@@ -212,19 +212,12 @@ public static class ChatResponseUpdateAGUIExtensions
 
                         if (reasoningContent.ProtectedData is { Length: > 0 } encrypted)
                         {
-                            yield return new ReasoningEncryptedValueEvent
-                            {
-                                Subtype = "message",
-                                EntityId = chatResponse.MessageId ?? string.Empty,
-                                EncryptedValue = encrypted,
-                                RawEvent = raw,
-                            };
+                            yield return reasoningTracker.EmitEncryptedValue(encrypted, raw);
                         }
 
                         if (!string.IsNullOrEmpty(reasoningContent.Text))
                         {
-                            var reasoningMessageId = chatResponse.MessageId ?? AGUIIdGenerator.NewMessageId();
-                            foreach (var openEvt in reasoningTracker.Open(reasoningMessageId))
+                            foreach (var openEvt in reasoningTracker.Open())
                             {
                                 yield return openEvt;
                             }

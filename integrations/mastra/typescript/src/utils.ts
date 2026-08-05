@@ -21,6 +21,29 @@ import { MastraAgent, MastraTracingOptions } from "./mastra";
  */
 type CoreMessageWithId = CoreMessage & { id?: string };
 
+/**
+ * Coerce an AG-UI message id into the charset the OpenAI Responses API accepts
+ * for `input[].id` (`^[A-Za-z0-9_-]+$`). Client-minted ids (e.g. CopilotKit's
+ * `msg-…`) can contain characters the Responses API rejects; once such an id is
+ * replayed as prior-turn history (turn 2+), the request 400s wholesale
+ * (`AI_APICallError: Invalid 'input[N].id'`), which breaks every multi-turn
+ * chat on a Responses-API model. AI SDK v5's `openai(model)` defaults to that
+ * API, so this hits any Mastra agent using the default provider.
+ *
+ * The mapping is deterministic and idempotent: an already-valid id is returned
+ * unchanged (the common case — Mastra-minted assistant ids are UUIDs, a no-op),
+ * and any given id always maps to the same sanitized value. That determinism is
+ * load-bearing for Mastra's history dedup (see convertAGUIMessagesToMastra): a
+ * message is sanitized identically every time it passes through this converter —
+ * both when first stored and when re-sent — so upsert-by-id still matches.
+ */
+const RESPONSES_API_ID_CHARSET = /^[A-Za-z0-9_-]+$/;
+function toModelSafeMessageId(id: string): string {
+  return RESPONSES_API_ID_CHARSET.test(id)
+    ? id
+    : id.replace(/[^A-Za-z0-9_-]/g, "-");
+}
+
 function mediaSourceToUrl(
   source: InputContentDataSource | InputContentUrlSource,
 ): string {
@@ -127,7 +150,10 @@ export function convertAGUIMessagesToMastra(
   //   - processInput filters historical messages whose IDs match the input IDs
   //   - storage.saveMessages upserts by ID, so re-sent history won't duplicate
   // The `id` key is omitted when undefined so it doesn't defeat Mastra's
-  // `"id" in message` check.
+  // `"id" in message` check. Preserved ids are routed through
+  // `toModelSafeMessageId` so a client-minted id can't 400 the OpenAI Responses
+  // API when it is replayed as `input[].id` on later turns (deterministic, so
+  // dedup is unaffected).
   const result: CoreMessageWithId[] = [];
 
   for (const message of messages) {
@@ -146,14 +172,18 @@ export function convertAGUIMessagesToMastra(
         });
       }
       result.push({
-        ...(message.id !== undefined ? { id: message.id } : {}),
+        ...(message.id !== undefined
+          ? { id: toModelSafeMessageId(message.id) }
+          : {}),
         role: "assistant",
         content: parts,
       } as CoreMessage);
     } else if (message.role === "user") {
       const userContent = toMastraContent(message.content);
       result.push({
-        ...(message.id !== undefined ? { id: message.id } : {}),
+        ...(message.id !== undefined
+          ? { id: toModelSafeMessageId(message.id) }
+          : {}),
         role: "user",
         content: userContent,
       } as CoreMessage);
@@ -170,7 +200,9 @@ export function convertAGUIMessagesToMastra(
         }
       }
       result.push({
-        ...(message.id !== undefined ? { id: message.id } : {}),
+        ...(message.id !== undefined
+          ? { id: toModelSafeMessageId(message.id) }
+          : {}),
         role: "tool",
         content: [
           {

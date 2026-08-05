@@ -102,7 +102,9 @@ to `ChatResponseUpdate` values:
 - Tool call events become MEAI function call content.
 - Interrupt outcomes become `ToolApprovalRequestContent` or
   `InterruptRequestContent`.
-- `RUN_ERROR` is surfaced as an exception.
+- `RUN_ERROR` becomes an `ErrorContent` update. Its `message` maps to
+  `ErrorContent.Message`, and its optional `code` maps to
+  `ErrorContent.ErrorCode`.
 
 `ResponseId` on each update corresponds to the AG-UI run id. The client clears
 `ConversationId` before yielding updates so callers continue sending full

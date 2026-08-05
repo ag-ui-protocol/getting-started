@@ -115,12 +115,22 @@ fixture (or omit it) to force its scenario to re-record. Captured files land in
 
 After a tool call the client replays the **same conversation** with the tool result
 appended — the last *user* message is unchanged. So a turn-2 fixture matched on
-`userMessage` would re-match the turn-1 fixture and loop. AIMock's documented fix
-(`write-fixtures` skill, gotcha #5) is to match the **tool-result turn**:
+`userMessage` would re-match the turn-1 fixture and loop. The fix is to match the
+**tool-result turn**:
 
 - Programmatically: `predicate: (req) => req.messages.at(-1)?.role === "tool"`.
-- In JSON fixtures (our case, since `predicate` is a function): the **`toolCallId`** field —
-  "exact match on `tool_call_id` of the last `role: "tool"` message".
+- In JSON fixtures (our case, since `predicate` is a function), any of:
+  - **`toolCallId`** — exact match on `tool_call_id` of the request's **last message**,
+    which must itself be `role: "tool"`. A tool result buried earlier in the
+    conversation does *not* qualify: aimock 1.16.4 tightened this from "the most
+    recent `role: "tool"` message anywhere in history", because the loose form let a
+    `toolCallId` fixture shadow `userMessage` matchers on fresh user turns.
+  - **`hasToolResult: true | false`** — the simplest two-leg discriminator, scoped to
+    the *current* turn (the messages after the last `user` message) since 1.37.3. Prefer
+    this over `toolCallId` when you only need "has a tool result come back yet?", because
+    it does not hard-code a recorded id that changes when you re-record.
+  - **`toolResultContains: "<substring>"`** — for legs that share a `tool_call_id` and
+    differ only in the tool-result payload.
 
 List the specific tool-result fixture **first** so it wins on turn 2; turn 1 (no tool
 message) falls through to the `userMessage` fixture. This is turn-count-independent — no
@@ -140,21 +150,41 @@ message) falls through to the `userMessage` fixture. This is turn-count-independ
 }
 ```
 
-#### Capturing both turns from the LLM (two passes)
+#### Capturing both turns from the LLM
 
-The *recorder* still keys every capture on the last user message (`buildFixtureMatch`) and
-caches it in memory, so a single record pass only captures turn 1 (it then shadows turn 2).
-To capture turn 2's real response:
+**One record pass captures every turn.** `buildFixtureMatch` stamps `userMessage`,
+`model`, `turnIndex` (count of `assistant` messages) and `hasToolResult` onto each
+capture, and registers it in the live fixture pool. Turn 2 therefore does not match
+turn 1's capture — they differ on `hasToolResult`, which is a hard reject gate — so the
+request misses, proxies upstream, and is recorded. Both turns land in `fixtures/recorded/`.
 
-1. **Pass 1** — record turn 1, then curate the capture into the committed fixture as
-   `{ "userMessage": ..., "sequenceIndex": 0 }` (temporary — gates it to the first occurrence).
-2. **Pass 2** — re-run recording. Turn 1 replays; turn 2 is the 2nd occurrence, skips the
-   `sequenceIndex: 0` entry, proxies to the LLM, and is captured.
-3. **Finalize** — rewrite the committed fixture into the turn-count-independent form above
-   (turn-2 `toolCallId` first, turn-1 `userMessage` second, drop `sequenceIndex`).
+The two-pass `sequenceIndex` dance this section used to describe was only necessary
+before aimock 1.19.3, when a capture was keyed on `userMessage` alone and turn 1 shadowed
+turn 2.
 
-Single-turn scenarios need only one pass. After curating, clear `OPENAI_API_KEY`/
-`AIMOCK_RECORD` and re-run to confirm the scenario replays offline and green.
+**When curating a capture into a committed fixture, decide about the extra match keys
+rather than pasting them verbatim:**
+
+- **Strip `model`** unless you mean it. Recording defaults to `gpt-5-mini`
+  (`helpers/record-config.ts`) while replay defaults to `gpt-4o`
+  (`helpers/dotnet-server.ts`), so a captured `"model": "gpt-5-mini"` will never match on
+  replay — the fixture silently misses and you get a 404 with no obvious cause.
+- **Strip `turnIndex`** unless you want depth-based selection. Every fixture in this repo
+  currently omits it, and `selectByTurnIndex` only reorders candidates when at least one
+  carries it — so the "first registered match wins" ordering that several fixture files
+  depend on holds *because* nothing sets it. Introducing one changes that.
+- **Keep `hasToolResult`** if the scenario has a tool-result leg; it is more durable than
+  pinning a recorded `toolCallId`.
+
+After curating, clear `OPENAI_API_KEY`/`AIMOCK_RECORD` and re-run to confirm the scenario
+replays offline and green.
+
+> **Recording against a reasoning model:** `RecordConfig` defaults both
+> `upstreamTimeoutMs` and `bodyTimeoutMs` to 30s. Token-emission gaps during a reasoning
+> model's thinking phase can exceed that. When it fires the capture is **dropped
+> entirely** — no fixture is written — and aimock logs `Proxy request failed: Upstream
+> response timed out after 30s` at error level, with the client seeing a 502 or a
+> destroyed stream. Lift `bodyTimeoutMs` if you hit it.
 
 ## Approach
 

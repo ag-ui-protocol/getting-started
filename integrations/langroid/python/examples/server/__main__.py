@@ -12,10 +12,17 @@ from .api.shared_state import app as shared_state_app
 
 app = FastAPI(title="Langroid AG-UI Examples Server")
 
+# Allowed CORS origins come from CORS_ALLOW_ORIGINS (comma-separated) and default
+# to the "*" wildcard for local development. Credentials are only enabled for
+# explicit, non-wildcard origins — a wildcard can never be combined with
+# allow_credentials=True (any site could then read authenticated responses).
+_origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if o.strip()]
+cors_origins = _origins or ["*"]
+is_wildcard = "*" in cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=bool(_origins) and not is_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )
