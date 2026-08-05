@@ -11,6 +11,7 @@ on:
       - "integrations/aws-strands/python/**"
       - "integrations/langroid/python/**"
       - "integrations/crew-ai/python/**"
+      - "integrations/claude-managed-agents/python/**"
       - ".github/workflows/unit-python-sdk.yml"
   pull_request:
     branches: [main]
@@ -22,6 +23,7 @@ on:
       - "integrations/aws-strands/python/**"
       - "integrations/langroid/python/**"
       - "integrations/crew-ai/python/**"
+      - "integrations/claude-managed-agents/python/**"
       - ".github/workflows/unit-python-sdk.yml"
 
 permissions:
@@ -375,4 +377,48 @@ jobs:
 
       - name: Run tests
         working-directory: integrations/crew-ai/python
+        run: uv run python -m pytest tests/ -v
+
+  claude-managed-agents-python:
+    name: claude-managed-agents-python
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect fork PR
+        id: fork-check
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" && \
+                "$HEAD_REPO" != "$BASE_REPO" ]]; then
+            echo "prefix=fork-" >> "$GITHUB_OUTPUT"
+          else
+            echo "prefix=" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REPO: ${{ github.repository }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: ">=0.8.0"
+
+      - name: Load cached venv
+        id: cached-uv-dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: integrations/claude-managed-agents/python/.venv
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-claude-managed-agents-${{ hashFiles('integrations/claude-managed-agents/python/uv.lock') }}
+
+      - name: Install dependencies
+        working-directory: integrations/claude-managed-agents/python
+        run: uv sync
+
+      - name: Run tests
+        working-directory: integrations/claude-managed-agents/python
         run: uv run python -m pytest tests/ -v

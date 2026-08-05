@@ -6,7 +6,8 @@
         "toolCalls": [
           {
             "name": "generate_task_steps",
-            "arguments": "{\"steps\":[{\"description\":\"Crack eggs into bowl\",\"status\":\"enabled\"},{\"description\":\"Preheat oven to 350F\",\"status\":\"enabled\"},{\"description\":\"Mix and bake for 25 min\",\"status\":\"enabled\"}]}"
+            "arguments": "{\"steps\":[{\"description\":\"Crack eggs into bowl\",\"status\":\"enabled\"},{\"description\":\"Preheat oven to 350F\",\"status\":\"enabled\"},{\"description\":\"Mix and bake for 25 min\",\"status\":\"enabled\"}]}",
+            "id": "call_generate_task_steps_1"
           }
         ]
       }
@@ -21,7 +22,8 @@
         "toolCalls": [
           {
             "name": "generate_task_steps",
-            "arguments": "{\"steps\":[{\"description\":\"Start The Planning\",\"status\":\"enabled\"},{\"description\":\"Design spacecraft\",\"status\":\"enabled\"},{\"description\":\"Launch mission\",\"status\":\"enabled\"}]}"
+            "arguments": "{\"steps\":[{\"description\":\"Start The Planning\",\"status\":\"enabled\"},{\"description\":\"Design spacecraft\",\"status\":\"enabled\"},{\"description\":\"Launch mission\",\"status\":\"enabled\"}]}",
+            "id": "call_generate_task_steps_2"
           }
         ]
       }
@@ -32,7 +34,8 @@
         "toolCalls": [
           {
             "name": "generate_task_steps",
-            "arguments": "{\"steps\":[{\"description\":\"Research mission requirements\",\"status\":\"enabled\"},{\"description\":\"Assemble crew\",\"status\":\"enabled\"},{\"description\":\"Build spacecraft\",\"status\":\"enabled\"},{\"description\":\"Launch from Earth\",\"status\":\"enabled\"},{\"description\":\"Land on Mars\",\"status\":\"enabled\"}]}"
+            "arguments": "{\"steps\":[{\"description\":\"Research mission requirements\",\"status\":\"enabled\"},{\"description\":\"Assemble crew\",\"status\":\"enabled\"},{\"description\":\"Build spacecraft\",\"status\":\"enabled\"},{\"description\":\"Launch from Earth\",\"status\":\"enabled\"},{\"description\":\"Land on Mars\",\"status\":\"enabled\"}]}",
+            "id": "call_generate_task_steps_3"
           }
         ]
       }

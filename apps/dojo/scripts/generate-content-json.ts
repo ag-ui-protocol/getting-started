@@ -545,6 +545,73 @@ const agentFilesMapper: Record<
       {},
     );
   },
+  // claude-managed-agents serves every feature from one server per language,
+  // driven by the shared agent specs.
+  "claude-managed-agents-dotnet": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/dotnet/examples/AGUIDojoServer/AgentSpecs.cs`,
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/dotnet/examples/AGUIDojoServer/ExampleAgents.cs`,
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/dotnet/examples/AGUIDojoServer/Program.cs`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
+  "claude-managed-agents-python": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/python/examples/agents.py`,
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/python/examples/server.py`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
+  "claude-managed-agents-typescript": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/typescript/examples/agents.ts`,
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/typescript/examples/server.ts`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
   // watsonx uses a single TS agent for all features — no per-feature server files
   watsonx: () => ({
     agentic_chat: [

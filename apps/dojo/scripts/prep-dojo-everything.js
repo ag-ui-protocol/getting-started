@@ -70,7 +70,7 @@ const ALL_TARGETS = {
     cwd: path.join(integrationsRoot, "agno/python/examples"),
   },
   "crew-ai": {
-    command: "poetry install",
+    command: "uv sync",
     name: "CrewAI",
     cwd: path.join(integrationsRoot, "crew-ai/python"),
   },
@@ -143,6 +143,22 @@ const ALL_TARGETS = {
     command: "pnpm install",
     name: "Claude Agent SDK (TypeScript)",
     cwd: path.join(integrationsRoot, "claude-agent-sdk/typescript"),
+  },
+  "claude-managed-agents-dotnet": {
+    command:
+      "dotnet restore AGUIDojoServer/AGUIDojoServer.csproj && dotnet build AGUIDojoServer/AGUIDojoServer.csproj",
+    name: "Claude Managed Agents (.NET)",
+    cwd: path.join(integrationsRoot, "claude-managed-agents/dotnet/examples"),
+  },
+  "claude-managed-agents-python": {
+    command: "uv sync",
+    name: "Claude Managed Agents (Python)",
+    cwd: path.join(integrationsRoot, "claude-managed-agents/python/examples"),
+  },
+  "claude-managed-agents-typescript": {
+    command: "pnpm install",
+    name: "Claude Managed Agents (TypeScript)",
+    cwd: path.join(integrationsRoot, "claude-managed-agents/typescript"),
   },
   "microsoft-agent-framework-python": {
     command: "uv sync",

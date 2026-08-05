@@ -7,7 +7,7 @@ readme = "README.md"
 packages = [{ include = "server" }]
 
 [tool.poetry.dependencies]
-python = "<3.14,>=3.12"
+python = "<3.15,>=3.10"
 ag-ui-protocol = "^0.1.10"
 fastapi = "^0.115.12"
 uvicorn = "^0.34.3"

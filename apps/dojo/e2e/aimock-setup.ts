@@ -2,6 +2,8 @@ import { LLMock, type ChatMessage } from "@copilotkit/aimock";
 import * as path from "node:path";
 import { registerA2UIRecoveryFixtures } from "./a2ui-recovery-fixtures";
 import { registerA2UIADKFixtures } from "./a2ui-adk-fixtures";
+import { registerA2UICrewAIFixtures } from "./a2ui-crewai-fixtures";
+import { registerInterruptCrewAIFixtures } from "./interrupt-crewai-fixtures";
 
 // Configurable so parallel worktrees / runs don't collide on one aimock port.
 const MOCK_PORT = Number(process.env.AIMOCK_PORT) || 5555;
@@ -31,6 +33,16 @@ export async function setupLLMock(): Promise<void> {
   // OSS-162 A2UI recovery showcase fixtures (predicate fixtures, must precede
   // the generic loadFixtureFile below).
   registerA2UIRecoveryFixtures(mockServer);
+
+  // CrewAI A2UI fixtures (gpt-4o, scoped to CrewAI-unique prompts so
+  // they never intercept the LangGraph/ADK demos). Predicate fixtures, before
+  // the generic loader.
+  registerA2UICrewAIFixtures(mockServer);
+
+  // CrewAI interrupt (suspend/resume) fixtures: the extract call before the
+  // pause and the confirm call after the resume. Scoped to this flow's own
+  // system prompts, before the generic loader.
+  registerInterruptCrewAIFixtures(mockServer);
 
   // Extract text from message content — handles both string and array-of-parts
   // (Strands SDK sends content as [{type: "text", text: "..."}])
@@ -1436,25 +1448,36 @@ export async function setupLLMock(): Promise<void> {
 
   // Universal catch-all: matches any request that wasn't handled above.
   // Appended LAST so specific fixtures always take priority.
-  // Log unmatched requests for debugging fixture mismatches.
+  //
+  // The diagnostic lives in the RESPONSE FACTORY, not in the predicate. Since
+  // aimock 1.34.0 the matcher no longer returns on first match — it evaluates
+  // every candidate's `match.predicate` and only then selects a winner, so a
+  // side effect inside a predicate fires on every single request. A response
+  // factory runs only when this fixture is the one actually served, i.e. only
+  // on a genuine fixture miss, which is what this log is for.
   mockServer.addFixture({
+    // endpoint: "chat" is load-bearing. A *function* response skips aimock's
+    // per-endpoint response-shape gate, so an unscoped catch-all becomes
+    // eligible for image/speech/transcription/video requests it could never
+    // match before, turning their honest 404 into a mis-attributed 500.
     match: {
-      predicate: (req) => {
-        const lastUser = req.messages.filter((m) => m.role === "user").pop();
-        const userText = lastUser ? textOf(lastUser.content) : "(no user msg)";
-        const toolNames =
-          req.tools?.map((t) => t.function.name).join(",") || "(no tools)";
-        const contentType = lastUser ? typeof lastUser.content : "N/A";
-        const contentSample = lastUser
-          ? JSON.stringify(lastUser.content).slice(0, 120)
-          : "N/A";
-        console.error(
-          `[aimock CATCH-ALL] model=${req.model} lastUser="${userText.slice(0, 80)}" tools=[${toolNames}] msgs=${req.messages.length} contentType=${contentType} content=${contentSample}`,
-        );
-        return true;
-      },
+      endpoint: "chat",
+      predicate: () => true,
     },
-    response: { content: "I understand. How can I help you with that?" },
+    response: (req) => {
+      const lastUser = req.messages.filter((m) => m.role === "user").pop();
+      const userText = lastUser ? textOf(lastUser.content) : "(no user msg)";
+      const toolNames =
+        req.tools?.map((t) => t.function.name).join(",") || "(no tools)";
+      const contentType = lastUser ? typeof lastUser.content : "N/A";
+      const contentSample = lastUser
+        ? JSON.stringify(lastUser.content).slice(0, 120)
+        : "N/A";
+      console.error(
+        `[aimock CATCH-ALL] model=${req.model} lastUser="${userText.slice(0, 80)}" tools=[${toolNames}] msgs=${req.messages.length} contentType=${contentType} content=${contentSample}`,
+      );
+      return { content: "I understand. How can I help you with that?" };
+    },
   });
 
   // Log fixture counts for debugging

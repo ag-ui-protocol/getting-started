@@ -25,6 +25,9 @@ type envVars = {
   awsStrandsTypescriptUrl: string;
   claudeAgentSdkPythonUrl: string;
   claudeAgentSdkTypescriptUrl: string;
+  claudeManagedAgentsDotnetUrl: string;
+  claudeManagedAgentsPythonUrl: string;
+  claudeManagedAgentsTypescriptUrl: string;
   langroidUrl: string;
   watsonxRegion: string;
   watsonxInstanceId: string;
@@ -84,6 +87,13 @@ export default function getEnvVars(): envVars {
       process.env.CLAUDE_AGENT_SDK_PYTHON_URL || "http://localhost:8019",
     claudeAgentSdkTypescriptUrl:
       process.env.CLAUDE_AGENT_SDK_TYPESCRIPT_URL || "http://localhost:8020",
+    claudeManagedAgentsDotnetUrl:
+      process.env.CLAUDE_MANAGED_AGENTS_DOTNET_URL || "http://localhost:8026",
+    claudeManagedAgentsPythonUrl:
+      process.env.CLAUDE_MANAGED_AGENTS_PYTHON_URL || "http://localhost:8025",
+    claudeManagedAgentsTypescriptUrl:
+      process.env.CLAUDE_MANAGED_AGENTS_TYPESCRIPT_URL ||
+      "http://localhost:8024",
     langroidUrl: process.env.LANGROID_URL || "http://localhost:8021",
     watsonxRegion: process.env.WATSONX_REGION || "",
     watsonxInstanceId: process.env.WATSONX_INSTANCE_ID || "",

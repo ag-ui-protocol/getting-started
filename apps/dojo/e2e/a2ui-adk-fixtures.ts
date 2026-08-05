@@ -108,7 +108,27 @@ const HOTELS_FIXED = [
   { id: "2", name: "Downtown Boutique Hotel", location: "SoHo", rating: 4.0, price: "$280" },
 ];
 
+/**
+ * Gemini tool-call ids must be supplied explicitly. aimock's Gemini serializer
+ * used to fall back to a generated id (`id: tc.id || generateToolCallId()`); that
+ * fallback was dropped before 1.23.1, which emitted no id at all, and 1.24.1
+ * restored emission but only for an id the fixture supplies. With no
+ * id, ADK's `populate_client_function_call_id()` mints a fresh UUID per SSE
+ * event, so partial and final events disagree — the failure that
+ * `_extract_lro_id_remap` works around, and only for LRO calls.
+ */
+const toolCallCounts = new Map<string, number>();
+const geminiToolCall = (name: string, args: string) => () => {
+  const n = (toolCallCounts.get(name) ?? 0) + 1;
+  toolCallCounts.set(name, n);
+  return { toolCalls: [{ name, arguments: args, id: `call_${name}_${n}` }] };
+};
+
 export function registerA2UIADKFixtures(mockServer: LLMock): void {
+  // Reset per registration: the counter is module-level, so without this the
+  // suffix would depend on test order, sharding and retries rather than on the
+  // conversation.
+  toolCallCounts.clear();
   const hasTool = (req: any, name: string) => req.tools?.some((t: any) => t.function.name === name);
   const wantsA2UI = (req: any) =>
     isHotelCreate(userText(req.messages)) || isRecover(userText(req.messages)) || isExhaust(userText(req.messages));
@@ -119,7 +139,7 @@ export function registerA2UIADKFixtures(mockServer: LLMock): void {
       predicate: (req: any) =>
         isGemini(req) && hasTool(req, "search_flights") && /flights/i.test(userText(req.messages)),
     },
-    response: { toolCalls: [{ name: "search_flights", arguments: JSON.stringify({ flights: FLIGHTS }) }] },
+    response: geminiToolCall("search_flights", JSON.stringify({ flights: FLIGHTS })),
   });
 
   // 0b) fixed_schema — backend search_hotels tool (user asks about hotels).
@@ -128,25 +148,25 @@ export function registerA2UIADKFixtures(mockServer: LLMock): void {
       predicate: (req: any) =>
         isGemini(req) && hasTool(req, "search_hotels") && /hotels/i.test(userText(req.messages)),
     },
-    response: { toolCalls: [{ name: "search_hotels", arguments: JSON.stringify({ hotels: HOTELS_FIXED }) }] },
+    response: geminiToolCall("search_hotels", JSON.stringify({ hotels: HOTELS_FIXED })),
   });
 
   // 1) Main ADK agent: A2UI prompt → call the generate_a2ui sub-agent tool.
   mockServer.addFixture({
     match: { predicate: (req: any) => isGemini(req) && hasTool(req, "generate_a2ui") && wantsA2UI(req) },
-    response: { toolCalls: [{ name: "generate_a2ui", arguments: JSON.stringify({ intent: "create" }) }] },
+    response: geminiToolCall("generate_a2ui", JSON.stringify({ intent: "create" })),
   });
 
   // 2) Sub-agent — dynamic_schema create → valid surface (Gemini-shaped args).
   mockServer.addFixture({
     match: { predicate: (req: any) => isGemini(req) && hasTool(req, "render_a2ui") && isHotelCreate(allText(req.messages)) },
-    response: { toolCalls: [{ name: "render_a2ui", arguments: renderArgsGemini(true) }] },
+    response: geminiToolCall("render_a2ui", renderArgsGemini(true)),
   });
 
   // 3) Sub-agent — EXHAUST ("broken"): always the dangling-ref surface (invalid).
   mockServer.addFixture({
     match: { predicate: (req: any) => isGemini(req) && hasTool(req, "render_a2ui") && isExhaust(allText(req.messages)) },
-    response: { toolCalls: [{ name: "render_a2ui", arguments: renderArgsGemini(false) }] },
+    response: geminiToolCall("render_a2ui", renderArgsGemini(false)),
   });
 
   // 4) Sub-agent — RECOVER ("luxury"), RETRY (errors fed back) → valid.
@@ -155,7 +175,7 @@ export function registerA2UIADKFixtures(mockServer: LLMock): void {
       predicate: (req: any) =>
         isGemini(req) && hasTool(req, "render_a2ui") && isRecover(allText(req.messages)) && allText(req.messages).includes(RETRY_MARKER),
     },
-    response: { toolCalls: [{ name: "render_a2ui", arguments: renderArgsGemini(true) }] },
+    response: geminiToolCall("render_a2ui", renderArgsGemini(true)),
   });
 
   // 5) Sub-agent — RECOVER ("luxury"), FIRST attempt (no marker) → invalid.
@@ -164,6 +184,6 @@ export function registerA2UIADKFixtures(mockServer: LLMock): void {
       predicate: (req: any) =>
         isGemini(req) && hasTool(req, "render_a2ui") && isRecover(allText(req.messages)) && !allText(req.messages).includes(RETRY_MARKER),
     },
-    response: { toolCalls: [{ name: "render_a2ui", arguments: renderArgsGemini(false) }] },
+    response: geminiToolCall("render_a2ui", renderArgsGemini(false)),
   });
 }

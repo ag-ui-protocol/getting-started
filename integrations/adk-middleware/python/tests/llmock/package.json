@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@copilotkit/aimock": "^1.7.0"
+    "@copilotkit/aimock": "1.37.4"
   }
 }

@@ -65,7 +65,9 @@ on:
     paths:
       - "**/package.json"
       - "**/pyproject.toml"
+      # Every Directory.Build.props that carries a released .NET VersionPrefix.
       - "sdks/dotnet/Directory.Build.props"
+      - "integrations/claude-managed-agents/dotnet/Directory.Build.props"
   workflow_dispatch:
     inputs:
       mode:
@@ -91,6 +93,9 @@ on:
           - integration-aws-strands-ts
           - integration-claude-agent-sdk-py
           - integration-claude-agent-sdk-ts
+          - integration-claude-managed-agents-dotnet
+          - integration-claude-managed-agents-py
+          - integration-claude-managed-agents-ts
           - integration-cloudflare-agents
           - integration-crewai-py
           - integration-crewai-ts
@@ -196,7 +201,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271  # v6.0.9
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
         with:
           version: "10.33.4"
 
@@ -660,7 +665,7 @@ jobs:
       # --- TypeScript publish ---
       - name: Setup pnpm
         if: needs.build.outputs.ts_count != '0' || needs.build.outputs.pre_ts_count != '0'
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271  # v6.0.9
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
         with:
           version: "10.33.4"
 
@@ -1236,16 +1241,29 @@ jobs:
           dotnet test tests/AGUI.Server.UnitTests -c Release -p:SignAssembly=false
           dotnet test tests/AGUI.Hosting.AspNetCore.IntegrationTests -c Release -p:SignAssembly=false
 
+      # The integration lives in its own solution with its own
+      # Directory.Build.props, so the SDK suites above do not cover it.
+      - name: Run claude-managed-agents .NET tests
+        if: >
+          contains(needs.build.outputs.dotnet_packages, 'AGUI.ClaudeManagedAgents') ||
+          contains(needs.build.outputs.pre_dotnet_packages_json, 'AGUI.ClaudeManagedAgents')
+        shell: bash
+        working-directory: integrations/claude-managed-agents/dotnet
+        run: dotnet test tests/AGUI.ClaudeManagedAgents.Tests -c Release
+
+      # Built from the detected set rather than a hand-kept list, so a package
+      # outside sdks/dotnet (an integration with its own Directory.Build.props)
+      # is not packed --no-build against a build that never happened.
       - name: Build .NET packages
         shell: bash
-        working-directory: sdks/dotnet
         run: |
           set -euo pipefail
-          dotnet build src/AGUI.Abstractions/AGUI.Abstractions.csproj -c Release --no-incremental
-          dotnet build src/AGUI.Formatting/AGUI.Formatting.csproj -c Release --no-incremental
-          dotnet build src/AGUI.Protobuf/AGUI.Protobuf.csproj -c Release --no-incremental
-          dotnet build src/AGUI.Client/AGUI.Client.csproj -c Release --no-incremental
-          dotnet build src/AGUI.Server/AGUI.Server.csproj -c Release --no-incremental
+          while read -r pkg; do
+            NAME=$(echo "$pkg" | jq -r '.name')
+            PKG_PATH=$(echo "$pkg" | jq -r '.path')
+            echo "Building ${NAME} from ${PKG_PATH}"
+            dotnet build "${PKG_PATH}/${NAME}.csproj" -c Release --no-incremental
+          done < <(jq -c '.[]' dotnet-packages.json)
 
       - name: Pack NuGet packages
         shell: bash
@@ -1254,11 +1272,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts/nuget
-          BASE_VERSION=$(sed -nE 's/.*<VersionPrefix[^>]*>([^<]+)<\/VersionPrefix>.*/\1/p' sdks/dotnet/Directory.Build.props | head -n1)
           while read -r pkg; do
             NAME=$(echo "$pkg" | jq -r '.name')
             VERSION=$(echo "$pkg" | jq -r '.version')
             PKG_PATH=$(echo "$pkg" | jq -r '.path')
+            # Each package's own Directory.Build.props, from release.config.json's
+            # versionSource: a second .NET scope has a different base version.
+            PROPS=$(echo "$pkg" | jq -r '.file')
+            BASE_VERSION=$(sed -nE 's/.*<VersionPrefix[^>]*>([^<]+)<\/VersionPrefix>.*/\1/p' "$PROPS" | head -n1)
+            if [ -z "$BASE_VERSION" ]; then
+              echo "::error::Could not read VersionPrefix from ${PROPS} for ${NAME}"
+              exit 1
+            fi
             CSPROJ="${PKG_PATH}/${NAME}.csproj"
             EXTRA_ARGS=()
             if [ "$MODE" = "prerelease" ]; then
@@ -1336,7 +1361,7 @@ jobs:
       # long-lived client secret is stored.
       - name: Azure login (OIDC)
         if: vars.SIGNING_PROVIDER == 'keyvault'
-        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43  # v3.0.0
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca  # v3.0.1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -1602,7 +1627,7 @@ jobs:
               NUGET_INTENDED=true
             else
               # Map the dispatch scope to its ecosystem. The explicit NuGet arm
-              # catches sdk-dotnet. The *-py glob catches the sdk-py /
+              # catches the .NET scopes. The *-py glob catches the sdk-py /
               # integration-*-py PyPI scopes; the explicit Python names cover
               # PyPI scopes that do NOT end in -py. Everything else is npm. This
               # only affects FAILURE paging — success arms use the real
@@ -1614,7 +1639,7 @@ jobs:
               # verify-release-scope-dropdowns.sh asserts this list maps every
               # config scope to the correct ecosystem, so it cannot drift.
               case "$SCOPE" in
-                sdk-dotnet)
+                integration-claude-managed-agents-dotnet|sdk-dotnet)
                   NUGET_INTENDED=true ;;
                 integration-agent-spec|integration-langroid|sdk-py-a2ui-toolkit)
                   PY_INTENDED=true ;;
@@ -1679,9 +1704,19 @@ jobs:
                 if echo "$FILES" | grep -qE '(^|/)pyproject\.toml$'; then
                   PY_INTENDED=true
                 fi
-                if echo "$FILES" | grep -qx 'sdks/dotnet/Directory.Build.props'; then
-                  NUGET_INTENDED=true
-                fi
+                # Every enrolled .NET versionSource. A .NET version lives in a
+                # Directory.Build.props rather than in a manifest the globs above
+                # catch, so this list is static and must cover each .NET scope —
+                # otherwise a failed build on an integration's version bump reads
+                # as "NuGet was never intended" and the failure page is swallowed.
+                # verify-release-scope-dropdowns.sh keeps it in step with
+                # release.config.json (and with the push trigger's paths).
+                DOTNET_VERSION_SOURCES="sdks/dotnet/Directory.Build.props integrations/claude-managed-agents/dotnet/Directory.Build.props"
+                for props in $DOTNET_VERSION_SOURCES; do
+                  if printf '%s\n' "$FILES" | grep -qxF "$props"; then
+                    NUGET_INTENDED=true
+                  fi
+                done
               fi
             fi
           fi
@@ -1699,7 +1734,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: "10.33.4"
 
