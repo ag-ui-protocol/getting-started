@@ -24,6 +24,9 @@ on:
           - integration-aws-strands-ts
           - integration-claude-agent-sdk-py
           - integration-claude-agent-sdk-ts
+          - integration-claude-managed-agents-dotnet
+          - integration-claude-managed-agents-py
+          - integration-claude-managed-agents-ts
           - integration-cloudflare-agents
           - integration-crewai-py
           - integration-crewai-ts
@@ -107,7 +110,7 @@ jobs:
             }
 
       - name: Checkout repo
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -115,7 +118,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: "10.33.4"
 
@@ -125,7 +128,7 @@ jobs:
           node-version: "22"
 
       - name: Setup Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 

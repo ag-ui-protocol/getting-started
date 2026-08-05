@@ -308,7 +308,20 @@ AG-UI was born from CopilotKit's initial **partnership** with LangGraph and Crew
 | :----- | ------ | --------------- | ------------ |
 | [CopilotKit](https://github.com/CopilotKit/CopilotKit) | Supported | [Getting Started](https://docs.copilotkit.ai/direct-to-llm/guides/quickstart) | 1st Party |
 | [Terminal + Agent]() | Supported | [Getting Started](https://docs.ag-ui.com/quickstart/clients) | Community |
+| Chat platforms (Slack, Microsoft Teams) | Supported | [Channels SDK](https://github.com/CopilotKit/channels-sdk), [OpenTag example](https://github.com/CopilotKit/OpenTag) | 1st Party |
 | [React Native](https://reactnative.dev/) | Help Wanted | [GitHub Source](https://github.com/ag-ui-protocol/ag-ui/issues/510) | Community |
+
+An AG-UI client does not have to be a web application. The protocol describes an
+event stream rather than a rendering target, so a terminal, a mobile app, or a
+chat platform can each act as a client.
+
+A chat-platform client is something anyone can build against AG-UI. The
+[Channels SDK](https://github.com/CopilotKit/channels-sdk) is one implementation
+of it, and [OpenTag](https://github.com/CopilotKit/OpenTag)
+is a complete application built on it: a Python LangGraph agent served over AG-UI
+into Slack and Microsoft Teams. In that application the agent and its runtime are
+self-hosted, while platform credentials and message delivery are handled by
+CopilotKit Intelligence — a hosted service, not part of the protocol.
 
 ---
 
@@ -416,4 +429,7 @@ Here's how to get help or provide feedback:
 - For bug reports and feature requests related to the AG-UI specification, SDKs,
   or documentation (open source), please
   [create a GitHub issue](https://github.com/ag-ui-protocol/ag-ui/issues)
-- For discussions or Q&A about AG-UI, please join the [Discord community](https://discord.gg/Jd3FzfdJa8)
+- For discussions or Q&A about AG-UI, please join the
+  [Discord community](https://discord.gg/Jd3FzfdJa8)
+- For production architecture or implementation help, see
+  [Production support](/talk-to-us)

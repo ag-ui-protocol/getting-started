@@ -21,6 +21,7 @@
       "@ag-ui/agno",
       "@ag-ui/aws-strands",
       "@ag-ui/claude-agent-sdk",
+      "@ag-ui/claude-managed-agents",
       "@ag-ui/cloudflare-agents",
       "@ag-ui/crewai",
       "@ag-ui/langchain",

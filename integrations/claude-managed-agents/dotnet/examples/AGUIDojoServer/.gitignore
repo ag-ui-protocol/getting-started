@@ -1,0 +1,6 @@
+# Provisioned IDs land under bin/ (next to the built assembly); keep the old
+# working-directory location ignored too as a safety net.
+.managed-agents.json
+.env
+bin/
+obj/

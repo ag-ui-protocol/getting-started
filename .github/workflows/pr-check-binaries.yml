@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -87,9 +87,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
       - name: Check build config allowlist
         run: bash .github/scripts/check-config-allowlist.sh
+
+  check-lfs-pointers:
+    name: Git LFS pointers
+    runs-on: ubuntu-latest
+    steps:
+      # lfs: false is deliberate. The check reads blobs from the index, where
+      # LFS-tracked files are always pointers, so it neither needs nor wants
+      # the objects hydrated.
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - name: Check Git LFS pointers match .gitattributes
+        run: bash .github/scripts/check-lfs-pointers.sh

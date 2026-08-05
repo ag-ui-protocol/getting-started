@@ -82,6 +82,22 @@ class TestAguiMessagesToLangchain(unittest.TestCase):
         assert isinstance(result[0], ToolMessage)
         assert result[0].content == "42"
         assert result[0].tool_call_id == "tc1"
+        # A tool result with no error maps to LangChain's default "success" status.
+        assert result[0].status == "success"
+
+    def test_tool_message_error_maps_to_status(self):
+        # A client-reported tool failure must reach the model as an error, not a
+        # silent success -- AG-UI's ToolMessage.error becomes status="error".
+        msg = AGUIToolMessage(
+            id="t1",
+            role="tool",
+            content="Tool failed: invalid id",
+            tool_call_id="tc1",
+            error="invalid id",
+        )
+        result = agui_messages_to_langchain([msg])
+        assert isinstance(result[0], ToolMessage)
+        assert result[0].status == "error"
 
     def test_multimodal_with_url(self):
         msg = AGUIUserMessage(
