@@ -1554,15 +1554,29 @@ class LangGraphAgent:
                 resolved = self._dispatch_event(
                     ToolCallEndEvent(type=EventType.TOOL_CALL_END, tool_call_id=self.get_message_in_progress(self.active_run["id"])["tool_call_id"], raw_event=event)
                 )
-                if resolved:
-                    self.messages_in_process[self.active_run["id"]] = None
+                # Always clear in-progress tracking once the underlying
+                # LangGraph chat-model call has genuinely ended, regardless
+                # of whether `_dispatch_event` chose to emit, transform, or
+                # suppress (return None for) the resulting AG-UI event.
+                # Subclasses (e.g. CopilotKit's LangGraphAGUIAgent) may
+                # legitimately filter out ToolCallEndEvent/TextMessageEndEvent
+                # by returning None (for calls tagged
+                # copilotkit:emit-tool-calls=False /
+                # copilotkit:emit-messages=False) — previously this left
+                # `messages_in_process[run_id]` permanently "in progress"
+                # after the very first suppressed call in a run, causing
+                # every subsequent *real* streamed message in that same run
+                # to skip TextMessageStartEvent entirely.
+                self.messages_in_process[self.active_run["id"]] = None
                 yield resolved
             elif self.get_message_in_progress(self.active_run["id"]) and self.get_message_in_progress(self.active_run["id"]).get("id"):
                 resolved = self._dispatch_event(
                     TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=self.get_message_in_progress(self.active_run["id"])["id"], raw_event=event)
                 )
-                if resolved:
-                    self.messages_in_process[self.active_run["id"]] = None
+                # See comment above: clear tracking unconditionally so a
+                # suppressed (None-returning) dispatch doesn't poison the
+                # state for the rest of the run.
+                self.messages_in_process[self.active_run["id"]] = None
                 yield resolved
 
         elif event_type == LangGraphEventTypes.OnCustomEvent:
