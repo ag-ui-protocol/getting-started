@@ -18,6 +18,7 @@
  *   { "scope": "...", "packages": [{ "name", "oldVersion", "newVersion", "file", "path" }] }
  */
 
+import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -328,6 +329,53 @@ function writePyVersion(pyprojectPath: string, newVersion: string): void {
   fs.writeFileSync(pyprojectPath, lines.join('\n'), "utf-8");
 }
 
+/**
+ * Re-lock a uv-managed Python package after its version has been bumped.
+ *
+ * uv.lock carries an entry for the package it locks -- the one whose ``source``
+ * is ``{ editable = "." }`` -- so editing pyproject.toml alone leaves that entry
+ * one version stale. Every release did exactly that, so every release shipped a
+ * stale lock: four consecutive aws-strands releases are each a one-line,
+ * one-file commit, and ag_ui_adk drifted five releases deep before anyone
+ * noticed. #2313 repaired the accumulated drift; this stops it recurring.
+ *
+ * ``uv lock`` may also flush latent metadata corrections that have nothing to do
+ * with the bump -- it rewrites the whole file once it has any reason to, and what
+ * it writes reflects the package metadata in uv's cache at that moment. Observed:
+ * the same uv binary added an ``exceptiongroup`` dependency marker on Aug 4 that
+ * it had not added on Jul 30, because the cache had refreshed from PyPI in
+ * between. Those are corrections rather than corruption, and the companion
+ * ``uv lock --check`` CI gate is what keeps them from piling up: with locks kept
+ * continuously current, a release bump has nothing extra to flush and its diff
+ * stays to the version line.
+ *
+ * Packages with no uv.lock (poetry-managed, or unlocked) are skipped. A missing
+ * ``uv`` is fatal rather than skipped -- silently shipping a stale lock is the
+ * exact failure this exists to prevent.
+ */
+function relockPythonPackage(pyprojectPath: string): void {
+  const pkgDir = path.dirname(pyprojectPath);
+  if (!fs.existsSync(path.join(pkgDir, "uv.lock"))) return;
+
+  try {
+    // stdout belongs to this script's JSON summary -- discard uv's so the
+    // summary stays parseable, and pass its stderr through for diagnostics.
+    execFileSync("uv", ["lock"], {
+      cwd: pkgDir,
+      stdio: ["ignore", "ignore", "inherit"],
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(
+        `uv is required to re-lock ${pkgDir} after a version bump, but was not ` +
+          `found on PATH. Install uv (https://docs.astral.sh/uv/) -- without it ` +
+          `the release would publish a uv.lock pinning the previous version.`,
+      );
+    }
+    throw error;
+  }
+}
+
 function readDotnetVersion(propsPath: string): string {
   const content = fs.readFileSync(propsPath, "utf-8");
   const match = content.match(/<VersionPrefix(?:\s+[^>]*)?>([^<]+)<\/VersionPrefix>/);
@@ -390,6 +438,7 @@ function writeVersionFile(filePath: string, ecosystem: PackageConfig["ecosystem"
     writeDotnetVersion(filePath, newVersion);
   } else {
     writePyVersion(filePath, newVersion);
+    relockPythonPackage(filePath);
   }
 }
 
@@ -419,7 +468,12 @@ function computeNewVersion(
 
 function main(): void {
   const args = parseArgs();
-  const repoRoot = path.resolve(__dirname, "../..");
+  // Normally the repo this script ships in. Overridable so tests can point the
+  // whole thing -- config, package files, lockfiles -- at a throwaway fixture
+  // tree, since the write path cannot otherwise be exercised without editing
+  // the real repo.
+  const repoRoot =
+    process.env.PREPARE_RELEASE_ROOT ?? path.resolve(__dirname, "../..");
 
   const configPath = path.join(repoRoot, "scripts/release/release.config.json");
   const config: ReleaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));

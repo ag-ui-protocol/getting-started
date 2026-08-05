@@ -65,7 +65,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: sdks/python
-        run: uv sync
+        # --locked fails the build if uv.lock is out of step with
+        # pyproject.toml. Release bumps used to edit pyproject alone,
+        # leaving every released package's lock a version stale (#2313,
+        # #2314); this is what stops that drifting again unnoticed.
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: sdks/python
@@ -106,7 +110,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: integrations/langgraph/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/langgraph/python
@@ -147,7 +151,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: integrations/watsonx/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/watsonx/python
@@ -188,7 +192,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: integrations/adk-middleware/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/adk-middleware/python
@@ -230,7 +234,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: integrations/adk-middleware/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Force google-adk 2.x
         working-directory: integrations/adk-middleware/python
@@ -291,7 +295,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: integrations/aws-strands/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/aws-strands/python
@@ -332,7 +336,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: integrations/langroid/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/langroid/python
@@ -373,7 +377,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: integrations/crew-ai/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/crew-ai/python
@@ -417,7 +421,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: integrations/claude-managed-agents/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/claude-managed-agents/python

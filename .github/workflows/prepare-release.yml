@@ -132,6 +132,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      # prepare-release.ts re-locks any uv-managed Python package it bumps, so uv
+      # must be on PATH or the bump aborts rather than shipping a stale lock.
+      # Same pinned action and floor as unit-python-sdk.yml.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ">=0.8.0"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
