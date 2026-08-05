@@ -723,6 +723,9 @@ class AntigravityAgent:
                     input_data.thread_id,
                 )
 
+        if self._apply_forwarded_command(bridge, input_data):
+            resolved = True
+
         # Frontend tool results arrive as ToolMessages carrying the tool_call_id
         # we minted when the tool parked.
         for message in reversed(list(input_data.messages or [])):
@@ -741,6 +744,80 @@ class AntigravityAgent:
                 )
 
         return resolved
+
+    def _apply_forwarded_command(
+        self, bridge: UIBridge, input_data: RunAgentInput
+    ) -> bool:
+        """Resolves an interrupt answered through ``forwardedProps.command``.
+
+        AG-UI's own channel for this is ``RunAgentInput.resume``, and clients
+        like the dojo use it. CopilotKit Channels does not: its run loop
+        re-enters an interrupted run with
+
+            agent.runAgent({ forwardedProps: { command: resume } })
+
+        so the answer arrives as a bare value under ``forwarded_props.command``
+        with no interrupt id attached -- the channel run loop tracks a single
+        outstanding interrupt per thread and does not need one. Reading only
+        ``resume`` leaves that answer on the floor and the tool parked forever,
+        which surfaces as a bot that has silently gone quiet.
+
+        Correlation, in order:
+
+        * an explicit id in the payload, for a client that sends one;
+        * otherwise the single parked request, which is the channels case;
+        * otherwise nothing -- guessing between several would resolve the wrong
+          one, and a warning is recoverable where a wrong answer is not.
+        """
+        forwarded = getattr(input_data, "forwarded_props", None) or {}
+        if not isinstance(forwarded, dict) or "command" not in forwarded:
+            return False
+        command = forwarded["command"]
+
+        interrupt_id: Optional[str] = None
+        payload: Any = command
+        cancelled = False
+        if isinstance(command, dict):
+            for key in ("interruptId", "interrupt_id"):
+                candidate = command.get(key)
+                if isinstance(candidate, str) and candidate:
+                    interrupt_id = candidate
+                    # A wrapper carrying the id usually carries the answer
+                    # beside it; fall back to the whole object when it does not.
+                    payload = command.get("payload", command)
+                    break
+            cancelled = command.get("status") == "cancelled"
+
+        if interrupt_id is None:
+            pending = bridge.pending_ids()
+            if len(pending) == 1:
+                interrupt_id = next(iter(pending))
+            elif not pending:
+                logger.warning(
+                    "forwardedProps.command arrived on thread %s with nothing "
+                    "parked; ignoring it.",
+                    input_data.thread_id,
+                )
+                return False
+            else:
+                logger.warning(
+                    "forwardedProps.command arrived on thread %s with %d parked "
+                    "requests and no interrupt id, so it cannot be matched to "
+                    "one; ignoring it.",
+                    input_data.thread_id,
+                    len(pending),
+                )
+                return False
+
+        if bridge.resolve_interrupt(interrupt_id, payload, cancelled):
+            return True
+        logger.warning(
+            "Ignoring forwardedProps.command for unknown interrupt %s on "
+            "thread %s",
+            interrupt_id,
+            input_data.thread_id,
+        )
+        return False
 
     def _extract_prompt(self, input_data: RunAgentInput, session) -> tuple:
         """Returns ``(text, message_id)`` for the newest unforwarded user turn.

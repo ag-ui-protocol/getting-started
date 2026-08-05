@@ -130,6 +130,23 @@ Three cases, one primitive (emit → park a Future → resolve from the next run
   It needs a client that implements the interrupt protocol — the dojo answers
   `ToolMessage`s, not `resume` entries, so the demos leave it off.
 
+### Answering an interrupt
+
+Two wire shapes are accepted, because clients disagree:
+
+* **AG-UI `resume`** — `RunAgentInput.resume` entries carrying an
+  `interrupt_id`. What the dojo and the protocol itself use.
+* **`forwardedProps.command`** — what CopilotKit Channels sends. Its run loop
+  re-enters an interrupted run with
+  `runAgent({ forwardedProps: { command: resume } })` and attaches no interrupt
+  id, because it tracks a single outstanding interrupt per thread.
+
+For the second shape the answer is matched to an explicit id in the payload if
+there is one, otherwise to the single parked request. With several parked and
+no id it is refused and logged: resolving the wrong request is unrecoverable,
+a warning is not. Supporting only `resume` left a channel-driven approval
+parked forever, which looks like a bot that has silently gone quiet.
+
 ### One turn, several runs
 
 An Antigravity *turn* that parks on a human spans several AG-UI *runs*, and on

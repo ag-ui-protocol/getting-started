@@ -1518,3 +1518,134 @@ class TestSessionTornDownMidRun:
         events = [e async for e in agent.run(run_input())]
         assert events[-1].code == "CANCELLED"
         assert "closed while the run was in progress" in events[-1].message
+
+
+class TestChannelsStyleResume:
+    """CopilotKit Channels answers an interrupt through forwardedProps.
+
+    Its run loop re-enters an interrupted run with
+    `runAgent({ forwardedProps: { command: resume } })` rather than AG-UI's
+    `resume` field, and sends no interrupt id -- it tracks a single outstanding
+    interrupt per thread. Reading only `resume` left the tool parked forever,
+    which looks like a bot that has silently gone quiet.
+    """
+
+    async def _park_a_question(self, bridge):
+        hook = bridge.build_interaction_hook()
+        spec = ag_types.AskQuestionInteractionSpec(
+            questions=[ag_types.AskQuestionEntry(question="Which?", options=[])]
+        )
+        task = asyncio.create_task(hook.run(None, spec))
+        await asyncio.sleep(0.05)
+        return task
+
+    async def test_a_bare_command_resolves_the_single_parked_request(self):
+        agent = AntigravityAgent()
+        bridge = UIBridge()
+        task = await self._park_a_question(bridge)
+
+        conversation = FakeConversation([[text_step("answered", done=True)]])
+        session = make_session(conversation, bridge, forwarded={"m1"})
+        await drain(
+            agent._run_locked(
+                session, run_input(forwarded_props={"command": "purple"})
+            )
+        )
+        result = await asyncio.wait_for(task, 1)
+        assert result.responses[0].freeform_response == "purple"
+
+    async def test_an_explicit_interrupt_id_is_honoured(self):
+        agent = AntigravityAgent()
+        bridge = UIBridge()
+        task = await self._park_a_question(bridge)
+        interrupt_id = bridge.pending_interrupts()[0].id
+
+        conversation = FakeConversation([[text_step("ok", done=True)]])
+        session = make_session(conversation, bridge, forwarded={"m1"})
+        await drain(
+            agent._run_locked(
+                session,
+                run_input(
+                    forwarded_props={
+                        "command": {
+                            "interruptId": interrupt_id,
+                            "payload": "green",
+                        }
+                    }
+                ),
+            )
+        )
+        result = await asyncio.wait_for(task, 1)
+        assert result.responses[0].freeform_response == "green"
+
+    async def test_a_cancelled_command_cancels_the_request(self):
+        agent = AntigravityAgent()
+        bridge = UIBridge()
+        task = await self._park_a_question(bridge)
+        interrupt_id = bridge.pending_interrupts()[0].id
+
+        conversation = FakeConversation([[text_step("ok", done=True)]])
+        session = make_session(conversation, bridge, forwarded={"m1"})
+        await drain(
+            agent._run_locked(
+                session,
+                run_input(
+                    forwarded_props={
+                        "command": {
+                            "interruptId": interrupt_id,
+                            "status": "cancelled",
+                        }
+                    }
+                ),
+            )
+        )
+        result = await asyncio.wait_for(task, 1)
+        # The hook reports a cancellation rather than inventing an answer.
+        assert result is not None
+
+    async def test_an_ambiguous_command_resolves_nothing(self):
+        """Two parked requests and no id: guessing would answer the wrong one."""
+        agent = AntigravityAgent()
+        bridge = UIBridge()
+        first = await self._park_a_question(bridge)
+        second = await self._park_a_question(bridge)
+        assert len(bridge.pending_ids()) == 2
+
+        conversation = FakeConversation([[text_step("ok", done=True)]])
+        session = make_session(conversation, bridge, forwarded={"m1"})
+        await drain(
+            agent._run_locked(
+                session, run_input(forwarded_props={"command": "purple"})
+            )
+        )
+        assert not first.done() and not second.done()
+        for task in (first, second):
+            task.cancel()
+
+    async def test_a_command_with_nothing_parked_is_ignored(self):
+        agent = AntigravityAgent()
+        bridge = UIBridge()
+        conversation = FakeConversation([[text_step("hi", done=True)]])
+        session = make_session(conversation, bridge)
+        events = await drain(
+            agent._run_locked(
+                session, run_input(forwarded_props={"command": "purple"})
+            )
+        )
+        # Not an error -- the run proceeds as an ordinary turn.
+        assert events[-1].type == "RUN_FINISHED"
+
+    async def test_unrelated_forwarded_props_are_left_alone(self):
+        agent = AntigravityAgent()
+        bridge = UIBridge()
+        task = await self._park_a_question(bridge)
+
+        conversation = FakeConversation([[text_step("ok", done=True)]])
+        session = make_session(conversation, bridge, forwarded={"m1"})
+        await drain(
+            agent._run_locked(
+                session, run_input(forwarded_props={"somethingElse": 1})
+            )
+        )
+        assert not task.done(), "a prop that is not `command` must not resolve"
+        task.cancel()
