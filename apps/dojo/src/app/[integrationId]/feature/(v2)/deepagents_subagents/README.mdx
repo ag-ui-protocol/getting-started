@@ -1,0 +1,35 @@
+# Deepagents Subagents: AG-UI Subagent Attribution (Step 1)
+
+This demo runs the **deepagents** 3-subagent LangGraph agent and proves that
+**subagent attribution surfaces through AG-UI** to the frontend.
+
+## What This Demo Shows
+
+The deepagents integration dispatches work to specialized subagents. As those
+subagents emit messages, the integration stamps each message with a
+`subagentId` field. This demo reads that field straight off `agent.messages`
+and renders a small `⟐ {subagentId}` marker next to any message that carries
+one.
+
+This is intentionally **minimal** — the goal of this step is only to prove
+that the `subagentId` attribution makes it from the backend all the way to
+the frontend message objects. Polished UI (grouping by subagent, avatars,
+etc.) is a follow-up, not part of this demo.
+
+## How to Interact
+
+Send a prompt that requires the supervisor to delegate to its subagents, e.g.:
+
+- "Research the topic of octopus intelligence using your subagents and summarize the findings."
+
+Watch the **Message Attribution** panel on the right: every message lists its
+role, and any message produced by a subagent shows the `⟐ {subagentId}`
+marker.
+
+## Implementation Notes
+
+- `subagentId` is an AG-UI message field (see `@ag-ui/core`). At the time of
+  writing it isn't part of the CopilotKit `Message` type, so the demo reads it
+  via a cast (`(message as unknown as { subagentId?: string }).subagentId`).
+- The chat panel uses `useAgent` with `UseAgentUpdate.OnMessagesChanged` so the
+  attribution list re-renders as new messages stream in.

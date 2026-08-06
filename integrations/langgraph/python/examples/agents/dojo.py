@@ -23,6 +23,7 @@ from .subgraphs.agent import graph as subgraphs_graph
 from .tool_based_generative_ui.agent import graph as tool_based_generative_ui_graph
 from .a2ui_fixed_schema.agent import graph as a2ui_fixed_schema_graph
 from .a2ui_dynamic_schema.agent import graph as a2ui_dynamic_schema_graph
+from .deepagents_subagents.agent import graph as deepagents_subagents_graph
 
 app = FastAPI(title="LangGraph Dojo Example Server")
 
@@ -88,6 +89,11 @@ agents = {
         description="Dynamic A2UI with LLM-generated UI schema.",
         graph=a2ui_dynamic_schema_graph,
     ),
+    "deepagents_subagents": LangGraphAgent(
+        name="deepagents_subagents",
+        description="A deepagents supervisor delegating to three specialized subagents (subagent attribution demo).",
+        graph=deepagents_subagents_graph,
+    ),
 }
 
 add_langgraph_fastapi_endpoint(
@@ -148,6 +154,12 @@ add_langgraph_fastapi_endpoint(
 
 add_langgraph_fastapi_endpoint(
     app=app, agent=agents["a2ui_dynamic_schema"], path="/agent/a2ui_dynamic_schema"
+)
+
+add_langgraph_fastapi_endpoint(
+    app=app,
+    agent=agents["deepagents_subagents"],
+    path="/agent/deepagents_subagents",
 )
 
 

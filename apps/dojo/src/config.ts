@@ -89,6 +89,13 @@ export const featureConfig: FeatureConfig[] = [
     tags: ["Chat", "Multi-agent architecture", "Streaming", "Subgraphs"],
   }),
   createFeatureConfig({
+    id: "deepagents_subagents",
+    name: "Deepagents Subagents",
+    description:
+      "Deepagents dispatches work to subagents; watch subagentId attribution surface on their messages",
+    tags: ["Chat", "Multi-agent architecture", "Streaming", "Subagents"],
+  }),
+  createFeatureConfig({
     id: "a2a_chat",
     name: "A2A Chat",
     description: "Chat with your Copilot and call frontend tools",

@@ -18,6 +18,7 @@ export const BaseMessageSchema = z.object({
   content: z.string().optional(),
   name: z.string().optional(),
   encryptedValue: z.string().optional(),
+  subagentId: z.string().optional(),
 });
 
 export const TextInputContentSchema = z.object({
@@ -142,6 +143,7 @@ export const ToolMessageSchema = z.object({
   toolCallId: z.string(),
   error: z.string().optional(),
   encryptedValue: z.string().optional(),
+  subagentId: z.string().optional(),
 });
 
 export const ActivityMessageSchema = z.object({
@@ -149,6 +151,7 @@ export const ActivityMessageSchema = z.object({
   role: z.literal("activity"),
   activityType: z.string(),
   content: z.record(z.any()),
+  subagentId: z.string().optional(),
 });
 
 export const ReasoningMessageSchema = z.object({
@@ -156,6 +159,7 @@ export const ReasoningMessageSchema = z.object({
   role: z.literal("reasoning"),
   content: z.string(),
   encryptedValue: z.string().optional(),
+  subagentId: z.string().optional(),
 });
 
 export const MessageSchema = z.discriminatedUnion("role", [

@@ -20,16 +20,19 @@ import { type DebugLoggerInput, resolveDebugLogger } from "@/debug-logger";
 interface TextMessageFields {
   messageId: string;
   name?: string;
+  subagentId?: string;
 }
 
 interface ToolCallFields {
   toolCallId: string;
   toolCallName: string;
   parentMessageId?: string;
+  subagentId?: string;
 }
 
 interface ReasoningMessageFields {
   messageId: string;
+  subagentId?: string;
 }
 
 export const transformChunks =
@@ -142,6 +145,9 @@ export const transformChunks =
           case EventType.ACTIVITY_SNAPSHOT:
           case EventType.ACTIVITY_DELTA:
           case EventType.REASONING_ENCRYPTED_VALUE:
+          case EventType.SUBAGENT_STARTED:
+          case EventType.SUBAGENT_FINISHED:
+          case EventType.SUBAGENT_ERROR:
             return [event];
           case EventType.TEXT_MESSAGE_CHUNK:
             const messageChunkEvent = event as TextMessageChunkEvent;
@@ -166,6 +172,7 @@ export const transformChunks =
               textMessageFields = {
                 messageId: messageChunkEvent.messageId,
                 name: messageChunkEvent.name,
+                subagentId: messageChunkEvent.subagentId,
               };
               mode = "text";
 
@@ -174,6 +181,9 @@ export const transformChunks =
                 messageId: messageChunkEvent.messageId,
                 role: messageChunkEvent.role || "assistant",
                 ...(messageChunkEvent.name !== undefined && { name: messageChunkEvent.name }),
+                ...(messageChunkEvent.subagentId !== undefined && {
+                  subagentId: messageChunkEvent.subagentId,
+                }),
               } as TextMessageStartEvent;
 
               textMessageResult.push(textMessageStartEvent);
@@ -223,6 +233,7 @@ export const transformChunks =
                 toolCallId: toolCallChunkEvent.toolCallId,
                 toolCallName: toolCallChunkEvent.toolCallName,
                 parentMessageId: toolCallChunkEvent.parentMessageId,
+                subagentId: toolCallChunkEvent.subagentId,
               };
               mode = "tool";
 
@@ -231,6 +242,9 @@ export const transformChunks =
                 toolCallId: toolCallChunkEvent.toolCallId,
                 toolCallName: toolCallChunkEvent.toolCallName,
                 parentMessageId: toolCallChunkEvent.parentMessageId,
+                ...(toolCallChunkEvent.subagentId !== undefined && {
+                  subagentId: toolCallChunkEvent.subagentId,
+                }),
               } as ToolCallStartEvent;
 
               toolMessageResult.push(toolCallStartEvent);
@@ -278,12 +292,17 @@ export const transformChunks =
 
               reasoningMessageFields = {
                 messageId: reasoningChunkEvent.messageId,
+                subagentId: reasoningChunkEvent.subagentId,
               };
               mode = "reasoning";
 
               const reasoningMessageStartEvent = {
                 type: EventType.REASONING_MESSAGE_START,
                 messageId: reasoningChunkEvent.messageId,
+                role: "reasoning",
+                ...(reasoningChunkEvent.subagentId !== undefined && {
+                  subagentId: reasoningChunkEvent.subagentId,
+                }),
               } as ReasoningMessageStartEvent;
               reasoningMessageResult.push(reasoningMessageStartEvent);
 

@@ -8,14 +8,17 @@ export const verifyEvents =
   (source$: Observable<BaseEvent>): Observable<BaseEvent> => {
     const log = resolveDebugLogger(debugLogger);
     // Declare variables in closure to maintain state across events
-    let activeMessages = new Map<string, boolean>(); // Map of message ID -> active status
-    let activeToolCalls = new Map<string, boolean>(); // Map of tool call ID -> active status
+    // Value carries the owning subagentId (if any) so continuation/close events
+    // can be checked for attribution consistency.
+    let activeMessages = new Map<string, { subagentId?: string }>(); // message ID -> owner
+    let activeToolCalls = new Map<string, { subagentId?: string }>(); // tool call ID -> owner
     let runFinished = false;
     let runError = false; // New flag to track if RUN_ERROR has been sent
     // New flags to track first/last event requirements
     let firstEventReceived = false;
     // Track active steps
     let activeSteps = new Map<string, boolean>(); // Map of step name -> active status
+    let activeSubagents = new Map<string, boolean>(); // Map of subagent ID -> active status
     let activeThinkingStep = false;
     let activeThinkingStepMessage = false;
     let runStarted = false; // Track if a run has started
@@ -25,11 +28,38 @@ export const verifyEvents =
       activeMessages.clear();
       activeToolCalls.clear();
       activeSteps.clear();
+      activeSubagents.clear();
       activeThinkingStep = false;
       activeThinkingStepMessage = false;
       runFinished = false;
       runError = false;
       runStarted = true;
+    };
+
+    // Subagent attribution consistency: a continuation/close event must not
+    // disagree with the subagent that owns its message / tool call (the opener).
+    // An absent tag is always allowed (the field is optional, and Phase-1
+    // attribution may be used without Phase-2 SUBAGENT_* lifecycle events — so we
+    // deliberately do NOT require the tag to reference an "active" subagent here,
+    // which would reject valid attribution-only streams).
+    const subagentTagError = (
+      evType: EventType,
+      evSubagentId: string | undefined,
+      owner: { subagentId?: string } | undefined,
+      entityKind: string,
+      entityId: string,
+    ): AGUIError | undefined => {
+      if (evSubagentId === undefined) return undefined;
+      if (
+        owner &&
+        owner.subagentId !== undefined &&
+        owner.subagentId !== evSubagentId
+      ) {
+        return new AGUIError(
+          `Cannot send '${evType}': subagentId '${evSubagentId}' does not match the ${entityKind} '${entityId}' opener's subagent '${owner.subagentId}'.`,
+        );
+      }
+      return undefined;
     };
 
     return source$.pipe(
@@ -102,7 +132,13 @@ export const verifyEvents =
               );
             }
 
-            activeMessages.set(messageId, true);
+            {
+              const subErr = subagentTagError(
+                eventType, (event as any).subagentId, undefined, "message", messageId,
+              );
+              if (subErr) return throwError(() => subErr);
+            }
+            activeMessages.set(messageId, { subagentId: (event as any).subagentId });
             return of(event);
           }
 
@@ -119,6 +155,10 @@ export const verifyEvents =
               );
             }
 
+            const subErr = subagentTagError(
+              eventType, (event as any).subagentId, activeMessages.get(messageId), "message", messageId,
+            );
+            if (subErr) return throwError(() => subErr);
             return of(event);
           }
 
@@ -135,6 +175,10 @@ export const verifyEvents =
               );
             }
 
+            const subErr = subagentTagError(
+              eventType, (event as any).subagentId, activeMessages.get(messageId), "message", messageId,
+            );
+            if (subErr) return throwError(() => subErr);
             // Remove message from active set
             activeMessages.delete(messageId);
             return of(event);
@@ -154,7 +198,13 @@ export const verifyEvents =
               );
             }
 
-            activeToolCalls.set(toolCallId, true);
+            {
+              const subErr = subagentTagError(
+                eventType, (event as any).subagentId, undefined, "tool call", toolCallId,
+              );
+              if (subErr) return throwError(() => subErr);
+            }
+            activeToolCalls.set(toolCallId, { subagentId: (event as any).subagentId });
             return of(event);
           }
 
@@ -171,6 +221,10 @@ export const verifyEvents =
               );
             }
 
+            const subErr = subagentTagError(
+              eventType, (event as any).subagentId, activeToolCalls.get(toolCallId), "tool call", toolCallId,
+            );
+            if (subErr) return throwError(() => subErr);
             return of(event);
           }
 
@@ -187,6 +241,10 @@ export const verifyEvents =
               );
             }
 
+            const subErr = subagentTagError(
+              eventType, (event as any).subagentId, activeToolCalls.get(toolCallId), "tool call", toolCallId,
+            );
+            if (subErr) return throwError(() => subErr);
             // Remove tool call from active set
             activeToolCalls.delete(toolCallId);
             return of(event);
@@ -215,6 +273,45 @@ export const verifyEvents =
               );
             }
             activeSteps.delete(stepName);
+            return of(event);
+          }
+
+          // Subagent flow
+          case EventType.SUBAGENT_STARTED: {
+            const subagentId = (event as any).subagentId;
+            const parentSubagentId = (event as any).parentSubagentId;
+            if (activeSubagents.has(subagentId)) {
+              return throwError(
+                () =>
+                  new AGUIError(
+                    `Cannot send 'SUBAGENT_STARTED': subagent '${subagentId}' is already active. Finish it with 'SUBAGENT_FINISHED' first.`,
+                  ),
+              );
+            }
+            if (parentSubagentId !== undefined && !activeSubagents.has(parentSubagentId)) {
+              return throwError(
+                () =>
+                  new AGUIError(
+                    `Cannot send 'SUBAGENT_STARTED': parentSubagentId '${parentSubagentId}' has not been started.`,
+                  ),
+              );
+            }
+            activeSubagents.set(subagentId, true);
+            return of(event);
+          }
+
+          case EventType.SUBAGENT_FINISHED:
+          case EventType.SUBAGENT_ERROR: {
+            const subagentId = (event as any).subagentId;
+            if (!activeSubagents.has(subagentId)) {
+              return throwError(
+                () =>
+                  new AGUIError(
+                    `Cannot send '${eventType}': no active subagent found with ID '${subagentId}'. A 'SUBAGENT_STARTED' event must be sent first.`,
+                  ),
+              );
+            }
+            activeSubagents.delete(subagentId);
             return of(event);
           }
 
@@ -258,6 +355,17 @@ export const verifyEvents =
                 () =>
                   new AGUIError(
                     `Cannot send 'RUN_FINISHED' while tool calls are still active: ${unfinishedToolCalls}`,
+                  ),
+              );
+            }
+
+            // Check that all subagents are finished before run ends
+            if (activeSubagents.size > 0) {
+              const unfinishedSubagents = Array.from(activeSubagents.keys()).join(", ");
+              return throwError(
+                () =>
+                  new AGUIError(
+                    `Cannot send 'RUN_FINISHED' while subagents are still active: ${unfinishedSubagents}`,
                   ),
               );
             }

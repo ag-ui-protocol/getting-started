@@ -47,6 +47,7 @@ class BaseMessage(ConfiguredBaseModel):
     content: Optional[str] = None
     name: Optional[str] = None
     encrypted_value: Optional[str] = None
+    subagent_id: Optional[str] = None
 
 
 class DeveloperMessage(BaseMessage):
@@ -199,6 +200,7 @@ class ToolMessage(ConfiguredBaseModel):
     tool_call_id: str
     error: Optional[str] = None
     encrypted_value: Optional[str] = None
+    subagent_id: Optional[str] = None
 
 
 class ActivityMessage(ConfiguredBaseModel):
@@ -210,6 +212,7 @@ class ActivityMessage(ConfiguredBaseModel):
     role: Literal["activity"] = "activity"  # pyright: ignore[reportIncompatibleVariableOverride]
     activity_type: str
     content: Dict[str, Any]
+    subagent_id: Optional[str] = None
 
 
 class ReasoningMessage(ConfiguredBaseModel):
@@ -221,6 +224,7 @@ class ReasoningMessage(ConfiguredBaseModel):
     role: Literal["reasoning"] = "reasoning"  # pyright: ignore[reportIncompatibleVariableOverride]
     content: str
     encrypted_value: Optional[str] = None
+    subagent_id: Optional[str] = None
 
 
 Message = Annotated[
