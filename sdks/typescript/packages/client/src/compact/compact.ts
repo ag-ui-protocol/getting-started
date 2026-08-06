@@ -47,6 +47,12 @@ export function compactEvents(events: BaseEvent[]): BaseEvent[] {
 
   // State compaction: collects state events, flushed at RUN_STARTED (pre-run/inter-run), RUN_FINISHED/RUN_ERROR (in-run), and at end (trailing)
   let stateEvents: (StateSnapshotEvent | StateDeltaEvent)[] = [];
+  // Running state carried across flushState calls so a STATE_DELTA in a
+  // later flush (e.g. run 2 without its own STATE_SNAPSHOT) can target
+  // paths established by an earlier flush (e.g. run 1's snapshot).
+  // Without this seed, the per-flush `state = {}` reset turned valid
+  // multi-run streams into OPERATION_PATH_CANNOT_ADD failures. See #1720.
+  let runningState: any = {};
 
   for (const event of events) {
     // Handle text message streaming events
@@ -138,7 +144,7 @@ export function compactEvents(events: BaseEvent[]): BaseEvent[] {
       pendingToolCalls.delete(toolCallId);
     } else if (event.type === EventType.RUN_STARTED) {
       // Flush any pre-run state events before starting a new run
-      flushState(stateEvents, compacted);
+      runningState = flushState(stateEvents, compacted, runningState);
       stateEvents = [];
       compacted.push(event);
     } else if (
@@ -146,7 +152,7 @@ export function compactEvents(events: BaseEvent[]): BaseEvent[] {
       event.type === EventType.RUN_ERROR
     ) {
       // Flush compacted state into output before the run boundary event
-      flushState(stateEvents, compacted);
+      runningState = flushState(stateEvents, compacted, runningState);
       stateEvents = [];
       compacted.push(event);
     } else if (
@@ -199,7 +205,7 @@ export function compactEvents(events: BaseEvent[]): BaseEvent[] {
   }
 
   // Flush any remaining state events (incomplete run or events outside runs)
-  flushState(stateEvents, compacted);
+  flushState(stateEvents, compacted, runningState);
 
   return compacted;
 }
@@ -285,12 +291,20 @@ function flushToolCall(
 function flushState(
   stateEvents: (StateSnapshotEvent | StateDeltaEvent)[],
   compacted: BaseEvent[],
-): void {
+  initialState: any = {},
+): any {
   if (stateEvents.length === 0) {
-    return;
+    // Nothing changed; the prior batch's running state is still current.
+    return initialState;
   }
 
-  let state: any = {};
+  // Seed from the prior batch instead of `{}`. STATE_SNAPSHOT in this
+  // batch still replaces wholesale (existing semantics); STATE_DELTA
+  // applies on top of whatever the prior batch produced — so a delta
+  // referencing a path established by an earlier flush no longer
+  // raises OPERATION_PATH_CANNOT_ADD on a phantom empty document.
+  // See issue #1720 for the breakage mode this guards against.
+  let state: any = structuredClone_(initialState);
 
   for (const event of stateEvents) {
     if (event.type === EventType.STATE_SNAPSHOT) {
@@ -307,4 +321,5 @@ function flushState(
   };
 
   compacted.push(compactedSnapshot);
+  return state;
 }

@@ -553,5 +553,90 @@ describe("Event Compaction", () => {
         settings: { theme: "light" },
       });
     });
+
+    // Regression tests for #1720 — flushState used to start each batch
+    // from `state = {}`, so a delta in a later flush that referenced
+    // a path from an earlier flush's snapshot raised
+    // OPERATION_PATH_CANNOT_ADD / JsonPointerException. flushState
+    // now seeds from the prior batch's running state.
+
+    it("carries state across runs when run 2 has only deltas (no snapshot)", () => {
+      const events = [
+        { type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" },
+        { type: EventType.STATE_SNAPSHOT, snapshot: { run_log: [] } },
+        {
+          type: EventType.STATE_DELTA,
+          delta: [{ op: "add", path: "/run_log/-", value: { kind: "token", text: "hi" } }],
+        },
+        { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" },
+        // Run 2: no STATE_SNAPSHOT — must inherit `/run_log` from run 1
+        { type: EventType.RUN_STARTED, threadId: "t1", runId: "r2" },
+        {
+          type: EventType.STATE_DELTA,
+          delta: [{ op: "add", path: "/run_log/-", value: { kind: "token", text: "there" } }],
+        },
+        { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r2" },
+      ];
+
+      // Before the fix this throws OPERATION_PATH_CANNOT_ADD on run 2.
+      expect(() => compactEvents(events)).not.toThrow();
+
+      const compacted = compactEvents(events);
+      const snapshots = compacted.filter(
+        (e) => e.type === EventType.STATE_SNAPSHOT,
+      ) as StateSnapshotEvent[];
+
+      // Run 1 snapshot
+      expect(snapshots[0].snapshot).toEqual({ run_log: [{ kind: "token", text: "hi" }] });
+      // Run 2 snapshot has BOTH entries — state carried across runs
+      expect(snapshots[1].snapshot).toEqual({
+        run_log: [
+          { kind: "token", text: "hi" },
+          { kind: "token", text: "there" },
+        ],
+      });
+    });
+
+    it("does not throw when a post-run delta replaces a field from the prior snapshot", () => {
+      const events = [
+        { type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" },
+        { type: EventType.STATE_SNAPSHOT, snapshot: { pipeline_stage: "classifier" } },
+        { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" },
+        // Inter-run delta clears the stage; without the prior-batch
+        // seed this raises JsonPointerException because /pipeline_stage
+        // doesn't exist on a fresh `{}`.
+        {
+          type: EventType.STATE_DELTA,
+          delta: [{ op: "replace", path: "/pipeline_stage", value: null }],
+        },
+        { type: EventType.RUN_STARTED, threadId: "t1", runId: "r2" },
+        { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r2" },
+      ];
+
+      expect(() => compactEvents(events)).not.toThrow();
+    });
+
+    it("trailing-only deltas (no run boundary) see prior state", () => {
+      const events = [
+        { type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" },
+        { type: EventType.STATE_SNAPSHOT, snapshot: { counter: 0 } },
+        { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" },
+        // No more RUN events — these land in the trailing flush
+        {
+          type: EventType.STATE_DELTA,
+          delta: [{ op: "replace", path: "/counter", value: 5 }],
+        },
+      ];
+
+      expect(() => compactEvents(events)).not.toThrow();
+
+      const compacted = compactEvents(events);
+      const snapshots = compacted.filter(
+        (e) => e.type === EventType.STATE_SNAPSHOT,
+      ) as StateSnapshotEvent[];
+
+      // Last snapshot reflects both the run-1 baseline AND the trailing delta
+      expect(snapshots[snapshots.length - 1].snapshot).toEqual({ counter: 5 });
+    });
   });
 });
