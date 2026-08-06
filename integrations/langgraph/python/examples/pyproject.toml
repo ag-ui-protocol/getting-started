@@ -26,10 +26,35 @@ dependencies = [
     "ag-ui-protocol>=0.1.18",
     "python-dotenv>=1.0.0",
     "fastapi>=0.115.12",
+    # Supervisor/subagent framework used by the deepagents_subagents demo, which
+    # langgraph.json registers as a graph. Without it that graph fails to import.
+    "deepagents>=0.7.4",
 ]
 
 [tool.uv]
-override-dependencies = ["langgraph>=1.1.3,<2"]
+# Floor raised from 1.1.3 to 1.2.5. This is an OVERRIDE, so it replaces every
+# package's own langgraph requirement rather than intersecting with it — which
+# means it can silently hold langgraph below what a dependency actually needs.
+# That happened once deepagents pulled langchain 1.3.x: langchain requires
+# langgraph>=1.2.5 for langgraph.prebuilt.ToolCallTransformer, the override
+# permitted 1.1.5, resolution kept 1.1.5, and every graph in this app failed to
+# import with "cannot import name 'ToolCallTransformer'". Keep this floor at or
+# above the langgraph that the pinned langchain needs.
+override-dependencies = ["langgraph>=1.2.5,<2"]
+
+# TEMPORARY, MUST BE REMOVED BEFORE THE NEXT RELEASE. Tracked in PNI-274.
+#
+# The deepagents_subagents demo needs the subagent events (ag-ui-protocol) and
+# the emission logic that stamps them (ag-ui-langgraph). Neither is published
+# yet, so resolving these two from PyPI gives the dojo an integration with no
+# subagent support — the demo would render an empty run rather than fail loudly.
+# Point both at the in-repo copies so the demo exercises the code being audited.
+#
+# uv keeps sources out of built wheel metadata, so this affects local runs and
+# CI only. See the matching block in ../pyproject.toml.
+[tool.uv.sources]
+ag-ui-protocol = { path = "../../../../sdks/python" }
+ag-ui-langgraph = { path = "../" }
 
 [project.scripts]
 dev = "agents.dojo:main"
