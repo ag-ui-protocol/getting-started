@@ -18,4 +18,15 @@ public sealed class StateSnapshotEvent : BaseEvent
     /// </summary>
     [JsonPropertyName("snapshot")]
     public JsonElement Snapshot { get; set; }
+
+    /// <summary>
+    /// Gets or sets the subagent that produced this event. Present so the type mirrors
+    /// the protocol schema, which carries the field on every attributable event. A
+    /// conforming producer never sets it here: only the parent owns state, and a consumer
+    /// applies state without consulting attribution, so a subagent's partial state would
+    /// land as if the parent had sent it.
+    /// </summary>
+    [JsonPropertyName("subagentId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SubagentId { get; set; }
 }

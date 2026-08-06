@@ -21,6 +21,11 @@ internal static class EventStreamConverter
 
         // Event verification state
         var activeSteps = new HashSet<string>();
+        // Subagents open right now, mapped to the parent that spawned them (null for one
+        // the parent run started directly). Nesting is tracked by this identity link, not
+        // by the order events arrive in, so interleaved parallel subagents cannot swap
+        // parents.
+        var activeSubagents = new Dictionary<string, string?>();
         var runStarted = false;
         var runFinished = false;
         var runError = false;
@@ -62,10 +67,72 @@ internal static class EventStreamConverter
                     textMessageBuilder.Reset();
                     toolCallBuilder.Reset();
                     activeSteps.Clear();
+                    activeSubagents.Clear();
                     runFinished = false;
                     runError = false;
                     runStarted = true;
                 }
+            }
+
+            // Subagent lifecycle and attribution rules. Kept beside the run/step rules
+            // above and mirroring verifyEvents in sdks/typescript/packages/client, so the
+            // same stream is accepted or rejected identically by both SDKs.
+            switch (evt)
+            {
+                case SubagentStartedEvent started:
+                    if (activeSubagents.ContainsKey(started.SubagentId))
+                    {
+                        throw new System.InvalidOperationException(
+                            $"Cannot send 'SUBAGENT_STARTED': subagent '{started.SubagentId}' is already active. Finish it with 'SUBAGENT_FINISHED' first.");
+                    }
+
+                    if (started.ParentSubagentId is not null
+                        && !activeSubagents.ContainsKey(started.ParentSubagentId))
+                    {
+                        throw new System.InvalidOperationException(
+                            $"Cannot send 'SUBAGENT_STARTED': parentSubagentId '{started.ParentSubagentId}' has not been started.");
+                    }
+
+                    activeSubagents[started.SubagentId] = started.ParentSubagentId;
+                    break;
+
+                case SubagentFinishedEvent finished:
+                    if (!activeSubagents.Remove(finished.SubagentId))
+                    {
+                        throw new System.InvalidOperationException(
+                            $"Cannot send 'SUBAGENT_FINISHED': no active subagent found with ID '{finished.SubagentId}'. A 'SUBAGENT_STARTED' event must be sent first.");
+                    }
+
+                    break;
+
+                case SubagentErrorEvent subagentErrored:
+                    if (!activeSubagents.Remove(subagentErrored.SubagentId))
+                    {
+                        throw new System.InvalidOperationException(
+                            $"Cannot send 'SUBAGENT_ERROR': no active subagent found with ID '{subagentErrored.SubagentId}'. A 'SUBAGENT_STARTED' event must be sent first.");
+                    }
+
+                    break;
+
+                // Only the parent owns state. A consumer applies a snapshot or delta
+                // without consulting attribution, so an attributed one would land as if
+                // the parent had sent it — silently replacing the parent's state with a
+                // subagent's partial view. Rejected rather than dropped so a
+                // non-conforming producer fails loudly instead of losing state updates.
+                case StateSnapshotEvent { SubagentId: not null } attributedSnapshot:
+                    throw new System.InvalidOperationException(
+                        $"Cannot send 'STATE_SNAPSHOT' attributed to subagent '{attributedSnapshot.SubagentId}': only the parent agent owns state.");
+
+                case StateDeltaEvent { SubagentId: not null } attributedDelta:
+                    throw new System.InvalidOperationException(
+                        $"Cannot send 'STATE_DELTA' attributed to subagent '{attributedDelta.SubagentId}': only the parent agent owns state.");
+
+                case RunFinishedEvent when activeSubagents.Count > 0:
+                    throw new System.InvalidOperationException(
+                        $"Cannot send 'RUN_FINISHED' while subagents are still active: {string.Join(", ", activeSubagents.Keys)}");
+
+                default:
+                    break;
             }
 
             switch (evt)
@@ -327,7 +394,14 @@ internal static class EventStreamConverter
                     break;
                 }
 
-                // Pass-through events: state, reasoning lifecycle, activity, custom, raw
+                // Pass-through events: state, reasoning lifecycle, activity, custom, raw,
+                // and the subagent lifecycle. The subagent events reach the caller as
+                // RawRepresentation because Microsoft.Extensions.AI has no concept of
+                // delegated work; a consumer that cares reads them off the update, while
+                // the validation above has already rejected an inconsistent lifecycle.
+                case SubagentStartedEvent:
+                case SubagentFinishedEvent:
+                case SubagentErrorEvent:
                 case StateSnapshotEvent:
                 case StateDeltaEvent:
                 case ReasoningStartEvent:

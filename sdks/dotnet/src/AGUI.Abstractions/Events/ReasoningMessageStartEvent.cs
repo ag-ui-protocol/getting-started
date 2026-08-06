@@ -23,4 +23,12 @@ public sealed class ReasoningMessageStartEvent : BaseEvent
     /// </summary>
     [JsonPropertyName("role")]
     public string Role { get; set; } = "reasoning";
+
+    /// <summary>
+    /// Gets or sets the subagent that produced this event, absent when the parent agent
+    /// produced it directly.
+    /// </summary>
+    [JsonPropertyName("subagentId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SubagentId { get; set; }
 }

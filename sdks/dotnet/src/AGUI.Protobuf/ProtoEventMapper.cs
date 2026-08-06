@@ -77,23 +77,35 @@ internal static class ProtoEventMapper
                 return new Proto.Event { RunError = runError };
             }
             case StepStartedEvent e:
-                return new Proto.Event
+            {
+                var stepStarted = new Proto.StepStartedEvent
                 {
-                    StepStarted = new Proto.StepStartedEvent
-                    {
-                        BaseEvent = BuildBaseEvent(e, Proto.EventType.StepStarted),
-                        StepName = e.StepName,
-                    },
+                    BaseEvent = BuildBaseEvent(e, Proto.EventType.StepStarted),
+                    StepName = e.StepName,
                 };
+
+                if (e.SubagentId is not null)
+                {
+                    stepStarted.SubagentId = e.SubagentId;
+                }
+
+                return new Proto.Event { StepStarted = stepStarted };
+            }
             case StepFinishedEvent e:
-                return new Proto.Event
+            {
+                var stepFinished = new Proto.StepFinishedEvent
                 {
-                    StepFinished = new Proto.StepFinishedEvent
-                    {
-                        BaseEvent = BuildBaseEvent(e, Proto.EventType.StepFinished),
-                        StepName = e.StepName,
-                    },
+                    BaseEvent = BuildBaseEvent(e, Proto.EventType.StepFinished),
+                    StepName = e.StepName,
                 };
+
+                if (e.SubagentId is not null)
+                {
+                    stepFinished.SubagentId = e.SubagentId;
+                }
+
+                return new Proto.Event { StepFinished = stepFinished };
+            }
             case TextMessageStartEvent e:
             {
                 var start = new Proto.TextMessageStartEvent
@@ -108,27 +120,44 @@ internal static class ProtoEventMapper
                     start.Name = e.Name;
                 }
 
+                if (e.SubagentId is not null)
+                {
+                    start.SubagentId = e.SubagentId;
+                }
+
                 return new Proto.Event { TextMessageStart = start };
             }
             case TextMessageContentEvent e:
-                return new Proto.Event
+            {
+                var content = new Proto.TextMessageContentEvent
                 {
-                    TextMessageContent = new Proto.TextMessageContentEvent
-                    {
-                        BaseEvent = BuildBaseEvent(e, Proto.EventType.TextMessageContent),
-                        MessageId = e.MessageId,
-                        Delta = e.Delta,
-                    },
+                    BaseEvent = BuildBaseEvent(e, Proto.EventType.TextMessageContent),
+                    MessageId = e.MessageId,
+                    Delta = e.Delta,
                 };
+
+                if (e.SubagentId is not null)
+                {
+                    content.SubagentId = e.SubagentId;
+                }
+
+                return new Proto.Event { TextMessageContent = content };
+            }
             case TextMessageEndEvent e:
-                return new Proto.Event
+            {
+                var end = new Proto.TextMessageEndEvent
                 {
-                    TextMessageEnd = new Proto.TextMessageEndEvent
-                    {
-                        BaseEvent = BuildBaseEvent(e, Proto.EventType.TextMessageEnd),
-                        MessageId = e.MessageId,
-                    },
+                    BaseEvent = BuildBaseEvent(e, Proto.EventType.TextMessageEnd),
+                    MessageId = e.MessageId,
                 };
+
+                if (e.SubagentId is not null)
+                {
+                    end.SubagentId = e.SubagentId;
+                }
+
+                return new Proto.Event { TextMessageEnd = end };
+            }
             case ToolCallStartEvent e:
             {
                 var start = new Proto.ToolCallStartEvent
@@ -143,36 +172,62 @@ internal static class ProtoEventMapper
                     start.ParentMessageId = e.ParentMessageId;
                 }
 
+                if (e.SubagentId is not null)
+                {
+                    start.SubagentId = e.SubagentId;
+                }
+
                 return new Proto.Event { ToolCallStart = start };
             }
             case ToolCallArgsEvent e:
-                return new Proto.Event
+            {
+                var args = new Proto.ToolCallArgsEvent
                 {
-                    ToolCallArgs = new Proto.ToolCallArgsEvent
-                    {
-                        BaseEvent = BuildBaseEvent(e, Proto.EventType.ToolCallArgs),
-                        ToolCallId = e.ToolCallId,
-                        Delta = e.Delta,
-                    },
+                    BaseEvent = BuildBaseEvent(e, Proto.EventType.ToolCallArgs),
+                    ToolCallId = e.ToolCallId,
+                    Delta = e.Delta,
                 };
+
+                if (e.SubagentId is not null)
+                {
+                    args.SubagentId = e.SubagentId;
+                }
+
+                return new Proto.Event { ToolCallArgs = args };
+            }
             case ToolCallEndEvent e:
-                return new Proto.Event
+            {
+                var toolCallEnd = new Proto.ToolCallEndEvent
                 {
-                    ToolCallEnd = new Proto.ToolCallEndEvent
-                    {
-                        BaseEvent = BuildBaseEvent(e, Proto.EventType.ToolCallEnd),
-                        ToolCallId = e.ToolCallId,
-                    },
+                    BaseEvent = BuildBaseEvent(e, Proto.EventType.ToolCallEnd),
+                    ToolCallId = e.ToolCallId,
                 };
+
+                if (e.SubagentId is not null)
+                {
+                    toolCallEnd.SubagentId = e.SubagentId;
+                }
+
+                return new Proto.Event { ToolCallEnd = toolCallEnd };
+            }
             case StateSnapshotEvent e:
-                return new Proto.Event
+            {
+                var stateSnapshot = new Proto.StateSnapshotEvent
                 {
-                    StateSnapshot = new Proto.StateSnapshotEvent
-                    {
-                        BaseEvent = BuildBaseEvent(e, Proto.EventType.StateSnapshot),
-                        Snapshot = ProtoValueConverter.ToValue(e.Snapshot),
-                    },
+                    BaseEvent = BuildBaseEvent(e, Proto.EventType.StateSnapshot),
+                    Snapshot = ProtoValueConverter.ToValue(e.Snapshot),
                 };
+
+                // Carried for schema parity only — a conforming producer never attributes
+                // state to a subagent. Mapped rather than dropped so a non-conforming
+                // stream stays diagnosable end to end instead of losing the evidence here.
+                if (e.SubagentId is not null)
+                {
+                    stateSnapshot.SubagentId = e.SubagentId;
+                }
+
+                return new Proto.Event { StateSnapshot = stateSnapshot };
+            }
             case StateDeltaEvent e:
             {
                 var stateDelta = new Proto.StateDeltaEvent
@@ -186,6 +241,11 @@ internal static class ProtoEventMapper
                     {
                         stateDelta.Delta.Add(ProtoMessageMapper.ToProtoPatchOperation(operation));
                     }
+                }
+
+                if (e.SubagentId is not null)
+                {
+                    stateDelta.SubagentId = e.SubagentId;
                 }
 
                 return new Proto.Event { StateDelta = stateDelta };
@@ -217,6 +277,11 @@ internal static class ProtoEventMapper
                     raw.Source = e.Source;
                 }
 
+                if (e.SubagentId is not null)
+                {
+                    raw.SubagentId = e.SubagentId;
+                }
+
                 return new Proto.Event { Raw = raw };
             }
             case CustomEvent e:
@@ -232,14 +297,82 @@ internal static class ProtoEventMapper
                     custom.Value = ProtoValueConverter.ToValue(e.Value.Value);
                 }
 
+                if (e.SubagentId is not null)
+                {
+                    custom.SubagentId = e.SubagentId;
+                }
+
                 return new Proto.Event { Custom = custom };
+            }
+            case SubagentStartedEvent e:
+            {
+                var subagentStarted = new Proto.SubagentStartedEvent
+                {
+                    BaseEvent = BuildBaseEvent(e, Proto.EventType.SubagentStarted),
+                    SubagentId = e.SubagentId,
+                    Name = e.Name,
+                };
+
+                if (e.Description is not null)
+                {
+                    subagentStarted.Description = e.Description;
+                }
+
+                if (e.ParentSubagentId is not null)
+                {
+                    subagentStarted.ParentSubagentId = e.ParentSubagentId;
+                }
+
+                if (e.ParentToolCallId is not null)
+                {
+                    subagentStarted.ParentToolCallId = e.ParentToolCallId;
+                }
+
+                if (e.ParentMessageId is not null)
+                {
+                    subagentStarted.ParentMessageId = e.ParentMessageId;
+                }
+
+                return new Proto.Event { SubagentStarted = subagentStarted };
+            }
+            case SubagentFinishedEvent e:
+            {
+                var subagentFinished = new Proto.SubagentFinishedEvent
+                {
+                    BaseEvent = BuildBaseEvent(e, Proto.EventType.SubagentFinished),
+                    SubagentId = e.SubagentId,
+                };
+
+                if (e.Result is not null)
+                {
+                    subagentFinished.Result = ProtoValueConverter.ToValue(e.Result.Value);
+                }
+
+                return new Proto.Event { SubagentFinished = subagentFinished };
+            }
+            case SubagentErrorEvent e:
+            {
+                var subagentError = new Proto.SubagentErrorEvent
+                {
+                    BaseEvent = BuildBaseEvent(e, Proto.EventType.SubagentError),
+                    SubagentId = e.SubagentId,
+                    Message = e.Message,
+                };
+
+                if (e.Code is not null)
+                {
+                    subagentError.Code = e.Code;
+                }
+
+                return new Proto.Event { SubagentError = subagentError };
             }
             default:
                 throw new NotSupportedException(
                     $"Event type '{evt.Type}' is not representable in the AG-UI protobuf wire format. " +
                     "Supported events: RUN_STARTED, RUN_FINISHED, RUN_ERROR, STEP_STARTED, STEP_FINISHED, " +
                     "TEXT_MESSAGE_START, TEXT_MESSAGE_CONTENT, TEXT_MESSAGE_END, TOOL_CALL_START, TOOL_CALL_ARGS, " +
-                    "TOOL_CALL_END, STATE_SNAPSHOT, STATE_DELTA, MESSAGES_SNAPSHOT, RAW, CUSTOM.");
+                    "TOOL_CALL_END, STATE_SNAPSHOT, STATE_DELTA, MESSAGES_SNAPSHOT, RAW, CUSTOM, " +
+                    "SUBAGENT_STARTED, SUBAGENT_FINISHED, SUBAGENT_ERROR.");
         }
     }
 
@@ -281,14 +414,22 @@ internal static class ProtoEventMapper
             case Proto.Event.EventOneofCase.StepStarted:
             {
                 var e = proto.StepStarted;
-                var result = new StepStartedEvent { StepName = e.StepName };
+                var result = new StepStartedEvent
+                {
+                    StepName = e.StepName,
+                    SubagentId = e.HasSubagentId ? e.SubagentId : null,
+                };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
             }
             case Proto.Event.EventOneofCase.StepFinished:
             {
                 var e = proto.StepFinished;
-                var result = new StepFinishedEvent { StepName = e.StepName };
+                var result = new StepFinishedEvent
+                {
+                    StepName = e.StepName,
+                    SubagentId = e.HasSubagentId ? e.SubagentId : null,
+                };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
             }
@@ -300,6 +441,7 @@ internal static class ProtoEventMapper
                     MessageId = e.MessageId,
                     Role = e.HasRole ? e.Role : string.Empty,
                     Name = e.HasName ? e.Name : null,
+                    SubagentId = e.HasSubagentId ? e.SubagentId : null,
                 };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
@@ -307,14 +449,23 @@ internal static class ProtoEventMapper
             case Proto.Event.EventOneofCase.TextMessageContent:
             {
                 var e = proto.TextMessageContent;
-                var result = new TextMessageContentEvent { MessageId = e.MessageId, Delta = e.Delta };
+                var result = new TextMessageContentEvent
+                {
+                    MessageId = e.MessageId,
+                    Delta = e.Delta,
+                    SubagentId = e.HasSubagentId ? e.SubagentId : null,
+                };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
             }
             case Proto.Event.EventOneofCase.TextMessageEnd:
             {
                 var e = proto.TextMessageEnd;
-                var result = new TextMessageEndEvent { MessageId = e.MessageId };
+                var result = new TextMessageEndEvent
+                {
+                    MessageId = e.MessageId,
+                    SubagentId = e.HasSubagentId ? e.SubagentId : null,
+                };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
             }
@@ -326,6 +477,7 @@ internal static class ProtoEventMapper
                     ToolCallId = e.ToolCallId,
                     ToolCallName = e.ToolCallName,
                     ParentMessageId = e.HasParentMessageId ? e.ParentMessageId : null,
+                    SubagentId = e.HasSubagentId ? e.SubagentId : null,
                 };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
@@ -333,14 +485,23 @@ internal static class ProtoEventMapper
             case Proto.Event.EventOneofCase.ToolCallArgs:
             {
                 var e = proto.ToolCallArgs;
-                var result = new ToolCallArgsEvent { ToolCallId = e.ToolCallId, Delta = e.Delta };
+                var result = new ToolCallArgsEvent
+                {
+                    ToolCallId = e.ToolCallId,
+                    Delta = e.Delta,
+                    SubagentId = e.HasSubagentId ? e.SubagentId : null,
+                };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
             }
             case Proto.Event.EventOneofCase.ToolCallEnd:
             {
                 var e = proto.ToolCallEnd;
-                var result = new ToolCallEndEvent { ToolCallId = e.ToolCallId };
+                var result = new ToolCallEndEvent
+                {
+                    ToolCallId = e.ToolCallId,
+                    SubagentId = e.HasSubagentId ? e.SubagentId : null,
+                };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
             }
@@ -352,6 +513,7 @@ internal static class ProtoEventMapper
                     Snapshot = e.Snapshot is null
                         ? default
                         : ProtoValueConverter.ToJsonElement(e.Snapshot),
+                    SubagentId = e.HasSubagentId ? e.SubagentId : null,
                 };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
@@ -359,7 +521,11 @@ internal static class ProtoEventMapper
             case Proto.Event.EventOneofCase.StateDelta:
             {
                 var e = proto.StateDelta;
-                var result = new StateDeltaEvent { Delta = BuildPatchArray(e) };
+                var result = new StateDeltaEvent
+                {
+                    Delta = BuildPatchArray(e),
+                    SubagentId = e.HasSubagentId ? e.SubagentId : null,
+                };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
             }
@@ -382,6 +548,7 @@ internal static class ProtoEventMapper
                 {
                     Event = e.Event is null ? default : ProtoValueConverter.ToJsonElement(e.Event),
                     Source = e.HasSource ? e.Source : null,
+                    SubagentId = e.HasSubagentId ? e.SubagentId : null,
                 };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
@@ -393,6 +560,45 @@ internal static class ProtoEventMapper
                 {
                     Name = e.Name,
                     Value = ProtoValueConverter.ToJsonElementOrNull(e.Value),
+                    SubagentId = e.HasSubagentId ? e.SubagentId : null,
+                };
+                ApplyBaseEvent(result, e.BaseEvent);
+                return result;
+            }
+            case Proto.Event.EventOneofCase.SubagentStarted:
+            {
+                var e = proto.SubagentStarted;
+                var result = new SubagentStartedEvent
+                {
+                    SubagentId = e.SubagentId,
+                    Name = e.Name,
+                    Description = e.HasDescription ? e.Description : null,
+                    ParentSubagentId = e.HasParentSubagentId ? e.ParentSubagentId : null,
+                    ParentToolCallId = e.HasParentToolCallId ? e.ParentToolCallId : null,
+                    ParentMessageId = e.HasParentMessageId ? e.ParentMessageId : null,
+                };
+                ApplyBaseEvent(result, e.BaseEvent);
+                return result;
+            }
+            case Proto.Event.EventOneofCase.SubagentFinished:
+            {
+                var e = proto.SubagentFinished;
+                var result = new SubagentFinishedEvent
+                {
+                    SubagentId = e.SubagentId,
+                    Result = ProtoValueConverter.ToJsonElementOrNull(e.Result),
+                };
+                ApplyBaseEvent(result, e.BaseEvent);
+                return result;
+            }
+            case Proto.Event.EventOneofCase.SubagentError:
+            {
+                var e = proto.SubagentError;
+                var result = new SubagentErrorEvent
+                {
+                    SubagentId = e.SubagentId,
+                    Message = e.Message,
+                    Code = e.HasCode ? e.Code : null,
                 };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;

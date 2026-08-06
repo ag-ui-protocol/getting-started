@@ -1,0 +1,246 @@
+using System.Collections.Generic;
+using System.Text.Json;
+using AGUI.Abstractions;
+using Xunit;
+
+namespace AGUI.Abstractions.UnitTests;
+
+/// <summary>
+/// The three subagent lifecycle events and the <c>subagentId</c> attribution field.
+/// Before these existed the .NET SDK had no way to express delegated work at all, which
+/// is what kept the 31-event set incomplete.
+/// </summary>
+public sealed class SubagentEventTest
+{
+    [Fact]
+    public void SubagentStarted_Serialize_IncludesAllFields()
+    {
+        var evt = new SubagentStartedEvent
+        {
+            SubagentId = "sub-1",
+            Name = "researcher",
+            Description = "digs through sources",
+            ParentSubagentId = "sub-outer",
+            ParentToolCallId = "call-9",
+            ParentMessageId = "msg-3",
+        };
+
+        var json = JsonSerializer.Serialize(evt, AGUIJsonSerializerContext.Default.SubagentStartedEvent);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("SUBAGENT_STARTED", root.GetProperty("type").GetString());
+        Assert.Equal("sub-1", root.GetProperty("subagentId").GetString());
+        Assert.Equal("researcher", root.GetProperty("name").GetString());
+        Assert.Equal("digs through sources", root.GetProperty("description").GetString());
+        Assert.Equal("sub-outer", root.GetProperty("parentSubagentId").GetString());
+        Assert.Equal("call-9", root.GetProperty("parentToolCallId").GetString());
+        Assert.Equal("msg-3", root.GetProperty("parentMessageId").GetString());
+    }
+
+    [Fact]
+    public void SubagentStarted_OmitsAbsentOptionals()
+    {
+        // Absent must mean absent on the wire, not null: a consumer distinguishes "no
+        // parent" (top-level subagent) from "parent with an empty id", and the TypeScript
+        // schema treats a present-but-null differently from omitted.
+        var evt = new SubagentStartedEvent { SubagentId = "sub-1", Name = "researcher" };
+
+        var json = JsonSerializer.Serialize(evt, AGUIJsonSerializerContext.Default.SubagentStartedEvent);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.False(root.TryGetProperty("description", out _));
+        Assert.False(root.TryGetProperty("parentSubagentId", out _));
+        Assert.False(root.TryGetProperty("parentToolCallId", out _));
+        Assert.False(root.TryGetProperty("parentMessageId", out _));
+    }
+
+    [Fact]
+    public void SubagentFinished_RoundTripsWithAndWithoutResult()
+    {
+        var withResult = new SubagentFinishedEvent
+        {
+            SubagentId = "sub-1",
+            Result = JsonSerializer.Deserialize<JsonElement>("{\"answer\":42}"),
+        };
+
+        var json = JsonSerializer.Serialize(withResult, AGUIJsonSerializerContext.Default.SubagentFinishedEvent);
+        var back = JsonSerializer.Deserialize(json, AGUIJsonSerializerContext.Default.SubagentFinishedEvent);
+
+        Assert.NotNull(back);
+        Assert.Equal("sub-1", back.SubagentId);
+        Assert.NotNull(back.Result);
+        Assert.Equal(42, back.Result!.Value.GetProperty("answer").GetInt32());
+
+        var bare = new SubagentFinishedEvent { SubagentId = "sub-1" };
+        var bareJson = JsonSerializer.Serialize(bare, AGUIJsonSerializerContext.Default.SubagentFinishedEvent);
+        using var doc = JsonDocument.Parse(bareJson);
+        Assert.False(doc.RootElement.TryGetProperty("result", out _));
+    }
+
+    [Fact]
+    public void SubagentError_RoundTripsWithAndWithoutCode()
+    {
+        var evt = new SubagentErrorEvent
+        {
+            SubagentId = "sub-1",
+            Message = "the subagent exploded",
+            Code = "E_BOOM",
+        };
+
+        var json = JsonSerializer.Serialize(evt, AGUIJsonSerializerContext.Default.SubagentErrorEvent);
+        var back = JsonSerializer.Deserialize(json, AGUIJsonSerializerContext.Default.SubagentErrorEvent);
+
+        Assert.NotNull(back);
+        Assert.Equal("the subagent exploded", back.Message);
+        Assert.Equal("E_BOOM", back.Code);
+
+        var bare = new SubagentErrorEvent { SubagentId = "sub-1", Message = "boom" };
+        var bareJson = JsonSerializer.Serialize(bare, AGUIJsonSerializerContext.Default.SubagentErrorEvent);
+        using var doc = JsonDocument.Parse(bareJson);
+        Assert.False(doc.RootElement.TryGetProperty("code", out _));
+    }
+
+    [Theory]
+    [InlineData("{\"type\":\"SUBAGENT_STARTED\",\"subagentId\":\"s\",\"name\":\"n\"}", typeof(SubagentStartedEvent))]
+    [InlineData("{\"type\":\"SUBAGENT_FINISHED\",\"subagentId\":\"s\"}", typeof(SubagentFinishedEvent))]
+    [InlineData("{\"type\":\"SUBAGENT_ERROR\",\"subagentId\":\"s\",\"message\":\"m\"}", typeof(SubagentErrorEvent))]
+    public void Deserialize_ViaBaseEvent_ReturnsCorrectType(string json, System.Type expected)
+    {
+        // The polymorphic converter is how events arrive off the wire. An unmapped
+        // discriminator throws, so this is what proves the three are actually reachable
+        // rather than merely declared.
+        var evt = JsonSerializer.Deserialize(json, AGUIJsonSerializerContext.Default.BaseEvent);
+
+        Assert.NotNull(evt);
+        Assert.IsType(expected, evt);
+    }
+
+    [Fact]
+    public void Serialize_ViaBaseEvent_KeepsDiscriminator()
+    {
+        // Exercises the converter's Write path: a missing case there silently drops the
+        // event's own fields.
+        BaseEvent evt = new SubagentStartedEvent { SubagentId = "sub-1", Name = "researcher" };
+
+        var json = JsonSerializer.Serialize(evt, AGUIJsonSerializerContext.Default.BaseEvent);
+        using var doc = JsonDocument.Parse(json);
+
+        Assert.Equal("SUBAGENT_STARTED", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("sub-1", doc.RootElement.GetProperty("subagentId").GetString());
+        Assert.Equal("researcher", doc.RootElement.GetProperty("name").GetString());
+    }
+}
+
+/// <summary>
+/// Attribution on every event path a subagent can produce, and on the message model.
+/// </summary>
+public sealed class SubagentAttributionTest
+{
+    [Fact]
+    public void TextEvents_CarrySubagentId()
+    {
+        AssertRoundTrips(new TextMessageStartEvent { MessageId = "m1", Role = "assistant", SubagentId = "s1" }, e => e.SubagentId);
+        AssertRoundTrips(new TextMessageContentEvent { MessageId = "m1", Delta = "hi", SubagentId = "s1" }, e => e.SubagentId);
+        AssertRoundTrips(new TextMessageEndEvent { MessageId = "m1", SubagentId = "s1" }, e => e.SubagentId);
+    }
+
+    [Fact]
+    public void ToolCallEvents_CarrySubagentId()
+    {
+        AssertRoundTrips(new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search", SubagentId = "s1" }, e => e.SubagentId);
+        AssertRoundTrips(new ToolCallArgsEvent { ToolCallId = "tc1", Delta = "{}", SubagentId = "s1" }, e => e.SubagentId);
+        AssertRoundTrips(new ToolCallEndEvent { ToolCallId = "tc1", SubagentId = "s1" }, e => e.SubagentId);
+        AssertRoundTrips(new ToolCallResultEvent { MessageId = "m1", ToolCallId = "tc1", Content = "done", SubagentId = "s1" }, e => e.SubagentId);
+    }
+
+    [Fact]
+    public void ReasoningEvents_CarrySubagentId()
+    {
+        AssertRoundTrips(new ReasoningStartEvent { MessageId = "r1", SubagentId = "s1" }, e => e.SubagentId);
+        AssertRoundTrips(new ReasoningMessageStartEvent { MessageId = "r1", SubagentId = "s1" }, e => e.SubagentId);
+        AssertRoundTrips(new ReasoningMessageContentEvent { MessageId = "r1", Delta = "think", SubagentId = "s1" }, e => e.SubagentId);
+        AssertRoundTrips(new ReasoningMessageEndEvent { MessageId = "r1", SubagentId = "s1" }, e => e.SubagentId);
+        AssertRoundTrips(new ReasoningEndEvent { MessageId = "r1", SubagentId = "s1" }, e => e.SubagentId);
+        // Encrypted reasoning is called out separately because it was the one path the
+        // LangGraph integration silently failed to attribute (PNI-195).
+        AssertRoundTrips(
+            new ReasoningEncryptedValueEvent { Subtype = "message", EntityId = "r1", EncryptedValue = "opaque", SubagentId = "s1" },
+            e => e.SubagentId);
+    }
+
+    [Fact]
+    public void ActivityAndStepEvents_CarrySubagentId()
+    {
+        AssertRoundTrips(new StepStartedEvent { StepName = "step", SubagentId = "s1" }, e => e.SubagentId);
+        AssertRoundTrips(new StepFinishedEvent { StepName = "step", SubagentId = "s1" }, e => e.SubagentId);
+        AssertRoundTrips(
+            new ActivitySnapshotEvent { MessageId = "a1", ActivityType = "search", Content = JsonSerializer.Deserialize<JsonElement>("{}"), SubagentId = "s1" },
+            e => e.SubagentId);
+    }
+
+    [Fact]
+    public void SubagentId_IsOmittedWhenAbsent()
+    {
+        // Unattributed events belong to the parent. Emitting an explicit null would make
+        // every parent event carry the key, which the TypeScript schema and the protobuf
+        // optional both treat as different from omitted.
+        var json = JsonSerializer.Serialize(
+            new TextMessageStartEvent { MessageId = "m1", Role = "assistant" },
+            AGUIJsonSerializerContext.Default.TextMessageStartEvent);
+
+        using var doc = JsonDocument.Parse(json);
+        Assert.False(doc.RootElement.TryGetProperty("subagentId", out _));
+    }
+
+    [Fact]
+    public void Messages_CarrySubagentIdOnEveryRole()
+    {
+        // Declared on AGUIMessage rather than per role: one MESSAGES_SNAPSHOT mixes the
+        // parent's messages with every subagent's, so attribution travels per message.
+        var messages = new List<AGUIMessage>
+        {
+            new AGUIAssistantMessage { Id = "m1", Content = "hi", SubagentId = "s1" },
+            new AGUIToolMessage { Id = "m2", Content = "done", ToolCallId = "tc1", SubagentId = "s1" },
+            new AGUIReasoningMessage { Id = "m3", Content = "think", SubagentId = "s2" },
+            new AGUIUserMessage { Id = "m4", Content = new AGUIUserContent("hello"), SubagentId = "s3" },
+        };
+
+        var snapshot = new MessagesSnapshotEvent();
+        foreach (var message in messages)
+        {
+            snapshot.Messages.Add(message);
+        }
+
+        var json = JsonSerializer.Serialize(snapshot, AGUIJsonSerializerContext.Default.MessagesSnapshotEvent);
+        var back = JsonSerializer.Deserialize(json, AGUIJsonSerializerContext.Default.MessagesSnapshotEvent);
+
+        Assert.NotNull(back);
+        Assert.Equal(new[] { "s1", "s1", "s2", "s3" }, back.Messages.Select(m => m.SubagentId).ToArray());
+    }
+
+    [Fact]
+    public void Messages_OmitSubagentIdWhenAbsent()
+    {
+        var json = JsonSerializer.Serialize(
+            (AGUIMessage)new AGUIAssistantMessage { Id = "m1", Content = "hi" },
+            AGUIJsonSerializerContext.Default.AGUIMessage);
+
+        using var doc = JsonDocument.Parse(json);
+        Assert.False(doc.RootElement.TryGetProperty("subagentId", out _));
+    }
+
+    private static void AssertRoundTrips<T>(T evt, System.Func<T, string?> read)
+        where T : BaseEvent
+    {
+        // Goes through the polymorphic BaseEvent converter, so a Write or Read case that
+        // forgot this event type fails here rather than passing on a direct serialize.
+        var json = JsonSerializer.Serialize((BaseEvent)evt, AGUIJsonSerializerContext.Default.BaseEvent);
+        var back = JsonSerializer.Deserialize(json, AGUIJsonSerializerContext.Default.BaseEvent);
+
+        Assert.NotNull(back);
+        var typed = Assert.IsType<T>(back);
+        Assert.Equal("s1", read(typed));
+    }
+}

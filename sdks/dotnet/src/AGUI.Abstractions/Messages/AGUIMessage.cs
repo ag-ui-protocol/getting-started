@@ -15,4 +15,14 @@ public abstract class AGUIMessage
 
     [JsonPropertyName("role")]
     public abstract string Role { get; }
+
+    /// <summary>
+    /// Gets or sets the subagent that produced this message, absent for the parent
+    /// agent's own. Declared on the base because the spec carries it on every role: a
+    /// single MESSAGES_SNAPSHOT mixes the parent's messages with those of every subagent
+    /// that ran, so attribution has to travel per message rather than per event.
+    /// </summary>
+    [JsonPropertyName("subagentId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SubagentId { get; set; }
 }
