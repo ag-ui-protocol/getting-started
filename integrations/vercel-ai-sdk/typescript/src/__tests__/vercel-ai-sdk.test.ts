@@ -41,6 +41,26 @@ describe("VercelAISDKAgent", () => {
     expect(clone.model).toBe(model);
   });
 
+  it("clone preserves accumulated messages, state, and headers", () => {
+    const model = makeMockModel([]);
+    const agent = new VercelAISDKAgent({ model, maxSteps: 2 });
+    agent.threadId = "thread-42";
+    agent.messages = [{ id: "m1", role: "user", content: "hi" }];
+    agent.state = { counter: 7 };
+    agent.headers = { "x-test": "1" };
+
+    const clone = agent.clone();
+
+    expect(clone.threadId).toBe("thread-42");
+    expect(clone.messages).toEqual(agent.messages);
+    expect(clone.messages).not.toBe(agent.messages);
+    expect(clone.state).toEqual({ counter: 7 });
+    expect(clone.headers).toEqual({ "x-test": "1" });
+    expect(clone.headers).not.toBe(agent.headers);
+    expect(clone.model).toBe(model);
+    expect(clone.maxSteps).toBe(2);
+  });
+
   it("runs end-to-end: emits RUN_STARTED, text events, RUN_FINISHED", async () => {
     const model = makeMockModel([
       streamStart,

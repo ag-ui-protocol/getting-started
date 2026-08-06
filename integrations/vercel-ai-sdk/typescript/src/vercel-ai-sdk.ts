@@ -47,7 +47,14 @@ export class VercelAISDKAgent extends AbstractAgent {
   }
 
   public clone() {
-    const cloned = new VercelAISDKAgent(this.config);
+    // super.clone() copies the AbstractAgent runtime state (threadId,
+    // messages, state, subscribers, middleware); re-attach the fields the
+    // base clone doesn't know about.
+    const cloned = super.clone() as VercelAISDKAgent;
+    cloned.config = this.config;
+    cloned.model = this.model;
+    cloned.maxSteps = this.maxSteps;
+    cloned.toolChoice = this.toolChoice;
     if (this.headers) {
       cloned.headers = { ...this.headers };
     }
