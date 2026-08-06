@@ -117,6 +117,38 @@ class TestHandleSingleEventCustomEvents(unittest.IsolatedAsyncioTestCase):
         assert agent.active_run["manually_emitted_state"] == {"counter": 42}
 
     @pytest.mark.asyncio
+    async def test_manually_emit_state_suppressed_inside_subagent(self):
+        """State belongs to the parent, so a subagent must not emit STATE_SNAPSHOT.
+
+        The two automatic paths (node-exit and checkpoint snapshots) already gate
+        on current_subagent_id. This manual path did not, and because
+        STATE_SNAPSHOT is in _SUBAGENT_ATTRIBUTABLE_EVENT_TYPES the dispatch
+        chokepoint would then stamp the subagent's id onto it — producing exactly
+        the event the design forbids. The client applies STATE_SNAPSHOT to the
+        shared state without consulting subagent_id, so a subagent calling the
+        manual helper would overwrite the parent's state with its own.
+        """
+        agent = self._make_agent()
+        agent.active_run["current_subagent_id"] = "tools:s1"
+        agent.active_run["active_subagents"] = {}
+        event = {
+            "event": LangGraphEventTypes.OnCustomEvent.value,
+            "name": CustomEventNames.ManuallyEmitState.value,
+            "data": {"counter": 42},
+        }
+        events = []
+        async for ev in agent._handle_single_event(event, {}):
+            events.append(ev)
+
+        event_types = [e.type for e in events]
+        assert EventType.STATE_SNAPSHOT not in event_types
+        # The CUSTOM passthrough still goes out, so the subagent's signal is not
+        # swallowed — only the state application is withheld.
+        assert EventType.CUSTOM in event_types
+        # Still recorded, so the parent's next snapshot carries it.
+        assert agent.active_run["manually_emitted_state"] == {"counter": 42}
+
+    @pytest.mark.asyncio
     async def test_exit_event_produces_custom(self):
         """The exit event always produces a CUSTOM event (line 915 in agent.py
         yields a CustomEvent unconditionally for all OnCustomEvent types)."""

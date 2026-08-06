@@ -209,7 +209,7 @@ _SUBAGENT_ATTRIBUTABLE_EVENT_TYPES = frozenset({
     EventType.TOOL_CALL_ARGS, EventType.TOOL_CALL_END,
     EventType.REASONING_START, EventType.REASONING_MESSAGE_START,
     EventType.REASONING_MESSAGE_CONTENT, EventType.REASONING_MESSAGE_END,
-    EventType.REASONING_END,
+    EventType.REASONING_END, EventType.REASONING_ENCRYPTED_VALUE,
     EventType.ACTIVITY_SNAPSHOT, EventType.ACTIVITY_DELTA,
     EventType.STATE_SNAPSHOT, EventType.STATE_DELTA,
     EventType.STEP_STARTED, EventType.STEP_FINISHED, EventType.CUSTOM, EventType.RAW,
@@ -2217,9 +2217,19 @@ class LangGraphAgent:
 
             elif event["name"] == CustomEventNames.ManuallyEmitState:
                 self.active_run["manually_emitted_state"] = event["data"]
-                yield self._dispatch_event(
-                    StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot=self.get_state_snapshot(self.active_run["manually_emitted_state"]), raw_event=event)
-                )
+                # Only the parent owns state, so this is suppressed inside a
+                # subagent exactly like the node-exit and checkpoint snapshots
+                # are. Without the guard the dispatch chokepoint would stamp the
+                # subagent's id onto a STATE_SNAPSHOT (STATE_* is in
+                # _SUBAGENT_ATTRIBUTABLE_EVENT_TYPES), and the client applies
+                # STATE_SNAPSHOT to the shared state without consulting
+                # subagent_id — so a subagent's partial state would land as if
+                # the parent had sent it. The value is still recorded above, so
+                # the parent's next snapshot carries it.
+                if not self.active_run.get("current_subagent_id"):
+                    yield self._dispatch_event(
+                        StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot=self.get_state_snapshot(self.active_run["manually_emitted_state"]), raw_event=event)
+                    )
             
             yield self._dispatch_event(
                 CustomEvent(type=EventType.CUSTOM, name=event["name"], value=event["data"], raw_event=event)

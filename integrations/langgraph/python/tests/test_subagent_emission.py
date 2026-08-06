@@ -7,6 +7,7 @@ from ag_ui.core import (
     TextMessageStartEvent,
     TextMessageContentEvent,
     ToolCallResultEvent,
+    ReasoningEncryptedValueEvent,
     SubagentStartedEvent,
     AssistantMessage,
 )
@@ -188,6 +189,37 @@ class TestDispatchStamping(unittest.TestCase):
         )
         self.assertEqual(ev.subagent_id, "tools:s1")  # its own id, unchanged (not re-stamped by chokepoint logic)
 
+    def test_stamps_encrypted_reasoning_value(self):
+        # REASONING_ENCRYPTED_VALUE is emitted for redacted_thinking blocks and
+        # for the accumulated signature at the end of a reasoning stream. Both
+        # sites sit inside the same reasoning stream whose REASONING_MESSAGE_END
+        # does get attributed, so leaving this one untagged splits a single
+        # subagent's reasoning across two owners: the client attributes the
+        # encrypted value to the parent while the surrounding reasoning events
+        # belong to the subagent.
+        agent = self._agent("tools:s1")
+        ev = agent._dispatch_event(
+            ReasoningEncryptedValueEvent(
+                type=EventType.REASONING_ENCRYPTED_VALUE,
+                subtype="message",
+                entity_id="r1",
+                encrypted_value="opaque",
+            )
+        )
+        self.assertEqual(ev.subagent_id, "tools:s1")
+
+    def test_does_not_stamp_encrypted_reasoning_outside_subagent(self):
+        agent = self._agent(None)
+        ev = agent._dispatch_event(
+            ReasoningEncryptedValueEvent(
+                type=EventType.REASONING_ENCRYPTED_VALUE,
+                subtype="message",
+                entity_id="r1",
+                encrypted_value="opaque",
+            )
+        )
+        self.assertIsNone(ev.subagent_id)
+
 
 async def _collect(agen):
     return [ev async for ev in agen]
@@ -245,6 +277,27 @@ class TestSnapshotIncludesSubagentMessages(unittest.TestCase):
         self.assertEqual(subagent_msgs[0].role, "assistant")
         self.assertEqual(subagent_msgs[0].content, "Hello world")
 
+    def test_checkpoint_state_snapshot_suppressed_inside_subagent(self):
+        # State belongs to the parent. While a subagent is active the checkpoint
+        # snapshot must withhold STATE_SNAPSHOT but still emit MESSAGES_SNAPSHOT,
+        # so the subagent's messages and their attribution survive without its
+        # subgraph state leaking into the parent's.
+        agent = self._agent_with_active_run(current_subagent_id="tools:s1")
+        events = asyncio.run(_collect(agent.get_state_and_messages_snapshots({})))
+        types = [e.type for e in events]
+        self.assertNotIn(EventType.STATE_SNAPSHOT, types)
+        self.assertIn(EventType.MESSAGES_SNAPSHOT, types)
+
+    def test_checkpoint_state_snapshot_emitted_for_parent(self):
+        # The same path with no subagent active is the control: the parent does
+        # emit STATE_SNAPSHOT, so the test above pins suppression rather than a
+        # path that never emits state at all.
+        agent = self._agent_with_active_run(current_subagent_id=None)
+        events = asyncio.run(_collect(agent.get_state_and_messages_snapshots({})))
+        types = [e.type for e in events]
+        self.assertIn(EventType.STATE_SNAPSHOT, types)
+        self.assertIn(EventType.MESSAGES_SNAPSHOT, types)
+
     def test_no_subagent_messages_leaves_snapshot_unchanged(self):
         # Backwards-compat: a run with no subagent messages (normal run or the
         # declared-subgraphs demo) yields the main-graph snapshot untouched.
@@ -269,6 +322,113 @@ class TestSnapshotIncludesSubagentMessages(unittest.TestCase):
         )
         snap = self._snapshot(agent)
         self.assertEqual(snap.messages, [])
+
+
+class TestNodeExitStateSuppression(unittest.IsolatedAsyncioTestCase):
+    """The third state-emission path: the node-exit STATE_SNAPSHOT in the stream
+    loop. Driven end to end through _handle_stream_events so the suppression is
+    pinned where it actually runs, not at a helper."""
+
+    async def _drive(self, in_subagent):
+        agent = _make_agent()
+
+        # The lane is derived from each event's own metadata by
+        # reconcile_subagents (nested checkpoint ns + lc_agent_name), never set
+        # by hand — so the metadata is what decides whether this node exit is
+        # inside a subagent.
+        if in_subagent:
+            sub_meta = {
+                "langgraph_node": "n",
+                "langgraph_checkpoint_ns": "tools:s1|model:inner",
+                "lc_agent_name": "researcher",
+            }
+        else:
+            sub_meta = {"langgraph_node": "n"}
+
+        async def fake_prepare(*args, **kwargs):
+            agent.active_run["schema_keys"] = {
+                "input": ["messages"], "output": ["messages"],
+                "config": [], "context": [],
+            }
+
+            async def gen():
+                yield {
+                    "event": "on_chain_start",
+                    "run_id": "run-1",
+                    "name": "n",
+                    "data": {},
+                    "metadata": {"langgraph_node": "n"},
+                }
+                # Node exit carrying a state update — this is what would
+                # normally produce a STATE_SNAPSHOT.
+                yield {
+                    "event": "on_chain_end",
+                    "run_id": "run-1",
+                    "name": "n",
+                    "data": {"output": {"custom_key": "from_graph"}},
+                    "metadata": sub_meta,
+                }
+
+            return {
+                "stream": gen(),
+                "state": MagicMock(values={"messages": []}),
+                "config": {"configurable": {"thread_id": "t1"}},
+            }
+
+        agent.prepare_stream = fake_prepare
+        final_state = MagicMock()
+        final_state.values = {"messages": []}
+        final_state.tasks = []
+        final_state.next = []
+        final_state.metadata = {"writes": {}}
+        agent.graph.aget_state = AsyncMock(return_value=final_state)
+
+        run_input = MagicMock()
+        run_input.run_id = "run-1"
+        run_input.thread_id = "t1"
+        run_input.forwarded_props = {}
+
+        collected = []
+        async for ev in agent._handle_stream_events(run_input):
+            collected.append(ev)
+        return collected
+
+    @staticmethod
+    def _node_exit_snapshots(collected):
+        """STATE_SNAPSHOTs produced by the node exit itself.
+
+        The end-of-run snapshots carry no raw_event and are the parent's — by
+        then the subagent has been drained — so they are not what this path is
+        about. Keying on the on_chain_end raw_event isolates the node-exit one.
+        """
+        return [
+            e for e in collected
+            if getattr(e, "type", None) == EventType.STATE_SNAPSHOT
+            and (getattr(e, "raw_event", None) or {}).get("event") == "on_chain_end"
+        ]
+
+    async def test_node_exit_state_snapshot_suppressed_inside_subagent(self):
+        collected = await self._drive(in_subagent=True)
+        self.assertEqual(
+            self._node_exit_snapshots(collected), [],
+            "a subagent must not emit STATE_SNAPSHOT; only the parent owns state",
+        )
+        # And nothing that did go out claims to be the subagent's state.
+        self.assertEqual(
+            [e for e in collected
+             if getattr(e, "type", None) == EventType.STATE_SNAPSHOT
+             and getattr(e, "subagent_id", None) is not None],
+            [],
+        )
+
+    async def test_node_exit_state_snapshot_emitted_for_parent(self):
+        # Control: the same node exit outside a subagent does emit one, so the
+        # test above pins suppression rather than a path that never fires.
+        collected = await self._drive(in_subagent=False)
+        self.assertTrue(
+            self._node_exit_snapshots(collected),
+            "parent should still emit a node-exit STATE_SNAPSHOT",
+        )
 
 
 class TestErrorOpenSubagents(unittest.TestCase):
