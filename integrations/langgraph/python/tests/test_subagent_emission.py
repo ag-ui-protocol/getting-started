@@ -431,6 +431,113 @@ class TestNodeExitStateSuppression(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class TestInterruptWithOpenSubagent(unittest.IsolatedAsyncioTestCase):
+    """An interrupt surfaces the pause by ENDING the run with RUN_FINISHED, and
+    the client's verifyEvents rejects RUN_FINISHED while any subagent is still
+    active. So a subagent suspended at a HITL interrupt must be finished before
+    the run ends, or every interrupted run with an open subagent hard-errors on
+    the client. drain_subagents was unit-tested in isolation but never on this
+    path, which is the one where the ordering actually matters."""
+
+    async def _drive(self, with_interrupt):
+        agent = _make_agent()
+
+        async def fake_prepare(*args, **kwargs):
+            agent.active_run["schema_keys"] = {
+                "input": ["messages"], "output": ["messages"],
+                "config": [], "context": [],
+            }
+
+            async def gen():
+                # A subagent opens and never closes: its task OnToolEnd never
+                # fires because the graph paused at an interrupt inside it.
+                yield {
+                    "event": "on_chain_start",
+                    "run_id": "run-1",
+                    "name": "n",
+                    "data": {},
+                    "metadata": {
+                        "langgraph_node": "n",
+                        "langgraph_checkpoint_ns": "tools:s1|model:inner",
+                        "lc_agent_name": "researcher",
+                    },
+                }
+
+            return {
+                "stream": gen(),
+                "state": MagicMock(values={"messages": []}),
+                "config": {"configurable": {"thread_id": "t1"}},
+            }
+
+        agent.prepare_stream = fake_prepare
+        final_state = MagicMock()
+        final_state.values = {"messages": []}
+        final_state.next = ["n"] if with_interrupt else []
+        final_state.metadata = {"writes": {}}
+        if with_interrupt:
+            task = MagicMock()
+            # Real strings, not mocks: AGUIInterrupt validates id as a str.
+            interrupt = MagicMock()
+            interrupt.id = "int-1"
+            interrupt.value = "please confirm"
+            task.interrupts = [interrupt]
+            final_state.tasks = [task]
+        else:
+            final_state.tasks = []
+        agent.graph.aget_state = AsyncMock(return_value=final_state)
+
+        run_input = MagicMock()
+        run_input.run_id = "run-1"
+        run_input.thread_id = "t1"
+        run_input.forwarded_props = {}
+
+        collected = []
+        async for ev in agent._handle_stream_events(run_input):
+            collected.append(ev)
+        return [getattr(e, "type", None) for e in collected], collected
+
+    async def test_open_subagent_is_finished_before_run_finished_on_interrupt(self):
+        types, collected = await self._drive(with_interrupt=True)
+
+        self.assertIn(EventType.SUBAGENT_STARTED, types)
+        self.assertIn(EventType.SUBAGENT_FINISHED, types)
+        self.assertIn(EventType.RUN_FINISHED, types)
+        self.assertLess(
+            types.index(EventType.SUBAGENT_FINISHED),
+            types.index(EventType.RUN_FINISHED),
+            "SUBAGENT_FINISHED must precede RUN_FINISHED or the client rejects the run",
+        )
+        # Exactly one terminal event, and it is last — nothing trails it.
+        terminal = [t for t in types if t in (EventType.RUN_FINISHED, EventType.RUN_ERROR)]
+        self.assertEqual(len(terminal), 1)
+        self.assertEqual(types[-1], EventType.RUN_FINISHED)
+
+    async def test_open_subagent_is_finished_before_run_finished_without_interrupt(self):
+        # Same invariant on the ordinary completion path.
+        types, _ = await self._drive(with_interrupt=False)
+        self.assertIn(EventType.SUBAGENT_FINISHED, types)
+        self.assertLess(
+            types.index(EventType.SUBAGENT_FINISHED),
+            types.index(EventType.RUN_FINISHED),
+        )
+        self.assertEqual(types[-1], EventType.RUN_FINISHED)
+
+    async def test_end_of_run_events_are_not_attributed_to_the_open_subagent(self):
+        # current_subagent_id is cleared before the supervisor-level end-of-run
+        # events, so the final snapshots and steps are the parent's.
+        _, collected = await self._drive(with_interrupt=False)
+        for ev in collected:
+            if getattr(ev, "type", None) in (
+                EventType.STATE_SNAPSHOT,
+                EventType.MESSAGES_SNAPSHOT,
+                EventType.STEP_FINISHED,
+            ):
+                self.assertIsNone(
+                    getattr(ev, "subagent_id", None),
+                    f"end-of-run {ev.type} must not be attributed to a subagent",
+                )
+
+
 class TestErrorOpenSubagents(unittest.TestCase):
     def test_emits_error_for_all_open_and_clears(self):
         active_run = {

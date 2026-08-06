@@ -12,6 +12,10 @@ import {
   ToolCallStartEvent,
   ToolCallEndEvent,
   ToolCallResultEvent,
+  ReasoningMessageStartEvent,
+  ReasoningMessageContentEvent,
+  ReasoningMessageEndEvent,
+  ActivitySnapshotEvent,
   RunAgentInput,
 } from "@ag-ui/core";
 import { defaultApplyEvents } from "../default";
@@ -215,5 +219,131 @@ describe("defaultApplyEvents with subagentId attribution", () => {
 
     expect(message).toBeDefined();
     expect((message as any).subagentId).toBe("first");
+  });
+
+  // The audit (PNI-195) lists reasoning and activity as attribution paths in
+  // their own right. Both were implemented but only exercised through text and
+  // tool calls, so a regression in either would have gone unnoticed.
+  it("should copy subagentId from REASONING_MESSAGE_START onto the newly created reasoning message", async () => {
+    const events$ = new Subject<BaseEvent>();
+    const initialState: RunAgentInput = {
+      messages: [],
+      state: {},
+      threadId: "test-thread",
+      runId: "test-run",
+      tools: [],
+      context: [],
+    };
+
+    const agent = createAgent(initialState.messages);
+    const result$ = defaultApplyEvents(initialState, events$, agent, []);
+    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.REASONING_MESSAGE_START,
+      messageId: "reason1",
+      subagentId: "sub-r",
+    } as ReasoningMessageStartEvent);
+    events$.next({
+      type: EventType.REASONING_MESSAGE_CONTENT,
+      messageId: "reason1",
+      delta: "thinking",
+    } as ReasoningMessageContentEvent);
+    events$.next({
+      type: EventType.REASONING_MESSAGE_END,
+      messageId: "reason1",
+    } as ReasoningMessageEndEvent);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    events$.complete();
+
+    const stateUpdates = await stateUpdatesPromise;
+    const finalUpdate = stateUpdates[stateUpdates.length - 1];
+    const message = finalUpdate?.messages?.find((m) => m.id === "reason1");
+
+    expect(message).toBeDefined();
+    expect(message!.role).toBe("reasoning");
+    expect((message as any).subagentId).toBe("sub-r");
+  });
+
+  it("should copy subagentId from ACTIVITY_SNAPSHOT onto the newly created activity message", async () => {
+    const events$ = new Subject<BaseEvent>();
+    const initialState: RunAgentInput = {
+      messages: [],
+      state: {},
+      threadId: "test-thread",
+      runId: "test-run",
+      tools: [],
+      context: [],
+    };
+
+    const agent = createAgent(initialState.messages);
+    const result$ = defaultApplyEvents(initialState, events$, agent, []);
+    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.ACTIVITY_SNAPSHOT,
+      messageId: "act1",
+      activityType: "search",
+      content: { query: "q" },
+      replace: false,
+      subagentId: "sub-a",
+    } as ActivitySnapshotEvent);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    events$.complete();
+
+    const stateUpdates = await stateUpdatesPromise;
+    const finalUpdate = stateUpdates[stateUpdates.length - 1];
+    const message = finalUpdate?.messages?.find((m) => m.id === "act1");
+
+    expect(message).toBeDefined();
+    expect(message!.role).toBe("activity");
+    expect((message as any).subagentId).toBe("sub-a");
+  });
+
+  it("should leave subagentId absent on reasoning and activity messages when the event omits it", async () => {
+    const events$ = new Subject<BaseEvent>();
+    const initialState: RunAgentInput = {
+      messages: [],
+      state: {},
+      threadId: "test-thread",
+      runId: "test-run",
+      tools: [],
+      context: [],
+    };
+
+    const agent = createAgent(initialState.messages);
+    const result$ = defaultApplyEvents(initialState, events$, agent, []);
+    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.REASONING_MESSAGE_START,
+      messageId: "reason2",
+    } as ReasoningMessageStartEvent);
+    events$.next({
+      type: EventType.ACTIVITY_SNAPSHOT,
+      messageId: "act2",
+      activityType: "search",
+      content: {},
+    } as ActivitySnapshotEvent);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    events$.complete();
+
+    const stateUpdates = await stateUpdatesPromise;
+    const finalUpdate = stateUpdates[stateUpdates.length - 1];
+
+    // Absent, not present-and-undefined: the field is spread in conditionally so
+    // an unattributed message must not carry the key at all.
+    expect(
+      finalUpdate?.messages?.find((m) => m.id === "reason2"),
+    ).not.toHaveProperty("subagentId");
+    expect(finalUpdate?.messages?.find((m) => m.id === "act2")).not.toHaveProperty(
+      "subagentId",
+    );
   });
 });

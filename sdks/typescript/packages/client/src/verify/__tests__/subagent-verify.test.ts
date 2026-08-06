@@ -11,6 +11,9 @@ import {
   SubagentFinishedEvent,
   TextMessageStartEvent,
   TextMessageEndEvent,
+  ToolCallStartEvent,
+  ToolCallArgsEvent,
+  ToolCallEndEvent,
 } from "@ag-ui/core";
 
 describe("verifyEvents subagent lifecycle", () => {
@@ -256,5 +259,79 @@ describe("verifyEvents subagent lifecycle", () => {
 
     expect(caught).toBeInstanceOf(AGUIError);
     expect((caught as Error).message).toMatch(/does not match/i);
+  });
+
+  // verify guards tool calls the same way it guards messages, but only the
+  // message path had a test. A tool call is the more consequential of the two:
+  // its args and result are what travel back to the provider, so an owner
+  // disagreement mid-stream is how a subagent's call could be stitched onto the
+  // parent's.
+  const expectRejected = async (inputEvents: BaseEvent[]) => {
+    let caught: unknown;
+    try {
+      await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(AGUIError);
+    expect((caught as Error).message).toMatch(/does not match/i);
+  };
+
+  it("should reject TOOL_CALL_ARGS whose subagentId differs from its opener", async () => {
+    await expectRejected([
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      {
+        type: EventType.TOOL_CALL_START,
+        toolCallId: "tc1",
+        toolCallName: "search",
+        subagentId: "s1",
+      } as ToolCallStartEvent,
+      {
+        type: EventType.TOOL_CALL_ARGS,
+        toolCallId: "tc1",
+        delta: "{}",
+        subagentId: "s2", // <-- disagrees with the opener's s1
+      } as ToolCallArgsEvent,
+    ]);
+  });
+
+  it("should reject TOOL_CALL_END whose subagentId differs from its opener", async () => {
+    await expectRejected([
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      {
+        type: EventType.TOOL_CALL_START,
+        toolCallId: "tc1",
+        toolCallName: "search",
+        subagentId: "s1",
+      } as ToolCallStartEvent,
+      {
+        type: EventType.TOOL_CALL_END,
+        toolCallId: "tc1",
+        subagentId: "s2",
+      } as ToolCallEndEvent,
+    ]);
+  });
+
+  it("should allow an untagged continuation of a tagged tool call", async () => {
+    // Omitting the tag is not a disagreement: attribution is optional per event,
+    // and the opener already established the owner. Only a *different* id is an
+    // error, so producers that tag only openers stay valid.
+    const inputEvents: BaseEvent[] = [
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      {
+        type: EventType.TOOL_CALL_START,
+        toolCallId: "tc1",
+        toolCallName: "search",
+        subagentId: "s1",
+      } as ToolCallStartEvent,
+      { type: EventType.TOOL_CALL_ARGS, toolCallId: "tc1", delta: "{}" } as ToolCallArgsEvent,
+      { type: EventType.TOOL_CALL_END, toolCallId: "tc1" } as ToolCallEndEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
+    ];
+
+    const events = await firstValueFrom(
+      verifyEvents(false)(from(inputEvents)).pipe(toArray()),
+    );
+    expect(events.map((e) => e.type)).toEqual(inputEvents.map((e) => e.type));
   });
 });
