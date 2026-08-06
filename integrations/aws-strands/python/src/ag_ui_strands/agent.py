@@ -1132,12 +1132,9 @@ class StrandsAgent:
 
             try:
                 async for event in agent_stream:
-                    # PATCHED: halt must BREAK out of the loop (brake), not just
-                    # continue (mute). continue kept the Strands event loop alive,
-                    # causing an extra Bedrock call and a hung Run. break lets the
-                    # existing agent_stream.aclose() cleanup terminate Strands.
+                    # If we've halted, consume remaining events silently to allow proper cleanup
                     if halt_event_stream:
-                        break
+                        continue
 
                     logger.debug(f"Received event: {event}")
 
@@ -1320,15 +1317,13 @@ class StrandsAgent:
                     # Handle tool results from Strands for backend tool rendering
                     elif "message" in event and event["message"].get("role") == "user":
                         if pending_halt:
-                            # PATCHED: set halt but DO NOT discard this message. It
-                            # packs results for ALL tools in the turn; the loop below
-                            # skips frontend-tool results and emits backend-tool
-                            # results. The next loop-top `break` (fix #1) then stops
-                            # the stream after backend results are flushed.
-                            # NOTE: the buffered frontend-tool ToolCallEnd(s) are
-                            # flushed *after* the per-item loop below (not here), so
-                            # the client receives the backend TOOL_CALL_RESULT(s)
-                            # before the frontend TOOL_CALL_END that hands off control.
+                            # Set halt but DO NOT discard this message: it packs
+                            # results for ALL tools in the turn, and the loop below
+                            # emits the backend-tool results. The buffered
+                            # frontend-tool ToolCallEnd(s) are flushed *after* that
+                            # per-item loop (not here), so the client receives the
+                            # backend TOOL_CALL_RESULT(s) before the frontend
+                            # TOOL_CALL_END that hands off control.
                             halt_event_stream = True
                         message_content = event["message"].get("content", [])
                         if not message_content or not isinstance(message_content, list):
