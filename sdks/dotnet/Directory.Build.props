@@ -15,7 +15,12 @@
     <TargetFrameworks>$(TargetFrameworksCore);netstandard2.0;net472</TargetFrameworks>
     <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
     <IsPackable>false</IsPackable>
-    <IsPackable Condition="'$(MSBuildProjectName)' == 'AGUI.Abstractions' Or '$(MSBuildProjectName)' == 'AGUI.Formatting' Or '$(MSBuildProjectName)' == 'AGUI.Protobuf' Or '$(MSBuildProjectName)' == 'AGUI.Client' Or '$(MSBuildProjectName)' == 'AGUI.Server'">true</IsPackable>
+    <!-- Packable projects are an explicit allowlist. It must be set HERE rather than in a
+         project's own file or a nested Directory.Build.props: the unconditional false above
+         would overwrite an earlier value, and a later one arrives after the
+         Condition="'$(IsPackable)' == 'true'" metadata group below has already been skipped,
+         silently dropping README/icon/signing/symbols from the package. -->
+    <IsPackable Condition="'$(MSBuildProjectName)' == 'AGUI.Abstractions' Or '$(MSBuildProjectName)' == 'AGUI.Formatting' Or '$(MSBuildProjectName)' == 'AGUI.Protobuf' Or '$(MSBuildProjectName)' == 'AGUI.Client' Or '$(MSBuildProjectName)' == 'AGUI.Server' Or '$(MSBuildProjectName)' == 'AGUI.A2UI' Or '$(MSBuildProjectName)' == 'AGUI.A2UI.Toolkit'">true</IsPackable>
     <!-- Public members should not use oblivious types. Not done with all nullable annotations. -->
     <NoWarn>$(NoWarn);RS0041</NoWarn>
   </PropertyGroup>
