@@ -91,6 +91,14 @@ const ALL_SERVICES = {
       env: { PORT: 8002 },
     },
   ],
+  "trpc-agent-go": [
+    {
+      command: "go run .",
+      name: "tRPC-Agent-Go",
+      cwd: path.join(integrationsRoot, "trpc-agent-go/go/examples"),
+      env: { PORT: 8027 },
+    },
+  ],
   "crew-ai": [
     {
       command: "uv run dev",
@@ -349,6 +357,7 @@ const ALL_SERVICES = {
         SERVER_STARTER_URL: "http://localhost:8000",
         SERVER_STARTER_ALL_FEATURES_URL: "http://localhost:8001",
         AGNO_URL: "http://localhost:8002",
+        TRPC_AGENT_GO_URL: "http://localhost:8027",
         CREW_AI_URL: "http://localhost:8003",
         LANGGRAPH_FAST_API_URL: "http://localhost:8004",
         LANGGRAPH_PYTHON_URL: "http://localhost:8005",
@@ -388,6 +397,7 @@ const ALL_SERVICES = {
         SERVER_STARTER_URL: "http://localhost:8000",
         SERVER_STARTER_ALL_FEATURES_URL: "http://localhost:8001",
         AGNO_URL: "http://localhost:8002",
+        TRPC_AGENT_GO_URL: "http://localhost:8027",
         CREW_AI_URL: "http://localhost:8003",
         LANGGRAPH_FAST_API_URL: "http://localhost:8004",
         LANGGRAPH_PYTHON_URL: "http://localhost:8005",
