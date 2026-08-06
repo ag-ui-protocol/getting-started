@@ -77,6 +77,10 @@ message Message {
   optional string tool_call_id = 6;
   optional string error = 7;
   repeated InputContent content_parts = 8;
+  // Which subagent produced this message, absent for the parent's own. Carried
+  // per-message rather than on MessagesSnapshotEvent, since one snapshot mixes
+  // the parent's messages with those of every subagent that ran.
+  optional string subagent_id = 9;
 }
 
 message Interrupt {

@@ -77,6 +77,12 @@ export interface Message {
   toolCallId?: string | undefined;
   error?: string | undefined;
   contentParts: InputContent[];
+  /**
+   * Which subagent produced this message, absent for the parent's own. Carried
+   * per-message rather than on MessagesSnapshotEvent, since one snapshot mixes
+   * the parent's messages with those of every subagent that ran.
+   */
+  subagentId?: string | undefined;
 }
 
 export interface Interrupt {
@@ -797,6 +803,7 @@ function createBaseMessage(): Message {
     toolCallId: undefined,
     error: undefined,
     contentParts: [],
+    subagentId: undefined,
   };
 }
 
@@ -825,6 +832,9 @@ export const Message: MessageFns<Message> = {
     }
     for (const v of message.contentParts) {
       InputContent.encode(v!, writer.uint32(66).fork()).join();
+    }
+    if (message.subagentId !== undefined) {
+      writer.uint32(74).string(message.subagentId);
     }
     return writer;
   },
@@ -900,6 +910,14 @@ export const Message: MessageFns<Message> = {
           message.contentParts.push(InputContent.decode(reader, reader.uint32()));
           continue;
         }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.subagentId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -922,6 +940,7 @@ export const Message: MessageFns<Message> = {
     message.toolCallId = object.toolCallId ?? undefined;
     message.error = object.error ?? undefined;
     message.contentParts = object.contentParts?.map((e) => InputContent.fromPartial(e)) || [];
+    message.subagentId = object.subagentId ?? undefined;
     return message;
   },
 };
