@@ -31,6 +31,14 @@
         { "name": "create-ag-ui-app", "path": "sdks/typescript/packages/cli", "ecosystem": "typescript" }
       ]
     },
+    "sdk-dotnet-a2ui-toolkit": {
+      "description": "A2UI Toolkit (standalone .NET SDK package, independently versioned)",
+      "sharedVersion": false,
+      "versionSource": "sdks/dotnet/src/AGUI.A2UI.Toolkit/Directory.Build.props",
+      "packages": [
+        { "name": "AGUI.A2UI.Toolkit", "path": "sdks/dotnet/src/AGUI.A2UI.Toolkit", "ecosystem": "dotnet" }
+      ]
+    },
     "sdk-ts-a2ui-toolkit": {
       "description": "A2UI Toolkit (standalone TypeScript SDK package, independently versioned)",
       "sharedVersion": false,

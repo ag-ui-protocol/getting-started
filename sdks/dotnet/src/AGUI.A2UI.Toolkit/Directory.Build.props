@@ -1,0 +1,26 @@
+<Project>
+
+  <!-- Inherit every shared .NET SDK build setting (target frameworks, analyzers,
+       signing, package metadata) from sdks/dotnet/Directory.Build.props. Without this
+       import a nested Directory.Build.props SHADOWS the parent rather than extending
+       it — MSBuild stops at the first file it finds walking up. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!-- AGUI.A2UI.Toolkit is sequenced separately from the sdk-dotnet train and pinned to
+         the CROSS-LANGUAGE A2UI family version, shared with its already-published siblings
+         @ag-ui/a2ui-toolkit (npm) and ag-ui-a2ui-toolkit (PyPI), both at 0.0.4. Those two are
+         independently versioned from their own SDKs (@ag-ui/core 0.0.57, ag-ui-protocol
+         0.1.19) for exactly this reason: the toolkit is a behavior-for-behavior port whose
+         version communicates cross-language parity, not .NET SDK progress.
+
+         The parent's VersionPrefix is conditional, so this UNCONDITIONAL override wins and
+         the pin holds when the train moves. That the train also currently reads 0.0.4 is a
+         coincidence which would otherwise mask the coupling.
+
+         This file's path is also the scope's `versionSource` in release.config.json — the
+         release guards require a Directory.Build.props there, not a .csproj. -->
+    <VersionPrefix>0.0.4</VersionPrefix>
+  </PropertyGroup>
+
+</Project>
