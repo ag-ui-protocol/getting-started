@@ -12,6 +12,20 @@ export const verifyEvents =
     // can be checked for attribution consistency.
     let activeMessages = new Map<string, { subagentId?: string }>(); // message ID -> owner
     let activeToolCalls = new Map<string, { subagentId?: string }>(); // tool call ID -> owner
+    // Activity messages are keyed by their own messageId and continued by
+    // ACTIVITY_DELTA, so they need the same owner tracking as text messages.
+    let activeActivities = new Map<string, { subagentId?: string }>(); // activity ID -> owner
+    // Reasoning messages are opened by REASONING_MESSAGE_START and continued by
+    // REASONING_MESSAGE_CONTENT/END, REASONING_END and REASONING_ENCRYPTED_VALUE, all
+    // keyed by the same id — the last ID-keyed entity that had no owner check, so an
+    // s2 delta could be appended to the reasoning message minted for s1.
+    let activeReasoning = new Map<string, { subagentId?: string }>(); // reasoning ID -> owner
+    // Owners retained for the whole run. The maps above double as "is this entity open?"
+    // state and so are cleared on close, but a continuation can legitimately arrive after
+    // its entity closed — REASONING_ENCRYPTED_VALUE with subtype "tool-call" after
+    // TOOL_CALL_END is the case in point, and nothing requires it to precede the close.
+    // Losing the owner there made the mismatch unmatchable and accepted a wrong one.
+    let entityOwners = new Map<string, { subagentId?: string }>(); // entity ID -> owner
     let runFinished = false;
     let runError = false; // New flag to track if RUN_ERROR has been sent
     // New flags to track first/last event requirements
@@ -19,6 +33,18 @@ export const verifyEvents =
     // Track active steps
     let activeSteps = new Map<string, boolean>(); // Map of step name -> active status
     let activeSubagents = new Map<string, boolean>(); // Map of subagent ID -> active status
+    // Ids closed by a SUBAGENT_FINISHED / SUBAGENT_ERROR in this run. Needed because
+    // "no duplicate SUBAGENT_STARTED for the same subagentId" has to hold for the whole
+    // run: a subagentId is a unique handle for ONE invocation, so tracking only the
+    // ACTIVE set made `STARTED(s1), FINISHED(s1), STARTED(s1)` legal and gave a single
+    // invocation two starts and two terminals.
+    //
+    // Deliberately NOT used to reject later events tagged with a closed id. The rule is
+    // that a continuation must not DISAGREE with its opener; requiring the tag to name a
+    // still-live subagent was explicitly rejected when this was designed, so that
+    // attribution-only producers (which tag events but never send SUBAGENT_*) stay
+    // valid. Cleared per run, like every other map here.
+    let closedSubagents = new Set<string>();
     let activeThinkingStep = false;
     let activeThinkingStepMessage = false;
     let runStarted = false; // Track if a run has started
@@ -27,8 +53,12 @@ export const verifyEvents =
     const resetRunState = () => {
       activeMessages.clear();
       activeToolCalls.clear();
+      activeActivities.clear();
+      activeReasoning.clear();
+      entityOwners.clear();
       activeSteps.clear();
       activeSubagents.clear();
+      closedSubagents.clear();
       activeThinkingStep = false;
       activeThinkingStepMessage = false;
       runFinished = false;
@@ -50,13 +80,16 @@ export const verifyEvents =
       entityId: string,
     ): AGUIError | undefined => {
       if (evSubagentId === undefined) return undefined;
-      if (
-        owner &&
-        owner.subagentId !== undefined &&
-        owner.subagentId !== evSubagentId
-      ) {
+      // An opener with no tag means the entity belongs to the PARENT, which is just as
+      // much an owner as a subagent is — so a tagged continuation on it is still a
+      // disagreement. Comparing only when the recorded owner had an id let
+      // `TEXT_MESSAGE_START(m1)` then `TEXT_MESSAGE_CONTENT(m1, subagentId: "s1")`
+      // through, and the reducer would append a subagent's text to a parent-owned
+      // message. `owner` being present at all is what matters; its id being undefined
+      // is the parent, not "unknown".
+      if (owner && owner.subagentId !== evSubagentId) {
         return new AGUIError(
-          `Cannot send '${evType}': subagentId '${evSubagentId}' does not match the ${entityKind} '${entityId}' opener's subagent '${owner.subagentId}'.`,
+          `Cannot send '${evType}': subagentId '${evSubagentId}' does not match the ${entityKind} '${entityId}' opener's subagent '${owner.subagentId ?? "(the parent agent)"}'.`,
         );
       }
       return undefined;
@@ -139,6 +172,7 @@ export const verifyEvents =
               if (subErr) return throwError(() => subErr);
             }
             activeMessages.set(messageId, { subagentId: (event as any).subagentId });
+            entityOwners.set(messageId, { subagentId: (event as any).subagentId });
             return of(event);
           }
 
@@ -205,6 +239,7 @@ export const verifyEvents =
               if (subErr) return throwError(() => subErr);
             }
             activeToolCalls.set(toolCallId, { subagentId: (event as any).subagentId });
+            entityOwners.set(toolCallId, { subagentId: (event as any).subagentId });
             return of(event);
           }
 
@@ -276,6 +311,109 @@ export const verifyEvents =
             return of(event);
           }
 
+          // Only the parent agent owns state. `defaultApplyEvents` replaces or
+          // patches the shared state without consulting attribution, so an
+          // attributed snapshot or delta would land as if the parent had sent it —
+          // a subagent's partial view silently overwriting the run's state. The
+          // schemas carry `subagentId` on these events for parity with the rest of
+          // the event set, so the only thing standing between an attributed state
+          // event and the parent's state is this check. The .NET client rejects the
+          // same stream; both SDKs must agree on what is acceptable.
+          case EventType.STATE_SNAPSHOT:
+          case EventType.STATE_DELTA: {
+            const subagentId = (event as any).subagentId;
+            if (subagentId !== undefined) {
+              return throwError(
+                () =>
+                  new AGUIError(
+                    `Cannot send '${eventType}' attributed to subagent '${subagentId}': only the parent agent owns state.`,
+                  ),
+              );
+            }
+            return of(event);
+          }
+
+          // Activity messages are opened by ACTIVITY_SNAPSHOT and continued by
+          // ACTIVITY_DELTA against the same messageId, so an owner change between
+          // the two silently patches an activity attributed to someone else —
+          // the same defect the text-message and tool-call checks prevent.
+          case EventType.ACTIVITY_SNAPSHOT: {
+            const messageId = (event as any).messageId;
+            // Only a REPLACING snapshot re-mints the activity and so re-owns it. With
+            // replace:false the reducer leaves the existing message alone, so overwriting
+            // the tracked owner here would let a following ACTIVITY_DELTA under the new
+            // tag patch a message still owned by someone else.
+            const isNew = !activeActivities.has(messageId);
+            if (isNew || (event as any).replace === true) {
+              activeActivities.set(messageId, { subagentId: (event as any).subagentId });
+            }
+            return of(event);
+          }
+
+          case EventType.REASONING_START:
+          case EventType.REASONING_MESSAGE_START: {
+            const messageId = (event as any).messageId;
+            // First writer records the owner. REASONING_START brackets the outer
+            // reasoning and REASONING_MESSAGE_START the inner message, usually under the
+            // same id, so whichever arrives first establishes it.
+            if (!activeReasoning.has(messageId)) {
+              activeReasoning.set(messageId, { subagentId: (event as any).subagentId });
+              entityOwners.set(messageId, { subagentId: (event as any).subagentId });
+            }
+            return of(event);
+          }
+
+          case EventType.REASONING_MESSAGE_CONTENT:
+          case EventType.REASONING_MESSAGE_END:
+          case EventType.REASONING_END: {
+            const messageId = (event as any).messageId;
+            const subErr = subagentTagError(
+              eventType,
+              (event as any).subagentId,
+              activeReasoning.get(messageId),
+              "reasoning message",
+              messageId,
+            );
+            if (subErr) return throwError(() => subErr);
+            // Only REASONING_END retires the owner. Deleting it at
+            // REASONING_MESSAGE_END left the outer close with nothing to compare
+            // against, so `REASONING_END(r, s2)` after an s1 message was accepted.
+            if (eventType === EventType.REASONING_END) {
+              activeReasoning.delete(messageId);
+            }
+            return of(event);
+          }
+
+          case EventType.REASONING_ENCRYPTED_VALUE: {
+            // Continues an entity by entityId, and `subtype` says which kind: a
+            // "tool-call" encrypted value belongs to a TOOL CALL, so looking only in
+            // activeReasoning found no owner and accepted s2's value against s1's call.
+            const entityId = (event as any).entityId;
+            const isToolCall = (event as any).subtype === "tool-call";
+            const subErr = subagentTagError(
+              eventType,
+              (event as any).subagentId,
+              entityOwners.get(entityId),
+              isToolCall ? "tool call" : "reasoning message",
+              entityId,
+            );
+            if (subErr) return throwError(() => subErr);
+            return of(event);
+          }
+
+          case EventType.ACTIVITY_DELTA: {
+            const messageId = (event as any).messageId;
+            const subErr = subagentTagError(
+              eventType,
+              (event as any).subagentId,
+              activeActivities.get(messageId),
+              "activity",
+              messageId,
+            );
+            if (subErr) return throwError(() => subErr);
+            return of(event);
+          }
+
           // Subagent flow
           case EventType.SUBAGENT_STARTED: {
             const subagentId = (event as any).subagentId;
@@ -288,11 +426,26 @@ export const verifyEvents =
                   ),
               );
             }
-            if (parentSubagentId !== undefined && !activeSubagents.has(parentSubagentId)) {
+            // Reopening a closed id would give one invocation two starts and two
+            // terminals. Ids are per-invocation, so a genuinely new delegation
+            // brings a new id; reuse within a run is a producer bug.
+            if (closedSubagents.has(subagentId)) {
               return throwError(
                 () =>
                   new AGUIError(
-                    `Cannot send 'SUBAGENT_STARTED': parentSubagentId '${parentSubagentId}' has not been started.`,
+                    `Cannot send 'SUBAGENT_STARTED': subagent '${subagentId}' has already finished in this run. Subagent IDs are per-invocation and cannot be reused.`,
+                  ),
+              );
+            }
+            if (
+              parentSubagentId !== undefined &&
+              !activeSubagents.has(parentSubagentId) &&
+              !closedSubagents.has(parentSubagentId)
+            ) {
+              return throwError(
+                () =>
+                  new AGUIError(
+                    `Cannot send 'SUBAGENT_STARTED': parentSubagentId '${parentSubagentId}' has not been started in this run.`,
                   ),
               );
             }
@@ -312,6 +465,7 @@ export const verifyEvents =
               );
             }
             activeSubagents.delete(subagentId);
+            closedSubagents.add(subagentId);
             return of(event);
           }
 
