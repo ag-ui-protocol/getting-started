@@ -24,6 +24,25 @@ public static class AGUIChatMessageExtensions
     /// </summary>
     private const string SubagentIdKey = "agui.subagentId";
 
+    /// <summary>Owner recorded on a content item, or null when it carries none.</summary>
+    private static string? ContentSubagentId(AIContent content) =>
+        content.AdditionalProperties?.TryGetValue(SubagentIdKey, out string? v) == true ? v : null;
+
+    private static AGUIToolCall ToAGUIToolCall(FunctionCallContent fc) => new()
+    {
+        Id = fc.CallId ?? string.Empty,
+        Type = "function",
+        Function = new AGUIToolCallFunction
+        {
+            Name = fc.Name ?? string.Empty,
+            Arguments = fc.Arguments is not null
+                ? JsonSerializer.Serialize(
+                    fc.Arguments,
+                    AGUIJsonSerializerContext.Default.GetTypeInfo(typeof(IDictionary<string, object?>))!)
+                : string.Empty,
+        },
+    };
+
     private static ChatMessage WithSubagentId(ChatMessage message, string? subagentId)
     {
         if (subagentId is not null)
@@ -80,14 +99,25 @@ public static class AGUIChatMessageExtensions
 
                 foreach (var toolCall in toolCallAssistant.ToolCalls)
                 {
-                    pendingToolCallContents.Add(new FunctionCallContent(
+                    var callContent = new FunctionCallContent(
                         toolCall.Id,
                         toolCall.Function.Name,
                         toolCall.Function.Arguments is { Length: > 0 }
                             ? (IDictionary<string, object?>?)JsonSerializer.Deserialize(
                                 toolCall.Function.Arguments,
                                 AGUIJsonSerializerContext.Default.GetTypeInfo(typeof(IDictionary<string, object?>))!)
-                            : null));
+                            : null);
+
+                    // Also on the content, not only the message: a coalesced ChatMessage has
+                    // room for one message-level owner, so calls from two subagents in one
+                    // message can only be told apart per content.
+                    if (message.SubagentId is not null)
+                    {
+                        callContent.AdditionalProperties ??= new AdditionalPropertiesDictionary();
+                        callContent.AdditionalProperties[SubagentIdKey] = message.SubagentId;
+                    }
+
+                    pendingToolCallContents.Add(callContent);
                 }
 
                 continue;
@@ -236,9 +266,40 @@ public static class AGUIChatMessageExtensions
             else if (message.Role == ChatRole.Assistant)
             {
                 var functionCalls = message.Contents.OfType<FunctionCallContent>().ToList();
+
+                // Calls owned by different subagents cannot share one AG-UI message, since
+                // attribution is per message there. ToChatResponse coalesces parallel
+                // tool-call updates into a single ChatMessage, so split it back apart by
+                // owner — the mirror of the forward direction, which starts a new buffered
+                // run when the owner changes.
+                var ownersPresent = functionCalls
+                    .Select(ContentSubagentId)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+                if (functionCalls.Count > 1 && ownersPresent.Count > 1)
+                {
+                    foreach (var owner in ownersPresent)
+                    {
+                        yield return new AGUIAssistantMessage
+                        {
+                            Id = message.MessageId,
+                            SubagentId = owner,
+                            ToolCalls = functionCalls
+                                .Where(fc => ContentSubagentId(fc) == owner)
+                                .Select(ToAGUIToolCall)
+                                .ToList(),
+                        };
+                    }
+
+                    continue;
+                }
+
                 var assistantMsg = new AGUIAssistantMessage
                 {
-                    Content = string.IsNullOrEmpty(message.Text) ? null : message.Text
+                    Content = string.IsNullOrEmpty(message.Text) ? null : message.Text,
+                    // A single-owner turn takes its owner from the content when the coalesced
+                    // message lost the message-level one.
+                    SubagentId = ownersPresent.Count == 1 ? ownersPresent[0] : null,
                 };
                 if (functionCalls.Count > 0)
                 {
@@ -290,10 +351,13 @@ public static class AGUIChatMessageExtensions
                         // Restored here as well as at the end of the loop: this branch
                         // yields directly (one message per result) and so never reaches
                         // the shared Id/SubagentId assignment below.
-                        SubagentId =
-                            message.AdditionalProperties?.TryGetValue(SubagentIdKey, out string? toolSubagentId) == true
+                        // Per content first: a coalesced message can hold results from more
+                        // than one subagent, and this branch already emits one AG-UI message
+                        // per result.
+                        SubagentId = ContentSubagentId(functionResult)
+                            ?? (message.AdditionalProperties?.TryGetValue(SubagentIdKey, out string? toolSubagentId) == true
                                 ? toolSubagentId
-                                : null,
+                                : null),
                     };
                 }
 

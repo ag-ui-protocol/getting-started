@@ -44,6 +44,11 @@ internal static class EventStreamConverter
             // map that has moved on since.
             var alreadyResolved =
                 update.AdditionalProperties?.Remove(AGUIOwnerResolvedKey) == true;
+            if (!alreadyResolved)
+            {
+                StampContentOwners(update, owners);
+            }
+
             if (!alreadyResolved && ResolveOwner(update, owners) is { } resolved)
             {
                 update.AdditionalProperties ??= new AdditionalPropertiesDictionary();
@@ -68,6 +73,39 @@ internal static class EventStreamConverter
     /// "unresolved". Removed before the update is yielded.
     /// </summary>
     private const string AGUIOwnerResolvedKey = "agui.__ownerResolved";
+
+    /// <summary>
+    /// Stamps each function call / result in the update with ITS OWN owner.
+    /// </summary>
+    /// <remarks>
+    /// The message-level property cannot express this. <c>ToChatResponse</c> coalesces
+    /// updates that share a message id — and parallel tool-call updates all carry a null
+    /// one — into a single <see cref="ChatMessage"/>, which has room for exactly one
+    /// <c>agui.subagentId</c>; two calls owned by different subagents therefore cancel out
+    /// and the attribution is lost entirely. Since the owner varies within the message, it
+    /// belongs on the content, which survives coalescing intact. Same mechanism the binary
+    /// content parts already use for their AG-UI-only "filename".
+    /// </remarks>
+    private static void StampContentOwners(ChatResponseUpdate update, Dictionary<string, string?> map)
+    {
+        foreach (var content in update.Contents)
+        {
+            var callId = content switch
+            {
+                FunctionCallContent call => call.CallId,
+                FunctionResultContent result => result.CallId,
+                _ => null,
+            };
+
+            if (callId is not null
+                && map.TryGetValue(CallKey(callId), out var owner)
+                && owner is not null)
+            {
+                content.AdditionalProperties ??= new AdditionalPropertiesDictionary();
+                content.AdditionalProperties[AGUISubagentIdKey] = owner;
+            }
+        }
+    }
 
     /// <summary>
     /// Owner for an update, tried in the order the update can identify its entity: its
@@ -214,6 +252,7 @@ internal static class EventStreamConverter
         // stamped update alone.
         static ChatResponseUpdate StampOwner(ChatResponseUpdate update, Dictionary<string, string?> map)
         {
+            StampContentOwners(update, map);
             update.AdditionalProperties ??= new AdditionalPropertiesDictionary();
             // The marker goes on even when the owner is the PARENT (null). "Resolved to the
             // parent" and "not yet resolved" are different states, and conflating them let
