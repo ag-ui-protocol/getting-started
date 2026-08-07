@@ -65,6 +65,43 @@ jobs:
           dotnet build src/AGUI.A2UI.Toolkit/AGUI.A2UI.Toolkit.csproj -c Release
           dotnet build src/AGUI.A2UI/AGUI.A2UI.csproj -c Release
 
+      # Every package here is enrolled for release, so packing has to keep working: an
+      # unpackable project, a missing README/icon, or a bad PackageId should fail on the PR
+      # rather than mid-release. `dotnet pack` on an unpackable project EXITS 0 and silently
+      # produces nothing, so the explicit existence checks below are the actual guard.
+      #
+      # ORDER MATTERS: this runs BEFORE the tests, which build with -p:SignAssembly=false and
+      # overwrite bin/Release with UNSIGNED assemblies. Packing with --no-build after them would
+      # silently ship unsigned packages. Do not move this step below the test steps.
+      - name: Pack the NuGet packages
+        run: |
+          dotnet pack src/AGUI.Abstractions/AGUI.Abstractions.csproj -c Release --no-build -o ./artifacts
+          dotnet pack src/AGUI.Formatting/AGUI.Formatting.csproj -c Release --no-build -o ./artifacts
+          dotnet pack src/AGUI.Protobuf/AGUI.Protobuf.csproj -c Release --no-build -o ./artifacts
+          dotnet pack src/AGUI.Client/AGUI.Client.csproj -c Release --no-build -o ./artifacts
+          dotnet pack src/AGUI.Server/AGUI.Server.csproj -c Release --no-build -o ./artifacts
+          dotnet pack src/AGUI.A2UI.Toolkit/AGUI.A2UI.Toolkit.csproj -c Release --no-build -o ./artifacts
+          dotnet pack src/AGUI.A2UI/AGUI.A2UI.csproj -c Release --no-build -o ./artifacts
+
+      - name: Check the produced package files
+        run: |
+          set -euo pipefail
+          ls -1 ./artifacts
+          test -n "$(find ./artifacts -name 'AGUI.Abstractions.*.nupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.Abstractions.*.snupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.Formatting.*.nupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.Formatting.*.snupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.Protobuf.*.nupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.Protobuf.*.snupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.Client.*.nupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.Client.*.snupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.Server.*.nupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.Server.*.snupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.A2UI.Toolkit.*.nupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.A2UI.Toolkit.*.snupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.A2UI.*.nupkg' -print -quit)"
+          test -n "$(find ./artifacts -name 'AGUI.A2UI.*.snupkg' -print -quit)"
+
       # Run the self-contained test projects directly rather than the whole
       # AGUI.slnx: the AGUIDojoServer sample references a sibling agent-framework
       # checkout that is not present in CI, so a solution-wide build would fail.
