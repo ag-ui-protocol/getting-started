@@ -1,6 +1,8 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using AGUI.Abstractions;
+using Microsoft.Extensions.AI;
 using Xunit;
 
 namespace AGUI.Abstractions.UnitTests;
@@ -271,6 +273,52 @@ public sealed class SubagentAttributionTest
         }.AsChatMessages().AsAGUIMessages().ToList();
 
         Assert.Equal("", Assert.Single(back).SubagentId);
+    }
+
+    [Fact]
+    public void ParallelCallsFromDifferentSubagents_KeepProviderValidGroupingAndLoseTheSecondOwner()
+    {
+        // A documented limitation, not an oversight. AG-UI attributes per MESSAGE, so two
+        // calls owned by two subagents would need two AG-UI messages — and providers reject
+        // assistant(tc1), assistant(tc2), tool(tc1), tool(tc2), which is the whole reason
+        // AsChatMessages merges a parallel-call run. Splitting on owner change was
+        // implemented and reverted: a provider-invalid history fails the next turn outright,
+        // which is worse than losing a rendering hint.
+        //
+        // So the grouping is preserved and the first owner wins. Asserted here so the
+        // trade-off is visible and cannot regress silently. Tracked in PNI-293.
+        var chatMessages = new List<AGUIMessage>
+        {
+            new AGUIAssistantMessage
+            {
+                Id = "m1",
+                SubagentId = "s1",
+                ToolCalls = new List<AGUIToolCall>
+                {
+                    new() { Id = "tc1", Type = "function", Function = new AGUIToolCallFunction { Name = "search", Arguments = "{}" } },
+                },
+            },
+            new AGUIAssistantMessage
+            {
+                Id = "m2",
+                SubagentId = "s2",
+                ToolCalls = new List<AGUIToolCall>
+                {
+                    new() { Id = "tc2", Type = "function", Function = new AGUIToolCallFunction { Name = "write", Arguments = "{}" } },
+                },
+            },
+        }.AsChatMessages().ToList();
+
+        // One assistant message holding both calls: the shape providers require.
+        var merged = Assert.Single(chatMessages);
+        Assert.Equal(
+            new[] { "tc1", "tc2" },
+            merged.Contents.OfType<FunctionCallContent>().Select(c => c.CallId).ToArray());
+
+        // Carrying the first owner; s2's attribution is the acknowledged casualty.
+        Assert.Equal(
+            "s1",
+            merged.AdditionalProperties?.TryGetValue("agui.subagentId", out string? v) == true ? v : null);
     }
 
     [Fact]

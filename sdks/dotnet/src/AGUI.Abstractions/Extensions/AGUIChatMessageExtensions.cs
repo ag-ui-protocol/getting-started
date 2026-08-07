@@ -50,28 +50,30 @@ public static class AGUIChatMessageExtensions
         // the reconstructed history valid. Only the current run is buffered, so this stays cheap.
         List<AIContent>? pendingToolCallContents = null;
         string? pendingToolCallId = null;
-        // The buffered run's owner. Merging messages from two different subagents into one
-        // ChatMessage would leave the result unattributable, so an owner change flushes
-        // and starts a new run just as a non-tool-call message does.
+        // The buffered run's owner — the FIRST owner in the run.
+        //
+        // Parallel tool calls from DIFFERENT subagents cannot keep per-call attribution
+        // here, and that is a limitation of the model rather than an oversight. AG-UI
+        // attributes per message, so two calls owned by two subagents would have to become
+        // two AG-UI messages; providers reject exactly that shape (see the comment above),
+        // which is the reason this buffering exists. Splitting the run on an owner change
+        // was implemented and reverted because it produced
+        // assistant(tc1), assistant(tc2), tool(tc1), tool(tc2) — provider-invalid — and a
+        // broken history fails the NEXT turn outright, which is worse than losing a
+        // rendering hint. Provider validity therefore wins and the second owner is dropped.
+        //
+        // Tracked in PNI-293 with the full analysis.
         string? pendingToolCallSubagentId = null;
 
         foreach (var message in aguiMessages)
         {
             if (message is AGUIAssistantMessage toolCallAssistant && toolCallAssistant.ToolCalls is { Count: > 0 })
             {
-                if (pendingToolCallContents is not null
-                    && pendingToolCallSubagentId != message.SubagentId)
-                {
-                    yield return WithSubagentId(
-                        new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId },
-                        pendingToolCallSubagentId);
-                    pendingToolCallContents = null;
-                    pendingToolCallId = null;
-                }
-
                 pendingToolCallContents ??= new List<AIContent>();
                 pendingToolCallId ??= message.Id;
-                pendingToolCallSubagentId = message.SubagentId;
+                // First owner in the run wins. Splitting the run when the owner changes was
+                // tried and reverted: see the note on pendingToolCallSubagentId.
+                pendingToolCallSubagentId ??= message.SubagentId;
 
                 if (!string.IsNullOrEmpty(toolCallAssistant.Content))
                 {
