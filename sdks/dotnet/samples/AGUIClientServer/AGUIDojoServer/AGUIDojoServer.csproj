@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\AGUI.Abstractions\AGUI.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\AGUI.A2UI\AGUI.A2UI.csproj" />
     <ProjectReference Include="..\..\..\src\AGUI.Server\AGUI.Server.csproj" />
     <ProjectReference Include="..\..\..\samples\AGUI.Samples.Shared\AGUI.Samples.Shared.csproj" />
   </ItemGroup>

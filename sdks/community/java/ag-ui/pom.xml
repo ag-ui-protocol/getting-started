@@ -28,6 +28,10 @@
         </developer>
     </developers>
 
+    <!-- Must point at the repository the artifacts are actually released from.
+         Maven Central renders these on the artifact page, and the release runs
+         out of ag-ui-protocol/ag-ui under that org's com.ag-ui.community
+         namespace. -->
     <scm>
         <connection>scm:git:https://github.com/ag-ui-protocol/ag-ui.git</connection>
         <developerConnection>scm:git:ssh://git@github.com/ag-ui-protocol/ag-ui.git</developerConnection>
@@ -41,7 +45,7 @@
     </modules>
 
     <properties>
-        <maven.compiler.release>21</maven.compiler.release>
+        <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <junit.version>6.1.0</junit.version>
         <jacoco.version>0.8.13</jacoco.version>
@@ -102,8 +106,7 @@
         </pluginManagement>
 
         <plugins>
-            <!-- Produces the per-module coverage report at
-                 target/site/jacoco/jacoco.xml. -->
+            <!-- Per-module coverage report at target/site/jacoco/jacoco.xml. -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -128,7 +131,9 @@
     </build>
 
     <profiles>
-        <!-- Activated when publishing to Maven Central (see .github/workflows/release.yml). -->
+        <!-- Activated by the `publish-maven` job in
+             .github/workflows/publish-release.yml when publishing to Maven
+             Central. Never activate it locally: it requires a GPG key. -->
         <profile>
             <id>release</id>
             <build>

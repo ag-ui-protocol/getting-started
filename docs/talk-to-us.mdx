@@ -1,177 +1,25 @@
 ---
-title: Enterprise
-description: Production support for teams deploying AG-UI
+title: Production support
+description:
+  Optional commercial architecture and implementation support for teams
+  deploying AG-UI
 ---
 
-AG-UI is free and open. If your team is deploying it in production and wants hands-on support, architecture review, or a direct line to the maintainers, the CopilotKit team can help.
+AG-UI is free and open source. For bugs, feature requests, contributions, and
+community questions, visit [Support for AG-UI](/support).
 
-Tell us what you're building and we'll be in touch. You'll also have the option to book time with the team after you submit.
+If your team wants hands-on architecture or implementation help with a
+production deployment, CopilotKit offers optional commercial engineering
+support. This is separate from using or contributing to the AG-UI open-source
+project.
 
-<div className="mt-8 max-w-2xl">
-  <form
-    id="talk-to-us-form"
-    onSubmit={(e) => {
-      e.preventDefault()
-
-      const HUBSPOT_PORTAL_ID = "45532593"
-      const HUBSPOT_FORM_GUID = "3691c7a9-b973-404d-9bf5-8fb4b7618b14"
-      const CALENDLY_URL = "https://calendly.com/d/ct5c-cff-nt3/talk-to-copilotkit-ag-ui"
-
-      const HUBSPOT_FIELD_NAMES = {
-        firstName: "firstname",
-        lastName: "lastname",
-        companyName: "company",
-        companyEmail: "email",
-        message: "contact_us_message",
-      }
-
-      const form = e.currentTarget
-      const fd = new FormData(form)
-      const messageEl = document.getElementById("message-editor")
-      const message = messageEl ? messageEl.innerText.trim() : ""
-
-      if (!message) {
-        if (messageEl) {
-          messageEl.focus()
-          messageEl.style.borderColor = "#ef4444"
-        }
-        return
-      }
-
-      const data = {
-        firstName: String(fd.get("firstName") || ""),
-        lastName: String(fd.get("lastName") || ""),
-        companyName: String(fd.get("companyName") || ""),
-        companyEmail: String(fd.get("companyEmail") || ""),
-        message,
-      }
-
-      const submitBtn = document.getElementById("talk-to-us-submit")
-      const originalLabel = submitBtn.textContent
-      submitBtn.disabled = true
-      submitBtn.textContent = "Submitting..."
-
-      if (window.posthog && typeof window.posthog.capture === "function") {
-        window.posthog.capture("talk_to_us_ag_ui.form_submitted", { location: "ag_ui_talk_to_us" })
-      }
-
-      const loadCalendly = () => new Promise((resolve) => {
-        if (window.Calendly && typeof window.Calendly.initPopupWidget === "function") return resolve()
-        if (!document.querySelector('link[data-calendly]')) {
-          const l = document.createElement("link")
-          l.rel = "stylesheet"
-          l.href = "https://assets.calendly.com/assets/external/widget.css"
-          l.setAttribute("data-calendly", "true")
-          document.head.appendChild(l)
-        }
-        if (!document.querySelector('script[data-calendly]')) {
-          const s = document.createElement("script")
-          s.src = "https://assets.calendly.com/assets/external/widget.js"
-          s.async = true
-          s.setAttribute("data-calendly", "true")
-          s.onload = () => resolve()
-          s.onerror = () => resolve()
-          document.head.appendChild(s)
-        } else {
-          const existing = document.querySelector('script[data-calendly]')
-          existing.addEventListener("load", () => resolve(), { once: true })
-          existing.addEventListener("error", () => resolve(), { once: true })
-        }
-      })
-
-      const submission = fetch(
-        `https://api.hsforms.com/submissions/v3/integration/submit/${HUBSPOT_PORTAL_ID}/${HUBSPOT_FORM_GUID}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fields: Object.entries(data).map(([k, v]) => ({
-              objectTypeId: "0-1",
-              name: HUBSPOT_FIELD_NAMES[k],
-              value: v,
-            })),
-          }),
-        },
-      ).catch(() => {})
-
-      Promise.all([submission, loadCalendly()]).finally(() => {
-        const qs = new URLSearchParams({
-          name: `${data.firstName} ${data.lastName}`,
-          email: data.companyEmail,
-          a2: data.companyName,
-          a3: data.message,
-        }).toString()
-        const url = `${CALENDLY_URL}?${qs}`
-
-        if (window.Calendly && typeof window.Calendly.initPopupWidget === "function") {
-          window.Calendly.initPopupWidget({ url })
-        } else {
-          window.open(url, "_blank", "noopener,noreferrer")
-        }
-
-        submitBtn.disabled = false
-        submitBtn.textContent = originalLabel
-        form.reset()
-        if (messageEl) messageEl.innerText = ""
-        const ph = document.getElementById("message-placeholder")
-        if (ph) ph.style.display = "block"
-      })
-    }}
-    className="flex flex-col gap-4 p-6 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800"
+<div>
+  <a
+    href="https://www.copilotkit.ai/talk-to-an-engineer?ref=ag_ui_docs_production_support&utm_source=docs&utm_medium=referral&utm_campaign=production_support&utm_content=ag_ui_production_support"
+    target="_blank"
+    rel="noopener"
+    className="inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
   >
-    <div className="flex flex-col md:flex-row gap-4">
-      <label className="flex-1 flex flex-col gap-1.5">
-        <span className="text-sm font-medium text-gray-900 dark:text-gray-100">First name <span className="text-red-500">*</span></span>
-        <input name="firstName" type="text" required placeholder="Sam" autoComplete="given-name" className="h-11 px-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
-      </label>
-      <label className="flex-1 flex flex-col gap-1.5">
-        <span className="text-sm font-medium text-gray-900 dark:text-gray-100">Last name <span className="text-red-500">*</span></span>
-        <input name="lastName" type="text" required placeholder="Smith" autoComplete="family-name" className="h-11 px-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
-      </label>
-    </div>
-
-    <label className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-gray-900 dark:text-gray-100">Company name <span className="text-red-500">*</span></span>
-      <input name="companyName" type="text" required placeholder="Universal Dynamics" className="h-11 px-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
-    </label>
-
-    <label className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-gray-900 dark:text-gray-100">Company email <span className="text-red-500">*</span></span>
-      <input name="companyEmail" type="email" required placeholder="sam@universaldynamics.ai" className="h-11 px-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
-    </label>
-
-    <div className="flex flex-col gap-1.5">
-      <span id="message-label" className="text-sm font-medium text-gray-900 dark:text-gray-100">Tell us about what you're building, your users, or your use case <span className="text-red-500">*</span></span>
-      <span id="message-hint" className="text-xs text-gray-500 dark:text-gray-400">This helps us route your request and respond quickly.</span>
-      <div className="relative">
-        <div
-          id="message-editor"
-          role="textbox"
-          aria-multiline="true"
-          aria-labelledby="message-label"
-          aria-describedby="message-hint"
-          aria-placeholder="What are you building, who are the users, what's the use case?"
-          contentEditable="true"
-          onInput={(e) => {
-            const ph = document.getElementById("message-placeholder")
-            if (ph) ph.style.display = e.currentTarget.innerText.trim() ? "none" : "block"
-            e.currentTarget.style.borderColor = ""
-          }}
-          className="block w-full px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-          style={{ minHeight: "140px", whiteSpace: "pre-wrap" }}
-        />
-        <div
-          id="message-placeholder"
-          aria-hidden="true"
-          className="absolute top-3 left-4 text-gray-400 dark:text-gray-500 pointer-events-none select-none"
-        >
-          What are you building, who are the users, what's the use case?
-        </div>
-      </div>
-    </div>
-
-    <button id="talk-to-us-submit" type="submit" className="mt-2 h-12 rounded-lg bg-gray-900 dark:bg-white text-white dark:text-gray-900 font-medium hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed">
-      Submit
-    </button>
-  </form>
+    Talk to a CopilotKit engineer
+  </a>
 </div>

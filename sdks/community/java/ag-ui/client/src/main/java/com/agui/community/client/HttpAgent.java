@@ -39,12 +39,12 @@ public final class HttpAgent implements Agent {
      * constructor}. Consuming an SSE response is a long-lived blocking operation,
      * so running it on a bounded pool shared across the JVM (such as
      * {@code ForkJoinPool.commonPool()}) risks starving that pool — a burst of
-     * concurrent runs could occupy every worker and deadlock. A
-     * virtual-thread-per-task executor sidesteps this: virtual threads are cheap
-     * and effectively unbounded, and the blocking read never pins a carrier
-     * thread for the duration of the stream.
+     * concurrent runs could occupy every worker and deadlock. A cached thread
+     * pool sidesteps this: it creates threads on demand (reusing idle ones) and
+     * is effectively unbounded, so a blocking stream read never starves other
+     * runs.
      */
-    private static final Executor DEFAULT_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
+    private static final Executor DEFAULT_EXECUTOR = Executors.newCachedThreadPool();
 
     private final URI endpoint;
     private final Serializer serializer;
@@ -53,8 +53,8 @@ public final class HttpAgent implements Agent {
     private final Duration requestTimeout;
 
     /**
-     * Creates an agent using a default {@link HttpClient} and a
-     * virtual-thread-per-task executor for stream processing.
+     * Creates an agent using a default {@link HttpClient} and a cached thread
+     * pool for stream processing.
      *
      * @param endpoint   the URI of the remote AG-UI endpoint
      * @param serializer the serializer used to encode the input and decode events
@@ -108,13 +108,9 @@ public final class HttpAgent implements Agent {
                     httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
 
             if (response.statusCode() >= 400) {
-    String body;
-    try (Stream<String> lines = response.body()) {
-        body = lines.collect(Collectors.joining("\n"));   // drains + closes → releases connection
-    }
-    publisher.closeExceptionally(new HttpAgentException(
-            "AG-UI endpoint returned HTTP " + response.statusCode() + ": " + body));
-    return;
+                publisher.closeExceptionally(new HttpAgentException(
+                        "AG-UI endpoint returned HTTP " + response.statusCode()));
+                return;
             }
 
             SseEventParser parser = new SseEventParser();

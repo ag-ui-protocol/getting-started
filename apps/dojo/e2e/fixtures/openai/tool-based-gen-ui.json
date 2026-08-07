@@ -6,7 +6,8 @@
         "toolCalls": [
           {
             "name": "generate_haiku",
-            "arguments": "{\"japanese\":[\"勝利の道を\",\"常に歩み続ける\",\"勝つ運命よ\"],\"english\":[\"On the path of victory\",\"I will always keep walking\",\"Destined to always win\"],\"image_name\":\"Mount_Fuji_Lake_Reflection_Cherry_Blossoms_Sakura_Spring.jpg\",\"gradient\":\"linear-gradient(135deg, #667eea 0%, #764ba2 100%)\"}"
+            "arguments": "{\"japanese\":[\"勝利の道を\",\"常に歩み続ける\",\"勝つ運命よ\"],\"english\":[\"On the path of victory\",\"I will always keep walking\",\"Destined to always win\"],\"image_name\":\"Mount_Fuji_Lake_Reflection_Cherry_Blossoms_Sakura_Spring.jpg\",\"gradient\":\"linear-gradient(135deg, #667eea 0%, #764ba2 100%)\"}",
+            "id": "call_generate_haiku_1"
           }
         ]
       }
@@ -17,7 +18,8 @@
         "toolCalls": [
           {
             "name": "generate_haiku",
-            "arguments": "{\"japanese\":[\"月が輝く\",\"夜空に静かに浮かぶ\",\"光の詩よ\"],\"english\":[\"The bright moon shining\",\"Floating quietly in night sky\",\"A poem of light\"],\"image_name\":\"Cherry_Blossoms_Sakura_Night_View_City_Lights_Japan.jpg\",\"gradient\":\"linear-gradient(135deg, #0c3547 0%, #204f64 50%, #2d6187 100%)\"}"
+            "arguments": "{\"japanese\":[\"月が輝く\",\"夜空に静かに浮かぶ\",\"光の詩よ\"],\"english\":[\"The bright moon shining\",\"Floating quietly in night sky\",\"A poem of light\"],\"image_name\":\"Cherry_Blossoms_Sakura_Night_View_City_Lights_Japan.jpg\",\"gradient\":\"linear-gradient(135deg, #0c3547 0%, #204f64 50%, #2d6187 100%)\"}",
+            "id": "call_generate_haiku_2"
           }
         ]
       }

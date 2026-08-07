@@ -78,6 +78,23 @@ describe("Message Conversion - All Types", () => {
       expect(result[0].type).toBe("tool");
       expect(result[0].content).toBe("42");
       expect(result[0].tool_call_id).toBe("tc1");
+      // A tool result with no error maps to LangChain's default "success" status.
+      expect(result[0].status).toBe("success");
+    });
+
+    it("should map a tool message error onto LangChain's status flag", () => {
+      // A client-reported tool failure must reach the model as an error, not a
+      // silent success — AG-UI's ToolMessage.error becomes status: "error".
+      const msg: Message = {
+        id: "t1",
+        role: "tool",
+        content: "Tool failed: invalid id",
+        toolCallId: "tc1",
+        error: "invalid id",
+      };
+      const result: any[] = aguiMessagesToLangChain([msg]);
+      expect(result[0].type).toBe("tool");
+      expect(result[0].status).toBe("error");
     });
 
     it("should throw for unsupported role", () => {

@@ -65,6 +65,17 @@ export const STRANDS_A2UI_INJECT_AGENTS: string[] = [
   "a2ui_recovery",
 ];
 
+// Per-agent A2UI inject whitelist for the CrewAI integration. Its dynamic and
+// recovery demos wire no A2UI tool and rely on the adapter auto-injecting
+// `generate_a2ui` when it sees `injectA2UITool`; `a2ui_fixed_schema` wires its
+// own backend tools (search_flights / search_hotels) and must NOT get
+// `generate_a2ui` injected alongside them. Applied per-agent here and excluded
+// from the runtime-level a2ui config in route.ts to avoid double-applying.
+export const CREWAI_A2UI_INJECT_AGENTS: string[] = [
+  "a2ui_dynamic_schema",
+  "a2ui_recovery",
+];
+
 export const agentsIntegrations = {
   "middleware-starter": async () => ({
     agentic_chat: new MiddlewareStarterAgent(),
@@ -243,15 +254,6 @@ export const agentsIntegrations = {
         subgraphs: "subgraphs",
       },
     ),
-    // A2UI Chat with middleware
-    a2ui_chat: (() => {
-      const agent = new LangGraphAgent({
-        deploymentUrl: envVars.langgraphPythonUrl,
-        graphId: "a2ui_chat",
-      });
-      agent.use(new A2UIMiddleware({ injectA2UITool: true }));
-      return agent;
-    })(),
     a2ui_dynamic_schema: new LangGraphAgent({
       deploymentUrl: envVars.langgraphPythonUrl,
       graphId: "a2ui_dynamic_schema",
@@ -406,13 +408,13 @@ export const agentsIntegrations = {
       },
     ),
 
-  crewai: async () =>
-    mapAgents(
+  crewai: async () => {
+    const agents = mapAgents(
       (path) => new CrewAIAgent({ url: `${envVars.crewAiUrl}/${path}` }),
       {
         agentic_chat: "agentic_chat",
-        // TODO: Add agent for backend_tool_rendering
-        // backend_tool_rendering: "backend_tool_rendering",
+        backend_tool_rendering: "backend_tool_rendering",
+        interrupt: "interrupt",
         human_in_the_loop: "human_in_the_loop",
         tool_based_generative_ui: "tool_based_generative_ui",
         agentic_generative_ui: "agentic_generative_ui",
@@ -420,8 +422,24 @@ export const agentsIntegrations = {
         predictive_state_updates: "predictive_state_updates",
         crew_chat: "crew_chat",
         error_flow: "error_flow",
+        a2ui_dynamic_schema: "a2ui_dynamic_schema",
+        a2ui_recovery: "a2ui_recovery",
+        a2ui_fixed_schema: "a2ui_fixed_schema",
       },
-    ),
+    );
+    // Auto-inject generate_a2ui for the subagent demos (dynamic + recovery);
+    // a2ui_fixed_schema wires its own backend tools and is deliberately left
+    // out. Excluded from the runtime a2ui config in route.ts (double-apply).
+    for (const id of CREWAI_A2UI_INJECT_AGENTS) {
+      (agents as Record<string, AbstractAgent>)[id]?.use(
+        new A2UIMiddleware({
+          injectA2UITool: true,
+          defaultCatalogId: A2UI_DOJO_CATALOG_ID,
+        }),
+      );
+    }
+    return agents;
+  },
 
   "agent-spec-langgraph": async () =>
     mapAgents(
@@ -505,6 +523,15 @@ export const agentsIntegrations = {
         shared_state: "shared_state",
         tool_based_generative_ui: "tool_based_generative_ui",
         predictive_state_updates: "predictive_state_updates",
+        // A2UI: generate_a2ui is auto-injected and handled server-side by the .NET
+        // AGUI.A2UI adapter (subagent + recovery). The dojo runtime attaches the A2UI
+        // painting middleware (no client-side tool injection, since injectsA2UITool is
+        // false for this integration), so these are plain HttpAgents. Fixed-schema needs no
+        // generation tool at all — its search tools return the surface envelope directly.
+        a2ui_fixed_schema: "a2ui_fixed_schema",
+        a2ui_dynamic_schema: "a2ui_dynamic_schema",
+        a2ui_advanced: "a2ui_advanced",
+        a2ui_recovery: "a2ui_recovery",
       },
     ),
 
@@ -655,6 +682,48 @@ export const agentsIntegrations = {
         agentic_chat: "agentic_chat",
         backend_tool_rendering: "backend_tool_rendering",
         shared_state: "shared_state",
+        human_in_the_loop: "human_in_the_loop",
+        tool_based_generative_ui: "tool_based_generative_ui",
+      },
+    ),
+
+  "claude-managed-agents-dotnet": async () =>
+    mapAgents(
+      (path) =>
+        new HttpAgent({
+          url: `${envVars.claudeManagedAgentsDotnetUrl}/${path}`,
+        }),
+      {
+        agentic_chat: "agentic_chat",
+        backend_tool_rendering: "backend_tool_rendering",
+        human_in_the_loop: "human_in_the_loop",
+        tool_based_generative_ui: "tool_based_generative_ui",
+      },
+    ),
+
+  "claude-managed-agents-python": async () =>
+    mapAgents(
+      (path) =>
+        new HttpAgent({
+          url: `${envVars.claudeManagedAgentsPythonUrl}/${path}`,
+        }),
+      {
+        agentic_chat: "agentic_chat",
+        backend_tool_rendering: "backend_tool_rendering",
+        human_in_the_loop: "human_in_the_loop",
+        tool_based_generative_ui: "tool_based_generative_ui",
+      },
+    ),
+
+  "claude-managed-agents-typescript": async () =>
+    mapAgents(
+      (path) =>
+        new HttpAgent({
+          url: `${envVars.claudeManagedAgentsTypescriptUrl}/${path}`,
+        }),
+      {
+        agentic_chat: "agentic_chat",
+        backend_tool_rendering: "backend_tool_rendering",
         human_in_the_loop: "human_in_the_loop",
         tool_based_generative_ui: "tool_based_generative_ui",
       },

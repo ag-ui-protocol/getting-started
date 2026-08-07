@@ -404,6 +404,9 @@ def agui_messages_to_langchain(messages: List[AGUIMessage]) -> List[BaseMessage]
                 id=message.id,
                 content=message.content,
                 tool_call_id=message.tool_call_id,
+                # Carry the AG-UI failure signal onto LangChain's tool-result status, so a
+                # client-reported tool failure is not delivered to the model as a success.
+                status="error" if message.error else "success",
             ))
         else:
             raise ValueError(f"Unsupported message role: {role}")

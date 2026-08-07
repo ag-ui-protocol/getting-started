@@ -80,7 +80,8 @@ function isValidBump(x: unknown): x is Bump {
 
 // Normalize ecosystem labels from collect-accumulated-bumps.py output
 // ("typescript" / "python" / "dotnet") to the npm / pypi / nuget labels the
-// prompt and PR-body table use. Anything else passes through unchanged.
+// prompt and PR-body table use. Anything else passes through unchanged —
+// notably "maven", which is already the registry's name.
 function normalizeEcosystem(eco: string): string {
   if (eco === "typescript") return "npm";
   if (eco === "python") return "pypi";

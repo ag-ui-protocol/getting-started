@@ -132,8 +132,6 @@ class SharedStateFlow(Flow[AgentState]):
         """
         This is the entry point for the flow.
         """
-        print(f"start_flow")
-        print(f"self.state: {self.state}")
 
     @router(start_flow)
     async def chat(self):
@@ -212,9 +210,8 @@ class SharedStateFlow(Flow[AgentState]):
                         "tool_call_id": tool_call_id
                     })
                     return "route_follow_up"
-                except Exception as e:
+                except Exception:  # pylint: disable=broad-exception-caught
                     # Handle validation or other errors during update
-                    print(f"Error updating recipe state: {e}") # Log the error server-side
                     # Optionally inform the user via a tool message, though it might be noisy
                     # self.state.messages.append({"role": "tool", "content": f"Error processing recipe update: {e}", "tool_call_id": tool_call_id})
                     return "route_end" # End the flow on error for now

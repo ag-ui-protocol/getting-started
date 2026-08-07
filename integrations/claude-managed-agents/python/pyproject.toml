@@ -1,0 +1,37 @@
+[project]
+name = "ag-ui-claude-managed-agents"
+version = "0.1.0"
+description = "AG-UI integration for Claude Managed Agents (Anthropic hosted agent sessions)"
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "cj", email = "cj@anthropic.com" }
+]
+dependencies = [
+  "ag-ui-protocol>=0.1.15",
+  "anthropic>=0.119.0",
+  "fastapi>=0.100.0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=7.4.0",
+  "pytest-asyncio>=0.21.0",
+  "httpx>=0.24.0",
+]
+
+[tool.ag-ui.scripts]
+test = "python -m pytest"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=77.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ag_ui_claude_managed_agents*"]

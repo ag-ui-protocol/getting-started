@@ -1,6 +1,5 @@
 # ag-ui · server
 
-
 Server-side support for the [AG-UI protocol](https://docs.ag-ui.com).
 
 This module exposes an [`Agent`](../core/src/main/java/com/agui/community/core/agent/Agent.java)

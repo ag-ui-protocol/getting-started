@@ -60,10 +60,21 @@ def _extract_agent_kwargs(agent: StrandsAgentCore) -> dict:
     return kwargs
 
 
-def _has_strands_session_manager(agent: Any) -> bool:
-    return (
-        getattr(agent, "session_manager", None) is not None
-        or getattr(agent, "_session_manager", None) is not None
+# Upper bound on the per-agent wire->native map held in session state. Bounds
+# growth from frontend calls that never receive a client result (abandoned HITL)
+# and so are never consumed/pruned. Generous — a thread rarely has this many
+# outstanding frontend calls at once.
+_WIRE_MAP_MAX = 512
+
+
+def _get_strands_session_manager(agent: Any) -> Any:
+    """Return the agent's Strands ``SessionManager``, or ``None``.
+
+    Strands stores it publicly as ``session_manager``; some versions keep a
+    private ``_session_manager`` alias.
+    """
+    return getattr(agent, "session_manager", None) or getattr(
+        agent, "_session_manager", None
     )
 
 
@@ -107,6 +118,12 @@ from .a2ui_tool import (
     plan_a2ui_injection,
 )
 from .client_proxy_tool import sync_proxy_tools
+from .session_reconcile import (
+    AG_UI_WIRE_MAP_STATE_KEY,
+    has_placeholder_results,
+    reconcile_frontend_tool_results,
+    resolve_native_ids,
+)
 from .config import (
     StrandsAgentConfig,
     ToolCallContext,
@@ -730,7 +747,7 @@ class StrandsAgent:
                     strands_messages.append(strands_msg)
 
             # Build a lookup of tool_call_id -> tool_name from the input messages
-            # directly (the assistant message in Run 2 already carries the tool name).
+            # directly (the assistant message in Run 2 already carries the name).
             _tool_call_id_to_name: dict = {}
             for _msg in (input_data.messages or []):
                 if _msg.role == "assistant" and hasattr(_msg, "tool_calls") and _msg.tool_calls:
@@ -761,43 +778,48 @@ class StrandsAgent:
             # understands the context and can generate a proper conclusion.
             user_message = ""
             if pending_tool_result_ids and input_data.messages:
+                # Collect ALL trailing tool results (not just the first). A parallel
+                # frontend-tool turn sends N results in one continuation run; the model
+                # must see every answer.
+                _result_parts: list[str] = []
                 for msg in reversed(input_data.messages):
                     if msg.role == "tool" and hasattr(msg, "tool_call_id"):
                         tool_name = _tool_call_id_to_name.get(msg.tool_call_id)
                         if tool_name and tool_name in frontend_tool_names:
-                            # Forward the ACTUAL frontend tool result so the model
-                            # can act on the human's decision (e.g. an approval
-                            # resolving to {"approved": false}). Previously this
-                            # discarded ``msg.content`` and hardcoded a success
-                            # string, silently breaking HITL — the model was told
-                            # the tool "executed successfully with no return value"
-                            # regardless of what the human actually returned.
-                            # Only fall back to that synthetic acknowledgement when
-                            # the result is genuinely empty.
+                            # Forward the ACTUAL result so the model can act on the
+                            # human's decision (e.g. an approval resolving to
+                            # {"approved": false}). Hardcoding a success string here
+                            # silently breaks HITL — the model would be told the tool
+                            # "executed successfully with no return value" regardless
+                            # of what the human returned. Only use that synthetic
+                            # acknowledgement when the result is genuinely empty.
                             result_text = (
                                 msg.content
                                 if isinstance(msg.content, str)
                                 else flatten_content_to_text(msg.content)
                             )
                             if result_text and result_text.strip():
-                                user_message = f"{tool_name} returned: {result_text}"
+                                _result_parts.append(f"{tool_name} returned: {result_text}")
                             else:
-                                user_message = f"{tool_name} executed successfully with no return value."
+                                _result_parts.append(
+                                    f"{tool_name} executed successfully with no return value."
+                                )
                         else:
-                            # Could not resolve the executed tool's name from
-                            # input messages or session history. Leave the
-                            # continuation message empty rather than guessing:
+                            # Could not resolve this tool's name from input messages
+                            # or session history (e.g. a delta-only payload with no
+                            # assistant tool_calls). Skip it rather than guessing:
                             # picking an arbitrary frontend tool would feed false
                             # context to the LLM when several frontend tools exist.
-                            # Strands still has the real tool result in session
-                            # history to conclude the round-trip from.
+                            # Strands still has the real result in session history to
+                            # conclude the round-trip from.
                             logger.warning(
                                 f"Could not resolve tool name for tool_call_id={msg.tool_call_id} "
-                                f"from input messages or session history (assistant message with "
-                                f"tool_calls may be missing — delta-only payload). Leaving the "
-                                f"continuation message empty."
+                                f"from input messages or session history (delta-only payload). "
+                                f"Skipping this tool result in the continuation message."
                             )
+                    else:
                         break
+                user_message = "\n".join(reversed(_result_parts))
             elif input_data.messages:
                 for msg in reversed(input_data.messages):
                     if (msg.role == "user" or msg.role == "tool") and msg.content:
@@ -858,16 +880,82 @@ class StrandsAgent:
                 f"Starting agent run: thread_id={input_data.thread_id}, run_id={input_data.run_id}, pending_tool_result_ids={pending_tool_result_ids}, message_count={len(input_data.messages)}, strands_message_count={len(strands_messages)}"
             )
 
+            # Collect the real results the client produced for proxied
+            # frontend tools. These arrive in ``RunAgentInput.messages`` on the
+            # continuation run and are used to reconcile the session-persisted
+            # "Forwarded to client" placeholder. A tool result is a frontend
+            # result when its tool name is client-declared, or (for delta-only
+            # payloads that omit the assistant message) when its wire id was
+            # recorded in the wire->native map when the call was emitted.
+            session_manager = _get_strands_session_manager(strands_agent)
+            # The durable wire->native map recorded at emission, read back from
+            # session state (restored from the store on a fresh process).
+            wire_to_native: Dict[str, str] = {}
+            if session_manager is not None:
+                wire_to_native = (
+                    strands_agent.state.get(AG_UI_WIRE_MAP_STATE_KEY) or {}
+                )
+            # Scope to the TRAILING tool results (this continuation's just-
+            # returned results). ``pending_tool_result_ids`` holds those ids;
+            # without this, a multi-turn continuation re-sends already-reconciled
+            # historical results, which can never be re-corrected and would force
+            # the legacy fallback every turn.
+            frontend_results: List[Dict[str, Any]] = []
+            for msg in (input_data.messages or []):
+                if getattr(msg, "role", None) != "tool":
+                    continue
+                wire_id = getattr(msg, "tool_call_id", None)
+                if not wire_id or wire_id not in pending_tool_result_ids:
+                    continue
+                name = _tool_call_id_to_name.get(wire_id)
+                if name not in frontend_tool_names and wire_id not in wire_to_native:
+                    continue
+                content = msg.content
+                text = (
+                    content
+                    if isinstance(content, str)
+                    else flatten_content_to_text(content)
+                )
+                frontend_results.append({"wire_id": wire_id, "text": text or ""})
+
+            # Translate the client's wire tool_call_id back to the native
+            # toolUseId Strands persisted (they differ for frontend tools — see
+            # the fresh-uuid assignment in the streaming loop). Only reconcile
+            # when there is at least one NON-EMPTY frontend result: a void tool
+            # returns nothing, and the synthetic "executed successfully with no
+            # return value" continuation message conveys that better than an
+            # empty toolResult. When reconciling, void placeholders in the same
+            # turn are still cleared (to "") so the literal "Forwarded to client"
+            # is never fed to the model.
+            resolved_native_results: Dict[str, str] = {}
+            corrected_native_ids: set[str] = set()
+            has_nonvoid_frontend_result = any(
+                (r["text"] or "").strip() for r in frontend_results
+            )
+            if session_manager is not None and self.config.replay_history_into_strands:
+                resolved_native_results = resolve_native_ids(
+                    wire_to_native, frontend_results
+                )
+
             # Reconcile Strands' internal conversation history with
-            # ``RunAgentInput.messages`` when no ``session_manager`` is wired.
-            # Without this, frontend tool results sent by the client never
-            # reach the LLM — Strands sees an open ``toolUse`` from the prior
-            # turn and the LLM re-fires the same tool every run, producing
-            # the "chart loops forever" symptom. With a session manager,
-            # Strands manages history itself, so we leave it alone.
+            # ``RunAgentInput.messages``. Without this, frontend tool results
+            # sent by the client never reach the LLM — Strands sees an open
+            # ``toolUse`` from the prior turn and the LLM re-fires the same tool
+            # every run, producing the "chart loops forever" symptom.
+            #
+            # No session manager: rebuild history in-memory and stream it.
+            # With a session manager (which owns persistence): overwrite the
+            # persisted placeholder toolResult(s) with the real client result
+            # via the session repository, then continue from the corrected
+            # native history — keeping a single source of truth rather than a
+            # placeholder plus a synthetic "tool returned: X" message.
             replay_history = (
-                self.config.replay_history_into_strands
-                and not _has_strands_session_manager(strands_agent)
+                self.config.replay_history_into_strands and session_manager is None
+            )
+            reconcile_session_results = (
+                session_manager is not None
+                and self.config.replay_history_into_strands
+                and has_nonvoid_frontend_result
             )
             if replay_history:
                 native_history = _build_strands_history(input_data.messages)
@@ -901,16 +989,86 @@ class StrandsAgent:
                 # (including ones produced by the frontend) and emits a
                 # proper follow-up turn instead of re-calling the tool.
                 agent_stream = strands_agent.stream_async(None)
+            elif reconcile_session_results:
+                try:
+                    corrected_native_ids = reconcile_frontend_tool_results(
+                        session_manager, strands_agent, resolved_native_results
+                    )
+                except Exception as e:  # noqa: BLE001 — degrade, don't crash the turn
+                    logger.warning(
+                        "Frontend tool result reconciliation failed; falling back to "
+                        f"the legacy continuation path: {e}",
+                        exc_info=True,
+                    )
+                # Continue from the corrected native history only when every
+                # NON-EMPTY frontend result this turn resolved to a native id
+                # (i.e. was present in the wire->native map) AND none of those
+                # placeholders remain uncleared. The scan is scoped to this
+                # turn's results so a stale placeholder from a prior (e.g. void)
+                # turn doesn't force the legacy path. Any shortfall means
+                # forwarding the real result as a synthetic user message is
+                # safer than replaying a stub.
+                non_void_results = [
+                    r for r in frontend_results if (r["text"] or "").strip()
+                ]
+                resolved_non_void = {
+                    native
+                    for native, text in resolved_native_results.items()
+                    if (text or "").strip()
+                }
+                all_non_void_resolved = len(resolved_non_void) == len(non_void_results)
+                # Scan all of this turn's resolved native ids (void included, so a
+                # resolved-but-uncleared void placeholder also blocks) — but not
+                # unrelated historical placeholders.
+                reconciled = all_non_void_resolved and not has_placeholder_results(
+                    getattr(strands_agent, "messages", None) or [],
+                    only_ids=set(resolved_native_results),
+                )
+                agent_stream = strands_agent.stream_async(
+                    None if reconciled else user_message
+                )
             else:
                 # Legacy path: pass only the latest user message and trust
                 # Strands (via session_manager) to track history.
                 agent_stream = strands_agent.stream_async(user_message)
 
+            # Drop only the entries whose placeholder was actually corrected
+            # this turn — they won't recur. Entries that were NOT corrected
+            # (unresolved, or a reconcile that raised) are kept so a later turn
+            # can retry; pruning them would strand the persisted placeholder
+            # forever. (Genuinely-abandoned entries are bounded by the size cap
+            # applied at emission.)
+            if wire_to_native and corrected_native_ids:
+                remaining = {
+                    wire: native
+                    for wire, native in wire_to_native.items()
+                    if native not in corrected_native_ids
+                }
+                if len(remaining) != len(wire_to_native):
+                    strands_agent.state.set(AG_UI_WIRE_MAP_STATE_KEY, remaining)
+
             try:
                 async for event in agent_stream:
-                    # If we've halted, consume remaining events silently to allow proper cleanup
+                    # Frontend-tool halt: STOP the loop rather than muting the
+                    # wire and draining it. The proxy tool returns a SUCCESSFUL
+                    # "Forwarded to client" placeholder, so Strands has every
+                    # reason to run another model cycle — and another. Draining
+                    # those cycles costs: frontend tool calls the client never
+                    # sees (so it can never answer them), real backend tool
+                    # side effects, phantom assistant turns persisted to the
+                    # session store, and RUN_FINISHED stuck behind work the
+                    # client is not watching. Single-agent Strands has no cycle
+                    # cap, so that tail is unbounded — a model that keeps
+                    # retrying the read never yields a terminal event at all.
+                    #
+                    # Safe here because the halt latches only AFTER Strands
+                    # appended the assistant toolUse + placeholder toolResult
+                    # and MessageAddedEvent synced agent state (see
+                    # SessionManager.register_hooks), so the next run's
+                    # reconcile still finds a placeholder to overwrite and the
+                    # wire->native map to key it by.
                     if halt_event_stream:
-                        continue
+                        break
 
                     logger.debug(f"Received event: {event}")
 
@@ -1092,9 +1250,26 @@ class StrandsAgent:
 
                     # Handle tool results from Strands for backend tool rendering
                     elif "message" in event and event["message"].get("role") == "user":
+                        # A deferred frontend-tool halt takes effect here — but
+                        # do NOT skip the message. In a parallel batch mixing a
+                        # frontend tool with backend tools, THIS message carries
+                        # the backend tools' real results, and dropping it loses
+                        # them permanently: the client's tool card never
+                        # resolves, the result never reaches MESSAGES_SNAPSHOT
+                        # (the only path into client-side history — the
+                        # TOOL_CALL_RESULT below is deliberately role-less and
+                        # is not history), and state_from_result /
+                        # custom_result_handler never fire. Consumers that
+                        # persist from the event stream then hold a transcript
+                        # whose toolUse has no toolResult, which the next run
+                        # replays straight to the model provider.
+                        #
+                        # Fall through instead: the per-item loop already skips
+                        # frontend placeholders (the client produces the real
+                        # result), so only genuine backend results go out. Stop
+                        # after the batch, before the next model cycle.
                         if pending_halt:
                             halt_event_stream = True
-                            continue
                         message_content = event["message"].get("content", [])
                         if not message_content or not isinstance(message_content, list):
                             continue
@@ -1269,6 +1444,14 @@ class StrandsAgent:
                                 # Break inner loop — no further results should be emitted
                                 break
 
+                        # The batch is fully emitted; stop before Strands runs
+                        # another model cycle. Breaking HERE rather than relying
+                        # on the check at the top of the loop means termination
+                        # does not depend on Strands happening to yield one more
+                        # event after this message.
+                        if halt_event_stream:
+                            break
+
                     # Handle tool calls
                     elif "current_tool_use" in event and event["current_tool_use"]:
                         tool_use = event["current_tool_use"]
@@ -1293,6 +1476,35 @@ class StrandsAgent:
                         elif is_frontend_tool:
                             # Generate new UUID for frontend tools
                             tool_use_id = str(uuid.uuid4())
+                            # Record wire id -> Strands native id on the agent's
+                            # SESSION STATE so a later continuation run — even on
+                            # a different process — can reconcile the persisted
+                            # placeholder (keyed by the native id) with the real
+                            # client result (which arrives keyed by the wire id).
+                            # Strands persists agent state durably at end of run.
+                            # Only maintained when a session manager is actually
+                            # active for this agent (matching the continuation
+                            # read/prune gate); otherwise it would never be read.
+                            if strands_tool_id and _get_strands_session_manager(
+                                strands_agent
+                            ):
+                                _wire_map = dict(
+                                    strands_agent.state.get(AG_UI_WIRE_MAP_STATE_KEY)
+                                    or {}
+                                )
+                                _wire_map[tool_use_id] = strands_tool_id
+                                # Bound growth: entries for frontend calls that
+                                # never get a client result (abandoned/dismissed
+                                # HITL) are never consumed/pruned. Keep only the
+                                # most-recent ``_WIRE_MAP_MAX`` (insertion order).
+                                if len(_wire_map) > _WIRE_MAP_MAX:
+                                    for _stale in list(_wire_map)[
+                                        : len(_wire_map) - _WIRE_MAP_MAX
+                                    ]:
+                                        _wire_map.pop(_stale, None)
+                                strands_agent.state.set(
+                                    AG_UI_WIRE_MAP_STATE_KEY, _wire_map
+                                )
                         else:
                             # Use Strands' ID for backend tools
                             tool_use_id = strands_tool_id or str(uuid.uuid4())
@@ -1742,8 +1954,16 @@ class StrandsAgent:
                 # The generator should complete naturally when we consume all events,
                 # but we still try to close it explicitly to be safe
                 try:
+                    # A frontend-tool halt breaks out of the loop with the
+                    # generator SUSPENDED at a yield, where ``ag_running`` is
+                    # False. The exhausted-generator check below would read
+                    # that as "already closed" and defer teardown to GC,
+                    # leaving the halted Strands cycle (and its model stream)
+                    # open. Close it explicitly instead.
+                    if halt_event_stream:
+                        await agent_stream.aclose()
                     # Check if generator is already closed/exhausted
-                    if not agent_stream.ag_running:
+                    elif not agent_stream.ag_running:
                         # Generator is already closed, nothing to do
                         pass
                     else:

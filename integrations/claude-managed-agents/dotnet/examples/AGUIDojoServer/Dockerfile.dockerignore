@@ -1,0 +1,45 @@
+# Exclusions for the Dojo server image. BuildKit reads the ignore file named
+# after the Dockerfile it is building, so this applies to this image only and
+# leaves every other build in the repository alone.
+#
+# The build context is the repository root (the project reaches into
+# sdks/dotnet through $(AGUIDotnetSdkDir)), which by default hands the daemon
+# the entire working tree: a developer's .env, every bin/obj from a local
+# build, node_modules, the whole .git history. Host build output would also be
+# copied over the top of the container's, so a stale obj/project.assets.json
+# could break or silently change the restore.
+
+# Version control and tooling state.
+**/.git
+**/.github
+**/.nx
+**/.vs
+**/.idea
+**/*.user
+**/*.suo
+
+# Host build output: never let the container inherit it.
+**/bin
+**/obj
+**/artifacts
+**/dist
+**/out
+**/TestResults
+
+# Dependency trees the .NET build has no use for.
+**/node_modules
+**/.venv
+**/__pycache__
+**/*.egg-info
+**/.pytest_cache
+
+# Developer secrets and provisioned resource ids. .env.example is a template
+# and carries no values, but nothing here needs it either.
+**/.env
+**/.env.*
+**/*.pfx
+**/*.p12
+**/.managed-agents.json
+
+# Local dotnet installs (see the repo-local SDK entry in .gitignore).
+**/.dotnet
