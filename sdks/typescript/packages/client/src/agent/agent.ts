@@ -168,7 +168,7 @@ export abstract class AbstractAgent {
       });
 
       let result: any = undefined;
-      const currentMessageIds = new Set(this.messages.map((message) => message.id));
+      const currentMessageIds = new Set((this.messages ?? []).map((message) => message.id));
 
       const subscribers: AgentSubscriber[] = [
         {
@@ -243,7 +243,7 @@ export abstract class AbstractAgent {
       );
 
       await lastValueFrom(pipeline(of(null)));
-      const newMessages = structuredClone_(this.messages).filter(
+      const newMessages = structuredClone_(this.messages ?? []).filter(
         (message: Message) => !currentMessageIds.has(message.id),
       );
       return { result, newMessages };
@@ -264,7 +264,7 @@ export abstract class AbstractAgent {
       this.agentId = this.agentId ?? uuidv4();
       const input = this.prepareRunAgentInput(parameters);
       let result: any = undefined;
-      const currentMessageIds = new Set(this.messages.map((message) => message.id));
+      const currentMessageIds = new Set((this.messages ?? []).map((message) => message.id));
 
       const subscribers: AgentSubscriber[] = [
         {
@@ -315,7 +315,7 @@ export abstract class AbstractAgent {
       // defaultValue prevents EmptyError when catchError returns EMPTY
       // (e.g. ConnectNotImplementedError path)
       await lastValueFrom(pipeline(of(null)), { defaultValue: undefined });
-      const newMessages = structuredClone_(this.messages).filter(
+      const newMessages = structuredClone_(this.messages ?? []).filter(
         (message: Message) => !currentMessageIds.has(message.id),
       );
       return { result, newMessages };
@@ -378,7 +378,7 @@ export abstract class AbstractAgent {
   }
 
   protected prepareRunAgentInput(parameters?: RunAgentParameters): RunAgentInput {
-    const clonedMessages = structuredClone_(this.messages) as Message[];
+    const clonedMessages = structuredClone_(this.messages ?? []) as Message[];
     const messagesWithoutActivity = clonedMessages.filter((message) => message.role !== "activity");
 
     return {
@@ -413,7 +413,7 @@ export abstract class AbstractAgent {
 
     const onRunInitializedMutation = await runSubscribersWithMutation(
       subscribers,
-      this.messages,
+      this.messages ?? [],
       this.state,
       (subscriber, messages, state) =>
         subscriber.onRunInitialized?.({ messages, state, agent: this, input }),
@@ -453,7 +453,7 @@ export abstract class AbstractAgent {
     return from(
       runSubscribersWithMutation(
         subscribers,
-        this.messages,
+        this.messages ?? [],
         this.state,
         (subscriber, messages, state) =>
           subscriber.onRunFailed?.({ error, messages, state, agent: this, input }),
@@ -513,7 +513,7 @@ export abstract class AbstractAgent {
   protected async onFinalize(input: RunAgentInput, subscribers: AgentSubscriber[]) {
     const onRunFinalizedMutation = await runSubscribersWithMutation(
       subscribers,
-      this.messages,
+      this.messages ?? [],
       this.state,
       (subscriber, messages, state) =>
         subscriber.onRunFinalized?.({ messages, state, agent: this, input }),

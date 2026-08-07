@@ -99,7 +99,7 @@ export const defaultApplyEvents = (
   debugLogger?: DebugLoggerInput,
 ): Observable<AgentStateMutation> => {
   const log = resolveDebugLogger(debugLogger);
-  let messages = structuredClone_(agent.messages);
+  let messages = structuredClone_(agent.messages ?? []);
   let state = structuredClone_(input.state);
   let currentMutation: AgentStateMutation = {};
 
