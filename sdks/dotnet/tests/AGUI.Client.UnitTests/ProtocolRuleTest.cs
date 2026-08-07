@@ -1882,6 +1882,25 @@ public sealed class ProtocolRuleTest
         Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Subagent_EmptyMessageId_StillCarriesAttribution()
+    {
+        // An empty messageId is a valid string per the schemas, and the builders accept it.
+        // Skipping empty ids when recording owners lost the attribution, so the response
+        // came back parent-owned while TypeScript preserved it.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new TextMessageStartEvent { MessageId = "", Role = "assistant", SubagentId = "s1" },
+            new TextMessageContentEvent { MessageId = "", Delta = "hi" },
+            new TextMessageEndEvent { MessageId = "" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var updates = await ProcessEventsAsync(events);
+        Assert.Contains(updates, u => u.Text is { Length: > 0 } && Owner(u) == "s1");
+    }
+
     private static string? Owner(ChatResponseUpdate update) =>
         update.AdditionalProperties?.TryGetValue("agui.subagentId", out string? v) == true ? v : null;
 

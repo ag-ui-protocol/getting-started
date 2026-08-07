@@ -64,8 +64,8 @@ internal static class EventStreamConverter
     /// </summary>
     private static string? ResolveOwner(ChatResponseUpdate update, Dictionary<string, string?> owners)
     {
-        if (update.MessageId is { Length: > 0 } messageId
-            && owners.TryGetValue(messageId, out var byMessage))
+        if (update.MessageId is not null
+            && owners.TryGetValue(update.MessageId, out var byMessage))
         {
             return byMessage;
         }
@@ -74,7 +74,7 @@ internal static class EventStreamConverter
         {
             foreach (var entityId in AttributedEntityIds(evt))
             {
-                if (entityId is { Length: > 0 } && owners.TryGetValue(entityId, out var byEntity))
+                if (entityId is not null && owners.TryGetValue(entityId, out var byEntity))
                 {
                     return byEntity;
                 }
@@ -90,7 +90,7 @@ internal static class EventStreamConverter
                 _ => null,
             };
 
-            if (callId is { Length: > 0 } && owners.TryGetValue(callId, out var byCall))
+            if (callId is not null && owners.TryGetValue(callId, out var byCall))
             {
                 return byCall;
             }
@@ -171,7 +171,10 @@ internal static class EventStreamConverter
         // inherit the tool call's subagent and mint a wrongly-attributed tool message.
         void RecordOwner(string? entityId, string? subagentId)
         {
-            if (entityId is { Length: > 0 })
+            // Null means the event has no such entity; an EMPTY id is a valid string the
+            // schemas accept, so skipping it lost the owner and the response came back
+            // parent-owned while TypeScript kept the attribution.
+            if (entityId is not null)
             {
                 owners[entityId] = subagentId;
             }
