@@ -22,11 +22,17 @@ export const verifyEvents =
     // Track active steps
     let activeSteps = new Map<string, boolean>(); // Map of step name -> active status
     let activeSubagents = new Map<string, boolean>(); // Map of subagent ID -> active status
-    // SUBAGENT_FINISHED / SUBAGENT_ERROR are terminal for the id they name, so the
-    // id has to stay known after it closes. Tracking only the ACTIVE set made
-    // `STARTED(s1), FINISHED(s1), STARTED(s1)` legal — two terminals for one
-    // invocation — and let output tagged `s1` keep arriving after its terminal.
-    // Cleared per run, like every other map here.
+    // Ids closed by a SUBAGENT_FINISHED / SUBAGENT_ERROR in this run. Needed because
+    // "no duplicate SUBAGENT_STARTED for the same subagentId" has to hold for the whole
+    // run: a subagentId is a unique handle for ONE invocation, so tracking only the
+    // ACTIVE set made `STARTED(s1), FINISHED(s1), STARTED(s1)` legal and gave a single
+    // invocation two starts and two terminals.
+    //
+    // Deliberately NOT used to reject later events tagged with a closed id. The rule is
+    // that a continuation must not DISAGREE with its opener; requiring the tag to name a
+    // still-live subagent was explicitly rejected when this was designed, so that
+    // attribution-only producers (which tag events but never send SUBAGENT_*) stay
+    // valid. Cleared per run, like every other map here.
     let closedSubagents = new Set<string>();
     let activeThinkingStep = false;
     let activeThinkingStepMessage = false;
@@ -68,23 +74,6 @@ export const verifyEvents =
       ) {
         return new AGUIError(
           `Cannot send '${evType}': subagentId '${evSubagentId}' does not match the ${entityKind} '${entityId}' opener's subagent '${owner.subagentId}'.`,
-        );
-      }
-      return subagentClosedError(evType, evSubagentId);
-    };
-
-    // A subagent that has already ended owns nothing further. This checks only ids
-    // that were explicitly closed in THIS run, so attribution-only producers —
-    // which never send SUBAGENT_* at all and therefore never close anything — stay
-    // valid, per the note above.
-    const subagentClosedError = (
-      evType: EventType,
-      evSubagentId: string | undefined,
-    ): AGUIError | undefined => {
-      if (evSubagentId === undefined) return undefined;
-      if (closedSubagents.has(evSubagentId)) {
-        return new AGUIError(
-          `Cannot send '${evType}': subagent '${evSubagentId}' has already finished. No further events may be attributed to it.`,
         );
       }
       return undefined;
@@ -332,10 +321,7 @@ export const verifyEvents =
           // the same defect the text-message and tool-call checks prevent.
           case EventType.ACTIVITY_SNAPSHOT: {
             const messageId = (event as any).messageId;
-            const subagentId = (event as any).subagentId;
-            const closedErr = subagentClosedError(eventType, subagentId);
-            if (closedErr) return throwError(() => closedErr);
-            activeActivities.set(messageId, { subagentId });
+            activeActivities.set(messageId, { subagentId: (event as any).subagentId });
             return of(event);
           }
 

@@ -377,21 +377,29 @@ describe("verifyEvents subagent lifecycle", () => {
     );
   });
 
-  it("should reject output attributed to a subagent after its terminal event", async () => {
-    await expectRejectedWith(
-      [
-        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
-        { type: EventType.SUBAGENT_STARTED, subagentId: "s1", name: "r" } as SubagentStartedEvent,
-        { type: EventType.SUBAGENT_FINISHED, subagentId: "s1" } as SubagentFinishedEvent,
-        {
-          type: EventType.TEXT_MESSAGE_START,
-          messageId: "m1",
-          role: "assistant",
-          subagentId: "s1",
-        } as TextMessageStartEvent,
-      ],
-      /has already finished/i,
-    );
+  it("should NOT reject an event tagged with an already-finished subagent", async () => {
+    // Pins a deliberate design decision, not an oversight. The verifier's rule is that
+    // a continuation must not DISAGREE with its opener; requiring a tag to name a
+    // still-live subagent was explicitly rejected so that attribution-only producers —
+    // which tag events but never send SUBAGENT_* — stay valid. Tightening this would
+    // add a constraint the protocol does not define, so it stays accepted here and a
+    // consumer decides how to render it.
+    const inputEvents: BaseEvent[] = [
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      { type: EventType.SUBAGENT_STARTED, subagentId: "s1", name: "r" } as SubagentStartedEvent,
+      { type: EventType.SUBAGENT_FINISHED, subagentId: "s1" } as SubagentFinishedEvent,
+      {
+        type: EventType.TEXT_MESSAGE_START,
+        messageId: "m1",
+        role: "assistant",
+        subagentId: "s1",
+      } as TextMessageStartEvent,
+      { type: EventType.TEXT_MESSAGE_END, messageId: "m1" } as TextMessageEndEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
+    ];
+
+    const events = await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+    expect(events).toHaveLength(inputEvents.length);
   });
 
   it("should reject a second terminal for the same subagent", async () => {

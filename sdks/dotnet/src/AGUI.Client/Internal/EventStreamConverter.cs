@@ -26,10 +26,13 @@ internal static class EventStreamConverter
         // by the order events arrive in, so interleaved parallel subagents cannot swap
         // parents.
         var activeSubagents = new Dictionary<string, string?>();
-        // Subagent terminals are terminal for the id they name, so a closed id has to
-        // stay known: tracking only the active set would make
-        // STARTED(s1)/FINISHED(s1)/STARTED(s1) legal and let output tagged s1 keep
-        // arriving after its terminal. Cleared per run, like activeSteps.
+        // Ids closed by a terminal in this run. Needed because "no duplicate
+        // SUBAGENT_STARTED for the same id" holds for the whole run — a subagentId is a
+        // unique handle for ONE invocation — so tracking only the active set would make
+        // STARTED(s1)/FINISHED(s1)/STARTED(s1) legal. Deliberately NOT used to reject
+        // later events tagged with a closed id: requiring a tag to name a still-live
+        // subagent was explicitly rejected in the design so attribution-only producers
+        // stay valid, and TypeScript accepts those streams too. Cleared per run.
         var closedSubagents = new HashSet<string>(StringComparer.Ordinal);
         // Owner of each open message / tool call, so a continuation tagged with a
         // different subagent is rejected here exactly as verifyEvents rejects it in
@@ -170,7 +173,6 @@ internal static class EventStreamConverter
                 // calls it is the consequential one — args and results are what travel
                 // back to the provider on the next turn.
                 case TextMessageStartEvent textStart:
-                    RejectClosedSubagent(textStart.Type, textStart.SubagentId, closedSubagents);
                     messageOwners[textStart.MessageId] = textStart.SubagentId;
                     break;
 
@@ -186,7 +188,6 @@ internal static class EventStreamConverter
                     break;
 
                 case ToolCallStartEvent toolStart:
-                    RejectClosedSubagent(toolStart.Type, toolStart.SubagentId, closedSubagents);
                     toolCallOwners[toolStart.ToolCallId] = toolStart.SubagentId;
                     break;
 
@@ -518,24 +519,6 @@ internal static class EventStreamConverter
         {
             throw new System.InvalidOperationException(
                 $"Cannot send '{eventType}': '{propertyName}' is required and must not be empty.");
-        }
-    }
-
-    /// <summary>
-    /// Throws when an event is attributed to a subagent that has already ended. Only
-    /// ids explicitly closed in this run are checked, so attribution-only producers —
-    /// which tag events but never send SUBAGENT_* and therefore close nothing — stay
-    /// valid.
-    /// </summary>
-    private static void RejectClosedSubagent(
-        string eventType,
-        string? subagentId,
-        HashSet<string> closedSubagents)
-    {
-        if (subagentId is not null && closedSubagents.Contains(subagentId))
-        {
-            throw new System.InvalidOperationException(
-                $"Cannot send '{eventType}': subagent '{subagentId}' has already finished. No further events may be attributed to it.");
         }
     }
 

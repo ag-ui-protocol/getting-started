@@ -1514,18 +1514,26 @@ public sealed class ProtocolRuleTest
     }
 
     [Fact]
-    public async Task Subagent_OutputAfterItsTerminal_Throws()
+    public async Task Subagent_EventTaggedWithAFinishedSubagent_IsAccepted()
     {
+        // Pins a deliberate design decision, matching TypeScript. The rule is that a
+        // continuation must not DISAGREE with its opener; requiring a tag to name a
+        // still-live subagent was explicitly rejected so attribution-only producers stay
+        // valid. Tightening it here would make .NET stricter than TypeScript — the exact
+        // divergence this file exists to prevent.
         var events = new BaseEvent[]
         {
             new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
             new SubagentStartedEvent { SubagentId = "s1", Name = "researcher" },
             new SubagentFinishedEvent { SubagentId = "s1" },
-            new TextMessageStartEvent { MessageId = "m1", Role = "assistant", SubagentId = "s1" }
+            new TextMessageStartEvent { MessageId = "m1", Role = "assistant", SubagentId = "s1" },
+            new TextMessageContentEvent { MessageId = "m1", Delta = "trailing" },
+            new TextMessageEndEvent { MessageId = "m1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
         };
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
-        Assert.Contains("has already finished", ex.Message, StringComparison.Ordinal);
+        var result = await ProcessEventsAsync(events);
+        Assert.Single(result.Select(u => u.RawRepresentation).OfType<RunFinishedEvent>());
     }
 
     [Fact]

@@ -197,9 +197,11 @@ describe("transformChunks subagentId propagation", () => {
   });
 
   it("should close a pending chunk stream before SUBAGENT_FINISHED", async () => {
-    // Otherwise the synthesized TEXT_MESSAGE_END lands after the subagent's
-    // terminal event, turning a valid chunk producer into a stream with
-    // post-terminal subagent output.
+    // Otherwise the synthesized TEXT_MESSAGE_END — which carries the opener's
+    // subagentId — lands after that subagent's terminal event, so a consumer
+    // grouping by subagent attaches it to a group it has already marked complete.
+    // The verifier tolerates such a tag by design; this is about not synthesizing
+    // incoherent output in the first place.
     const started: SubagentStartedEvent = {
       type: EventType.SUBAGENT_STARTED,
       subagentId: "s1",

@@ -156,12 +156,15 @@ export const transformChunks =
           case EventType.REASONING_ENCRYPTED_VALUE:
           case EventType.SUBAGENT_STARTED:
             return [event];
-          // A subagent's terminal event closes any stream still being assembled
-          // from chunks. Passing these through untouched left the pending message
-          // open, so its synthesized END was emitted later — by the run terminal or
-          // the next non-chunk event — i.e. AFTER the subagent had already
-          // finished. A perfectly valid chunk producer was thereby transformed
-          // into a stream with post-terminal subagent output.
+          // A subagent's terminal event closes any stream still being assembled from
+          // chunks. Passing these through untouched left the pending message open, so
+          // its synthesized END — which carries the opener's subagentId — was emitted
+          // later, by the run terminal or the next non-chunk event, i.e. after that
+          // subagent had already finished. The verifier tolerates such a tag by
+          // design, so this is not about validity: it is that a message this
+          // transform synthesized should not be closed on behalf of an owner that
+          // has already ended, since a consumer grouping by subagent would attach it
+          // to a group it had already marked complete.
           case EventType.SUBAGENT_FINISHED:
           case EventType.SUBAGENT_ERROR:
             return [...closePendingEvent(), event];
