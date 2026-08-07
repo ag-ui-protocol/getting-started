@@ -39,11 +39,12 @@ internal static class EventStreamConverter
         await foreach (var update in AsChatResponseUpdatesCore(events, jsonSerializerOptions, owners, cancellationToken)
             .ConfigureAwait(false))
         {
-            // Already stamped means it was buffered and its owner frozen at creation; do
-            // not re-resolve against a map that has moved on since.
-            var alreadyStamped =
-                update.AdditionalProperties?.ContainsKey(AGUISubagentIdKey) == true;
-            if (!alreadyStamped && ResolveOwner(update, owners) is { } resolved)
+            // The marker means this update was buffered and its owner already frozen at
+            // creation — including when that owner is the parent. Re-resolving would read a
+            // map that has moved on since.
+            var alreadyResolved =
+                update.AdditionalProperties?.Remove(AGUIOwnerResolvedKey) == true;
+            if (!alreadyResolved && ResolveOwner(update, owners) is { } resolved)
             {
                 update.AdditionalProperties ??= new AdditionalPropertiesDictionary();
                 update.AdditionalProperties[AGUISubagentIdKey] = resolved;
@@ -59,6 +60,14 @@ internal static class EventStreamConverter
     /// <c>AsAGUIMessages</c> on the next turn.
     /// </summary>
     internal const string AGUISubagentIdKey = "agui.subagentId";
+
+    /// <summary>
+    /// Transient marker saying an update's owner was already determined at creation, so the
+    /// wrapper must not re-resolve it. Needed as its own flag because "resolved to the
+    /// parent" carries no subagentId and would otherwise be indistinguishable from
+    /// "unresolved". Removed before the update is yielded.
+    /// </summary>
+    private const string AGUIOwnerResolvedKey = "agui.__ownerResolved";
 
     /// <summary>
     /// Owner for an update, tried in the order the update can identify its entity: its
@@ -179,9 +188,15 @@ internal static class EventStreamConverter
         // stamped update alone.
         static ChatResponseUpdate StampOwner(ChatResponseUpdate update, Dictionary<string, string?> map)
         {
+            update.AdditionalProperties ??= new AdditionalPropertiesDictionary();
+            // The marker goes on even when the owner is the PARENT (null). "Resolved to the
+            // parent" and "not yet resolved" are different states, and conflating them let
+            // the wrapper re-resolve a parent-owned buffered update after the entity had
+            // been re-owned by a subagent — emitting the parent's snapshot as that
+            // subagent's. Stripped again in the wrapper so it never reaches the wire.
+            update.AdditionalProperties[AGUIOwnerResolvedKey] = true;
             if (ResolveOwner(update, map) is { } owner)
             {
-                update.AdditionalProperties ??= new AdditionalPropertiesDictionary();
                 update.AdditionalProperties[AGUISubagentIdKey] = owner;
             }
 

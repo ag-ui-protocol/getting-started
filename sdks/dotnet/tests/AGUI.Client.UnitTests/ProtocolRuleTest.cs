@@ -1947,6 +1947,55 @@ public sealed class ProtocolRuleTest
         Assert.Equal("s2", Owner(activityUpdates[1]));
     }
 
+    [Fact]
+    public async Task Subagent_BufferedParentOwnedUpdate_StaysParentOwned()
+    {
+        // The residual of freezing owners at creation: a marker was written only when an
+        // owner was FOUND, so a parent-owned buffered update got none and was re-resolved
+        // at flush — after s1 had taken the activity over — and the parent's snapshot came
+        // out as s1's. "Resolved to the parent" is a different state from "unresolved".
+        var content = JsonDocument.Parse("{}").RootElement;
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search" },
+            new ToolCallEndEvent { ToolCallId = "tc1" },
+            new ActivitySnapshotEvent { MessageId = "a1", ActivityType = "search", Content = content, Replace = true },
+            new ActivitySnapshotEvent { MessageId = "a1", ActivityType = "search", Content = content, Replace = true, SubagentId = "s1" },
+            new ToolCallResultEvent { MessageId = "m9", ToolCallId = "tc1", Content = "done" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var updates = await ProcessEventsAsync(events);
+        var activityUpdates = updates
+            .Where(u => u.RawRepresentation is ActivitySnapshotEvent)
+            .ToList();
+
+        Assert.Equal(2, activityUpdates.Count);
+        Assert.Null(Owner(activityUpdates[0]));
+        Assert.Equal("s1", Owner(activityUpdates[1]));
+    }
+
+    [Fact]
+    public async Task Subagent_InternalResolutionMarker_NeverReachesTheCaller()
+    {
+        // The marker is an implementation detail; leaking it would put a stray key on every
+        // buffered message's AdditionalProperties.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search", SubagentId = "s1" },
+            new ToolCallEndEvent { ToolCallId = "tc1", SubagentId = "s1" },
+            new ToolCallResultEvent { MessageId = "m9", ToolCallId = "tc1", Content = "done", SubagentId = "s1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var updates = await ProcessEventsAsync(events);
+        Assert.All(
+            updates,
+            u => Assert.False(u.AdditionalProperties?.ContainsKey("agui.__ownerResolved") == true));
+    }
+
     private static string? Owner(ChatResponseUpdate update) =>
         update.AdditionalProperties?.TryGetValue("agui.subagentId", out string? v) == true ? v : null;
 
