@@ -1996,6 +1996,33 @@ public sealed class ProtocolRuleTest
             u => Assert.False(u.AdditionalProperties?.ContainsKey("agui.__ownerResolved") == true));
     }
 
+    [Fact]
+    public async Task Subagent_ResultReusingTheToolCallIdAsMessageId_DoesNotRestampTheCall()
+    {
+        // ToolCallResultEventExtensions in AGUI.Server emits MessageId == ToolCallId, so
+        // this is the DEFAULT shape this SDK produces, not an edge case. With one flat owner
+        // map the result's owner overwrote the call's, and the FunctionCallContent — still
+        // buffered until the result arrives — flushed with the wrong one. Message ids and
+        // tool call ids are separate namespaces.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search", SubagentId = "s1" },
+            new ToolCallEndEvent { ToolCallId = "tc1", SubagentId = "s1" },
+            // Parent-owned result reusing the call id as its message id.
+            new ToolCallResultEvent { MessageId = "tc1", ToolCallId = "tc1", Content = "done" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var updates = await ProcessEventsAsync(events);
+
+        var callUpdate = Assert.Single(updates, u => u.Contents.OfType<FunctionCallContent>().Any());
+        Assert.Equal("s1", Owner(callUpdate));
+
+        var resultUpdate = Assert.Single(updates, u => u.Contents.OfType<FunctionResultContent>().Any());
+        Assert.Null(Owner(resultUpdate));
+    }
+
     private static string? Owner(ChatResponseUpdate update) =>
         update.AdditionalProperties?.TryGetValue("agui.subagentId", out string? v) == true ? v : null;
 

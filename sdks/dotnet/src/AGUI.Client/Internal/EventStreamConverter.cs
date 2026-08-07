@@ -78,16 +78,16 @@ internal static class EventStreamConverter
     private static string? ResolveOwner(ChatResponseUpdate update, Dictionary<string, string?> owners)
     {
         if (update.MessageId is not null
-            && owners.TryGetValue(update.MessageId, out var byMessage))
+            && owners.TryGetValue(MessageKey(update.MessageId), out var byMessage))
         {
             return byMessage;
         }
 
         if (update.RawRepresentation is BaseEvent evt)
         {
-            foreach (var entityId in AttributedEntityIds(evt))
+            foreach (var entityKey in AttributedEntityKeys(evt))
             {
-                if (entityId is not null && owners.TryGetValue(entityId, out var byEntity))
+                if (owners.TryGetValue(entityKey, out var byEntity))
                 {
                     return byEntity;
                 }
@@ -103,7 +103,7 @@ internal static class EventStreamConverter
                 _ => null,
             };
 
-            if (callId is not null && owners.TryGetValue(callId, out var byCall))
+            if (callId is not null && owners.TryGetValue(CallKey(callId), out var byCall))
             {
                 return byCall;
             }
@@ -112,27 +112,43 @@ internal static class EventStreamConverter
         return null;
     }
 
-    /// <summary>The entity ids an event refers to, most specific first.</summary>
-    private static IEnumerable<string?> AttributedEntityIds(BaseEvent evt)
+    /// <summary>
+    /// Message-id key space for the owner map. Message ids and tool call ids are separate
+    /// namespaces that can legitimately collide — this SDK's own server helper emits
+    /// TOOL_CALL_RESULT with <c>MessageId == ToolCallId</c> — so a single flat map let a
+    /// result's owner overwrite its call's, and the still-buffered FunctionCallContent
+    /// flushed with the wrong one.
+    /// </summary>
+    private static string MessageKey(string id) => "msg:" + id;
+
+    /// <summary>Tool-call-id key space for the owner map. See <see cref="MessageKey"/>.</summary>
+    private static string CallKey(string id) => "call:" + id;
+
+    /// <summary>The namespaced entity keys an event refers to, most specific first.</summary>
+    private static IEnumerable<string> AttributedEntityKeys(BaseEvent evt)
     {
         switch (evt)
         {
-            case TextMessageStartEvent e: yield return e.MessageId; break;
-            case TextMessageContentEvent e: yield return e.MessageId; break;
-            case TextMessageEndEvent e: yield return e.MessageId; break;
-            case ReasoningMessageStartEvent e: yield return e.MessageId; break;
-            case ReasoningMessageContentEvent e: yield return e.MessageId; break;
-            case ReasoningMessageEndEvent e: yield return e.MessageId; break;
-            case ReasoningEncryptedValueEvent e: yield return e.EntityId; break;
-            case ActivitySnapshotEvent e: yield return e.MessageId; break;
-            case ActivityDeltaEvent e: yield return e.MessageId; break;
+            case TextMessageStartEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
+            case TextMessageContentEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
+            case TextMessageEndEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
+            case ReasoningStartEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
+            case ReasoningMessageStartEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
+            case ReasoningMessageContentEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
+            case ReasoningMessageEndEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
+            case ReasoningMessageChunkEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
+            case ReasoningEncryptedValueEvent e: if (e.EntityId is not null) yield return MessageKey(e.EntityId); break;
+            case ActivitySnapshotEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
+            case ActivityDeltaEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
+            // The minted tool message first: that is what this update represents. The call
+            // key is a fallback for consumers that only see the call.
             case ToolCallResultEvent e:
-                yield return e.MessageId;
-                yield return e.ToolCallId;
+                if (e.MessageId is not null) yield return MessageKey(e.MessageId);
+                if (e.ToolCallId is not null) yield return CallKey(e.ToolCallId);
                 break;
-            case ToolCallStartEvent e: yield return e.ToolCallId; break;
-            case ToolCallArgsEvent e: yield return e.ToolCallId; break;
-            case ToolCallEndEvent e: yield return e.ToolCallId; break;
+            case ToolCallStartEvent e: if (e.ToolCallId is not null) yield return CallKey(e.ToolCallId); break;
+            case ToolCallArgsEvent e: if (e.ToolCallId is not null) yield return CallKey(e.ToolCallId); break;
+            case ToolCallEndEvent e: if (e.ToolCallId is not null) yield return CallKey(e.ToolCallId); break;
         }
     }
 
@@ -203,14 +219,22 @@ internal static class EventStreamConverter
             return update;
         }
 
-        void RecordOwner(string? entityId, string? subagentId)
+        // Null means the event has no such entity; an EMPTY id is a valid string the schemas
+        // accept, so skipping it lost the owner and the response came back parent-owned while
+        // TypeScript kept the attribution.
+        void RecordMessageOwner(string? messageId, string? subagentId)
         {
-            // Null means the event has no such entity; an EMPTY id is a valid string the
-            // schemas accept, so skipping it lost the owner and the response came back
-            // parent-owned while TypeScript kept the attribution.
-            if (entityId is not null)
+            if (messageId is not null)
             {
-                owners[entityId] = subagentId;
+                owners[MessageKey(messageId)] = subagentId;
+            }
+        }
+
+        void RecordCallOwner(string? toolCallId, string? subagentId)
+        {
+            if (toolCallId is not null)
+            {
+                owners[CallKey(toolCallId)] = subagentId;
             }
         }
         var runStarted = false;
@@ -359,7 +383,7 @@ internal static class EventStreamConverter
                 // back to the provider on the next turn.
                 case TextMessageStartEvent textStart:
                     messageOwners[textStart.MessageId] = textStart.SubagentId;
-                    RecordOwner(textStart.MessageId, textStart.SubagentId);
+                    RecordMessageOwner(textStart.MessageId, textStart.SubagentId);
                     break;
 
                 case TextMessageContentEvent textContent:
@@ -374,7 +398,7 @@ internal static class EventStreamConverter
 
                 case ToolCallStartEvent toolStart:
                     toolCallOwners[toolStart.ToolCallId] = toolStart.SubagentId;
-                    RecordOwner(toolStart.ToolCallId, toolStart.SubagentId);
+                    RecordCallOwner(toolStart.ToolCallId, toolStart.SubagentId);
                     break;
 
                 // A creation event under D5: it both references the call and mints the tool
@@ -385,7 +409,7 @@ internal static class EventStreamConverter
                     // precisely so the executor can differ from the caller (client-side tool
                     // execution), so writing it onto the tool call would restamp the
                     // buffered FunctionCallContent and lose the caller's owner.
-                    RecordOwner(toolResult.MessageId, toolResult.SubagentId);
+                    RecordMessageOwner(toolResult.MessageId, toolResult.SubagentId);
                     break;
 
                 // Both open a reasoning entity, usually under the same id; first writer
@@ -397,7 +421,7 @@ internal static class EventStreamConverter
                         reasoningOwners[outerReasoningStart.MessageId] = outerReasoningStart.SubagentId;
                     }
 
-                    RecordOwner(outerReasoningStart.MessageId, outerReasoningStart.SubagentId);
+                    RecordMessageOwner(outerReasoningStart.MessageId, outerReasoningStart.SubagentId);
                     break;
 
                 case ReasoningMessageStartEvent reasoningStart:
@@ -406,7 +430,7 @@ internal static class EventStreamConverter
                         reasoningOwners[reasoningStart.MessageId] = reasoningStart.SubagentId;
                     }
 
-                    RecordOwner(reasoningStart.MessageId, reasoningStart.SubagentId);
+                    RecordMessageOwner(reasoningStart.MessageId, reasoningStart.SubagentId);
                     break;
 
                 // #4 — the one compact stream this SDK models. Its opener establishes the
@@ -423,7 +447,7 @@ internal static class EventStreamConverter
                         if (!reasoningOwners.ContainsKey(chunkId))
                         {
                             reasoningOwners[chunkId] = reasoningChunk.SubagentId;
-                            RecordOwner(chunkId, reasoningChunk.SubagentId);
+                            RecordMessageOwner(chunkId, reasoningChunk.SubagentId);
                         }
                         else
                         {
@@ -484,7 +508,7 @@ internal static class EventStreamConverter
                     if (!activityOwners.ContainsKey(activitySnapshot.MessageId) || activitySnapshot.Replace != false)
                     {
                         activityOwners[activitySnapshot.MessageId] = activitySnapshot.SubagentId;
-                        RecordOwner(activitySnapshot.MessageId, activitySnapshot.SubagentId);
+                        RecordMessageOwner(activitySnapshot.MessageId, activitySnapshot.SubagentId);
                     }
 
                     break;
