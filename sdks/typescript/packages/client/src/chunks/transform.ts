@@ -122,11 +122,16 @@ export const transformChunks =
     // disagreement would never be seen. Rejecting here covers both shapes uniformly, and
     // matches how this transform already reports malformed chunk input.
     const assertChunkOwner = (incoming: string | undefined, entityKind: string, entityId: string) => {
+      // An absent tag inherits, so it is never a disagreement. But an open stream with
+      // NO owner belongs to the parent, which is as much an owner as a subagent — so a
+      // tagged chunk on it does disagree. Comparing only when the stream had an owner
+      // let a parent-opened stream be continued under a subagent's tag, and because a
+      // no-delta chunk emits nothing the verifier never saw it either.
       if (incoming === undefined) return;
       const owner = pendingStreamOwner();
-      if (owner !== undefined && owner !== incoming) {
+      if (owner !== incoming) {
         throw new Error(
-          `Cannot continue ${entityKind} '${entityId}': chunk subagentId '${incoming}' does not match the open stream's subagent '${owner}'.`,
+          `Cannot continue ${entityKind} '${entityId}': chunk subagentId '${incoming}' does not match the open stream's subagent '${owner ?? "(the parent agent)"}'.`,
         );
       }
     };

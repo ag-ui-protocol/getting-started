@@ -341,14 +341,21 @@ export const verifyEvents =
             return of(event);
           }
 
+          case EventType.REASONING_START:
           case EventType.REASONING_MESSAGE_START: {
             const messageId = (event as any).messageId;
-            activeReasoning.set(messageId, { subagentId: (event as any).subagentId });
+            // First writer records the owner. REASONING_START brackets the outer
+            // reasoning and REASONING_MESSAGE_START the inner message, usually under the
+            // same id, so whichever arrives first establishes it.
+            if (!activeReasoning.has(messageId)) {
+              activeReasoning.set(messageId, { subagentId: (event as any).subagentId });
+            }
             return of(event);
           }
 
           case EventType.REASONING_MESSAGE_CONTENT:
-          case EventType.REASONING_MESSAGE_END: {
+          case EventType.REASONING_MESSAGE_END:
+          case EventType.REASONING_END: {
             const messageId = (event as any).messageId;
             const subErr = subagentTagError(
               eventType,
@@ -358,20 +365,26 @@ export const verifyEvents =
               messageId,
             );
             if (subErr) return throwError(() => subErr);
-            if (eventType === EventType.REASONING_MESSAGE_END) {
+            // Only REASONING_END retires the owner. Deleting it at
+            // REASONING_MESSAGE_END left the outer close with nothing to compare
+            // against, so `REASONING_END(r, s2)` after an s1 message was accepted.
+            if (eventType === EventType.REASONING_END) {
               activeReasoning.delete(messageId);
             }
             return of(event);
           }
 
           case EventType.REASONING_ENCRYPTED_VALUE: {
-            // Continues a reasoning entity by entityId rather than messageId.
+            // Continues an entity by entityId, and `subtype` says which kind: a
+            // "tool-call" encrypted value belongs to a TOOL CALL, so looking only in
+            // activeReasoning found no owner and accepted s2's value against s1's call.
             const entityId = (event as any).entityId;
+            const isToolCall = (event as any).subtype === "tool-call";
             const subErr = subagentTagError(
               eventType,
               (event as any).subagentId,
-              activeReasoning.get(entityId),
-              "reasoning message",
+              isToolCall ? activeToolCalls.get(entityId) : activeReasoning.get(entityId),
+              isToolCall ? "tool call" : "reasoning message",
               entityId,
             );
             if (subErr) return throwError(() => subErr);
@@ -414,11 +427,15 @@ export const verifyEvents =
                   ),
               );
             }
-            if (parentSubagentId !== undefined && !activeSubagents.has(parentSubagentId)) {
+            if (
+              parentSubagentId !== undefined &&
+              !activeSubagents.has(parentSubagentId) &&
+              !closedSubagents.has(parentSubagentId)
+            ) {
               return throwError(
                 () =>
                   new AGUIError(
-                    `Cannot send 'SUBAGENT_STARTED': parentSubagentId '${parentSubagentId}' has not been started.`,
+                    `Cannot send 'SUBAGENT_STARTED': parentSubagentId '${parentSubagentId}' has not been started in this run.`,
                   ),
               );
             }

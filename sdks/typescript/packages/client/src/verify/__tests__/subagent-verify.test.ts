@@ -493,6 +493,123 @@ describe("verifyEvents subagent lifecycle", () => {
     );
   });
 
+  it("should reject REASONING_END whose owner differs from the reasoning opener", async () => {
+    // The owner has to survive REASONING_MESSAGE_END, since REASONING_END closes the
+    // outer reasoning afterwards. Retiring it at the message end left the outer close
+    // with nothing to compare against.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.REASONING_START, messageId: "r1", subagentId: "s1" } as BaseEvent,
+        {
+          type: EventType.REASONING_MESSAGE_START,
+          messageId: "r1",
+          role: "reasoning",
+          subagentId: "s1",
+        } as BaseEvent,
+        { type: EventType.REASONING_MESSAGE_END, messageId: "r1", subagentId: "s1" } as BaseEvent,
+        { type: EventType.REASONING_END, messageId: "r1", subagentId: "s2" } as BaseEvent,
+      ],
+      /does not match/i,
+    );
+  });
+
+  it("should reject a tool-call encrypted value whose owner differs from the tool call", async () => {
+    // REASONING_ENCRYPTED_VALUE continues whichever entity its `subtype` names, so a
+    // "tool-call" value has to be checked against the TOOL CALL's owner. Looking only in
+    // the reasoning map found nothing and accepted s2's value against s1's call.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        {
+          type: EventType.TOOL_CALL_START,
+          toolCallId: "tc1",
+          toolCallName: "search",
+          subagentId: "s1",
+        } as ToolCallStartEvent,
+        {
+          type: EventType.REASONING_ENCRYPTED_VALUE,
+          subtype: "tool-call",
+          entityId: "tc1",
+          encryptedValue: "opaque",
+          subagentId: "s2",
+        } as BaseEvent,
+      ],
+      /does not match/i,
+    );
+  });
+
+  it("should allow a child whose parent has already finished", async () => {
+    // The rule is that parentSubagentId must have been STARTED, not that it must still be
+    // active. Checking only the active set was stricter than the protocol defines and
+    // rejected this valid lifecycle.
+    const inputEvents: BaseEvent[] = [
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      { type: EventType.SUBAGENT_STARTED, subagentId: "p", name: "parent" } as SubagentStartedEvent,
+      { type: EventType.SUBAGENT_FINISHED, subagentId: "p" } as SubagentFinishedEvent,
+      {
+        type: EventType.SUBAGENT_STARTED,
+        subagentId: "c",
+        name: "child",
+        parentSubagentId: "p",
+      } as SubagentStartedEvent,
+      { type: EventType.SUBAGENT_FINISHED, subagentId: "c" } as SubagentFinishedEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
+    ];
+
+    const events = await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+    expect(events).toHaveLength(inputEvents.length);
+  });
+
+  it("should still reject a parent never started in this run", async () => {
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        {
+          type: EventType.SUBAGENT_STARTED,
+          subagentId: "c",
+          name: "child",
+          parentSubagentId: "ghost",
+        } as SubagentStartedEvent,
+      ],
+      /has not been started/i,
+    );
+  });
+
+  it("should not let a non-replacing ACTIVITY_SNAPSHOT take over an activity", async () => {
+    // The reducer leaves the existing activity alone when replace is false, so the tracked
+    // owner must not change either, or a following delta under the new tag patches a
+    // message someone else owns.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        {
+          type: EventType.ACTIVITY_SNAPSHOT,
+          messageId: "a1",
+          activityType: "search",
+          content: {},
+          replace: false,
+          subagentId: "s1",
+        } as BaseEvent,
+        {
+          type: EventType.ACTIVITY_SNAPSHOT,
+          messageId: "a1",
+          activityType: "search",
+          content: {},
+          replace: false,
+          subagentId: "s2",
+        } as BaseEvent,
+        {
+          type: EventType.ACTIVITY_DELTA,
+          messageId: "a1",
+          delta: [],
+          subagentId: "s2",
+        } as BaseEvent,
+      ],
+      /does not match/i,
+    );
+  });
+
   it("should allow an untagged continuation of a tagged tool call", async () => {
     // Omitting the tag is not a disagreement: attribution is optional per event,
     // and the opener already established the owner. Only a *different* id is an

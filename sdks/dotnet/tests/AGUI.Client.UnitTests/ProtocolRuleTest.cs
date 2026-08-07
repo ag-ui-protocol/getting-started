@@ -1655,6 +1655,140 @@ public sealed class ProtocolRuleTest
         Assert.All(updates, u => Assert.Null(Owner(u)));
     }
 
+    [Fact]
+    public async Task Subagent_ReasoningContinuationWithDifferentOwner_Throws()
+    {
+        // Parity: TypeScript rejects this, so .NET must too.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ReasoningMessageStartEvent { MessageId = "r1", Role = "reasoning", SubagentId = "s1" },
+            new ReasoningMessageContentEvent { MessageId = "r1", Delta = "x", SubagentId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_ToolCallEncryptedValueWithDifferentOwner_Throws()
+    {
+        // `subtype` decides which entity is continued; a "tool-call" value belongs to the
+        // tool call, not a reasoning message.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search", SubagentId = "s1" },
+            new ReasoningEncryptedValueEvent
+            {
+                Subtype = "tool-call",
+                EntityId = "tc1",
+                EncryptedValue = "opaque",
+                SubagentId = "s2"
+            }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_ChildOfAFinishedParent_IsAccepted()
+    {
+        // parentSubagentId must have been STARTED, not still be active.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new SubagentStartedEvent { SubagentId = "p", Name = "parent" },
+            new SubagentFinishedEvent { SubagentId = "p" },
+            new SubagentStartedEvent { SubagentId = "c", Name = "child", ParentSubagentId = "p" },
+            new SubagentFinishedEvent { SubagentId = "c" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var result = await ProcessEventsAsync(events);
+        Assert.Single(result.Select(u => u.RawRepresentation).OfType<RunFinishedEvent>());
+    }
+
+    [Fact]
+    public async Task Subagent_NonReplacingActivitySnapshot_DoesNotTakeOwnership()
+    {
+        var content = JsonDocument.Parse("{}").RootElement;
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ActivitySnapshotEvent { MessageId = "a1", ActivityType = "search", Content = content, Replace = false, SubagentId = "s1" },
+            new ActivitySnapshotEvent { MessageId = "a1", ActivityType = "search", Content = content, Replace = false, SubagentId = "s2" },
+            new ActivityDeltaEvent { MessageId = "a1", ActivityType = "search", Patch = JsonDocument.Parse("[]").RootElement, SubagentId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_OpenerOnlyAttribution_ReachesTheResponse()
+    {
+        // TEXT_MESSAGE_START yields no update, so deriving owners from updates alone never
+        // saw it and an opener-only stream came back unattributed.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new TextMessageStartEvent { MessageId = "m1", Role = "assistant", SubagentId = "s1" },
+            new TextMessageContentEvent { MessageId = "m1", Delta = "hi" },
+            new TextMessageEndEvent { MessageId = "m1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var updates = await ProcessEventsAsync(events);
+        Assert.Contains(updates, u => u.Text is { Length: > 0 } && Owner(u) == "s1");
+    }
+
+    [Fact]
+    public async Task Subagent_UntaggedToolResult_IsParentOwned()
+    {
+        // TOOL_CALL_RESULT is a creation event carrying its own attribution (D5), so an
+        // untagged one belongs to the parent and must clear the call's recorded owner
+        // rather than inheriting it.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search", SubagentId = "s1" },
+            new ToolCallEndEvent { ToolCallId = "tc1", SubagentId = "s1" },
+            new ToolCallResultEvent { MessageId = "m9", ToolCallId = "tc1", Content = "done" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var updates = await ProcessEventsAsync(events);
+        var resultUpdate = Assert.Single(
+            updates, u => u.Contents.OfType<FunctionResultContent>().Any());
+        Assert.Null(Owner(resultUpdate));
+    }
+
+    [Fact]
+    public async Task Subagent_OwnershipDoesNotLeakBetweenRuns()
+    {
+        // Run 2 reuses the message id for a parent-owned message; the stamp must not carry
+        // run 1's owner across.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new TextMessageStartEvent { MessageId = "m1", Role = "assistant", SubagentId = "s1" },
+            new TextMessageContentEvent { MessageId = "m1", Delta = "from s1" },
+            new TextMessageEndEvent { MessageId = "m1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" },
+            new RunStartedEvent { ThreadId = "t1", RunId = "r2" },
+            new TextMessageStartEvent { MessageId = "m1", Role = "assistant" },
+            new TextMessageContentEvent { MessageId = "m1", Delta = "from the parent" },
+            new TextMessageEndEvent { MessageId = "m1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r2" }
+        };
+
+        var updates = await ProcessEventsAsync(events);
+        var secondRunText = updates.Last(u => u.Text == "from the parent");
+        Assert.Null(Owner(secondRunText));
+    }
+
     private static string? Owner(ChatResponseUpdate update) =>
         update.AdditionalProperties?.TryGetValue("agui.subagentId", out string? v) == true ? v : null;
 

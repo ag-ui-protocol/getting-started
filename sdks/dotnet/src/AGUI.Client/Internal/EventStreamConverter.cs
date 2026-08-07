@@ -14,46 +14,32 @@ internal static class EventStreamConverter
     /// one with the subagent that produced it.
     /// </summary>
     /// <remarks>
-    /// The attribution is carried in <see cref="ChatResponseUpdate.AdditionalProperties"/>
-    /// under the same key <c>AsChatMessages</c> uses, because
-    /// <see cref="ChatResponseExtensions.ToChatResponse"/> preserves it onto the coalesced
-    /// <see cref="ChatMessage"/>. Without this the request direction was covered but the
-    /// response direction was not: AGUIChatClient.GetResponseAsync builds its response
-    /// from these updates, so a message a subagent produced came back untagged and the
-    /// next turn sent it to the agent as the parent's.
+    /// Carried in <see cref="ChatResponseUpdate.AdditionalProperties"/> under the same key
+    /// <c>AsChatMessages</c> uses, because <c>ToChatResponse</c> preserves it onto the
+    /// coalesced <see cref="ChatMessage"/>. Without it only the request direction was
+    /// covered: AGUIChatClient.GetResponseAsync builds its response from these updates, so
+    /// a subagent's message came back untagged and the next turn sent it to the agent as
+    /// the parent's.
     ///
-    /// Done in one wrapper rather than at each of the ten update sites so a new site
-    /// cannot silently omit it.
+    /// The owner map is populated by the core loop, which sees every event — including the
+    /// openers that yield no update at all. Deriving it out here from updates alone missed
+    /// those, so an opener-only stream (tagged START, untagged content and end) was never
+    /// attributed.
     /// </remarks>
     internal static async IAsyncEnumerable<ChatResponseUpdate> AsChatResponseUpdates(
         IAsyncEnumerable<BaseEvent> events,
         JsonSerializerOptions jsonSerializerOptions,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        // entityId -> owner, where the entity is a messageId or a toolCallId. Two keys are
-        // needed because not every message-producing update carries a MessageId:
-        // ToolCallBuilder emits FunctionCallContent updates with MessageId == null, so
-        // keying on MessageId alone left every subagent tool call untagged — and
-        // GetResponseAsync would then hand back a function-call message that the next
-        // turn sent to the agent as the parent's.
-        var owners = new Dictionary<string, string>(StringComparer.Ordinal);
+        // entityId -> owner, where an entity is a messageId or a toolCallId. Owned by the
+        // core loop and mutated as it validates, so it is reset with the rest of the
+        // per-run state on a new RUN_STARTED.
+        var owners = new Dictionary<string, string?>(StringComparer.Ordinal);
 
-        await foreach (var update in AsChatResponseUpdatesCore(events, jsonSerializerOptions, cancellationToken)
+        await foreach (var update in AsChatResponseUpdatesCore(events, jsonSerializerOptions, owners, cancellationToken)
             .ConfigureAwait(false))
         {
-            if (update.RawRepresentation is BaseEvent sourceEvent)
-            {
-                foreach (var (entityId, subagentId) in DescribeAttribution(sourceEvent))
-                {
-                    if (entityId is { Length: > 0 } && subagentId is not null)
-                    {
-                        owners[entityId] = subagentId;
-                    }
-                }
-            }
-
-            var resolved = ResolveOwner(update, owners);
-            if (resolved is not null)
+            if (ResolveOwner(update, owners) is { } resolved)
             {
                 update.AdditionalProperties ??= new AdditionalPropertiesDictionary();
                 update.AdditionalProperties[AGUISubagentIdKey] = resolved;
@@ -64,16 +50,35 @@ internal static class EventStreamConverter
     }
 
     /// <summary>
-    /// Owner for an update: by its MessageId when it has one, otherwise by the call id of
-    /// any function call or result it carries. The latter is what covers tool-call and
-    /// tool-result updates, which the builders emit without a MessageId.
+    /// Key matching <c>AGUIChatMessageExtensions</c>, so an update's attribution survives
+    /// into <see cref="ChatMessage.AdditionalProperties"/> and back out through
+    /// <c>AsAGUIMessages</c> on the next turn.
     /// </summary>
-    private static string? ResolveOwner(ChatResponseUpdate update, Dictionary<string, string> owners)
+    internal const string AGUISubagentIdKey = "agui.subagentId";
+
+    /// <summary>
+    /// Owner for an update, tried in the order the update can identify its entity: its
+    /// MessageId; the entity id of the event that produced it (this is what covers
+    /// reasoning updates, which carry no MessageId); then the call id of any function call
+    /// or result it carries (tool-call updates, likewise without a MessageId).
+    /// </summary>
+    private static string? ResolveOwner(ChatResponseUpdate update, Dictionary<string, string?> owners)
     {
         if (update.MessageId is { Length: > 0 } messageId
             && owners.TryGetValue(messageId, out var byMessage))
         {
             return byMessage;
+        }
+
+        if (update.RawRepresentation is BaseEvent evt)
+        {
+            foreach (var entityId in AttributedEntityIds(evt))
+            {
+                if (entityId is { Length: > 0 } && owners.TryGetValue(entityId, out var byEntity))
+                {
+                    return byEntity;
+                }
+            }
         }
 
         foreach (var content in update.Contents)
@@ -94,67 +99,34 @@ internal static class EventStreamConverter
         return null;
     }
 
-    /// <summary>
-    /// Key matching <c>AGUIChatMessageExtensions</c>, so an update's attribution survives
-    /// into <see cref="ChatMessage.AdditionalProperties"/> and back out through
-    /// <c>AsAGUIMessages</c> on the next turn.
-    /// </summary>
-    private const string AGUISubagentIdKey = "agui.subagentId";
-
-    /// <summary>
-    /// The (entity id, owner) pairs an event establishes. Tool calls contribute two: the
-    /// call id, which is how tool-call and tool-result updates are matched, and — for
-    /// TOOL_CALL_RESULT — the tool message's own id.
-    /// </summary>
-    private static IEnumerable<(string? EntityId, string? SubagentId)> DescribeAttribution(BaseEvent evt)
+    /// <summary>The entity ids an event refers to, most specific first.</summary>
+    private static IEnumerable<string?> AttributedEntityIds(BaseEvent evt)
     {
         switch (evt)
         {
-            case TextMessageStartEvent e:
-                yield return (e.MessageId, e.SubagentId);
-                break;
-            case TextMessageContentEvent e:
-                yield return (e.MessageId, e.SubagentId);
-                break;
-            case TextMessageEndEvent e:
-                yield return (e.MessageId, e.SubagentId);
-                break;
-            case ToolCallStartEvent e:
-                yield return (e.ToolCallId, e.SubagentId);
-                if (e.ParentMessageId is not null)
-                {
-                    yield return (e.ParentMessageId, e.SubagentId);
-                }
-
-                break;
-            case ToolCallArgsEvent e:
-                yield return (e.ToolCallId, e.SubagentId);
-                break;
-            case ToolCallEndEvent e:
-                yield return (e.ToolCallId, e.SubagentId);
-                break;
+            case TextMessageStartEvent e: yield return e.MessageId; break;
+            case TextMessageContentEvent e: yield return e.MessageId; break;
+            case TextMessageEndEvent e: yield return e.MessageId; break;
+            case ReasoningMessageStartEvent e: yield return e.MessageId; break;
+            case ReasoningMessageContentEvent e: yield return e.MessageId; break;
+            case ReasoningMessageEndEvent e: yield return e.MessageId; break;
+            case ReasoningEncryptedValueEvent e: yield return e.EntityId; break;
+            case ActivitySnapshotEvent e: yield return e.MessageId; break;
+            case ActivityDeltaEvent e: yield return e.MessageId; break;
             case ToolCallResultEvent e:
-                yield return (e.ToolCallId, e.SubagentId);
-                yield return (e.MessageId, e.SubagentId);
+                yield return e.MessageId;
+                yield return e.ToolCallId;
                 break;
-            case ReasoningMessageStartEvent e:
-                yield return (e.MessageId, e.SubagentId);
-                break;
-            case ReasoningMessageContentEvent e:
-                yield return (e.MessageId, e.SubagentId);
-                break;
-            case ReasoningMessageEndEvent e:
-                yield return (e.MessageId, e.SubagentId);
-                break;
-            case ActivitySnapshotEvent e:
-                yield return (e.MessageId, e.SubagentId);
-                break;
+            case ToolCallStartEvent e: yield return e.ToolCallId; break;
+            case ToolCallArgsEvent e: yield return e.ToolCallId; break;
+            case ToolCallEndEvent e: yield return e.ToolCallId; break;
         }
     }
 
     private static async IAsyncEnumerable<ChatResponseUpdate> AsChatResponseUpdatesCore(
         IAsyncEnumerable<BaseEvent> events,
         JsonSerializerOptions jsonSerializerOptions,
+        Dictionary<string, string?> owners,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         string? conversationId = null;
@@ -186,6 +158,21 @@ internal static class EventStreamConverter
         // the same messageId, so they need the same owner tracking. TypeScript checks
         // these; without it .NET accepted a stream TypeScript rejects.
         var activityOwners = new Dictionary<string, string?>(StringComparer.Ordinal);
+        // Reasoning, tracked like the others so .NET rejects the same continuation
+        // mismatches TypeScript does.
+        var reasoningOwners = new Dictionary<string, string?>(StringComparer.Ordinal);
+
+        // Records the owner for an entity on a CREATION event. Creation events carry
+        // attribution explicitly (D3/D5), so an untagged one means the parent owns it —
+        // which must overwrite any stale entry, or an untagged TOOL_CALL_RESULT would
+        // inherit the tool call's subagent and mint a wrongly-attributed tool message.
+        void RecordOwner(string? entityId, string? subagentId)
+        {
+            if (entityId is { Length: > 0 })
+            {
+                owners[entityId] = subagentId;
+            }
+        }
         var runStarted = false;
         var runFinished = false;
         var runError = false;
@@ -232,6 +219,8 @@ internal static class EventStreamConverter
                     messageOwners.Clear();
                     toolCallOwners.Clear();
                     activityOwners.Clear();
+                    reasoningOwners.Clear();
+                    owners.Clear();
                     runFinished = false;
                     runError = false;
                     runStarted = true;
@@ -266,11 +255,15 @@ internal static class EventStreamConverter
                             $"Cannot send 'SUBAGENT_STARTED': subagent '{startedId}' has already finished in this run. Subagent IDs are per-invocation and cannot be reused.");
                     }
 
+                    // Started, not necessarily still active — requiring the parent to be
+                    // open was stricter than the protocol defines and rejected a valid
+                    // lifecycle where the parent finished before its child started.
                     if (started.ParentSubagentId is not null
-                        && !activeSubagents.ContainsKey(started.ParentSubagentId))
+                        && !activeSubagents.ContainsKey(started.ParentSubagentId)
+                        && !closedSubagents.Contains(started.ParentSubagentId))
                     {
                         throw new System.InvalidOperationException(
-                            $"Cannot send 'SUBAGENT_STARTED': parentSubagentId '{started.ParentSubagentId}' has not been started.");
+                            $"Cannot send 'SUBAGENT_STARTED': parentSubagentId '{started.ParentSubagentId}' has not been started in this run.");
                     }
 
                     activeSubagents[startedId] = started.ParentSubagentId;
@@ -325,6 +318,7 @@ internal static class EventStreamConverter
                 // back to the provider on the next turn.
                 case TextMessageStartEvent textStart:
                     messageOwners[textStart.MessageId] = textStart.SubagentId;
+                    RecordOwner(textStart.MessageId, textStart.SubagentId);
                     break;
 
                 case TextMessageContentEvent textContent:
@@ -340,10 +334,65 @@ internal static class EventStreamConverter
 
                 case ToolCallStartEvent toolStart:
                     toolCallOwners[toolStart.ToolCallId] = toolStart.SubagentId;
+                    RecordOwner(toolStart.ToolCallId, toolStart.SubagentId);
+                    break;
+
+                // A creation event under D5: it both references the call and mints the tool
+                // message, and carries its own attribution — so an untagged one is
+                // parent-owned and must clear the call's recorded owner.
+                case ToolCallResultEvent toolResult:
+                    RecordOwner(toolResult.ToolCallId, toolResult.SubagentId);
+                    RecordOwner(toolResult.MessageId, toolResult.SubagentId);
+                    break;
+
+                case ReasoningMessageStartEvent reasoningStart:
+                    if (!reasoningOwners.ContainsKey(reasoningStart.MessageId))
+                    {
+                        reasoningOwners[reasoningStart.MessageId] = reasoningStart.SubagentId;
+                    }
+
+                    RecordOwner(reasoningStart.MessageId, reasoningStart.SubagentId);
+                    break;
+
+                case ReasoningMessageContentEvent reasoningContent:
+                    RejectOwnerMismatch(
+                        reasoningContent.Type, reasoningContent.SubagentId, reasoningOwners,
+                        reasoningContent.MessageId, "reasoning message");
+                    break;
+
+                case ReasoningMessageEndEvent reasoningEnd:
+                    RejectOwnerMismatch(
+                        reasoningEnd.Type, reasoningEnd.SubagentId, reasoningOwners,
+                        reasoningEnd.MessageId, "reasoning message");
+                    break;
+
+                case ReasoningEndEvent outerReasoningEnd:
+                    RejectOwnerMismatch(
+                        outerReasoningEnd.Type, outerReasoningEnd.SubagentId, reasoningOwners,
+                        outerReasoningEnd.MessageId, "reasoning message");
+                    reasoningOwners.Remove(outerReasoningEnd.MessageId);
+                    break;
+
+                case ReasoningEncryptedValueEvent encrypted:
+                    // `subtype` decides which entity this continues: a "tool-call" value
+                    // belongs to a tool call, not a reasoning message.
+                    RejectOwnerMismatch(
+                        encrypted.Type,
+                        encrypted.SubagentId,
+                        encrypted.Subtype == "tool-call" ? toolCallOwners : reasoningOwners,
+                        encrypted.EntityId,
+                        encrypted.Subtype == "tool-call" ? "tool call" : "reasoning message");
                     break;
 
                 case ActivitySnapshotEvent activitySnapshot:
-                    activityOwners[activitySnapshot.MessageId] = activitySnapshot.SubagentId;
+                    // Only a replacing snapshot re-mints the activity and so re-owns it;
+                    // with Replace=false the reducer leaves the existing message alone.
+                    if (!activityOwners.ContainsKey(activitySnapshot.MessageId) || activitySnapshot.Replace == true)
+                    {
+                        activityOwners[activitySnapshot.MessageId] = activitySnapshot.SubagentId;
+                        RecordOwner(activitySnapshot.MessageId, activitySnapshot.SubagentId);
+                    }
+
                     break;
 
                 case ActivityDeltaEvent activityDelta:
