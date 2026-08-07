@@ -1431,6 +1431,166 @@ public sealed class ProtocolRuleTest
         Assert.Equal("search", call.Name);
     }
 
+    // These mirror verifyEvents in the TypeScript client one-for-one. The criterion is
+    // that both SDKs accept or reject the same stream; anywhere only one of them
+    // rejects, a producer is validated by one client and not the other.
+
+    [Fact]
+    public async Task Subagent_ToolCallArgsWithDifferentOwner_Throws()
+    {
+        // The consequential half of owner-mismatch: a tool call's args and result are
+        // what travel back to the provider next turn, so stitching a subagent's call
+        // onto another owner's is how a wrong call reaches the model.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search", SubagentId = "s1" },
+            new ToolCallArgsEvent { ToolCallId = "tc1", Delta = "{}", SubagentId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_ToolCallEndWithDifferentOwner_Throws()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search", SubagentId = "s1" },
+            new ToolCallEndEvent { ToolCallId = "tc1", SubagentId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_TextMessageContentWithDifferentOwner_Throws()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new TextMessageStartEvent { MessageId = "m1", Role = "assistant", SubagentId = "s1" },
+            new TextMessageContentEvent { MessageId = "m1", Delta = "x", SubagentId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_UntaggedContinuationOfATaggedOpener_IsAccepted()
+    {
+        // Omitting the tag is not a disagreement — attribution is optional per event —
+        // so producers that tag only openers stay valid in both SDKs.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search", SubagentId = "s1" },
+            new ToolCallArgsEvent { ToolCallId = "tc1", Delta = "{}" },
+            new ToolCallEndEvent { ToolCallId = "tc1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var result = await ProcessEventsAsync(events);
+        Assert.Single(result.Select(u => u.RawRepresentation).OfType<RunFinishedEvent>());
+    }
+
+    [Fact]
+    public async Task Subagent_RestartingAFinishedSubagent_Throws()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new SubagentStartedEvent { SubagentId = "s1", Name = "researcher" },
+            new SubagentFinishedEvent { SubagentId = "s1" },
+            new SubagentStartedEvent { SubagentId = "s1", Name = "researcher" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("already finished in this run", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_OutputAfterItsTerminal_Throws()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new SubagentStartedEvent { SubagentId = "s1", Name = "researcher" },
+            new SubagentFinishedEvent { SubagentId = "s1" },
+            new TextMessageStartEvent { MessageId = "m1", Role = "assistant", SubagentId = "s1" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("has already finished", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_MissingRequiredIdentifier_Throws()
+    {
+        // TypeScript rejects this via zod. System.Text.Json has no equivalent, so a
+        // missing property arrives as string.Empty — which would otherwise register an
+        // active subagent named "" and corrupt the validation state.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new SubagentStartedEvent { Name = "worker" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("'subagentId' is required", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_MissingRequiredName_Throws()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new SubagentStartedEvent { SubagentId = "s1" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("'name' is required", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_MissingErrorMessage_Throws()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new SubagentStartedEvent { SubagentId = "s1", Name = "researcher" },
+            new SubagentErrorEvent { SubagentId = "s1" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("'message' is required", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_ClosedSetIsPerRun()
+    {
+        // Run-scoped, like activeSteps: a second run may reuse an id the first closed.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new SubagentStartedEvent { SubagentId = "s1", Name = "researcher" },
+            new SubagentFinishedEvent { SubagentId = "s1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" },
+            new RunStartedEvent { ThreadId = "t1", RunId = "r2" },
+            new SubagentStartedEvent { SubagentId = "s1", Name = "researcher" },
+            new SubagentFinishedEvent { SubagentId = "s1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r2" }
+        };
+
+        var result = await ProcessEventsAsync(events);
+        Assert.Equal(2, result.Select(u => u.RawRepresentation).OfType<SubagentStartedEvent>().Count());
+    }
+
     // ────────────────────────────────────────────────
     // Helpers — process events through EventStreamConverter.AsChatResponseUpdates
     // ────────────────────────────────────────────────

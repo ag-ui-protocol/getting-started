@@ -231,6 +231,51 @@ public sealed class SubagentAttributionTest
         Assert.False(doc.RootElement.TryGetProperty("subagentId", out _));
     }
 
+    [Fact]
+    public void SubagentId_SurvivesTheChatMessageRoundTrip()
+    {
+        // AGUIChatClient sends request messages through AsAGUIMessages, so anything
+        // this round trip drops is silently reattributed to the parent on the next
+        // turn. ChatMessage has no concept of delegated work, hence the
+        // AdditionalProperties carriage — the same approach the binary content parts
+        // already use for their AG-UI-only "filename".
+        var original = new List<AGUIMessage>
+        {
+            new AGUIAssistantMessage { Id = "m1", Content = "from a subagent", SubagentId = "s1" },
+            new AGUIToolMessage { Id = "m2", Content = "done", ToolCallId = "tc1", SubagentId = "s2" },
+            new AGUIUserMessage { Id = "m3", Content = new AGUIUserContent("hi"), SubagentId = "s3" },
+            new AGUIAssistantMessage { Id = "m4", Content = "from the parent" },
+        };
+
+        var back = original.AsChatMessages().AsAGUIMessages().ToList();
+
+        var byId = back.ToDictionary(m => m.Id!, m => m.SubagentId);
+        Assert.Equal("s1", byId["m1"]);
+        Assert.Equal("s3", byId["m3"]);
+        Assert.Null(byId["m4"]);
+        // A tool message is deliberately rekeyed to its call id on the way back (see
+        // the ChatRole.Tool branch, which mirrors Microsoft.Extensions.AI by
+        // materializing one message per FunctionResultContent), so it returns as "tc1"
+        // rather than "m2". Its attribution still has to survive.
+        Assert.Equal("s2", byId["tc1"]);
+    }
+
+    [Fact]
+    public void UnattributedMessages_DoNotGainAnAdditionalProperty()
+    {
+        // A parent-owned message must not acquire the key at all, or every consumer
+        // inspecting AdditionalProperties sees delegation where there is none.
+        var chatMessages = new List<AGUIMessage>
+        {
+            new AGUIAssistantMessage { Id = "m1", Content = "from the parent" },
+        }.AsChatMessages().ToList();
+
+        var message = Assert.Single(chatMessages);
+        Assert.True(
+            message.AdditionalProperties is null
+                || !message.AdditionalProperties.ContainsKey("agui.subagentId"));
+    }
+
     private static void AssertRoundTrips<T>(T evt, System.Func<T, string?> read)
         where T : BaseEvent
     {

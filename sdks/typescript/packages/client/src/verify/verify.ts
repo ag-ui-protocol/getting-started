@@ -12,6 +12,9 @@ export const verifyEvents =
     // can be checked for attribution consistency.
     let activeMessages = new Map<string, { subagentId?: string }>(); // message ID -> owner
     let activeToolCalls = new Map<string, { subagentId?: string }>(); // tool call ID -> owner
+    // Activity messages are keyed by their own messageId and continued by
+    // ACTIVITY_DELTA, so they need the same owner tracking as text messages.
+    let activeActivities = new Map<string, { subagentId?: string }>(); // activity ID -> owner
     let runFinished = false;
     let runError = false; // New flag to track if RUN_ERROR has been sent
     // New flags to track first/last event requirements
@@ -19,6 +22,12 @@ export const verifyEvents =
     // Track active steps
     let activeSteps = new Map<string, boolean>(); // Map of step name -> active status
     let activeSubagents = new Map<string, boolean>(); // Map of subagent ID -> active status
+    // SUBAGENT_FINISHED / SUBAGENT_ERROR are terminal for the id they name, so the
+    // id has to stay known after it closes. Tracking only the ACTIVE set made
+    // `STARTED(s1), FINISHED(s1), STARTED(s1)` legal — two terminals for one
+    // invocation — and let output tagged `s1` keep arriving after its terminal.
+    // Cleared per run, like every other map here.
+    let closedSubagents = new Set<string>();
     let activeThinkingStep = false;
     let activeThinkingStepMessage = false;
     let runStarted = false; // Track if a run has started
@@ -27,8 +36,10 @@ export const verifyEvents =
     const resetRunState = () => {
       activeMessages.clear();
       activeToolCalls.clear();
+      activeActivities.clear();
       activeSteps.clear();
       activeSubagents.clear();
+      closedSubagents.clear();
       activeThinkingStep = false;
       activeThinkingStepMessage = false;
       runFinished = false;
@@ -57,6 +68,23 @@ export const verifyEvents =
       ) {
         return new AGUIError(
           `Cannot send '${evType}': subagentId '${evSubagentId}' does not match the ${entityKind} '${entityId}' opener's subagent '${owner.subagentId}'.`,
+        );
+      }
+      return subagentClosedError(evType, evSubagentId);
+    };
+
+    // A subagent that has already ended owns nothing further. This checks only ids
+    // that were explicitly closed in THIS run, so attribution-only producers —
+    // which never send SUBAGENT_* at all and therefore never close anything — stay
+    // valid, per the note above.
+    const subagentClosedError = (
+      evType: EventType,
+      evSubagentId: string | undefined,
+    ): AGUIError | undefined => {
+      if (evSubagentId === undefined) return undefined;
+      if (closedSubagents.has(evSubagentId)) {
+        return new AGUIError(
+          `Cannot send '${evType}': subagent '${evSubagentId}' has already finished. No further events may be attributed to it.`,
         );
       }
       return undefined;
@@ -276,6 +304,54 @@ export const verifyEvents =
             return of(event);
           }
 
+          // Only the parent agent owns state. `defaultApplyEvents` replaces or
+          // patches the shared state without consulting attribution, so an
+          // attributed snapshot or delta would land as if the parent had sent it —
+          // a subagent's partial view silently overwriting the run's state. The
+          // schemas carry `subagentId` on these events for parity with the rest of
+          // the event set, so the only thing standing between an attributed state
+          // event and the parent's state is this check. The .NET client rejects the
+          // same stream; both SDKs must agree on what is acceptable.
+          case EventType.STATE_SNAPSHOT:
+          case EventType.STATE_DELTA: {
+            const subagentId = (event as any).subagentId;
+            if (subagentId !== undefined) {
+              return throwError(
+                () =>
+                  new AGUIError(
+                    `Cannot send '${eventType}' attributed to subagent '${subagentId}': only the parent agent owns state.`,
+                  ),
+              );
+            }
+            return of(event);
+          }
+
+          // Activity messages are opened by ACTIVITY_SNAPSHOT and continued by
+          // ACTIVITY_DELTA against the same messageId, so an owner change between
+          // the two silently patches an activity attributed to someone else —
+          // the same defect the text-message and tool-call checks prevent.
+          case EventType.ACTIVITY_SNAPSHOT: {
+            const messageId = (event as any).messageId;
+            const subagentId = (event as any).subagentId;
+            const closedErr = subagentClosedError(eventType, subagentId);
+            if (closedErr) return throwError(() => closedErr);
+            activeActivities.set(messageId, { subagentId });
+            return of(event);
+          }
+
+          case EventType.ACTIVITY_DELTA: {
+            const messageId = (event as any).messageId;
+            const subErr = subagentTagError(
+              eventType,
+              (event as any).subagentId,
+              activeActivities.get(messageId),
+              "activity",
+              messageId,
+            );
+            if (subErr) return throwError(() => subErr);
+            return of(event);
+          }
+
           // Subagent flow
           case EventType.SUBAGENT_STARTED: {
             const subagentId = (event as any).subagentId;
@@ -285,6 +361,17 @@ export const verifyEvents =
                 () =>
                   new AGUIError(
                     `Cannot send 'SUBAGENT_STARTED': subagent '${subagentId}' is already active. Finish it with 'SUBAGENT_FINISHED' first.`,
+                  ),
+              );
+            }
+            // Reopening a closed id would give one invocation two starts and two
+            // terminals. Ids are per-invocation, so a genuinely new delegation
+            // brings a new id; reuse within a run is a producer bug.
+            if (closedSubagents.has(subagentId)) {
+              return throwError(
+                () =>
+                  new AGUIError(
+                    `Cannot send 'SUBAGENT_STARTED': subagent '${subagentId}' has already finished in this run. Subagent IDs are per-invocation and cannot be reused.`,
                   ),
               );
             }
@@ -312,6 +399,7 @@ export const verifyEvents =
               );
             }
             activeSubagents.delete(subagentId);
+            closedSubagents.add(subagentId);
             return of(event);
           }
 

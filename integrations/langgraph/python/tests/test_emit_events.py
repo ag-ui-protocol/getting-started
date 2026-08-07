@@ -145,8 +145,33 @@ class TestHandleSingleEventCustomEvents(unittest.IsolatedAsyncioTestCase):
         # The CUSTOM passthrough still goes out, so the subagent's signal is not
         # swallowed — only the state application is withheld.
         assert EventType.CUSTOM in event_types
-        # Still recorded, so the parent's next snapshot carries it.
-        assert agent.active_run["manually_emitted_state"] == {"counter": 42}
+
+    @pytest.mark.asyncio
+    async def test_manually_emit_state_inside_subagent_does_not_leak_into_parent_state(self):
+        """Suppressing the snapshot is not enough — the value must not be recorded.
+
+        Withholding the immediate STATE_SNAPSHOT while still storing the payload in
+        the run-global `manually_emitted_state` only defers the violation: the
+        stream loop reads that key back as `updated_state` on the next parent node
+        exit and emits it as an UNATTRIBUTED snapshot, so the consumer applies the
+        subagent's partial state as the parent's. The suppression has to drop the
+        value, not just delay it.
+        """
+        agent = self._make_agent()
+        agent.active_run["current_subagent_id"] = "tools:s1"
+        agent.active_run["active_subagents"] = {}
+        event = {
+            "event": LangGraphEventTypes.OnCustomEvent.value,
+            "name": CustomEventNames.ManuallyEmitState.value,
+            "data": {"counter": 42},
+        }
+        async for _ in agent._handle_single_event(event, {}):
+            pass
+
+        assert agent.active_run["manually_emitted_state"] is None, (
+            "a subagent's manually-emitted state must not be recorded; the stream "
+            "loop would re-emit it as the parent's state on the next node exit"
+        )
 
     @pytest.mark.asyncio
     async def test_exit_event_produces_custom(self):

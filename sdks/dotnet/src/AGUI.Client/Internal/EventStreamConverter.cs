@@ -26,6 +26,16 @@ internal static class EventStreamConverter
         // by the order events arrive in, so interleaved parallel subagents cannot swap
         // parents.
         var activeSubagents = new Dictionary<string, string?>();
+        // Subagent terminals are terminal for the id they name, so a closed id has to
+        // stay known: tracking only the active set would make
+        // STARTED(s1)/FINISHED(s1)/STARTED(s1) legal and let output tagged s1 keep
+        // arriving after its terminal. Cleared per run, like activeSteps.
+        var closedSubagents = new HashSet<string>(StringComparer.Ordinal);
+        // Owner of each open message / tool call, so a continuation tagged with a
+        // different subagent is rejected here exactly as verifyEvents rejects it in
+        // TypeScript. Without this the two SDKs disagreed about the same stream.
+        var messageOwners = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var toolCallOwners = new Dictionary<string, string?>(StringComparer.Ordinal);
         var runStarted = false;
         var runFinished = false;
         var runError = false;
@@ -68,6 +78,9 @@ internal static class EventStreamConverter
                     toolCallBuilder.Reset();
                     activeSteps.Clear();
                     activeSubagents.Clear();
+                    closedSubagents.Clear();
+                    messageOwners.Clear();
+                    toolCallOwners.Clear();
                     runFinished = false;
                     runError = false;
                     runStarted = true;
@@ -80,10 +93,25 @@ internal static class EventStreamConverter
             switch (evt)
             {
                 case SubagentStartedEvent started:
+                    // Required by the protocol schema, which TypeScript enforces with
+                    // zod. System.Text.Json has no such notion and leaves a missing
+                    // string as the property initializer (string.Empty), so without
+                    // this an id-less event would register an active subagent named ""
+                    // and corrupt the validation state below — while the TypeScript
+                    // client rejected the very same payload.
+                    RequireNonEmpty(started.SubagentId, "subagentId", AGUIEventTypes.SubagentStarted);
+                    RequireNonEmpty(started.Name, "name", AGUIEventTypes.SubagentStarted);
+
                     if (activeSubagents.ContainsKey(started.SubagentId))
                     {
                         throw new System.InvalidOperationException(
                             $"Cannot send 'SUBAGENT_STARTED': subagent '{started.SubagentId}' is already active. Finish it with 'SUBAGENT_FINISHED' first.");
+                    }
+
+                    if (closedSubagents.Contains(started.SubagentId))
+                    {
+                        throw new System.InvalidOperationException(
+                            $"Cannot send 'SUBAGENT_STARTED': subagent '{started.SubagentId}' has already finished in this run. Subagent IDs are per-invocation and cannot be reused.");
                     }
 
                     if (started.ParentSubagentId is not null
@@ -97,21 +125,26 @@ internal static class EventStreamConverter
                     break;
 
                 case SubagentFinishedEvent finished:
+                    RequireNonEmpty(finished.SubagentId, "subagentId", AGUIEventTypes.SubagentFinished);
                     if (!activeSubagents.Remove(finished.SubagentId))
                     {
                         throw new System.InvalidOperationException(
                             $"Cannot send 'SUBAGENT_FINISHED': no active subagent found with ID '{finished.SubagentId}'. A 'SUBAGENT_STARTED' event must be sent first.");
                     }
 
+                    closedSubagents.Add(finished.SubagentId);
                     break;
 
                 case SubagentErrorEvent subagentErrored:
+                    RequireNonEmpty(subagentErrored.SubagentId, "subagentId", AGUIEventTypes.SubagentError);
+                    RequireNonEmpty(subagentErrored.Message, "message", AGUIEventTypes.SubagentError);
                     if (!activeSubagents.Remove(subagentErrored.SubagentId))
                     {
                         throw new System.InvalidOperationException(
                             $"Cannot send 'SUBAGENT_ERROR': no active subagent found with ID '{subagentErrored.SubagentId}'. A 'SUBAGENT_STARTED' event must be sent first.");
                     }
 
+                    closedSubagents.Add(subagentErrored.SubagentId);
                     break;
 
                 // Only the parent owns state. A consumer applies a snapshot or delta
@@ -130,6 +163,43 @@ internal static class EventStreamConverter
                 case RunFinishedEvent when activeSubagents.Count > 0:
                     throw new System.InvalidOperationException(
                         $"Cannot send 'RUN_FINISHED' while subagents are still active: {string.Join(", ", activeSubagents.Keys)}");
+
+                // Attribution consistency for the two ID-keyed entities, mirroring
+                // verifyEvents. An opener records its owner; a continuation or close
+                // tagged with a different subagent is a contradiction, and for tool
+                // calls it is the consequential one — args and results are what travel
+                // back to the provider on the next turn.
+                case TextMessageStartEvent textStart:
+                    RejectClosedSubagent(textStart.Type, textStart.SubagentId, closedSubagents);
+                    messageOwners[textStart.MessageId] = textStart.SubagentId;
+                    break;
+
+                case TextMessageContentEvent textContent:
+                    RejectOwnerMismatch(
+                        textContent.Type, textContent.SubagentId, messageOwners, textContent.MessageId, "message");
+                    break;
+
+                case TextMessageEndEvent textEnd:
+                    RejectOwnerMismatch(
+                        textEnd.Type, textEnd.SubagentId, messageOwners, textEnd.MessageId, "message");
+                    messageOwners.Remove(textEnd.MessageId);
+                    break;
+
+                case ToolCallStartEvent toolStart:
+                    RejectClosedSubagent(toolStart.Type, toolStart.SubagentId, closedSubagents);
+                    toolCallOwners[toolStart.ToolCallId] = toolStart.SubagentId;
+                    break;
+
+                case ToolCallArgsEvent toolArgs:
+                    RejectOwnerMismatch(
+                        toolArgs.Type, toolArgs.SubagentId, toolCallOwners, toolArgs.ToolCallId, "tool call");
+                    break;
+
+                case ToolCallEndEvent toolEnd:
+                    RejectOwnerMismatch(
+                        toolEnd.Type, toolEnd.SubagentId, toolCallOwners, toolEnd.ToolCallId, "tool call");
+                    toolCallOwners.Remove(toolEnd.ToolCallId);
+                    break;
 
                 default:
                     break;
@@ -433,6 +503,63 @@ internal static class EventStreamConverter
                     break;
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Throws when a protocol-required string arrived empty. The TypeScript schemas
+    /// make these mandatory; System.Text.Json has no equivalent, so a missing property
+    /// silently becomes <see cref="string.Empty"/> and both SDKs would otherwise
+    /// disagree about whether the same payload is valid.
+    /// </summary>
+    private static void RequireNonEmpty(string value, string propertyName, string eventType)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            throw new System.InvalidOperationException(
+                $"Cannot send '{eventType}': '{propertyName}' is required and must not be empty.");
+        }
+    }
+
+    /// <summary>
+    /// Throws when an event is attributed to a subagent that has already ended. Only
+    /// ids explicitly closed in this run are checked, so attribution-only producers —
+    /// which tag events but never send SUBAGENT_* and therefore close nothing — stay
+    /// valid.
+    /// </summary>
+    private static void RejectClosedSubagent(
+        string eventType,
+        string? subagentId,
+        HashSet<string> closedSubagents)
+    {
+        if (subagentId is not null && closedSubagents.Contains(subagentId))
+        {
+            throw new System.InvalidOperationException(
+                $"Cannot send '{eventType}': subagent '{subagentId}' has already finished. No further events may be attributed to it.");
+        }
+    }
+
+    /// <summary>
+    /// Throws when a continuation or close event names a different subagent than the
+    /// one that opened the entity. An absent tag is not a disagreement: attribution is
+    /// optional per event, so producers that tag only openers remain valid.
+    /// </summary>
+    private static void RejectOwnerMismatch(
+        string eventType,
+        string? subagentId,
+        Dictionary<string, string?> owners,
+        string entityId,
+        string entityKind)
+    {
+        if (subagentId is null)
+        {
+            return;
+        }
+
+        if (owners.TryGetValue(entityId, out var owner) && owner is not null && owner != subagentId)
+        {
+            throw new System.InvalidOperationException(
+                $"Cannot send '{eventType}': subagentId '{subagentId}' does not match the {entityKind} '{entityId}' opener's subagent '{owner}'.");
         }
     }
 }

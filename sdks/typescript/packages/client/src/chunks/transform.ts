@@ -51,6 +51,9 @@ export const transformChunks =
       const event = {
         type: EventType.TEXT_MESSAGE_END,
         messageId: textMessageFields.messageId,
+        ...(textMessageFields.subagentId !== undefined && {
+          subagentId: textMessageFields.subagentId,
+        }),
       } as TextMessageEndEvent;
       mode = undefined;
       textMessageFields = undefined;
@@ -69,6 +72,9 @@ export const transformChunks =
       const event = {
         type: EventType.TOOL_CALL_END,
         toolCallId: toolCallFields.toolCallId,
+        ...(toolCallFields.subagentId !== undefined && {
+          subagentId: toolCallFields.subagentId,
+        }),
       } as ToolCallEndEvent;
       mode = undefined;
       toolCallFields = undefined;
@@ -87,6 +93,9 @@ export const transformChunks =
       const event = {
         type: EventType.REASONING_MESSAGE_END,
         messageId: reasoningMessageFields.messageId,
+        ...(reasoningMessageFields.subagentId !== undefined && {
+          subagentId: reasoningMessageFields.subagentId,
+        }),
       } as ReasoningMessageEndEvent;
       mode = undefined;
       reasoningMessageFields = undefined;
@@ -146,9 +155,16 @@ export const transformChunks =
           case EventType.ACTIVITY_DELTA:
           case EventType.REASONING_ENCRYPTED_VALUE:
           case EventType.SUBAGENT_STARTED:
+            return [event];
+          // A subagent's terminal event closes any stream still being assembled
+          // from chunks. Passing these through untouched left the pending message
+          // open, so its synthesized END was emitted later — by the run terminal or
+          // the next non-chunk event — i.e. AFTER the subagent had already
+          // finished. A perfectly valid chunk producer was thereby transformed
+          // into a stream with post-terminal subagent output.
           case EventType.SUBAGENT_FINISHED:
           case EventType.SUBAGENT_ERROR:
-            return [event];
+            return [...closePendingEvent(), event];
           case EventType.TEXT_MESSAGE_CHUNK:
             const messageChunkEvent = event as TextMessageChunkEvent;
             const textMessageResult = [];
@@ -198,6 +214,16 @@ export const transformChunks =
                 type: EventType.TEXT_MESSAGE_CONTENT,
                 messageId: textMessageFields!.messageId,
                 delta: messageChunkEvent.delta,
+                // Carry the INCOMING chunk's tag, not the opener's. The chunk
+                // path keys a stream by id alone, so a chunk that reuses the id
+                // under a different owner would otherwise be absorbed silently
+                // and the whole message attributed to the opener. Propagating it
+                // lets verifyEvents — which runs after this transform — reject the
+                // ownership change the same way it does on the non-chunk path.
+                ...((messageChunkEvent.subagentId ?? textMessageFields!.subagentId) !==
+                  undefined && {
+                  subagentId: messageChunkEvent.subagentId ?? textMessageFields!.subagentId,
+                }),
               } as TextMessageContentEvent;
 
               textMessageResult.push(textMessageContentEvent);
@@ -260,6 +286,16 @@ export const transformChunks =
                 type: EventType.TOOL_CALL_ARGS,
                 toolCallId: toolCallFields!.toolCallId,
                 delta: toolCallChunkEvent.delta,
+                // Carry the INCOMING chunk's tag, not the opener's. The chunk
+                // path keys a stream by id alone, so a chunk that reuses the id
+                // under a different owner would otherwise be absorbed silently
+                // and the whole message attributed to the opener. Propagating it
+                // lets verifyEvents — which runs after this transform — reject the
+                // ownership change the same way it does on the non-chunk path.
+                ...((toolCallChunkEvent.subagentId ?? toolCallFields!.subagentId) !==
+                  undefined && {
+                  subagentId: toolCallChunkEvent.subagentId ?? toolCallFields!.subagentId,
+                }),
               } as ToolCallArgsEvent;
 
               toolMessageResult.push(toolCallArgsEvent);
@@ -316,6 +352,17 @@ export const transformChunks =
                 type: EventType.REASONING_MESSAGE_CONTENT,
                 messageId: reasoningMessageFields!.messageId,
                 delta: reasoningChunkEvent.delta,
+                // Carry the INCOMING chunk's tag, not the opener's. The chunk
+                // path keys a stream by id alone, so a chunk that reuses the id
+                // under a different owner would otherwise be absorbed silently
+                // and the whole message attributed to the opener. Propagating it
+                // lets verifyEvents — which runs after this transform — reject the
+                // ownership change the same way it does on the non-chunk path.
+                ...((reasoningChunkEvent.subagentId ?? reasoningMessageFields!.subagentId) !==
+                  undefined && {
+                  subagentId:
+                    reasoningChunkEvent.subagentId ?? reasoningMessageFields!.subagentId,
+                }),
               } as ReasoningMessageContentEvent;
 
               reasoningMessageResult.push(reasoningMessageContentEvent);

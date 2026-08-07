@@ -266,7 +266,7 @@ describe("verifyEvents subagent lifecycle", () => {
   // its args and result are what travel back to the provider, so an owner
   // disagreement mid-stream is how a subagent's call could be stitched onto the
   // parent's.
-  const expectRejected = async (inputEvents: BaseEvent[]) => {
+  const expectRejectedWith = async (inputEvents: BaseEvent[], message: RegExp) => {
     let caught: unknown;
     try {
       await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
@@ -274,8 +274,11 @@ describe("verifyEvents subagent lifecycle", () => {
       caught = err;
     }
     expect(caught).toBeInstanceOf(AGUIError);
-    expect((caught as Error).message).toMatch(/does not match/i);
+    expect((caught as Error).message).toMatch(message);
   };
+
+  const expectRejected = (inputEvents: BaseEvent[]) =>
+    expectRejectedWith(inputEvents, /does not match/i);
 
   it("should reject TOOL_CALL_ARGS whose subagentId differs from its opener", async () => {
     await expectRejected([
@@ -310,6 +313,156 @@ describe("verifyEvents subagent lifecycle", () => {
         subagentId: "s2",
       } as ToolCallEndEvent,
     ]);
+  });
+
+  it("should reject STATE_SNAPSHOT attributed to a subagent", async () => {
+    // Only the parent owns state. defaultApplyEvents replaces the shared state
+    // without consulting attribution, so without this the subagent's partial view
+    // lands as the parent's. The .NET client rejects the same stream.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        {
+          type: EventType.SUBAGENT_STARTED,
+          subagentId: "s1",
+          name: "researcher",
+        } as SubagentStartedEvent,
+        { type: EventType.STATE_SNAPSHOT, snapshot: { a: 1 }, subagentId: "s1" } as BaseEvent,
+      ],
+      /only the parent agent owns state/i,
+    );
+  });
+
+  it("should reject STATE_DELTA attributed to a subagent", async () => {
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        {
+          type: EventType.SUBAGENT_STARTED,
+          subagentId: "s1",
+          name: "researcher",
+        } as SubagentStartedEvent,
+        { type: EventType.STATE_DELTA, delta: [], subagentId: "s1" } as BaseEvent,
+      ],
+      /only the parent agent owns state/i,
+    );
+  });
+
+  it("should allow unattributed state while a subagent is running", async () => {
+    // Control: the parent's own state still flows normally mid-delegation.
+    const inputEvents: BaseEvent[] = [
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      { type: EventType.SUBAGENT_STARTED, subagentId: "s1", name: "r" } as SubagentStartedEvent,
+      { type: EventType.STATE_SNAPSHOT, snapshot: { a: 1 } } as BaseEvent,
+      { type: EventType.STATE_DELTA, delta: [] } as BaseEvent,
+      { type: EventType.SUBAGENT_FINISHED, subagentId: "s1" } as SubagentFinishedEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
+    ];
+
+    const events = await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+    expect(events).toHaveLength(inputEvents.length);
+  });
+
+  it("should reject restarting a subagent that already finished in this run", async () => {
+    // Ids are per-invocation. Reusing one gives a single invocation two starts and
+    // two terminals, which is what tracking only the ACTIVE set allowed.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentId: "s1", name: "r" } as SubagentStartedEvent,
+        { type: EventType.SUBAGENT_FINISHED, subagentId: "s1" } as SubagentFinishedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentId: "s1", name: "r" } as SubagentStartedEvent,
+      ],
+      /has already finished in this run/i,
+    );
+  });
+
+  it("should reject output attributed to a subagent after its terminal event", async () => {
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentId: "s1", name: "r" } as SubagentStartedEvent,
+        { type: EventType.SUBAGENT_FINISHED, subagentId: "s1" } as SubagentFinishedEvent,
+        {
+          type: EventType.TEXT_MESSAGE_START,
+          messageId: "m1",
+          role: "assistant",
+          subagentId: "s1",
+        } as TextMessageStartEvent,
+      ],
+      /has already finished/i,
+    );
+  });
+
+  it("should reject a second terminal for the same subagent", async () => {
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentId: "s1", name: "r" } as SubagentStartedEvent,
+        { type: EventType.SUBAGENT_FINISHED, subagentId: "s1" } as SubagentFinishedEvent,
+        { type: EventType.SUBAGENT_ERROR, subagentId: "s1", message: "boom" } as BaseEvent,
+      ],
+      /no active subagent/i,
+    );
+  });
+
+  it("should let a new run reuse a subagent id closed by the previous run", async () => {
+    // The closed set is run-scoped, like every other map in the verifier.
+    const inputEvents: BaseEvent[] = [
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r1" } as RunStartedEvent,
+      { type: EventType.SUBAGENT_STARTED, subagentId: "s1", name: "r" } as SubagentStartedEvent,
+      { type: EventType.SUBAGENT_FINISHED, subagentId: "s1" } as SubagentFinishedEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r1" } as RunFinishedEvent,
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r2" } as RunStartedEvent,
+      { type: EventType.SUBAGENT_STARTED, subagentId: "s1", name: "r" } as SubagentStartedEvent,
+      { type: EventType.SUBAGENT_FINISHED, subagentId: "s1" } as SubagentFinishedEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r2" } as RunFinishedEvent,
+    ];
+
+    const events = await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+    expect(events).toHaveLength(inputEvents.length);
+  });
+
+  it("should reject an ACTIVITY_DELTA whose subagentId differs from its snapshot", async () => {
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        {
+          type: EventType.ACTIVITY_SNAPSHOT,
+          messageId: "a1",
+          activityType: "search",
+          content: {},
+          replace: false,
+          subagentId: "s1",
+        } as BaseEvent,
+        {
+          type: EventType.ACTIVITY_DELTA,
+          messageId: "a1",
+          delta: [],
+          subagentId: "s2",
+        } as BaseEvent,
+      ],
+      /does not match/i,
+    );
+  });
+
+  it("should allow an attribution-only stream with no lifecycle events", async () => {
+    // The closed-set rule must not break Phase-1 producers, which tag events but
+    // never send SUBAGENT_*. They close nothing, so nothing is ever in the set.
+    const inputEvents: BaseEvent[] = [
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      {
+        type: EventType.TEXT_MESSAGE_START,
+        messageId: "m1",
+        role: "assistant",
+        subagentId: "never-declared",
+      } as TextMessageStartEvent,
+      { type: EventType.TEXT_MESSAGE_END, messageId: "m1" } as TextMessageEndEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
+    ];
+
+    const events = await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+    expect(events).toHaveLength(inputEvents.length);
   });
 
   it("should allow an untagged continuation of a tagged tool call", async () => {

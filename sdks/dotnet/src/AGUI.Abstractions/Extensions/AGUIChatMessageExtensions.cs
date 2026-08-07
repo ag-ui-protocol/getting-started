@@ -14,6 +14,28 @@ public static class AGUIChatMessageExtensions
     private static readonly ChatRole s_developerChatRole = new("developer");
 
     /// <summary>
+    /// <see cref="ChatMessage.AdditionalProperties"/> key carrying <see
+    /// cref="AGUIMessage.SubagentId"/> across the round trip.
+    /// <see cref="ChatMessage"/> has no concept of delegated work, and AGUIChatClient
+    /// sends request messages through <see cref="AsAGUIMessages"/>, so without this a
+    /// subagent-attributed message handed back to the client silently returns to the
+    /// agent as the parent's on the next turn. Same approach the binary content parts
+    /// already use for their AG-UI-only "filename".
+    /// </summary>
+    private const string SubagentIdKey = "agui.subagentId";
+
+    private static ChatMessage WithSubagentId(ChatMessage message, string? subagentId)
+    {
+        if (subagentId is not null)
+        {
+            message.AdditionalProperties ??= new AdditionalPropertiesDictionary();
+            message.AdditionalProperties[SubagentIdKey] = subagentId;
+        }
+
+        return message;
+    }
+
+    /// <summary>
     /// Converts a sequence of <see cref="AGUIMessage"/> instances to <see cref="ChatMessage"/> instances.
     /// </summary>
     /// <param name="aguiMessages">The AG-UI messages to convert.</param>
@@ -106,7 +128,9 @@ public static class AGUIChatMessageExtensions
                     }
                 }
 
-                yield return new ChatMessage(role, contents) { MessageId = message.Id, AuthorName = authorName };
+                yield return WithSubagentId(
+                    new ChatMessage(role, contents) { MessageId = message.Id, AuthorName = authorName },
+                    message.SubagentId);
             }
             else if (message is AGUIToolMessage toolMessage)
             {
@@ -115,10 +139,9 @@ public static class AGUIChatMessageExtensions
                     new FunctionResultContent(toolMessage.ToolCallId ?? string.Empty, toolMessage.Content)
                 };
 
-                yield return new ChatMessage(role, contents)
-                {
-                    MessageId = message.Id
-                };
+                yield return WithSubagentId(
+                    new ChatMessage(role, contents) { MessageId = message.Id },
+                    message.SubagentId);
             }
             else
             {
@@ -131,10 +154,9 @@ public static class AGUIChatMessageExtensions
                     _ => string.Empty,
                 };
 
-                yield return new ChatMessage(role, text)
-                {
-                    MessageId = message.Id
-                };
+                yield return WithSubagentId(
+                    new ChatMessage(role, text) { MessageId = message.Id },
+                    message.SubagentId);
             }
         }
 
@@ -244,7 +266,15 @@ public static class AGUIChatMessageExtensions
                     {
                         Id = functionResult.CallId,
                         ToolCallId = functionResult.CallId,
-                        Content = SerializeFunctionResult(functionResult, message.Text)
+                        Content = SerializeFunctionResult(functionResult, message.Text),
+                        // Restored here as well as at the end of the loop: this branch
+                        // yields directly (one message per result) and so never reaches
+                        // the shared Id/SubagentId assignment below.
+                        SubagentId =
+                            message.AdditionalProperties?.TryGetValue(SubagentIdKey, out string? toolSubagentId) == true
+                            && !string.IsNullOrEmpty(toolSubagentId)
+                                ? toolSubagentId
+                                : null,
                     };
                 }
 
@@ -259,6 +289,12 @@ public static class AGUIChatMessageExtensions
             }
 
             aguiMessage.Id = message.MessageId;
+            if (message.AdditionalProperties?.TryGetValue(SubagentIdKey, out string? subagentId) == true
+                && !string.IsNullOrEmpty(subagentId))
+            {
+                aguiMessage.SubagentId = subagentId;
+            }
+
             yield return aguiMessage;
         }
     }

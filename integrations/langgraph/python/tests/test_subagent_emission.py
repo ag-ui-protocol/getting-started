@@ -522,20 +522,186 @@ class TestInterruptWithOpenSubagent(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(types[-1], EventType.RUN_FINISHED)
 
-    async def test_end_of_run_events_are_not_attributed_to_the_open_subagent(self):
+    async def test_end_of_run_snapshots_are_not_attributed_to_the_open_subagent(self):
         # current_subagent_id is cleared before the supervisor-level end-of-run
-        # events, so the final snapshots and steps are the parent's.
+        # events, so the final snapshots belong to the parent.
         _, collected = await self._drive(with_interrupt=False)
         for ev in collected:
             if getattr(ev, "type", None) in (
                 EventType.STATE_SNAPSHOT,
                 EventType.MESSAGES_SNAPSHOT,
-                EventType.STEP_FINISHED,
             ):
                 self.assertIsNone(
                     getattr(ev, "subagent_id", None),
                     f"end-of-run {ev.type} must not be attributed to a subagent",
                 )
+
+    async def test_end_of_run_step_close_pairs_with_whoever_opened_it(self):
+        # STEP_* is different from the snapshots: a step is a matched pair, so its
+        # close belongs to whichever lane opened it even when that lane is a
+        # subagent and the run is ending. Reattributing the close to the parent
+        # just because current_subagent_id was cleared would emit
+        # `STEP_STARTED under s1` / `STEP_FINISHED under None` for one step.
+        #
+        # Safe with respect to the terminal rule because the step close happens
+        # before drain_subagents emits SUBAGENT_FINISHED, so the owner is still
+        # open at that point.
+        _, collected = await self._drive(with_interrupt=False)
+        types = [getattr(e, "type", None) for e in collected]
+        starts = [e for e in collected if getattr(e, "type", None) == EventType.STEP_STARTED]
+        finishes = [e for e in collected if getattr(e, "type", None) == EventType.STEP_FINISHED]
+
+        self.assertTrue(starts and finishes, f"expected a step pair, got {types}")
+        for start, finish in zip(starts, finishes):
+            self.assertEqual(start.step_name, finish.step_name)
+            self.assertEqual(
+                start.subagent_id, finish.subagent_id,
+                "a step's two halves must carry the same owner",
+            )
+
+        # And the close still precedes the subagent's terminal event.
+        self.assertLess(
+            types.index(EventType.STEP_FINISHED),
+            types.index(EventType.SUBAGENT_FINISHED),
+        )
+
+
+class TestClosedSubagentsNeverRestart(unittest.TestCase):
+    """SUBAGENT_FINISHED is terminal for the id it names.
+
+    reconcile_subagents emits SUBAGENT_STARTED for any id not currently in
+    `active_subagents`, and both _finish_subagent_on_task_end and drain_subagents
+    REMOVE the id from that dict when they close it. Nothing recorded that the id
+    had already been closed, so a single trailing event bearing the finished
+    subagent's namespace re-opened it: two SUBAGENT_STARTED and two terminals for
+    one invocation, and output after a terminal.
+    """
+
+    def test_finished_subagent_is_not_restarted_by_a_trailing_event(self):
+        ar = _run()
+        ar["subagent_segments"] = set()
+
+        ns = "tools:s1|model:x"
+        first = reconcile_subagents(ar, ns, "researcher", set())
+        self.assertEqual([e.type for e in first], [EventType.SUBAGENT_STARTED])
+
+        # The `task` delegation returns and the subagent is closed.
+        drained = drain_subagents(ar)
+        self.assertEqual([e.type for e in drained], [EventType.SUBAGENT_FINISHED])
+
+        # A trailing event from the same namespace arrives (the subagent's inner
+        # tooling can emit after its task tool returns).
+        again = reconcile_subagents(ar, ns, "researcher", set())
+        self.assertEqual(
+            [e.type for e in again], [],
+            "a closed subagent must not be re-opened by a trailing event",
+        )
+
+    def test_events_after_close_are_not_attributed_to_the_closed_subagent(self):
+        ar = _run()
+        ar["subagent_segments"] = set()
+        ns = "tools:s1|model:x"
+
+        reconcile_subagents(ar, ns, "researcher", set())
+        drain_subagents(ar)
+        reconcile_subagents(ar, ns, "researcher", set())
+
+        self.assertIsNone(
+            ar["current_subagent_id"],
+            "output arriving after a subagent's terminal event must not be "
+            "attributed to it",
+        )
+
+    def test_a_different_subagent_still_starts_normally(self):
+        # Control: closing s1 must not suppress an unrelated subagent.
+        ar = _run()
+        ar["subagent_segments"] = set()
+
+        reconcile_subagents(ar, "tools:s1|model:x", "researcher", set())
+        drain_subagents(ar)
+        events = reconcile_subagents(ar, "tools:s2|model:y", "writer", set())
+
+        self.assertEqual([e.type for e in events], [EventType.SUBAGENT_STARTED])
+        self.assertEqual(events[0].subagent_id, "tools:s2")
+
+    def test_closed_set_is_per_run(self):
+        # A fresh run reuses ids freely; the closed set is run-scoped like
+        # active_subagents.
+        ar = _run()
+        ar["subagent_segments"] = set()
+        reconcile_subagents(ar, "tools:s1|model:x", "researcher", set())
+        drain_subagents(ar)
+
+        fresh = _run()
+        fresh["subagent_segments"] = set()
+        events = reconcile_subagents(fresh, "tools:s1|model:x", "researcher", set())
+        self.assertEqual([e.type for e in events], [EventType.SUBAGENT_STARTED])
+
+
+class TestStepOwnership(unittest.TestCase):
+    """A step's STEP_FINISHED must carry the lane that STARTED it.
+
+    In the stream loop reconcile_subagents runs before handle_node_change, so by
+    the time the previous node's step is closed, current_subagent_id already points
+    at the NEW lane. Leaving STEP_FINISHED to the dispatch chokepoint therefore
+    pairs `STEP_STARTED research` under s1 with `STEP_FINISHED research` under s2 —
+    a step whose two halves belong to different owners.
+    """
+
+    def _agent(self):
+        agent = _make_agent()
+        agent.active_run = {
+            "id": "run-1",
+            "node_name": None,
+            "current_subagent_id": None,
+            "active_subagents": {},
+            "subagent_messages": {},
+        }
+        return agent
+
+    def test_step_finished_carries_the_lane_that_started_the_step(self):
+        agent = self._agent()
+
+        # s1 opens the `research` step.
+        agent.active_run["current_subagent_id"] = "s1"
+        started = list(agent.handle_node_change("research"))
+        self.assertEqual([e.type for e in started], [EventType.STEP_STARTED])
+        self.assertEqual(started[0].subagent_id, "s1")
+
+        # An event from s2 arrives; reconcile_subagents switches the lane BEFORE
+        # handle_node_change closes s1's step.
+        agent.active_run["current_subagent_id"] = "s2"
+        transition = list(agent.handle_node_change("write"))
+
+        self.assertEqual(
+            [e.type for e in transition],
+            [EventType.STEP_FINISHED, EventType.STEP_STARTED],
+        )
+        finished, next_started = transition
+        self.assertEqual(finished.step_name, "research")
+        self.assertEqual(
+            finished.subagent_id, "s1",
+            "STEP_FINISHED must belong to the lane that opened the step, not the "
+            "lane whose event happened to trigger the transition",
+        )
+        self.assertEqual(next_started.step_name, "write")
+        self.assertEqual(next_started.subagent_id, "s2")
+
+    def test_parent_step_closed_while_a_subagent_is_active_stays_unattributed(self):
+        # The reverse direction: a step the parent opened must not acquire a
+        # subagent's id just because a subagent became active before it closed.
+        agent = self._agent()
+        list(agent.handle_node_change("supervise"))
+
+        agent.active_run["current_subagent_id"] = "s1"
+        transition = list(agent.handle_node_change("research"))
+
+        finished = transition[0]
+        self.assertEqual(finished.step_name, "supervise")
+        self.assertIsNone(
+            finished.subagent_id,
+            "a step the parent opened belongs to the parent when it closes",
+        )
 
 
 class TestErrorOpenSubagents(unittest.TestCase):
