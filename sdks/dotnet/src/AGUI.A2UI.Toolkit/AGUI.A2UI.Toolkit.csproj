@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>$(TargetFrameworksCore)</TargetFrameworks>
+    <RootNamespace>AGUI.A2UI</RootNamespace>
+    <PackageId>AGUI.A2UI.Toolkit</PackageId>
+    <Description>Framework-agnostic A2UI (agent-generated UI) toolkit for the AG-UI protocol: component validation, the validate-and-retry recovery loop, prompt/context assembly, and the a2ui_operations envelope builder. Pure BCL, no framework or Microsoft.Extensions.AI dependency, so it can back a hand-rolled integration the way ag-ui-a2ui-toolkit (Python) and @ag-ui/a2ui-toolkit (TS) do.</Description>
+    <PackageTags>$(PackageTags);a2ui;generative-ui;validation;streaming</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(SignAssembly)' != 'true'">
+    <!-- AGUI.A2UI (the adapter) calls the internal recovery helpers; the unit tests
+         exercise both the public surface and those internals directly. -->
+    <InternalsVisibleTo Include="AGUI.A2UI" />
+    <InternalsVisibleTo Include="AGUI.A2UI.UnitTests" />
+  </ItemGroup>
+
+</Project>

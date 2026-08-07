@@ -35,6 +35,9 @@
   },
   "typesVersions": {
     "*": {
+      "a2ui": [
+        "dist/a2ui.d.ts"
+      ],
       "copilotkit": [
         "dist/copilotkit.d.ts"
       ]

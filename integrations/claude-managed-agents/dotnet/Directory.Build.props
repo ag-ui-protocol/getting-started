@@ -1,0 +1,37 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- NuGet audit advisories are surfaced as warnings but must not fail the build. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+    <NoWarn>$(NoWarn);NU5128;CS1591</NoWarn>
+    <IsPackable>false</IsPackable>
+    <IsPackable Condition="'$(MSBuildProjectName)' == 'AGUI.ClaudeManagedAgents'">true</IsPackable>
+    <!-- Root of the ag-ui .NET SDK, referenced by project reference until its packages ship. -->
+    <AGUIDotnetSdkDir>$(MSBuildThisFileDirectory)..\..\..\sdks\dotnet\</AGUIDotnetSdkDir>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IsPackable)' == 'true'">
+    <VersionPrefix Condition="'$(VersionPrefix)' == ''">0.0.1</VersionPrefix>
+    <Authors>AG-UI Protocol</Authors>
+    <Company>AG-UI Protocol</Company>
+    <Product>AG-UI Claude Managed Agents integration</Product>
+    <Copyright>Copyright (c) AG-UI Protocol 2026</Copyright>
+    <PackageProjectUrl>https://github.com/ag-ui-protocol/ag-ui</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ag-ui-protocol/ag-ui</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>ag-ui;agent;ai;llm;protocol;anthropic;claude;managed-agents</PackageTags>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <Deterministic>true</Deterministic>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\README.md" />
+  </ItemGroup>
+</Project>

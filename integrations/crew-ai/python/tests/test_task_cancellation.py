@@ -1,5 +1,5 @@
 """
-Tests for Defect B: orphaned kickoff task and missing timeout in the CrewAI
+Tests for the orphaned kickoff task and missing timeout in the CrewAI
 FastAPI endpoint.
 
 The event-generator in ``add_crewai_flow_fastapi_endpoint`` used to spawn the
@@ -72,7 +72,7 @@ class _HangingFlow:
 class _ExplodingFlow:
     """A flow whose ``kickoff_async`` raises immediately.
 
-    Used to pin down finding #3: kickoff-task exceptions must be raced
+    Used to pin down that kickoff-task exceptions must be raced
     against the queue and surfaced as ``RUN_ERROR`` promptly, not held
     hostage by the flow-timeout ceiling.
     """
@@ -95,8 +95,8 @@ class _FakeCrew:
     to be accepted by ``add_crewai_crew_fastapi_endpoint`` as the ``crew``
     argument. To catch accidental surface-additions (a future refactor
     that starts calling ``crew.<method>`` at request time would silently
-    "succeed" under a plain stub), we raise on any attribute access.
-    Finding #12 — spy pattern.
+    "succeed" under a plain stub), we raise on any attribute access
+    (spy pattern).
     """
 
     def __getattr__(self, name):  # noqa: D401
@@ -183,7 +183,7 @@ def _parse_sse_payloads(raw: str) -> list[dict]:
         ]
         if not data_lines:
             continue
-        # Defensive invariant (finding #13): each SSE frame produced by
+        # Defensive invariant: each SSE frame produced by
         # EventEncoder carries exactly one ``data:`` line per payload.
         # A regression that pretty-prints JSON (inserting embedded blank
         # lines) would split the frame across the ``\n\n`` separator and
@@ -208,8 +208,8 @@ def _parse_sse_payloads(raw: str) -> list[dict]:
 
 class _CompletingFlow:
     """A flow whose ``kickoff_async`` returns cleanly WITHOUT the listener
-    having enqueued a ``None`` sentinel. Used to pin the CPU-spin regression
-    (finding #1): if the main loop keeps re-creating get_task and waiting on
+    having enqueued a ``None`` sentinel. Used to pin the CPU-spin regression:
+    if the main loop keeps re-creating get_task and waiting on
     ``{get_task, kickoff_task}`` after ``kickoff_task.done()``, it spins.
     """
 
@@ -338,7 +338,7 @@ async def test_flow_timeout_env_var_bounds_execution(monkeypatch, factory):
     # exposed as event-level extras. We emit extras camelCased (``threadId``
     # / ``runId``) so the wire format lines up with peer events
     # (RunStartedEvent / RunFinishedEvent) whose declared fields are
-    # camelCased by the alias generator. Finding #3: snake_case extras on
+    # camelCased by the alias generator. snake_case extras on
     # RunErrorEvent were a protocol inconsistency.
     assert "t-1" in error_msg and "r-1" in error_msg, (
         f"RunErrorEvent message should carry thread/run correlation; got: {error_msg!r}"
@@ -365,7 +365,7 @@ async def test_flow_timeout_env_var_bounds_execution(monkeypatch, factory):
         f"got: {err.get('code')!r}"
     )
 
-    # Finding #8: RUN_ERROR must be terminal on the timeout path. A regression
+    # RUN_ERROR must be terminal on the timeout path. A regression
     # that emits both RUN_FINISHED and RUN_ERROR would still parse — this
     # assertion pins the contract that only RUN_ERROR appears.
     all_types = [p.get("type") for p in payloads]
@@ -377,7 +377,7 @@ async def test_flow_timeout_env_var_bounds_execution(monkeypatch, factory):
         f"RUN_ERROR must be the terminal event on the timeout path; "
         f"got trailing type={payloads[-1].get('type')!r} all={all_types!r}"
     )
-    # Finding #4: the previous assertion scanned for ``event:`` header
+    # The previous assertion scanned for ``event:`` header
     # lines, but EventEncoder's SSE format emits only ``data:`` frames —
     # the scan is vacuously empty, so the assertion was silently passing
     # regardless of whether RUN_FINISHED was present at the wire layer.
@@ -389,7 +389,7 @@ async def test_flow_timeout_env_var_bounds_execution(monkeypatch, factory):
 async def test_kickoff_exception_is_surfaced_promptly(monkeypatch, factory):
     """If ``kickoff_async`` itself raises, the stream must surface the real
     cause as a ``RUN_ERROR`` event without waiting for the flow-timeout
-    ceiling to fire. Red-green pin for finding #3.
+    ceiling to fire.
     """
     # Set a generous flow ceiling so that if the fix regresses (loop blocks on
     # queue.get instead of racing the kickoff task), the test would have to
@@ -418,8 +418,7 @@ async def test_kickoff_exception_is_surfaced_promptly(monkeypatch, factory):
             drained.append(chunk)
 
     # 15s is dramatically shorter than the 30s env-var ceiling; if the
-    # kickoff race is missing or broken, this wait_for raises (finding
-    # #20: earlier comment said 5s but was already bumped to 15s).
+    # kickoff race is missing or broken, this wait_for raises.
     await asyncio.wait_for(_drain(), timeout=15.0)
 
     parts = [p.decode("utf-8", errors="replace") if isinstance(p, (bytes, bytearray)) else p
@@ -441,7 +440,7 @@ async def test_kickoff_exception_is_surfaced_promptly(monkeypatch, factory):
         f"kickoff exceptions should use the FLOW_ERROR code family, not "
         f"FLOW_TIMEOUT; got code={code!r}"
     )
-    # CR8 MEDIUM: ``_sanitize_exception_code`` upper-cases the class name
+    # ``_sanitize_exception_code`` upper-cases the class name
     # and replaces non ``[A-Z0-9_]`` characters with underscore so the
     # composed code field matches the ``^[A-Z][A-Z0-9_]+$`` convention
     # peer events follow. ``RuntimeError`` is pure-ASCII alnum so it
@@ -453,7 +452,7 @@ async def test_kickoff_exception_is_surfaced_promptly(monkeypatch, factory):
 
     # Coarse message: must carry correlation; must NOT leak the raw
     # exception repr (which contained our unique marker) NOR duplicate the
-    # class name (which already lives in the ``code`` field). Finding #5.
+    # class name (which already lives in the ``code`` field).
     message = err.get("message", "")
     assert "t-1" in message and "r-1" in message, (
         f"RunErrorEvent message should carry thread/run correlation; got: {message!r}"
@@ -473,21 +472,18 @@ async def test_kickoff_exception_is_surfaced_promptly(monkeypatch, factory):
         f"in code={code!r}); got: {message!r}"
     )
 
-    # Correlation extras should still be present, camelCased (finding #3).
+    # Correlation extras should still be present, camelCased.
     assert err.get("threadId") == "t-1", err
     assert err.get("runId") == "r-1", err
     assert "thread_id" not in err, err
     assert "run_id" not in err, err
 
 
-# -- R3 additions ----------------------------------------------------------
-
-
 @pytest.mark.parametrize("factory", ["flow", "crew"])
 async def test_happy_path_no_spin_when_kickoff_completes_without_sentinel(
     monkeypatch, factory
 ):
-    """Finding #1: if ``kickoff_async`` returns cleanly but no ``None``
+    """If ``kickoff_async`` returns cleanly but no ``None``
     sentinel is enqueued (listener disabled, misfire, or future refactor),
     the generator must NOT spin on ``asyncio.wait({get_task, kickoff_task})``
     — which always returns immediately because ``kickoff_task`` is already
@@ -530,7 +526,7 @@ async def test_happy_path_no_spin_when_kickoff_completes_without_sentinel(
 
     assert flow.done.is_set(), "kickoff must have completed"
 
-    # Positive pin (finding #11): the happy-path-no-sentinel flow
+    # Positive pin: the happy-path-no-sentinel flow
     # should produce an empty payload list (the flow emits nothing, no
     # listeners fire, no ``None`` sentinel is delivered). Asserting
     # ``payloads == []`` pins that we neither drop nor fabricate events
@@ -554,7 +550,7 @@ async def test_happy_path_no_spin_when_kickoff_completes_without_sentinel(
 
 @pytest.mark.parametrize("factory", ["flow", "crew"])
 async def test_run_error_wire_format_camelcase_extras(monkeypatch, factory):
-    """Finding #3: verify by-alias round-trip of the RunErrorEvent wire
+    """Verify by-alias round-trip of the RunErrorEvent wire
     payload. ``threadId`` / ``runId`` must be present, snake_case variants
     must not. A targeted assertion — independent of the broader timeout test
     — so a regression to snake_case is caught even if other assertions drift.
@@ -599,12 +595,12 @@ async def test_run_error_wire_format_camelcase_extras(monkeypatch, factory):
 class _RaceFlow:
     """Flow that completes quickly after enqueueing a single event.
 
-    Used to pin the cancel-race invariant (R4 HIGH #1): the main loop
+    Used to pin the cancel-race invariant: the main loop
     must not silently drop an item delivered to ``get_task`` between
     ``asyncio.wait`` returning and the ``finally`` cancelling it.
 
-    CR6-7 LOW #3 / CR6-6 LOW #2: the registry is supplied by the test
-    rather than held in a module-level global. A module-level global
+    The registry is supplied by the test rather than held in a
+    module-level global. A module-level global
     ``dict`` is xdist-unsafe (process-parallel workers share import-time
     state via ``pickle``-ish boundaries, but mutating module state
     across parametrized cases serialised on one worker is still a
@@ -633,7 +629,7 @@ class _RaceFlow:
 
 @pytest.fixture
 def _race_queue_registry() -> dict:
-    """Per-test queue registry for ``_RaceFlow`` (CR6-7 LOW #3).
+    """Per-test queue registry for ``_RaceFlow``.
 
     Replaces the prior module-level ``_MODULE_QUEUE_REGISTRY`` global.
     Scoping to the test fixture keeps the side-channel local to the
@@ -647,7 +643,7 @@ def _race_queue_registry() -> dict:
 async def test_cancel_race_does_not_drop_delivered_queue_item(
     monkeypatch, factory, _race_queue_registry
 ):
-    """R4 HIGH #1: if ``get_task`` is cancelled but had already been
+    """If ``get_task`` is cancelled but had already been
     delivered a queue item, the item must be yielded (or the cancel must
     not happen). The cancel-race guard in the ``finally`` clause harvests
     ``get_task.result()`` before discarding.
@@ -658,7 +654,7 @@ async def test_cancel_race_does_not_drop_delivered_queue_item(
     same scheduler tick; we simulate the timing by running many rounds
     and asserting that the event is delivered every time.
 
-    Amplification-style probe (CR6-6 LOW #3): this test runs 10
+    Amplification-style probe: this test runs 10
     independent rounds to amplify the timing-dependent race signal.
     The regression it pins does not reproduce deterministically in
     userspace — the scheduler may or may not surface the race on any
@@ -734,11 +730,11 @@ class _LateEnqueueFlow:
     before returning from ``kickoff_async``. The enqueue fires the scheduler
     tick AFTER ``kickoff_task.done()`` becomes true.
 
-    Used to pin R4 MEDIUM #3: the happy-path drain must not break on the
+    Used to pin that the happy-path drain must not break on the
     first empty probe — it must yield once and probe again to catch a
     late-arriving listener enqueue (otherwise the event is silently dropped).
 
-    R5 MEDIUM #9: the deferred-put task is retained on the instance so
+    The deferred-put task is retained on the instance so
     tests can cancel/await it during cleanup; a fire-and-forget
     ``create_task`` would occasionally leave a pending task on the loop
     at test teardown.
@@ -775,7 +771,7 @@ class _LateEnqueueFlow:
                 q.put_nowait(event)
 
         # Retain a handle so tests can tear the task down deterministically
-        # (R5 MEDIUM #9: previously fire-and-forget).
+        # (previously fire-and-forget).
         self._deferred_task = asyncio.create_task(_deferred_put())
         self.done.set()
 
@@ -795,7 +791,7 @@ class _LateEnqueueFlow:
 async def test_happy_path_drain_captures_late_listener_enqueue(
     monkeypatch, _race_queue_registry
 ):
-    """R4 MEDIUM #3: after ``kickoff_task.done()``, the drain loop must
+    """After ``kickoff_task.done()``, the drain loop must
     yield to the event loop and re-probe the queue — otherwise a
     listener that enqueues in the tick immediately after kickoff's
     return is silently dropped.
@@ -853,7 +849,7 @@ async def test_happy_path_drain_captures_late_listener_enqueue(
         f"got types={types!r}"
     )
 
-    # R5 MEDIUM #9: await the deferred enqueue task so it does not leak
+    # Await the deferred enqueue task so it does not leak
     # into later tests as a pending task on the event loop.
     await flow.await_deferred()
 
@@ -862,14 +858,14 @@ async def test_happy_path_drain_captures_late_listener_enqueue(
 async def test_happy_path_drain_captures_multi_tick_late_enqueue(
     monkeypatch, delay_ticks, _race_queue_registry
 ):
-    """R5 HIGH #3 red-green: a listener enqueue that needs >1 scheduler
+    """A listener enqueue that needs >1 scheduler
     tick after ``kickoff_task.done()`` to materialise must still be
-    delivered. Pre-R5 the drain performed at most 2 passes (with a
+    delivered. The prior drain performed at most 2 passes (with a
     single ``sleep(0)`` between) and early-returned on the first empty
     pass — a listener whose ``call_soon`` chain fires 3+ ticks later
     would be silently dropped.
 
-    Post-R5 the drain keeps looping while any pass drains something OR
+    Now the drain keeps looping while any pass drains something OR
     while we have consecutive-empty budget (two empty passes) AND the
     ``_DRAIN_MAX_PASSES`` / ``_DRAIN_BUDGET_SECONDS`` caps remain.
     """
@@ -925,7 +921,7 @@ async def test_happy_path_drain_captures_multi_tick_late_enqueue(
 
 
 def test_flow_timeout_nan_falls_back_to_default(monkeypatch):
-    """R4 LOW #17: ``float('nan') > 0`` is False, which would silently
+    """``float('nan') > 0`` is False, which would silently
     disable the ceiling. A NaN env var must fall back to the default.
     """
     from ag_ui_crewai import endpoint as ep
@@ -939,7 +935,7 @@ def test_flow_timeout_nan_falls_back_to_default(monkeypatch):
 
 
 def test_cancel_join_timeout_env_override(monkeypatch):
-    """R4 MEDIUM #8: operators must be able to tune the teardown ceiling
+    """Operators must be able to tune the teardown ceiling
     via AGUI_CREWAI_CANCEL_JOIN_TIMEOUT_SECONDS to reduce tail latency
     under disconnect-heavy load.
     """
@@ -962,11 +958,11 @@ def test_cancel_join_timeout_env_override(monkeypatch):
 
 
 async def test_get_flow_is_serialized_under_concurrent_first_requests(monkeypatch):
-    """R4 MEDIUM #6: two concurrent first-requests must not both
+    """Two concurrent first-requests must not both
     construct ``ChatWithCrewFlow`` — that constructor issues a real LLM
     call and is expensive.
 
-    Scope note (R5 MEDIUM #5): ``ChatWithCrewFlow.__init__`` is
+    Scope note: ``ChatWithCrewFlow.__init__`` is
     synchronous. The constructor IS slow (it issues a real LLM call), but
     from the event loop's perspective it runs to completion on a single
     tick — it cannot interleave with another coroutine via ``await``.
@@ -988,8 +984,8 @@ async def test_get_flow_is_serialized_under_concurrent_first_requests(monkeypatc
     interleave their reads of ``_cached_flow`` if ``_get_flow`` awaits
     any schedulable work between the check and the cache write.
 
-    CR6-7 LOW #5: reviewer suggested strengthening by monkeypatching
-    ``__init__`` to include ``await asyncio.sleep(0)``. That is
+    Strengthening this by monkeypatching ``__init__`` to include
+    ``await asyncio.sleep(0)`` was considered. That is
     syntactically impossible — Python's sync ``__init__`` cannot host
     an ``await`` — and the ``_get_flow`` double-check inside the
     ``async with`` critical section means a no-op lock substitute still
@@ -1067,7 +1063,7 @@ async def test_get_flow_is_serialized_under_concurrent_first_requests(monkeypatc
 
 
 async def test_cancel_and_join_outer_cancel_bounded_by_monotonic_deadline(monkeypatch):
-    """Finding #2 + #7: verify the teardown window stays bounded when the
+    """Verify the teardown window stays bounded when the
     outer scope is cancelled mid-teardown. The post-fix implementation
     uses a shared monotonic deadline, so the combined wait of the inner
     shielded ``wait_for`` plus the CancelledError-branch ``wait_for`` must
@@ -1076,7 +1072,7 @@ async def test_cancel_and_join_outer_cancel_bounded_by_monotonic_deadline(monkey
     """
     # Shrink the teardown ceiling so the test is fast and the regression
     # signature (2x → 1x) is clearly distinguishable from scheduling jitter.
-    # CR7 MEDIUM: drive this via the public env var rather than stabbing
+    # Drive this via the public env var rather than stabbing
     # the module constant — that exercises the full parse pipeline in
     # ``_cancel_join_timeout_seconds`` (float(), isfinite, >0 guard)
     # rather than short-circuiting it at the constant-read site.
@@ -1117,18 +1113,18 @@ async def test_cancel_and_join_outer_cancel_bounded_by_monotonic_deadline(monkey
     # Outer cancel: triggers the CancelledError branch inside _cancel_and_join.
     driver.cancel()
 
-    # R5 LOW #17: use ``time.monotonic()`` for parity with
-    # ``_cancel_and_join``'s internal deadline math; ``loop.time()`` was
-    # an unnecessary divergence and on some platforms has different
-    # resolution characteristics than ``time.monotonic()``.
+    # Use ``time.monotonic()`` for parity with ``_cancel_and_join``'s
+    # internal deadline math; ``loop.time()`` was an unnecessary
+    # divergence and on some platforms has different resolution
+    # characteristics than ``time.monotonic()``.
     # Resolve the ceiling through the helper that reads the env var, so
     # the bound matches what ``_cancel_and_join`` actually uses under
-    # the monkeypatched env (CR7 MEDIUM).
+    # the monkeypatched env.
     ceiling = ep._cancel_join_timeout_seconds()
 
     start = time.monotonic()
     try:
-        # CR8 MEDIUM: bound = ceiling * 3.0 rather than ``ceiling +
+        # bound = ceiling * 3.0 rather than ``ceiling +
         # 0.4``. With ceiling=0.5 the additive slack (0.4s) leaves
         # only ~0.4s of CI scheduler jitter before the test flakes;
         # ``* 3.0`` scales with the ceiling and is strictly tighter
@@ -1152,8 +1148,7 @@ async def test_cancel_and_join_outer_cancel_bounded_by_monotonic_deadline(monkey
     assert elapsed <= bound, (
         f"_cancel_and_join outer-cancel teardown exceeded single-ceiling "
         f"window; elapsed={elapsed:.3f}s, "
-        f"ceiling={ceiling}s bound={bound}s "
-        f"(finding #7 regression)"
+        f"ceiling={ceiling}s bound={bound}s"
     )
 
     # Clean up the absorb-cancel task cleanly.
@@ -1176,7 +1171,7 @@ class _UpstreamTimeoutFlow:
     (``timeout=None``) — otherwise the ``timeout:g`` formatting crashes
     with ``TypeError: unsupported format string passed to
     NoneType.__format__`` and the client sees an abruptly terminated
-    stream instead of a correlated RunErrorEvent. CR6-4 LOW.
+    stream instead of a correlated RunErrorEvent.
     """
 
     def __init__(self) -> None:
@@ -1196,7 +1191,7 @@ class _UpstreamTimeoutFlow:
 async def test_upstream_timeout_distinct_from_ceiling_timeout_when_ceiling_disabled(
     monkeypatch, factory
 ):
-    """CR7 CRITICAL: upstream ``TimeoutError`` bubbling out of
+    """Upstream ``TimeoutError`` bubbling out of
     ``kickoff_async`` must NOT be classified as a flow-ceiling timeout
     when the ceiling is disabled.
 
@@ -1274,7 +1269,7 @@ async def test_upstream_timeout_distinct_from_ceiling_timeout_when_ceiling_disab
         f"RunErrorEvent must not surface a NoneType-formatting error; "
         f"got: {error_msg!r}"
     )
-    # CR7 CRITICAL: the code must distinguish upstream timeouts from
+    # The code must distinguish upstream timeouts from
     # ceiling-fired timeouts. This is the load-bearing assertion —
     # pre-fix emitted AGUI_CREWAI_FLOW_TIMEOUT here, which is what
     # downstream alerting treats as "our configured ceiling tripped".
@@ -1309,7 +1304,7 @@ async def test_upstream_timeout_distinct_from_ceiling_timeout_when_ceiling_disab
 class _HangingLongerThanCeilingFlow:
     """A flow whose ``kickoff_async`` hangs longer than our ceiling.
 
-    Used to pin the ceiling-fired path (CR7 CRITICAL): our monotonic
+    Used to pin the ceiling-fired path: our monotonic
     deadline / ``asyncio.wait`` timeout must raise ``_CeilingExceeded``
     (not a bare ``TimeoutError``) so the dedicated handler emits
     ``AGUI_CREWAI_FLOW_TIMEOUT`` with "exceeded ceiling=<value>s".
@@ -1335,7 +1330,7 @@ class _HangingLongerThanCeilingFlow:
 async def test_ceiling_fired_emits_flow_timeout_code_distinct_from_upstream(
     monkeypatch, factory
 ):
-    """CR7 CRITICAL: the ceiling-fired path must keep emitting
+    """The ceiling-fired path must keep emitting
     ``AGUI_CREWAI_FLOW_TIMEOUT`` with "exceeded ceiling=<value>s".
 
     Complement to ``test_upstream_timeout_distinct_from_ceiling_timeout``
@@ -1414,13 +1409,8 @@ async def test_ceiling_fired_emits_flow_timeout_code_distinct_from_upstream(
     )
 
 
-# -- CR8 round additions ----------------------------------------------------
-
-
 async def test_cancelled_kickoff_emits_run_error(monkeypatch):
-    """CR8 HIGH #2 red-green pin.
-
-    If ``kickoff_task`` enters the main-loop fast path in a
+    """If ``kickoff_task`` enters the main-loop fast path in a
     ``done() and cancelled()`` state, the stream MUST emit a
     ``RUN_ERROR`` event with ``code=AGUI_CREWAI_KICKOFF_CANCELLED``
     before closing. Pre-fix the code silently fell through (drained,
@@ -1447,7 +1437,7 @@ async def test_cancelled_kickoff_emits_run_error(monkeypatch):
     flow = _HangingFlow()
 
     # Wrap ``asyncio.create_task`` scoped to the endpoint module so the
-    # task returned to the generator is pre-cancelled. CR9 HIGH: we
+    # task returned to the generator is pre-cancelled. We
     # patch ``ep.asyncio.create_task`` rather than the global
     # ``asyncio.create_task`` to narrow the blast radius — a broad patch
     # on the shared asyncio module can be observed by any concurrent
@@ -1525,7 +1515,7 @@ class _WeirdExceptionFlow:
     """A flow whose ``kickoff_async`` raises a custom exception whose
     ``__name__`` contains characters outside ``[A-Z0-9_]``.
 
-    Used to pin CR8 MEDIUM (sanitize exception class name). The
+    Used to pin sanitization of the exception class name. The
     composed ``code`` field must match the ``^[A-Z][A-Z0-9_]+$``
     convention peer events follow — a raw ``type(e).__name__`` with
     lowercase letters or digits mid-name or even unicode could
@@ -1543,7 +1533,7 @@ class _WeirdExceptionFlow:
 
 
 async def test_custom_exception_class_name_is_sanitized_in_code(monkeypatch):
-    """CR8 MEDIUM red-green: the ``code`` field on a generic
+    """The ``code`` field on a generic
     FLOW_ERROR must be sanitized so exotic exception class names do
     not violate the ``^[A-Z][A-Z0-9_]+$`` convention peer events use.
 
@@ -1605,7 +1595,7 @@ async def test_custom_exception_class_name_is_sanitized_in_code(monkeypatch):
 
 
 def test_sanitize_exception_code_direct():
-    """CR8 MEDIUM unit test: sanitize replaces non ``[A-Z0-9_]`` chars
+    """Sanitize replaces non ``[A-Z0-9_]`` chars
     with ``_`` and upper-cases the result.
 
     Covers edge cases the integration test above cannot easily
@@ -1621,20 +1611,20 @@ def test_sanitize_exception_code_direct():
     assert _sanitize_exception_code("my-error") == "MY_ERROR"
     # Unicode: non-ASCII characters replaced with _, then the trailing
     # underscore is stripped so the composed wire code doesn't end in
-    # ``_`` (CR9 LOW — the prior output ``ERRORX_`` produced wire codes
+    # ``_`` (the prior output ``ERRORX_`` produced wire codes
     # like ``AGUI_CREWAI_FLOW_ERROR_ERRORX_`` with a trailing
     # underscore that looked ugly in alerting).
     assert _sanitize_exception_code("ErrorX\u00e9") == "ERRORX"
     # Spaces replaced.
     assert _sanitize_exception_code("Weird Exception") == "WEIRD_EXCEPTION"
-    # CR9 LOW: consecutive non-[A-Z0-9_] runs collapse to a single
+    # Consecutive non-[A-Z0-9_] runs collapse to a single
     # underscore so the composed code stays greppable — prior behaviour
     # produced ``WEIRD___EXCEPTION`` for a name like "Weird---Exception".
     assert _sanitize_exception_code("Weird---Exception") == "WEIRD_EXCEPTION"
-    # CR9 LOW: leading/trailing underscores stripped.
+    # Leading/trailing underscores stripped.
     assert _sanitize_exception_code("_leading") == "LEADING"
     assert _sanitize_exception_code("trailing_") == "TRAILING"
-    # CR9 LOW: if the cleaned result is empty or does not start with
+    # If the cleaned result is empty or does not start with
     # [A-Z] (all-digits / all-unicode), prefix ``E_`` so the composed
     # wire code still matches ``^[A-Z][A-Z0-9_]+$``.
     assert _sanitize_exception_code("42").startswith("E_")
@@ -1645,7 +1635,7 @@ def test_sanitize_exception_code_direct():
 
 
 def test_run_started_and_run_error_share_alias_policy():
-    """CR8 LOW (alias policy pin): ``_run_error_extras`` derives the
+    """Alias policy pin: ``_run_error_extras`` derives the
     wire-level ``threadId`` / ``runId`` aliases from
     ``RunStartedEvent.model_fields`` on the load-bearing assumption
     that ``RunStartedEvent`` and ``RunErrorEvent`` share the same
@@ -1693,11 +1683,8 @@ def test_run_started_and_run_error_share_alias_policy():
         )
 
 
-# -- CR9 round additions ----------------------------------------------------
-
-
 def test_stamp_correlation_ids_covers_events_with_the_fields():
-    """CR9 MEDIUM red-green: the correlation-id stamp helper must
+    """The correlation-id stamp helper must
     stamp ANY event object that declares ``thread_id`` / ``run_id``
     fields, not only the ``RUN_STARTED`` / ``RUN_FINISHED`` pair the
     pre-fix main-loop enumerated by type code. Future ag-ui.core events
@@ -1722,7 +1709,7 @@ def test_stamp_correlation_ids_covers_events_with_the_fields():
 
 
 def test_stamp_correlation_ids_noop_for_events_without_the_fields():
-    """CR9 MEDIUM: events whose schema does not declare the fields
+    """Events whose schema does not declare the fields
     (StepStartedEvent, MessagesSnapshotEvent, etc.) must be left
     UNTOUCHED — we do not add stray ``thread_id`` / ``run_id``
     attributes that would change their wire format on-write.
@@ -1739,7 +1726,7 @@ def test_stamp_correlation_ids_noop_for_events_without_the_fields():
 
 
 async def test_create_queue_stamp_ordering_no_stamped_but_unregistered_window(monkeypatch):
-    """CR9 LOW red-green: ``create_queue`` must insert into ``QUEUES``
+    """``create_queue`` must insert into ``QUEUES``
     BEFORE stamping ``_agui_queue_key`` on the flow so a concurrent
     ``get_queue(flow)`` never observes the attr pointing at a
     not-yet-inserted key.
@@ -1775,7 +1762,7 @@ async def test_create_queue_stamp_ordering_no_stamped_but_unregistered_window(mo
 
 
 async def test_get_task_result_cancelled_falls_back_to_unset(monkeypatch):
-    """CR9 LOW red-green: if ``get_task`` completes but is cancelled
+    """If ``get_task`` completes but is cancelled
     (e.g. a concurrent outer-cancel propagated into it), reading
     ``get_task.result()`` raises CancelledError. Pre-fix that bypassed
     the ``except _CeilingExceeded`` / ``except Exception`` handlers in
@@ -1801,7 +1788,7 @@ async def test_get_task_result_cancelled_falls_back_to_unset(monkeypatch):
 
 
 async def test_teardown_future_exception_is_retrieved_on_timeout():
-    """CR9 MEDIUM red-green: the post-grace / grace-path teardown
+    """The post-grace / grace-path teardown
     futures must mark their stored ``TimeoutError`` as retrieved so the
     GC does not log ``Task exception was never retrieved`` when the
     recovery wait is itself cancelled and we re-raise the outer cancel
@@ -1857,27 +1844,33 @@ async def test_teardown_future_exception_is_retrieved_on_timeout():
 
 
 async def test_conftest_preserves_external_bus_handlers_across_tests():
-    """CR9 MEDIUM red-green: the autouse conftest fixture must
+    """The autouse conftest fixture must
     snapshot/restore the crewai bus handlers rather than ``clear()``
     them wholesale. Prior behaviour wiped ALL handlers between tests —
     including any registered by another library in the same process.
 
     We simulate an external subscriber by registering a plain callable
-    against a sentinel key in ``_crewai_event_bus._handlers`` BEFORE
-    the autouse fixture runs (by mutating the dict directly in-line
-    within the test), then asserting the handler is still present
-    at teardown — approximated here by re-reading the dict at the end
-    of the test body.
+    against a sentinel key in the bus handler dict BEFORE the autouse
+    fixture runs (by mutating the dict directly in-line within the test),
+    then asserting the handler is still present at teardown — approximated
+    here by re-reading the dict at the end of the test body.
+
+    crewai 1.0.0 split ``_handlers`` into ``_sync_handlers`` /
+    ``_async_handlers``; probe whichever the installed crewai exposes.
     """
     from ag_ui_crewai import endpoint as ep  # noqa: F401 - ensures conftest imported
     try:
-        from crewai.utilities.events import crewai_event_bus
+        from ag_ui_crewai._capabilities import crewai_event_bus
     except Exception:
         pytest.skip("crewai event bus not importable")
 
-    handlers = getattr(crewai_event_bus, "_handlers", None)
+    handlers = None
+    for _attr in ("_sync_handlers", "_async_handlers", "_handlers"):
+        handlers = getattr(crewai_event_bus, _attr, None)
+        if handlers is not None:
+            break
     if handlers is None:
-        pytest.skip("crewai event bus does not expose _handlers")
+        pytest.skip("crewai event bus does not expose a handler dict")
 
     sentinel_key = "__cr9_external_subscriber__"
     sentinel_handler = object()
@@ -1895,15 +1888,14 @@ async def test_conftest_preserves_external_bus_handlers_across_tests():
         # by direct observation: the stale GLOBAL wipe would blow away
         # the external key; a correct snapshot/restore preserves it.
         assert handlers.get(sentinel_key) == [sentinel_handler], (
-            "external subscriber dropped by conftest wipe; CR9 MEDIUM "
-            "regression"
+            "external subscriber dropped by conftest wipe regression"
         )
     finally:
         handlers.pop(sentinel_key, None)
 
 
 def test_alias_warn_seen_is_cleared_by_autouse_fixture():
-    """CR9 MEDIUM: the autouse fixture must reset the
+    """The autouse fixture must reset the
     ``_ALIAS_WARN_SEEN`` dedup set between tests so a prior test that
     observed an alias divergence does not suppress the WARN in a later
     test. We verify the fixture invariant at test start — the set
@@ -1912,13 +1904,13 @@ def test_alias_warn_seen_is_cleared_by_autouse_fixture():
     from ag_ui_crewai import endpoint as ep
 
     assert ep._ALIAS_WARN_SEEN == set(), (
-        "autouse fixture did not clear _ALIAS_WARN_SEEN; CR9 MEDIUM "
-        f"regression. leftover={ep._ALIAS_WARN_SEEN!r}"
+        "autouse fixture did not clear _ALIAS_WARN_SEEN; "
+        f"leftover={ep._ALIAS_WARN_SEEN!r}"
     )
 
 
 async def test_run_started_finished_have_correct_thread_id_via_stamp_helper():
-    """CR9 MEDIUM integration red-green: a flow whose
+    """A flow whose
     ``FlowStartedEvent`` fires must ship a ``RunStartedEvent`` on the
     wire whose ``thread_id`` / ``run_id`` carry the input-data
     correlation — NOT the listener's ``"?"`` placeholders. The
@@ -1982,7 +1974,7 @@ async def test_run_started_finished_have_correct_thread_id_via_stamp_helper():
 
 
 def test_kickoff_cancelled_message_wording_aligned_with_code():
-    """CR9 LOW red-green: the client-facing RunErrorEvent message on
+    """The client-facing RunErrorEvent message on
     the externally-cancelled-kickoff path must say "kickoff was
     cancelled" — aligning with the internal ``_KickoffCancelled``
     sentinel ("CrewAI kickoff task was cancelled"), the wire code
@@ -1998,7 +1990,7 @@ def test_kickoff_cancelled_message_wording_aligned_with_code():
     ) else inspect.getsource(ep)
     # Pre-fix wording should no longer appear; new wording must appear.
     assert "CrewAI flow was cancelled" not in src, (
-        "stale 'flow was cancelled' wording found; CR9 LOW "
+        "stale 'flow was cancelled' wording found; "
         "alignment regression"
     )
     assert "CrewAI kickoff was cancelled" in src, (

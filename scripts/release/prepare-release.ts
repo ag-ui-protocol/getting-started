@@ -11,12 +11,28 @@
  * For TypeScript packages, edits package.json.
  * For Python packages, edits pyproject.toml using regex (handles both
  * [project].version and [tool.poetry].version).
- * For .NET packages, edits sdks/dotnet/Directory.Build.props VersionPrefix.
+ * For .NET packages, edits the VersionPrefix in the Directory.Build.props the
+ * scope names as its `versionSource`.
+ * For Maven packages, edits the project <version> in the reactor pom.xml the
+ * scope names as its `versionSource`, AND the <parent><version> of every module
+ * that pom lists — Maven requires the parent version to be a literal, so the
+ * reactor version is physically repeated in each module and a root-only edit
+ * leaves the build unresolvable.
  *
  * Outputs JSON to stdout:
- *   { "scope": "...", "packages": [{ "name", "oldVersion", "newVersion", "file", "path" }] }
+ *   {
+ *     "scope": "...",
+ *     "packages": [{ "name", "oldVersion", "newVersion", "file", "path" }],
+ *     "files": ["<every file actually written>"]
+ *   }
+ *
+ * `files` exists because a package's `file` is its VERSION SOURCE, which for
+ * Maven is not the complete set of files the bump touched. Callers that stage a
+ * commit (prepare-release.yml) must use `files`, or a Maven bump commits a root
+ * pom whose modules still declare the old parent version.
  */
 
+import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -242,8 +258,10 @@ function bumpPythonVersion(
 interface PackageConfig {
   name: string;
   path: string;
-  ecosystem: "typescript" | "python" | "dotnet";
+  ecosystem: "typescript" | "python" | "dotnet" | "maven";
   buildSystem?: "uv" | "poetry";
+  /** Maven only: the groupId the artifact publishes under. */
+  groupId?: string;
 }
 
 interface ScopeConfig {
@@ -327,6 +345,53 @@ function writePyVersion(pyprojectPath: string, newVersion: string): void {
   fs.writeFileSync(pyprojectPath, lines.join('\n'), "utf-8");
 }
 
+/**
+ * Re-lock a uv-managed Python package after its version has been bumped.
+ *
+ * uv.lock carries an entry for the package it locks -- the one whose ``source``
+ * is ``{ editable = "." }`` -- so editing pyproject.toml alone leaves that entry
+ * one version stale. Every release did exactly that, so every release shipped a
+ * stale lock: four consecutive aws-strands releases are each a one-line,
+ * one-file commit, and ag_ui_adk drifted five releases deep before anyone
+ * noticed. #2313 repaired the accumulated drift; this stops it recurring.
+ *
+ * ``uv lock`` may also flush latent metadata corrections that have nothing to do
+ * with the bump -- it rewrites the whole file once it has any reason to, and what
+ * it writes reflects the package metadata in uv's cache at that moment. Observed:
+ * the same uv binary added an ``exceptiongroup`` dependency marker on Aug 4 that
+ * it had not added on Jul 30, because the cache had refreshed from PyPI in
+ * between. Those are corrections rather than corruption, and the companion
+ * ``uv lock --check`` CI gate is what keeps them from piling up: with locks kept
+ * continuously current, a release bump has nothing extra to flush and its diff
+ * stays to the version line.
+ *
+ * Packages with no uv.lock (poetry-managed, or unlocked) are skipped. A missing
+ * ``uv`` is fatal rather than skipped -- silently shipping a stale lock is the
+ * exact failure this exists to prevent.
+ */
+function relockPythonPackage(pyprojectPath: string): void {
+  const pkgDir = path.dirname(pyprojectPath);
+  if (!fs.existsSync(path.join(pkgDir, "uv.lock"))) return;
+
+  try {
+    // stdout belongs to this script's JSON summary -- discard uv's so the
+    // summary stays parseable, and pass its stderr through for diagnostics.
+    execFileSync("uv", ["lock"], {
+      cwd: pkgDir,
+      stdio: ["ignore", "ignore", "inherit"],
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(
+        `uv is required to re-lock ${pkgDir} after a version bump, but was not ` +
+          `found on PATH. Install uv (https://docs.astral.sh/uv/) -- without it ` +
+          `the release would publish a uv.lock pinning the previous version.`,
+      );
+    }
+    throw error;
+  }
+}
+
 function readDotnetVersion(propsPath: string): string {
   const content = fs.readFileSync(propsPath, "utf-8");
   const match = content.match(/<VersionPrefix(?:\s+[^>]*)?>([^<]+)<\/VersionPrefix>/);
@@ -348,12 +413,169 @@ function writeDotnetVersion(propsPath: string, newVersion: string): void {
   fs.writeFileSync(propsPath, next, "utf-8");
 }
 
-function getVersionFilePath(repoRoot: string, pkg: PackageConfig): string {
+// ---------------------------------------------------------------------------
+// Maven pom.xml version bumping
+//
+// A pom has <version> elements all over it — <parent>, every <dependency>,
+// every <plugin>, and arbitrary <properties> like <junit.version>. A "first
+// <version> in the file" regex therefore reads the PARENT version in every
+// child module and a plugin version in some roots. These helpers walk the
+// element tree instead and address elements by their exact path, so
+// project>version and project>parent>version are never confused for each other
+// or for anything nested deeper.
+// ---------------------------------------------------------------------------
+
+/** Blank out comments, preserving byte offsets so ranges stay valid. */
+function stripXmlComments(content: string): string {
+  return content.replace(/<!--[\s\S]*?-->/g, (m) => " ".repeat(m.length));
+}
+
+interface ElementRange {
+  /** Offset of the first character of the element's text content. */
+  start: number;
+  /** Offset just past the last character of the element's text content. */
+  end: number;
+}
+
+/**
+ * Find the text ranges of every element at an exact element path, e.g.
+ * ["project", "parent", "version"]. Offsets index into the ORIGINAL string, so
+ * a caller can splice a replacement in directly.
+ */
+function findElementRanges(content: string, elementPath: string[]): ElementRange[] {
+  const scannable = stripXmlComments(content);
+  // Tag names may be namespaced (ns:version); attributes are skipped.
+  const tagRe = /<(\/?)([A-Za-z_][\w.:-]*)(?:\s[^>]*?)?(\/?)>/g;
+  const stack: string[] = [];
+  const ranges: ElementRange[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = tagRe.exec(scannable)) !== null) {
+    const [full, closing, name, selfClosing] = match;
+    if (closing) {
+      stack.pop();
+      continue;
+    }
+    if (selfClosing) {
+      continue;
+    }
+    stack.push(name);
+    if (
+      stack.length === elementPath.length &&
+      stack.every((n, i) => n === elementPath[i])
+    ) {
+      const start = match.index + full.length;
+      const end = scannable.indexOf(`</${name}>`, start);
+      if (end === -1) {
+        throw new Error(`Unterminated <${name}> in pom while reading ${elementPath.join(">")}`);
+      }
+      ranges.push({ start, end });
+    }
+  }
+
+  return ranges;
+}
+
+function findSingleElementRange(content: string, elementPath: string[]): ElementRange | null {
+  const ranges = findElementRanges(content, elementPath);
+  return ranges.length > 0 ? ranges[0] : null;
+}
+
+/** The reactor version: the <version> that is a direct child of <project>. */
+function readMavenVersion(pomPath: string): string {
+  const content = fs.readFileSync(pomPath, "utf-8");
+  const range = findSingleElementRange(content, ["project", "version"]);
+  if (!range) {
+    throw new Error(`Cannot read project <version> from ${pomPath}`);
+  }
+  return content.slice(range.start, range.end).trim();
+}
+
+function replaceRange(content: string, range: ElementRange, value: string): string {
+  return content.slice(0, range.start) + value + content.slice(range.end);
+}
+
+/**
+ * Write a new reactor version: the root pom's project>version plus the
+ * project>parent>version of every module the root lists. Returns the absolute
+ * path of every file written so the caller can stage them all.
+ */
+function writeMavenVersion(pomPath: string, newVersion: string): string[] {
+  const rootContent = fs.readFileSync(pomPath, "utf-8");
+  const rootRange = findSingleElementRange(rootContent, ["project", "version"]);
+  if (!rootRange) {
+    throw new Error(`Cannot find project <version> in ${pomPath}`);
+  }
+  fs.writeFileSync(pomPath, replaceRange(rootContent, rootRange, newVersion), "utf-8");
+
+  const written = [pomPath];
+  const reactorDir = path.dirname(pomPath);
+
+  for (const moduleRange of findElementRanges(rootContent, ["project", "modules", "module"])) {
+    const moduleName = rootContent.slice(moduleRange.start, moduleRange.end).trim();
+    const modulePom = path.join(reactorDir, moduleName, "pom.xml");
+    if (!fs.existsSync(modulePom)) {
+      throw new Error(
+        `Module "${moduleName}" declared in ${pomPath} has no pom.xml at ${modulePom}`,
+      );
+    }
+    const moduleContent = fs.readFileSync(modulePom, "utf-8");
+    const parentRange = findSingleElementRange(moduleContent, ["project", "parent", "version"]);
+    if (!parentRange) {
+      // A module without an inherited parent version is not part of this
+      // reactor's shared version and bumping the root would silently orphan it.
+      throw new Error(`Cannot find <parent><version> in ${modulePom}`);
+    }
+    fs.writeFileSync(modulePom, replaceRange(moduleContent, parentRange, newVersion), "utf-8");
+    written.push(modulePom);
+  }
+
+  return written;
+}
+
+/** Verify every module's parent version matches the reactor version. */
+function readMavenModuleParentVersions(pomPath: string): Record<string, string> {
+  const rootContent = fs.readFileSync(pomPath, "utf-8");
+  const reactorDir = path.dirname(pomPath);
+  const versions: Record<string, string> = {};
+  for (const moduleRange of findElementRanges(rootContent, ["project", "modules", "module"])) {
+    const moduleName = rootContent.slice(moduleRange.start, moduleRange.end).trim();
+    const modulePom = path.join(reactorDir, moduleName, "pom.xml");
+    const moduleContent = fs.readFileSync(modulePom, "utf-8");
+    const parentRange = findSingleElementRange(moduleContent, ["project", "parent", "version"]);
+    versions[moduleName] = parentRange
+      ? moduleContent.slice(parentRange.start, parentRange.end).trim()
+      : "";
+  }
+  return versions;
+}
+
+function getVersionFilePath(repoRoot: string, pkg: PackageConfig, versionSource?: string): string {
   if (pkg.ecosystem === "typescript") {
     return path.join(repoRoot, pkg.path, "package.json");
   }
   if (pkg.ecosystem === "dotnet") {
-    return path.join(repoRoot, "sdks/dotnet/Directory.Build.props");
+    // A .NET version lives in a shared Directory.Build.props rather than the
+    // csproj, and each .NET scope names its own. Assuming the SDK's file bumps
+    // the wrong package as soon as a second .NET scope exists, so the scope has
+    // to declare it.
+    if (!versionSource) {
+      throw new Error(
+        `Scope for ${pkg.name} must declare a "versionSource" pointing at its Directory.Build.props`
+      );
+    }
+    return path.join(repoRoot, versionSource);
+  }
+  if (pkg.ecosystem === "maven") {
+    // A Maven module inherits its version from the reactor pom; its own pom
+    // carries no <version> at all. Same reasoning as .NET: the scope names the
+    // reactor pom so a second Maven scope cannot bump the wrong one.
+    if (!versionSource) {
+      throw new Error(
+        `Scope for ${pkg.name} must declare a "versionSource" pointing at its reactor pom.xml`
+      );
+    }
+    return path.join(repoRoot, versionSource);
   }
   return path.join(repoRoot, pkg.path, "pyproject.toml");
 }
@@ -365,27 +587,44 @@ function readVersionFile(filePath: string, ecosystem: PackageConfig["ecosystem"]
   if (ecosystem === "dotnet") {
     return readDotnetVersion(filePath);
   }
+  if (ecosystem === "maven") {
+    return readMavenVersion(filePath);
+  }
   return readPyVersion(filePath);
 }
 
-function readVersion(repoRoot: string, pkg: PackageConfig): string {
-  const filePath = getVersionFilePath(repoRoot, pkg);
+function readVersion(repoRoot: string, pkg: PackageConfig, versionSource?: string): string {
+  const filePath = getVersionFilePath(repoRoot, pkg, versionSource);
   return readVersionFile(filePath, pkg.ecosystem);
 }
 
-function writeVersionFile(filePath: string, ecosystem: PackageConfig["ecosystem"], newVersion: string): void {
+/** Returns the absolute path of every file written (Maven fans out to modules). */
+function writeVersionFile(
+  filePath: string,
+  ecosystem: PackageConfig["ecosystem"],
+  newVersion: string
+): string[] {
   if (ecosystem === "typescript") {
     writeTsVersion(filePath, newVersion);
   } else if (ecosystem === "dotnet") {
     writeDotnetVersion(filePath, newVersion);
+  } else if (ecosystem === "maven") {
+    return writeMavenVersion(filePath, newVersion);
   } else {
     writePyVersion(filePath, newVersion);
+    relockPythonPackage(filePath);
   }
+  return [filePath];
 }
 
-function writeVersion(repoRoot: string, pkg: PackageConfig, newVersion: string): void {
-  const filePath = getVersionFilePath(repoRoot, pkg);
-  writeVersionFile(filePath, pkg.ecosystem, newVersion);
+function writeVersion(
+  repoRoot: string,
+  pkg: PackageConfig,
+  newVersion: string,
+  versionSource?: string
+): string[] {
+  const filePath = getVersionFilePath(repoRoot, pkg, versionSource);
+  return writeVersionFile(filePath, pkg.ecosystem, newVersion);
 }
 
 function computeNewVersion(
@@ -409,7 +648,12 @@ function computeNewVersion(
 
 function main(): void {
   const args = parseArgs();
-  const repoRoot = path.resolve(__dirname, "../..");
+  // Normally the repo this script ships in. Overridable so tests can point the
+  // whole thing -- config, package files, lockfiles -- at a throwaway fixture
+  // tree, since the write path cannot otherwise be exercised without editing
+  // the real repo.
+  const repoRoot =
+    process.env.PREPARE_RELEASE_ROOT ?? path.resolve(__dirname, "../..");
 
   const configPath = path.join(repoRoot, "scripts/release/release.config.json");
   const config: ReleaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -429,7 +673,18 @@ function main(): void {
     path: string;
     ecosystem: string;
     buildSystem?: string;
+    groupId?: string;
   }> = [];
+
+  // Every file actually written, so callers can stage a complete commit. A
+  // package's `file` is only its version SOURCE — for Maven the bump also
+  // rewrites each module's <parent><version>.
+  const modifiedFiles = new Set<string>();
+  const recordWritten = (paths: string[]): void => {
+    for (const p of paths) {
+      modifiedFiles.add(path.relative(repoRoot, p));
+    }
+  };
 
   if (scopeConfig.sharedVersion && scopeConfig.versionSource) {
     // All packages share one version — read from versionSource
@@ -444,7 +699,7 @@ function main(): void {
     console.error(`[${args.scope}] Shared version: ${currentVersion} -> ${newVersion}`);
 
     if (versionSourceEcosystem === "dotnet" && args.bump !== "prerelease" && !args.dryRun) {
-      writeVersionFile(versionSourcePath, versionSourceEcosystem, newVersion);
+      recordWritten(writeVersionFile(versionSourcePath, versionSourceEcosystem, newVersion));
       const written = readVersionFile(versionSourcePath, versionSourceEcosystem);
       if (written !== newVersion) {
         console.error(`ERROR: Verification failed for ${scopeConfig.versionSource}: expected ${newVersion}, got ${written}`);
@@ -452,18 +707,46 @@ function main(): void {
       }
     }
 
+    // Maven writes the reactor pom for EVERY bump type, including prerelease:
+    // unlike .NET (where a prerelease suffix is applied at pack time via
+    // -p:VersionSuffix and the props file stays put), the pom is the only place
+    // a Maven version exists.
+    if (versionSourceEcosystem === "maven" && !args.dryRun) {
+      recordWritten(writeVersionFile(versionSourcePath, versionSourceEcosystem, newVersion));
+      const written = readVersionFile(versionSourcePath, versionSourceEcosystem);
+      if (written !== newVersion) {
+        console.error(`ERROR: Verification failed for ${scopeConfig.versionSource}: expected ${newVersion}, got ${written}`);
+        process.exit(1);
+      }
+      // A module left on the old parent version makes the reactor unbuildable,
+      // and Maven would only surface it much later, mid-release.
+      for (const [moduleName, moduleVersion] of Object.entries(
+        readMavenModuleParentVersions(versionSourcePath),
+      )) {
+        if (moduleVersion !== newVersion) {
+          console.error(
+            `ERROR: Verification failed for module ${moduleName}: <parent><version> is ${moduleVersion || "(missing)"}, expected ${newVersion}`,
+          );
+          process.exit(1);
+        }
+      }
+    }
+
+    const sharedVersionSourceFile =
+      versionSourceEcosystem === "dotnet" || versionSourceEcosystem === "maven";
+
     for (const pkg of scopeConfig.packages) {
-      const filePath = versionSourceEcosystem === "dotnet"
+      const filePath = sharedVersionSourceFile
         ? versionSourcePath
-        : getVersionFilePath(repoRoot, pkg);
+        : getVersionFilePath(repoRoot, pkg, scopeConfig.versionSource);
       const relPath = path.relative(repoRoot, filePath);
 
       const versionToWrite = pkg.ecosystem === 'python' ? toPep440(newVersion) : newVersion;
 
-      if (versionSourceEcosystem !== "dotnet" && !args.dryRun) {
-        writeVersion(repoRoot, pkg, versionToWrite);
+      if (!sharedVersionSourceFile && !args.dryRun) {
+        recordWritten(writeVersion(repoRoot, pkg, versionToWrite, scopeConfig.versionSource));
         // Verify
-        const written = readVersion(repoRoot, pkg);
+        const written = readVersion(repoRoot, pkg, scopeConfig.versionSource);
         if (written !== versionToWrite) {
           console.error(`ERROR: Verification failed for ${pkg.name}: expected ${versionToWrite}, got ${written}`);
           process.exit(1);
@@ -478,22 +761,23 @@ function main(): void {
         path: pkg.path,
         ecosystem: pkg.ecosystem,
         ...(pkg.buildSystem && { buildSystem: pkg.buildSystem }),
+        ...(pkg.groupId && { groupId: pkg.groupId }),
       });
     }
   } else {
     // Each package has its own version
     for (const pkg of scopeConfig.packages) {
-      const filePath = getVersionFilePath(repoRoot, pkg);
+      const filePath = getVersionFilePath(repoRoot, pkg, scopeConfig.versionSource);
       const relPath = path.relative(repoRoot, filePath);
-      const currentVersion = readVersion(repoRoot, pkg);
+      const currentVersion = readVersion(repoRoot, pkg, scopeConfig.versionSource);
       const newVersion = computeNewVersion(currentVersion, args.bump, args.preid, pkg.ecosystem);
 
       console.error(`[${args.scope}] ${pkg.name}: ${currentVersion} -> ${newVersion}`);
 
       if (!args.dryRun) {
-        writeVersion(repoRoot, pkg, newVersion);
+        recordWritten(writeVersion(repoRoot, pkg, newVersion, scopeConfig.versionSource));
         // Verify
-        const written = readVersion(repoRoot, pkg);
+        const written = readVersion(repoRoot, pkg, scopeConfig.versionSource);
         if (written !== newVersion) {
           console.error(`ERROR: Verification failed for ${pkg.name}: expected ${newVersion}, got ${written}`);
           process.exit(1);
@@ -508,6 +792,7 @@ function main(): void {
         path: pkg.path,
         ecosystem: pkg.ecosystem,
         ...(pkg.buildSystem && { buildSystem: pkg.buildSystem }),
+        ...(pkg.groupId && { groupId: pkg.groupId }),
       });
     }
   }
@@ -516,6 +801,8 @@ function main(): void {
   const output = {
     scope: args.scope,
     packages: results,
+    // On --dry-run nothing is written, so this is empty by construction.
+    files: [...modifiedFiles].sort(),
   };
 
   console.log(JSON.stringify(output, null, 2));

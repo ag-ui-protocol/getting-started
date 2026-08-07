@@ -760,13 +760,48 @@ class TestSessionFrontendToolReconciliation:
             wire_map={"wire-1": "native-1"},  # wire-2 missing -> unresolvable
             store=store,
         )
-        # Not all non-void results resolved -> legacy fallback: a single
-        # synthetic user message (not None/empty). The resolvable result's store
-        # placeholder is still corrected (partial correction is safe — the value
-        # is real); only the model-facing continuation falls back.
-        assert instance.stream_prompts == ["approve returned: R2"]
+        # Not all non-void results resolved -> legacy fallback: a synthetic user
+        # message (not None/empty). The fallback forwards EVERY frontend result in
+        # the turn, not just the last — the model must see both answers. The
+        # resolvable result's store placeholder is still corrected (partial
+        # correction is safe — the value is real); only the model-facing
+        # continuation falls back.
+        assert instance.stream_prompts == ["approve returned: R1\napprove returned: R2"]
         assert _result_content(sm, "default", 1)[0]["toolResult"]["content"] == [
             {"text": "R1"}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_legacy_fallback_forwards_every_frontend_result(self, tmp_path):
+        # A parallel frontend-tool turn returns N results in one continuation. On
+        # the legacy path (here: no wire->native map, so nothing reconciles) the
+        # synthetic user message must carry EVERY result, in call order — not just
+        # the last one. Guards against re-introducing a ``break`` after the first
+        # result, which would silently drop the model's view of the other answers.
+        from strands.session.file_session_manager import FileSessionManager
+
+        sm = FileSessionManager(session_id="thread-multi-legacy", storage_dir=str(tmp_path))
+        instance = await _run_session_continuation(
+            sm,
+            "default",
+            messages=[
+                _payload_assistant("wire-1", "approve", "{}"),
+                _payload_assistant("wire-2", "setColor", '{"color": "blue"}'),
+                _payload_tool("wire-1", "R1"),
+                _payload_tool("wire-2", "R2"),
+            ],
+            tools=[_frontend_tool("approve"), _frontend_tool("setColor")],
+            wire_map={},  # nothing resolves -> legacy fallback for the whole turn
+            store=[
+                _store_tool_use("native-1", "approve", {}),
+                _store_placeholder("native-1"),
+                _store_tool_use("native-2", "setColor", {"color": "blue"}),
+                _store_placeholder("native-2"),
+            ],
+        )
+        # Both results reach the model, in the order the tools were called.
+        assert instance.stream_prompts == [
+            "approve returned: R1\nsetColor returned: R2"
         ]
 
     @pytest.mark.asyncio

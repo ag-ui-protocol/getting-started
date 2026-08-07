@@ -2,7 +2,8 @@
 """
 collect-accumulated-bumps.py
 
-Walks every package.json, pyproject.toml, and enrolled .NET Directory.Build.props
+Walks every package.json, pyproject.toml, enrolled .NET Directory.Build.props and
+enrolled Maven reactor pom.xml
 that changed between two git refs and reports which ones had their version field bumped. Used to build a
 release PR's summary from the accumulated state of the release/next branch.
 
@@ -24,6 +25,7 @@ import re
 import subprocess
 import sys
 import tomllib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -78,6 +80,23 @@ def parse_pyproject(content: str) -> tuple[str | None, str | None]:
 def parse_directory_build_props(content: str) -> str | None:
     match = re.search(r"<VersionPrefix(?:\s+[^>]*)?>([^<]+)</VersionPrefix>", content)
     return match.group(1) if match else None
+
+
+def parse_maven_pom(content: str) -> str | None:
+    """Read the reactor version: the <version> that is a DIRECT child of <project>.
+
+    A pom carries <version> for its parent, every dependency and every plugin, so
+    a regex would read the wrong one. Parse the XML and take the direct child.
+    """
+    ns = "{http://maven.apache.org/POM/4.0.0}"
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError:
+        return None
+    version = root.findtext(f"{ns}version")
+    if version is None:
+        version = root.findtext("version")
+    return version.strip() if version and version.strip() else None
 
 
 def load_scope_maps() -> tuple[dict[str, tuple[str, str]], dict[str, tuple[str, list[dict]]]]:
@@ -137,14 +156,25 @@ def main() -> None:
                 _, version_old = parse_pyproject(old_content)
             ecosystem_default = "python"
 
-        elif path in version_source_map and path.endswith("Directory.Build.props"):
+        elif path in version_source_map and path.endswith(
+            ("Directory.Build.props", "pom.xml")
+        ):
+            # Shared-version sources: one file drives every package in the scope.
+            # A Maven MODULE pom is not in version_source_map (it only repeats
+            # its <parent><version>), so it falls through to the else and is
+            # correctly ignored rather than double-counted.
+            parse = (
+                parse_directory_build_props
+                if path.endswith("Directory.Build.props")
+                else parse_maven_pom
+            )
             new_content = read_file_at_ref(head, path)
             old_content = read_file_at_ref(base, path)
             if new_content is None:
                 continue
-            version_new = parse_directory_build_props(new_content)
+            version_new = parse(new_content)
             if old_content is not None:
-                version_old = parse_directory_build_props(old_content)
+                version_old = parse(old_content)
             if not version_new or version_old == version_new:
                 continue
 

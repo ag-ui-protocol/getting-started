@@ -211,6 +211,10 @@ export const menuIntegrations = [
       "predictive_state_updates",
       "shared_state",
       "tool_based_generative_ui",
+      "a2ui_fixed_schema",
+      "a2ui_dynamic_schema",
+      "a2ui_advanced",
+      "a2ui_recovery",
     ],
   },
   {
@@ -274,7 +278,8 @@ export const menuIntegrations = [
     features: [
       "agentic_chat",
       "v1_agentic_chat",
-      // "backend_tool_rendering",
+      "backend_tool_rendering",
+      "interrupt",
       "human_in_the_loop",
       "agentic_generative_ui",
       "predictive_state_updates",
@@ -282,6 +287,9 @@ export const menuIntegrations = [
       "tool_based_generative_ui",
       "crew_chat",
       "error_flow",
+      "a2ui_dynamic_schema",
+      "a2ui_recovery",
+      "a2ui_fixed_schema",
     ],
   },
   // {
@@ -373,6 +381,36 @@ export const menuIntegrations = [
       "agentic_chat",
       "backend_tool_rendering",
       "shared_state",
+      "human_in_the_loop",
+      "tool_based_generative_ui",
+    ],
+  },
+  {
+    id: "claude-managed-agents-dotnet",
+    name: "Claude Managed Agents (.NET)",
+    features: [
+      "agentic_chat",
+      "backend_tool_rendering",
+      "human_in_the_loop",
+      "tool_based_generative_ui",
+    ],
+  },
+  {
+    id: "claude-managed-agents-python",
+    name: "Claude Managed Agents (Python)",
+    features: [
+      "agentic_chat",
+      "backend_tool_rendering",
+      "human_in_the_loop",
+      "tool_based_generative_ui",
+    ],
+  },
+  {
+    id: "claude-managed-agents-typescript",
+    name: "Claude Managed Agents (Typescript)",
+    features: [
+      "agentic_chat",
+      "backend_tool_rendering",
       "human_in_the_loop",
       "tool_based_generative_ui",
     ],

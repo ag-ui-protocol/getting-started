@@ -293,6 +293,39 @@ export const defaultApplyEvents = (
           if (mutation.stopPropagation !== true) {
             const { toolCallId, toolCallName, parentMessageId } = event as ToolCallStartEvent;
 
+            // Applying a start event must be idempotent. The same start can
+            // reach this reducer twice — a tool call already carried in
+            // `agent.messages` from an earlier run and then replayed by the
+            // backend (the HITL path does this when the run re-syncs after
+            // `respond()`), or one stream re-delivered over two transports.
+            // Appending unconditionally would leave the assistant message
+            // holding the id twice, and the second copy stays empty because
+            // TOOL_CALL_ARGS resolves to the first match. That malformed
+            // message is then what travels back to the provider on the next
+            // turn. Resolve the existing entry the same way TOOL_CALL_ARGS
+            // does, and do it before resolveOrCreateAssistantMessage so a
+            // replay can't append a stray empty assistant message either.
+            const ownerMessage = messages.find((m) =>
+              (m as AssistantMessage).toolCalls?.some((tc) => tc.id === toolCallId),
+            ) as AssistantMessage | undefined;
+            const existingToolCall = ownerMessage?.toolCalls?.find((tc) => tc.id === toolCallId);
+
+            if (existingToolCall) {
+              // Update the existing entry instead of pushing a second one, and
+              // leave `arguments` untouched — a start event carries none, so
+              // the copy already in state holds the only streamed args.
+              if (existingToolCall.function.name !== toolCallName) {
+                console.warn(
+                  `TOOL_CALL_START: tool call '${toolCallId}' already exists with name ` +
+                    `'${existingToolCall.function.name}' — updating it to '${toolCallName}'`,
+                );
+                existingToolCall.function.name = toolCallName;
+                applyMutation({ messages });
+              }
+
+              return emitUpdates();
+            }
+
             const targetMessage = resolveOrCreateAssistantMessage(
               messages,
               parentMessageId,

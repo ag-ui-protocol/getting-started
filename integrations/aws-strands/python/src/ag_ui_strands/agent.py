@@ -778,43 +778,48 @@ class StrandsAgent:
             # understands the context and can generate a proper conclusion.
             user_message = ""
             if pending_tool_result_ids and input_data.messages:
+                # Collect ALL trailing tool results (not just the first). A parallel
+                # frontend-tool turn sends N results in one continuation run; the model
+                # must see every answer.
+                _result_parts: list[str] = []
                 for msg in reversed(input_data.messages):
                     if msg.role == "tool" and hasattr(msg, "tool_call_id"):
                         tool_name = _tool_call_id_to_name.get(msg.tool_call_id)
                         if tool_name and tool_name in frontend_tool_names:
-                            # Forward the ACTUAL frontend tool result so the model
-                            # can act on the human's decision (e.g. an approval
-                            # resolving to {"approved": false}). Previously this
-                            # discarded ``msg.content`` and hardcoded a success
-                            # string, silently breaking HITL — the model was told
-                            # the tool "executed successfully with no return value"
-                            # regardless of what the human actually returned.
-                            # Only fall back to that synthetic acknowledgement when
-                            # the result is genuinely empty.
+                            # Forward the ACTUAL result so the model can act on the
+                            # human's decision (e.g. an approval resolving to
+                            # {"approved": false}). Hardcoding a success string here
+                            # silently breaks HITL — the model would be told the tool
+                            # "executed successfully with no return value" regardless
+                            # of what the human returned. Only use that synthetic
+                            # acknowledgement when the result is genuinely empty.
                             result_text = (
                                 msg.content
                                 if isinstance(msg.content, str)
                                 else flatten_content_to_text(msg.content)
                             )
                             if result_text and result_text.strip():
-                                user_message = f"{tool_name} returned: {result_text}"
+                                _result_parts.append(f"{tool_name} returned: {result_text}")
                             else:
-                                user_message = f"{tool_name} executed successfully with no return value."
+                                _result_parts.append(
+                                    f"{tool_name} executed successfully with no return value."
+                                )
                         else:
-                            # Could not resolve the executed tool's name from
-                            # input messages or session history. Leave the
-                            # continuation message empty rather than guessing:
+                            # Could not resolve this tool's name from input messages
+                            # or session history (e.g. a delta-only payload with no
+                            # assistant tool_calls). Skip it rather than guessing:
                             # picking an arbitrary frontend tool would feed false
                             # context to the LLM when several frontend tools exist.
-                            # Strands still has the real tool result in session
-                            # history to conclude the round-trip from.
+                            # Strands still has the real result in session history to
+                            # conclude the round-trip from.
                             logger.warning(
                                 f"Could not resolve tool name for tool_call_id={msg.tool_call_id} "
-                                f"from input messages or session history (assistant message with "
-                                f"tool_calls may be missing — delta-only payload). Leaving the "
-                                f"continuation message empty."
+                                f"from input messages or session history (delta-only payload). "
+                                f"Skipping this tool result in the continuation message."
                             )
+                    else:
                         break
+                user_message = "\n".join(reversed(_result_parts))
             elif input_data.messages:
                 for msg in reversed(input_data.messages):
                     if (msg.role == "user" or msg.role == "tool") and msg.content:
@@ -1044,9 +1049,26 @@ class StrandsAgent:
 
             try:
                 async for event in agent_stream:
-                    # If we've halted, consume remaining events silently to allow proper cleanup
+                    # Frontend-tool halt: STOP the loop rather than muting the
+                    # wire and draining it. The proxy tool returns a SUCCESSFUL
+                    # "Forwarded to client" placeholder, so Strands has every
+                    # reason to run another model cycle — and another. Draining
+                    # those cycles costs: frontend tool calls the client never
+                    # sees (so it can never answer them), real backend tool
+                    # side effects, phantom assistant turns persisted to the
+                    # session store, and RUN_FINISHED stuck behind work the
+                    # client is not watching. Single-agent Strands has no cycle
+                    # cap, so that tail is unbounded — a model that keeps
+                    # retrying the read never yields a terminal event at all.
+                    #
+                    # Safe here because the halt latches only AFTER Strands
+                    # appended the assistant toolUse + placeholder toolResult
+                    # and MessageAddedEvent synced agent state (see
+                    # SessionManager.register_hooks), so the next run's
+                    # reconcile still finds a placeholder to overwrite and the
+                    # wire->native map to key it by.
                     if halt_event_stream:
-                        continue
+                        break
 
                     logger.debug(f"Received event: {event}")
 
@@ -1228,9 +1250,26 @@ class StrandsAgent:
 
                     # Handle tool results from Strands for backend tool rendering
                     elif "message" in event and event["message"].get("role") == "user":
+                        # A deferred frontend-tool halt takes effect here — but
+                        # do NOT skip the message. In a parallel batch mixing a
+                        # frontend tool with backend tools, THIS message carries
+                        # the backend tools' real results, and dropping it loses
+                        # them permanently: the client's tool card never
+                        # resolves, the result never reaches MESSAGES_SNAPSHOT
+                        # (the only path into client-side history — the
+                        # TOOL_CALL_RESULT below is deliberately role-less and
+                        # is not history), and state_from_result /
+                        # custom_result_handler never fire. Consumers that
+                        # persist from the event stream then hold a transcript
+                        # whose toolUse has no toolResult, which the next run
+                        # replays straight to the model provider.
+                        #
+                        # Fall through instead: the per-item loop already skips
+                        # frontend placeholders (the client produces the real
+                        # result), so only genuine backend results go out. Stop
+                        # after the batch, before the next model cycle.
                         if pending_halt:
                             halt_event_stream = True
-                            continue
                         message_content = event["message"].get("content", [])
                         if not message_content or not isinstance(message_content, list):
                             continue
@@ -1404,6 +1443,14 @@ class StrandsAgent:
                                 )
                                 # Break inner loop — no further results should be emitted
                                 break
+
+                        # The batch is fully emitted; stop before Strands runs
+                        # another model cycle. Breaking HERE rather than relying
+                        # on the check at the top of the loop means termination
+                        # does not depend on Strands happening to yield one more
+                        # event after this message.
+                        if halt_event_stream:
+                            break
 
                     # Handle tool calls
                     elif "current_tool_use" in event and event["current_tool_use"]:
@@ -1907,8 +1954,16 @@ class StrandsAgent:
                 # The generator should complete naturally when we consume all events,
                 # but we still try to close it explicitly to be safe
                 try:
+                    # A frontend-tool halt breaks out of the loop with the
+                    # generator SUSPENDED at a yield, where ``ag_running`` is
+                    # False. The exhausted-generator check below would read
+                    # that as "already closed" and defer teardown to GC,
+                    # leaving the halted Strands cycle (and its model stream)
+                    # open. Close it explicitly instead.
+                    if halt_event_stream:
+                        await agent_stream.aclose()
                     # Check if generator is already closed/exhausted
-                    if not agent_stream.ag_running:
+                    elif not agent_stream.ag_running:
                         # Generator is already closed, nothing to do
                         pass
                     else:
