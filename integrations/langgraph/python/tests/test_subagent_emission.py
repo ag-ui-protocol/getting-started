@@ -7,6 +7,9 @@ from ag_ui.core import (
     TextMessageStartEvent,
     TextMessageContentEvent,
     ToolCallResultEvent,
+    ReasoningEncryptedValueEvent,
+    ReasoningMessageStartEvent,
+    ReasoningMessageContentEvent,
     SubagentStartedEvent,
     AssistantMessage,
 )
@@ -188,6 +191,37 @@ class TestDispatchStamping(unittest.TestCase):
         )
         self.assertEqual(ev.subagent_id, "tools:s1")  # its own id, unchanged (not re-stamped by chokepoint logic)
 
+    def test_stamps_encrypted_reasoning_value(self):
+        # REASONING_ENCRYPTED_VALUE is emitted for redacted_thinking blocks and
+        # for the accumulated signature at the end of a reasoning stream. Both
+        # sites sit inside the same reasoning stream whose REASONING_MESSAGE_END
+        # does get attributed, so leaving this one untagged splits a single
+        # subagent's reasoning across two owners: the client attributes the
+        # encrypted value to the parent while the surrounding reasoning events
+        # belong to the subagent.
+        agent = self._agent("tools:s1")
+        ev = agent._dispatch_event(
+            ReasoningEncryptedValueEvent(
+                type=EventType.REASONING_ENCRYPTED_VALUE,
+                subtype="message",
+                entity_id="r1",
+                encrypted_value="opaque",
+            )
+        )
+        self.assertEqual(ev.subagent_id, "tools:s1")
+
+    def test_does_not_stamp_encrypted_reasoning_outside_subagent(self):
+        agent = self._agent(None)
+        ev = agent._dispatch_event(
+            ReasoningEncryptedValueEvent(
+                type=EventType.REASONING_ENCRYPTED_VALUE,
+                subtype="message",
+                entity_id="r1",
+                encrypted_value="opaque",
+            )
+        )
+        self.assertIsNone(ev.subagent_id)
+
 
 async def _collect(agen):
     return [ev async for ev in agen]
@@ -245,6 +279,95 @@ class TestSnapshotIncludesSubagentMessages(unittest.TestCase):
         self.assertEqual(subagent_msgs[0].role, "assistant")
         self.assertEqual(subagent_msgs[0].content, "Hello world")
 
+    def test_subagent_reasoning_survives_the_snapshot(self):
+        # A subagent's reasoning lives only in its subgraph checkpoint, so it is absent
+        # from the main-graph MESSAGES_SNAPSHOT and the client's snapshot apply would drop
+        # the streamed reasoning message. The parent's reasoning does survive (utils
+        # converts LangChain reasoning content blocks), so this was the one message kind a
+        # subagent could produce that vanished at snapshot time.
+        agent = self._agent_with_active_run(current_subagent_id="tools:s1")
+        agent._dispatch_event(
+            ReasoningMessageStartEvent(
+                type=EventType.REASONING_MESSAGE_START, message_id="r1", role="reasoning"
+            )
+        )
+        agent._dispatch_event(
+            ReasoningMessageContentEvent(
+                type=EventType.REASONING_MESSAGE_CONTENT, message_id="r1", delta="think"
+            )
+        )
+
+        snap = self._snapshot(agent)
+        reasoning = [m for m in snap.messages if m.role == "reasoning"]
+        self.assertEqual(len(reasoning), 1)
+        self.assertEqual(reasoning[0].id, "r1")
+        self.assertEqual(reasoning[0].content, "think")
+        self.assertEqual(reasoning[0].subagent_id, "tools:s1")
+
+    def test_subagent_reasoning_keeps_its_encrypted_value_through_the_snapshot(self):
+        # The signature arrives on its own event. Reconstructing the snapshot message
+        # without it loses the protected reasoning, because a snapshot that contains the
+        # message looks authoritative and the client replaces the streamed one.
+        agent = self._agent_with_active_run(current_subagent_id="tools:s1")
+        agent._dispatch_event(
+            ReasoningMessageStartEvent(
+                type=EventType.REASONING_MESSAGE_START, message_id="r1", role="reasoning"
+            )
+        )
+        agent._dispatch_event(
+            ReasoningMessageContentEvent(
+                type=EventType.REASONING_MESSAGE_CONTENT, message_id="r1", delta="think"
+            )
+        )
+        agent._dispatch_event(
+            ReasoningEncryptedValueEvent(
+                type=EventType.REASONING_ENCRYPTED_VALUE,
+                subtype="message",
+                entity_id="r1",
+                encrypted_value="sig-abc",
+            )
+        )
+
+        snap = self._snapshot(agent)
+        reasoning = [m for m in snap.messages if m.role == "reasoning"]
+        self.assertEqual(len(reasoning), 1)
+        self.assertEqual(reasoning[0].encrypted_value, "sig-abc")
+        self.assertEqual(reasoning[0].subagent_id, "tools:s1")
+
+    def test_empty_subagent_reasoning_not_appended(self):
+        # Same rule as an empty assistant turn: no content, no bubble.
+        agent = self._agent_with_active_run(current_subagent_id="tools:s1")
+        agent._dispatch_event(
+            ReasoningMessageStartEvent(
+                type=EventType.REASONING_MESSAGE_START,
+                message_id="r-empty",
+                role="reasoning",
+            )
+        )
+        snap = self._snapshot(agent)
+        self.assertEqual([m for m in snap.messages if m.role == "reasoning"], [])
+
+    def test_checkpoint_state_snapshot_suppressed_inside_subagent(self):
+        # State belongs to the parent. While a subagent is active the checkpoint
+        # snapshot must withhold STATE_SNAPSHOT but still emit MESSAGES_SNAPSHOT,
+        # so the subagent's messages and their attribution survive without its
+        # subgraph state leaking into the parent's.
+        agent = self._agent_with_active_run(current_subagent_id="tools:s1")
+        events = asyncio.run(_collect(agent.get_state_and_messages_snapshots({})))
+        types = [e.type for e in events]
+        self.assertNotIn(EventType.STATE_SNAPSHOT, types)
+        self.assertIn(EventType.MESSAGES_SNAPSHOT, types)
+
+    def test_checkpoint_state_snapshot_emitted_for_parent(self):
+        # The same path with no subagent active is the control: the parent does
+        # emit STATE_SNAPSHOT, so the test above pins suppression rather than a
+        # path that never emits state at all.
+        agent = self._agent_with_active_run(current_subagent_id=None)
+        events = asyncio.run(_collect(agent.get_state_and_messages_snapshots({})))
+        types = [e.type for e in events]
+        self.assertIn(EventType.STATE_SNAPSHOT, types)
+        self.assertIn(EventType.MESSAGES_SNAPSHOT, types)
+
     def test_no_subagent_messages_leaves_snapshot_unchanged(self):
         # Backwards-compat: a run with no subagent messages (normal run or the
         # declared-subgraphs demo) yields the main-graph snapshot untouched.
@@ -269,6 +392,419 @@ class TestSnapshotIncludesSubagentMessages(unittest.TestCase):
         )
         snap = self._snapshot(agent)
         self.assertEqual(snap.messages, [])
+
+
+class TestNodeExitStateSuppression(unittest.IsolatedAsyncioTestCase):
+    """The third state-emission path: the node-exit STATE_SNAPSHOT in the stream
+    loop. Driven end to end through _handle_stream_events so the suppression is
+    pinned where it actually runs, not at a helper."""
+
+    async def _drive(self, in_subagent):
+        agent = _make_agent()
+
+        # The lane is derived from each event's own metadata by
+        # reconcile_subagents (nested checkpoint ns + lc_agent_name), never set
+        # by hand — so the metadata is what decides whether this node exit is
+        # inside a subagent.
+        if in_subagent:
+            sub_meta = {
+                "langgraph_node": "n",
+                "langgraph_checkpoint_ns": "tools:s1|model:inner",
+                "lc_agent_name": "researcher",
+            }
+        else:
+            sub_meta = {"langgraph_node": "n"}
+
+        async def fake_prepare(*args, **kwargs):
+            agent.active_run["schema_keys"] = {
+                "input": ["messages"], "output": ["messages"],
+                "config": [], "context": [],
+            }
+
+            async def gen():
+                yield {
+                    "event": "on_chain_start",
+                    "run_id": "run-1",
+                    "name": "n",
+                    "data": {},
+                    "metadata": {"langgraph_node": "n"},
+                }
+                # Node exit carrying a state update — this is what would
+                # normally produce a STATE_SNAPSHOT.
+                yield {
+                    "event": "on_chain_end",
+                    "run_id": "run-1",
+                    "name": "n",
+                    "data": {"output": {"custom_key": "from_graph"}},
+                    "metadata": sub_meta,
+                }
+
+            return {
+                "stream": gen(),
+                "state": MagicMock(values={"messages": []}),
+                "config": {"configurable": {"thread_id": "t1"}},
+            }
+
+        agent.prepare_stream = fake_prepare
+        final_state = MagicMock()
+        final_state.values = {"messages": []}
+        final_state.tasks = []
+        final_state.next = []
+        final_state.metadata = {"writes": {}}
+        agent.graph.aget_state = AsyncMock(return_value=final_state)
+
+        run_input = MagicMock()
+        run_input.run_id = "run-1"
+        run_input.thread_id = "t1"
+        run_input.forwarded_props = {}
+
+        collected = []
+        async for ev in agent._handle_stream_events(run_input):
+            collected.append(ev)
+        return collected
+
+    @staticmethod
+    def _node_exit_snapshots(collected):
+        """STATE_SNAPSHOTs produced by the node exit itself.
+
+        The end-of-run snapshots carry no raw_event and are the parent's — by
+        then the subagent has been drained — so they are not what this path is
+        about. Keying on the on_chain_end raw_event isolates the node-exit one.
+        """
+        return [
+            e for e in collected
+            if getattr(e, "type", None) == EventType.STATE_SNAPSHOT
+            and (getattr(e, "raw_event", None) or {}).get("event") == "on_chain_end"
+        ]
+
+    async def test_node_exit_state_snapshot_suppressed_inside_subagent(self):
+        collected = await self._drive(in_subagent=True)
+        self.assertEqual(
+            self._node_exit_snapshots(collected), [],
+            "a subagent must not emit STATE_SNAPSHOT; only the parent owns state",
+        )
+        # And nothing that did go out claims to be the subagent's state.
+        self.assertEqual(
+            [e for e in collected
+             if getattr(e, "type", None) == EventType.STATE_SNAPSHOT
+             and getattr(e, "subagent_id", None) is not None],
+            [],
+        )
+
+    async def test_node_exit_state_snapshot_emitted_for_parent(self):
+        # Control: the same node exit outside a subagent does emit one, so the
+        # test above pins suppression rather than a path that never fires.
+        collected = await self._drive(in_subagent=False)
+        self.assertTrue(
+            self._node_exit_snapshots(collected),
+            "parent should still emit a node-exit STATE_SNAPSHOT",
+        )
+
+
+class TestInterruptWithOpenSubagent(unittest.IsolatedAsyncioTestCase):
+    """An interrupt surfaces the pause by ENDING the run with RUN_FINISHED, and
+    the client's verifyEvents rejects RUN_FINISHED while any subagent is still
+    active. So a subagent suspended at a HITL interrupt must be finished before
+    the run ends, or every interrupted run with an open subagent hard-errors on
+    the client. drain_subagents was unit-tested in isolation but never on this
+    path, which is the one where the ordering actually matters."""
+
+    async def _drive(self, with_interrupt):
+        agent = _make_agent()
+
+        async def fake_prepare(*args, **kwargs):
+            agent.active_run["schema_keys"] = {
+                "input": ["messages"], "output": ["messages"],
+                "config": [], "context": [],
+            }
+
+            async def gen():
+                # A subagent opens and never closes: its task OnToolEnd never
+                # fires because the graph paused at an interrupt inside it.
+                yield {
+                    "event": "on_chain_start",
+                    "run_id": "run-1",
+                    "name": "n",
+                    "data": {},
+                    "metadata": {
+                        "langgraph_node": "n",
+                        "langgraph_checkpoint_ns": "tools:s1|model:inner",
+                        "lc_agent_name": "researcher",
+                    },
+                }
+
+            return {
+                "stream": gen(),
+                "state": MagicMock(values={"messages": []}),
+                "config": {"configurable": {"thread_id": "t1"}},
+            }
+
+        agent.prepare_stream = fake_prepare
+        final_state = MagicMock()
+        final_state.values = {"messages": []}
+        final_state.next = ["n"] if with_interrupt else []
+        final_state.metadata = {"writes": {}}
+        if with_interrupt:
+            task = MagicMock()
+            # Real strings, not mocks: AGUIInterrupt validates id as a str.
+            interrupt = MagicMock()
+            interrupt.id = "int-1"
+            interrupt.value = "please confirm"
+            task.interrupts = [interrupt]
+            final_state.tasks = [task]
+        else:
+            final_state.tasks = []
+        agent.graph.aget_state = AsyncMock(return_value=final_state)
+
+        run_input = MagicMock()
+        run_input.run_id = "run-1"
+        run_input.thread_id = "t1"
+        run_input.forwarded_props = {}
+
+        collected = []
+        async for ev in agent._handle_stream_events(run_input):
+            collected.append(ev)
+        return [getattr(e, "type", None) for e in collected], collected
+
+    async def test_open_subagent_is_finished_before_run_finished_on_interrupt(self):
+        types, collected = await self._drive(with_interrupt=True)
+
+        self.assertIn(EventType.SUBAGENT_STARTED, types)
+        self.assertIn(EventType.SUBAGENT_FINISHED, types)
+        self.assertIn(EventType.RUN_FINISHED, types)
+        self.assertLess(
+            types.index(EventType.SUBAGENT_FINISHED),
+            types.index(EventType.RUN_FINISHED),
+            "SUBAGENT_FINISHED must precede RUN_FINISHED or the client rejects the run",
+        )
+        # Exactly one terminal event, and it is last — nothing trails it.
+        terminal = [t for t in types if t in (EventType.RUN_FINISHED, EventType.RUN_ERROR)]
+        self.assertEqual(len(terminal), 1)
+        self.assertEqual(types[-1], EventType.RUN_FINISHED)
+
+    async def test_open_subagent_is_finished_before_run_finished_without_interrupt(self):
+        # Same invariant on the ordinary completion path.
+        types, _ = await self._drive(with_interrupt=False)
+        self.assertIn(EventType.SUBAGENT_FINISHED, types)
+        self.assertLess(
+            types.index(EventType.SUBAGENT_FINISHED),
+            types.index(EventType.RUN_FINISHED),
+        )
+        self.assertEqual(types[-1], EventType.RUN_FINISHED)
+
+    async def test_end_of_run_snapshots_are_not_attributed_to_the_open_subagent(self):
+        # current_subagent_id is cleared before the supervisor-level end-of-run
+        # events, so the final snapshots belong to the parent.
+        _, collected = await self._drive(with_interrupt=False)
+        for ev in collected:
+            if getattr(ev, "type", None) in (
+                EventType.STATE_SNAPSHOT,
+                EventType.MESSAGES_SNAPSHOT,
+            ):
+                self.assertIsNone(
+                    getattr(ev, "subagent_id", None),
+                    f"end-of-run {ev.type} must not be attributed to a subagent",
+                )
+
+    async def test_end_of_run_step_close_pairs_with_whoever_opened_it(self):
+        # STEP_* is different from the snapshots: a step is a matched pair, so its
+        # close belongs to whichever lane opened it even when that lane is a
+        # subagent and the run is ending. Reattributing the close to the parent
+        # just because current_subagent_id was cleared would emit
+        # `STEP_STARTED under s1` / `STEP_FINISHED under None` for one step.
+        #
+        # Safe with respect to the terminal rule because the step close happens
+        # before drain_subagents emits SUBAGENT_FINISHED, so the owner is still
+        # open at that point.
+        _, collected = await self._drive(with_interrupt=False)
+        types = [getattr(e, "type", None) for e in collected]
+        starts = [e for e in collected if getattr(e, "type", None) == EventType.STEP_STARTED]
+        finishes = [e for e in collected if getattr(e, "type", None) == EventType.STEP_FINISHED]
+
+        self.assertTrue(starts and finishes, f"expected a step pair, got {types}")
+        for start, finish in zip(starts, finishes):
+            self.assertEqual(start.step_name, finish.step_name)
+            self.assertEqual(
+                start.subagent_id, finish.subagent_id,
+                "a step's two halves must carry the same owner",
+            )
+
+        # And the close still precedes the subagent's terminal event.
+        self.assertLess(
+            types.index(EventType.STEP_FINISHED),
+            types.index(EventType.SUBAGENT_FINISHED),
+        )
+
+
+class TestClosedSubagentsNeverRestart(unittest.TestCase):
+    """SUBAGENT_FINISHED is terminal for the id it names.
+
+    reconcile_subagents emits SUBAGENT_STARTED for any id not currently in
+    `active_subagents`, and both _finish_subagent_on_task_end and drain_subagents
+    REMOVE the id from that dict when they close it. Nothing recorded that the id
+    had already been closed, so a single trailing event bearing the finished
+    subagent's namespace re-opened it: two SUBAGENT_STARTED and two terminals for
+    one invocation, and output after a terminal.
+    """
+
+    def test_finished_subagent_is_not_restarted_by_a_trailing_event(self):
+        ar = _run()
+        ar["subagent_segments"] = set()
+
+        ns = "tools:s1|model:x"
+        first = reconcile_subagents(ar, ns, "researcher", set())
+        self.assertEqual([e.type for e in first], [EventType.SUBAGENT_STARTED])
+
+        # The `task` delegation returns and the subagent is closed.
+        drained = drain_subagents(ar)
+        self.assertEqual([e.type for e in drained], [EventType.SUBAGENT_FINISHED])
+
+        # A trailing event from the same namespace arrives (the subagent's inner
+        # tooling can emit after its task tool returns).
+        again = reconcile_subagents(ar, ns, "researcher", set())
+        self.assertEqual(
+            [e.type for e in again], [],
+            "a closed subagent must not be re-opened by a trailing event",
+        )
+
+    def test_events_after_close_keep_their_true_owner(self):
+        ar = _run()
+        ar["subagent_segments"] = set()
+        ns = "tools:s1|model:x"
+
+        reconcile_subagents(ar, ns, "researcher", set())
+        drain_subagents(ar)
+        reconcile_subagents(ar, ns, "researcher", set())
+
+        self.assertEqual(
+            ar["current_subagent_id"], "tools:s1",
+            "the protocol permits attributing output to an already-finished subagent, "
+            "so trailing output keeps its true owner rather than becoming the parent's",
+        )
+
+    def test_closed_subagent_namespace_still_suppresses_state(self):
+        """Not re-opening a closed subagent must not hand its state to the parent.
+
+        Routing a trailing event from a closed subagent's namespace to the root lane
+        fixes the duplicate SUBAGENT_STARTED, but the state guards key on "is a
+        subagent open?" — so with the lane cleared they stop firing, and a trailing
+        node exit carrying the subagent's own state update escapes as an
+        UNATTRIBUTED parent STATE_SNAPSHOT. Suppression has to key on whether the
+        event came from a subagent's namespace at all, which is still true after the
+        subagent closed.
+        """
+        ar = _run()
+        ar["subagent_segments"] = set()
+        ns = "tools:s1|model:x"
+
+        reconcile_subagents(ar, ns, "researcher", set())
+        drain_subagents(ar)
+        reconcile_subagents(ar, ns, "researcher", set())
+
+        self.assertEqual(
+            ar["current_subagent_id"], "tools:s1",
+            "attribution follows the namespace even after the subagent closed; blanking "
+            "it would reparent the trailing output — and its state — to the parent",
+        )
+
+    def test_root_events_are_not_attributed(self):
+        # Control: a genuine root event stays unattributed, so the parent's own state is
+        # still emitted.
+        ar = _run()
+        ar["subagent_segments"] = set()
+        reconcile_subagents(ar, "model:root-uuid", None, set())
+        self.assertIsNone(ar["current_subagent_id"])
+
+    def test_a_different_subagent_still_starts_normally(self):
+        # Control: closing s1 must not suppress an unrelated subagent.
+        ar = _run()
+        ar["subagent_segments"] = set()
+
+        reconcile_subagents(ar, "tools:s1|model:x", "researcher", set())
+        drain_subagents(ar)
+        events = reconcile_subagents(ar, "tools:s2|model:y", "writer", set())
+
+        self.assertEqual([e.type for e in events], [EventType.SUBAGENT_STARTED])
+        self.assertEqual(events[0].subagent_id, "tools:s2")
+
+    def test_closed_set_is_per_run(self):
+        # A fresh run reuses ids freely; the closed set is run-scoped like
+        # active_subagents.
+        ar = _run()
+        ar["subagent_segments"] = set()
+        reconcile_subagents(ar, "tools:s1|model:x", "researcher", set())
+        drain_subagents(ar)
+
+        fresh = _run()
+        fresh["subagent_segments"] = set()
+        events = reconcile_subagents(fresh, "tools:s1|model:x", "researcher", set())
+        self.assertEqual([e.type for e in events], [EventType.SUBAGENT_STARTED])
+
+
+class TestStepOwnership(unittest.TestCase):
+    """A step's STEP_FINISHED must carry the lane that STARTED it.
+
+    In the stream loop reconcile_subagents runs before handle_node_change, so by
+    the time the previous node's step is closed, current_subagent_id already points
+    at the NEW lane. Leaving STEP_FINISHED to the dispatch chokepoint therefore
+    pairs `STEP_STARTED research` under s1 with `STEP_FINISHED research` under s2 —
+    a step whose two halves belong to different owners.
+    """
+
+    def _agent(self):
+        agent = _make_agent()
+        agent.active_run = {
+            "id": "run-1",
+            "node_name": None,
+            "current_subagent_id": None,
+            "active_subagents": {},
+            "subagent_messages": {},
+        }
+        return agent
+
+    def test_step_finished_carries_the_lane_that_started_the_step(self):
+        agent = self._agent()
+
+        # s1 opens the `research` step.
+        agent.active_run["current_subagent_id"] = "s1"
+        started = list(agent.handle_node_change("research"))
+        self.assertEqual([e.type for e in started], [EventType.STEP_STARTED])
+        self.assertEqual(started[0].subagent_id, "s1")
+
+        # An event from s2 arrives; reconcile_subagents switches the lane BEFORE
+        # handle_node_change closes s1's step.
+        agent.active_run["current_subagent_id"] = "s2"
+        transition = list(agent.handle_node_change("write"))
+
+        self.assertEqual(
+            [e.type for e in transition],
+            [EventType.STEP_FINISHED, EventType.STEP_STARTED],
+        )
+        finished, next_started = transition
+        self.assertEqual(finished.step_name, "research")
+        self.assertEqual(
+            finished.subagent_id, "s1",
+            "STEP_FINISHED must belong to the lane that opened the step, not the "
+            "lane whose event happened to trigger the transition",
+        )
+        self.assertEqual(next_started.step_name, "write")
+        self.assertEqual(next_started.subagent_id, "s2")
+
+    def test_parent_step_closed_while_a_subagent_is_active_stays_unattributed(self):
+        # The reverse direction: a step the parent opened must not acquire a
+        # subagent's id just because a subagent became active before it closed.
+        agent = self._agent()
+        list(agent.handle_node_change("supervise"))
+
+        agent.active_run["current_subagent_id"] = "s1"
+        transition = list(agent.handle_node_change("research"))
+
+        finished = transition[0]
+        self.assertEqual(finished.step_name, "supervise")
+        self.assertIsNone(
+            finished.subagent_id,
+            "a step the parent opened belongs to the parent when it closes",
+        )
 
 
 class TestErrorOpenSubagents(unittest.TestCase):
