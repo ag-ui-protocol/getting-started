@@ -3,7 +3,7 @@ import { HttpEvent, HttpEventType } from "../../run/http-request";
 import { parseProtoStream } from "../proto";
 import * as proto from "@ag-ui/proto";
 import { BaseEvent, EventType } from "@ag-ui/core";
-import { Subject, of, throwError } from "rxjs";
+import { firstValueFrom, of, Subject, throwError, toArray } from "rxjs";
 import { describe, it, expect, vi, beforeEach, Mock, test } from "vitest";
 
 // Mock dependencies
@@ -55,6 +55,35 @@ describe("transformHttpEventStream", () => {
     // Then
     expect(parseProtoStream).toHaveBeenCalled();
     expect(receivedEvents).toEqual([mockBaseEvent]);
+  });
+
+  test("should not drop events from a synchronous cold SSE source", async () => {
+    const headers = new Headers([["content-type", "text/event-stream"]]);
+    const data = new TextEncoder().encode(
+      'data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"msg-1","delta":"hello"}\n\n',
+    );
+
+    const result$ = transformHttpEventStream(
+      of(
+        {
+          type: HttpEventType.HEADERS,
+          status: 200,
+          headers,
+        },
+        {
+          type: HttpEventType.DATA,
+          data,
+        },
+      ),
+    );
+
+    await expect(firstValueFrom(result$.pipe(toArray()))).resolves.toEqual([
+      {
+        type: EventType.TEXT_MESSAGE_CONTENT,
+        messageId: "msg-1",
+        delta: "hello",
+      },
+    ]);
   });
 
   test("should emit RUN_ERROR and complete on AbortError without erroring", () => {

@@ -1,5 +1,5 @@
 import { HttpEvent, HttpEventType } from "../../run/http-request";
-import { firstValueFrom, Subject, take } from "rxjs";
+import { firstValueFrom, of, Subject, take, toArray } from "rxjs";
 import {
   EventType,
   TextMessageStartEvent,
@@ -71,6 +71,40 @@ describe("parseProtoStream", () => {
     expect(receivedEvent.role).toEqual(originalEvent.role);
     // Complete the stream
     chunk$.complete();
+  });
+
+  it("should not drop events from a synchronous cold protobuf source", async () => {
+    const headers = new Headers();
+    headers.append("Content-Type", proto.AGUI_MEDIA_TYPE);
+
+    const originalEvent = {
+      type: EventType.TEXT_MESSAGE_CONTENT,
+      messageId: "msg123",
+      delta: "Hello world",
+      timestamp: Date.now(),
+    };
+    const encodedEvent = eventEncoder.encodeBinary(originalEvent);
+
+    const event$ = transformHttpEventStream(
+      of(
+        {
+          type: HttpEventType.HEADERS,
+          status: 200,
+          headers,
+        },
+        {
+          type: HttpEventType.DATA,
+          data: encodedEvent,
+        },
+      ),
+    );
+
+    const events = await firstValueFrom(event$.pipe(toArray()));
+
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toEqual(originalEvent.type);
+    expect((events[0] as TextMessageContentEvent).messageId).toEqual(originalEvent.messageId);
+    expect((events[0] as TextMessageContentEvent).delta).toEqual(originalEvent.delta);
   });
 
   it("should handle multiple protobuf events in a single chunk", async () => {
