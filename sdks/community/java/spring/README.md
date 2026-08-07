@@ -1,7 +1,7 @@
 # ag-ui-spring
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-[![Java](https://img.shields.io/badge/Java-21%2B-orange.svg)](https://adoptium.net/)
+[![Java](https://img.shields.io/badge/Java-17%2B-orange.svg)](https://adoptium.net/)
 
 Spring integrations for the [**AG-UI protocol**](https://docs.ag-ui.com), built on
 top of the framework-agnostic `ag-ui` Java
@@ -58,7 +58,7 @@ Portal rejects SNAPSHOT dependencies).
 
 ## Requirements
 
-- **Java 21+**
+- **Java 17+**
 - **Spring Boot 4.1.x** / **Spring AI 2.x**
 - The `ag-ui` artifacts (`com.ag-ui.community:java-core`, `:java-server`) — resolved from
   Maven Central (currently `0.1.0`; see `ag-ui.version` in the root POM).
