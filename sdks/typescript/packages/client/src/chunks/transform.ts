@@ -107,6 +107,30 @@ export const transformChunks =
       return event;
     };
 
+    /** Owner of the currently open stream, or undefined when none is open / untagged. */
+    const pendingStreamOwner = (): string | undefined => {
+      if (mode === "text") return textMessageFields?.subagentId;
+      if (mode === "tool") return toolCallFields?.subagentId;
+      if (mode === "reasoning") return reasoningMessageFields?.subagentId;
+      return undefined;
+    };
+
+    // #7 — a chunk that reuses an open stream's id under a DIFFERENT owner is a
+    // contradiction the defined continuation-owner rule forbids. Propagating the tag onto
+    // synthesized CONTENT surfaces it to verifyEvents, but only when the chunk carries a
+    // delta; a compact chunk with attribution and no delta emits nothing, so the
+    // disagreement would never be seen. Rejecting here covers both shapes uniformly, and
+    // matches how this transform already reports malformed chunk input.
+    const assertChunkOwner = (incoming: string | undefined, entityKind: string, entityId: string) => {
+      if (incoming === undefined) return;
+      const owner = pendingStreamOwner();
+      if (owner !== undefined && owner !== incoming) {
+        throw new Error(
+          `Cannot continue ${entityKind} '${entityId}': chunk subagentId '${incoming}' does not match the open stream's subagent '${owner}'.`,
+        );
+      }
+    };
+
     const closePendingEvent = () => {
       if (mode === "text") {
         return [closeTextMessage()];
@@ -166,10 +190,31 @@ export const transformChunks =
           // has already ended, since a consumer grouping by subagent would attach it
           // to a group it had already marked complete.
           case EventType.SUBAGENT_FINISHED:
-          case EventType.SUBAGENT_ERROR:
-            return [...closePendingEvent(), event];
+          case EventType.SUBAGENT_ERROR: {
+            // Only when the finishing subagent OWNS the pending stream. There is one
+            // global pending stream here, so closing on any terminal broke unrelated
+            // lanes: with two subagents running, s2 finishing would close s1's open
+            // message, and because continuation chunks omit messageId the next s1 chunk
+            // then threw "First TEXT_MESSAGE_CHUNK must have a messageId".
+            const terminalOwner = (event as { subagentId?: string }).subagentId;
+            if (terminalOwner !== undefined && pendingStreamOwner() === terminalOwner) {
+              return [...closePendingEvent(), event];
+            }
+            return [event];
+          }
           case EventType.TEXT_MESSAGE_CHUNK:
             const messageChunkEvent = event as TextMessageChunkEvent;
+            if (
+              mode === "text" &&
+              (messageChunkEvent.messageId === undefined ||
+                messageChunkEvent.messageId === textMessageFields?.messageId)
+            ) {
+              assertChunkOwner(
+                messageChunkEvent.subagentId,
+                "text message",
+                textMessageFields!.messageId,
+              );
+            }
             const textMessageResult = [];
             if (
               // we are not in a text message
@@ -239,6 +284,17 @@ export const transformChunks =
             return textMessageResult;
           case EventType.TOOL_CALL_CHUNK:
             const toolCallChunkEvent = event as ToolCallChunkEvent;
+            if (
+              mode === "tool" &&
+              (toolCallChunkEvent.toolCallId === undefined ||
+                toolCallChunkEvent.toolCallId === toolCallFields?.toolCallId)
+            ) {
+              assertChunkOwner(
+                toolCallChunkEvent.subagentId,
+                "tool call",
+                toolCallFields!.toolCallId,
+              );
+            }
             const toolMessageResult = [];
             if (
               // we are not in a text message
@@ -311,6 +367,17 @@ export const transformChunks =
             return toolMessageResult;
           case EventType.REASONING_MESSAGE_CHUNK:
             const reasoningChunkEvent = event as ReasoningMessageChunkEvent;
+            if (
+              mode === "reasoning" &&
+              (reasoningChunkEvent.messageId === undefined ||
+                reasoningChunkEvent.messageId === reasoningMessageFields?.messageId)
+            ) {
+              assertChunkOwner(
+                reasoningChunkEvent.subagentId,
+                "reasoning message",
+                reasoningMessageFields!.messageId,
+              );
+            }
             const reasoningMessageResult = [];
             if (
               // we are not in a reasoning message

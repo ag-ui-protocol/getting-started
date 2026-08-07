@@ -8,6 +8,8 @@ from ag_ui.core import (
     TextMessageContentEvent,
     ToolCallResultEvent,
     ReasoningEncryptedValueEvent,
+    ReasoningMessageStartEvent,
+    ReasoningMessageContentEvent,
     SubagentStartedEvent,
     AssistantMessage,
 )
@@ -236,8 +238,6 @@ class TestSnapshotIncludesSubagentMessages(unittest.TestCase):
         agent.active_run = {
             "id": "run-1",
             "current_subagent_id": current_subagent_id,
-            # reconcile_subagents sets both; state suppression keys on the namespace.
-            "current_subagent_ns": current_subagent_id,
             "active_subagents": {},
             "subagent_messages": {},
             "subagent_tool_call_owner": {},
@@ -278,6 +278,44 @@ class TestSnapshotIncludesSubagentMessages(unittest.TestCase):
         self.assertEqual(subagent_msgs[0].id, "sub-msg-1")
         self.assertEqual(subagent_msgs[0].role, "assistant")
         self.assertEqual(subagent_msgs[0].content, "Hello world")
+
+    def test_subagent_reasoning_survives_the_snapshot(self):
+        # A subagent's reasoning lives only in its subgraph checkpoint, so it is absent
+        # from the main-graph MESSAGES_SNAPSHOT and the client's snapshot apply would drop
+        # the streamed reasoning message. The parent's reasoning does survive (utils
+        # converts LangChain reasoning content blocks), so this was the one message kind a
+        # subagent could produce that vanished at snapshot time.
+        agent = self._agent_with_active_run(current_subagent_id="tools:s1")
+        agent._dispatch_event(
+            ReasoningMessageStartEvent(
+                type=EventType.REASONING_MESSAGE_START, message_id="r1", role="reasoning"
+            )
+        )
+        agent._dispatch_event(
+            ReasoningMessageContentEvent(
+                type=EventType.REASONING_MESSAGE_CONTENT, message_id="r1", delta="think"
+            )
+        )
+
+        snap = self._snapshot(agent)
+        reasoning = [m for m in snap.messages if m.role == "reasoning"]
+        self.assertEqual(len(reasoning), 1)
+        self.assertEqual(reasoning[0].id, "r1")
+        self.assertEqual(reasoning[0].content, "think")
+        self.assertEqual(reasoning[0].subagent_id, "tools:s1")
+
+    def test_empty_subagent_reasoning_not_appended(self):
+        # Same rule as an empty assistant turn: no content, no bubble.
+        agent = self._agent_with_active_run(current_subagent_id="tools:s1")
+        agent._dispatch_event(
+            ReasoningMessageStartEvent(
+                type=EventType.REASONING_MESSAGE_START,
+                message_id="r-empty",
+                role="reasoning",
+            )
+        )
+        snap = self._snapshot(agent)
+        self.assertEqual([m for m in snap.messages if m.role == "reasoning"], [])
 
     def test_checkpoint_state_snapshot_suppressed_inside_subagent(self):
         # State belongs to the parent. While a subagent is active the checkpoint
@@ -599,7 +637,7 @@ class TestClosedSubagentsNeverRestart(unittest.TestCase):
             "a closed subagent must not be re-opened by a trailing event",
         )
 
-    def test_events_after_close_are_not_attributed_to_the_closed_subagent(self):
+    def test_events_after_close_keep_their_true_owner(self):
         ar = _run()
         ar["subagent_segments"] = set()
         ns = "tools:s1|model:x"
@@ -608,10 +646,10 @@ class TestClosedSubagentsNeverRestart(unittest.TestCase):
         drain_subagents(ar)
         reconcile_subagents(ar, ns, "researcher", set())
 
-        self.assertIsNone(
-            ar["current_subagent_id"],
-            "output arriving after a subagent's terminal event must not be "
-            "attributed to it",
+        self.assertEqual(
+            ar["current_subagent_id"], "tools:s1",
+            "the protocol permits attributing output to an already-finished subagent, "
+            "so trailing output keeps its true owner rather than becoming the parent's",
         )
 
     def test_closed_subagent_namespace_still_suppresses_state(self):
@@ -633,19 +671,19 @@ class TestClosedSubagentsNeverRestart(unittest.TestCase):
         drain_subagents(ar)
         reconcile_subagents(ar, ns, "researcher", set())
 
-        self.assertIsNone(ar["current_subagent_id"], "closed subagent owns nothing")
-        self.assertTrue(
-            ar.get("current_subagent_ns"),
-            "the event is still inside a subagent's namespace, so state stays suppressed",
+        self.assertEqual(
+            ar["current_subagent_id"], "tools:s1",
+            "attribution follows the namespace even after the subagent closed; blanking "
+            "it would reparent the trailing output — and its state — to the parent",
         )
 
-    def test_root_events_are_not_marked_as_subagent_namespace(self):
-        # Control: a genuine root event must not suppress the parent's own state.
+    def test_root_events_are_not_attributed(self):
+        # Control: a genuine root event stays unattributed, so the parent's own state is
+        # still emitted.
         ar = _run()
         ar["subagent_segments"] = set()
         reconcile_subagents(ar, "model:root-uuid", None, set())
         self.assertIsNone(ar["current_subagent_id"])
-        self.assertFalsy = self.assertFalse(ar.get("current_subagent_ns"))
 
     def test_a_different_subagent_still_starts_normally(self):
         # Control: closing s1 must not suppress an unrelated subagent.

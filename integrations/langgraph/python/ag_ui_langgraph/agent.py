@@ -53,6 +53,7 @@ from ag_ui.core import (
     FunctionCall,
     ToolCall as AGUIToolCall,
     ToolMessage as AGUIToolMessage,
+    ReasoningMessage,
     CustomEvent,
     Interrupt as AGUIInterrupt,
     MessagesSnapshotEvent,
@@ -235,21 +236,21 @@ def reconcile_subagents(active_run, ns, lc_agent_name, subgraphs) -> list:
     # emit after the `task` tool returns — re-opened it: two SUBAGENT_STARTED and two
     # terminals for one invocation, plus output attributed after a terminal.
     # Trailing events fall back to the parent lane instead.
-    # Which subagent NAMESPACE this event came from, independent of whether that
-    # subagent is still open. State suppression keys on this rather than on
-    # current_subagent_id: a trailing event from a closed subagent still carries the
-    # SUBAGENT'S state, so routing it to the root lane below would otherwise let a
-    # node exit emit that state as an unattributed parent STATE_SNAPSHOT — handing the
-    # parent a subagent's partial view, which is the one thing state ownership forbids.
-    active_run["current_subagent_ns"] = new_id
-
-    closed = active_run.setdefault("closed_subagents", set())
-    if new_id is not None and new_id in closed:
-        new_id = None
-
+    # Attribution follows the event's namespace even after that subagent closed. The
+    # protocol deliberately allows a tag to name an already-finished subagent, so
+    # blanking it here would silently reparent the subagent's trailing output — and its
+    # state — to the parent, which is exactly what attribution exists to prevent. Only
+    # the SUBAGENT_STARTED emission is gated, since re-opening a closed id would give one
+    # invocation two starts and two terminals.
     active_run["current_subagent_id"] = new_id
+    closed = active_run.setdefault("closed_subagents", set())
+
     events = []
-    if new_id is not None and new_id not in active_run["active_subagents"]:
+    if (
+        new_id is not None
+        and new_id not in active_run["active_subagents"]
+        and new_id not in closed
+    ):
         # Prefer the declared subagent_type + description captured from the
         # `task` delegation tool (see _capture_subagent_task_meta); fall back to
         # the runtime lc_agent_name when no task metadata was captured.
@@ -282,7 +283,6 @@ def drain_subagents(active_run) -> list:
     # Terminal for these ids — see reconcile_subagents.
     active_run.setdefault("closed_subagents", set()).update(ids)
     active_run["current_subagent_id"] = None
-    active_run["current_subagent_ns"] = None
     return events
 
 
@@ -304,7 +304,6 @@ def error_open_subagents(active_run, message: str) -> list:
     # Terminal for these ids — see reconcile_subagents.
     active_run.setdefault("closed_subagents", set()).update(ids)
     active_run["current_subagent_id"] = None
-    active_run["current_subagent_ns"] = None
     return events
 
 
@@ -618,7 +617,27 @@ class LangGraphAgent:
                 }
             return entry
 
-        if etype == EventType.TEXT_MESSAGE_START and getattr(event, "subagent_id", None):
+        if etype == EventType.REASONING_MESSAGE_START and getattr(event, "subagent_id", None):
+            # A subagent's reasoning lives only in its subgraph checkpoint, exactly like
+            # its text and tool calls, so it is absent from the main-graph
+            # MESSAGES_SNAPSHOT and the client's snapshot apply would drop the streamed
+            # reasoning message. The parent's reasoning does survive (utils converts
+            # LangChain reasoning content blocks into ReasoningMessages), so without this
+            # a subagent's reasoning was the one kind that vanished at snapshot time.
+            entry = sub_msgs.get(event.message_id)
+            if entry is None:
+                sub_msgs[event.message_id] = {
+                    "kind": "reasoning",
+                    "id": event.message_id,
+                    "role": "reasoning",
+                    "content": "",
+                    "subagent_id": event.subagent_id,
+                }
+        elif etype == EventType.REASONING_MESSAGE_CONTENT:
+            entry = sub_msgs.get(event.message_id)
+            if entry is not None and entry.get("kind") == "reasoning":
+                entry["content"] += getattr(event, "delta", "") or ""
+        elif etype == EventType.TEXT_MESSAGE_START and getattr(event, "subagent_id", None):
             entry = ensure_assistant_entry(event.message_id, event.subagent_id)
             entry["role"] = getattr(event, "role", "assistant") or "assistant"
         elif etype == EventType.TEXT_MESSAGE_CONTENT:
@@ -973,12 +992,12 @@ class LangGraphAgent:
                             # not yet run, so current_graph_state does not yet reflect
                             # the forthcoming state update.
                             self.active_run["state_reliable"] = False
-                    elif self.active_run.get("current_subagent_ns"):
+                    elif self.active_run.get("current_subagent_id"):
                         # Subagents don't emit STATE_SNAPSHOT — only the parent
                         # agent's state is surfaced. The subagent's messages still
                         # reach the client via MESSAGES_SNAPSHOT, so nothing is lost.
-                        # Keyed on the namespace, not the open lane: a trailing event
-                        # from an already-closed subagent still carries ITS state.
+                        # The lane survives a close (see reconcile_subagents), so a
+                        # trailing event from a finished subagent stays suppressed.
                         pass
                     else:
                         yield self._dispatch_event(
@@ -1025,7 +1044,6 @@ class LangGraphAgent:
             # would linger and mis-stamp these as the subagent's. Clear it before
             # emitting them; drain_subagents below still finishes open subagents.
             self.active_run["current_subagent_id"] = None
-            self.active_run["current_subagent_ns"] = None
 
             if self.active_run.get("node_name") != node_name:
                 for ev in self.handle_node_change(node_name):
@@ -2265,7 +2283,7 @@ class LangGraphAgent:
                 # it as a snapshot. That deferred snapshot carries no subagent_id,
                 # so it would reach the consumer looking like the parent's own
                 # state — the exact outcome this guard exists to stop.
-                if not self.active_run.get("current_subagent_ns"):
+                if not self.active_run.get("current_subagent_id"):
                     self.active_run["manually_emitted_state"] = event["data"]
                     yield self._dispatch_event(
                         StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot=self.get_state_snapshot(self.active_run["manually_emitted_state"]), raw_event=event)
@@ -2741,7 +2759,7 @@ class LangGraphAgent:
         # its (subgraph) state is not surfaced. The MESSAGES_SNAPSHOT below is
         # still emitted and carries the subagent's messages (merged + tagged), so
         # attribution and history survive without leaking subagent state.
-        if not self.active_run.get("current_subagent_ns"):
+        if not self.active_run.get("current_subagent_id"):
             yield self._dispatch_event(
                 StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot=self.get_state_snapshot(state_values))
             )
@@ -2789,6 +2807,19 @@ class LangGraphAgent:
         # 1. This run's freshly-streamed subagent messages.
         for entry in sub_msgs.values():
             if entry["id"] in existing_ids:
+                continue
+            if entry["kind"] == "reasoning":
+                if not entry["content"]:
+                    continue
+                agui_messages.append(
+                    ReasoningMessage(
+                        id=entry["id"],
+                        role="reasoning",
+                        content=entry["content"],
+                        subagent_id=entry["subagent_id"],
+                    )
+                )
+                existing_ids.add(entry["id"])
                 continue
             if entry["kind"] == "tool":
                 agui_messages.append(

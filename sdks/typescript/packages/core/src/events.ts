@@ -350,18 +350,28 @@ export const ReasoningEncryptedValueEventSchema = BaseEventSchema.extend({
   subagentId: z.string().optional(),
 });
 
+// The optional fields accept `null` and treat it as omitted, for the same reason
+// ToolCallStartEvent.parentMessageId does: .NET producers serialize optional fields as
+// JSON `null` (System.Text.Json), so a schema that rejected null would fail on a stream
+// the .NET SDK considers valid — the interop regression this repo has already fixed once.
+const nullableOptionalString = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((v) => v ?? undefined);
+
 export const SubagentStartedEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.SUBAGENT_STARTED),
   subagentId: z.string(),
   name: z.string(),
-  description: z.string().optional(),
-  parentSubagentId: z.string().optional(),
+  description: nullableOptionalString,
+  parentSubagentId: nullableOptionalString,
   // Link back to the tool call (and the message that held it) that spawned this
   // subagent, for the agents-as-tools pattern (e.g. deepagents `task`). Lets a
   // consumer correlate the subagent to its spawning call without inspecting
   // rawEvent.metadata.
-  parentToolCallId: z.string().optional(),
-  parentMessageId: z.string().optional(),
+  parentToolCallId: nullableOptionalString,
+  parentMessageId: nullableOptionalString,
 });
 
 export const SubagentFinishedEventSchema = BaseEventSchema.extend({
@@ -375,7 +385,7 @@ export const SubagentErrorEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.SUBAGENT_ERROR),
   subagentId: z.string(),
   message: z.string(),
-  code: z.string().optional(),
+  code: nullableOptionalString,
 });
 
 export const EventSchemas = z.discriminatedUnion("type", [

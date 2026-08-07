@@ -15,6 +15,11 @@ export const verifyEvents =
     // Activity messages are keyed by their own messageId and continued by
     // ACTIVITY_DELTA, so they need the same owner tracking as text messages.
     let activeActivities = new Map<string, { subagentId?: string }>(); // activity ID -> owner
+    // Reasoning messages are opened by REASONING_MESSAGE_START and continued by
+    // REASONING_MESSAGE_CONTENT/END, REASONING_END and REASONING_ENCRYPTED_VALUE, all
+    // keyed by the same id — the last ID-keyed entity that had no owner check, so an
+    // s2 delta could be appended to the reasoning message minted for s1.
+    let activeReasoning = new Map<string, { subagentId?: string }>(); // reasoning ID -> owner
     let runFinished = false;
     let runError = false; // New flag to track if RUN_ERROR has been sent
     // New flags to track first/last event requirements
@@ -43,6 +48,7 @@ export const verifyEvents =
       activeMessages.clear();
       activeToolCalls.clear();
       activeActivities.clear();
+      activeReasoning.clear();
       activeSteps.clear();
       activeSubagents.clear();
       closedSubagents.clear();
@@ -324,7 +330,51 @@ export const verifyEvents =
           // the same defect the text-message and tool-call checks prevent.
           case EventType.ACTIVITY_SNAPSHOT: {
             const messageId = (event as any).messageId;
-            activeActivities.set(messageId, { subagentId: (event as any).subagentId });
+            // Only a REPLACING snapshot re-mints the activity and so re-owns it. With
+            // replace:false the reducer leaves the existing message alone, so overwriting
+            // the tracked owner here would let a following ACTIVITY_DELTA under the new
+            // tag patch a message still owned by someone else.
+            const isNew = !activeActivities.has(messageId);
+            if (isNew || (event as any).replace === true) {
+              activeActivities.set(messageId, { subagentId: (event as any).subagentId });
+            }
+            return of(event);
+          }
+
+          case EventType.REASONING_MESSAGE_START: {
+            const messageId = (event as any).messageId;
+            activeReasoning.set(messageId, { subagentId: (event as any).subagentId });
+            return of(event);
+          }
+
+          case EventType.REASONING_MESSAGE_CONTENT:
+          case EventType.REASONING_MESSAGE_END: {
+            const messageId = (event as any).messageId;
+            const subErr = subagentTagError(
+              eventType,
+              (event as any).subagentId,
+              activeReasoning.get(messageId),
+              "reasoning message",
+              messageId,
+            );
+            if (subErr) return throwError(() => subErr);
+            if (eventType === EventType.REASONING_MESSAGE_END) {
+              activeReasoning.delete(messageId);
+            }
+            return of(event);
+          }
+
+          case EventType.REASONING_ENCRYPTED_VALUE: {
+            // Continues a reasoning entity by entityId rather than messageId.
+            const entityId = (event as any).entityId;
+            const subErr = subagentTagError(
+              eventType,
+              (event as any).subagentId,
+              activeReasoning.get(entityId),
+              "reasoning message",
+              entityId,
+            );
+            if (subErr) return throwError(() => subErr);
             return of(event);
           }
 

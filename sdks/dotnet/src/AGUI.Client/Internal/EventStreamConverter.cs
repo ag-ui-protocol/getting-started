@@ -30,9 +30,12 @@ internal static class EventStreamConverter
         JsonSerializerOptions jsonSerializerOptions,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        // messageId -> owner, learned from whichever event opened or created it. The
-        // builders emit updates keyed by MessageId, and continuation events carry the tag
-        // too, so either source resolves the owner.
+        // entityId -> owner, where the entity is a messageId or a toolCallId. Two keys are
+        // needed because not every message-producing update carries a MessageId:
+        // ToolCallBuilder emits FunctionCallContent updates with MessageId == null, so
+        // keying on MessageId alone left every subagent tool call untagged — and
+        // GetResponseAsync would then hand back a function-call message that the next
+        // turn sent to the agent as the parent's.
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
 
         await foreach (var update in AsChatResponseUpdatesCore(events, jsonSerializerOptions, cancellationToken)
@@ -40,22 +43,55 @@ internal static class EventStreamConverter
         {
             if (update.RawRepresentation is BaseEvent sourceEvent)
             {
-                var (entityId, subagentId) = DescribeAttribution(sourceEvent);
-                if (entityId is not null && subagentId is not null)
+                foreach (var (entityId, subagentId) in DescribeAttribution(sourceEvent))
                 {
-                    owners[entityId] = subagentId;
+                    if (entityId is { Length: > 0 } && subagentId is not null)
+                    {
+                        owners[entityId] = subagentId;
+                    }
                 }
             }
 
-            if (update.MessageId is { Length: > 0 } messageId
-                && owners.TryGetValue(messageId, out var owner))
+            var resolved = ResolveOwner(update, owners);
+            if (resolved is not null)
             {
                 update.AdditionalProperties ??= new AdditionalPropertiesDictionary();
-                update.AdditionalProperties[AGUISubagentIdKey] = owner;
+                update.AdditionalProperties[AGUISubagentIdKey] = resolved;
             }
 
             yield return update;
         }
+    }
+
+    /// <summary>
+    /// Owner for an update: by its MessageId when it has one, otherwise by the call id of
+    /// any function call or result it carries. The latter is what covers tool-call and
+    /// tool-result updates, which the builders emit without a MessageId.
+    /// </summary>
+    private static string? ResolveOwner(ChatResponseUpdate update, Dictionary<string, string> owners)
+    {
+        if (update.MessageId is { Length: > 0 } messageId
+            && owners.TryGetValue(messageId, out var byMessage))
+        {
+            return byMessage;
+        }
+
+        foreach (var content in update.Contents)
+        {
+            var callId = content switch
+            {
+                FunctionCallContent call => call.CallId,
+                FunctionResultContent result => result.CallId,
+                _ => null,
+            };
+
+            if (callId is { Length: > 0 } && owners.TryGetValue(callId, out var byCall))
+            {
+                return byCall;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -65,18 +101,56 @@ internal static class EventStreamConverter
     /// </summary>
     private const string AGUISubagentIdKey = "agui.subagentId";
 
-    /// <summary>Entity id and owner for the events that carry message-level attribution.</summary>
-    private static (string? EntityId, string? SubagentId) DescribeAttribution(BaseEvent evt) => evt switch
+    /// <summary>
+    /// The (entity id, owner) pairs an event establishes. Tool calls contribute two: the
+    /// call id, which is how tool-call and tool-result updates are matched, and — for
+    /// TOOL_CALL_RESULT — the tool message's own id.
+    /// </summary>
+    private static IEnumerable<(string? EntityId, string? SubagentId)> DescribeAttribution(BaseEvent evt)
     {
-        TextMessageStartEvent e => (e.MessageId, e.SubagentId),
-        TextMessageContentEvent e => (e.MessageId, e.SubagentId),
-        TextMessageEndEvent e => (e.MessageId, e.SubagentId),
-        ToolCallResultEvent e => (e.MessageId, e.SubagentId),
-        ReasoningMessageStartEvent e => (e.MessageId, e.SubagentId),
-        ReasoningMessageContentEvent e => (e.MessageId, e.SubagentId),
-        ActivitySnapshotEvent e => (e.MessageId, e.SubagentId),
-        _ => (null, null),
-    };
+        switch (evt)
+        {
+            case TextMessageStartEvent e:
+                yield return (e.MessageId, e.SubagentId);
+                break;
+            case TextMessageContentEvent e:
+                yield return (e.MessageId, e.SubagentId);
+                break;
+            case TextMessageEndEvent e:
+                yield return (e.MessageId, e.SubagentId);
+                break;
+            case ToolCallStartEvent e:
+                yield return (e.ToolCallId, e.SubagentId);
+                if (e.ParentMessageId is not null)
+                {
+                    yield return (e.ParentMessageId, e.SubagentId);
+                }
+
+                break;
+            case ToolCallArgsEvent e:
+                yield return (e.ToolCallId, e.SubagentId);
+                break;
+            case ToolCallEndEvent e:
+                yield return (e.ToolCallId, e.SubagentId);
+                break;
+            case ToolCallResultEvent e:
+                yield return (e.ToolCallId, e.SubagentId);
+                yield return (e.MessageId, e.SubagentId);
+                break;
+            case ReasoningMessageStartEvent e:
+                yield return (e.MessageId, e.SubagentId);
+                break;
+            case ReasoningMessageContentEvent e:
+                yield return (e.MessageId, e.SubagentId);
+                break;
+            case ReasoningMessageEndEvent e:
+                yield return (e.MessageId, e.SubagentId);
+                break;
+            case ActivitySnapshotEvent e:
+                yield return (e.MessageId, e.SubagentId);
+                break;
+        }
+    }
 
     private static async IAsyncEnumerable<ChatResponseUpdate> AsChatResponseUpdatesCore(
         IAsyncEnumerable<BaseEvent> events,

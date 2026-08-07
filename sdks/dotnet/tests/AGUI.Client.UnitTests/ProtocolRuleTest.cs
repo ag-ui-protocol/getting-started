@@ -1599,6 +1599,65 @@ public sealed class ProtocolRuleTest
         Assert.Equal(2, result.Select(u => u.RawRepresentation).OfType<SubagentStartedEvent>().Count());
     }
 
+    [Fact]
+    public async Task Subagent_ResponseMessages_CarryAttributionAcrossATurn()
+    {
+        // The full loop: GetResponseAsync builds its response from these updates via
+        // ToChatResponse (never AsChatMessages), so anything not stamped here comes back
+        // untagged and the next turn sends it to the agent as the parent's. Tool-call
+        // updates are the ones that broke: ToolCallBuilder emits them with a null
+        // MessageId, so keying on MessageId alone missed them entirely.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new SubagentStartedEvent { SubagentId = "s1", Name = "researcher" },
+            new TextMessageStartEvent { MessageId = "m1", Role = "assistant", SubagentId = "s1" },
+            new TextMessageContentEvent { MessageId = "m1", Delta = "found it", SubagentId = "s1" },
+            new TextMessageEndEvent { MessageId = "m1", SubagentId = "s1" },
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search", SubagentId = "s1" },
+            new ToolCallArgsEvent { ToolCallId = "tc1", Delta = "{}", SubagentId = "s1" },
+            new ToolCallEndEvent { ToolCallId = "tc1", SubagentId = "s1" },
+            new SubagentFinishedEvent { SubagentId = "s1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var updates = await ProcessEventsAsync(events);
+
+        // Text and tool-call updates both carry it.
+        Assert.Contains(updates, u => u.Text is { Length: > 0 } && Owner(u) == "s1");
+        Assert.Contains(
+            updates,
+            u => u.Contents.OfType<FunctionCallContent>().Any() && Owner(u) == "s1");
+
+        // And it survives coalescing into the response, then back out to AG-UI messages —
+        // which is what the next turn actually sends.
+        var response = updates.ToChatResponse();
+        var roundTripped = response.Messages.AsAGUIMessages().ToList();
+        Assert.All(
+            roundTripped.Where(m => m.Role is "assistant" or "tool"),
+            m => Assert.Equal("s1", m.SubagentId));
+    }
+
+    [Fact]
+    public async Task Parent_ResponseMessages_StayUnattributed()
+    {
+        // Control: an unattributed run must not acquire the key.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new TextMessageStartEvent { MessageId = "m1", Role = "assistant" },
+            new TextMessageContentEvent { MessageId = "m1", Delta = "hi" },
+            new TextMessageEndEvent { MessageId = "m1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var updates = await ProcessEventsAsync(events);
+        Assert.All(updates, u => Assert.Null(Owner(u)));
+    }
+
+    private static string? Owner(ChatResponseUpdate update) =>
+        update.AdditionalProperties?.TryGetValue("agui.subagentId", out string? v) == true ? v : null;
+
     // ────────────────────────────────────────────────
     // Helpers — process events through EventStreamConverter.AsChatResponseUpdates
     // ────────────────────────────────────────────────

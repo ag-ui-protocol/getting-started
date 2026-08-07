@@ -158,42 +158,115 @@ describe("transformChunks subagentId propagation", () => {
     expect((content as Record<string, unknown>).subagentId).toBe("sub-1");
   });
 
-  it("should surface an owner change mid-stream instead of absorbing it", async () => {
-    // Two chunks share a messageId but name different subagents. The chunk path
-    // keys a stream by id alone, so it cannot itself tell these apart — but by
-    // propagating each chunk's own tag onto the synthesized CONTENT, the
-    // disagreement becomes visible to verifyEvents, which runs after this
-    // transform and rejects it. Previously both deltas merged into one message
-    // silently attributed entirely to the first owner.
-    const events = await firstValueFrom(
-      transformChunks(false)(
-        concat(
-          of({
-            type: EventType.TEXT_MESSAGE_CHUNK,
-            messageId: "m1",
-            role: "assistant",
-            delta: "A",
-            subagentId: "s1",
-          } as TextMessageChunkEvent),
-          of({
-            type: EventType.TEXT_MESSAGE_CHUNK,
-            messageId: "m1",
-            delta: "B",
-            subagentId: "s2",
-          } as TextMessageChunkEvent),
-          of({
-            type: EventType.RUN_FINISHED,
-            threadId: "t",
-            runId: "r",
-          } as RunFinishedEvent),
-        ),
-      ).pipe(toArray()),
-    );
+  it("should reject an owner change on the same chunk stream", async () => {
+    // Two chunks share a messageId but name different subagents — a contradiction the
+    // continuation-owner rule forbids. Rejected here rather than left to verifyEvents,
+    // because a compact chunk carrying attribution but no delta emits no synthesized
+    // event at all, so the disagreement would never reach the verifier.
+    const first: TextMessageChunkEvent = {
+      type: EventType.TEXT_MESSAGE_CHUNK,
+      messageId: "m1",
+      role: "assistant",
+      delta: "A",
+      subagentId: "s1",
+    };
+    const conflicting: TextMessageChunkEvent = {
+      type: EventType.TEXT_MESSAGE_CHUNK,
+      messageId: "m1",
+      delta: "B",
+      subagentId: "s2",
+    };
 
+    await expect(
+      firstValueFrom(transformChunks(false)(from([first, conflicting])).pipe(toArray())),
+    ).rejects.toThrow(/does not match the open stream's subagent/);
+  });
+
+  it("should reject an owner change even when the chunk carries no delta", async () => {
+    // The shape that made propagation alone insufficient: no delta means no synthesized
+    // CONTENT to carry the conflicting tag.
+    const first: TextMessageChunkEvent = {
+      type: EventType.TEXT_MESSAGE_CHUNK,
+      messageId: "m1",
+      role: "assistant",
+      delta: "A",
+      subagentId: "s1",
+    };
+    const conflicting: TextMessageChunkEvent = {
+      type: EventType.TEXT_MESSAGE_CHUNK,
+      messageId: "m1",
+      subagentId: "s2",
+    };
+
+    await expect(
+      firstValueFrom(transformChunks(false)(from([first, conflicting])).pipe(toArray())),
+    ).rejects.toThrow(/does not match the open stream's subagent/);
+  });
+
+  it("should allow an untagged continuation chunk on a tagged stream", async () => {
+    // Omitting the tag is not a disagreement, so producers that tag only the opening
+    // chunk keep working.
+    const first: TextMessageChunkEvent = {
+      type: EventType.TEXT_MESSAGE_CHUNK,
+      messageId: "m1",
+      role: "assistant",
+      delta: "A",
+      subagentId: "s1",
+    };
+    const untagged: TextMessageChunkEvent = {
+      type: EventType.TEXT_MESSAGE_CHUNK,
+      delta: "B",
+    } as TextMessageChunkEvent;
+    const runFinished: RunFinishedEvent = {
+      type: EventType.RUN_FINISHED,
+      threadId: "t",
+      runId: "r",
+    };
+
+    const events = await firstValueFrom(
+      transformChunks(false)(from([first, untagged, runFinished])).pipe(toArray()),
+    );
     const contents = events.filter((e) => e.type === EventType.TEXT_MESSAGE_CONTENT);
     expect(contents).toHaveLength(2);
-    expect((contents[0] as Record<string, unknown>).subagentId).toBe("s1");
-    expect((contents[1] as Record<string, unknown>).subagentId).toBe("s2");
+    expect((contents[1] as Record<string, unknown>).subagentId).toBe("s1");
+  });
+
+  it("should not close another subagent's pending stream on a terminal", async () => {
+    // One global pending stream lives here, so closing on ANY subagent terminal broke
+    // unrelated lanes: s2 finishing closed s1's open message, and since continuation
+    // chunks omit messageId the next s1 chunk then threw "First TEXT_MESSAGE_CHUNK must
+    // have a messageId".
+    const s1Chunk: TextMessageChunkEvent = {
+      type: EventType.TEXT_MESSAGE_CHUNK,
+      messageId: "m1",
+      role: "assistant",
+      delta: "A",
+      subagentId: "s1",
+    };
+    const s2Finished: SubagentFinishedEvent = {
+      type: EventType.SUBAGENT_FINISHED,
+      subagentId: "s2",
+    };
+    const s1More: TextMessageChunkEvent = {
+      type: EventType.TEXT_MESSAGE_CHUNK,
+      delta: "B",
+      subagentId: "s1",
+    } as TextMessageChunkEvent;
+    const runFinished: RunFinishedEvent = {
+      type: EventType.RUN_FINISHED,
+      threadId: "t",
+      runId: "r",
+    };
+
+    const events = await firstValueFrom(
+      transformChunks(false)(from([s1Chunk, s2Finished, s1More, runFinished])).pipe(toArray()),
+    );
+
+    // s1's message stayed open across s2's terminal, so both deltas belong to it and
+    // exactly one END is synthesized.
+    const contents = events.filter((e) => e.type === EventType.TEXT_MESSAGE_CONTENT);
+    expect(contents.map((c) => (c as Record<string, unknown>).delta)).toEqual(["A", "B"]);
+    expect(events.filter((e) => e.type === EventType.TEXT_MESSAGE_END)).toHaveLength(1);
   });
 
   it("should close a pending chunk stream before SUBAGENT_FINISHED", async () => {

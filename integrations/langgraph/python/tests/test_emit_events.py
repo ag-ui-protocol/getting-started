@@ -129,11 +129,7 @@ class TestHandleSingleEventCustomEvents(unittest.IsolatedAsyncioTestCase):
         manual helper would overwrite the parent's state with its own.
         """
         agent = self._make_agent()
-        # reconcile_subagents sets both: the lane (who owns output) and the namespace
-        # (whether the event came from inside a subagent at all, which is what state
-        # suppression keys on).
         agent.active_run["current_subagent_id"] = "tools:s1"
-        agent.active_run["current_subagent_ns"] = "tools:s1"
         agent.active_run["active_subagents"] = {}
         event = {
             "event": LangGraphEventTypes.OnCustomEvent.value,
@@ -162,11 +158,7 @@ class TestHandleSingleEventCustomEvents(unittest.IsolatedAsyncioTestCase):
         value, not just delay it.
         """
         agent = self._make_agent()
-        # reconcile_subagents sets both: the lane (who owns output) and the namespace
-        # (whether the event came from inside a subagent at all, which is what state
-        # suppression keys on).
         agent.active_run["current_subagent_id"] = "tools:s1"
-        agent.active_run["current_subagent_ns"] = "tools:s1"
         agent.active_run["active_subagents"] = {}
         event = {
             "event": LangGraphEventTypes.OnCustomEvent.value,
