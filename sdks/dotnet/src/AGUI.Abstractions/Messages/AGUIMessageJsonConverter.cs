@@ -62,6 +62,7 @@ public sealed class AGUIMessageJsonConverter : JsonConverter<AGUIMessage>
             Id = jsonElement.TryGetProperty("id", out var idProp) ? idProp.GetString() : null,
             Name = jsonElement.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null,
             EncryptedValue = jsonElement.TryGetProperty("encryptedValue", out var encProp) ? encProp.GetString() : null,
+            SubagentId = jsonElement.TryGetProperty("subagentId", out var subagentProp) ? subagentProp.GetString() : null,
         };
 
         if (jsonElement.TryGetProperty("content", out var contentProp))
@@ -163,6 +164,14 @@ public sealed class AGUIMessageJsonConverter : JsonConverter<AGUIMessage>
         if (user.EncryptedValue is not null)
         {
             writer.WriteString("encryptedValue", user.EncryptedValue);
+        }
+
+        // Written explicitly because this role is hand-serialized for its polymorphic
+        // content, so it does not inherit the base's properties the way the
+        // source-generated roles do.
+        if (user.SubagentId is not null)
+        {
+            writer.WriteString("subagentId", user.SubagentId);
         }
 
         switch (user.Content.Value)
