@@ -36,7 +36,7 @@ Add your API key to `.env`. The example server recognizes:
 | `OPENAI_DEFAULT_MODEL` | No | Overrides the model shared by the examples. |
 | `OPENAI_AGENTS_DISABLE_TRACING` | No | Set to `true` to disable OpenAI Agents SDK tracing. |
 | `HOST` | No | Bind address; defaults to `0.0.0.0`. |
-| `PORT` | No | Server port; defaults to `8024`. |
+| `PORT` | No | Server port; defaults to `8027`. |
 | `RELOAD` | No | Set to a non-empty value to restart the server after local code changes. |
 
 These examples use the OpenAI provider directly. Provider selection is not an
@@ -50,7 +50,7 @@ runner.
 uv run --env-file .env --no-dev python server.py
 ```
 
-Server runs on **http://localhost:8024** (the port the AG-UI Dojo expects;
+Server runs on **http://localhost:8027** (the port the AG-UI Dojo expects;
 override with `PORT`). Tracing follows the SDK's own `OPENAI_AGENTS_DISABLE_TRACING`
 env var and default (`false` — tracing on); set it to `true` to disable
 tracing.
@@ -84,7 +84,7 @@ pnpm dev
 ```
 
 Open `http://localhost:3000`, select **OpenAI Agents (Python)**, and choose a
-feature. The Dojo uses `http://localhost:8024` by default. Set
+feature. The Dojo uses `http://localhost:8027` by default. Set
 `OPENAI_AGENTS_PYTHON_URL` in the Dojo environment if the backend uses another
 address.
 
@@ -104,7 +104,7 @@ it does not collect these example tests.
 ## Manual smoke test
 
 ```bash
-curl -N -X POST http://localhost:8024/agentic_chat/ \
+curl -N -X POST http://localhost:8027/agentic_chat/ \
   -H 'Content-Type: application/json' \
   -d '{
     "thread_id": "t1",
@@ -280,7 +280,7 @@ translator continues to handle messages and streamed events.
 | Problem | Check |
 |---|---|
 | Server exits immediately | Set `OPENAI_API_KEY` in `examples/.env`. |
-| Dojo cannot connect | Confirm the server is on port `8024`, or set `OPENAI_AGENTS_PYTHON_URL` for Dojo. |
+| Dojo cannot connect | Confirm the server is on port `8027`, or set `OPENAI_AGENTS_PYTHON_URL` for Dojo. |
 | Endpoint returns 404 | Include the mounted demo path and its trailing slash, such as `/agentic_chat/`. |
 | Changes are not picked up | Set `RELOAD=1` or restart the example server. |
 | Example tests are not running | Run `uv run pytest` from the `examples` directory; the package suite does not collect them. |

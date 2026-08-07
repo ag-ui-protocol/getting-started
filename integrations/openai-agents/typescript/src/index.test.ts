@@ -10,7 +10,7 @@ describe("OpenAIAgentsHttpAgent", () => {
 
   it("can be created with a URL", () => {
     const agent = new OpenAIAgentsHttpAgent({
-      url: "http://localhost:8024/agentic_chat/",
+      url: "http://localhost:8027/agentic_chat/",
     });
 
     expect(agent).toBeInstanceOf(OpenAIAgentsHttpAgent);

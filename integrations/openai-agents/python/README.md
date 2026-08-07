@@ -77,7 +77,7 @@ The bundled example server additionally reads:
 |---|---:|---|
 | `OPENAI_DEFAULT_MODEL` | No | Overrides the model used by all examples. |
 | `HOST` | No | Example server bind address; defaults to `0.0.0.0`. |
-| `PORT` | No | Example server port; defaults to `8024`. |
+| `PORT` | No | Example server port; defaults to `8027`. |
 
 Keep secrets in your deployment secret manager or an uncommitted `.env` file.
 
@@ -703,7 +703,7 @@ cp .env.example .env
 uv run python server.py
 ```
 
-The server listens on `http://localhost:8024` by default. `PORT` and `HOST`
+The server listens on `http://localhost:8027` by default. `PORT` and `HOST`
 override the defaults. `GET /health` lists the mounted demos. See the
 [examples guide](examples/README.md) for routes and suggested prompts.
 

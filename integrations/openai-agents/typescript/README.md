@@ -20,7 +20,7 @@ published to npm.
 import { OpenAIAgentsHttpAgent } from "@ag-ui/openai-agents";
 
 const agent = new OpenAIAgentsHttpAgent({
-  url: "http://localhost:8024/agentic_chat/",
+  url: "http://localhost:8027/agentic_chat/",
 });
 
 // Use the agent with AG-UI clients

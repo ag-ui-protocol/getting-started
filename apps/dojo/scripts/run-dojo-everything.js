@@ -224,7 +224,7 @@ const ALL_SERVICES = {
       command: "uv run dev",
       name: "OpenAI Agents SDK (Python)",
       cwd: path.join(integrationsRoot, "openai-agents/python/examples"),
-      env: { PORT: 8024 },
+      env: { PORT: 8027 },
     },
   ],
   "claude-agent-sdk-python": [
@@ -380,7 +380,7 @@ const ALL_SERVICES = {
         CLAUDE_MANAGED_AGENTS_PYTHON_URL: "http://localhost:8025",
         CLAUDE_MANAGED_AGENTS_TYPESCRIPT_URL: "http://localhost:8024",
         LANGROID_URL: "http://localhost:8021",
-        OPENAI_AGENTS_PYTHON_URL: "http://localhost:8024",
+        OPENAI_AGENTS_PYTHON_URL: "http://localhost:8027",
         NEXT_PUBLIC_CUSTOM_DOMAIN_TITLE:
           "cpkdojo.local___CopilotKit Feature Viewer",
       },
@@ -420,7 +420,7 @@ const ALL_SERVICES = {
         CLAUDE_MANAGED_AGENTS_PYTHON_URL: "http://localhost:8025",
         CLAUDE_MANAGED_AGENTS_TYPESCRIPT_URL: "http://localhost:8024",
         LANGROID_URL: "http://localhost:8021",
-        OPENAI_AGENTS_PYTHON_URL: "http://localhost:8024",
+        OPENAI_AGENTS_PYTHON_URL: "http://localhost:8027",
         NEXT_PUBLIC_CUSTOM_DOMAIN_TITLE:
           "cpkdojo.local___CopilotKit Feature Viewer",
       },

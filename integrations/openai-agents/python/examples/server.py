@@ -1,7 +1,7 @@
 """Aggregate FastAPI server for the OpenAI Agents SDK Dojo demos.
 
 Each demo owns a small FastAPI app. This server mounts those apps under the
-Dojo feature paths and serves them together on port 8024.
+Dojo feature paths and serves them together on port 8027.
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ def main() -> int:
     if not os.getenv("OPENAI_API_KEY"):
         print("Error: OPENAI_API_KEY required")
         return 1
-    port = int(os.getenv("PORT", "8024"))
+    port = int(os.getenv("PORT", "8027"))
     host = os.getenv("HOST", "0.0.0.0")
     print(f"Starting server on port {port} — agents: {list(DEMOS)}")
     if os.getenv("RELOAD"):
