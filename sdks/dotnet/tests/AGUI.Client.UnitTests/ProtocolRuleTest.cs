@@ -1789,6 +1789,99 @@ public sealed class ProtocolRuleTest
         Assert.Null(Owner(secondRunText));
     }
 
+    [Fact]
+    public async Task Subagent_ToolResultOwner_DoesNotRestampTheCall()
+    {
+        // D5 gives TOOL_CALL_RESULT its own attribution so the executor can differ from
+        // the caller. It therefore owns only the minted tool message; writing it onto the
+        // call restamped the buffered FunctionCallContent and lost the caller's owner.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search", SubagentId = "s1" },
+            new ToolCallEndEvent { ToolCallId = "tc1", SubagentId = "s1" },
+            new ToolCallResultEvent { MessageId = "m9", ToolCallId = "tc1", Content = "done" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var updates = await ProcessEventsAsync(events);
+        var callUpdate = Assert.Single(updates, u => u.Contents.OfType<FunctionCallContent>().Any());
+        Assert.Equal("s1", Owner(callUpdate));
+    }
+
+    [Fact]
+    public async Task Subagent_ActivitySnapshotWithoutReplace_DefaultsToReplacing()
+    {
+        // The schemas default `replace` to true, so an omitted value means the snapshot
+        // re-mints (and re-owns) the activity. Treating null as false rejected a stream
+        // TypeScript accepts.
+        var content = JsonDocument.Parse("{}").RootElement;
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ActivitySnapshotEvent { MessageId = "a1", ActivityType = "search", Content = content, SubagentId = "s1" },
+            new ActivitySnapshotEvent { MessageId = "a1", ActivityType = "search", Content = content, SubagentId = "s2" },
+            new ActivityDeltaEvent { MessageId = "a1", ActivityType = "search", Patch = JsonDocument.Parse("[]").RootElement, SubagentId = "s2" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var result = await ProcessEventsAsync(events);
+        Assert.Single(result.Select(u => u.RawRepresentation).OfType<RunFinishedEvent>());
+    }
+
+    [Fact]
+    public async Task Subagent_ReasoningStartIsAnOpener()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ReasoningStartEvent { MessageId = "r1", SubagentId = "s1" },
+            new ReasoningEndEvent { MessageId = "r1", SubagentId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_CompactReasoningChunkOwnerChange_Throws()
+    {
+        // The one compact stream this SDK models; TypeScript's chunk transform rejects the
+        // same disagreement.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ReasoningMessageChunkEvent { MessageId = "r1", Delta = "a", SubagentId = "s1" },
+            new ReasoningMessageChunkEvent { MessageId = "r1", Delta = "b", SubagentId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_EncryptedToolCallValueAfterTheCallClosed_IsStillChecked()
+    {
+        // Nothing requires the encrypted continuation to arrive before TOOL_CALL_END, so
+        // the owner has to remain available after the close.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search", SubagentId = "s1" },
+            new ToolCallEndEvent { ToolCallId = "tc1", SubagentId = "s1" },
+            new ReasoningEncryptedValueEvent
+            {
+                Subtype = "tool-call",
+                EntityId = "tc1",
+                EncryptedValue = "opaque",
+                SubagentId = "s2"
+            }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
     private static string? Owner(ChatResponseUpdate update) =>
         update.AdditionalProperties?.TryGetValue("agui.subagentId", out string? v) == true ? v : null;
 

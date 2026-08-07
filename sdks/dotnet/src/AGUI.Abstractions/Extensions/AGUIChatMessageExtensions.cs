@@ -292,7 +292,6 @@ public static class AGUIChatMessageExtensions
                         // the shared Id/SubagentId assignment below.
                         SubagentId =
                             message.AdditionalProperties?.TryGetValue(SubagentIdKey, out string? toolSubagentId) == true
-                            && !string.IsNullOrEmpty(toolSubagentId)
                                 ? toolSubagentId
                                 : null,
                     };
@@ -309,8 +308,11 @@ public static class AGUIChatMessageExtensions
             }
 
             aguiMessage.Id = message.MessageId;
+            // Null-only, not IsNullOrEmpty: an empty string is a valid opaque id that the
+            // schemas accept, and treating it as absent silently converted it to parent
+            // attribution on the next turn.
             if (message.AdditionalProperties?.TryGetValue(SubagentIdKey, out string? subagentId) == true
-                && !string.IsNullOrEmpty(subagentId))
+                && subagentId is not null)
             {
                 aguiMessage.SubagentId = subagentId;
             }

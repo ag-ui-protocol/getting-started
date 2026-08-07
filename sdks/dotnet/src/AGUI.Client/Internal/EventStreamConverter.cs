@@ -161,6 +161,9 @@ internal static class EventStreamConverter
         // Reasoning, tracked like the others so .NET rejects the same continuation
         // mismatches TypeScript does.
         var reasoningOwners = new Dictionary<string, string?>(StringComparer.Ordinal);
+        // Id of the compact reasoning stream currently open, so a continuation chunk that
+        // omits messageId can still be checked against its opener.
+        string? openReasoningChunkId = null;
 
         // Records the owner for an entity on a CREATION event. Creation events carry
         // attribution explicitly (D3/D5), so an untagged one means the parent owns it —
@@ -220,6 +223,7 @@ internal static class EventStreamConverter
                     toolCallOwners.Clear();
                     activityOwners.Clear();
                     reasoningOwners.Clear();
+                    openReasoningChunkId = null;
                     owners.Clear();
                     runFinished = false;
                     runError = false;
@@ -329,7 +333,6 @@ internal static class EventStreamConverter
                 case TextMessageEndEvent textEnd:
                     RejectOwnerMismatch(
                         textEnd.Type, textEnd.SubagentId, messageOwners, textEnd.MessageId, "message");
-                    messageOwners.Remove(textEnd.MessageId);
                     break;
 
                 case ToolCallStartEvent toolStart:
@@ -341,8 +344,23 @@ internal static class EventStreamConverter
                 // message, and carries its own attribution — so an untagged one is
                 // parent-owned and must clear the call's recorded owner.
                 case ToolCallResultEvent toolResult:
-                    RecordOwner(toolResult.ToolCallId, toolResult.SubagentId);
+                    // Only the minted tool message. D5 gives this event its own attribution
+                    // precisely so the executor can differ from the caller (client-side tool
+                    // execution), so writing it onto the tool call would restamp the
+                    // buffered FunctionCallContent and lose the caller's owner.
                     RecordOwner(toolResult.MessageId, toolResult.SubagentId);
+                    break;
+
+                // Both open a reasoning entity, usually under the same id; first writer
+                // records the owner. Registering only REASONING_MESSAGE_START left
+                // REASONING_START(r, s1) / REASONING_END(r, s2) with nothing to compare.
+                case ReasoningStartEvent outerReasoningStart:
+                    if (!reasoningOwners.ContainsKey(outerReasoningStart.MessageId))
+                    {
+                        reasoningOwners[outerReasoningStart.MessageId] = outerReasoningStart.SubagentId;
+                    }
+
+                    RecordOwner(outerReasoningStart.MessageId, outerReasoningStart.SubagentId);
                     break;
 
                 case ReasoningMessageStartEvent reasoningStart:
@@ -352,6 +370,38 @@ internal static class EventStreamConverter
                     }
 
                     RecordOwner(reasoningStart.MessageId, reasoningStart.SubagentId);
+                    break;
+
+                // #4 — the one compact stream this SDK models. Its opener establishes the
+                // owner and a later chunk must not disagree, exactly as the TypeScript
+                // chunk transform enforces.
+                case ReasoningMessageChunkEvent reasoningChunk:
+                    if (reasoningChunk.MessageId is { Length: > 0 } chunkId)
+                    {
+                        if (!reasoningOwners.ContainsKey(chunkId))
+                        {
+                            reasoningOwners[chunkId] = reasoningChunk.SubagentId;
+                            RecordOwner(chunkId, reasoningChunk.SubagentId);
+                        }
+                        else
+                        {
+                            RejectOwnerMismatch(
+                                reasoningChunk.Type, reasoningChunk.SubagentId, reasoningOwners,
+                                chunkId, "reasoning message");
+                        }
+                    }
+                    else if (openReasoningChunkId is not null)
+                    {
+                        RejectOwnerMismatch(
+                            reasoningChunk.Type, reasoningChunk.SubagentId, reasoningOwners,
+                            openReasoningChunkId, "reasoning message");
+                    }
+
+                    if (reasoningChunk.MessageId is { Length: > 0 } newOpen)
+                    {
+                        openReasoningChunkId = newOpen;
+                    }
+
                     break;
 
                 case ReasoningMessageContentEvent reasoningContent:
@@ -370,7 +420,6 @@ internal static class EventStreamConverter
                     RejectOwnerMismatch(
                         outerReasoningEnd.Type, outerReasoningEnd.SubagentId, reasoningOwners,
                         outerReasoningEnd.MessageId, "reasoning message");
-                    reasoningOwners.Remove(outerReasoningEnd.MessageId);
                     break;
 
                 case ReasoningEncryptedValueEvent encrypted:
@@ -387,7 +436,10 @@ internal static class EventStreamConverter
                 case ActivitySnapshotEvent activitySnapshot:
                     // Only a replacing snapshot re-mints the activity and so re-owns it;
                     // with Replace=false the reducer leaves the existing message alone.
-                    if (!activityOwners.ContainsKey(activitySnapshot.MessageId) || activitySnapshot.Replace == true)
+                    // Absent means replace: the schemas default it to true, so a null here
+                    // is "replace", and treating it as false rejected valid streams that
+                    // TypeScript accepts.
+                    if (!activityOwners.ContainsKey(activitySnapshot.MessageId) || activitySnapshot.Replace != false)
                     {
                         activityOwners[activitySnapshot.MessageId] = activitySnapshot.SubagentId;
                         RecordOwner(activitySnapshot.MessageId, activitySnapshot.SubagentId);
@@ -408,7 +460,10 @@ internal static class EventStreamConverter
                 case ToolCallEndEvent toolEnd:
                     RejectOwnerMismatch(
                         toolEnd.Type, toolEnd.SubagentId, toolCallOwners, toolEnd.ToolCallId, "tool call");
-                    toolCallOwners.Remove(toolEnd.ToolCallId);
+                    // Deliberately NOT removed: a REASONING_ENCRYPTED_VALUE with
+                    // subtype "tool-call" may arrive after the close, and no rule requires
+                    // it to precede one. Dropping the owner here made that continuation
+                    // unmatchable and accepted a mismatched one. Cleared per run instead.
                     break;
 
                 default:

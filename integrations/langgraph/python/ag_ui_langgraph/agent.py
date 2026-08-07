@@ -706,7 +706,11 @@ class LangGraphAgent:
         graph_messages = []
         inbound_subagent_messages = []
         for m in input.messages or []:
-            if getattr(m, "subagent_id", None):
+            # `is not None`, not truthiness: an empty string is a valid opaque
+            # subagent_id, and treating it as absent would put a subagent's internal
+            # message into the supervisor's graph state — the pollution this split exists
+            # to prevent.
+            if getattr(m, "subagent_id", None) is not None:
                 inbound_subagent_messages.append(m)
             else:
                 graph_messages.append(m)

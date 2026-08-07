@@ -20,6 +20,12 @@ export const verifyEvents =
     // keyed by the same id — the last ID-keyed entity that had no owner check, so an
     // s2 delta could be appended to the reasoning message minted for s1.
     let activeReasoning = new Map<string, { subagentId?: string }>(); // reasoning ID -> owner
+    // Owners retained for the whole run. The maps above double as "is this entity open?"
+    // state and so are cleared on close, but a continuation can legitimately arrive after
+    // its entity closed — REASONING_ENCRYPTED_VALUE with subtype "tool-call" after
+    // TOOL_CALL_END is the case in point, and nothing requires it to precede the close.
+    // Losing the owner there made the mismatch unmatchable and accepted a wrong one.
+    let entityOwners = new Map<string, { subagentId?: string }>(); // entity ID -> owner
     let runFinished = false;
     let runError = false; // New flag to track if RUN_ERROR has been sent
     // New flags to track first/last event requirements
@@ -49,6 +55,7 @@ export const verifyEvents =
       activeToolCalls.clear();
       activeActivities.clear();
       activeReasoning.clear();
+      entityOwners.clear();
       activeSteps.clear();
       activeSubagents.clear();
       closedSubagents.clear();
@@ -165,6 +172,7 @@ export const verifyEvents =
               if (subErr) return throwError(() => subErr);
             }
             activeMessages.set(messageId, { subagentId: (event as any).subagentId });
+            entityOwners.set(messageId, { subagentId: (event as any).subagentId });
             return of(event);
           }
 
@@ -231,6 +239,7 @@ export const verifyEvents =
               if (subErr) return throwError(() => subErr);
             }
             activeToolCalls.set(toolCallId, { subagentId: (event as any).subagentId });
+            entityOwners.set(toolCallId, { subagentId: (event as any).subagentId });
             return of(event);
           }
 
@@ -349,6 +358,7 @@ export const verifyEvents =
             // same id, so whichever arrives first establishes it.
             if (!activeReasoning.has(messageId)) {
               activeReasoning.set(messageId, { subagentId: (event as any).subagentId });
+              entityOwners.set(messageId, { subagentId: (event as any).subagentId });
             }
             return of(event);
           }
@@ -383,7 +393,7 @@ export const verifyEvents =
             const subErr = subagentTagError(
               eventType,
               (event as any).subagentId,
-              isToolCall ? activeToolCalls.get(entityId) : activeReasoning.get(entityId),
+              entityOwners.get(entityId),
               isToolCall ? "tool call" : "reasoning message",
               entityId,
             );

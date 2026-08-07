@@ -261,6 +261,19 @@ public sealed class SubagentAttributionTest
     }
 
     [Fact]
+    public void EmptySubagentId_SurvivesTheRoundTrip()
+    {
+        // An empty string is a valid opaque id — the schemas accept it — so treating it as
+        // absent silently converted it to parent attribution on the next turn.
+        var back = new List<AGUIMessage>
+        {
+            new AGUIAssistantMessage { Id = "m1", Content = "hi", SubagentId = "" },
+        }.AsChatMessages().AsAGUIMessages().ToList();
+
+        Assert.Equal("", Assert.Single(back).SubagentId);
+    }
+
+    [Fact]
     public void UnattributedMessages_DoNotGainAnAdditionalProperty()
     {
         // A parent-owned message must not acquire the key at all, or every consumer
