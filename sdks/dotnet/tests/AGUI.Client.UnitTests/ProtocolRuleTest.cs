@@ -1901,6 +1901,23 @@ public sealed class ProtocolRuleTest
         Assert.Contains(updates, u => u.Text is { Length: > 0 } && Owner(u) == "s1");
     }
 
+    [Fact]
+    public async Task Subagent_CompactReasoningChunkWithEmptyId_StillChecksOwner()
+    {
+        // The last instance of the same rule: an empty messageId is present, not absent,
+        // so the compact stream's owner is registered and a mismatched continuation is
+        // rejected — as TypeScript's transform already does.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ReasoningMessageChunkEvent { MessageId = "", Delta = "a", SubagentId = "s1" },
+            new ReasoningMessageChunkEvent { MessageId = "", Delta = "b", SubagentId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
     private static string? Owner(ChatResponseUpdate update) =>
         update.AdditionalProperties?.TryGetValue("agui.subagentId", out string? v) == true ? v : null;
 

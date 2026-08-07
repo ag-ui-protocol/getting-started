@@ -379,7 +379,12 @@ internal static class EventStreamConverter
                 // owner and a later chunk must not disagree, exactly as the TypeScript
                 // chunk transform enforces.
                 case ReasoningMessageChunkEvent reasoningChunk:
-                    if (reasoningChunk.MessageId is { Length: > 0 } chunkId)
+                    // Null means the chunk omits the id and so continues the open stream;
+                    // an EMPTY id is a present id, since messageId is an optional
+                    // z.string(). Treating empty as absent skipped both registration and
+                    // the open-stream cursor, so .NET accepted a mismatch TypeScript
+                    // rejects. Same distinction as RecordOwner above.
+                    if (reasoningChunk.MessageId is { } chunkId)
                     {
                         if (!reasoningOwners.ContainsKey(chunkId))
                         {
@@ -400,7 +405,7 @@ internal static class EventStreamConverter
                             openReasoningChunkId, "reasoning message");
                     }
 
-                    if (reasoningChunk.MessageId is { Length: > 0 } newOpen)
+                    if (reasoningChunk.MessageId is { } newOpen)
                     {
                         openReasoningChunkId = newOpen;
                     }
