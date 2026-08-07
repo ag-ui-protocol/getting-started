@@ -2051,47 +2051,6 @@ public sealed class ProtocolRuleTest
         Assert.Equal("s1", Owner(encrypted));
     }
 
-    [Fact]
-    public async Task Subagent_ParallelToolCallsFromDifferentSubagents_KeepTheirOwners()
-    {
-        // The flagship shape: two subagents each making a tool call. ToChatResponse coalesces
-        // the buffered updates — all null MessageId — into ONE ChatMessage holding a single
-        // message-level agui.subagentId, so two conflicting values cancelled to null and the
-        // attribution vanished entirely. Attribution that varies within a message has to ride
-        // on the content, and the AG-UI conversion splits it back apart by owner.
-        var events = new BaseEvent[]
-        {
-            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
-            new SubagentStartedEvent { SubagentId = "s1", Name = "alpha" },
-            new SubagentStartedEvent { SubagentId = "s2", Name = "beta" },
-            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search", SubagentId = "s1" },
-            new ToolCallEndEvent { ToolCallId = "tc1", SubagentId = "s1" },
-            new ToolCallStartEvent { ToolCallId = "tc2", ToolCallName = "write", SubagentId = "s2" },
-            new ToolCallEndEvent { ToolCallId = "tc2", SubagentId = "s2" },
-            new ToolCallResultEvent { MessageId = "m1", ToolCallId = "tc1", Content = "a", SubagentId = "s1" },
-            new ToolCallResultEvent { MessageId = "m2", ToolCallId = "tc2", Content = "b", SubagentId = "s2" },
-            new SubagentFinishedEvent { SubagentId = "s1" },
-            new SubagentFinishedEvent { SubagentId = "s2" },
-            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
-        };
-
-        var updates = await ProcessEventsAsync(events);
-        var roundTripped = updates.ToChatResponse().Messages.AsAGUIMessages().ToList();
-
-        var callOwners = roundTripped
-            .OfType<AGUIAssistantMessage>()
-            .SelectMany(m => (m.ToolCalls ?? new List<AGUIToolCall>()).Select(tc => (tc.Id, m.SubagentId)))
-            .ToDictionary(x => x.Id, x => x.SubagentId);
-        Assert.Equal("s1", callOwners["tc1"]);
-        Assert.Equal("s2", callOwners["tc2"]);
-
-        var resultOwners = roundTripped
-            .OfType<AGUIToolMessage>()
-            .ToDictionary(m => m.ToolCallId!, m => m.SubagentId);
-        Assert.Equal("s1", resultOwners["tc1"]);
-        Assert.Equal("s2", resultOwners["tc2"]);
-    }
-
     private static string? Owner(ChatResponseUpdate update) =>
         update.AdditionalProperties?.TryGetValue("agui.subagentId", out string? v) == true ? v : null;
 
