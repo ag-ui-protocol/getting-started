@@ -631,12 +631,24 @@ class LangGraphAgent:
                     "id": event.message_id,
                     "role": "reasoning",
                     "content": "",
+                    "encrypted_value": None,
                     "subagent_id": event.subagent_id,
                 }
         elif etype == EventType.REASONING_MESSAGE_CONTENT:
             entry = sub_msgs.get(event.message_id)
             if entry is not None and entry.get("kind") == "reasoning":
                 entry["content"] += getattr(event, "delta", "") or ""
+        elif etype == EventType.REASONING_ENCRYPTED_VALUE:
+            # The protected signature rides on its own event, keyed by entity_id. Without
+            # capturing it here the reconstructed snapshot message carries content but no
+            # encrypted_value — and because a snapshot containing the reasoning message
+            # looks authoritative, the client replaces the streamed one and the signature
+            # is lost. Only "message" subtype belongs to a reasoning message; "tool-call"
+            # values belong to a tool call.
+            if getattr(event, "subtype", None) == "message":
+                entry = sub_msgs.get(getattr(event, "entity_id", None))
+                if entry is not None and entry.get("kind") == "reasoning":
+                    entry["encrypted_value"] = getattr(event, "encrypted_value", None)
         elif etype == EventType.TEXT_MESSAGE_START and getattr(event, "subagent_id", None):
             entry = ensure_assistant_entry(event.message_id, event.subagent_id)
             entry["role"] = getattr(event, "role", "assistant") or "assistant"
@@ -2816,6 +2828,7 @@ class LangGraphAgent:
                         id=entry["id"],
                         role="reasoning",
                         content=entry["content"],
+                        encrypted_value=entry.get("encrypted_value"),
                         subagent_id=entry["subagent_id"],
                     )
                 )

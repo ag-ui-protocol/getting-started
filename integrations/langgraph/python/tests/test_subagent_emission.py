@@ -304,6 +304,36 @@ class TestSnapshotIncludesSubagentMessages(unittest.TestCase):
         self.assertEqual(reasoning[0].content, "think")
         self.assertEqual(reasoning[0].subagent_id, "tools:s1")
 
+    def test_subagent_reasoning_keeps_its_encrypted_value_through_the_snapshot(self):
+        # The signature arrives on its own event. Reconstructing the snapshot message
+        # without it loses the protected reasoning, because a snapshot that contains the
+        # message looks authoritative and the client replaces the streamed one.
+        agent = self._agent_with_active_run(current_subagent_id="tools:s1")
+        agent._dispatch_event(
+            ReasoningMessageStartEvent(
+                type=EventType.REASONING_MESSAGE_START, message_id="r1", role="reasoning"
+            )
+        )
+        agent._dispatch_event(
+            ReasoningMessageContentEvent(
+                type=EventType.REASONING_MESSAGE_CONTENT, message_id="r1", delta="think"
+            )
+        )
+        agent._dispatch_event(
+            ReasoningEncryptedValueEvent(
+                type=EventType.REASONING_ENCRYPTED_VALUE,
+                subtype="message",
+                entity_id="r1",
+                encrypted_value="sig-abc",
+            )
+        )
+
+        snap = self._snapshot(agent)
+        reasoning = [m for m in snap.messages if m.role == "reasoning"]
+        self.assertEqual(len(reasoning), 1)
+        self.assertEqual(reasoning[0].encrypted_value, "sig-abc")
+        self.assertEqual(reasoning[0].subagent_id, "tools:s1")
+
     def test_empty_subagent_reasoning_not_appended(self):
         # Same rule as an empty assistant turn: no content, no bubble.
         agent = self._agent_with_active_run(current_subagent_id="tools:s1")
