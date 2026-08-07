@@ -137,7 +137,17 @@ internal static class EventStreamConverter
             case ReasoningMessageContentEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
             case ReasoningMessageEndEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
             case ReasoningMessageChunkEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
-            case ReasoningEncryptedValueEvent e: if (e.EntityId is not null) yield return MessageKey(e.EntityId); break;
+            // `subtype` selects the namespace: a "tool-call" value's entityId is a tool call
+            // id, not a message id. The validation path already made this distinction; the
+            // resolution path did not, so with the SDK-default MessageId == ToolCallId shape
+            // it read the RESULT message's owner instead of the call's.
+            case ReasoningEncryptedValueEvent e:
+                if (e.EntityId is not null)
+                {
+                    yield return e.Subtype == "tool-call" ? CallKey(e.EntityId) : MessageKey(e.EntityId);
+                }
+
+                break;
             case ActivitySnapshotEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
             case ActivityDeltaEvent e: if (e.MessageId is not null) yield return MessageKey(e.MessageId); break;
             // The minted tool message first: that is what this update represents. The call

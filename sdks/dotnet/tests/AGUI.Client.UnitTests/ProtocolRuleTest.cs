@@ -2023,6 +2023,34 @@ public sealed class ProtocolRuleTest
         Assert.Null(Owner(resultUpdate));
     }
 
+    [Fact]
+    public async Task Subagent_ToolCallEncryptedValue_ResolvesViaTheCallNamespace()
+    {
+        // `subtype` selects the namespace. With the SDK-default MessageId == ToolCallId
+        // shape, reading the message namespace returned the RESULT message's owner rather
+        // than the call's, so the encrypted update came out attributed to s2.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search", SubagentId = "s1" },
+            new ToolCallEndEvent { ToolCallId = "tc1", SubagentId = "s1" },
+            new ToolCallResultEvent { MessageId = "tc1", ToolCallId = "tc1", Content = "done", SubagentId = "s1" },
+            new ReasoningEncryptedValueEvent
+            {
+                Subtype = "tool-call",
+                EntityId = "tc1",
+                EncryptedValue = "opaque",
+                SubagentId = "s1"
+            },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var updates = await ProcessEventsAsync(events);
+        var encrypted = Assert.Single(
+            updates, u => u.RawRepresentation is ReasoningEncryptedValueEvent);
+        Assert.Equal("s1", Owner(encrypted));
+    }
+
     private static string? Owner(ChatResponseUpdate update) =>
         update.AdditionalProperties?.TryGetValue("agui.subagentId", out string? v) == true ? v : null;
 
