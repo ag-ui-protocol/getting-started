@@ -39,7 +39,11 @@ internal static class EventStreamConverter
         await foreach (var update in AsChatResponseUpdatesCore(events, jsonSerializerOptions, owners, cancellationToken)
             .ConfigureAwait(false))
         {
-            if (ResolveOwner(update, owners) is { } resolved)
+            // Already stamped means it was buffered and its owner frozen at creation; do
+            // not re-resolve against a map that has moved on since.
+            var alreadyStamped =
+                update.AdditionalProperties?.ContainsKey(AGUISubagentIdKey) == true;
+            if (!alreadyStamped && ResolveOwner(update, owners) is { } resolved)
             {
                 update.AdditionalProperties ??= new AdditionalPropertiesDictionary();
                 update.AdditionalProperties[AGUISubagentIdKey] = resolved;
@@ -169,6 +173,21 @@ internal static class EventStreamConverter
         // attribution explicitly (D3/D5), so an untagged one means the parent owns it —
         // which must overwrite any stale entry, or an untagged TOOL_CALL_RESULT would
         // inherit the tool call's subagent and mint a wrongly-attributed tool message.
+        // Buffered updates are flushed after later events have mutated the owner map, so
+        // resolving at yield time would stamp them with whoever owns the entity by then.
+        // Stamping here freezes the owner as of creation; the wrapper leaves an already
+        // stamped update alone.
+        static ChatResponseUpdate StampOwner(ChatResponseUpdate update, Dictionary<string, string?> map)
+        {
+            if (ResolveOwner(update, map) is { } owner)
+            {
+                update.AdditionalProperties ??= new AdditionalPropertiesDictionary();
+                update.AdditionalProperties[AGUISubagentIdKey] = owner;
+            }
+
+            return update;
+        }
+
         void RecordOwner(string? entityId, string? subagentId)
         {
             // Null means the event has no such entity; an EMPTY id is a valid string the
@@ -592,7 +611,7 @@ internal static class EventStreamConverter
                     var update = textMessageBuilder.EmitTextUpdate(textContent);
                     if (toolCallBuilder.IsBuffering)
                     {
-                        toolCallBuilder.BufferUpdate(update);
+                        toolCallBuilder.BufferUpdate(StampOwner(update, owners));
                     }
                     else
                     {
@@ -622,7 +641,7 @@ internal static class EventStreamConverter
                         };
                         if (toolCallBuilder.IsBuffering)
                         {
-                            toolCallBuilder.BufferUpdate(update);
+                            toolCallBuilder.BufferUpdate(StampOwner(update, owners));
                         }
                         else
                         {
@@ -648,7 +667,7 @@ internal static class EventStreamConverter
                         };
                         if (toolCallBuilder.IsBuffering)
                         {
-                            toolCallBuilder.BufferUpdate(update);
+                            toolCallBuilder.BufferUpdate(StampOwner(update, owners));
                         }
                         else
                         {
@@ -707,7 +726,7 @@ internal static class EventStreamConverter
                     };
                     if (toolCallBuilder.IsBuffering)
                     {
-                        toolCallBuilder.BufferUpdate(update);
+                        toolCallBuilder.BufferUpdate(StampOwner(update, owners));
                     }
                     else
                     {
@@ -728,7 +747,7 @@ internal static class EventStreamConverter
                     };
                     if (toolCallBuilder.IsBuffering)
                     {
-                        toolCallBuilder.BufferUpdate(update);
+                        toolCallBuilder.BufferUpdate(StampOwner(update, owners));
                     }
                     else
                     {
@@ -767,7 +786,7 @@ internal static class EventStreamConverter
                     };
                     if (toolCallBuilder.IsBuffering)
                     {
-                        toolCallBuilder.BufferUpdate(update);
+                        toolCallBuilder.BufferUpdate(StampOwner(update, owners));
                     }
                     else
                     {

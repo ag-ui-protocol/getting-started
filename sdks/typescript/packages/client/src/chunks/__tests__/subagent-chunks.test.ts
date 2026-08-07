@@ -158,6 +158,40 @@ describe("transformChunks subagentId propagation", () => {
     expect((content as Record<string, unknown>).subagentId).toBe("sub-1");
   });
 
+  it("should treat an explicitly empty reasoning messageId as a new stream", async () => {
+    // An empty id is present, not absent, so it opens a NEW reasoning message. Truthiness
+    // here left the previous message open and stamped its content with the new chunk's
+    // owner, which the verifier then rejected as a mismatch — while .NET accepted the
+    // same stream.
+    const first: ReasoningMessageChunkEvent = {
+      type: EventType.REASONING_MESSAGE_CHUNK,
+      messageId: "r",
+      delta: "A",
+      subagentId: "s1",
+    };
+    const second: ReasoningMessageChunkEvent = {
+      type: EventType.REASONING_MESSAGE_CHUNK,
+      messageId: "",
+      delta: "B",
+      subagentId: "s2",
+    };
+    const runFinished: RunFinishedEvent = {
+      type: EventType.RUN_FINISHED,
+      threadId: "t",
+      runId: "r",
+    };
+
+    const events = await firstValueFrom(
+      transformChunks(false)(from([first, second, runFinished])).pipe(toArray()),
+    );
+
+    // Two separate reasoning messages, each with its own owner.
+    const starts = events.filter((e) => e.type === EventType.REASONING_MESSAGE_START);
+    expect(starts).toHaveLength(2);
+    expect((starts[0] as Record<string, unknown>).subagentId).toBe("s1");
+    expect((starts[1] as Record<string, unknown>).subagentId).toBe("s2");
+  });
+
   it("should reject an owner change on the same chunk stream", async () => {
     // Two chunks share a messageId but name different subagents — a contradiction the
     // continuation-owner rule forbids. Rejected here rather than left to verifyEvents,

@@ -387,8 +387,11 @@ export const transformChunks =
             if (
               // we are not in a reasoning message
               mode !== "reasoning" ||
-              // or the message id is different
-              (reasoningChunkEvent.messageId &&
+              // or the message id is different. `!== undefined`, not truthiness, to match
+              // the text and tool branches: an explicitly empty id is a present id that
+              // denotes a NEW stream, and treating it as absent left this pointing at the
+              // previous message and stamped its content with the new chunk's owner.
+              (reasoningChunkEvent.messageId !== undefined &&
                 reasoningChunkEvent.messageId !== reasoningMessageFields?.messageId)
             ) {
               // close the current message if any

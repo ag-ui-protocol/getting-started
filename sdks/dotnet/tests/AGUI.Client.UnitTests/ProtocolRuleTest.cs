@@ -1918,6 +1918,35 @@ public sealed class ProtocolRuleTest
         Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Subagent_BufferedUpdates_KeepTheOwnerTheyHadAtCreation()
+    {
+        // Updates produced while a tool call is buffering are flushed later, after further
+        // events have moved the owner map on. Resolving at flush time stamped the earlier
+        // update with the later owner, so the first activity — genuinely s1's — was
+        // reported as s2's.
+        var content = JsonDocument.Parse("{}").RootElement;
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            // Open a tool call so subsequent pass-through updates are buffered.
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "search" },
+            new ActivitySnapshotEvent { MessageId = "a1", ActivityType = "search", Content = content, Replace = true, SubagentId = "s1" },
+            new ActivitySnapshotEvent { MessageId = "a1", ActivityType = "search", Content = content, Replace = true, SubagentId = "s2" },
+            new ToolCallEndEvent { ToolCallId = "tc1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var updates = await ProcessEventsAsync(events);
+        var activityUpdates = updates
+            .Where(u => u.RawRepresentation is ActivitySnapshotEvent)
+            .ToList();
+
+        Assert.Equal(2, activityUpdates.Count);
+        Assert.Equal("s1", Owner(activityUpdates[0]));
+        Assert.Equal("s2", Owner(activityUpdates[1]));
+    }
+
     private static string? Owner(ChatResponseUpdate update) =>
         update.AdditionalProperties?.TryGetValue("agui.subagentId", out string? v) == true ? v : null;
 
