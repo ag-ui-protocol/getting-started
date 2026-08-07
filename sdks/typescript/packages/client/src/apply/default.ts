@@ -738,11 +738,21 @@ export const defaultApplyEvents = (
               createdMessage = activityMessage;
             } else if (existingActivityMessage) {
               if (replace) {
+                // A replace snapshot re-mints the activity, so it brings its own
+                // attribution with it (D4: a creation event's subagentId transfers to
+                // the message it mints). Spreading the old message kept the old owner,
+                // so replacing a parent activity with a subagent's snapshot left it
+                // parent-owned — and, in the other direction, a parent snapshot could
+                // never reclaim an activity a subagent had taken.
                 messages[existingIndex] = {
                   ...existingActivityMessage,
                   activityType: activityEvent.activityType,
                   content: structuredClone_(activityEvent.content),
+                  subagentId: activityEvent.subagentId,
                 };
+                if (activityEvent.subagentId === undefined) {
+                  delete (messages[existingIndex] as { subagentId?: string }).subagentId;
+                }
               }
             } else if (replace) {
               messages[existingIndex] = activityMessage;
