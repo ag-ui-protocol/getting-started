@@ -1,5 +1,5 @@
 import { BaseEvent, EventType, AGUIError } from "@ag-ui/core";
-import { Observable, throwError, of } from "rxjs";
+import { Observable, throwError, of, concat, defer, EMPTY } from "rxjs";
 import { mergeMap } from "rxjs/operators";
 import { type DebugLoggerInput, resolveDebugLogger } from "@/debug-logger";
 
@@ -32,7 +32,7 @@ export const verifyEvents =
       runStarted = true;
     };
 
-    return source$.pipe(
+    const events$ = source$.pipe(
       // Process each event through our state machine
       mergeMap((event) => {
         const eventType = event.type;
@@ -366,4 +366,32 @@ export const verifyEvents =
         }
       }),
     );
+
+    // Once the source completes, assert that the run reached a terminal event.
+    // A stream that ends without 'RUN_FINISHED' or 'RUN_ERROR' is a truncated
+    // run (dropped connection, idle timeout, evicted server) and must not be
+    // reported as a successful run.
+    const verifyCompletion$ = defer(() => {
+      if (runFinished || runError) {
+        return EMPTY;
+      }
+
+      if (!runStarted) {
+        return throwError(
+          () =>
+            new AGUIError(
+              `The stream ended without emitting 'RUN_STARTED'. A run must begin with 'RUN_STARTED' and end with 'RUN_FINISHED' or 'RUN_ERROR'.`,
+            ),
+        );
+      }
+
+      return throwError(
+        () =>
+          new AGUIError(
+            `The stream ended without 'RUN_FINISHED' or 'RUN_ERROR'. The run was started but never terminated, so its result is incomplete.`,
+          ),
+      );
+    });
+
+    return concat(events$, verifyCompletion$);
   };
