@@ -18,7 +18,7 @@ public sealed class SubagentFinishedEvent : BaseEvent
     /// Gets or sets the identifier of the subagent this event closes.
     /// </summary>
     [JsonPropertyName("subagentId")]
-    public string SubagentId { get; set; } = string.Empty;
+    public string? SubagentId { get; set; }
 
     /// <summary>
     /// Gets or sets the subagent's completion payload, mirroring

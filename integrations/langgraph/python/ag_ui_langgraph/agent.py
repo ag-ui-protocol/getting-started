@@ -235,6 +235,14 @@ def reconcile_subagents(active_run, ns, lc_agent_name, subgraphs) -> list:
     # emit after the `task` tool returns — re-opened it: two SUBAGENT_STARTED and two
     # terminals for one invocation, plus output attributed after a terminal.
     # Trailing events fall back to the parent lane instead.
+    # Which subagent NAMESPACE this event came from, independent of whether that
+    # subagent is still open. State suppression keys on this rather than on
+    # current_subagent_id: a trailing event from a closed subagent still carries the
+    # SUBAGENT'S state, so routing it to the root lane below would otherwise let a
+    # node exit emit that state as an unattributed parent STATE_SNAPSHOT — handing the
+    # parent a subagent's partial view, which is the one thing state ownership forbids.
+    active_run["current_subagent_ns"] = new_id
+
     closed = active_run.setdefault("closed_subagents", set())
     if new_id is not None and new_id in closed:
         new_id = None
@@ -274,6 +282,7 @@ def drain_subagents(active_run) -> list:
     # Terminal for these ids — see reconcile_subagents.
     active_run.setdefault("closed_subagents", set()).update(ids)
     active_run["current_subagent_id"] = None
+    active_run["current_subagent_ns"] = None
     return events
 
 
@@ -295,6 +304,7 @@ def error_open_subagents(active_run, message: str) -> list:
     # Terminal for these ids — see reconcile_subagents.
     active_run.setdefault("closed_subagents", set()).update(ids)
     active_run["current_subagent_id"] = None
+    active_run["current_subagent_ns"] = None
     return events
 
 
@@ -963,10 +973,12 @@ class LangGraphAgent:
                             # not yet run, so current_graph_state does not yet reflect
                             # the forthcoming state update.
                             self.active_run["state_reliable"] = False
-                    elif self.active_run.get("current_subagent_id"):
+                    elif self.active_run.get("current_subagent_ns"):
                         # Subagents don't emit STATE_SNAPSHOT — only the parent
                         # agent's state is surfaced. The subagent's messages still
                         # reach the client via MESSAGES_SNAPSHOT, so nothing is lost.
+                        # Keyed on the namespace, not the open lane: a trailing event
+                        # from an already-closed subagent still carries ITS state.
                         pass
                     else:
                         yield self._dispatch_event(
@@ -1013,6 +1025,7 @@ class LangGraphAgent:
             # would linger and mis-stamp these as the subagent's. Clear it before
             # emitting them; drain_subagents below still finishes open subagents.
             self.active_run["current_subagent_id"] = None
+            self.active_run["current_subagent_ns"] = None
 
             if self.active_run.get("node_name") != node_name:
                 for ev in self.handle_node_change(node_name):
@@ -2252,7 +2265,7 @@ class LangGraphAgent:
                 # it as a snapshot. That deferred snapshot carries no subagent_id,
                 # so it would reach the consumer looking like the parent's own
                 # state — the exact outcome this guard exists to stop.
-                if not self.active_run.get("current_subagent_id"):
+                if not self.active_run.get("current_subagent_ns"):
                     self.active_run["manually_emitted_state"] = event["data"]
                     yield self._dispatch_event(
                         StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot=self.get_state_snapshot(self.active_run["manually_emitted_state"]), raw_event=event)
@@ -2728,7 +2741,7 @@ class LangGraphAgent:
         # its (subgraph) state is not surfaced. The MESSAGES_SNAPSHOT below is
         # still emitted and carries the subagent's messages (merged + tagged), so
         # attribution and history survive without leaking subagent state.
-        if not self.active_run.get("current_subagent_id"):
+        if not self.active_run.get("current_subagent_ns"):
             yield self._dispatch_event(
                 StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot=self.get_state_snapshot(state_values))
             )

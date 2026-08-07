@@ -18,13 +18,13 @@ public sealed class SubagentErrorEvent : BaseEvent
     /// Gets or sets the identifier of the subagent that failed.
     /// </summary>
     [JsonPropertyName("subagentId")]
-    public string SubagentId { get; set; } = string.Empty;
+    public string? SubagentId { get; set; }
 
     /// <summary>
     /// Gets or sets the error message.
     /// </summary>
     [JsonPropertyName("message")]
-    public string Message { get; set; } = string.Empty;
+    public string? Message { get; set; }
 
     /// <summary>
     /// Gets or sets an optional machine-readable error code.

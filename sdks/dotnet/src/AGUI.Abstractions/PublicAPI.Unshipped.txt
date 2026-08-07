@@ -830,21 +830,21 @@ AGUI.Abstractions.StepStartedEvent.SubagentId.set -> void
 AGUI.Abstractions.SubagentErrorEvent
 AGUI.Abstractions.SubagentErrorEvent.Code.get -> string?
 AGUI.Abstractions.SubagentErrorEvent.Code.set -> void
-AGUI.Abstractions.SubagentErrorEvent.Message.get -> string!
+AGUI.Abstractions.SubagentErrorEvent.Message.get -> string?
 AGUI.Abstractions.SubagentErrorEvent.Message.set -> void
 AGUI.Abstractions.SubagentErrorEvent.SubagentErrorEvent() -> void
-AGUI.Abstractions.SubagentErrorEvent.SubagentId.get -> string!
+AGUI.Abstractions.SubagentErrorEvent.SubagentId.get -> string?
 AGUI.Abstractions.SubagentErrorEvent.SubagentId.set -> void
 AGUI.Abstractions.SubagentFinishedEvent
 AGUI.Abstractions.SubagentFinishedEvent.Result.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.SubagentFinishedEvent.Result.set -> void
 AGUI.Abstractions.SubagentFinishedEvent.SubagentFinishedEvent() -> void
-AGUI.Abstractions.SubagentFinishedEvent.SubagentId.get -> string!
+AGUI.Abstractions.SubagentFinishedEvent.SubagentId.get -> string?
 AGUI.Abstractions.SubagentFinishedEvent.SubagentId.set -> void
 AGUI.Abstractions.SubagentStartedEvent
 AGUI.Abstractions.SubagentStartedEvent.Description.get -> string?
 AGUI.Abstractions.SubagentStartedEvent.Description.set -> void
-AGUI.Abstractions.SubagentStartedEvent.Name.get -> string!
+AGUI.Abstractions.SubagentStartedEvent.Name.get -> string?
 AGUI.Abstractions.SubagentStartedEvent.Name.set -> void
 AGUI.Abstractions.SubagentStartedEvent.ParentMessageId.get -> string?
 AGUI.Abstractions.SubagentStartedEvent.ParentMessageId.set -> void
@@ -852,7 +852,7 @@ AGUI.Abstractions.SubagentStartedEvent.ParentSubagentId.get -> string?
 AGUI.Abstractions.SubagentStartedEvent.ParentSubagentId.set -> void
 AGUI.Abstractions.SubagentStartedEvent.ParentToolCallId.get -> string?
 AGUI.Abstractions.SubagentStartedEvent.ParentToolCallId.set -> void
-AGUI.Abstractions.SubagentStartedEvent.SubagentId.get -> string!
+AGUI.Abstractions.SubagentStartedEvent.SubagentId.get -> string?
 AGUI.Abstractions.SubagentStartedEvent.SubagentId.set -> void
 AGUI.Abstractions.SubagentStartedEvent.SubagentStartedEvent() -> void
 AGUI.Abstractions.TextMessageContentEvent.SubagentId.get -> string?

@@ -9,7 +9,76 @@ namespace AGUI.Client;
 
 internal static class EventStreamConverter
 {
+    /// <summary>
+    /// Converts an AG-UI event stream to <see cref="ChatResponseUpdate"/>s, stamping each
+    /// one with the subagent that produced it.
+    /// </summary>
+    /// <remarks>
+    /// The attribution is carried in <see cref="ChatResponseUpdate.AdditionalProperties"/>
+    /// under the same key <c>AsChatMessages</c> uses, because
+    /// <see cref="ChatResponseExtensions.ToChatResponse"/> preserves it onto the coalesced
+    /// <see cref="ChatMessage"/>. Without this the request direction was covered but the
+    /// response direction was not: AGUIChatClient.GetResponseAsync builds its response
+    /// from these updates, so a message a subagent produced came back untagged and the
+    /// next turn sent it to the agent as the parent's.
+    ///
+    /// Done in one wrapper rather than at each of the ten update sites so a new site
+    /// cannot silently omit it.
+    /// </remarks>
     internal static async IAsyncEnumerable<ChatResponseUpdate> AsChatResponseUpdates(
+        IAsyncEnumerable<BaseEvent> events,
+        JsonSerializerOptions jsonSerializerOptions,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        // messageId -> owner, learned from whichever event opened or created it. The
+        // builders emit updates keyed by MessageId, and continuation events carry the tag
+        // too, so either source resolves the owner.
+        var owners = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        await foreach (var update in AsChatResponseUpdatesCore(events, jsonSerializerOptions, cancellationToken)
+            .ConfigureAwait(false))
+        {
+            if (update.RawRepresentation is BaseEvent sourceEvent)
+            {
+                var (entityId, subagentId) = DescribeAttribution(sourceEvent);
+                if (entityId is not null && subagentId is not null)
+                {
+                    owners[entityId] = subagentId;
+                }
+            }
+
+            if (update.MessageId is { Length: > 0 } messageId
+                && owners.TryGetValue(messageId, out var owner))
+            {
+                update.AdditionalProperties ??= new AdditionalPropertiesDictionary();
+                update.AdditionalProperties[AGUISubagentIdKey] = owner;
+            }
+
+            yield return update;
+        }
+    }
+
+    /// <summary>
+    /// Key matching <c>AGUIChatMessageExtensions</c>, so an update's attribution survives
+    /// into <see cref="ChatMessage.AdditionalProperties"/> and back out through
+    /// <c>AsAGUIMessages</c> on the next turn.
+    /// </summary>
+    private const string AGUISubagentIdKey = "agui.subagentId";
+
+    /// <summary>Entity id and owner for the events that carry message-level attribution.</summary>
+    private static (string? EntityId, string? SubagentId) DescribeAttribution(BaseEvent evt) => evt switch
+    {
+        TextMessageStartEvent e => (e.MessageId, e.SubagentId),
+        TextMessageContentEvent e => (e.MessageId, e.SubagentId),
+        TextMessageEndEvent e => (e.MessageId, e.SubagentId),
+        ToolCallResultEvent e => (e.MessageId, e.SubagentId),
+        ReasoningMessageStartEvent e => (e.MessageId, e.SubagentId),
+        ReasoningMessageContentEvent e => (e.MessageId, e.SubagentId),
+        ActivitySnapshotEvent e => (e.MessageId, e.SubagentId),
+        _ => (null, null),
+    };
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> AsChatResponseUpdatesCore(
         IAsyncEnumerable<BaseEvent> events,
         JsonSerializerOptions jsonSerializerOptions,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -39,6 +108,10 @@ internal static class EventStreamConverter
         // TypeScript. Without this the two SDKs disagreed about the same stream.
         var messageOwners = new Dictionary<string, string?>(StringComparer.Ordinal);
         var toolCallOwners = new Dictionary<string, string?>(StringComparer.Ordinal);
+        // Activities are opened by ACTIVITY_SNAPSHOT and continued by ACTIVITY_DELTA on
+        // the same messageId, so they need the same owner tracking. TypeScript checks
+        // these; without it .NET accepted a stream TypeScript rejects.
+        var activityOwners = new Dictionary<string, string?>(StringComparer.Ordinal);
         var runStarted = false;
         var runFinished = false;
         var runError = false;
@@ -84,6 +157,7 @@ internal static class EventStreamConverter
                     closedSubagents.Clear();
                     messageOwners.Clear();
                     toolCallOwners.Clear();
+                    activityOwners.Clear();
                     runFinished = false;
                     runError = false;
                     runStarted = true;
@@ -102,19 +176,20 @@ internal static class EventStreamConverter
                     // this an id-less event would register an active subagent named ""
                     // and corrupt the validation state below — while the TypeScript
                     // client rejected the very same payload.
-                    RequireNonEmpty(started.SubagentId, "subagentId", AGUIEventTypes.SubagentStarted);
-                    RequireNonEmpty(started.Name, "name", AGUIEventTypes.SubagentStarted);
+                    RequireProvided(started.SubagentId, "subagentId", AGUIEventTypes.SubagentStarted);
+                    RequireProvided(started.Name, "name", AGUIEventTypes.SubagentStarted);
+                    var startedId = started.SubagentId!;
 
-                    if (activeSubagents.ContainsKey(started.SubagentId))
+                    if (activeSubagents.ContainsKey(startedId))
                     {
                         throw new System.InvalidOperationException(
-                            $"Cannot send 'SUBAGENT_STARTED': subagent '{started.SubagentId}' is already active. Finish it with 'SUBAGENT_FINISHED' first.");
+                            $"Cannot send 'SUBAGENT_STARTED': subagent '{startedId}' is already active. Finish it with 'SUBAGENT_FINISHED' first.");
                     }
 
-                    if (closedSubagents.Contains(started.SubagentId))
+                    if (closedSubagents.Contains(startedId))
                     {
                         throw new System.InvalidOperationException(
-                            $"Cannot send 'SUBAGENT_STARTED': subagent '{started.SubagentId}' has already finished in this run. Subagent IDs are per-invocation and cannot be reused.");
+                            $"Cannot send 'SUBAGENT_STARTED': subagent '{startedId}' has already finished in this run. Subagent IDs are per-invocation and cannot be reused.");
                     }
 
                     if (started.ParentSubagentId is not null
@@ -124,30 +199,32 @@ internal static class EventStreamConverter
                             $"Cannot send 'SUBAGENT_STARTED': parentSubagentId '{started.ParentSubagentId}' has not been started.");
                     }
 
-                    activeSubagents[started.SubagentId] = started.ParentSubagentId;
+                    activeSubagents[startedId] = started.ParentSubagentId;
                     break;
 
                 case SubagentFinishedEvent finished:
-                    RequireNonEmpty(finished.SubagentId, "subagentId", AGUIEventTypes.SubagentFinished);
-                    if (!activeSubagents.Remove(finished.SubagentId))
+                    RequireProvided(finished.SubagentId, "subagentId", AGUIEventTypes.SubagentFinished);
+                    var finishedId = finished.SubagentId!;
+                    if (!activeSubagents.Remove(finishedId))
                     {
                         throw new System.InvalidOperationException(
-                            $"Cannot send 'SUBAGENT_FINISHED': no active subagent found with ID '{finished.SubagentId}'. A 'SUBAGENT_STARTED' event must be sent first.");
+                            $"Cannot send 'SUBAGENT_FINISHED': no active subagent found with ID '{finishedId}'. A 'SUBAGENT_STARTED' event must be sent first.");
                     }
 
-                    closedSubagents.Add(finished.SubagentId);
+                    closedSubagents.Add(finishedId);
                     break;
 
                 case SubagentErrorEvent subagentErrored:
-                    RequireNonEmpty(subagentErrored.SubagentId, "subagentId", AGUIEventTypes.SubagentError);
-                    RequireNonEmpty(subagentErrored.Message, "message", AGUIEventTypes.SubagentError);
-                    if (!activeSubagents.Remove(subagentErrored.SubagentId))
+                    RequireProvided(subagentErrored.SubagentId, "subagentId", AGUIEventTypes.SubagentError);
+                    RequireProvided(subagentErrored.Message, "message", AGUIEventTypes.SubagentError);
+                    var erroredId = subagentErrored.SubagentId!;
+                    if (!activeSubagents.Remove(erroredId))
                     {
                         throw new System.InvalidOperationException(
-                            $"Cannot send 'SUBAGENT_ERROR': no active subagent found with ID '{subagentErrored.SubagentId}'. A 'SUBAGENT_STARTED' event must be sent first.");
+                            $"Cannot send 'SUBAGENT_ERROR': no active subagent found with ID '{erroredId}'. A 'SUBAGENT_STARTED' event must be sent first.");
                     }
 
-                    closedSubagents.Add(subagentErrored.SubagentId);
+                    closedSubagents.Add(erroredId);
                     break;
 
                 // Only the parent owns state. A consumer applies a snapshot or delta
@@ -189,6 +266,15 @@ internal static class EventStreamConverter
 
                 case ToolCallStartEvent toolStart:
                     toolCallOwners[toolStart.ToolCallId] = toolStart.SubagentId;
+                    break;
+
+                case ActivitySnapshotEvent activitySnapshot:
+                    activityOwners[activitySnapshot.MessageId] = activitySnapshot.SubagentId;
+                    break;
+
+                case ActivityDeltaEvent activityDelta:
+                    RejectOwnerMismatch(
+                        activityDelta.Type, activityDelta.SubagentId, activityOwners, activityDelta.MessageId, "activity");
                     break;
 
                 case ToolCallArgsEvent toolArgs:
@@ -508,17 +594,23 @@ internal static class EventStreamConverter
     }
 
     /// <summary>
-    /// Throws when a protocol-required string arrived empty. The TypeScript schemas
-    /// make these mandatory; System.Text.Json has no equivalent, so a missing property
-    /// silently becomes <see cref="string.Empty"/> and both SDKs would otherwise
-    /// disagree about whether the same payload is valid.
+    /// Throws when a protocol-required string was ABSENT from the payload.
     /// </summary>
-    private static void RequireNonEmpty(string value, string propertyName, string eventType)
+    /// <remarks>
+    /// The TypeScript schemas mark these mandatory with <c>z.string()</c>, which
+    /// requires the key to be present but accepts an empty value — so this checks for
+    /// null, not for empty. The properties are declared nullable precisely to make that
+    /// distinction possible: were they non-nullable with a <c>string.Empty</c>
+    /// initializer, a missing property and an explicit <c>""</c> would be
+    /// indistinguishable, and rejecting both would make .NET stricter than TypeScript
+    /// and Python, which is the divergence this is here to prevent.
+    /// </remarks>
+    private static void RequireProvided(string? value, string propertyName, string eventType)
     {
-        if (string.IsNullOrEmpty(value))
+        if (value is null)
         {
             throw new System.InvalidOperationException(
-                $"Cannot send '{eventType}': '{propertyName}' is required and must not be empty.");
+                $"Cannot send '{eventType}': '{propertyName}' is required.");
         }
     }
 
@@ -539,7 +631,10 @@ internal static class EventStreamConverter
             return;
         }
 
-        if (owners.TryGetValue(entityId, out var owner) && owner is not null && owner != subagentId)
+        // A recorded owner of null means the entity belongs to the PARENT, which is just
+        // as much an owner as a subagent — so a tagged continuation on it is still a
+        // disagreement. Only the ABSENCE of an entry means "unknown opener".
+        if (owners.TryGetValue(entityId, out var owner) && owner != subagentId)
         {
             throw new System.InvalidOperationException(
                 $"Cannot send '{eventType}': subagentId '{subagentId}' does not match the {entityKind} '{entityId}' opener's subagent '{owner}'.");

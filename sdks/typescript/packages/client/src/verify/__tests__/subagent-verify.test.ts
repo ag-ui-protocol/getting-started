@@ -473,6 +473,26 @@ describe("verifyEvents subagent lifecycle", () => {
     expect(events).toHaveLength(inputEvents.length);
   });
 
+  it("should reject a tagged continuation of an UNTAGGED (parent-owned) opener", async () => {
+    // An untagged opener means the entity belongs to the parent, which is as much an
+    // owner as a subagent — so a tagged continuation on it still disagrees. Comparing
+    // only when the recorded owner had an id let this through, and the reducer would
+    // append a subagent's text to a parent-owned message.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.TEXT_MESSAGE_START, messageId: "m1", role: "assistant" } as TextMessageStartEvent,
+        {
+          type: EventType.TEXT_MESSAGE_CONTENT,
+          messageId: "m1",
+          delta: "x",
+          subagentId: "s1",
+        } as BaseEvent,
+      ],
+      /does not match/i,
+    );
+  });
+
   it("should allow an untagged continuation of a tagged tool call", async () => {
     // Omitting the tag is not a disagreement: attribution is optional per event,
     // and the opener already established the owner. Only a *different* id is an

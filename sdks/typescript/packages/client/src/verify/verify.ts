@@ -67,13 +67,16 @@ export const verifyEvents =
       entityId: string,
     ): AGUIError | undefined => {
       if (evSubagentId === undefined) return undefined;
-      if (
-        owner &&
-        owner.subagentId !== undefined &&
-        owner.subagentId !== evSubagentId
-      ) {
+      // An opener with no tag means the entity belongs to the PARENT, which is just as
+      // much an owner as a subagent is — so a tagged continuation on it is still a
+      // disagreement. Comparing only when the recorded owner had an id let
+      // `TEXT_MESSAGE_START(m1)` then `TEXT_MESSAGE_CONTENT(m1, subagentId: "s1")`
+      // through, and the reducer would append a subagent's text to a parent-owned
+      // message. `owner` being present at all is what matters; its id being undefined
+      // is the parent, not "unknown".
+      if (owner && owner.subagentId !== evSubagentId) {
         return new AGUIError(
-          `Cannot send '${evType}': subagentId '${evSubagentId}' does not match the ${entityKind} '${entityId}' opener's subagent '${owner.subagentId}'.`,
+          `Cannot send '${evType}': subagentId '${evSubagentId}' does not match the ${entityKind} '${entityId}' opener's subagent '${owner.subagentId ?? "(the parent agent)"}'.`,
         );
       }
       return undefined;

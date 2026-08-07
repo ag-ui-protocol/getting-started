@@ -50,13 +50,28 @@ public static class AGUIChatMessageExtensions
         // the reconstructed history valid. Only the current run is buffered, so this stays cheap.
         List<AIContent>? pendingToolCallContents = null;
         string? pendingToolCallId = null;
+        // The buffered run's owner. Merging messages from two different subagents into one
+        // ChatMessage would leave the result unattributable, so an owner change flushes
+        // and starts a new run just as a non-tool-call message does.
+        string? pendingToolCallSubagentId = null;
 
         foreach (var message in aguiMessages)
         {
             if (message is AGUIAssistantMessage toolCallAssistant && toolCallAssistant.ToolCalls is { Count: > 0 })
             {
+                if (pendingToolCallContents is not null
+                    && pendingToolCallSubagentId != message.SubagentId)
+                {
+                    yield return WithSubagentId(
+                        new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId },
+                        pendingToolCallSubagentId);
+                    pendingToolCallContents = null;
+                    pendingToolCallId = null;
+                }
+
                 pendingToolCallContents ??= new List<AIContent>();
                 pendingToolCallId ??= message.Id;
+                pendingToolCallSubagentId = message.SubagentId;
 
                 if (!string.IsNullOrEmpty(toolCallAssistant.Content))
                 {
@@ -81,9 +96,12 @@ public static class AGUIChatMessageExtensions
             // Any non-(assistant-with-tool-calls) message ends the current run; flush it first.
             if (pendingToolCallContents is not null)
             {
-                yield return new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId };
+                yield return WithSubagentId(
+                    new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId },
+                    pendingToolCallSubagentId);
                 pendingToolCallContents = null;
                 pendingToolCallId = null;
+                pendingToolCallSubagentId = null;
             }
 
             var role = MapChatRole(message.Role);
@@ -163,7 +181,9 @@ public static class AGUIChatMessageExtensions
         // Flush any trailing assistant-tool-call run.
         if (pendingToolCallContents is not null)
         {
-            yield return new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId };
+            yield return WithSubagentId(
+                new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId },
+                pendingToolCallSubagentId);
         }
     }
 

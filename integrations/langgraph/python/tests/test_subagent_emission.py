@@ -236,6 +236,8 @@ class TestSnapshotIncludesSubagentMessages(unittest.TestCase):
         agent.active_run = {
             "id": "run-1",
             "current_subagent_id": current_subagent_id,
+            # reconcile_subagents sets both; state suppression keys on the namespace.
+            "current_subagent_ns": current_subagent_id,
             "active_subagents": {},
             "subagent_messages": {},
             "subagent_tool_call_owner": {},
@@ -611,6 +613,39 @@ class TestClosedSubagentsNeverRestart(unittest.TestCase):
             "output arriving after a subagent's terminal event must not be "
             "attributed to it",
         )
+
+    def test_closed_subagent_namespace_still_suppresses_state(self):
+        """Not re-opening a closed subagent must not hand its state to the parent.
+
+        Routing a trailing event from a closed subagent's namespace to the root lane
+        fixes the duplicate SUBAGENT_STARTED, but the state guards key on "is a
+        subagent open?" — so with the lane cleared they stop firing, and a trailing
+        node exit carrying the subagent's own state update escapes as an
+        UNATTRIBUTED parent STATE_SNAPSHOT. Suppression has to key on whether the
+        event came from a subagent's namespace at all, which is still true after the
+        subagent closed.
+        """
+        ar = _run()
+        ar["subagent_segments"] = set()
+        ns = "tools:s1|model:x"
+
+        reconcile_subagents(ar, ns, "researcher", set())
+        drain_subagents(ar)
+        reconcile_subagents(ar, ns, "researcher", set())
+
+        self.assertIsNone(ar["current_subagent_id"], "closed subagent owns nothing")
+        self.assertTrue(
+            ar.get("current_subagent_ns"),
+            "the event is still inside a subagent's namespace, so state stays suppressed",
+        )
+
+    def test_root_events_are_not_marked_as_subagent_namespace(self):
+        # Control: a genuine root event must not suppress the parent's own state.
+        ar = _run()
+        ar["subagent_segments"] = set()
+        reconcile_subagents(ar, "model:root-uuid", None, set())
+        self.assertIsNone(ar["current_subagent_id"])
+        self.assertFalsy = self.assertFalse(ar.get("current_subagent_ns"))
 
     def test_a_different_subagent_still_starts_normally(self):
         # Control: closing s1 must not suppress an unrelated subagent.

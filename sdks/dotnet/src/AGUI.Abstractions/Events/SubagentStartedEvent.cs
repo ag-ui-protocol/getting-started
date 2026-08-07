@@ -18,13 +18,13 @@ public sealed class SubagentStartedEvent : BaseEvent
     /// <c>subagentId</c>.
     /// </summary>
     [JsonPropertyName("subagentId")]
-    public string SubagentId { get; set; } = string.Empty;
+    public string? SubagentId { get; set; }
 
     /// <summary>
     /// Gets or sets the subagent's display name.
     /// </summary>
     [JsonPropertyName("name")]
-    public string Name { get; set; } = string.Empty;
+    public string? Name { get; set; }
 
     /// <summary>
     /// Gets or sets an optional human-readable description of what the subagent does.
