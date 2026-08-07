@@ -20,6 +20,15 @@ internal static class ProtoMessageMapper
             Role = message.Role,
         };
 
+        // Set once from the base rather than per role: attribution applies to every
+        // message kind, and a MESSAGES_SNAPSHOT mixes the parent's messages with those of
+        // every subagent that ran, so losing it on one role would silently reparent that
+        // role's messages to the parent.
+        if (message.SubagentId is not null)
+        {
+            proto.SubagentId = message.SubagentId;
+        }
+
         switch (message)
         {
             case AGUIUserMessage user:
@@ -103,6 +112,20 @@ internal static class ProtoMessageMapper
     }
 
     public static AGUIMessage FromProto(Proto.Message proto)
+    {
+        // Applied here rather than inside each role branch below: the branches return
+        // six different concrete types, so a per-branch assignment is six chances to
+        // forget one and silently reparent that role's messages to the parent.
+        var message = FromProtoByRole(proto);
+        if (proto.HasSubagentId)
+        {
+            message.SubagentId = proto.SubagentId;
+        }
+
+        return message;
+    }
+
+    private static AGUIMessage FromProtoByRole(Proto.Message proto)
     {
         var id = string.IsNullOrEmpty(proto.Id) ? null : proto.Id;
 
