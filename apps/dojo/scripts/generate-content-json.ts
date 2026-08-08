@@ -388,6 +388,33 @@ const agentFilesMapper: Record<
       {},
     );
   },
+  antigravity: (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/antigravity/python/examples/server/api/${agentId}.py`,
+          ),
+          // Each demo file is a thin delegation; the model, workspace and
+          // capability config it calls into all live in _common.py.
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            "/antigravity/python/examples/server/api/_common.py",
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            "/antigravity/python/examples/server/__init__.py",
+          ),
+        ],
+      }),
+      {},
+    );
+  },
   "aws-strands": (agentKeys: string[]) => {
     return agentKeys.reduce(
       (acc, agentId) => ({

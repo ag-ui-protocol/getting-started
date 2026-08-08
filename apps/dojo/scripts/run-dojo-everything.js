@@ -193,6 +193,14 @@ const ALL_SERVICES = {
       env: { PORT: 8010 },
     },
   ],
+  antigravity: [
+    {
+      command: "uv run dev",
+      name: "Antigravity",
+      cwd: path.join(integrationsRoot, "antigravity/python/examples"),
+      env: { PORT: 8027 },
+    },
+  ],
   "a2a-middleware": [
     {
       command: "uv run buildings_management.py",

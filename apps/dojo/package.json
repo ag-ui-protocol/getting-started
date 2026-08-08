@@ -21,6 +21,7 @@
     "@ag-ui/adk": "workspace:*",
     "@ag-ui/ag2": "workspace:*",
     "@ag-ui/agno": "workspace:*",
+    "@ag-ui/antigravity": "workspace:*",
     "@ag-ui/aws-strands": "workspace:*",
     "@ag-ui/claude-agent-sdk": "workspace:*",
     "@ag-ui/claude-managed-agents": "workspace:*",

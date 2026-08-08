@@ -185,6 +185,16 @@ export const menuIntegrations = [
     ],
   },
   {
+    id: "antigravity",
+    name: "Google Antigravity",
+    features: [
+      "agentic_chat",
+      "human_in_the_loop",
+      "tool_based_generative_ui",
+      "backend_tool_rendering",
+    ],
+  },
+  {
     id: "microsoft-agent-framework-dotnet",
     name: "Microsoft Agent Framework (.NET)",
     features: [

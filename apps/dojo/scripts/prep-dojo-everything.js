@@ -119,6 +119,11 @@ const ALL_TARGETS = {
     name: "ADK Middleware",
     cwd: path.join(integrationsRoot, "adk-middleware/python/examples"),
   },
+  antigravity: {
+    command: "uv sync",
+    name: "Antigravity",
+    cwd: path.join(integrationsRoot, "antigravity/python/examples"),
+  },
   "a2a-middleware": {
     command: "uv sync",
     name: "A2A Middleware",
