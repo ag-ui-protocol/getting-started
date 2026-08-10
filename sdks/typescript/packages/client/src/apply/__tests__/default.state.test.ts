@@ -199,7 +199,7 @@ describe("defaultApplyEvents - State Patching", () => {
 
       let updateCount = 0;
       result$.subscribe({
-        next: (update: AgentStateMutation) => {
+        next: (_update: AgentStateMutation) => {
           updateCount++;
         },
         complete: () => {

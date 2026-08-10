@@ -205,6 +205,11 @@ def _build_snapshot_messages(input_messages: List[Any]) -> List[Any]:
                     role="tool",
                     content=_coerce_text(msg.content),
                     tool_call_id=tool_call_id,
+                    # This is an AG-UI -> AG-UI rebuild of the client's own message, so
+                    # preserve its error/encrypted_value on the snapshot echo instead of
+                    # silently dropping the client's own fields.
+                    error=getattr(msg, "error", None),
+                    encrypted_value=getattr(msg, "encrypted_value", None),
                 )
             )
     return out
@@ -237,7 +242,10 @@ def _build_strands_history(input_messages: List[Any]) -> List[Dict[str, Any]]:
                     "toolResult": {
                         "toolUseId": getattr(msg, "tool_call_id", "") or "",
                         "content": [{"text": _coerce_text(msg.content)}],
-                        "status": "success",
+                        # Carry the AG-UI failure signal onto Bedrock's toolResult status,
+                        # so a client-reported tool failure is not asserted to the model as
+                        # a success.
+                        "status": "error" if getattr(msg, "error", None) else "success",
                     }
                 }
             )
@@ -293,6 +301,88 @@ def _build_strands_history(input_messages: List[Any]) -> List[Dict[str, Any]]:
             out.append({"role": "assistant", "content": blocks})
 
     flush_tool_results()
+    # Normalize so Bedrock's toolUse/toolResult pairing holds even when results
+    # arrive out of order, are wedged apart by other messages, or span multiple
+    # consecutive tool-call turns (parallel tool calls).
+    return _normalize_tool_turns(out)
+
+
+def _is_tooluse_only_assistant(m):
+    return (
+        m.get("role") == "assistant"
+        and m.get("content")
+        and all("toolUse" in b for b in m["content"])
+    )
+
+
+def _is_toolresult_only_user(m):
+    return (
+        m.get("role") == "user"
+        and m.get("content")
+        and all("toolResult" in b for b in m["content"])
+    )
+
+
+def _normalize_tool_turns(msgs):
+    """Merge same-turn toolUse into one assistant msg and their toolResults
+    into the immediately following user msg, dropping any messages wedged
+    between a toolUse turn and its toolResults so Bedrock accepts the history.
+
+    Messages that legitimately *follow* a completed toolUse/toolResult pair are
+    preserved in place; only messages wedged *between* the toolUse turn and its
+    results are dropped.
+    """
+    out = []
+    i = 0
+    n = len(msgs)
+    while i < n:
+        m = msgs[i]
+        if not _is_tooluse_only_assistant(m):
+            out.append(m)
+            i += 1
+            continue
+
+        # Collect consecutive toolUse-only assistant messages into one.
+        merged_tooluse = list(m["content"])
+        j = i + 1
+        while j < n and _is_tooluse_only_assistant(msgs[j]):
+            merged_tooluse.extend(msgs[j]["content"])
+            j += 1
+        # Preserve first-seen order and de-duplicate ids: a repeated toolUseId
+        # must not later emit a duplicate toolResult (Bedrock rejects that).
+        tooluse_ids = []
+        seen_ids = set()
+        for b in merged_tooluse:
+            rid = b["toolUse"]["toolUseId"]
+            if rid not in seen_ids:
+                seen_ids.add(rid)
+                tooluse_ids.append(rid)
+
+        # Scan forward for the matching toolResults. Anything that is not a
+        # matching result and appears *before* results are complete is "wedged"
+        # and dropped; once every result is collected, the remaining messages
+        # are left untouched to be processed in place by the outer loop.
+        results_by_id = {}
+        k = j
+        while k < n and len(results_by_id) < len(tooluse_ids):
+            mk = msgs[k]
+            if _is_toolresult_only_user(mk):
+                for b in mk["content"]:
+                    rid = b["toolResult"].get("toolUseId")
+                    if rid in seen_ids and rid not in results_by_id:
+                        results_by_id[rid] = b
+                    # non-matching / duplicate result blocks wedged in are dropped
+            # non-toolResult messages wedged before completion are dropped
+            k += 1
+
+        # Emit merged assistant(toolUse) + merged user(toolResult) adjacently.
+        out.append({"role": "assistant", "content": merged_tooluse})
+        ordered = [results_by_id[tid] for tid in tooluse_ids if tid in results_by_id]
+        if ordered:
+            out.append({"role": "user", "content": ordered})
+
+        # Continue with whatever legitimately follows, in place (no reordering).
+        i = k
     return out
 
 
@@ -871,6 +961,12 @@ class StrandsAgent:
             stop_text_streaming = False
             halt_event_stream = False
             pending_halt = False
+            # Frontend-tool ToolCallEnd ids are buffered here so the client's
+            # "execute this frontend tool" signal is delayed until AFTER this
+            # turn's backend tool results have been emitted. This prevents the
+            # client dispatching its follow-up run before the backend results
+            # reach it, narrowing the ConcurrencyException race window.
+            deferred_frontend_tool_ends = []
 
             # Reasoning/thinking state tracking
             reasoning_started = False
@@ -1444,6 +1540,21 @@ class StrandsAgent:
                                 # Break inner loop — no further results should be emitted
                                 break
 
+                        # Defer hand-off: now that this turn's backend
+                        # TOOL_CALL_RESULT(s) have been emitted above, flush the
+                        # buffered frontend-tool ToolCallEnd(s). Flushing here —
+                        # after the per-item loop and before the halt break below —
+                        # guarantees the wire order backend TOOL_CALL_RESULT ->
+                        # frontend TOOL_CALL_END, so the client only starts the
+                        # frontend tool once backend work has reached it.
+                        if deferred_frontend_tool_ends:
+                            for _fe_tool_use_id in deferred_frontend_tool_ends:
+                                yield ToolCallEndEvent(
+                                    type=EventType.TOOL_CALL_END,
+                                    tool_call_id=_fe_tool_use_id,
+                                )
+                            deferred_frontend_tool_ends = []
+
                         # The batch is fully emitted; stop before Strands runs
                         # another model cycle. Breaking HERE rather than relying
                         # on the check at the top of the loop means termination
@@ -1756,10 +1867,20 @@ class StrandsAgent:
                                                 exc_info=True,
                                             )
 
-                                    yield ToolCallEndEvent(
-                                        type=EventType.TOOL_CALL_END,
-                                        tool_call_id=tool_use_id,
-                                    )
+                                    # Defer hand-off: for frontend tools, buffer the
+                                    # ToolCallEnd instead of emitting it now. It is
+                                    # flushed after this turn's backend results (see
+                                    # the pending_halt handler). Backend tools and
+                                    # continue_after_frontend_call tools emit now.
+                                    if is_frontend_tool and not (
+                                        behavior and behavior.continue_after_frontend_call
+                                    ):
+                                        deferred_frontend_tool_ends.append(tool_use_id)
+                                    else:
+                                        yield ToolCallEndEvent(
+                                            type=EventType.TOOL_CALL_END,
+                                            tool_call_id=tool_use_id,
+                                        )
 
                                     if self._will_emit_tool_snapshot(behavior, emit_snapshots):
                                         snapshot_messages.append(
@@ -1949,6 +2070,19 @@ class StrandsAgent:
                                             f"Deferring halt after frontend tool call: tool_name={tool_name}, tool_call_id={tool_use_id}, thread_id={input_data.thread_id}"
                                         )
                                         pending_halt = True
+
+                # Defer hand-off (safety flush): if the stream ended without a
+                # backend tool-result message (e.g. a turn with ONLY frontend tool
+                # calls), the per-batch flush above never ran and the buffered
+                # frontend ToolCallEnd(s) would be lost — leaving TOOL_CALL_START
+                # events with no matching END. Flush any remainder here.
+                if deferred_frontend_tool_ends:
+                    for _fe_tool_use_id in deferred_frontend_tool_ends:
+                        yield ToolCallEndEvent(
+                            type=EventType.TOOL_CALL_END,
+                            tool_call_id=_fe_tool_use_id,
+                        )
+                    deferred_frontend_tool_ends = []
             finally:
                 # Properly close the async generator to avoid context detachment errors
                 # The generator should complete naturally when we consume all events,

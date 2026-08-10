@@ -22,6 +22,7 @@
   ],
   "scripts": {
     "build": "tsdown",
+    "lint": "eslint \"src/**/*.ts*\"",
     "dev": "tsdown --watch",
     "clean": "git clean -fdX --exclude=\"!.env\"",
     "typecheck": "tsc --noEmit",
@@ -41,6 +42,7 @@
   "devDependencies": {
     "@types/node": "^20.11.19",
     "@vitest/coverage-istanbul": "^4.0.18",
+    "eslint": "^9.37.0",
     "publint": "^0.3.12",
     "@arethetypeswrong/cli": "^0.17.4",
     "tsdown": "^0.20.1",

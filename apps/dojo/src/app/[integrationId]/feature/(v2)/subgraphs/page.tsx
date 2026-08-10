@@ -96,7 +96,7 @@ function InterruptHumanInTheLoop<TAgent extends AvailableAgents>({
     }
   };
 
-  const handleOptionSelect = (option: any) => {
+  const handleOptionSelect = (option: unknown) => {
     resolve(JSON.stringify(option));
   };
 
@@ -452,8 +452,14 @@ function TravelPlanner() {
 
   return (
     <div className="travel-content">
+      {/* NOTE (PNI-272): these three stay defined inside TravelPlanner. Hoisting
+          them to module scope gives React stable component identities, which
+          stops the remount-per-render these currently do — a behaviour change. */}
+      {/* eslint-disable-next-line react-hooks/static-components */}
       <ItineraryStrip />
+      {/* eslint-disable-next-line react-hooks/static-components */}
       <AgentStatus />
+      {/* eslint-disable-next-line react-hooks/static-components */}
       <TravelDetails />
     </div>
   );
