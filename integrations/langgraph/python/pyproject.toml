@@ -18,6 +18,28 @@ dependencies = [
     "pydantic>=2.0.0",
 ]
 
+# TEMPORARY, MUST BE REMOVED BEFORE THE NEXT ag-ui-langgraph RELEASE.
+#
+# Subagent support needs the SUBAGENT_* events and the `subagent_run_id` field,
+# which live in this repo's sdks/python but are not in any published
+# ag-ui-protocol wheel (latest on PyPI is 0.1.19). Without this override the
+# package does not import at all — `from ag_ui.core import SubagentStartedEvent`
+# raises ImportError — so every test here and the deepagents_subagents dojo
+# demo fail on a clean checkout.
+#
+# `[tool.uv.sources]` is a development-only override: uv applies it for local
+# `uv sync` and CI, and it is NOT written into the built wheel's metadata, so
+# installed users still resolve `ag-ui-protocol>=0.1.15` from PyPI. That is
+# exactly why it is unsafe to leave here — a release cut while this points at
+# a local path ships a wheel whose declared floor (0.1.15) cannot satisfy the
+# imports the code actually makes.
+#
+# Removal is tracked in PNI-274. The sequence is: release ag-ui-protocol with
+# the subagent events, raise the floor below to that version, delete this
+# block, then release ag-ui-langgraph.
+[tool.uv.sources]
+ag-ui-protocol = { path = "../../../sdks/python" }
+
 [project.optional-dependencies]
 fastapi = ["fastapi>=0.115.12"]
 
