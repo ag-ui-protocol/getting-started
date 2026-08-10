@@ -2052,6 +2052,81 @@ public sealed class ProtocolRuleTest
     // Helpers — process events through EventStreamConverter.AsChatResponseUpdates
     // ────────────────────────────────────────────────
 
+    // Step ownership. These mirror the TypeScript verifier's tests one for one, from the
+    // same real deepagents run a design partner reported: a subagent ran inside the
+    // parent's `tools` step and its own inner step was ALSO called `tools`, because a
+    // subagent runs the same graph shape and step names come from graph node names.
+    //
+    // Before steps were owner-keyed this client had it backwards, exactly as the
+    // TypeScript one did: it accepted the mis-attributed closes and rejected the correctly
+    // nested stream.
+
+    [Fact]
+    public async Task Subagent_ParentAndSubagentStepsOfSameName_AreBothAllowed()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new StepStartedEvent { StepName = "tools" },
+            new SubagentStartedEvent { SubagentRunId = "s1", Name = "alpha" },
+            new StepStartedEvent { StepName = "tools", SubagentRunId = "s1" },
+            new StepFinishedEvent { StepName = "tools", SubagentRunId = "s1" },
+            new SubagentFinishedEvent { SubagentRunId = "s1" },
+            new StepFinishedEvent { StepName = "tools" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        await ProcessEventsAsync(events);
+    }
+
+    [Fact]
+    public async Task Subagent_StepFinishedClosingParentStepUnderSubagentTag_Throws()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new StepStartedEvent { StepName = "tools" },
+            new SubagentStartedEvent { SubagentRunId = "s1", Name = "alpha" },
+            new StepFinishedEvent { StepName = "tools", SubagentRunId = "s1" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("that step is open under the parent agent", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("finished by whoever started it", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_StepFinishedClosingSubagentStepUntagged_Throws()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new SubagentStartedEvent { SubagentRunId = "s1", Name = "alpha" },
+            new StepStartedEvent { StepName = "inner", SubagentRunId = "s1" },
+            new StepFinishedEvent { StepName = "inner" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("attributed to the parent agent", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("open under subagent 's1'", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_UnfinishedSubagentStepAtRunFinished_NamesTheOwner()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new SubagentStartedEvent { SubagentRunId = "s1", Name = "alpha" },
+            new StepStartedEvent { StepName = "inner", SubagentRunId = "s1" },
+            new SubagentFinishedEvent { SubagentRunId = "s1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("inner (subagent 's1')", ex.Message, StringComparison.Ordinal);
+    }
+
     private static async Task<List<ChatResponseUpdate>> ProcessEventsAsync(BaseEvent[] events)
     {
         using var httpClient = CreateMockHttpClient(events);

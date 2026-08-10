@@ -58,6 +58,16 @@ function stripMessages(messages: MessageLike[]): MessageLike[] {
  *
  * The subagent feature is purely additive, so this shim is a pure removal in both
  * directions; there is no field/event to translate (unlike 0.0.45's THINKING->REASONING).
+ *
+ * Who this actually fires for: `maxVersion` defaults to this library's own version, but
+ * agent subclasses OVERRIDE it to declare the protocol level their backend speaks. Four
+ * integrations do -- llama-index, pydantic-ai and ag2 at 0.0.39, and crew-ai pinned at
+ * exactly 0.0.57, the version before subagents. So this shim is live for all four today,
+ * and the OUTBOUND stripping is the load-bearing half: those backends predate subagents,
+ * and events carrying subagent data can still reach a consumer wired to them -- replayed
+ * history, a stored thread written by a newer client, or a proxy forwarding a newer
+ * upstream. Stripping is what keeps such a consumer from receiving events it has no
+ * concept of.
  */
 export class BackwardCompatibility_0_0_57 extends Middleware {
   private warnDroppedLifecycleEvent(eventType: string) {

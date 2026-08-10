@@ -628,4 +628,73 @@ describe("verifyEvents subagent lifecycle", () => {
     );
     expect(events.map((e) => e.type)).toEqual(inputEvents.map((e) => e.type));
   });
+
+  // Step ownership. All three cases come from one real deepagents run reported by a
+  // design partner, where a subagent ran inside the parent's `tools` step and the
+  // subagent's own inner step was ALSO called `tools` -- normal, since a subagent runs
+  // the same graph shape as its parent, and step names come from graph node names.
+  //
+  // Before steps were owner-scoped the verifier had it exactly backwards: it ACCEPTED
+  // that run's mis-attributed closes and REJECTED the correctly nested stream. Both
+  // directions are pinned here.
+
+  it("should accept the parent and a subagent both having a step of the same name open", async () => {
+    const inputEvents: BaseEvent[] = [
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      // The parent's `tools` step wraps the whole delegation, untagged.
+      { type: EventType.STEP_STARTED, stepName: "tools" } as BaseEvent,
+      { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "alpha" } as SubagentStartedEvent,
+      // The subagent's own inner step, same name, tagged.
+      { type: EventType.STEP_STARTED, stepName: "tools", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.STEP_FINISHED, stepName: "tools", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s1" } as SubagentFinishedEvent,
+      // The parent's step closes AFTER the subagent run, still untagged.
+      { type: EventType.STEP_FINISHED, stepName: "tools" } as BaseEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
+    ];
+
+    const events = await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+    expect(events).toHaveLength(inputEvents.length);
+  });
+
+  it("should reject a STEP_FINISHED that closes the PARENT's step under a subagent's tag", async () => {
+    // The reported bug: the producer stamped attribution from "whichever subagent is
+    // currently active", so the parent's step close carried the subagent's id.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.STEP_STARTED, stepName: "tools" } as BaseEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "alpha" } as SubagentStartedEvent,
+        { type: EventType.STEP_FINISHED, stepName: "tools", subagentRunId: "s1" } as BaseEvent,
+      ],
+      /that step is open under the parent agent.*finished by whoever started it/i,
+    );
+  });
+
+  it("should reject a STEP_FINISHED that closes a SUBAGENT's step untagged", async () => {
+    // The same bug in the other direction, from the end of that run: once the subagent
+    // had been popped from the namespace, its own step close went out untagged.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "alpha" } as SubagentStartedEvent,
+        { type: EventType.STEP_STARTED, stepName: "inner", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.STEP_FINISHED, stepName: "inner" } as BaseEvent,
+      ],
+      /attributed to the parent agent.*open under subagent 's1'/i,
+    );
+  });
+
+  it("should name the owner of an unfinished subagent step at RUN_FINISHED", async () => {
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "alpha" } as SubagentStartedEvent,
+        { type: EventType.STEP_STARTED, stepName: "inner", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s1" } as SubagentFinishedEvent,
+        { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
+      ],
+      /steps are still active: inner \(subagent 's1'\)/i,
+    );
+  });
 });

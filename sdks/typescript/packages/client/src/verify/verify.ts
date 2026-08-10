@@ -30,8 +30,17 @@ export const verifyEvents =
     let runError = false; // New flag to track if RUN_ERROR has been sent
     // New flags to track first/last event requirements
     let firstEventReceived = false;
-    // Track active steps
-    const activeSteps = new Map<string, boolean>(); // Map of step name -> active status
+    // Track active steps, keyed by OWNER + name rather than name alone. A step name is
+    // only unique within one agent: a subagent routinely runs the same graph shape as its
+    // parent, so both legitimately have a step called "tools" open at once (the parent's
+    // wraps the delegation, the subagent's is its own inner work). Keying by name alone
+    // rejected that valid nesting with `Step "tools" is already active`, while ACCEPTING a
+    // STEP_FINISHED that closed the parent's step under the subagent's tag -- the exact
+    // shape a design partner reported from a real deepagents run.
+    const stepKey = (subagentRunId: string | undefined, stepName: string) =>
+      `${subagentRunId ?? ""}\u0000${stepName}`;
+    // key -> the owner and display name, kept for error messages and the RUN_FINISHED check
+    const activeSteps = new Map<string, { stepName: string; subagentRunId?: string }>();
     const activeSubagents = new Map<string, boolean>(); // Map of subagent ID -> active status
     // Ids closed by a SUBAGENT_FINISHED / SUBAGENT_ERROR in this run. Needed because
     // "no duplicate SUBAGENT_STARTED for the same subagentRunId" has to hold for the whole
@@ -288,18 +297,52 @@ export const verifyEvents =
           // Step flow
           case EventType.STEP_STARTED: {
             const stepName = (event.stepName as string);
-            if (activeSteps.has(stepName)) {
+            const stepOwner = (event.subagentRunId as string | undefined);
+            const key = stepKey(stepOwner, stepName);
+            if (activeSteps.has(key)) {
               return throwError(
-                () => new AGUIError(`Step "${stepName}" is already active for 'STEP_STARTED'`),
+                () =>
+                  new AGUIError(
+                    `Step "${stepName}" is already active for 'STEP_STARTED'${
+                      stepOwner !== undefined ? ` in subagent '${stepOwner}'` : ""
+                    }`,
+                  ),
               );
             }
-            activeSteps.set(stepName, true);
+            activeSteps.set(key, { stepName, subagentRunId: stepOwner });
             return of(event);
           }
 
           case EventType.STEP_FINISHED: {
             const stepName = (event.stepName as string);
-            if (!activeSteps.has(stepName)) {
+            const stepOwner = (event.subagentRunId as string | undefined);
+            const key = stepKey(stepOwner, stepName);
+            if (!activeSteps.has(key)) {
+              // A step with this name IS open, but under a different owner. Reported
+              // separately because it is a distinct and much more likely mistake than a
+              // step that was never started: a producer that stamps its attribution from
+              // "whichever subagent is currently active" closes the PARENT's step under a
+              // subagent's tag, and closes a SUBAGENT's step untagged once the subagent
+              // has been popped. Both were observed in the same real run. The generic
+              // "was not started" message sent the reader looking for a missing
+              // STEP_STARTED that is in fact right there.
+              const sameName = Array.from(activeSteps.values()).find(
+                (v) => v.stepName === stepName,
+              );
+              if (sameName) {
+                return throwError(
+                  () =>
+                    new AGUIError(
+                      `Cannot send 'STEP_FINISHED' for step "${stepName}" attributed to ${
+                        stepOwner !== undefined ? `subagent '${stepOwner}'` : "the parent agent"
+                      }: that step is open under ${
+                        sameName.subagentRunId !== undefined
+                          ? `subagent '${sameName.subagentRunId}'`
+                          : "the parent agent"
+                      }. A step must be finished by whoever started it.`,
+                    ),
+                );
+              }
               return throwError(
                 () =>
                   new AGUIError(
@@ -307,7 +350,7 @@ export const verifyEvents =
                   ),
               );
             }
-            activeSteps.delete(stepName);
+            activeSteps.delete(key);
             return of(event);
           }
 
@@ -477,7 +520,13 @@ export const verifyEvents =
 
             // Check that all steps are finished before run ends
             if (activeSteps.size > 0) {
-              const unfinishedSteps = Array.from(activeSteps.keys()).join(", ");
+              const unfinishedSteps = Array.from(activeSteps.values())
+                .map((v) =>
+                  v.subagentRunId !== undefined
+                    ? `${v.stepName} (subagent '${v.subagentRunId}')`
+                    : v.stepName,
+                )
+                .join(", ");
               return throwError(
                 () =>
                   new AGUIError(

@@ -70,6 +70,21 @@ internal static class EventStreamConverter
     private const string AGUIOwnerResolvedKey = "agui.__ownerResolved";
 
     /// <summary>
+    /// Renders the open steps for an error message, naming each step's owner. Steps are
+    /// keyed by owner + name, so the raw keys are not readable on their own.
+    /// </summary>
+    private static string DescribeSteps(HashSet<(string? Owner, string Name)> steps)
+    {
+        var parts = new List<string>();
+        foreach (var s in steps)
+        {
+            parts.Add(s.Owner is null ? s.Name : $"{s.Name} (subagent '{s.Owner}')");
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    /// <summary>
     /// Owner for an update, tried in the order the update can identify its entity: its
     /// MessageId; the entity id of the event that produced it (this is what covers
     /// reasoning updates, which carry no MessageId); then the call id of any function call
@@ -174,7 +189,13 @@ internal static class EventStreamConverter
         var toolCallBuilder = new ToolCallBuilder();
 
         // Event verification state
-        var activeSteps = new HashSet<string>();
+        // Steps are keyed by OWNER + name, not name alone. A step name is only unique
+        // within one agent: a subagent runs the same graph shape as its parent, so both
+        // legitimately have a step called "tools" open at once. Keying by name alone
+        // rejected that valid nesting while ACCEPTING a STEP_FINISHED that closed the
+        // parent's step under a subagent's tag -- the shape a design partner reported
+        // from a real run. Mirrors the TypeScript verifier.
+        var activeSteps = new HashSet<(string? Owner, string Name)>();
         // Subagents open right now, mapped to the parent that spawned them (null for one
         // the parent run started directly). Nesting is tracked by this identity link, not
         // by the order events arrive in, so interleaved parallel subagents cannot swap
@@ -567,7 +588,7 @@ internal static class EventStreamConverter
                     if (activeSteps.Count > 0)
                     {
                         throw new System.InvalidOperationException(
-                            $"Cannot send 'RUN_FINISHED' while steps are still active: {string.Join(", ", activeSteps)}");
+                            $"Cannot send 'RUN_FINISHED' while steps are still active: {DescribeSteps(activeSteps)}");
                     }
 
                     textMessageBuilder.EnsureCompleted();
@@ -673,10 +694,11 @@ internal static class EventStreamConverter
                     break;
 
                 case StepStartedEvent stepStarted:
-                    if (!activeSteps.Add(stepStarted.StepName))
+                    if (!activeSteps.Add((stepStarted.SubagentRunId, stepStarted.StepName)))
                     {
                         throw new System.InvalidOperationException(
-                            $"Step \"{stepStarted.StepName}\" is already active for 'STEP_STARTED'.");
+                            $"Step \"{stepStarted.StepName}\" is already active for 'STEP_STARTED'"
+                            + (stepStarted.SubagentRunId is null ? "." : $" in subagent '{stepStarted.SubagentRunId}'."));
                     }
 
                     {
@@ -699,8 +721,28 @@ internal static class EventStreamConverter
                     break;
 
                 case StepFinishedEvent stepFinished:
-                    if (!activeSteps.Remove(stepFinished.StepName))
+                    if (!activeSteps.Remove((stepFinished.SubagentRunId, stepFinished.StepName)))
                     {
+                        // A step of this name IS open, but under a different owner. Called
+                        // out separately because it is a far likelier mistake than a step
+                        // that was never started: a producer stamping attribution from
+                        // "whichever subagent is active" closes the parent's step tagged
+                        // and the subagent's step untagged. The generic message sent the
+                        // reader hunting for a STEP_STARTED that is in fact right there.
+                        foreach (var open in activeSteps)
+                        {
+                            if (open.Name != stepFinished.StepName) continue;
+                            var attributed = stepFinished.SubagentRunId is null
+                                ? "the parent agent"
+                                : $"subagent '{stepFinished.SubagentRunId}'";
+                            var actual = open.Owner is null
+                                ? "the parent agent"
+                                : $"subagent '{open.Owner}'";
+                            throw new System.InvalidOperationException(
+                                $"Cannot send 'STEP_FINISHED' for step \"{stepFinished.StepName}\" attributed to {attributed}: "
+                                + $"that step is open under {actual}. A step must be finished by whoever started it.");
+                        }
+
                         throw new System.InvalidOperationException(
                             $"Cannot send 'STEP_FINISHED' for step \"{stepFinished.StepName}\" that was not started.");
                     }
