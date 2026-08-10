@@ -205,6 +205,11 @@ def _build_snapshot_messages(input_messages: List[Any]) -> List[Any]:
                     role="tool",
                     content=_coerce_text(msg.content),
                     tool_call_id=tool_call_id,
+                    # This is an AG-UI -> AG-UI rebuild of the client's own message, so
+                    # preserve its error/encrypted_value on the snapshot echo instead of
+                    # silently dropping the client's own fields.
+                    error=getattr(msg, "error", None),
+                    encrypted_value=getattr(msg, "encrypted_value", None),
                 )
             )
     return out
@@ -237,7 +242,10 @@ def _build_strands_history(input_messages: List[Any]) -> List[Dict[str, Any]]:
                     "toolResult": {
                         "toolUseId": getattr(msg, "tool_call_id", "") or "",
                         "content": [{"text": _coerce_text(msg.content)}],
-                        "status": "success",
+                        # Carry the AG-UI failure signal onto Bedrock's toolResult status,
+                        # so a client-reported tool failure is not asserted to the model as
+                        # a success.
+                        "status": "error" if getattr(msg, "error", None) else "success",
                     }
                 }
             )
