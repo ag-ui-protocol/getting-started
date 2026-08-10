@@ -14,6 +14,7 @@ from ag_ui.core import (
     AssistantMessage,
 )
 from ag_ui_langgraph.agent import (
+    close_lane_steps,
     LangGraphAgent,
     derive_subagent_context,
     reconcile_subagents,
@@ -763,48 +764,68 @@ class TestStepOwnership(unittest.TestCase):
         }
         return agent
 
-    def test_step_finished_carries_the_lane_that_started_the_step(self):
+    def test_concurrent_lanes_keep_their_own_steps_open(self):
+        # Steps are per-lane, so an event from s2 does NOT close s1's step. Under the
+        # old flat model any lane switch closed whatever step happened to be open,
+        # which is what produced mismatched STEP_STARTED/STEP_FINISHED pairs.
         agent = self._agent()
 
-        # s1 opens the `research` step.
         agent.active_run["current_subagent_run_id"] = "s1"
         started = list(agent.handle_node_change("research"))
         self.assertEqual([e.type for e in started], [EventType.STEP_STARTED])
         self.assertEqual(started[0].subagent_run_id, "s1")
 
-        # An event from s2 arrives; reconcile_subagents switches the lane BEFORE
-        # handle_node_change closes s1's step.
         agent.active_run["current_subagent_run_id"] = "s2"
         transition = list(agent.handle_node_change("write"))
 
         self.assertEqual(
-            [e.type for e in transition],
-            [EventType.STEP_FINISHED, EventType.STEP_STARTED],
+            [e.type for e in transition], [EventType.STEP_STARTED],
+            "s2 starting work must not close s1's step",
         )
-        finished, next_started = transition
-        self.assertEqual(finished.step_name, "research")
-        self.assertEqual(
-            finished.subagent_run_id, "s1",
-            "STEP_FINISHED must belong to the lane that opened the step, not the "
-            "lane whose event happened to trigger the transition",
-        )
-        self.assertEqual(next_started.step_name, "write")
-        self.assertEqual(next_started.subagent_run_id, "s2")
+        self.assertEqual(transition[0].subagent_run_id, "s2")
 
-    def test_parent_step_closed_while_a_subagent_is_active_stays_unattributed(self):
-        # The reverse direction: a step the parent opened must not acquire a
-        # subagent's id just because a subagent became active before it closed.
+        # Each lane still closes under its own owner when it ends.
+        closes = close_lane_steps(agent.active_run, ["s1", "s2"])
+        self.assertEqual(
+            [(e.step_name, e.subagent_run_id) for e in closes],
+            [("research", "s1"), ("write", "s2")],
+        )
+
+    def test_parent_step_stays_open_across_a_subagent_run(self):
+        # The shape a design partner reported: the parent's `tools` step wraps the
+        # delegation, so it must NOT close when the subagent starts its own work, and
+        # must not acquire the subagent's id. The subagent's step nests inside it --
+        # even when it has the SAME name, which is normal since a subagent runs the
+        # same graph shape.
         agent = self._agent()
-        list(agent.handle_node_change("supervise"))
+        opened = list(agent.handle_node_change("tools"))
+        self.assertEqual([e.type for e in opened], [EventType.STEP_STARTED])
+        self.assertIsNone(opened[0].subagent_run_id)
 
         agent.active_run["current_subagent_run_id"] = "s1"
-        transition = list(agent.handle_node_change("research"))
+        agent.active_run["active_subagents"]["s1"] = "alpha"
+        nested = list(agent.handle_node_change("tools"))
 
-        finished = transition[0]
-        self.assertEqual(finished.step_name, "supervise")
+        self.assertEqual(
+            [e.type for e in nested], [EventType.STEP_STARTED],
+            "the parent's step must stay open across the subagent run",
+        )
+        self.assertEqual(nested[0].subagent_run_id, "s1")
+
+        # The subagent's step closes inside its own window, tagged; the parent's is
+        # still open afterwards and remains the parent's.
+        drained = drain_subagents(agent.active_run)
+        self.assertEqual(
+            [(getattr(e, "step_name", None), e.subagent_run_id) for e in drained],
+            [("tools", "s1"), (None, "s1")],
+        )
+        agent.active_run["current_subagent_run_id"] = None
+        closing = list(agent.handle_node_change("model"))
+        self.assertEqual(closing[0].type, EventType.STEP_FINISHED)
+        self.assertEqual(closing[0].step_name, "tools")
         self.assertIsNone(
-            finished.subagent_run_id,
-            "a step the parent opened belongs to the parent when it closes",
+            closing[0].subagent_run_id,
+            "the parent's wrapping step closes as the parent's, after the subagent",
         )
 
 

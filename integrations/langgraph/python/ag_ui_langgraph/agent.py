@@ -275,11 +275,43 @@ def reconcile_subagents(active_run, ns, lc_agent_name, subgraphs) -> list:
     return events
 
 
+def close_lane_steps(active_run, ids) -> list:
+    """Emit STEP_FINISHED for any step still open in the given subagents' lanes.
+
+    Steps are tracked per lane, so a subagent's own step no longer gets closed as a
+    side effect of the parent's next node transition -- which is the point, but it
+    means a lane's step has to be closed explicitly when that lane ends. Without
+    this the step leaks: clients require every step closed before RUN_FINISHED, so
+    the run would fail with "steps are still active" naming the subagent.
+
+    Emitted BEFORE the subagent's own terminal, so the step closes inside the
+    subagent's window rather than after it.
+    """
+    lane_nodes = active_run.get("lane_nodes") or {}
+    step_owners = active_run.get("step_owners") or {}
+    events = []
+    for sid in ids:
+        node = lane_nodes.get(sid)
+        if not node:
+            continue
+        events.append(
+            StepFinishedEvent(
+                type=EventType.STEP_FINISHED,
+                step_name=node,
+                subagent_run_id=step_owners.get(sid, sid),
+            )
+        )
+        lane_nodes.pop(sid, None)
+        step_owners.pop(sid, None)
+    return events
+
+
 def drain_subagents(active_run) -> list:
     """Emit SUBAGENT_FINISHED for any still-open subagents (before RUN_FINISHED)."""
     ids = list(active_run.get("active_subagents", {}).keys())
-    events = [SubagentFinishedEvent(type=EventType.SUBAGENT_FINISHED, subagent_run_id=sid)
-              for sid in ids]
+    events = close_lane_steps(active_run, ids)
+    events += [SubagentFinishedEvent(type=EventType.SUBAGENT_FINISHED, subagent_run_id=sid)
+               for sid in ids]
     active_run["active_subagents"].clear()
     # Terminal for these ids — see reconcile_subagents.
     active_run.setdefault("closed_subagents", set()).update(ids)
@@ -299,8 +331,12 @@ def error_open_subagents(active_run, message: str) -> list:
     if not active_run:
         return []
     ids = list(active_run.get("active_subagents", {}).keys())
-    events = [SubagentErrorEvent(type=EventType.SUBAGENT_ERROR, subagent_run_id=sid, message=message)
-              for sid in ids]
+    # Close each lane's open step before its terminal, same as the drain path. A step
+    # left open on the error path fails the clients' "all steps closed" rule just as
+    # surely as one left open on the success path.
+    events = close_lane_steps(active_run, ids)
+    events += [SubagentErrorEvent(type=EventType.SUBAGENT_ERROR, subagent_run_id=sid, message=message)
+               for sid in ids]
     active_run.get("active_subagents", {}).clear()
     # Terminal for these ids — see reconcile_subagents.
     active_run.setdefault("closed_subagents", set()).update(ids)
@@ -2652,19 +2688,43 @@ class LangGraphAgent:
         if node_name == "__end__":
             node_name = None
 
-        if node_name != self.active_run.get("node_name"):
-            # End current step if we have one
-            if self.active_run.get("node_name"):
-                yield self.end_step()
+        # Steps are tracked PER LANE (the parent is lane None; each subagent is its own).
+        # With a single current-node slot a subagent's first node transition closed the
+        # PARENT's step -- so the `tools` step wrapping a delegation ended the moment the
+        # subagent started work, and reopened when it returned, putting a parent-owned
+        # STEP_STARTED inside the subagent's run. A design partner reported exactly that
+        # from a real deepagents run. The parent's step now stays open across the whole
+        # delegation, which the clients accept since steps are keyed by (owner, name).
+        lane = self.active_run.get("current_subagent_run_id")
+        lane_nodes = self.active_run.setdefault("lane_nodes", {})
+        # Seed the PARENT lane from the legacy flat field on first use. Several paths
+        # assign active_run["node_name"] directly -- the resume path and the
+        # interrupt/writes handling -- so a step can already be open for the parent
+        # without lane_nodes knowing. Without this the parent's open step is invisible
+        # here and never gets closed.
+        if lane is None and None not in lane_nodes:
+            lane_nodes[None] = self.active_run.get("node_name")
+        current = lane_nodes.get(lane)
+
+        if node_name != current:
+            # End the current step IN THIS LANE if there is one
+            if current:
+                yield self.end_step(lane)
 
             # Start new step if we have a node name
             if node_name:
-                for event in self.start_step(node_name):
+                for event in self.start_step(node_name, lane):
                     yield event
 
+            lane_nodes[lane] = node_name
+
+        # Kept in step with the lane that produced this transition. Other paths read
+        # node_name for graph-level purposes (aupdate_state's as_node, interrupt
+        # handling, the exiting-node state check), which are about the graph's position
+        # rather than which lane owns a step, so they keep their existing behaviour.
         self.active_run["node_name"] = node_name
 
-    def start_step(self, step_name: str) -> Generator[ProcessedEvents, None, None]:
+    def start_step(self, step_name: str, lane: str | None = None) -> Generator[ProcessedEvents, None, None]:
         """Emit STEP_STARTED for ``step_name``; node_name bookkeeping is done by handle_node_change."""
         event = self._dispatch_event(
             StepStartedEvent(
@@ -2676,19 +2736,19 @@ class LangGraphAgent:
         # same owner. Read back off the dispatched event rather than from
         # current_subagent_run_id so the two halves can never disagree about what the
         # chokepoint actually stamped.
-        self.active_run["step_owner"] = getattr(event, "subagent_run_id", None)
+        self.active_run.setdefault("step_owners", {})[lane] = getattr(event, "subagent_run_id", None)
         yield event
 
-    def end_step(self) -> ProcessedEvents:
-        """Emit STEP_FINISHED for the active step; node_name bookkeeping is done by handle_node_change."""
+    def end_step(self, lane: str | None = None) -> ProcessedEvents:
+        """Emit STEP_FINISHED for this lane's active step; bookkeeping is done by handle_node_change."""
         # Invariant: end_step is only called mid-run, from handle_node_change.
         if self.active_run is None:
             raise RuntimeError("end_step called outside an active run")
-        node_name = self.active_run.get("node_name")
+        node_name = self.active_run.get("lane_nodes", {}).get(lane)
         if not node_name:
             raise ValueError("No active step to end")
 
-        step_owner = self.active_run.get("step_owner")
+        step_owner = self.active_run.get("step_owners", {}).get(lane)
         event = self._dispatch_event(
             StepFinishedEvent(
                 type=EventType.STEP_FINISHED,
@@ -2704,7 +2764,7 @@ class LangGraphAgent:
         # correct value may be None (a parent-owned step), which the chokepoint
         # treats as "unset, go ahead and stamp".
         event.subagent_run_id = step_owner
-        self.active_run["step_owner"] = None
+        self.active_run.get("step_owners", {}).pop(lane, None)
         return event
 
     # Probe the graph's astream_events signature for version-specific support
