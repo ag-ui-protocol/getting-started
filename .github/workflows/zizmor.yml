@@ -32,6 +32,14 @@ permissions:
   contents: read
   security-events: write # SARIF upload to GitHub code scanning
 
+# Pinned Python build toolchain — see .github/python-toolchain.env, which is the
+# single place these two values are recorded, along with the green run they came
+# from. Change one, change them all: the python-toolchain-pins job in
+# lint-release-workflows.yml fails if any workflow's literal disagrees with that file.
+env:
+  UV_VERSION: "0.12.1"
+  PYTHON_VERSION: "3.12"
+
 jobs:
   zizmor:
     runs-on: ubuntu-latest
@@ -43,6 +51,9 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Run zizmor
         # --persona=auditor surfaces medium-confidence findings that the default

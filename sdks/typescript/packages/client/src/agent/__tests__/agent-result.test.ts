@@ -58,7 +58,7 @@ class TestAgent extends AbstractAgent {
     this.eventsToEmit = events;
   }
 
-  run(input: RunAgentInput): Observable<BaseEvent> {
+  run(_input: RunAgentInput): Observable<BaseEvent> {
     return of(...this.eventsToEmit);
   }
 }
@@ -70,7 +70,7 @@ class StreamingTestAgent extends AbstractAgent {
     this.eventSubject = subject;
   }
 
-  run(input: RunAgentInput): Observable<BaseEvent> {
+  run(_input: RunAgentInput): Observable<BaseEvent> {
     if (!this.eventSubject) {
       throw new Error("eventSubject not set");
     }

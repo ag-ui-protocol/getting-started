@@ -30,6 +30,14 @@ on:
 permissions:
   contents: read
 
+# Pinned Python build toolchain — see .github/python-toolchain.env, which is the
+# single place these two values are recorded, along with the green run they came
+# from. Change one, change them all: the python-toolchain-pins job in
+# lint-release-workflows.yml fails if any workflow's literal disagrees with that file.
+env:
+  UV_VERSION: "0.12.1"
+  PYTHON_VERSION: "3.12"
+
 jobs:
   check-generated-files:
     name: dojo / check-generated-files
@@ -44,7 +52,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: "22"
+          node-version-file: ".node-version"
 
       - name: Install pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
@@ -201,7 +209,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: "22"
+          node-version-file: ".node-version"
 
       - name: Install pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
@@ -211,7 +219,7 @@ jobs:
       # Now that pnpm is available, cache its store to speed installs
       - name: Resolve pnpm store path
         id: pnpm-store
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
 
       - name: Cache pnpm store
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
@@ -229,10 +237,15 @@ jobs:
             ~/.cache/pypoetry
             ~/.cache/uv
             **/.venv
-          key: ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pydeps-${{ matrix.suite }}-${{ hashFiles('**/poetry.lock', '**/pyproject.toml') }}
+          # The toolchain segments keep a venv built by one uv/Python from being
+          # restored into a job expecting another — including via restore-keys,
+          # which would otherwise reach past them on a key miss. Note the limit:
+          # this path also captures Poetry-built venvs, and Poetry is installed at
+          # `version: latest` below, so a Poetry upgrade is NOT reflected in the key.
+          key: ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pydeps-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ matrix.suite }}-${{ hashFiles('**/poetry.lock', '**/pyproject.toml') }}
           restore-keys: |
-            ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pydeps-${{ matrix.suite }}-
-            ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pydeps-
+            ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pydeps-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ matrix.suite }}-
+            ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pydeps-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-
 
       - name: Cache Next.js build
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
@@ -249,8 +262,17 @@ jobs:
           virtualenvs-create: true
           virtualenvs-in-project: true
 
+      # uv itself is only invoked indirectly here — the example apps under
+      # integrations/*/python/examples are synced by
+      # apps/dojo/scripts/prep-dojo-everything.js. Those syncs are deliberately
+      # not frozen (the script is shared with local dev, where relocking is
+      # wanted), so this pin is what keeps the interpreter and resolver stable
+      # across e2e runs.
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Set up .NET SDK
         if: ${{ contains(join(matrix.services, ','), 'microsoft-agent-framework-dotnet') || contains(join(matrix.services, ','), 'ag-ui-dotnet') }}

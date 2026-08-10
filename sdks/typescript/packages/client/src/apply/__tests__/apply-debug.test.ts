@@ -7,14 +7,13 @@ import {
   Message,
   RunStartedEvent,
   TextMessageStartEvent,
-  TextMessageContentEvent,
   TextMessageEndEvent,
   RunFinishedEvent,
   RunAgentInput,
 } from "@ag-ui/core";
 import { defaultApplyEvents } from "../default";
 import { AbstractAgent } from "@/agent";
-import { createDebugLogger, DebugLogger } from "@/debug-logger";
+import { createDebugLogger } from "@/debug-logger";
 import { AgentSubscriber } from "@/agent/subscriber";
 
 const createAgent = (messages: Message[] = []) =>

@@ -32,16 +32,17 @@ if [ ! -f "$CONFIG" ]; then
   exit 1
 fi
 
-# Emit one TSV line per package: "<scope>\t<name>\t<path>\t<ecosystem>\t<buildSystem>".
+# Emit one TSV line per package:
+# "<scope>\t<name>\t<path>\t<ecosystem>\t<buildSystem>\t<groupId>".
 PACKAGES=$(jq -r '
   .scopes | to_entries[]
   | .key as $s
   | .value.packages[]
-  | [$s, .name, .path, .ecosystem, (.buildSystem // "-")] | @tsv
+  | [$s, .name, .path, .ecosystem, (.buildSystem // "-"), (.groupId // "-")] | @tsv
 ' "$CONFIG")
 
 rc=0
-while IFS=$'\t' read -r scope name path ecosystem build_system; do
+while IFS=$'\t' read -r scope name path ecosystem build_system group_id; do
   [ -z "$scope" ] && continue
 
   if [ "$ecosystem" = "typescript" ]; then
@@ -100,6 +101,54 @@ except Exception as e:
     print(f'ERROR: could not read PackageId from {os.environ[\"MANIFEST\"]}: {e}', file=sys.stderr)
     sys.exit(1)
 ") || { echo "ERROR: [$scope] $name: could not read PackageId from $path/*.csproj" >&2; rc=1; continue; }
+  elif [ "$ecosystem" = "maven" ]; then
+    manifest="$REPO_ROOT/$path/pom.xml"
+    if [ ! -f "$manifest" ]; then
+      echo "ERROR: [$scope] $name: pom.xml not found at $path" >&2
+      rc=1
+      continue
+    fi
+    # A Maven artifact is groupId:artifactId, and a module inherits its groupId
+    # from the reactor's <parent> unless it declares its own. Both halves are
+    # checked: a wrong groupId sends detect-java-version-changes.sh to a URL
+    # that 404s, which reads as "never published".
+    if [ "$group_id" = "-" ]; then
+      echo "ERROR: [$scope] $name: maven packages must declare a \"groupId\" in release.config.json" >&2
+      rc=1
+      continue
+    fi
+    actual=$(MANIFEST="$manifest" python3 -c "
+import os, sys
+import xml.etree.ElementTree as ET
+NS = '{http://maven.apache.org/POM/4.0.0}'
+try:
+    root = ET.parse(os.environ['MANIFEST']).getroot()
+    def text(tag):
+        return root.findtext(f'{NS}{tag}') or root.findtext(tag)
+    artifact = text('artifactId')
+    if not artifact:
+        raise KeyError('artifactId')
+    group = text('groupId')
+    if not group:
+        parent = root.find(f'{NS}parent')
+        if parent is None:
+            parent = root.find('parent')
+        if parent is not None:
+            group = parent.findtext(f'{NS}groupId') or parent.findtext('groupId')
+    if not group:
+        raise KeyError('groupId')
+    print(artifact.strip())
+    print(group.strip())
+except Exception as e:
+    print(f'ERROR: could not read coordinates from {os.environ[\"MANIFEST\"]}: {e}', file=sys.stderr)
+    sys.exit(1)
+") || { echo "ERROR: [$scope] $name: could not read coordinates from $path/pom.xml" >&2; rc=1; continue; }
+    actual_group=$(printf '%s\n' "$actual" | sed -n '2p')
+    actual=$(printf '%s\n' "$actual" | sed -n '1p')
+    if [ "$group_id" != "$actual_group" ]; then
+      echo "ERROR: [$scope] $name: release.config.json groupId '$group_id' != pom groupId '$actual_group' at $path" >&2
+      rc=1
+    fi
   else
     echo "ERROR: [$scope] $name: unknown ecosystem '$ecosystem'" >&2
     rc=1
@@ -121,7 +170,8 @@ done <<< "$PACKAGES"
 if [ "$rc" -ne 0 ]; then
   echo "" >&2
   echo "Fix: make each release.config.json package 'name' exactly match the name in" >&2
-  echo "its manifest (package.json '.name', pyproject.toml [project]/[tool.poetry] name, or .csproj PackageId)." >&2
+  echo "its manifest (package.json '.name', pyproject.toml [project]/[tool.poetry] name," >&2
+  echo ".csproj PackageId, or pom.xml artifactId)." >&2
   exit 1
 fi
 

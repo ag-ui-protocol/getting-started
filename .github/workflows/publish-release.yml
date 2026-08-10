@@ -18,9 +18,15 @@ name: release / publish
 #   "1.2.3a0" / "1.2.3b0" / "1.2.3rc0" → same, with PEP 440 prerelease tags
 #
 # SECURITY: Build and publish are split into separate jobs. Publishing secrets
-# (PYPI_API_TOKEN) are only available in publish jobs, never in the same process
-# tree as build-time code execution. npm and NuGet publishing use OIDC trusted
-# publishing (no long-lived package token at all) — see below.
+# (PYPI_API_TOKEN, SONATYPE_*/GPG_*) are only available in publish jobs, never in
+# the same process tree as build-time code execution. npm and NuGet publishing
+# use OIDC trusted publishing (no long-lived package token at all) — see below.
+#
+# MAVEN CENTRAL is STABLE-ONLY. Central has no dist-tag / prerelease channel and
+# every upload is permanent and immutable, so there is no throwaway equivalent of
+# an npm `canary` tag. A prerelease dispatch that resolves to a Maven scope FAILS
+# LOUD in the build job rather than silently publishing junk versions into a
+# public namespace forever (or, worse, silently doing nothing).
 #
 # OIDC ENTRY POINT: This workflow is the ONLY workflow that publishes to npm
 # under OIDC. The npm trusted publisher records for every @ag-ui/* package
@@ -48,9 +54,9 @@ name: release / publish
 #     -f mode=prerelease -f scope=integration-langgraph-py -f suffix=fix-user-issue
 
 on:
-  # Version bumps can only live in package.json, pyproject.toml, or the .NET
-  # SDK's Directory.Build.props, so we gate the trigger on those paths.
-  # Combined with the release.config.json
+  # Version bumps can only live in package.json, pyproject.toml, the .NET SDK's
+  # Directory.Build.props, or a Maven reactor pom.xml, so we gate the trigger on
+  # those paths. Combined with the release.config.json
   # allowlist in detect-ts-version-changes.sh this gives defense in depth:
   # unrelated pushes don't even start the workflow, and any workflow run that
   # does fire still filters to enrolled packages before touching a registry.
@@ -68,6 +74,11 @@ on:
       # Every Directory.Build.props that carries a released .NET VersionPrefix.
       - "sdks/dotnet/Directory.Build.props"
       - "integrations/claude-managed-agents/dotnet/Directory.Build.props"
+      # Every reactor pom.xml that carries a released Maven version. A module
+      # pom only repeats its <parent><version>, so the reactor pom is the
+      # authoritative trigger. Kept in step with release.config.json by
+      # verify-release-scope-dropdowns.sh.
+      - "sdks/community/java/ag-ui/pom.xml"
   workflow_dispatch:
     inputs:
       mode:
@@ -116,6 +127,7 @@ on:
           - sdk-py
           - sdk-py-a2ui-toolkit
           - sdk-dotnet
+          - sdk-java
           - sdk-ts
           - sdk-ts-a2ui-toolkit
           - create-ag-ui-app
@@ -135,6 +147,17 @@ concurrency:
 
 env:
   NX_VERBOSE_LOGGING: true
+  # Pinned Python build toolchain — see .github/python-toolchain.env, which also
+  # records the green run these versions came from. Kept in step with every other
+  # Python job by the python-toolchain-pins job in lint-release-workflows.yml.
+  # PYTHON_VERSION is the same 3.12 the `Setup Python` step already pins.
+  #
+  # Audited for frozen mode: prerelease builds rewrite package versions on
+  # purpose, but the only uv commands here are `uv build` and `uv publish`,
+  # neither of which reads or rewrites uv.lock (verified against uv 0.12.1), so
+  # this file needs no frozen-mode exemption.
+  UV_VERSION: "0.12.1"
+  PYTHON_VERSION: "3.12"
 
 permissions:
   contents: read
@@ -164,6 +187,8 @@ jobs:
       py_count: ${{ steps.detect_py.outputs.count }}
       dotnet_packages: ${{ steps.detect_dotnet.outputs.packages }}
       dotnet_count: ${{ steps.detect_dotnet.outputs.count }}
+      java_packages: ${{ steps.detect_java.outputs.packages }}
+      java_count: ${{ steps.detect_java.outputs.count }}
       ts_groups_json: ${{ steps.save_groups.outputs.groups }}
       # Prerelease-only outputs (populated when mode=prerelease).
       pre_ts_packages_json: ${{ steps.pre_ts.outputs.packages_json }}
@@ -172,6 +197,8 @@ jobs:
       pre_has_py_packages: ${{ steps.pre_py.outputs.has_packages }}
       pre_dotnet_packages_json: ${{ steps.pre_dotnet.outputs.packages_json }}
       pre_dotnet_count: ${{ steps.pre_dotnet.outputs.count }}
+      # NOTE: there is deliberately no pre_java_* output. Maven Central is
+      # stable-only (see the header); the prerelease path fails loud instead.
     steps:
       - name: Determine mode and scope
         id: meta
@@ -208,7 +235,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: "22"
+          node-version-file: ".node-version"
 
       - name: Install protoc
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # v3.0.0
@@ -219,12 +246,13 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Setup Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Poetry
         run: pip install poetry
@@ -353,12 +381,44 @@ jobs:
           COUNT=$(echo "$CHANGED" | jq 'length')
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
 
+      - name: Detect Java version changes vs Maven Central
+        id: detect_java
+        if: steps.meta.outputs.mode == 'stable'
+        run: |
+          set -euo pipefail
+          set +e
+          CHANGED=$(bash scripts/release/detect-java-version-changes.sh 2>detect-java.log)
+          RC=$?
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::detect-java-version-changes.sh exited with status $RC"
+            echo "::group::detect-java.log"
+            cat detect-java.log || true
+            echo "::endgroup::"
+            exit 1
+          fi
+          cat detect-java.log || true
+          [ -z "$CHANGED" ] && CHANGED="[]"
+          [ "$CHANGED" = "null" ] && CHANGED="[]"
+          if ! echo "$CHANGED" | jq -e . >/dev/null 2>&1; then
+            echo "::error::detect-java-version-changes.sh produced non-JSON stdout"
+            echo "::group::stdout (first 200 chars)"
+            printf '%s\n' "$CHANGED" | head -c 200
+            echo
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "packages=$CHANGED" >> "$GITHUB_OUTPUT"
+          COUNT=$(echo "$CHANGED" | jq 'length')
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
       - name: Nothing to publish (stable)
         if: >
           steps.meta.outputs.mode == 'stable' &&
           steps.detect_ts.outputs.count == '0' &&
           steps.detect_py.outputs.count == '0' &&
-          steps.detect_dotnet.outputs.count == '0'
+          steps.detect_dotnet.outputs.count == '0' &&
+          steps.detect_java.outputs.count == '0'
         run: |
           {
             echo "## release / publish"
@@ -462,6 +522,34 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      # Java builds and tests HERE, in the secretless build job, rather than in
+      # publish-maven. `mvn -Prelease deploy` has to re-run the lifecycle from
+      # source anyway (it signs what it packs), so there is nothing to hand over
+      # as an artifact — but running the test suite here keeps arbitrary
+      # build-time code out of the process tree that holds the Sonatype
+      # credentials and GPG key, which is the security model stated at the top
+      # of this file.
+      - name: Set up JDK 17 (stable)
+        if: steps.meta.outputs.mode == 'stable' && steps.detect_java.outputs.count != '0'
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961  # v5.7.0
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: maven
+
+      - name: Build and test Java packages (stable)
+        if: steps.meta.outputs.mode == 'stable' && steps.detect_java.outputs.count != '0'
+        env:
+          JAVA_PACKAGES: ${{ steps.detect_java.outputs.packages }}
+        run: |
+          set -euo pipefail
+          # One reactor per distinct versionSource, so a second Maven scope
+          # builds its own tree instead of silently riding on the first.
+          while read -r pom; do
+            echo "=== Building and testing Maven reactor ${pom} ==="
+            mvn -B -f "$pom" install
+          done < <(echo "$JAVA_PACKAGES" | jq -r '[.[].file] | unique | .[]')
+
       # ===== Prerelease mode: validate suffix, bump in place, build/test, upload =====
       # Validate user-supplied suffix against npm-safe charset BEFORE invoking
       # prepare-release.ts. Empty suffix → fall back to unix timestamp.
@@ -547,6 +635,24 @@ jobs:
             echo "NuGet packages JSON: $PACKAGES_JSON"
           else
             echo "No .NET packages in scope — NuGet publish will be skipped"
+          fi
+
+      # Maven Central has no canary channel: every upload is permanent and
+      # immutable, so a `0.1.1-canary.<ts>` would sit in the public
+      # com.ag-ui.community namespace forever. Refuse the run instead of
+      # publishing junk — and instead of silently doing nothing, which would
+      # read as a successful canary that never shipped anything.
+      - name: Reject Maven scopes (prerelease)
+        if: steps.meta.outputs.mode == 'prerelease'
+        run: |
+          set -euo pipefail
+          COUNT=$(jq '[.packages[] | select(.ecosystem == "maven")] | length' /tmp/bump-result.json)
+          if [ "$COUNT" -gt 0 ]; then
+            echo "::error::Scope contains Maven packages, which cannot be canary-published."
+            echo "::error::Maven Central has no dist-tag/prerelease channel and every upload is permanent."
+            echo "::error::Ship it as a stable release instead: run 'release / create-pr' with this scope and merge the release PR."
+            jq -r '.packages[] | select(.ecosystem == "maven") | "  - \(.name)"' /tmp/bump-result.json
+            exit 1
           fi
 
       - name: Build TypeScript packages in scope (prerelease)
@@ -673,7 +779,7 @@ jobs:
         if: needs.build.outputs.ts_count != '0' || needs.build.outputs.pre_ts_count != '0'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: "22"
+          node-version-file: ".node-version"
           registry-url: https://registry.npmjs.org
 
       # Stable: download stable ts artifacts.
@@ -964,7 +1070,8 @@ jobs:
         if: needs.build.outputs.py_count != '0' || needs.build.outputs.pre_has_py_packages == 'true'
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Download Python build artifacts (stable)
         if: needs.build.outputs.mode == 'stable' && needs.build.outputs.py_count != '0'
@@ -1118,8 +1225,16 @@ jobs:
       # publish — the delete is idempotent (no-op if the branch is already
       # gone). Skipped on prerelease (canary) runs, which never touch
       # release/next.
+      #
+      # Only the LAST registry lane of a run cleans up, so a mixed release does
+      # not delete the branch out from under a lane still to come. Order is
+      # publish → publish-dotnet → publish-maven, so this runs only when neither
+      # of the later lanes has anything to do.
       - name: Delete release/next if present
-        if: needs.build.outputs.mode != 'prerelease' && needs.build.outputs.dotnet_count == '0'
+        if: >
+          needs.build.outputs.mode != 'prerelease' &&
+          needs.build.outputs.dotnet_count == '0' &&
+          needs.build.outputs.java_count == '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -1524,8 +1639,10 @@ jobs:
           DOTNET_PACKAGES: ${{ needs.build.outputs.dotnet_packages }}
         run: bash scripts/release/reconcile-release.sh dotnet "$DOTNET_PACKAGES"
 
+      # Only if the Maven lane (which runs after this one) has nothing to do —
+      # see the same step in the `publish` job.
       - name: Delete release/next if present
-        if: needs.build.outputs.mode != 'prerelease'
+        if: needs.build.outputs.mode != 'prerelease' && needs.build.outputs.java_count == '0'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1557,6 +1674,206 @@ jobs:
             echo "$DOTNET_PACKAGES" | jq -r '.[] | "```\ndotnet add package \(.name) --version \(.version)\n```"'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  publish-maven:
+    needs: [build, publish, publish-dotnet]
+    # Last registry lane. Sequenced after npm/PyPI and NuGet for the same reason
+    # publish-dotnet is sequenced after publish: it avoids racing over tags and
+    # the shared daily GitHub Release, and it stops a Maven publish from going
+    # out after an earlier lane already failed.
+    #
+    # STABLE ONLY — see the workflow header. There is no prerelease arm because
+    # Maven Central has no canary channel; the build job rejects a prerelease
+    # dispatch that resolves to a Maven scope before reaching this point.
+    if: >
+      always() &&
+      needs.build.result == 'success' &&
+      (needs.publish.result == 'success' || needs.publish.result == 'skipped') &&
+      (needs['publish-dotnet'].result == 'success' || needs['publish-dotnet'].result == 'skipped') &&
+      needs.build.outputs.mode == 'stable' &&
+      needs.build.outputs.java_count != '0' &&
+      (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
+    name: Publish to Maven Central
+    runs-on: ubuntu-latest
+    # Central's publishing portal validates synchronously when the pom sets
+    # <waitUntil>published</waitUntil>, which can take tens of minutes.
+    timeout-minutes: 60
+    environment: maven
+    permissions:
+      # Pushes the per-package git tags and creates/updates the daily GitHub
+      # Release. No id-token: Maven Central authenticates with the Sonatype user
+      # token, not OIDC.
+      contents: write  # git tags + daily GitHub Release
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961  # v5.7.0
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: maven
+          # Writes ~/.m2/settings.xml with a "central" server whose credentials
+          # come from the env vars named below. The id must match the reactor
+          # pom's central-publishing-maven-plugin <publishingServerId>.
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_PASSWORD
+          # Names the env var maven-gpg-plugin reads the passphrase from.
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      - name: Prepare Maven package set
+        env:
+          JAVA_PACKAGES: ${{ needs.build.outputs.java_packages }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$JAVA_PACKAGES" > maven-packages.json
+          jq -e 'type == "array" and length > 0' maven-packages.json >/dev/null
+          echo "Maven packages:"
+          jq -r '.[] | "- \(.groupId):\(.name):\(.version) from \(.path)"' maven-packages.json
+
+      # The shared GPG_PRIVATE_KEY secret is stored base64-encoded for the
+      # Kotlin SDK's JReleaser flow (see sdks/community/kotlin/publish.sh), and
+      # setup-java's `gpg-private-key` input only accepts armored text. Import it
+      # here instead, accepting either form, so both JVM SDKs keep signing with
+      # the same repo-level key.
+      - name: Import GPG signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "::error::GPG_PRIVATE_KEY is empty — cannot sign artifacts for Maven Central"
+            exit 1
+          fi
+
+          if printf '%s' "$GPG_PRIVATE_KEY" | grep -q 'BEGIN PGP PRIVATE KEY BLOCK'; then
+            printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          else
+            printf '%s' "$GPG_PRIVATE_KEY" | base64 --decode | gpg --batch --import
+          fi
+
+          gpg --batch --list-secret-keys --keyid-format=long
+
+      # Tests already ran in the secretless build job at this same SHA;
+      # -DskipTests keeps test code out of the credential-bearing process tree.
+      - name: Deploy to Maven Central
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          # One deploy per reactor, matching the build job's grouping.
+          while read -r pom; do
+            echo "🚀 Deploying Maven reactor ${pom} to Maven Central..."
+            mvn -B -f "$pom" -Prelease deploy -DskipTests
+          done < <(jq -r '[.[].file] | unique | .[]' maven-packages.json)
+
+      # The central plugin's <waitUntil>published</waitUntil> returns once the
+      # portal has published, but repo1 sync lags behind that by minutes. Verify
+      # each artifact is actually resolvable before tagging, so a git tag never
+      # points at a release nobody can consume — the Maven equivalent of the
+      # npm/NuGet lanes' registry-visibility checks.
+      - name: Verify Maven Central artifacts are visible
+        run: |
+          set -euo pipefail
+
+          MAX_WAIT_SECONDS=900
+          SLEEP_SECONDS=15
+          START_SECONDS=$(date +%s)
+          MISSING_PACKAGES=$(mktemp)
+          jq -c '.[]' maven-packages.json > "$MISSING_PACKAGES"
+
+          while true; do
+            NEXT_MISSING=$(mktemp)
+
+            while read -r pkg; do
+              NAME=$(echo "$pkg" | jq -r '.name')
+              VERSION=$(echo "$pkg" | jq -r '.version')
+              GROUP_ID=$(echo "$pkg" | jq -r '.groupId')
+              GROUP_PATH=$(printf '%s' "$GROUP_ID" | tr '.' '/')
+              URL="https://repo1.maven.org/maven2/${GROUP_PATH}/${NAME}/${VERSION}/${NAME}-${VERSION}.pom"
+
+              if curl -fsSL -o /dev/null "$URL" 2>/dev/null; then
+                echo "::notice::PUBLISHED: ${GROUP_ID}:${NAME}:${VERSION}"
+              else
+                echo "$pkg" >> "$NEXT_MISSING"
+              fi
+            done < "$MISSING_PACKAGES"
+
+            if [ ! -s "$NEXT_MISSING" ]; then
+              rm -f "$MISSING_PACKAGES" "$NEXT_MISSING"
+              break
+            fi
+
+            NOW_SECONDS=$(date +%s)
+            ELAPSED_SECONDS=$((NOW_SECONDS - START_SECONDS))
+            if [ "$ELAPSED_SECONDS" -ge "$MAX_WAIT_SECONDS" ]; then
+              echo "::error::Maven Central verification timed out after ${ELAPSED_SECONDS}s waiting for:"
+              jq -r '. | "- \(.groupId):\(.name):\(.version)"' "$NEXT_MISSING"
+              exit 1
+            fi
+
+            REMAINING_COUNT=$(wc -l < "$NEXT_MISSING" | tr -d ' ')
+            echo "::notice::Waiting for ${REMAINING_COUNT} Maven artifact(s) to sync to repo1 after ${ELAPSED_SECONDS}s"
+            mv "$NEXT_MISSING" "$MISSING_PACKAGES"
+            sleep "$SLEEP_SECONDS"
+          done
+
+      - name: Configure git
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: Configure git credentials for push
+        run: git config --local url."https://x-access-token:$GITHUB_TOKEN@github.com/".insteadOf "https://github.com/"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push per-package git tags (Maven)
+        env:
+          JAVA_PACKAGES: ${{ needs.build.outputs.java_packages }}
+        run: bash scripts/release/create-tags.sh "$JAVA_PACKAGES"
+
+      - name: Create GitHub Release (Maven)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JAVA_PACKAGES: ${{ needs.build.outputs.java_packages }}
+        run: bash scripts/release/create-or-update-release.sh maven "$JAVA_PACKAGES"
+
+      - name: Reconcile GitHub Release (Maven) — safety net for partial failures
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JAVA_PACKAGES: ${{ needs.build.outputs.java_packages }}
+        run: bash scripts/release/reconcile-release.sh maven "$JAVA_PACKAGES"
+
+      # Last lane in the run, so cleanup is unconditional here — see the same
+      # step in the `publish` and `publish-dotnet` jobs.
+      - name: Delete release/next if present
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push origin --delete release/next 2>/dev/null || echo "Branch already gone"
+
+      - name: Release summary (Maven stable)
+        env:
+          JAVA_PACKAGES: ${{ needs.build.outputs.java_packages }}
+        run: |
+          {
+            echo "## release / publish — Maven Central"
+            echo ""
+            echo "$JAVA_PACKAGES" | jq -r '.[] | "- `\(.groupId):\(.name):\(.version)`"'
+            echo ""
+            echo "Artifacts appear at https://central.sonatype.com/namespace/com.ag-ui.community"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Post-release #engr Slack notification. Ported from CopilotKit's `notify`
   # job. Runs after build, publish, and publish-dotnet via always() so it fires
   # on success, failure, OR a skipped publish — the pure builder
@@ -1568,7 +1885,7 @@ jobs:
   # job. Lane attribution comes from the published-package SETS plus the
   # event-derived intent gates.
   notify:
-    needs: [build, publish, publish-dotnet]
+    needs: [build, publish, publish-dotnet, publish-maven]
     # Run on every real-release context: a push-to-main (merged release PR /
     # version-bump) or a non-dry-run workflow_dispatch. Skipped on dry-run
     # dispatches (the builder also suppresses dry-run, but gating the job off
@@ -1610,6 +1927,7 @@ jobs:
           NPM_INTENDED=false
           PY_INTENDED=false
           NUGET_INTENDED=false
+          MAVEN_INTENDED=false
 
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             # A stable dispatch intends the scope's lane. With no scope (full
@@ -1625,13 +1943,14 @@ jobs:
               NPM_INTENDED=true
               PY_INTENDED=true
               NUGET_INTENDED=true
+              MAVEN_INTENDED=true
             else
-              # Map the dispatch scope to its ecosystem. The explicit NuGet arm
-              # catches the .NET scopes. The *-py glob catches the sdk-py /
-              # integration-*-py PyPI scopes; the explicit Python names cover
-              # PyPI scopes that do NOT end in -py. Everything else is npm. This
-              # only affects FAILURE paging — success arms use the real
-              # published-package sets, not this heuristic.
+              # Map the dispatch scope to its ecosystem. The explicit NuGet and
+              # Maven arms catch the .NET and Maven scopes. The *-py glob catches
+              # the sdk-py / integration-*-py PyPI scopes; the explicit Python
+              # names cover PyPI scopes that do NOT end in -py. Everything else
+              # is npm. This only affects FAILURE paging — success arms use the
+              # real published-package sets, not this heuristic.
               #
               # This step runs BEFORE checkout (see the job comment above), so
               # release.config.json is NOT on disk here and cannot be consulted
@@ -1641,6 +1960,8 @@ jobs:
               case "$SCOPE" in
                 integration-claude-managed-agents-dotnet|sdk-dotnet)
                   NUGET_INTENDED=true ;;
+                sdk-java)
+                  MAVEN_INTENDED=true ;;
                 integration-agent-spec|integration-langroid|sdk-py-a2ui-toolkit)
                   PY_INTENDED=true ;;
                 *-py)
@@ -1660,6 +1981,7 @@ jobs:
                 NPM_INTENDED=true
                 PY_INTENDED=true
                 NUGET_INTENDED=true
+                MAVEN_INTENDED=true
                 FILES=""
               fi
             else
@@ -1667,6 +1989,7 @@ jobs:
               NPM_INTENDED=true
               PY_INTENDED=true
               NUGET_INTENDED=true
+              MAVEN_INTENDED=true
             fi
             # Intent here means "the compare-range TOUCHED a package.json /
             # pyproject.toml", NOT "a version was actually bumped". This signal
@@ -1697,6 +2020,7 @@ jobs:
                 NPM_INTENDED=true
                 PY_INTENDED=true
                 NUGET_INTENDED=true
+                MAVEN_INTENDED=true
               else
                 if echo "$FILES" | grep -qE '(^|/)package\.json$'; then
                   NPM_INTENDED=true
@@ -1717,6 +2041,18 @@ jobs:
                     NUGET_INTENDED=true
                   fi
                 done
+                # Every enrolled Maven reactor pom, for the same reason as the
+                # .NET list above: a Maven version lives in a pom.xml that the
+                # package.json / pyproject.toml globs do not catch, so without
+                # this a failed build on a Maven bump reads as "Maven Central was
+                # never intended" and the failure page is swallowed. Kept in step
+                # with release.config.json by verify-release-scope-dropdowns.sh.
+                MAVEN_VERSION_SOURCES="sdks/community/java/ag-ui/pom.xml"
+                for pom in $MAVEN_VERSION_SOURCES; do
+                  if printf '%s\n' "$FILES" | grep -qxF "$pom"; then
+                    MAVEN_INTENDED=true
+                  fi
+                done
               fi
             fi
           fi
@@ -1725,8 +2061,9 @@ jobs:
             echo "npm_intended=$NPM_INTENDED"
             echo "py_intended=$PY_INTENDED"
             echo "nuget_intended=$NUGET_INTENDED"
+            echo "maven_intended=$MAVEN_INTENDED"
           } >> "$GITHUB_OUTPUT"
-          echo "npm_intended=$NPM_INTENDED py_intended=$PY_INTENDED nuget_intended=$NUGET_INTENDED"
+          echo "npm_intended=$NPM_INTENDED py_intended=$PY_INTENDED nuget_intended=$NUGET_INTENDED maven_intended=$MAVEN_INTENDED"
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1741,7 +2078,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22"
+          node-version-file: ".node-version"
 
       - name: Install dependencies (no lifecycle scripts)
         run: pnpm install --frozen-lockfile --ignore-scripts
@@ -1763,12 +2100,17 @@ jobs:
           NUGET_RESULT: ${{ needs['publish-dotnet'].result }}
           NUGET_BUILD_RESULT: ${{ needs.build.result }}
           NUGET_PACKAGES: ${{ needs.build.outputs.dotnet_packages }}
+          MAVEN_INTENDED: ${{ steps.intent.outputs.maven_intended }}
+          MAVEN_RESULT: ${{ needs['publish-maven'].result }}
+          MAVEN_BUILD_RESULT: ${{ needs.build.result }}
+          MAVEN_PACKAGES: ${{ needs.build.outputs.java_packages }}
           SCOPE: ${{ needs.build.outputs.scope }}
           DRY_RUN: ${{ inputs.dry_run }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           NPM_ORG_URL: https://www.npmjs.com/org/ag-ui
           PY_BASE_URL: https://pypi.org/project
           NUGET_BASE_URL: https://www.nuget.org/packages
+          MAVEN_BASE_URL: https://central.sonatype.com/artifact
         run: pnpm tsx scripts/release/build-release-notification.ts
 
       - name: Post to #engr
@@ -1801,7 +2143,8 @@ jobs:
           needs.build.outputs.mode != 'prerelease' &&
           (steps.intent.outputs.npm_intended != 'false' ||
            steps.intent.outputs.py_intended != 'false' ||
-           steps.intent.outputs.nuget_intended != 'false') &&
+           steps.intent.outputs.nuget_intended != 'false' ||
+           steps.intent.outputs.maven_intended != 'false') &&
           env.SLACK_WEBHOOK != ''
         continue-on-error: true
         uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
@@ -1829,6 +2172,7 @@ jobs:
           MODE: ${{ needs.build.outputs.mode }}
           DOTNET_PACKAGES: ${{ needs.build.outputs.dotnet_packages }}
           PRE_DOTNET_PACKAGES: ${{ needs.build.outputs.pre_dotnet_packages_json }}
+          JAVA_PACKAGES: ${{ needs.build.outputs.java_packages }}
         run: |
           {
             echo ""
@@ -1837,6 +2181,11 @@ jobs:
               echo ""
               echo "### NuGet"
               echo "$DOTNET_PACKAGES" | jq -r '.[] | "- `\(.name)@\(.version)`"'
+            fi
+            if [ "$MODE" = "stable" ] && [ -n "$JAVA_PACKAGES" ] && [ "$(echo "$JAVA_PACKAGES" | jq 'length')" -gt 0 ]; then
+              echo ""
+              echo "### Maven Central"
+              echo "$JAVA_PACKAGES" | jq -r '.[] | "- `\(.groupId):\(.name):\(.version)`"'
             fi
             if [ "$MODE" = "prerelease" ] && [ -n "$PRE_DOTNET_PACKAGES" ] && [ "$(echo "$PRE_DOTNET_PACKAGES" | jq 'length')" -gt 0 ]; then
               echo ""

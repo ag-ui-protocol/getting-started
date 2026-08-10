@@ -20,6 +20,13 @@ on:
 permissions:
   contents: read
 
+# Pinned Python build toolchain — see .github/python-toolchain.env. Kept in step
+# across workflows by the python-toolchain-pins job in lint-release-workflows.yml,
+# which fails if either literal here disagrees with that file.
+env:
+  UV_VERSION: "0.12.1"
+  PYTHON_VERSION: "3.12"
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -37,14 +44,15 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22"
+          node-version-file: ".node-version"
 
       # The uv.lock re-lock test skips itself when uv is absent, so without this
       # it would pass vacuously here and give false confidence.
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
         # --ignore-scripts: we only need tsx + node; skip postinstall builds.

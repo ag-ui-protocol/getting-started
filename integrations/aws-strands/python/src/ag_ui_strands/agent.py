@@ -293,6 +293,88 @@ def _build_strands_history(input_messages: List[Any]) -> List[Dict[str, Any]]:
             out.append({"role": "assistant", "content": blocks})
 
     flush_tool_results()
+    # Normalize so Bedrock's toolUse/toolResult pairing holds even when results
+    # arrive out of order, are wedged apart by other messages, or span multiple
+    # consecutive tool-call turns (parallel tool calls).
+    return _normalize_tool_turns(out)
+
+
+def _is_tooluse_only_assistant(m):
+    return (
+        m.get("role") == "assistant"
+        and m.get("content")
+        and all("toolUse" in b for b in m["content"])
+    )
+
+
+def _is_toolresult_only_user(m):
+    return (
+        m.get("role") == "user"
+        and m.get("content")
+        and all("toolResult" in b for b in m["content"])
+    )
+
+
+def _normalize_tool_turns(msgs):
+    """Merge same-turn toolUse into one assistant msg and their toolResults
+    into the immediately following user msg, dropping any messages wedged
+    between a toolUse turn and its toolResults so Bedrock accepts the history.
+
+    Messages that legitimately *follow* a completed toolUse/toolResult pair are
+    preserved in place; only messages wedged *between* the toolUse turn and its
+    results are dropped.
+    """
+    out = []
+    i = 0
+    n = len(msgs)
+    while i < n:
+        m = msgs[i]
+        if not _is_tooluse_only_assistant(m):
+            out.append(m)
+            i += 1
+            continue
+
+        # Collect consecutive toolUse-only assistant messages into one.
+        merged_tooluse = list(m["content"])
+        j = i + 1
+        while j < n and _is_tooluse_only_assistant(msgs[j]):
+            merged_tooluse.extend(msgs[j]["content"])
+            j += 1
+        # Preserve first-seen order and de-duplicate ids: a repeated toolUseId
+        # must not later emit a duplicate toolResult (Bedrock rejects that).
+        tooluse_ids = []
+        seen_ids = set()
+        for b in merged_tooluse:
+            rid = b["toolUse"]["toolUseId"]
+            if rid not in seen_ids:
+                seen_ids.add(rid)
+                tooluse_ids.append(rid)
+
+        # Scan forward for the matching toolResults. Anything that is not a
+        # matching result and appears *before* results are complete is "wedged"
+        # and dropped; once every result is collected, the remaining messages
+        # are left untouched to be processed in place by the outer loop.
+        results_by_id = {}
+        k = j
+        while k < n and len(results_by_id) < len(tooluse_ids):
+            mk = msgs[k]
+            if _is_toolresult_only_user(mk):
+                for b in mk["content"]:
+                    rid = b["toolResult"].get("toolUseId")
+                    if rid in seen_ids and rid not in results_by_id:
+                        results_by_id[rid] = b
+                    # non-matching / duplicate result blocks wedged in are dropped
+            # non-toolResult messages wedged before completion are dropped
+            k += 1
+
+        # Emit merged assistant(toolUse) + merged user(toolResult) adjacently.
+        out.append({"role": "assistant", "content": merged_tooluse})
+        ordered = [results_by_id[tid] for tid in tooluse_ids if tid in results_by_id]
+        if ordered:
+            out.append({"role": "user", "content": ordered})
+
+        # Continue with whatever legitimately follows, in place (no reordering).
+        i = k
     return out
 
 
@@ -778,43 +860,48 @@ class StrandsAgent:
             # understands the context and can generate a proper conclusion.
             user_message = ""
             if pending_tool_result_ids and input_data.messages:
+                # Collect ALL trailing tool results (not just the first). A parallel
+                # frontend-tool turn sends N results in one continuation run; the model
+                # must see every answer.
+                _result_parts: list[str] = []
                 for msg in reversed(input_data.messages):
                     if msg.role == "tool" and hasattr(msg, "tool_call_id"):
                         tool_name = _tool_call_id_to_name.get(msg.tool_call_id)
                         if tool_name and tool_name in frontend_tool_names:
-                            # Forward the ACTUAL frontend tool result so the model
-                            # can act on the human's decision (e.g. an approval
-                            # resolving to {"approved": false}). Previously this
-                            # discarded ``msg.content`` and hardcoded a success
-                            # string, silently breaking HITL — the model was told
-                            # the tool "executed successfully with no return value"
-                            # regardless of what the human actually returned.
-                            # Only fall back to that synthetic acknowledgement when
-                            # the result is genuinely empty.
+                            # Forward the ACTUAL result so the model can act on the
+                            # human's decision (e.g. an approval resolving to
+                            # {"approved": false}). Hardcoding a success string here
+                            # silently breaks HITL — the model would be told the tool
+                            # "executed successfully with no return value" regardless
+                            # of what the human returned. Only use that synthetic
+                            # acknowledgement when the result is genuinely empty.
                             result_text = (
                                 msg.content
                                 if isinstance(msg.content, str)
                                 else flatten_content_to_text(msg.content)
                             )
                             if result_text and result_text.strip():
-                                user_message = f"{tool_name} returned: {result_text}"
+                                _result_parts.append(f"{tool_name} returned: {result_text}")
                             else:
-                                user_message = f"{tool_name} executed successfully with no return value."
+                                _result_parts.append(
+                                    f"{tool_name} executed successfully with no return value."
+                                )
                         else:
-                            # Could not resolve the executed tool's name from
-                            # input messages or session history. Leave the
-                            # continuation message empty rather than guessing:
+                            # Could not resolve this tool's name from input messages
+                            # or session history (e.g. a delta-only payload with no
+                            # assistant tool_calls). Skip it rather than guessing:
                             # picking an arbitrary frontend tool would feed false
                             # context to the LLM when several frontend tools exist.
-                            # Strands still has the real tool result in session
-                            # history to conclude the round-trip from.
+                            # Strands still has the real result in session history to
+                            # conclude the round-trip from.
                             logger.warning(
                                 f"Could not resolve tool name for tool_call_id={msg.tool_call_id} "
-                                f"from input messages or session history (assistant message with "
-                                f"tool_calls may be missing — delta-only payload). Leaving the "
-                                f"continuation message empty."
+                                f"from input messages or session history (delta-only payload). "
+                                f"Skipping this tool result in the continuation message."
                             )
+                    else:
                         break
+                user_message = "\n".join(reversed(_result_parts))
             elif input_data.messages:
                 for msg in reversed(input_data.messages):
                     if (msg.role == "user" or msg.role == "tool") and msg.content:
@@ -866,6 +953,12 @@ class StrandsAgent:
             stop_text_streaming = False
             halt_event_stream = False
             pending_halt = False
+            # Frontend-tool ToolCallEnd ids are buffered here so the client's
+            # "execute this frontend tool" signal is delayed until AFTER this
+            # turn's backend tool results have been emitted. This prevents the
+            # client dispatching its follow-up run before the backend results
+            # reach it, narrowing the ConcurrencyException race window.
+            deferred_frontend_tool_ends = []
 
             # Reasoning/thinking state tracking
             reasoning_started = False
@@ -1044,9 +1137,26 @@ class StrandsAgent:
 
             try:
                 async for event in agent_stream:
-                    # If we've halted, consume remaining events silently to allow proper cleanup
+                    # Frontend-tool halt: STOP the loop rather than muting the
+                    # wire and draining it. The proxy tool returns a SUCCESSFUL
+                    # "Forwarded to client" placeholder, so Strands has every
+                    # reason to run another model cycle — and another. Draining
+                    # those cycles costs: frontend tool calls the client never
+                    # sees (so it can never answer them), real backend tool
+                    # side effects, phantom assistant turns persisted to the
+                    # session store, and RUN_FINISHED stuck behind work the
+                    # client is not watching. Single-agent Strands has no cycle
+                    # cap, so that tail is unbounded — a model that keeps
+                    # retrying the read never yields a terminal event at all.
+                    #
+                    # Safe here because the halt latches only AFTER Strands
+                    # appended the assistant toolUse + placeholder toolResult
+                    # and MessageAddedEvent synced agent state (see
+                    # SessionManager.register_hooks), so the next run's
+                    # reconcile still finds a placeholder to overwrite and the
+                    # wire->native map to key it by.
                     if halt_event_stream:
-                        continue
+                        break
 
                     logger.debug(f"Received event: {event}")
 
@@ -1228,9 +1338,26 @@ class StrandsAgent:
 
                     # Handle tool results from Strands for backend tool rendering
                     elif "message" in event and event["message"].get("role") == "user":
+                        # A deferred frontend-tool halt takes effect here — but
+                        # do NOT skip the message. In a parallel batch mixing a
+                        # frontend tool with backend tools, THIS message carries
+                        # the backend tools' real results, and dropping it loses
+                        # them permanently: the client's tool card never
+                        # resolves, the result never reaches MESSAGES_SNAPSHOT
+                        # (the only path into client-side history — the
+                        # TOOL_CALL_RESULT below is deliberately role-less and
+                        # is not history), and state_from_result /
+                        # custom_result_handler never fire. Consumers that
+                        # persist from the event stream then hold a transcript
+                        # whose toolUse has no toolResult, which the next run
+                        # replays straight to the model provider.
+                        #
+                        # Fall through instead: the per-item loop already skips
+                        # frontend placeholders (the client produces the real
+                        # result), so only genuine backend results go out. Stop
+                        # after the batch, before the next model cycle.
                         if pending_halt:
                             halt_event_stream = True
-                            continue
                         message_content = event["message"].get("content", [])
                         if not message_content or not isinstance(message_content, list):
                             continue
@@ -1404,6 +1531,29 @@ class StrandsAgent:
                                 )
                                 # Break inner loop — no further results should be emitted
                                 break
+
+                        # Defer hand-off: now that this turn's backend
+                        # TOOL_CALL_RESULT(s) have been emitted above, flush the
+                        # buffered frontend-tool ToolCallEnd(s). Flushing here —
+                        # after the per-item loop and before the halt break below —
+                        # guarantees the wire order backend TOOL_CALL_RESULT ->
+                        # frontend TOOL_CALL_END, so the client only starts the
+                        # frontend tool once backend work has reached it.
+                        if deferred_frontend_tool_ends:
+                            for _fe_tool_use_id in deferred_frontend_tool_ends:
+                                yield ToolCallEndEvent(
+                                    type=EventType.TOOL_CALL_END,
+                                    tool_call_id=_fe_tool_use_id,
+                                )
+                            deferred_frontend_tool_ends = []
+
+                        # The batch is fully emitted; stop before Strands runs
+                        # another model cycle. Breaking HERE rather than relying
+                        # on the check at the top of the loop means termination
+                        # does not depend on Strands happening to yield one more
+                        # event after this message.
+                        if halt_event_stream:
+                            break
 
                     # Handle tool calls
                     elif "current_tool_use" in event and event["current_tool_use"]:
@@ -1709,10 +1859,20 @@ class StrandsAgent:
                                                 exc_info=True,
                                             )
 
-                                    yield ToolCallEndEvent(
-                                        type=EventType.TOOL_CALL_END,
-                                        tool_call_id=tool_use_id,
-                                    )
+                                    # Defer hand-off: for frontend tools, buffer the
+                                    # ToolCallEnd instead of emitting it now. It is
+                                    # flushed after this turn's backend results (see
+                                    # the pending_halt handler). Backend tools and
+                                    # continue_after_frontend_call tools emit now.
+                                    if is_frontend_tool and not (
+                                        behavior and behavior.continue_after_frontend_call
+                                    ):
+                                        deferred_frontend_tool_ends.append(tool_use_id)
+                                    else:
+                                        yield ToolCallEndEvent(
+                                            type=EventType.TOOL_CALL_END,
+                                            tool_call_id=tool_use_id,
+                                        )
 
                                     if self._will_emit_tool_snapshot(behavior, emit_snapshots):
                                         snapshot_messages.append(
@@ -1902,13 +2062,34 @@ class StrandsAgent:
                                             f"Deferring halt after frontend tool call: tool_name={tool_name}, tool_call_id={tool_use_id}, thread_id={input_data.thread_id}"
                                         )
                                         pending_halt = True
+
+                # Defer hand-off (safety flush): if the stream ended without a
+                # backend tool-result message (e.g. a turn with ONLY frontend tool
+                # calls), the per-batch flush above never ran and the buffered
+                # frontend ToolCallEnd(s) would be lost — leaving TOOL_CALL_START
+                # events with no matching END. Flush any remainder here.
+                if deferred_frontend_tool_ends:
+                    for _fe_tool_use_id in deferred_frontend_tool_ends:
+                        yield ToolCallEndEvent(
+                            type=EventType.TOOL_CALL_END,
+                            tool_call_id=_fe_tool_use_id,
+                        )
+                    deferred_frontend_tool_ends = []
             finally:
                 # Properly close the async generator to avoid context detachment errors
                 # The generator should complete naturally when we consume all events,
                 # but we still try to close it explicitly to be safe
                 try:
+                    # A frontend-tool halt breaks out of the loop with the
+                    # generator SUSPENDED at a yield, where ``ag_running`` is
+                    # False. The exhausted-generator check below would read
+                    # that as "already closed" and defer teardown to GC,
+                    # leaving the halted Strands cycle (and its model stream)
+                    # open. Close it explicitly instead.
+                    if halt_event_stream:
+                        await agent_stream.aclose()
                     # Check if generator is already closed/exhausted
-                    if not agent_stream.ag_running:
+                    elif not agent_stream.ag_running:
                         # Generator is already closed, nothing to do
                         pass
                     else:

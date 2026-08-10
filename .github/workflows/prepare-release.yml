@@ -47,6 +47,7 @@ on:
           - sdk-py
           - sdk-py-a2ui-toolkit
           - sdk-dotnet
+          - sdk-java
           - sdk-ts
           - sdk-ts-a2ui-toolkit
           - create-ag-ui-app
@@ -73,6 +74,14 @@ permissions:
 
 env:
   NX_VERBOSE_LOGGING: true
+  # Pinned Python build toolchain — see .github/python-toolchain.env. Kept in step
+  # across workflows by the python-toolchain-pins job in lint-release-workflows.yml.
+  # UV_VERSION is needed here because prepare-release.ts re-locks the packages it
+  # bumps (#2314), so this workflow does run uv — and its output lands in a COMMITTED
+  # lockfile, which makes an exact version load-bearing here in a way it is not
+  # elsewhere.
+  UV_VERSION: "0.12.1"
+  PYTHON_VERSION: "3.12"
 
 jobs:
   create-release-pr:
@@ -125,20 +134,22 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22"
+          node-version-file: ".node-version"
 
       - name: Setup Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
 
       # prepare-release.ts re-locks any uv-managed Python package it bumps, so uv
       # must be on PATH or the bump aborts rather than shipping a stale lock.
-      # Same pinned action and floor as unit-python-sdk.yml.
+      # The exact version matters here more than anywhere: this is the uv whose
+      # output lands in a committed lockfile.
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -185,7 +196,13 @@ jobs:
           SUMMARY=$(jq -r '.packages | map("\(.name)@\(.newVersion)") | join(", ")' /tmp/bump-result.json)
           echo "summary=$SUMMARY" >> "$GITHUB_OUTPUT"
 
-          FILES=$(jq -r '.packages[].file' /tmp/bump-result.json | tr '\n' ' ')
+          # Stage the files prepare-release.ts actually WROTE, not the packages'
+          # version SOURCES. For Maven those differ: the bump rewrites the
+          # reactor pom's version AND every module's <parent><version>, so
+          # staging only `.packages[].file` would commit a reactor the modules
+          # no longer resolve against. `.files` is the authoritative list;
+          # `.packages[].file` is the fallback for any older payload shape.
+          FILES=$(jq -r '(if (.files // []) | length > 0 then .files else [.packages[].file] end) | unique | .[]' /tmp/bump-result.json | tr '\n' ' ')
           echo "files=$FILES" >> "$GITHUB_OUTPUT"
 
       - name: Dry-run summary
@@ -270,11 +287,11 @@ jobs:
           {
             echo "## Accumulated Release"
             echo ""
-            echo "Merging this PR publishes the following to npm, PyPI, and NuGet:"
+            echo "Merging this PR publishes the following to npm, PyPI, NuGet, and Maven Central:"
             echo ""
             echo "| Package | Old | New | Registry |"
             echo "|---------|-----|-----|----------|"
-            jq -r '.[] | "| \(.name) | \(.oldVersion) | \(.newVersion) | \(if .ecosystem == "typescript" then "npm" elif .ecosystem == "dotnet" then "NuGet" else "PyPI" end) |"' /tmp/accumulated.json
+            jq -r '.[] | "| \(.name) | \(.oldVersion) | \(.newVersion) | \(if .ecosystem == "typescript" then "npm" elif .ecosystem == "dotnet" then "NuGet" elif .ecosystem == "maven" then "Maven Central" else "PyPI" end) |"' /tmp/accumulated.json
             echo ""
             echo "---"
             echo ""
@@ -294,7 +311,7 @@ jobs:
             echo "2. **CI runs on this PR** — tests, lint, type checks, build must pass before merge."
             echo "3. **When merged**, the \`release / publish\` workflow detects the version bumps and:"
             echo "   - Builds and tests all packages"
-            echo "   - Publishes to npm, PyPI, and NuGet"
+            echo "   - Publishes to npm, PyPI, NuGet, and Maven Central"
             echo "   - Creates per-package git tags"
             echo "   - Creates a GitHub Release"
             echo ""

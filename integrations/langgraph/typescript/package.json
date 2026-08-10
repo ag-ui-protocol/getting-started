@@ -63,5 +63,12 @@
       "import": "./dist/middlewares/index.mjs"
     },
     "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "middlewares": [
+        "dist/middlewares/index.d.ts"
+      ]
+    }
   }
 }

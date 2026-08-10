@@ -27,12 +27,15 @@
     "test:exports": "nx run-many -t test:exports"
   },
   "devDependencies": {
+    "@eslint/js": "^9.37.0",
     "@nx/js": "22.5.0",
+    "eslint": "^9.37.0",
     "nx": "^22.4.5",
     "prettier": "^3.5.3",
     "semver": "^7.7.3",
     "tsx": "^4.20.6",
-    "typescript": "5.8.2"
+    "typescript": "5.8.2",
+    "typescript-eslint": "^8.48.1"
   },
   "packageManager": "pnpm@10.33.4",
   "engines": {

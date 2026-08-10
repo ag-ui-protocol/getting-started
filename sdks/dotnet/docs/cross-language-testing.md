@@ -560,7 +560,7 @@ The C# server is **already registered** in the dojo framework (`run-dojo-everyth
 - `@copilotkit/aimock` — LLMock server
 - `dotnet` CLI — to build and run C# server/client
 - The C# server must support `OPENAI_BASE_URL` environment variable to point at LLMock
-- Node.js 20+ for running LLMock and TS server
+- Node.js at the version in the repository's root `.node-version`, for running LLMock and TS server
 
 ## Success Criteria
 
@@ -594,7 +594,7 @@ The TS SDK ships no reference HTTP server — the only runnable AG-UI servers in
 ### Prerequisites
 
 - .NET 10 SDK
-- Node.js 20+ and pnpm 10+ (the repository's `packageManager`)
+- Node.js at the repository's root `.node-version`, and pnpm 10+ (the repository's `packageManager`)
 - `pnpm install` from the repository root (one-off)
 
 ### Running

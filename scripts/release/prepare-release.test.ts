@@ -15,6 +15,20 @@ const SCRIPT = join(process.cwd(), "scripts/release/prepare-release.ts");
 const DOTNET_PROPS = "sdks/dotnet/Directory.Build.props";
 const MANAGED_AGENTS_PROPS =
   "integrations/claude-managed-agents/dotnet/Directory.Build.props";
+const JAVA_POM = "sdks/community/java/ag-ui/pom.xml";
+
+// Same reasoning as currentDotnetVersion: read ground truth so the test tracks
+// what the bumper DOES, not what version happens to be shipping. Parses the
+// project-level <version> — a pom has <version> for its parent, dependencies
+// and plugins too, so anchor on the reactor's own <artifactId>/<version> pair.
+function currentJavaVersion(pom = JAVA_POM): string {
+  const content = readFileSync(join(process.cwd(), pom), "utf8");
+  const match = content.match(
+    /<artifactId>java-ag-ui<\/artifactId>\s*<version>([^<]+)<\/version>/,
+  );
+  assert.ok(match, `Cannot read reactor <version> from ${pom}`);
+  return match[1];
+}
 
 // Read the .NET shared VersionPrefix from ground truth rather than hardcoding
 // the shipping version. Hardcoding it made this test chase every prod version
@@ -133,6 +147,150 @@ test(
       pkg.path,
       "integrations/claude-managed-agents/dotnet/src/AGUI.ClaudeManagedAgents",
     );
+  },
+);
+
+// Pins the Maven scope end to end. The load-bearing detail is `files`: a Maven
+// bump rewrites the reactor pom AND every module's <parent><version>, because
+// Maven requires the parent version to be a literal. A caller that staged only
+// `packages[].file` (the version SOURCE) would commit a reactor whose modules
+// still point at the old version, leaving main unbuildable.
+test(
+  "dry-run bumps sdk-java shared version from the reactor pom",
+  { timeout: 30_000 },
+  async () => {
+    const expectedOldVersion = currentJavaVersion();
+    const expectedNewVersion = bumpMinor(expectedOldVersion);
+
+    const result = await runPrepareRelease([
+      "--scope",
+      "sdk-java",
+      "--bump",
+      "minor",
+      "--dry-run",
+    ]);
+
+    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.scope, "sdk-java");
+    assert.deepEqual(
+      output.packages.map((pkg: { name: string }) => pkg.name),
+      ["java-core", "java-client", "java-server"],
+    );
+    for (const pkg of output.packages) {
+      assert.equal(pkg.oldVersion, expectedOldVersion);
+      assert.equal(pkg.newVersion, expectedNewVersion);
+      // Every module versions off the reactor pom, not its own pom.
+      assert.equal(pkg.file, JAVA_POM);
+      assert.equal(pkg.ecosystem, "maven");
+      // groupId is what detect-java-version-changes.sh builds its Maven Central
+      // lookup URL from; a missing one would 404 and read as "never published".
+      assert.equal(pkg.groupId, "com.ag-ui.community");
+    }
+    // --dry-run writes nothing, so nothing is reported as written.
+    assert.deepEqual(output.files, []);
+  },
+);
+
+// The reactor pom carries <version> elements for plugins (maven-gpg-plugin
+// 3.2.8, jacoco, ...) and dependencies BELOW the project version. A bumper that
+// grabbed "the first <version>" or used a global regex would rewrite one of
+// those instead. Assert the reported version is the reactor's, not a plugin's.
+test(
+  "sdk-java reads the project version, not a plugin or dependency version",
+  { timeout: 30_000 },
+  async () => {
+    const result = await runPrepareRelease([
+      "--scope",
+      "sdk-java",
+      "--bump",
+      "patch",
+      "--dry-run",
+    ]);
+
+    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+    const output = JSON.parse(result.stdout);
+    const [pkg] = output.packages;
+    assert.equal(pkg.oldVersion, currentJavaVersion());
+
+    const pom = readFileSync(join(process.cwd(), JAVA_POM), "utf8");
+    const pluginVersions = [
+      ...pom.matchAll(
+        /<artifactId>maven-gpg-plugin<\/artifactId>\s*<version>([^<]+)<\/version>/g,
+      ),
+    ].map((m) => m[1]);
+    assert.ok(
+      pluginVersions.length > 0,
+      "expected the pom to pin a plugin version",
+    );
+    for (const pluginVersion of pluginVersions) {
+      assert.notEqual(
+        pkg.oldVersion,
+        pluginVersion,
+        `read a plugin version (${pluginVersion}) as the reactor version`,
+      );
+    }
+  },
+);
+
+// The one behaviour a dry-run cannot cover, and the one most likely to break
+// main: a real bump must rewrite the reactor pom AND every module's
+// <parent><version>. Maven forbids property interpolation in a parent version,
+// so a root-only edit leaves every module pointing at a parent that no longer
+// exists and `mvn install` fails at resolution. Runs the real writer against the
+// working tree and restores it in `finally`.
+test(
+  "a real sdk-java bump rewrites the reactor pom AND every module parent",
+  { timeout: 30_000 },
+  async () => {
+    const modulePoms = ["core", "client", "server"].map((m) =>
+      join("sdks/community/java/ag-ui", m, "pom.xml"),
+    );
+    const touched = [JAVA_POM, ...modulePoms];
+    const original = new Map(
+      touched.map((p) => [p, readFileSync(join(process.cwd(), p), "utf8")]),
+    );
+
+    const oldVersion = currentJavaVersion();
+    const newVersion = bumpMinor(oldVersion);
+
+    try {
+      const result = await runPrepareRelease([
+        "--scope",
+        "sdk-java",
+        "--bump",
+        "minor",
+      ]);
+      assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+
+      const output = JSON.parse(result.stdout);
+      assert.deepEqual(
+        [...output.files].sort(),
+        [...touched].sort(),
+        "every written pom must be reported in `files` so the release PR stages it",
+      );
+
+      assert.equal(currentJavaVersion(), newVersion);
+      for (const modulePom of modulePoms) {
+        const content = readFileSync(join(process.cwd(), modulePom), "utf8");
+        const parent = content.match(
+          /<parent>[\s\S]*?<version>([^<]+)<\/version>[\s\S]*?<\/parent>/,
+        );
+        assert.ok(parent, `no <parent><version> in ${modulePom}`);
+        assert.equal(
+          parent[1],
+          newVersion,
+          `${modulePom} still points at the old parent version`,
+        );
+      }
+    } finally {
+      for (const [p, content] of original) {
+        writeFileSync(join(process.cwd(), p), content, "utf8");
+      }
+    }
+
+    // Restored, so a failure here does not leave the repo bumped.
+    assert.equal(currentJavaVersion(), oldVersion);
   },
 );
 

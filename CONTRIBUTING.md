@@ -55,6 +55,20 @@ If you'd confirmed that the **[x]** work hasn't been started yet, please file an
 
 ---
 
+## Toolchain
+
+This repository is developed and tested on the Node version in `.node-version` at the root. `fnm` reads it directly and resolves a bare major, so `fnm use` in the repository root gets you the right Node. `nvm` reads only `.nvmrc`, so pass the version through (`nvm use "$(cat .node-version)"`). `nodenv` and `asdf` read `.node-version` too — `asdf` only with `legacy_version_file = yes` in `~/.asdfrc` — but both resolve it to an exactly-installed version name, so under plain `nodenv` a bare major does not resolve at all: install an exact version (`nodenv install 22.11.0`) and either add the [`nodenv-aliases`](https://github.com/jasonkarns/nodenv-aliases) plugin or set `NODENV_VERSION`.
+
+In CI, all 12 `actions/setup-node` steps read that file via `node-version-file` rather than naming a version inline. Nothing enforces that automatically yet, so a new step that types a version in would not be caught — if you are adding one, copy an existing step rather than writing the input from scratch. The same is true of pnpm, which is pinned two different ways today: 9 of 11 `pnpm/action-setup` steps pin `version:` inline and 2 rely on `package.json#packageManager`.
+
+The Python build toolchain is pinned the same way, in [`.github/python-toolchain.env`](.github/python-toolchain.env), but that one *is* enforced — `scripts/release/verify-python-toolchain-pins.sh` fails CI when a workflow's literal disagrees with the record. Closing the same gap for Node and pnpm is tracked in [PNI-280](https://linear.app/copilotkit/issue/PNI-280); see Step 7's Python note for the enforced version of this pattern.
+
+To bump the Node major, edit `.node-version` — every `actions/setup-node` step follows it automatically. Then review `publish-release.yml`'s npm-OIDC workaround, which exists only because the npm bundled with Node 22 cannot use OIDC trusted publishing, so a later major should probably delete it. Nothing will remind you about that one, so it is written down here.
+
+None of this is `package.json#engines.node`. The root manifest is private and never published, so its `>=18` is a floor on installs *in this repository* — and it is what `node-version-file: "package.json"` used to resolve before this was centralized. The published `@ag-ui/*` packages mostly declare no engines range at all, so changing the root value is not a consumer-compatibility decision.
+
+---
+
 ## Step-by-Step Guide to Adding an Integration PR
 
 This guide walks you through everything needed to submit an integration PR to AG-UI. It covers adding the integration code, examples, dojo configuration, end-to-end tests, and CI setup.
@@ -115,7 +129,7 @@ Add entries for your integration in the dojo script configuration at `apps/dojo/
 
 In both scripts, you add an entry to the `ALL_TARGETS` object. The **object key must match** the key you used in `agents.ts`. Each entry includes:
 - The **name** for logging
-- The **command** to execute (e.g., `uv sync` for prep, `uv run ...` for run)
+- The **command** to execute (e.g., `uv sync` for prep, `uv run ...` for run). Use a plain `uv sync` — example apps are synced non-frozen on purpose (see Step 7's Python note).
 - The **working directory** (pointing into your `integrations/` examples folder)
 - **Environment variables** (optional) — for example, `PORT`
 
@@ -152,6 +166,42 @@ The end-to-end tests need to run in CI as well. Update the GitHub Actions workfl
 
 **Note:** Tests won't run by default on external PRs. The team will open a separate PR from within the repo to trigger CI, then merge the original contributor PR once tests pass.
 
+**Python integrations:** CI pins one uv version and one CPython version for every Python job, recorded in [`.github/python-toolchain.env`](.github/python-toolchain.env). Two things follow from that, and CI enforces both.
+
+**1. New Python CI steps must use the pin.** The `python-toolchain-pins` job fails if any workflow's literal disagrees with that file, or if a `setup-uv` invocation takes its version any other way. Declare the two values in your workflow's top-level `env:` (a workflow cannot read them from the file), then reference them:
+
+```yaml
+env:
+  UV_VERSION: "0.12.1"      # must equal .github/python-toolchain.env
+  PYTHON_VERSION: "3.12"
+
+# ...
+      - uses: astral-sh/setup-uv@<sha>
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+```
+
+A venv cache key must carry both versions, so an environment built by one toolchain is never restored into a job expecting another. Match the existing spelling:
+
+```
+py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}
+```
+
+`actions/setup-python` steps take `python-version` from the same pin. Watch the scope: `env:` is per-workflow/job/step, so a `${{ env.UV_VERSION }}` with no declaration a step can see expands to nothing and the job silently installs whatever uv is latest.
+
+To check your work before pushing, or to find every file still to update when moving the pin:
+
+```bash
+bash scripts/release/verify-python-toolchain-pins.sh
+```
+
+It names each file and line that disagrees. Note what it does *not* verify: that the pinned versions are the right ones. That comes from a green run, which is why `python-toolchain.env` records the run its values came from — update that too when you move the pin.
+
+**2. Lockfiles are checked, not repaired.** Python jobs install with `uv sync --locked`, the `lockfiles` job runs `uv lock --check` over every first-party `uv.lock`, and each Python job that installs dependencies ends with `.github/actions/assert-lockfiles-unchanged`, so a job that rewrites a committed lockfile fails instead of hiding the drift. If CI reports lockfile drift, run `uv lock` in the package directory and commit the result.
+
+The one exception is the `examples/` apps: `prep-dojo-everything.js` syncs those non-frozen on purpose (it is shared with local dev, where relocking is wanted), so their lockfiles are outside both checks. That is why a plain `uv sync` is the right prep command for an example app.
+
 ### Step 8 (Optional): Update CODEOWNERS
 
 This step is only needed if you want to be added as a co-owner who can merge changes to your integration without core team review. If this applies to you, update the `.github/CODEOWNERS` file to add yourself alongside the team:
@@ -178,6 +228,8 @@ Use this checklist to verify your PR is complete before submitting:
 - [ ] End-to-end test spec files added for every supported feature
 - [ ] Tests pass locally
 - [ ] CI workflow matrix updated in `.github/workflows/dojo-e2e.yml` (entry name matches `agents.ts`)
+- [ ] **Python only:** new CI steps use `${{ env.UV_VERSION }}` / `${{ env.PYTHON_VERSION }}` matching `.github/python-toolchain.env`, and any venv cache key carries both versions — verify with `bash scripts/release/verify-python-toolchain-pins.sh` (see Step 7)
+- [ ] **Python only:** `uv.lock` committed alongside `pyproject.toml`, and `uv lock --check` passes in the package directory
 
 ---
 

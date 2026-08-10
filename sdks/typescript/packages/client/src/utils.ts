@@ -7,7 +7,7 @@ export const structuredClone_ = <T>(obj: T): T => {
 
   try {
     return JSON.parse(JSON.stringify(obj));
-  } catch (err) {
+  } catch (_err) {
     // Preserve array vs object type in shallow fallback
     if (Array.isArray(obj)) {
       return [...obj] as unknown as T;

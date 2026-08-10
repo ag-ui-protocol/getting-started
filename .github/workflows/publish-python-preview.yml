@@ -12,6 +12,17 @@ on:
 permissions:
   contents: read
 
+# Pinned Python build toolchain — see .github/python-toolchain.env, which is the
+# single place these two values are recorded, along with the green run they came
+# from. Change one, change them all: the python-toolchain-pins job in
+# lint-release-workflows.yml fails if any workflow's literal disagrees with that file.
+#
+# Audited alongside build-python-preview.yml: this job only uploads the wheels
+# that workflow already built, so it never touches a lockfile.
+env:
+  UV_VERSION: "0.12.1"
+  PYTHON_VERSION: "3.12"
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -40,15 +51,33 @@ jobs:
 
       - name: Read PR metadata
         id: meta
+        # These three files come from a workflow_run artifact, which on a fork PR is
+        # produced by the fork's own run — so they are untrusted input reaching a job
+        # that holds `pull-requests: write`. Validate the shape before it becomes a step
+        # output: `echo "k=$(cat f)"` exits 0 even when `cat` fails, so a missing file
+        # silently yielded an empty value, and a value containing a newline would set
+        # arbitrary extra outputs. A single grouped redirect also satisfies SC2129,
+        # which reviewdog reports at error level now that this file is in the
+        # actionlint scope.
         run: |
-          echo "pr-number=$(cat pr-metadata/pr-number)" >> "$GITHUB_OUTPUT"
-          echo "version=$(cat pr-metadata/version)" >> "$GITHUB_OUTPUT"
-          echo "sha=$(cat pr-metadata/sha)" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          pr=$(tr -d '\n' < pr-metadata/pr-number)
+          version=$(tr -d '\n' < pr-metadata/version)
+          sha=$(tr -d '\n' < pr-metadata/sha)
+          [[ "$pr" =~ ^[0-9]+$ ]] || { echo "::error::bad pr-number: '$pr'"; exit 1; }
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::bad sha: '$sha'"; exit 1; }
+          [[ "$version" =~ ^0\.0\.0\.dev[0-9]+$ ]] || { echo "::error::bad version: '$version'"; exit 1; }
+          {
+            echo "pr-number=$pr"
+            echo "version=$version"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Publish all packages to TestPyPI
         run: |

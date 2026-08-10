@@ -4,11 +4,12 @@
 # Creates or updates a daily GitHub Release with published package info.
 #
 # Usage: ./create-or-update-release.sh <ecosystem> <packages-json>
-#   ecosystem: "typescript", "python", or "dotnet"
+#   ecosystem: "typescript", "python", "dotnet", or "maven"
 #   packages-json: JSON array string of published packages
 #     TS format:  [{"name":"@ag-ui/core","version":"0.0.49","path":"..."}]
 #     Py format:  [{"name":"ag-ui-protocol","version":"0.1.15","dir":"..."}]
 #     .NET format: [{"name":"AGUI.Client","version":"0.1.0","path":"..."}]
+#     Maven format: [{"name":"java-core","version":"0.1.0","path":"...","groupId":"com.ag-ui.community"}]
 #
 # Requires: gh CLI authenticated with contents:write permission
 # Environment: DRY_RUN=true to skip actual release creation
@@ -51,8 +52,20 @@ elif [ "$ECOSYSTEM" = "dotnet" ]; then
     VERSION=$(echo "$pkg" | jq -r '.version')
     SECTION+="| ${NAME} | ${VERSION} | \`dotnet add package ${NAME} --version ${VERSION}\` |${NL}"
   done < <(echo "$PACKAGES_JSON" | jq -c '.[]')
+elif [ "$ECOSYSTEM" = "maven" ]; then
+  # Gradle-style coordinates rather than a <dependency> block: the install cell
+  # has to stay on one line inside the table.
+  SECTION="### Java (Maven Central) - published at ${TIMESTAMP} UTC${NL}"
+  SECTION+="| Package | Version | Install |${NL}"
+  SECTION+="|---------|---------|--------|${NL}"
+  while read -r pkg; do
+    NAME=$(echo "$pkg" | jq -r '.name')
+    VERSION=$(echo "$pkg" | jq -r '.version')
+    GROUP_ID=$(echo "$pkg" | jq -r '.groupId')
+    SECTION+="| ${NAME} | ${VERSION} | \`${GROUP_ID}:${NAME}:${VERSION}\` |${NL}"
+  done < <(echo "$PACKAGES_JSON" | jq -c '.[]')
 else
-  echo "ERROR: Unknown ecosystem '$ECOSYSTEM'. Use 'typescript', 'python', or 'dotnet'." >&2
+  echo "ERROR: Unknown ecosystem '$ECOSYSTEM'. Use 'typescript', 'python', 'dotnet', or 'maven'." >&2
   exit 1
 fi
 
@@ -78,6 +91,8 @@ for i in $(seq 1 $MAX_RETRIES); do
     while read -r pkg; do
       NAME=$(echo "$pkg" | jq -r '.name')
       VERSION=$(echo "$pkg" | jq -r '.version')
+      # Maven only; empty for the other ecosystems.
+      GROUP_ID=$(echo "$pkg" | jq -r '.groupId // empty')
       ROW_KEY="| ${NAME} | ${VERSION} |"
       if grep -Fq "$ROW_KEY" <<<"$EXISTING_BODY"; then
         echo "Row for ${NAME}@${VERSION} already present in release body; skipping" >&2
@@ -86,6 +101,7 @@ for i in $(seq 1 $MAX_RETRIES); do
           typescript) APPEND_SECTION+="| ${NAME} | ${VERSION} | \`npm install ${NAME}@${VERSION}\` |${NL}" ;;
           python) APPEND_SECTION+="| ${NAME} | ${VERSION} | \`pip install ${NAME}==${VERSION}\` |${NL}" ;;
           dotnet) APPEND_SECTION+="| ${NAME} | ${VERSION} | \`dotnet add package ${NAME} --version ${VERSION}\` |${NL}" ;;
+          maven) APPEND_SECTION+="| ${NAME} | ${VERSION} | \`${GROUP_ID}:${NAME}:${VERSION}\` |${NL}" ;;
         esac
         APPEND_ROWS=$((APPEND_ROWS + 1))
       fi
@@ -100,6 +116,7 @@ for i in $(seq 1 $MAX_RETRIES); do
       typescript) HEADER="### TypeScript (npm) - published at ${TIMESTAMP} UTC${NL}| Package | Version | Install |${NL}|---------|---------|--------|${NL}" ;;
       python) HEADER="### Python (PyPI) - published at ${TIMESTAMP} UTC${NL}| Package | Version | Install |${NL}|---------|---------|--------|${NL}" ;;
       dotnet) HEADER="### .NET (NuGet) - published at ${TIMESTAMP} UTC${NL}| Package | Version | Install |${NL}|---------|---------|--------|${NL}" ;;
+      maven) HEADER="### Java (Maven Central) - published at ${TIMESTAMP} UTC${NL}| Package | Version | Install |${NL}|---------|---------|--------|${NL}" ;;
     esac
     UPDATED_BODY="${EXISTING_BODY}${NL}${HEADER}${APPEND_SECTION}"
     echo "$UPDATED_BODY" | gh release edit "$TAG" --notes-file -

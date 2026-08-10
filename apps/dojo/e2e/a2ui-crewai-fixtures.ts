@@ -11,7 +11,12 @@
  *
  * Register via `registerA2UICrewAIFixtures(mockServer)` from aimock-setup.ts.
  */
-import type { LLMock, ChatMessage } from "@copilotkit/aimock";
+import type {
+  LLMock,
+  ChatMessage,
+  ChatCompletionRequest,
+  ToolDefinition,
+} from "@copilotkit/aimock";
 
 const textOf = (content: ChatMessage["content"] | undefined): string => {
   if (typeof content === "string") return content;
@@ -95,13 +100,13 @@ const HOTELS_FIXED = [
 ];
 
 export function registerA2UICrewAIFixtures(mockServer: LLMock): void {
-  const hasTool = (req: any, name: string) =>
-    req.tools?.some((t: any) => t.function.name === name);
+  const hasTool = (req: ChatCompletionRequest, name: string) =>
+    req.tools?.some((t: ToolDefinition) => t.function.name === name);
 
   // fixed_schema - backend search_flights tool ("search for flights").
   mockServer.addFixture({
     match: {
-      predicate: (req: any) =>
+      predicate: (req: ChatCompletionRequest) =>
         hasTool(req, "search_flights") && /search for flights/i.test(userText(req.messages)),
     },
     response: {
@@ -112,7 +117,7 @@ export function registerA2UICrewAIFixtures(mockServer: LLMock): void {
   // fixed_schema - backend search_hotels tool ("search for hotels").
   mockServer.addFixture({
     match: {
-      predicate: (req: any) =>
+      predicate: (req: ChatCompletionRequest) =>
         hasTool(req, "search_hotels") && /search for hotels/i.test(userText(req.messages)),
     },
     response: {
@@ -123,7 +128,7 @@ export function registerA2UICrewAIFixtures(mockServer: LLMock): void {
   // dynamic_schema - main agent calls the generate_a2ui sub-agent tool.
   mockServer.addFixture({
     match: {
-      predicate: (req: any) => hasTool(req, "generate_a2ui") && isDynamic(userText(req.messages)),
+      predicate: (req: ChatCompletionRequest) => hasTool(req, "generate_a2ui") && isDynamic(userText(req.messages)),
     },
     response: {
       toolCalls: [{ name: "generate_a2ui", arguments: JSON.stringify({ intent: "create" }) }],
@@ -133,7 +138,7 @@ export function registerA2UICrewAIFixtures(mockServer: LLMock): void {
   // dynamic_schema - sub-agent render_a2ui → valid hotel-comparison surface.
   mockServer.addFixture({
     match: {
-      predicate: (req: any) => hasTool(req, "render_a2ui") && isDynamic(allText(req.messages)),
+      predicate: (req: ChatCompletionRequest) => hasTool(req, "render_a2ui") && isDynamic(allText(req.messages)),
     },
     response: { toolCalls: [{ name: "render_a2ui", arguments: renderArgs }] },
   });

@@ -113,6 +113,9 @@ export interface AgentSubscriber {
       event: ToolCallArgsEvent;
       toolCallBuffer: string;
       toolCallName: string;
+      // DEFERRED (PNI-272): narrowing this to `unknown` would force casts in
+      // every consumer's subscriber callback. Public API decision, not lint.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       partialToolCallArgs: Record<string, any>;
     } & AgentSubscriberParams,
   ): MaybePromise<AgentStateMutation | void>;
@@ -120,6 +123,8 @@ export interface AgentSubscriber {
     params: {
       event: ToolCallEndEvent;
       toolCallName: string;
+      // DEFERRED (PNI-272): see `partialToolCallArgs` above.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       toolCallArgs: Record<string, any>;
     } & AgentSubscriberParams,
   ): MaybePromise<AgentStateMutation | void>;

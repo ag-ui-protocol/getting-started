@@ -175,6 +175,23 @@ message":
 This message becomes part of the conversation history, allowing the agent to
 reference and incorporate the tool's result in subsequent responses.
 
+If the tool did not succeed, set `error` to the failure message:
+
+```typescript
+{
+  id: "result-789",
+  role: "tool",
+  content: "Deployment blocked: the production environment is locked",
+  toolCallId: "tool-123",
+  error: "the production environment is locked" // Marks this result as a failure
+}
+```
+
+`error` is how the protocol expresses a client-side tool failure. Without it, a
+tool that failed is indistinguishable from one that succeeded — whatever the
+frontend happened to put in `content` is all the agent has to go on. See
+[Messages](/concepts/messages) for the full `ToolMessage` shape.
+
 ## Human-in-the-Loop Workflows
 
 The AG-UI tool system is especially powerful for implementing human-in-the-loop
