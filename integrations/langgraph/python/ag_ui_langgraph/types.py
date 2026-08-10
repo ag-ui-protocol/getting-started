@@ -72,22 +72,73 @@ RunMetadata = TypedDict("RunMetadata", {
     "state_reliable": NotRequired[bool],
     # Message / state data
     "manually_emitted_state": NotRequired[Optional[State]],
-    # Reasoning / thinking
-    "reasoning_process": NotRequired[Optional[ThinkingProcess]],
-    # Pinned text message id for the current node. Set on the first
-    # auto-streamed text chunk emitted from a node (from the chunk's id) and
-    # reused for every subsequent TEXT_MESSAGE_START emitted from the same
-    # node, so text resuming after a tool call (or after a fresh model
-    # invocation within the same node) stays in the same UI bubble. Cleared
-    # by handle_node_change on every node transition, so multi-node graphs
-    # (e.g. supervisor routing to specialist agents) preserve separate
-    # bubbles per node. Reset implicitly on the next run when active_run is
-    # replaced. Not used by ManuallyEmitMessage events: those carry their
-    # own message_id and bypass this field entirely.
-    "current_text_message_id": NotRequired[Optional[str]],
+    # Reasoning / thinking. Keyed per subagent "lane" (the derived subagent id,
+    # or "__root__" for the root/supervisor) so concurrently-streaming subagents
+    # do not clobber each other's in-flight reasoning. Each deepagents fan-out
+    # subagent has a distinct id, so this isolates concurrent subagent reasoning
+    # (see _current_lane for the attribution-less fan-out caveat).
+    "reasoning_processes": NotRequired[Dict[str, ThinkingProcess]],
+    # Canonical pending reasoning id (from a text-less reasoning chunk), keyed
+    # per lane like reasoning_processes.
+    "pending_reasoning_ids": NotRequired[Dict[str, str]],
+    # Pinned text message id per (lane, node). Set on the first auto-streamed
+    # text chunk from a lane's node (from the chunk's id) and reused for every
+    # subsequent TEXT_MESSAGE_START from the same lane while that lane's node is
+    # unchanged, so text resuming after a tool call (or after a fresh model
+    # invocation within the same node) stays in the same UI bubble. The pin is
+    # re-minted lazily by _get_or_pin_text_message_id when the lane's own node
+    # changes (tracked in current_text_message_nodes) — NOT by handle_node_change
+    # on the global node_name, which thrashes under concurrent subagents. So
+    # multi-node graphs (e.g. supervisor routing to specialist agents) still get
+    # separate bubbles per node. Reset implicitly on the next run when active_run
+    # is replaced. Not used by ManuallyEmitMessage events: those carry their own
+    # message_id and bypass this field entirely.
+    #
+    # Keyed per subagent "lane" (the derived subagent id, or "__root__" for the
+    # root/supervisor) so concurrently-streaming subagents keep independent
+    # text bubbles. Keyed by lane rather than by model run_id on purpose: a
+    # single subagent's ReAct loop spans multiple model invocations (distinct
+    # run_ids), and the pin must survive across them to keep text→tool→text in
+    # one bubble — run_id keying would fragment it.
+    "current_text_message_ids": NotRequired[Dict[str, Optional[str]]],
+    # The node that owns each lane's current text pin. The pin resets when the
+    # lane's own node changes (not the global node_name, which thrashes under
+    # concurrent subagents). See _get_or_pin_text_message_id.
+    "current_text_message_nodes": NotRequired[Dict[str, Optional[str]]],
+    # Deepagents subagent tracking. Maps a stable per-invocation subagent id
+    # (the leading `|`-separated checkpoint_ns segment, e.g. "tools:<uuid>")
+    # to the subagent's name (metadata's lc_agent_name), for every subagent
+    # invocation currently active on this run.
+    "active_subagents": NotRequired[Dict[str, str]],
+    # The subagent id (see above) whose events are currently being processed,
+    # or None when the current event originates at the root/supervisor level.
+    "current_subagent_run_id": NotRequired[Optional[str]],
+    # Declared metadata for each subagent invocation, captured from the
+    # deepagents `task` delegation tool's on_tool_start input (which runs in the
+    # subagent's own checkpoint namespace, i.e. its subagent id). Maps subagent
+    # id -> {"name": subagent_type, "description": task description}, so
+    # SUBAGENT_STARTED can carry the declared subagent type and the
+    # per-invocation description rather than only the runtime lc_agent_name.
+    "subagent_task_meta": NotRequired[Dict[str, Dict[str, Optional[str]]]],
+    # Subagent-attributed messages streamed during this run, keyed by message
+    # id. Assistant entries hold {kind:"assistant", id, role, content,
+    # subagent_run_id, tool_calls}; tool-result entries hold {kind:"tool", id,
+    # content, tool_call_id, subagent_run_id}. These live only in the subagent
+    # (subgraph) checkpoint, not main-graph state, so they are merged into
+    # MESSAGES_SNAPSHOT (which is built from main-graph state) to keep the
+    # streamed subagent text AND tool calls from being wiped when the client
+    # applies it.
+    "subagent_messages": NotRequired[Dict[str, Any]],
+    # Routes a subagent tool call's streamed TOOL_CALL_ARGS deltas (which carry
+    # only tool_call_id, no parent_message_id/subagent_run_id) back to the owning
+    # assistant entry in subagent_messages. Maps tool_call_id -> message id.
+    "subagent_tool_call_owner": NotRequired[Dict[str, str]],
 })
 
-MessagesInProgressRecord = Dict[str, Optional[MessageInProgress]]
+# run_id -> lane -> in-flight message/tool-call record. The inner "lane" key is
+# the derived subagent id ("__root__" for the root/supervisor), so concurrently
+# streaming subagents each get their own in-flight slot and never merge tokens.
+MessagesInProgressRecord = Dict[str, Dict[str, Optional[MessageInProgress]]]
 
 ToolCall = TypedDict("ToolCall", {
     "id": str,

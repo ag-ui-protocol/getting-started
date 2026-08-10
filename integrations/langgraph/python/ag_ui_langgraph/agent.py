@@ -3,6 +3,7 @@ import re
 import uuid
 import json
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Optional, List, Any, Union, AsyncGenerator, Generator, Literal, Dict, TypedDict
 from typing_extensions import NotRequired, Self
 import inspect
@@ -25,6 +26,7 @@ from .types import (
     MessagesInProgressRecord,
     SchemaKeys,
     MessageInProgress,
+    ThinkingProcess,
     RunMetadata,
     LangGraphEventTypes,
     CustomEventNames,
@@ -47,6 +49,11 @@ from .utils import (
 
 from ag_ui.core import (
     EventType,
+    AssistantMessage,
+    FunctionCall,
+    ToolCall as AGUIToolCall,
+    ToolMessage as AGUIToolMessage,
+    ReasoningMessage,
     CustomEvent,
     Interrupt as AGUIInterrupt,
     MessagesSnapshotEvent,
@@ -74,6 +81,9 @@ from ag_ui.core import (
     ReasoningMessageEndEvent,
     ReasoningEndEvent,
     ReasoningEncryptedValueEvent,
+    SubagentStartedEvent,
+    SubagentFinishedEvent,
+    SubagentErrorEvent,
 )
 from .interrupts import lg_interrupts_to_agui, DEFAULT_RESUME_SENTINEL_CANCELLED, DEFAULT_RESUME_SENTINEL_MAP
 from ag_ui.encoder import EventEncoder
@@ -107,6 +117,195 @@ ProcessedEvents = Union[
 logger = logging.getLogger(__name__)
 
 ROOT_SUBGRAPH_NAME = "root"
+
+
+@dataclass
+class SubagentContext:
+    subagent_run_id: str
+    name: str
+    parent_subagent_run_id: Optional[str] = None
+
+
+# Lane key for root/supervisor-level streaming state (events with no subagent).
+# Subagent lanes use the derived subagent id (e.g. "tools:<uuid>").
+_ROOT_LANE = "__root__"
+
+
+def _record_subagent_boundaries(ns: str, known: set) -> None:
+    """Record `tools:<uuid>` segments that are genuine subagent boundaries.
+
+    A boundary is a `tools:` segment directly followed by a non-`tools` node
+    (the subagent's own model/middleware). A regular inner tool's ToolNode is a
+    leaf (never followed by such a node), so it is never recorded — which is how
+    a nested subagent is told apart from a subagent's own tool call.
+    """
+    if not ns:
+        return
+    segs = ns.split("|")
+    for i, seg in enumerate(segs):
+        if (
+            seg.split(":")[0] == "tools"
+            and i + 1 < len(segs)
+            and segs[i + 1].split(":")[0] != "tools"
+        ):
+            known.add(seg)
+
+
+def derive_subagent_context(
+    ns: str,
+    lc_agent_name: Optional[str],
+    subgraphs,
+    known_subagent_segments: Optional[set] = None,
+) -> Optional[SubagentContext]:
+    """Return a SubagentContext when an event originates inside a deepagents
+    subagent, else None.
+
+    Signals (confirmed via spike): a subagent event has a nested ('|') checkpoint
+    namespace AND metadata lc_agent_name set. Declared subgraphs also nest but do
+    not set lc_agent_name, so they are excluded (their root segment is in `subgraphs`).
+    """
+    if not lc_agent_name or not ns or "|" not in ns:
+        return None
+    leading = ns.split("|")[0]
+    root_name = leading.split(":")[0]
+    if root_name in subgraphs:
+        return None  # declared subgraph, handled elsewhere
+    segs = ns.split("|")
+    # A `tools:<uuid>` segment is a genuine subagent boundary only when it is
+    # directly followed by a non-`tools` node (the subagent's own model /
+    # middleware) — a *regular* inner tool's ToolNode is a leaf and is never
+    # followed by agent machinery. `known_subagent_segments` accumulates those
+    # boundaries across the stream (see reconcile_subagents). The subagent chain
+    # for this event is the boundary segments present in its ns, in order: the
+    # deepest is the current subagent, the one above it is its parent. This
+    # distinguishes a nested subagent (tools:A|tools:B|model) from a subagent's
+    # own inner tool call (tools:A|tools:B|tools:C), which the naive
+    # deepest-segment approach conflated.
+    if known_subagent_segments:
+        chain = [s for s in segs if s in known_subagent_segments]
+        if chain:
+            return SubagentContext(
+                subagent_run_id=chain[-1],
+                name=lc_agent_name,
+                parent_subagent_run_id=chain[-2] if len(chain) >= 2 else None,
+            )
+    # Fallback (no accumulated boundary info, e.g. standalone callers): the
+    # leading segment is the subagent, with no derivable parent.
+    return SubagentContext(subagent_run_id=leading, name=lc_agent_name, parent_subagent_run_id=None)
+
+
+# Event types that carry a `subagent_run_id` field and should be stamped with the
+# currently active subagent id at the _dispatch_event chokepoint. Every in-window
+# event is tagged so the stream is self-describing per event (a consumer never
+# has to reconstruct attribution from a prior event's messageId/toolCallId).
+# Excludes only the run-lifecycle events, MESSAGES_SNAPSHOT (its messages are
+# tagged individually), and the SUBAGENT_* lifecycle events (which carry their
+# own subagent_run_id explicitly). STATE_SNAPSHOT/STATE_DELTA are attributable per
+# the protocol design; this integration emits them for a subagent only on the
+# explicit `manually_emit_state` path, since node-exit and checkpoint snapshots
+# would carry a partial subgraph view (see the suppressions in the stream loop).
+_SUBAGENT_ATTRIBUTABLE_EVENT_TYPES = frozenset({
+    EventType.TEXT_MESSAGE_START, EventType.TEXT_MESSAGE_CHUNK,
+    EventType.TEXT_MESSAGE_CONTENT, EventType.TEXT_MESSAGE_END,
+    EventType.TOOL_CALL_START, EventType.TOOL_CALL_CHUNK, EventType.TOOL_CALL_RESULT,
+    EventType.TOOL_CALL_ARGS, EventType.TOOL_CALL_END,
+    EventType.REASONING_START, EventType.REASONING_MESSAGE_START,
+    EventType.REASONING_MESSAGE_CONTENT, EventType.REASONING_MESSAGE_END,
+    EventType.REASONING_END, EventType.REASONING_ENCRYPTED_VALUE,
+    EventType.ACTIVITY_SNAPSHOT, EventType.ACTIVITY_DELTA,
+    EventType.STATE_SNAPSHOT, EventType.STATE_DELTA,
+    EventType.STEP_STARTED, EventType.STEP_FINISHED, EventType.CUSTOM, EventType.RAW,
+})
+
+
+def reconcile_subagents(active_run, ns, lc_agent_name, subgraphs) -> list:
+    """Emit SUBAGENT_STARTED once per distinct subagent (deepagents runs task
+    subagents concurrently, so their events interleave -- a toggle is NOT a finish).
+    current_subagent_run_id tracks the CURRENT event's subagent for _dispatch_event
+    stamping. SUBAGENT_FINISHED is emitted by drain_subagents before RUN_FINISHED
+    (unique-started + all-closed-before-run-end is protocol-valid; precise per-subagent
+    finish timing is deferred for this step)."""
+    known = active_run.setdefault("subagent_segments", set())
+    _record_subagent_boundaries(ns, known)
+    ctx = derive_subagent_context(ns, lc_agent_name, subgraphs, known)
+    new_id = ctx.subagent_run_id if ctx else None
+
+    # SUBAGENT_FINISHED / SUBAGENT_ERROR are terminal for the id they name, so a
+    # closed subagent may neither be re-opened nor own further output. Both closing
+    # paths only REMOVE the id from active_subagents, so without this a single
+    # trailing event bearing a finished subagent's namespace — its inner tooling can
+    # emit after the `task` tool returns — re-opened it: two SUBAGENT_STARTED and two
+    # terminals for one invocation, plus output attributed after a terminal.
+    # Trailing events fall back to the parent lane instead.
+    # Attribution follows the event's namespace even after that subagent closed. The
+    # protocol deliberately allows a tag to name an already-finished subagent, so
+    # blanking it here would silently reparent the subagent's trailing output — and its
+    # state — to the parent, which is exactly what attribution exists to prevent. Only
+    # the SUBAGENT_STARTED emission is gated, since re-opening a closed id would give one
+    # invocation two starts and two terminals.
+    active_run["current_subagent_run_id"] = new_id
+    closed = active_run.setdefault("closed_subagents", set())
+
+    events = []
+    if (
+        new_id is not None
+        and new_id not in active_run["active_subagents"]
+        and new_id not in closed
+    ):
+        # Prefer the declared subagent_type + description captured from the
+        # `task` delegation tool (see _capture_subagent_task_meta); fall back to
+        # the runtime lc_agent_name when no task metadata was captured.
+        task_meta = (active_run.get("subagent_task_meta") or {}).get(new_id) or {}
+        name = task_meta.get("name") or ctx.name
+        description = task_meta.get("description")
+        active_run["active_subagents"][new_id] = name
+        # Remember this subagent's parent so, when it finishes, control (and
+        # the `task` tool result attribution) returns to the parent rather than
+        # the root. None for a top-level subagent (parent is the root).
+        active_run.setdefault("subagent_parents", {})[new_id] = ctx.parent_subagent_run_id
+        events.append(SubagentStartedEvent(
+            type=EventType.SUBAGENT_STARTED,
+            subagent_run_id=new_id,
+            name=name,
+            description=description,
+            parent_subagent_run_id=ctx.parent_subagent_run_id,
+            parent_tool_call_id=task_meta.get("parent_tool_call_id"),
+            parent_message_id=task_meta.get("parent_message_id"),
+        ))
+    return events
+
+
+def drain_subagents(active_run) -> list:
+    """Emit SUBAGENT_FINISHED for any still-open subagents (before RUN_FINISHED)."""
+    ids = list(active_run.get("active_subagents", {}).keys())
+    events = [SubagentFinishedEvent(type=EventType.SUBAGENT_FINISHED, subagent_run_id=sid)
+              for sid in ids]
+    active_run["active_subagents"].clear()
+    # Terminal for these ids — see reconcile_subagents.
+    active_run.setdefault("closed_subagents", set()).update(ids)
+    active_run["current_subagent_run_id"] = None
+    return events
+
+
+def error_open_subagents(active_run, message: str) -> list:
+    """Emit SUBAGENT_ERROR for every still-open subagent and clear them.
+
+    Used on both the in-band ``error`` event path and the hard-exception path so
+    a subagent that was mid-flight when the run failed gets a terminal event
+    (otherwise the client shows it running forever). Clearing ``active_subagents``
+    also ensures a subsequent ``drain_subagents`` does NOT additionally emit
+    SUBAGENT_FINISHED for the same subagent (contradictory error-then-finish).
+    """
+    if not active_run:
+        return []
+    ids = list(active_run.get("active_subagents", {}).keys())
+    events = [SubagentErrorEvent(type=EventType.SUBAGENT_ERROR, subagent_run_id=sid, message=message)
+              for sid in ids]
+    active_run.get("active_subagents", {}).clear()
+    # Terminal for these ids — see reconcile_subagents.
+    active_run.setdefault("closed_subagents", set()).update(ids)
+    active_run["current_subagent_run_id"] = None
+    return events
 
 
 class PreparedStream(TypedDict):
@@ -194,7 +393,294 @@ class LangGraphAgent:
                 # make_json_safe pass). See emit_raw_events in __init__.
                 event.raw_event = None
 
+        active_run = getattr(self, "active_run", None)
+        current_subagent_run_id = active_run.get("current_subagent_run_id") if active_run else None
+        if (
+            current_subagent_run_id
+            and event.type in _SUBAGENT_ATTRIBUTABLE_EVENT_TYPES
+            and getattr(event, "subagent_run_id", None) is None
+        ):
+            event.subagent_run_id = current_subagent_run_id
+
+        self._accumulate_subagent_message(event)
+
         return event
+
+    def _capture_task_tool_dispatch(self, event: dict) -> None:
+        """Map each `task` ToolNode dispatch to its originating tool_call_id.
+
+        Current LangChain ``create_agent`` schedules every pending tool call as
+        its own ``Send("tools", [tool_call])``, so the ToolNode's
+        ``on_chain_start`` carries that single tool call (with its id) in
+        ``data.input`` and a ``langgraph_checkpoint_ns`` equal to the namespace
+        the spawned subagent's own ``task`` ``on_tool_start`` reports. Recording
+        ns -> tool_call_id here lets _capture_subagent_task_meta attach the
+        EXACT spawning call to each subagent by namespace, instead of matching
+        by FIFO order — which breaks when tool starts are reordered (async tool
+        wrappers, per-call HITL interrupts, or even default concurrent
+        scheduling). Only a single-call ToolNode dispatch is captured;
+        batched/ambiguous shapes are left to the FIFO fallback.
+        """
+        if event.get("event") != LangGraphEventTypes.OnChainStart.value:
+            return
+        metadata = event.get("metadata") or {}
+        if metadata.get("langgraph_node") != "tools" and event.get("name") != "tools":
+            return
+        node_input = (event.get("data") or {}).get("input")
+        candidates: List[Any] = []
+        if isinstance(node_input, list):
+            candidates = node_input
+        elif isinstance(node_input, dict):
+            if node_input.get("type") == "tool_call":
+                candidates = [node_input]
+            elif isinstance(node_input.get("tool_call"), dict):
+                candidates = [node_input["tool_call"]]
+        task_calls = [
+            c for c in candidates
+            if isinstance(c, dict) and c.get("name") == "task" and isinstance(c.get("id"), str)
+        ]
+        # A single task call per ToolNode namespace is the unambiguous case.
+        # Multiple in one namespace (older batched shapes) fall back to FIFO.
+        if len(task_calls) != 1:
+            return
+        active_run = getattr(self, "active_run", None)
+        if active_run is None:
+            return
+        tool_call_id = task_calls[0]["id"]
+        ns = metadata.get("langgraph_checkpoint_ns")
+        if ns:
+            active_run.setdefault("task_tool_call_ids_by_ns", {})[ns] = tool_call_id
+
+    def _capture_subagent_task_meta(self, event: dict) -> None:
+        """Record a subagent invocation's declared name + description from the
+        deepagents ``task`` delegation tool's ``on_tool_start``.
+
+        The ``task`` tool executes in the subagent's own checkpoint namespace
+        (e.g. ``tools:<uuid>``) — the same value ``derive_subagent_context``
+        derives as the subagent id — and its input carries ``subagent_type`` and
+        ``description``. Capturing it here (which runs before the subagent's own
+        events trigger SUBAGENT_STARTED) lets that event report the declared
+        subagent type and the per-invocation description. No-op for non-task
+        tools and non-deepagents runs (input without ``subagent_type``).
+        """
+        if event.get("event") != LangGraphEventTypes.OnToolStart.value:
+            return
+        tool_input = (event.get("data") or {}).get("input")
+        if not isinstance(tool_input, dict) or "subagent_type" not in tool_input:
+            return
+        # The task on_tool_start runs *in* the new subagent's own ToolNode, so the
+        # deepest `tools:` segment of its ns is the new subagent's id (matches the
+        # chain derivation in reconcile_subagents). Single-level: same as before.
+        ns = (event.get("metadata") or {}).get("langgraph_checkpoint_ns", "")
+        tool_segs = [s for s in ns.split("|") if s.split(":")[0] == "tools"] if ns else []
+        subagent_run_id = tool_segs[-1] if tool_segs else (ns.split("|")[0] if ns else "")
+        if not subagent_run_id:
+            return
+        active_run = getattr(self, "active_run", None)
+        if active_run is None:
+            return
+        # Link this subagent back to the EXACT `task` call that spawned it,
+        # keyed by the subagent's checkpoint namespace — which equals the
+        # namespace of its per-call ToolNode dispatch captured in
+        # _capture_task_tool_dispatch. This does not rely on FIFO emission
+        # order (which tool-start reordering can violate). FIFO remains a
+        # fallback ONLY when no per-call dispatch was captured for this exact
+        # namespace (older/batched ToolNode shapes, or a renamed tool node).
+        #
+        # Note: we deliberately do NOT fall back to matching a ToolNode run_id
+        # from parent_ids. The ns and the run_id are recorded together by the
+        # same dispatch capture, so a namespace miss means this subagent's own
+        # dispatch was never captured — and its own ToolNode run_id is likewise
+        # absent. A parent_ids scan could then only match an *ancestor*
+        # subagent's dispatch (e.g. a nested child matching its outer parent),
+        # which is always wrong. FIFO is the correct degradation instead.
+        pending = active_run.get("pending_task_calls") or []
+        originating_tool_call_id = (active_run.get("task_tool_call_ids_by_ns") or {}).get(ns)
+        task_call = {}
+        if originating_tool_call_id is not None:
+            match_index = next(
+                (i for i, c in enumerate(pending)
+                 if c.get("tool_call_id") == originating_tool_call_id),
+                None,
+            )
+            if match_index is not None:
+                task_call = pending.pop(match_index)
+            else:
+                # The exact call is known even if no streamed chunk supplied its
+                # parent_message_id (e.g. tool-call emission not yet observed).
+                task_call = {"tool_call_id": originating_tool_call_id}
+        elif pending:
+            task_call = pending.pop(0)
+        active_run.setdefault("subagent_task_meta", {})[subagent_run_id] = {
+            "name": tool_input.get("subagent_type"),
+            "description": tool_input.get("description"),
+            "parent_tool_call_id": task_call.get("tool_call_id"),
+            "parent_message_id": task_call.get("parent_message_id"),
+        }
+        # Map this `task` invocation's run_id to its subagent_run_id so the matching
+        # OnToolEnd can finish exactly this subagent (see
+        # _finish_subagent_on_task_end). The subagent's own inner tools (grep,
+        # write_file, …) share its checkpoint namespace, so ns matching alone
+        # would finish it prematurely; the run_id is unique to the task call.
+        run_id = event.get("run_id")
+        if run_id:
+            active_run.setdefault("subagent_task_runs", {})[run_id] = subagent_run_id
+
+    def _finish_subagent_on_task_end(self, event: dict) -> list:
+        """Emit SUBAGENT_FINISHED when a deepagents ``task`` delegation returns.
+
+        The subagent's lifecycle is exactly the lifespan of the ``task`` tool
+        that spawned it: its OnToolEnd fires once the subagent has produced all
+        of its output and control returns to the supervisor. Finishing here —
+        rather than in ``drain_subagents`` at RUN_FINISHED — makes the reported
+        subagent status track the subagent itself, not the parent run. Matched
+        by the run_id recorded in _capture_subagent_task_meta so only the task
+        call (not the subagent's inner tool calls, which share its namespace)
+        triggers the finish. No-op for non-task tool ends.
+        """
+        if event.get("event") != LangGraphEventTypes.OnToolEnd.value:
+            return []
+        active_run = getattr(self, "active_run", None)
+        if active_run is None:
+            return []
+        run_id = event.get("run_id")
+        subagent_run_id = (active_run.get("subagent_task_runs") or {}).pop(run_id, None)
+        if not subagent_run_id:
+            return []
+        if subagent_run_id not in active_run.get("active_subagents", {}):
+            return []
+        del active_run["active_subagents"][subagent_run_id]
+        # Terminal for this id — see reconcile_subagents.
+        active_run.setdefault("closed_subagents", set()).add(subagent_run_id)
+        # Control returns to the subagent that INVOKED this one: the `task`
+        # tool's result (and any further events at this level) belongs to the
+        # parent, not the root. Restore current_subagent_run_id to the finishing
+        # subagent's parent — None for a top-level subagent, so single-level
+        # behavior (result attributed to root) is unchanged.
+        parent_subagent_run_id = (active_run.get("subagent_parents") or {}).pop(subagent_run_id, None)
+        if active_run.get("current_subagent_run_id") == subagent_run_id:
+            active_run["current_subagent_run_id"] = parent_subagent_run_id
+        # The subagent's output is the `task` tool's result. deepagents returns a
+        # Command whose state update carries the ToolMessage; surface its content
+        # as the finished subagent's `result` (mirrors RUN_FINISHED.result).
+        result = None
+        output = (event.get("data") or {}).get("output")
+        update = getattr(output, "update", None)
+        if isinstance(update, dict):
+            msgs = update.get("messages")
+            if msgs:
+                result = getattr(msgs[0], "content", None)
+        return [SubagentFinishedEvent(
+            type=EventType.SUBAGENT_FINISHED, subagent_run_id=subagent_run_id, result=result,
+        )]
+
+    def _accumulate_subagent_message(self, event: ProcessedEvents) -> None:
+        """Accumulate subagent-attributed messages — text, tool calls, and tool
+        results — as they stream, keyed by message id, on
+        ``active_run["subagent_messages"]``.
+
+        These messages live only in the subagent's (subgraph) checkpoint, not
+        in the main/supervisor graph state, so the MESSAGES_SNAPSHOT built from
+        main-graph state omits them — and applying that snapshot client-side
+        wipes the streamed subagent messages. Capturing them here lets
+        ``get_state_and_messages_snapshots`` merge them back in with their
+        ``subagent_run_id`` preserved, so both subagent text and tool-call
+        attribution survive a snapshot apply. This is a no-op for runs without
+        subagents (the tracking dicts stay empty), so normal runs and
+        declared-subgraph runs keep an identical snapshot.
+
+        TOOL_CALL_START / TOOL_CALL_RESULT are stamped with the active
+        subagent_run_id upstream (see _dispatch_event); TOOL_CALL_ARGS is a
+        continuation event carrying only tool_call_id, so it is routed back to
+        its owning assistant entry via ``subagent_tool_call_owner``.
+        """
+        active_run = getattr(self, "active_run", None)
+        if active_run is None:
+            return
+        sub_msgs = active_run.get("subagent_messages")
+        if sub_msgs is None:
+            return
+        tc_owner = active_run.get("subagent_tool_call_owner")
+        if tc_owner is None:
+            return
+        etype = event.type
+
+        def ensure_assistant_entry(message_id: str, subagent_run_id: str) -> dict:
+            entry = sub_msgs.get(message_id)
+            if entry is None:
+                entry = sub_msgs[message_id] = {
+                    "kind": "assistant",
+                    "id": message_id,
+                    "role": "assistant",
+                    "content": "",
+                    "subagent_run_id": subagent_run_id,
+                    "tool_calls": {},
+                }
+            return entry
+
+        if etype == EventType.REASONING_MESSAGE_START and getattr(event, "subagent_run_id", None):
+            # A subagent's reasoning lives only in its subgraph checkpoint, exactly like
+            # its text and tool calls, so it is absent from the main-graph
+            # MESSAGES_SNAPSHOT and the client's snapshot apply would drop the streamed
+            # reasoning message. The parent's reasoning does survive (utils converts
+            # LangChain reasoning content blocks into ReasoningMessages), so without this
+            # a subagent's reasoning was the one kind that vanished at snapshot time.
+            entry = sub_msgs.get(event.message_id)
+            if entry is None:
+                sub_msgs[event.message_id] = {
+                    "kind": "reasoning",
+                    "id": event.message_id,
+                    "role": "reasoning",
+                    "content": "",
+                    "encrypted_value": None,
+                    "subagent_run_id": event.subagent_run_id,
+                }
+        elif etype == EventType.REASONING_MESSAGE_CONTENT:
+            entry = sub_msgs.get(event.message_id)
+            if entry is not None and entry.get("kind") == "reasoning":
+                entry["content"] += getattr(event, "delta", "") or ""
+        elif etype == EventType.REASONING_ENCRYPTED_VALUE:
+            # The protected signature rides on its own event, keyed by entity_id. Without
+            # capturing it here the reconstructed snapshot message carries content but no
+            # encrypted_value — and because a snapshot containing the reasoning message
+            # looks authoritative, the client replaces the streamed one and the signature
+            # is lost. Only "message" subtype belongs to a reasoning message; "tool-call"
+            # values belong to a tool call.
+            if getattr(event, "subtype", None) == "message":
+                entry = sub_msgs.get(getattr(event, "entity_id", None))
+                if entry is not None and entry.get("kind") == "reasoning":
+                    entry["encrypted_value"] = getattr(event, "encrypted_value", None)
+        elif etype == EventType.TEXT_MESSAGE_START and getattr(event, "subagent_run_id", None):
+            entry = ensure_assistant_entry(event.message_id, event.subagent_run_id)
+            entry["role"] = getattr(event, "role", "assistant") or "assistant"
+        elif etype == EventType.TEXT_MESSAGE_CONTENT:
+            entry = sub_msgs.get(event.message_id)
+            if entry is not None and entry.get("kind") == "assistant":
+                entry["content"] += event.delta or ""
+        elif etype == EventType.TOOL_CALL_START and getattr(event, "subagent_run_id", None):
+            message_id = event.parent_message_id or event.tool_call_id
+            entry = ensure_assistant_entry(message_id, event.subagent_run_id)
+            entry["tool_calls"][event.tool_call_id] = {
+                "id": event.tool_call_id,
+                "name": event.tool_call_name,
+                "arguments": "",
+            }
+            tc_owner[event.tool_call_id] = message_id
+        elif etype == EventType.TOOL_CALL_ARGS:
+            message_id = tc_owner.get(event.tool_call_id)
+            entry = sub_msgs.get(message_id) if message_id is not None else None
+            if entry is not None and entry.get("kind") == "assistant":
+                tool_call = entry["tool_calls"].get(event.tool_call_id)
+                if tool_call is not None:
+                    tool_call["arguments"] += event.delta or ""
+        elif etype == EventType.TOOL_CALL_RESULT and getattr(event, "subagent_run_id", None):
+            sub_msgs[event.message_id] = {
+                "kind": "tool",
+                "id": event.message_id,
+                "content": event.content or "",
+                "tool_call_id": event.tool_call_id,
+                "subagent_run_id": event.subagent_run_id,
+            }
 
     async def run(self, input: RunAgentInput) -> AsyncGenerator[ProcessedEvents, None]:
         # Normalize camelCase keys from the frontend to snake_case before forwarding.
@@ -206,7 +692,36 @@ class LangGraphAgent:
             forwarded_props = {
                 camel_to_snake(k): v for k, v in input.forwarded_props.items()
             }
-        async for event_str in self._handle_stream_events(input.model_copy(update={"forwarded_props": forwarded_props})):
+
+        # Split subagent-attributed messages out of the graph input. They are
+        # display-only — each subagent's internal text and tool calls — and live
+        # in the subagent's own subgraph checkpoint, never the main graph's. The
+        # client echoes the full history back on every turn, so leaving them in
+        # would make the main-graph merge treat them as new messages (their ids
+        # are never in the main checkpoint) and append them to the supervisor's
+        # state, polluting it with orphan subagent tool calls that grow each
+        # turn. The supervisor's own messages carry no subagent_run_id, so they stay
+        # in the graph input. The subagent messages are stashed and re-emitted in
+        # the MESSAGES_SNAPSHOT (see _merge_subagent_messages) so they persist in
+        # the client's display across turns without ever entering graph state.
+        graph_messages = []
+        inbound_subagent_messages = []
+        for m in input.messages or []:
+            # `is not None`, not truthiness: an empty string is a valid opaque
+            # subagent_run_id, and treating it as absent would put a subagent's internal
+            # message into the supervisor's graph state — the pollution this split exists
+            # to prevent.
+            if getattr(m, "subagent_run_id", None) is not None:
+                inbound_subagent_messages.append(m)
+            else:
+                graph_messages.append(m)
+        self._inbound_subagent_messages = inbound_subagent_messages
+
+        update: dict = {"forwarded_props": forwarded_props}
+        if input.messages:
+            update["messages"] = graph_messages
+
+        async for event_str in self._handle_stream_events(input.model_copy(update=update)):
             yield event_str
 
     async def _handle_stream_events(self, input: RunAgentInput) -> AsyncGenerator[ProcessedEvents, None]:
@@ -215,12 +730,30 @@ class LangGraphAgent:
             "id": input.run_id,
             "thread_id": thread_id,
             "mode": "start",
-            "reasoning_process": None,
+            "reasoning_processes": {},
+            "pending_reasoning_ids": {},
+            "current_text_message_ids": {},
+            "current_text_message_nodes": {},
             "node_name": None,
             "has_function_streaming": False,
             "streamed_tool_call_ids": set(),
             "model_made_tool_call": False,
             "state_reliable": True,
+            "active_subagents": {},
+            "current_subagent_run_id": None,
+            "subagent_task_meta": {},
+            "subagent_task_runs": {},
+            "subagent_parents": {},
+            "pending_task_calls": [],
+            "seen_task_call_ids": set(),
+            "task_tool_call_ids_by_ns": {},
+            "subagent_segments": set(),
+            "subagent_messages": {},
+            "subagent_tool_call_owner": {},
+            # Subagent messages the client echoed back from prior turns, split
+            # out of the graph input in run(). Re-emitted in the snapshot so
+            # they persist in the display without entering graph state.
+            "inbound_subagent_messages": getattr(self, "_inbound_subagent_messages", []) or [],
         }
         self.active_run = INITIAL_ACTIVE_RUN
         try:
@@ -333,6 +866,26 @@ class LangGraphAgent:
                     async for ev in self.get_state_and_messages_snapshots(config):
                         yield ev
 
+                # Record each `task` ToolNode dispatch (its on_chain_start
+                # precedes the task's on_tool_start) so the subagent can be
+                # linked to its EXACT spawning tool call by namespace, not FIFO.
+                self._capture_task_tool_dispatch(event)
+                # Capture declared subagent name/description from the `task`
+                # tool BEFORE reconcile_subagents fires SUBAGENT_STARTED for the
+                # subagent it spawns (task on_tool_start precedes the subagent's
+                # own events in the stream).
+                self._capture_subagent_task_meta(event)
+
+                lc_agent_name = (event.get("metadata") or {}).get("lc_agent_name")
+                for sub_ev in reconcile_subagents(self.active_run, ns, lc_agent_name, self.subgraphs):
+                    yield self._dispatch_event(sub_ev)
+
+                # Finish a subagent as soon as its `task` delegation returns, so
+                # its reported status tracks the subagent's own lifecycle rather
+                # than waiting for drain_subagents at RUN_FINISHED.
+                for sub_ev in self._finish_subagent_on_task_end(event):
+                    yield self._dispatch_event(sub_ev)
+
                 if event["event"] == "error":
                     # Upstream "error" events do not always carry a
                     # data.message field; a hard subscript here crashed
@@ -346,6 +899,12 @@ class LangGraphAgent:
                             "Upstream error event missing data.message: %r", event
                         )
                         error_message = "Unknown error"
+                    # Terminate every open subagent with SUBAGENT_ERROR (not just
+                    # the current one — deepagents runs them concurrently) and
+                    # clear them so the drain below can't also emit a
+                    # contradictory SUBAGENT_FINISHED for a subagent that errored.
+                    for sub_ev in error_open_subagents(self.active_run, error_message):
+                        yield self._dispatch_event(sub_ev)
                     yield self._dispatch_event(
                         RunErrorEvent(type=EventType.RUN_ERROR, message=error_message, raw_event=event)
                     )
@@ -430,7 +989,7 @@ class LangGraphAgent:
                 manually_emitted = self.active_run.get("manually_emitted_state")
                 updated_state = manually_emitted if manually_emitted is not None else current_graph_state
                 has_state_diff = updated_state != state
-                if exiting_node or (has_state_diff and not self.get_message_in_progress(self.active_run["id"])):
+                if exiting_node or (has_state_diff and not self.has_any_message_in_progress(self.active_run["id"])):
                     state = updated_state
                     self.active_run["prev_node_name"] = self.active_run["node_name"]
                     current_graph_state.update(updated_state)
@@ -450,6 +1009,17 @@ class LangGraphAgent:
                             # not yet run, so current_graph_state does not yet reflect
                             # the forthcoming state update.
                             self.active_run["state_reliable"] = False
+                    elif self.active_run.get("current_subagent_run_id"):
+                        # Node-exit snapshots are suppressed while a subagent is
+                        # active because a subgraph's state is a PARTIAL view of the
+                        # run's document -- emitting it would overwrite the whole
+                        # state with a fragment. This is a producer-side choice about
+                        # this integration's state model, not a protocol rule:
+                        # attributed state events are legal. The subagent's messages
+                        # still reach the client via MESSAGES_SNAPSHOT.
+                        # The lane survives a close (see reconcile_subagents), so a
+                        # trailing event from a finished subagent stays suppressed.
+                        pass
                     else:
                         yield self._dispatch_event(
                             StateSnapshotEvent(
@@ -489,6 +1059,13 @@ class LangGraphAgent:
 
             node_name = "__end__" if is_end_node else node_name
 
+            # End-of-run events (node-change STEP_*, final root STATE_SNAPSHOT)
+            # are supervisor-level. If the stream ended while a subagent was
+            # still open (e.g. its task OnToolEnd never fired), current_subagent_run_id
+            # would linger and mis-stamp these as the subagent's. Clear it before
+            # emitting them; drain_subagents below still finishes open subagents.
+            self.active_run["current_subagent_run_id"] = None
+
             if self.active_run.get("node_name") != node_name:
                 for ev in self.handle_node_change(node_name):
                     yield ev
@@ -498,6 +1075,15 @@ class LangGraphAgent:
 
             for ev in self.handle_node_change(None):
                 yield ev
+
+            # Finish any open subagents before RUN_FINISHED. This is required
+            # even on the interrupt path: an interrupt surfaces the pause by
+            # ENDING the run with RUN_FINISHED, and the AG-UI client forbids
+            # RUN_FINISHED while a subagent is still active. A subagent suspended
+            # at a HITL interrupt is therefore finished here; on resume it
+            # re-emits SUBAGENT_STARTED (the run replays) and finishes again.
+            for sub_ev in drain_subagents(self.active_run):
+                yield self._dispatch_event(sub_ev)
 
             if interrupts:
                 for ev in self._emit_interrupt_finish(
@@ -513,7 +1099,25 @@ class LangGraphAgent:
                         run_id=self.active_run["id"],
                     )
                 )
+        except Exception as exc:
+            # A hard exception (not an in-band "error" event) would otherwise
+            # leave any open subagent with no terminal event — the client shows
+            # it running forever. Emit SUBAGENT_ERROR for each open subagent,
+            # then re-raise for the existing run-level error handling. `except
+            # Exception` deliberately excludes CancelledError/GeneratorExit, so
+            # this never yields into a cancelled generator.
+            if getattr(self, "active_run", None):
+                for sub_ev in error_open_subagents(self.active_run, str(exc)):
+                    yield self._dispatch_event(sub_ev)
+            raise
         finally:
+            # Drop this run's in-flight lane slots so no streaming state (which
+            # is instance-level, keyed by run id) survives into a later run.
+            # Per-run state living inside active_run (reasoning/pin/subagent
+            # maps) is discarded with active_run itself below.
+            active_run = getattr(self, "active_run", None)
+            if active_run is not None:
+                self.messages_in_process.pop(active_run.get("id"), None)
             self.active_run = None
 
     async def prepare_stream(self, input: RunAgentInput, agent_state: State, config: RunnableConfig) -> PreparedStream:
@@ -765,15 +1369,67 @@ class LangGraphAgent:
             "config": config
         }
 
-    def get_message_in_progress(self, run_id: str) -> Optional[MessageInProgress]:
-        return self.messages_in_process.get(run_id)
+    def _current_lane(self) -> str:
+        """The current subagent "lane" for per-subagent streaming state.
 
-    def set_message_in_progress(self, run_id: str, data: MessageInProgress) -> None:
-        current_message_in_progress = self.messages_in_process.get(run_id) or {}
-        self.messages_in_process[run_id] = {
+        Transient stream state (in-flight message/tool call, reasoning, text
+        pin) is keyed by this lane so concurrently-streaming subagents never
+        clobber each other. The lane is the derived subagent id for the event
+        currently being processed (set by reconcile_subagents before the event
+        is handled), or "__root__" for the root/supervisor.
+
+        Scope: deepagents runs each parallel `task` subagent in its own
+        checkpoint namespace, so every concurrent *subagent* stream derives a
+        distinct id and thus a distinct lane — the case this fix targets.
+        Concurrent streams that carry NO subagent identity (e.g. two ordinary
+        model nodes or two declared subgraphs fanning out in a hand-built
+        graph) all map to "__root__" and would still interleave into one lane;
+        that is a pre-existing limitation of attribution-less parallel
+        streaming, not something lanes can resolve (there is no id to separate
+        them by).
+        """
+        active_run = getattr(self, "active_run", None)
+        return (active_run.get("current_subagent_run_id") if active_run else None) or _ROOT_LANE
+
+    def _get_reasoning_process(self, lane: Optional[str] = None) -> Optional[ThinkingProcess]:
+        lane = lane if lane is not None else self._current_lane()
+        return (self.active_run.get("reasoning_processes") or {}).get(lane)
+
+    def _set_reasoning_process(self, value: Optional[ThinkingProcess], lane: Optional[str] = None) -> None:
+        lane = lane if lane is not None else self._current_lane()
+        procs = self.active_run.setdefault("reasoning_processes", {})
+        if value is None:
+            procs.pop(lane, None)
+        else:
+            procs[lane] = value
+
+    def get_message_in_progress(self, run_id: str, lane: Optional[str] = None) -> Optional[MessageInProgress]:
+        lane = lane if lane is not None else self._current_lane()
+        return (self.messages_in_process.get(run_id) or {}).get(lane)
+
+    def set_message_in_progress(self, run_id: str, data: MessageInProgress, lane: Optional[str] = None) -> None:
+        lane = lane if lane is not None else self._current_lane()
+        lanes = self.messages_in_process.setdefault(run_id, {})
+        current_message_in_progress = lanes.get(lane) or {}
+        lanes[lane] = {
             **current_message_in_progress,
             **data,
         }
+
+    def clear_message_in_progress(self, run_id: str, lane: Optional[str] = None) -> None:
+        lane = lane if lane is not None else self._current_lane()
+        lanes = self.messages_in_process.get(run_id)
+        if lanes is not None:
+            lanes[lane] = None
+
+    def has_any_message_in_progress(self, run_id: str) -> bool:
+        """True if any lane in this run has an open in-flight message/tool call.
+
+        Used by the node-exit state-snapshot gate: a snapshot must not be
+        emitted while *any* subagent is mid-message, not just the current lane.
+        """
+        lanes = self.messages_in_process.get(run_id) or {}
+        return any(bool(v) for v in lanes.values())
 
     def get_schema_keys(self, config: RunnableConfig) -> SchemaKeys:
         try:
@@ -1316,7 +1972,7 @@ class LangGraphAgent:
                         raw_event=event,
                     )
                 )
-                self.messages_in_process[self.active_run["id"]] = None
+                self.clear_message_in_progress(self.active_run["id"])
                 current_stream = None
                 has_current_stream = False
                 # Re-evaluate the booleans against the now-closed stream.
@@ -1330,6 +1986,29 @@ class LangGraphAgent:
             chunk = event["data"]["chunk"]
             chunk_content = _chunk_get(chunk, "content", None) if chunk else None
             chunk_id = _chunk_get(chunk, "id", None) if chunk else None
+
+            # Capture EVERY `task` delegation call in this chunk (with its
+            # tool_call_id and the assistant chunk id as parent_message_id) so
+            # each spawned subagent can carry parentToolCallId / parentMessageId
+            # on its SUBAGENT_STARTED. A supervisor can fan out several `task`
+            # calls in one turn; scanning the whole tool_call_chunks list (not
+            # just [0]) queues all of them. Dedupe by tool_call_id because a
+            # call's id recurs across its arg-streaming chunks.
+            #
+            # These queued records are matched to subagents by the per-call
+            # ToolNode dispatch namespace in _capture_subagent_task_meta (see
+            # _capture_task_tool_dispatch), NOT by emission order, so reordered
+            # tool starts don't swap sibling links. FIFO order is only a fallback
+            # for older/batched ToolNode shapes.
+            for _tcc in tool_call_chunks_list:
+                if _tcc.get("name") == "task" and _tcc.get("id"):
+                    seen_tasks = self.active_run.setdefault("seen_task_call_ids", set())
+                    if _tcc["id"] not in seen_tasks:
+                        seen_tasks.add(_tcc["id"])
+                        self.active_run.setdefault("pending_task_calls", []).append({
+                            "tool_call_id": _tcc["id"],
+                            "parent_message_id": chunk_id,
+                        })
 
             reasoning_data = resolve_reasoning_content(chunk) if chunk else None
             encrypted_reasoning_data = resolve_encrypted_reasoning_content(chunk) if chunk else None
@@ -1357,8 +2036,9 @@ class LangGraphAgent:
                 return
 
             # Handle redacted_thinking blocks (encrypted reasoning content)
-            if encrypted_reasoning_data and self.active_run.get('reasoning_process', None) is not None:
-                reasoning_message_id = self.active_run["reasoning_process"]["message_id"]
+            reasoning_process = self._get_reasoning_process()
+            if encrypted_reasoning_data and reasoning_process is not None:
+                reasoning_message_id = reasoning_process["message_id"]
                 yield self._dispatch_event(
                     ReasoningEncryptedValueEvent(
                         type=EventType.REASONING_ENCRYPTED_VALUE,
@@ -1369,16 +2049,16 @@ class LangGraphAgent:
                 )
                 return
 
-            if reasoning_data is None and self.active_run.get('reasoning_process', None) is not None:
-                reasoning_message_id = self.active_run["reasoning_process"]["message_id"]
+            if reasoning_data is None and reasoning_process is not None:
+                reasoning_message_id = reasoning_process["message_id"]
                 # Emit signature as encrypted value if accumulated during reasoning
-                if self.active_run["reasoning_process"].get("signature"):
+                if reasoning_process.get("signature"):
                     yield self._dispatch_event(
                         ReasoningEncryptedValueEvent(
                             type=EventType.REASONING_ENCRYPTED_VALUE,
                             subtype="message",
                             entity_id=reasoning_message_id,
-                            encrypted_value=self.active_run["reasoning_process"]["signature"],
+                            encrypted_value=reasoning_process["signature"],
                         )
                     )
                 yield self._dispatch_event(
@@ -1393,7 +2073,7 @@ class LangGraphAgent:
                         message_id=reasoning_message_id,
                     )
                 )
-                self.active_run["reasoning_process"] = None
+                self._set_reasoning_process(None)
 
             if tool_call_used_to_predict_state:
                 yield self._dispatch_event(
@@ -1436,7 +2116,7 @@ class LangGraphAgent:
                     )
 
                 if text_stream_id:
-                    self.messages_in_process[self.active_run["id"]] = None
+                    self.clear_message_in_progress(self.active_run["id"])
                     current_stream = None
                     has_current_stream = False
                 is_message_end_event = False
@@ -1449,7 +2129,7 @@ class LangGraphAgent:
                 yield self._dispatch_event(
                     TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=current_stream["id"], raw_event=event)
                 )
-                self.messages_in_process[self.active_run["id"]] = None
+                self.clear_message_in_progress(self.active_run["id"])
                 current_stream = None
                 has_current_stream = False
                 is_message_end_event = False
@@ -1462,7 +2142,7 @@ class LangGraphAgent:
                 yield self._dispatch_event(
                     ToolCallEndEvent(type=EventType.TOOL_CALL_END, tool_call_id=current_stream["tool_call_id"], raw_event=event)
                 )
-                self.messages_in_process[self.active_run["id"]] = None
+                self.clear_message_in_progress(self.active_run["id"])
                 return
 
 
@@ -1470,7 +2150,7 @@ class LangGraphAgent:
                 yield self._dispatch_event(
                     TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=current_stream["id"], raw_event=event)
                 )
-                self.messages_in_process[self.active_run["id"]] = None
+                self.clear_message_in_progress(self.active_run["id"])
                 return
 
             if is_tool_call_start_event:
@@ -1520,7 +2200,9 @@ class LangGraphAgent:
                     return
 
                 if bool(current_stream and current_stream.get("id")) == False:
-                    message_id = self._get_or_pin_text_message_id(chunk_id)
+                    message_id = self._get_or_pin_text_message_id(
+                        chunk_id, (event.get("metadata") or {}).get("langgraph_node")
+                    )
                     yield self._dispatch_event(
                         TextMessageStartEvent(
                             type=EventType.TEXT_MESSAGE_START,
@@ -1555,14 +2237,14 @@ class LangGraphAgent:
                     ToolCallEndEvent(type=EventType.TOOL_CALL_END, tool_call_id=self.get_message_in_progress(self.active_run["id"])["tool_call_id"], raw_event=event)
                 )
                 if resolved:
-                    self.messages_in_process[self.active_run["id"]] = None
+                    self.clear_message_in_progress(self.active_run["id"])
                 yield resolved
             elif self.get_message_in_progress(self.active_run["id"]) and self.get_message_in_progress(self.active_run["id"]).get("id"):
                 resolved = self._dispatch_event(
                     TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=self.get_message_in_progress(self.active_run["id"])["id"], raw_event=event)
                 )
                 if resolved:
-                    self.messages_in_process[self.active_run["id"]] = None
+                    self.clear_message_in_progress(self.active_run["id"])
                 yield resolved
 
         elif event_type == LangGraphEventTypes.OnCustomEvent:
@@ -1606,6 +2288,18 @@ class LangGraphAgent:
                 )
 
             elif event["name"] == CustomEventNames.ManuallyEmitState:
+                # No subagent guard here, deliberately. An audit revision dropped
+                # this payload when a subagent was active, on the grounds that only
+                # the parent owns state. That was an invented rule -- the protocol
+                # lists STATE_* as attributable -- and dropping silently discarded
+                # a state write the user had explicitly asked for.
+                #
+                # `manually_emit_state` is an explicit request to set the run's
+                # state, and `manually_emitted_state` is run-global by design. A
+                # subagent making that request means it, so it is recorded and
+                # emitted like any other. The dispatch chokepoint stamps
+                # subagent_run_id on the snapshot, which is provenance: it records
+                # who wrote the state, while the state itself stays run-scoped.
                 self.active_run["manually_emitted_state"] = event["data"]
                 yield self._dispatch_event(
                     StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot=self.get_state_snapshot(self.active_run["manually_emitted_state"]), raw_event=event)
@@ -1777,19 +2471,23 @@ class LangGraphAgent:
         # opens the reasoning message under it, WITHOUT opening a message here
         # — a summary-less (store=true) reasoning item must keep rendering
         # nothing.
+        # Reasoning state is per-subagent-lane so concurrently-reasoning
+        # subagents don't clobber each other (see _current_lane).
+        lane = self._current_lane()
         if not reasoning_data["text"]:
             if reasoning_data.get("id"):
-                self.active_run["pending_reasoning_id"] = reasoning_data["id"]
+                self.active_run.setdefault("pending_reasoning_ids", {})[lane] = reasoning_data["id"]
             return
 
         reasoning_step_index = reasoning_data.get("index", 0)
 
-        if (self.active_run.get("reasoning_process") and
-                self.active_run["reasoning_process"].get("index") is not None and
-                self.active_run["reasoning_process"]["index"] != reasoning_step_index):
+        reasoning_process = self._get_reasoning_process(lane)
+        if (reasoning_process and
+                reasoning_process.get("index") is not None and
+                reasoning_process["index"] != reasoning_step_index):
 
-            reasoning_message_id = self.active_run["reasoning_process"]["message_id"]
-            if self.active_run["reasoning_process"].get("type"):
+            reasoning_message_id = reasoning_process["message_id"]
+            if reasoning_process.get("type"):
                 yield self._dispatch_event(
                     ReasoningMessageEndEvent(
                         type=EventType.REASONING_MESSAGE_END,
@@ -1802,9 +2500,10 @@ class LangGraphAgent:
                     message_id=reasoning_message_id,
                 )
             )
-            self.active_run["reasoning_process"] = None
+            self._set_reasoning_process(None, lane)
+            reasoning_process = None
 
-        if not self.active_run.get("reasoning_process"):
+        if not reasoning_process:
             # Prefer the provider's canonical reasoning id (e.g. OpenAI
             # ``rs_…``) when the stream carried one: the snapshot converter
             # (_reasoning_block_to_agui_message) re-emits this same reasoning
@@ -1813,7 +2512,7 @@ class LangGraphAgent:
             # both.
             message_id = (
                 reasoning_data.get("id")
-                or self.active_run.pop("pending_reasoning_id", None)
+                or (self.active_run.get("pending_reasoning_ids") or {}).pop(lane, None)
                 or str(uuid.uuid4())
             )
             yield self._dispatch_event(
@@ -1822,30 +2521,31 @@ class LangGraphAgent:
                     message_id=message_id,
                 )
             )
-            self.active_run["reasoning_process"] = {
+            reasoning_process = {
                 "index": reasoning_step_index,
                 "message_id": message_id,
             }
+            self._set_reasoning_process(reasoning_process, lane)
 
-        if self.active_run["reasoning_process"].get("type") != reasoning_data["type"]:
+        if reasoning_process.get("type") != reasoning_data["type"]:
             yield self._dispatch_event(
                 ReasoningMessageStartEvent(
                     type=EventType.REASONING_MESSAGE_START,
-                    message_id=self.active_run["reasoning_process"]["message_id"],
+                    message_id=reasoning_process["message_id"],
                     role="reasoning",
                 )
             )
-            self.active_run["reasoning_process"]["type"] = reasoning_data["type"]
+            reasoning_process["type"] = reasoning_data["type"]
 
         # Accumulate signature if present (Anthropic extended thinking)
         if reasoning_data.get("signature"):
-            self.active_run["reasoning_process"]["signature"] = reasoning_data["signature"]
+            reasoning_process["signature"] = reasoning_data["signature"]
 
-        if self.active_run["reasoning_process"].get("type"):
+        if reasoning_process.get("type"):
             yield self._dispatch_event(
                 ReasoningMessageContentEvent(
                     type=EventType.REASONING_MESSAGE_CONTENT,
-                    message_id=self.active_run["reasoning_process"]["message_id"],
+                    message_id=reasoning_process["message_id"],
                     delta=reasoning_data["text"]
                 )
             )
@@ -1914,19 +2614,31 @@ class LangGraphAgent:
             f"(thread_id={thread_id!r}, snapshots_scanned={len(history_list)})"
         )
 
-    def _get_or_pin_text_message_id(self, fallback_id: str) -> str:
+    def _get_or_pin_text_message_id(self, fallback_id: str, node: Optional[str] = None) -> str:
         """Returns the message_id to use for a TEXT_MESSAGE_START emission,
-        pinning the first id per node. chunk_id changes per LLM invocation,
-        so a text→tool→text sequence within one node would otherwise render
-        as multiple bubbles; pinning keeps them in one. handle_node_change
-        clears the pin on every node transition, so different nodes (e.g. a
-        supervisor routing to specialist agents) get fresh ids and stay in
-        separate bubbles. See #1317.
+        pinning the first id per (subagent lane, node). chunk_id changes per
+        LLM invocation, so a text→tool→text sequence within one node would
+        otherwise render as multiple bubbles; pinning keeps them in one. The
+        pin is reset when the lane's own node changes, so different nodes (e.g.
+        a supervisor routing to specialist agents) get fresh ids and stay in
+        separate bubbles. Keying by lane + the lane's node (rather than a
+        global node) means concurrently-streaming subagents keep independent
+        bubbles and one subagent's node change never re-mints another's. See
+        #1317.
         """
-        stored = self.active_run.get("current_text_message_id")
-        message_id = stored if stored is not None else fallback_id
-        self.active_run["current_text_message_id"] = message_id
-        return message_id
+        lane = self._current_lane()
+        pins = self.active_run.setdefault("current_text_message_ids", {})
+        pin_nodes = self.active_run.setdefault("current_text_message_nodes", {})
+        # Reset when this lane has no pin yet, or when THIS LANE's node actually
+        # changed. The reset is driven by the lane's own node rather than the
+        # global node_name, which thrashes under concurrent subagents (a node
+        # change in subagent A must not re-mint subagent B's bubble). A missing
+        # node (None) never forces a reset, so absent metadata can't fragment a
+        # bubble.
+        if pins.get(lane) is None or (node is not None and pin_nodes.get(lane) != node):
+            pins[lane] = fallback_id
+            pin_nodes[lane] = node
+        return pins[lane]
 
     def handle_node_change(self, node_name: Optional[str]) -> Generator[ProcessedEvents, None, None]:
         """
@@ -1950,20 +2662,22 @@ class LangGraphAgent:
                 for event in self.start_step(node_name):
                     yield event
 
-            # Clear the pinned text message id: a new node should mint its own
-            # bubble. See RunMetadata.current_text_message_id.
-            self.active_run["current_text_message_id"] = None
-
         self.active_run["node_name"] = node_name
 
     def start_step(self, step_name: str) -> Generator[ProcessedEvents, None, None]:
         """Emit STEP_STARTED for ``step_name``; node_name bookkeeping is done by handle_node_change."""
-        yield self._dispatch_event(
+        event = self._dispatch_event(
             StepStartedEvent(
                 type=EventType.STEP_STARTED,
                 step_name=step_name
             )
         )
+        # Remember who opened this step so end_step can attribute the close to the
+        # same owner. Read back off the dispatched event rather than from
+        # current_subagent_run_id so the two halves can never disagree about what the
+        # chokepoint actually stamped.
+        self.active_run["step_owner"] = getattr(event, "subagent_run_id", None)
+        yield event
 
     def end_step(self) -> ProcessedEvents:
         """Emit STEP_FINISHED for the active step; node_name bookkeeping is done by handle_node_change."""
@@ -1974,12 +2688,24 @@ class LangGraphAgent:
         if not node_name:
             raise ValueError("No active step to end")
 
-        return self._dispatch_event(
+        step_owner = self.active_run.get("step_owner")
+        event = self._dispatch_event(
             StepFinishedEvent(
                 type=EventType.STEP_FINISHED,
                 step_name=node_name
             )
         )
+        # Overwrite whatever the chokepoint stamped. In the stream loop
+        # reconcile_subagents runs BEFORE handle_node_change, so current_subagent_run_id
+        # already points at the lane whose event triggered the transition, not the
+        # lane that opened the step being closed. Without this, interleaved
+        # subagents produce `STEP_STARTED research` under s1 paired with
+        # `STEP_FINISHED research` under s2. Assigned after dispatch because the
+        # correct value may be None (a parent-owned step), which the chokepoint
+        # treats as "unset, go ahead and stamp".
+        event.subagent_run_id = step_owner
+        self.active_run["step_owner"] = None
+        return event
 
     # Probe the graph's astream_events signature for version-specific support
     # (notably the ``context`` parameter, added in newer LangGraph releases)
@@ -2040,17 +2766,117 @@ class LangGraphAgent:
             state_values = {}
         else:
             state_values = state.values
-        yield self._dispatch_event(
-            StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot=self.get_state_snapshot(state_values))
-        )
+        # Checkpoint snapshots are suppressed while a subagent is active for the
+        # same reason as the node-exit ones: a subgraph's state is a partial view of
+        # the run's document. A producer-side choice, not a protocol rule. The
+        # MESSAGES_SNAPSHOT below is
+        # still emitted and carries the subagent's messages (merged + tagged), so
+        # attribution and history survive without leaking subagent state.
+        if not self.active_run.get("current_subagent_run_id"):
+            yield self._dispatch_event(
+                StateSnapshotEvent(type=EventType.STATE_SNAPSHOT, snapshot=self.get_state_snapshot(state_values))
+            )
 
         snapshot_messages = self._filter_orphan_tool_messages(state_values.get("messages", []))
+        agui_messages = self._merge_subagent_messages(
+            langchain_messages_to_agui(snapshot_messages)
+        )
         yield self._dispatch_event(
             MessagesSnapshotEvent(
                 type=EventType.MESSAGES_SNAPSHOT,
-                messages=langchain_messages_to_agui(snapshot_messages),
+                messages=agui_messages,
             )
         )
+
+    def _merge_subagent_messages(self, agui_messages: list) -> list:
+        """Append subagent-attributed messages to a snapshot's message list,
+        preserving each message's ``subagent_run_id`` so the client keeps the
+        subagent attribution the frontend renders — for both text and tool calls.
+
+        Two sources are merged, both absent from main-graph state:
+
+        1. This run's freshly-streamed subagent messages (``subagent_messages``),
+           built from the accumulator.
+        2. Prior turns' subagent messages the client echoed back, split out of
+           the graph input in ``run`` (``inbound_subagent_messages``). Re-emitting
+           them keeps them in the client's display across turns — the client's
+           MESSAGES_SNAPSHOT apply is an edit-merge that keeps a message it
+           already has in its existing position, so including them here (by id)
+           preserves their place without our needing to reconstruct ordering.
+
+        No-op when neither source has anything, so runs without subagents (and
+        the declared-``subgraphs`` demo, which never sets a ``subagent_run_id``)
+        produce an identical snapshot. Messages already present (matched by id)
+        are not duplicated. An assistant turn with neither text nor tool calls is
+        skipped so the snapshot gains no empty bubbles; tool calls are preserved
+        even when the turn has no text (a tool-call-only subagent message).
+        """
+        active_run = getattr(self, "active_run", None)
+        sub_msgs = (active_run.get("subagent_messages") if active_run else None) or {}
+        inbound = (active_run.get("inbound_subagent_messages") if active_run else None) or []
+        if not sub_msgs and not inbound:
+            return agui_messages
+        existing_ids = {getattr(m, "id", None) for m in agui_messages}
+        # 1. This run's freshly-streamed subagent messages.
+        for entry in sub_msgs.values():
+            if entry["id"] in existing_ids:
+                continue
+            if entry["kind"] == "reasoning":
+                if not entry["content"]:
+                    continue
+                agui_messages.append(
+                    ReasoningMessage(
+                        id=entry["id"],
+                        role="reasoning",
+                        content=entry["content"],
+                        encrypted_value=entry.get("encrypted_value"),
+                        subagent_run_id=entry["subagent_run_id"],
+                    )
+                )
+                existing_ids.add(entry["id"])
+                continue
+            if entry["kind"] == "tool":
+                agui_messages.append(
+                    AGUIToolMessage(
+                        id=entry["id"],
+                        role="tool",
+                        content=entry["content"],
+                        tool_call_id=entry["tool_call_id"],
+                        subagent_run_id=entry["subagent_run_id"],
+                    )
+                )
+                existing_ids.add(entry["id"])
+                continue
+            tool_calls = [
+                AGUIToolCall(
+                    id=tc["id"],
+                    type="function",
+                    function=FunctionCall(name=tc["name"], arguments=tc["arguments"]),
+                )
+                for tc in entry["tool_calls"].values()
+            ]
+            if not entry["content"] and not tool_calls:
+                continue
+            agui_messages.append(
+                AssistantMessage(
+                    id=entry["id"],
+                    role="assistant",
+                    content=entry["content"] or None,
+                    tool_calls=tool_calls or None,
+                    subagent_run_id=entry["subagent_run_id"],
+                )
+            )
+            existing_ids.add(entry["id"])
+        # 2. Prior turns' subagent messages echoed back by the client. Re-emit
+        #    verbatim (they are already well-formed AG-UI messages carrying
+        #    subagent_run_id) so the client retains them in place across turns.
+        for m in inbound:
+            mid = getattr(m, "id", None)
+            if mid in existing_ids:
+                continue
+            agui_messages.append(m)
+            existing_ids.add(mid)
+        return agui_messages
 
 
 def dump_json_safe(value):
