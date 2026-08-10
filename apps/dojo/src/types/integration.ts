@@ -12,6 +12,7 @@ export type Feature =
   | "agentic_chat_reasoning"
   | "agentic_chat_multimodal"
   | "subgraphs"
+  | "deepagents_subagents"
   | "a2a_chat"
   | "vnext_chat"
   | "v1_agentic_chat"
