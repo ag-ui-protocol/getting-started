@@ -54,7 +54,9 @@ class TestDeriveSubagentContext(unittest.TestCase):
 
 
 def _run():
-    return {"active_subagents": {}, "current_subagent_run_id": None}
+    # Opts in, like the agent factory: the flag defaults to off in production.
+    return {"active_subagents": {}, "current_subagent_run_id": None,
+            "emit_subagent_events": True}
 
 
 class TestReconcileSubagents(unittest.TestCase):
@@ -144,7 +146,10 @@ def _make_agent():
     initial_state.next = []
     initial_state.metadata = {"writes": {}}
     graph.aget_state = AsyncMock(return_value=initial_state)
-    return LangGraphAgent(name="test", graph=graph)
+    # These suites test subagent behaviour, so they opt in. The flag defaults to OFF
+    # because a released client cannot survive the SUBAGENT_* events; see the flag's
+    # comment in agent.py. The off path has its own suite below.
+    return LangGraphAgent(name="test", graph=graph, emit_subagent_events=True)
 
 
 class TestDispatchStamping(unittest.TestCase):
@@ -761,6 +766,7 @@ class TestStepOwnership(unittest.TestCase):
             "current_subagent_run_id": None,
             "active_subagents": {},
             "subagent_messages": {},
+            "emit_subagent_events": agent.emit_subagent_events,
         }
         return agent
 
@@ -833,6 +839,7 @@ class TestErrorOpenSubagents(unittest.TestCase):
     def test_emits_error_for_all_open_and_clears(self):
         active_run = {
             "active_subagents": {"tools:a": "x", "tools:b": "y"},
+            "emit_subagent_events": True,
             "current_subagent_run_id": "tools:b",
         }
         events = error_open_subagents(active_run, "boom")
@@ -1201,3 +1208,92 @@ class TestNestedSubagentParent(unittest.TestCase):
         e3 = reconcile_subagents(ar, "tools:a|tools:b|tools:c", "inner", set())
         self.assertEqual(e3, [])
         self.assertEqual(ar["current_subagent_run_id"], "tools:b")
+
+class TestEmitSubagentEventsOff(unittest.TestCase):
+    """The DEFAULT path: emit_subagent_events=False.
+
+    A released @ag-ui/client (<= 0.0.57) validates each event against a discriminated
+    union in its HTTP transport, with the throwing `EventSchemas.parse`, before any
+    middleware runs -- so one SUBAGENT_STARTED ends the stream and no consumer-side
+    filter can prevent it. With the flag off this integration must look exactly like it
+    did before subagent support: the subagent still runs and its output still reaches
+    the client, but as the parent's own work.
+    """
+
+    def _agent(self):
+        from langgraph.graph.state import CompiledStateGraph
+        graph = MagicMock(spec=CompiledStateGraph)
+        graph.config_specs = []
+        graph.nodes = {}
+        st = MagicMock()
+        st.values = {"messages": [], "copilotkit": {}}
+        st.tasks = []
+        st.next = []
+        st.metadata = {"writes": {}}
+        graph.aget_state = AsyncMock(return_value=st)
+        agent = LangGraphAgent(name="test", graph=graph)  # default: off
+        agent.active_run = {
+            "id": "run-1",
+            "node_name": None,
+            "current_subagent_run_id": None,
+            "active_subagents": {},
+            "subagent_messages": {},
+            "emit_subagent_events": agent.emit_subagent_events,
+        }
+        return agent
+
+    def test_the_flag_defaults_to_off(self):
+        self.assertFalse(
+            self._agent().emit_subagent_events,
+            "must default to off: a released client cannot survive the SUBAGENT_* events",
+        )
+
+    def test_no_attribution_is_stamped(self):
+        agent = self._agent()
+        agent.active_run["current_subagent_run_id"] = "s1"
+        event = agent._dispatch_event(
+            TextMessageStartEvent(
+                type=EventType.TEXT_MESSAGE_START, message_id="m1", role="assistant"
+            )
+        )
+        self.assertIsNone(
+            event.subagent_run_id,
+            "with the flag off no event may carry subagentRunId -- the field is "
+            "harmless to old clients, but the point is to look unchanged",
+        )
+
+    def test_steps_stay_flat_so_they_cannot_collide(self):
+        # Untagged steps are keyed by NAME in both clients. Keeping per-lane tracking
+        # while emitting no tags would leave two untagged `tools` steps open at once,
+        # which a client rejects. So the off path must flatten, exactly as before.
+        agent = self._agent()
+        opened = list(agent.handle_node_change("tools"))
+        self.assertEqual([e.type for e in opened], [EventType.STEP_STARTED])
+
+        agent.active_run["current_subagent_run_id"] = "s1"
+        transition = list(agent.handle_node_change("tools"))
+        self.assertEqual(
+            transition, [],
+            "same node name in the flat model is not a transition, so nothing is emitted",
+        )
+
+        nested = list(agent.handle_node_change("inner"))
+        self.assertEqual(
+            [e.type for e in nested],
+            [EventType.STEP_FINISHED, EventType.STEP_STARTED],
+            "the flat model closes the open step before opening the next",
+        )
+        self.assertTrue(
+            all(e.subagent_run_id is None for e in nested),
+            "no step may be attributed while the flag is off",
+        )
+
+    def test_snapshot_carries_no_subagent_messages(self):
+        agent = self._agent()
+        agent.active_run["subagent_messages"] = {"s1": [{"id": "x", "role": "assistant"}]}
+        merged = agent._merge_subagent_messages([{"id": "parent", "role": "assistant"}])
+        self.assertEqual(
+            [m["id"] for m in merged], ["parent"],
+            "no subagent-attributed history may surface in MESSAGES_SNAPSHOT",
+        )
+

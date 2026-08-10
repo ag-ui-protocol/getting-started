@@ -309,6 +309,13 @@ def close_lane_steps(active_run, ids) -> list:
 def drain_subagents(active_run) -> list:
     """Emit SUBAGENT_FINISHED for any still-open subagents (before RUN_FINISHED)."""
     ids = list(active_run.get("active_subagents", {}).keys())
+    if not active_run.get("emit_subagent_events"):
+        # Lane bookkeeping still has to be torn down even when the events are withheld,
+        # otherwise the next turn starts with subagents that look active.
+        active_run["active_subagents"].clear()
+        active_run.setdefault("closed_subagents", set()).update(ids)
+        active_run["current_subagent_run_id"] = None
+        return []
     events = close_lane_steps(active_run, ids)
     events += [SubagentFinishedEvent(type=EventType.SUBAGENT_FINISHED, subagent_run_id=sid)
                for sid in ids]
@@ -331,6 +338,11 @@ def error_open_subagents(active_run, message: str) -> list:
     if not active_run:
         return []
     ids = list(active_run.get("active_subagents", {}).keys())
+    if not active_run.get("emit_subagent_events"):
+        active_run.get("active_subagents", {}).clear()
+        active_run.setdefault("closed_subagents", set()).update(ids)
+        active_run["current_subagent_run_id"] = None
+        return []
     # Close each lane's open step before its terminal, same as the drain path. A step
     # left open on the error path fails the clients' "all steps closed" rule just as
     # surely as one left open on the success path.
@@ -359,7 +371,7 @@ class PreparedStream(TypedDict):
     events_to_dispatch: NotRequired[Optional[List[ProcessedEvents]]]
 
 class LangGraphAgent:
-    def __init__(self, *, name: str, graph: CompiledStateGraph, description: Optional[str] = None, config:  Union[Optional[RunnableConfig], dict] = None, enable_legacy_on_interrupt_event: bool = True, emit_interrupt_outcome: bool = False, emit_raw_events: bool = True):
+    def __init__(self, *, name: str, graph: CompiledStateGraph, description: Optional[str] = None, config:  Union[Optional[RunnableConfig], dict] = None, enable_legacy_on_interrupt_event: bool = True, emit_interrupt_outcome: bool = False, emit_raw_events: bool = True, emit_subagent_events: bool = False):
         self.name = name
         self.description = description
         self.graph = graph
@@ -382,6 +394,25 @@ class LangGraphAgent:
         # working until they adopt RunAgentInput.resume[] (the structured outcome
         # makes them stop sending a resume directive). See _emit_interrupt_finish.
         self.emit_interrupt_outcome = emit_interrupt_outcome
+        # Opt-in: emit the subagent protocol surface. OFF by default, because a client
+        # cannot be protected from it after the fact. An @ag-ui/client at or below
+        # 0.0.57 validates every event against a discriminated union AS IT COMES OFF THE
+        # WIRE, in the HTTP transport, using the throwing `EventSchemas.parse`. So a
+        # single SUBAGENT_STARTED kills the whole stream before any middleware could
+        # filter it -- there is no consumer-side fix for an already-released client, which
+        # is why the switch has to live here. (`subagentRunId` alone is harmless: the
+        # schemas are passthrough, so an unknown FIELD on a known event is accepted. It is
+        # the unknown EVENT TYPES that break.)
+        #
+        # When off, this agent behaves exactly as it did before subagent support existed:
+        # no SUBAGENT_* events, no subagent_run_id on anything, no subagent messages in
+        # MESSAGES_SNAPSHOT, and steps flattened as they were. A subagent still runs and
+        # its text and tool calls still reach the client -- they simply arrive as the
+        # parent's own work, which is what a pre-subagent client expects.
+        #
+        # Flip the default once a released client understands the events. Requested this
+        # way by a design partner whose package proxy refuses prerelease builds.
+        self.emit_subagent_events = emit_subagent_events
         self.messages_in_process: MessagesInProgressRecord = {}
         self.active_run: Optional[RunMetadata] = None
         self.constant_schema_keys = ['messages', 'tools']
@@ -430,7 +461,11 @@ class LangGraphAgent:
                 event.raw_event = None
 
         active_run = getattr(self, "active_run", None)
-        current_subagent_run_id = active_run.get("current_subagent_run_id") if active_run else None
+        current_subagent_run_id = (
+            active_run.get("current_subagent_run_id")
+            if active_run and self.emit_subagent_events
+            else None
+        )
         if (
             current_subagent_run_id
             and event.type in _SUBAGENT_ATTRIBUTABLE_EVENT_TYPES
@@ -785,6 +820,9 @@ class LangGraphAgent:
             "task_tool_call_ids_by_ns": {},
             "subagent_segments": set(),
             "subagent_messages": {},
+            # Read by the module-level subagent emitters so the gate cannot be bypassed
+            # by a caller that forgets to check. See emit_subagent_events in __init__.
+            "emit_subagent_events": self.emit_subagent_events,
             "subagent_tool_call_owner": {},
             # Subagent messages the client echoed back from prior turns, split
             # out of the graph input in run(). Re-emitted in the snapshot so
@@ -913,7 +951,13 @@ class LangGraphAgent:
                 self._capture_subagent_task_meta(event)
 
                 lc_agent_name = (event.get("metadata") or {}).get("lc_agent_name")
-                for sub_ev in reconcile_subagents(self.active_run, ns, lc_agent_name, self.subgraphs):
+                sub_events = reconcile_subagents(self.active_run, ns, lc_agent_name, self.subgraphs)
+                # Lane bookkeeping still runs when the flag is off -- reconcile_subagents
+                # maintains active_subagents / current_subagent_run_id, which other paths
+                # read. Only the client-visible SUBAGENT_* events are withheld.
+                if not self.emit_subagent_events:
+                    sub_events = []
+                for sub_ev in sub_events:
                     yield self._dispatch_event(sub_ev)
 
                 # Finish a subagent as soon as its `task` delegation returns, so
@@ -2695,7 +2739,15 @@ class LangGraphAgent:
         # STEP_STARTED inside the subagent's run. A design partner reported exactly that
         # from a real deepagents run. The parent's step now stays open across the whole
         # delegation, which the clients accept since steps are keyed by (owner, name).
-        lane = self.active_run.get("current_subagent_run_id")
+        # Lane None when the flag is off: steps then behave exactly as they did before
+        # subagent support, a single flat sequence. Keeping per-lane tracking while
+        # emitting no tags would put two untagged steps of the same name open at once,
+        # which the clients reject (they key untagged steps by name).
+        lane = (
+            self.active_run.get("current_subagent_run_id")
+            if self.emit_subagent_events
+            else None
+        )
         lane_nodes = self.active_run.setdefault("lane_nodes", {})
         # Seed the PARENT lane from the legacy flat field on first use. Several paths
         # assign active_run["node_name"] directly -- the resume path and the
@@ -2849,6 +2901,12 @@ class LangGraphAgent:
         )
 
     def _merge_subagent_messages(self, agui_messages: list) -> list:
+        # Nothing subagent-related surfaces in MESSAGES_SNAPSHOT when the flag is off.
+        # The subagent's text and tool calls still reach the client as they happen; they
+        # are simply not merged back in as separately-attributed history.
+        if not self.emit_subagent_events:
+            return agui_messages
+
         """Append subagent-attributed messages to a snapshot's message list,
         preserving each message's ``subagent_run_id`` so the client keeps the
         subagent attribution the frontend renders — for both text and tool calls.

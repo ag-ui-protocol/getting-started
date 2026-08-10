@@ -54,7 +54,8 @@ def _fresh_active_run(run_id: str = "run-1") -> dict:
 
 
 def _make_agent(run_id: str = "run-1") -> LangGraphAgent:
-    agent = LangGraphAgent(name="test", graph=MagicMock())
+    # Parallel-subagent behaviour, so this suite opts in; the flag defaults to off.
+    agent = LangGraphAgent(name="test", graph=MagicMock(), emit_subagent_events=True)
     agent.active_run = _fresh_active_run(run_id)
     agent.dispatched = []
     real_dispatch = agent._dispatch_event
@@ -399,7 +400,7 @@ class TestNoCrossRunState(unittest.TestCase):
 
         mock_graph.astream_events = _empty_stream
 
-        agent = LangGraphAgent(name="test", graph=mock_graph)
+        agent = LangGraphAgent(name="test", graph=mock_graph, emit_subagent_events=True)
         # Seed lane state as if this run had streamed a subagent message.
         agent.messages_in_process = {"run-teardown": {"tools:a": {"id": "m", "tool_call_id": None}}}
 

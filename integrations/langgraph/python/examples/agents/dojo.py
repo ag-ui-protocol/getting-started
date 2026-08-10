@@ -93,6 +93,11 @@ agents = {
         name="deepagents_subagents",
         description="A deepagents supervisor delegating to three specialized subagents (subagent attribution demo).",
         graph=deepagents_subagents_graph,
+        # The whole point of this demo is the subagent surface, so it opts in. The flag
+        # defaults to OFF because a released @ag-ui/client rejects the SUBAGENT_* events
+        # outright -- see emit_subagent_events in ag_ui_langgraph/agent.py. The dojo runs
+        # a preview client that understands them.
+        emit_subagent_events=True,
     ),
 }
 

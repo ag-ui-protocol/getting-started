@@ -39,7 +39,7 @@ class TestHandleSingleEventCustomEvents(unittest.IsolatedAsyncioTestCase):
         from ag_ui_langgraph.agent import LangGraphAgent
 
         mock_graph = MagicMock()
-        agent = LangGraphAgent(name="test", graph=mock_graph)
+        agent = LangGraphAgent(name="test", graph=mock_graph, emit_subagent_events=True)
         # Minimal active_run state required by _handle_single_event.
         # Each key is needed for a specific code path:
         #   id              — used as key in messages_in_process dict
