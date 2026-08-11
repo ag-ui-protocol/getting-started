@@ -111,6 +111,56 @@ export const verifyEvents =
       runStarted = true;
     };
 
+    // Ownership seeded from replayed history: MESSAGES_SNAPSHOT and the
+    // RUN_STARTED input echo both put messages on the wire that later events can
+    // reference, so their owners (absent = the parent agent) go on record like an
+    // opener's would — and each assistant message's tool calls under the
+    // message's owner, since a ToolCall carries no owner field of its own.
+    // Without this, reopening a replayed id under a DIFFERENT owner was accepted
+    // and the reducer appended the new producer's content into the recorded
+    // owner's message: silent misattribution via the replay door.
+    //
+    // `authoritative` distinguishes the two sources. A snapshot restates the
+    // whole conversation and the reducer REPLACES the message, so its owner
+    // replaces the recorded one — keeping the old map entry while the document
+    // moved on left the verifier contradicting the reducer. The RUN_STARTED
+    // input echo is plain history: it seeds only ids nothing else has claimed
+    // (the maps were just reset for the run anyway).
+    //
+    // Initial history handed to an agent OUTSIDE the event stream
+    // (RunAgentInput.messages without the RUN_STARTED echo) never passes this
+    // operator and cannot be seeded; producers replaying such ids must tag
+    // consistently with that history.
+    const seedOwnersFromMessages = (rawMessages: unknown, authoritative: boolean) => {
+      const messages = (rawMessages ?? []) as Array<{
+        id?: string;
+        role?: string;
+        subagentRunId?: string;
+        toolCalls?: Array<{ id?: string }>;
+      }>;
+      if (!Array.isArray(messages)) return;
+      for (const msg of messages) {
+        if (!msg || typeof msg.id !== "string") continue;
+        // Owners are per entity KIND (see `owners` above), so the message must
+        // seed the bucket its role streams through — a reasoning message's
+        // continuations are checked against `owners.reasoning`, not `.message`.
+        const bucket =
+          msg.role === "reasoning"
+            ? owners.reasoning
+            : msg.role === "activity"
+              ? owners.activity
+              : owners.message;
+        if (authoritative || !bucket.has(msg.id)) {
+          bucket.set(msg.id, { subagentRunId: msg.subagentRunId });
+        }
+        for (const tc of msg.toolCalls ?? []) {
+          if (tc && typeof tc.id === "string" && (authoritative || !owners.toolCall.has(tc.id))) {
+            owners.toolCall.set(tc.id, { subagentRunId: msg.subagentRunId });
+          }
+        }
+      }
+    };
+
     // Subagent attribution consistency: a continuation/close event must not
     // disagree with the subagent that owns its message / tool call (the opener).
     // An absent tag is always allowed (the field is optional, and Phase-1
@@ -324,6 +374,23 @@ export const verifyEvents =
                 eventType, eventTag, existingToolCallOwner, "tool call", toolCallId,
               );
               if (subErr) return throwError(() => subErr);
+              // An untagged reopen's EFFECTIVE owner is the one it inherits from
+              // its parent message — comparing only the (absent) raw tag let a
+              // reopen under a different parent slip through: the reducer keeps
+              // the call inside the first parent and appends the new call's args
+              // there, so the new parent ends up with no call at all.
+              if (
+                eventTag === undefined &&
+                inheritedOwner &&
+                inheritedOwner.subagentRunId !== existingToolCallOwner.subagentRunId
+              ) {
+                return throwError(
+                  () =>
+                    new AGUIError(
+                      `Cannot send 'TOOL_CALL_START': tool call '${toolCallId}' is owned by '${existingToolCallOwner.subagentRunId ?? "(the parent agent)"}' but its parent message '${parentMessageId}' is owned by '${inheritedOwner.subagentRunId ?? "(the parent agent)"}'. A tool call belongs to the message that carries it.`,
+                    ),
+                );
+              }
             }
             activeToolCalls.add(toolCallId);
             if (!existingToolCallOwner) {
@@ -663,36 +730,10 @@ export const verifyEvents =
           }
 
           case EventType.MESSAGES_SNAPSHOT: {
-            // A snapshot establishes ownership just as an opener does: each message's
-            // subagentRunId (absent = the parent agent) is on record from here on, and
-            // so is each assistant message's tool calls' — a ToolCall carries no owner
-            // field of its own, so it belongs to its message. Without this seeding, a
-            // later event reopening a snapshot id under a DIFFERENT owner was accepted,
-            // and the reducer appended the new producer's content into the recorded
-            // owner's message — silent misattribution via the replay door. First writer
-            // still wins: ids the stream already established keep their recorded owner
-            // (a snapshot restating them agrees by construction; checking it would
-            // re-verify the reducer, not the producer).
-            //
-            // Initial history handed to an agent OUTSIDE the event stream (RunAgentInput
-            // messages) never passes through this operator and cannot be seeded here;
-            // producers replaying such ids must tag consistently with that history.
-            const messages = ((event as { messages?: unknown }).messages ?? []) as Array<{
-              id?: string;
-              subagentRunId?: string;
-              toolCalls?: Array<{ id?: string }>;
-            }>;
-            for (const msg of messages) {
-              if (!msg || typeof msg.id !== "string") continue;
-              if (!owners.message.has(msg.id)) {
-                owners.message.set(msg.id, { subagentRunId: msg.subagentRunId });
-              }
-              for (const tc of msg.toolCalls ?? []) {
-                if (tc && typeof tc.id === "string" && !owners.toolCall.has(tc.id)) {
-                  owners.toolCall.set(tc.id, { subagentRunId: msg.subagentRunId });
-                }
-              }
-            }
+            // Authoritative: the snapshot restates the conversation and the reducer
+            // replaces each message, so its owners replace recorded ones. See
+            // seedOwnersFromMessages.
+            seedOwnersFromMessages((event as { messages?: unknown }).messages, true);
             return of(event);
           }
 
@@ -700,6 +741,13 @@ export const verifyEvents =
           case EventType.RUN_STARTED: {
             // We've already validated this above
             runStarted = true;
+            // The input echo carries replayed history the reducer applies, so it
+            // seeds ownership like a snapshot does (non-authoritatively — it is
+            // history, not a rewrite). See seedOwnersFromMessages.
+            seedOwnersFromMessages(
+              ((event as { input?: { messages?: unknown } }).input ?? {}).messages,
+              false,
+            );
             return of(event);
           }
 

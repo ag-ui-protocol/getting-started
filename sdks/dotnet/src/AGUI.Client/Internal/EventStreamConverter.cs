@@ -283,6 +283,86 @@ internal static class EventStreamConverter
                 owners[CallKey(toolCallId)] = subagentRunId;
             }
         }
+
+        // Ownership seeded from replayed history: MESSAGES_SNAPSHOT and the
+        // RUN_STARTED input echo both put messages on the wire that later events can
+        // reference, so their owners (null = the parent agent) go on record like an
+        // opener's would — and each assistant message's tool calls under the message's
+        // owner, since a ToolCall carries no owner field of its own. The bucket is
+        // per entity KIND: a reasoning message's continuations are checked against
+        // reasoningOwners, an activity's against activityOwners.
+        //
+        // `authoritative` distinguishes the two sources. A snapshot restates the whole
+        // conversation and consumers replace the message, so its owner replaces the
+        // recorded one; the RUN_STARTED input echo is plain history and seeds only ids
+        // nothing else has claimed. Mirrors verifyEvents.
+        void SeedOwnersFromMessages(IList<AGUIMessage>? messages, bool authoritative)
+        {
+            if (messages is null)
+            {
+                return;
+            }
+
+            foreach (var message in messages)
+            {
+                if (message?.Id is not { } messageId)
+                {
+                    continue;
+                }
+
+                var bucket = message switch
+                {
+                    AGUIReasoningMessage => reasoningOwners,
+                    AGUIActivityMessage => activityOwners,
+                    _ => messageOwners,
+                };
+                if (authoritative || !bucket.ContainsKey(messageId))
+                {
+                    bucket[messageId] = message.SubagentRunId;
+                    RecordMessageOwner(messageId, message.SubagentRunId);
+                }
+
+                if (message is AGUIAssistantMessage { ToolCalls: { } seededToolCalls })
+                {
+                    foreach (var seededToolCall in seededToolCalls)
+                    {
+                        if (seededToolCall is null
+                            || (!authoritative && toolCallOwners.ContainsKey(seededToolCall.Id)))
+                        {
+                            continue;
+                        }
+
+                        toolCallOwners[seededToolCall.Id] = message.SubagentRunId;
+                        RecordCallOwner(seededToolCall.Id, message.SubagentRunId);
+                    }
+                }
+            }
+        }
+
+        // The compact reasoning-chunk lane cursors track OPEN streams, so they close at
+        // the same points the TypeScript chunk transform closes lanes: run-level events
+        // and MESSAGES_SNAPSHOT close every lane; an explicit event closes its own
+        // lane's; a subagent terminal closes that subagent's. A cursor kept past those
+        // points made a historical stream win parent-priority or count toward
+        // ambiguity after it was already over.
+        void CloseChunkLane(string? lane)
+        {
+            if (lane is null)
+            {
+                parentReasoningChunkId = null;
+            }
+            else
+            {
+                subagentReasoningChunkIds.Remove(lane);
+            }
+        }
+
+        void CloseAllChunkLanes()
+        {
+            parentReasoningChunkId = null;
+            subagentReasoningChunkIds.Clear();
+        }
+
         var runStarted = false;
         var runFinished = false;
         var runError = false;
@@ -343,6 +423,45 @@ internal static class EventStreamConverter
                     runError = false;
                     runStarted = true;
                 }
+            }
+
+            // Chunk-lane close points, mirroring the TypeScript chunk transform: run
+            // boundaries and MESSAGES_SNAPSHOT close every lane; an explicit event
+            // closes its own lane's pending chunk stream; a subagent terminal closes
+            // that subagent's. Chunk events themselves and the pure pass-through
+            // events (RAW, ACTIVITY_*, REASONING_ENCRYPTED_VALUE, SUBAGENT_STARTED)
+            // close nothing. Runs BEFORE the validation below so the ambiguity /
+            // sole-lane inference only ever sees lanes that are genuinely open.
+            switch (evt)
+            {
+                case RunStartedEvent or RunFinishedEvent or RunErrorEvent or MessagesSnapshotEvent:
+                    CloseAllChunkLanes();
+                    break;
+                case SubagentFinishedEvent closingTerminal:
+                    CloseChunkLane(closingTerminal.SubagentRunId);
+                    break;
+                case SubagentErrorEvent closingErrorTerminal:
+                    CloseChunkLane(closingErrorTerminal.SubagentRunId);
+                    break;
+                case TextMessageStartEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case TextMessageContentEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case TextMessageEndEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case ToolCallStartEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case ToolCallArgsEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case ToolCallEndEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case ToolCallResultEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case StateSnapshotEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case StateDeltaEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case CustomEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case StepStartedEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case StepFinishedEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case ReasoningStartEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case ReasoningMessageStartEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case ReasoningMessageContentEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case ReasoningMessageEndEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                case ReasoningEndEvent explicitEvt: CloseChunkLane(explicitEvt.SubagentRunId); break;
+                default:
+                    break;
             }
 
             // Subagent lifecycle and attribution rules. Kept beside the run/step rules
@@ -429,44 +548,17 @@ internal static class EventStreamConverter
                         $"Cannot send 'RUN_FINISHED' while subagents are still active: {string.Join(", ", activeSubagents.Keys)}");
 
                 case MessagesSnapshotEvent snapshot:
-                    // A snapshot establishes ownership just as an opener does: each
-                    // message's subagentRunId (null = the parent agent) goes on record,
-                    // and so does each assistant message's tool calls' — a ToolCall
-                    // carries no owner field of its own, so it belongs to its message.
-                    // Without this seeding, a later event reopening a snapshot id under a
-                    // DIFFERENT owner was accepted and the reducer merged the new
-                    // producer's content into the recorded owner's message — silent
-                    // misattribution via the replay door. First writer still wins: ids
-                    // the stream already established keep their recorded owner. Mirrors
-                    // verifyEvents.
-                    foreach (var snapshotMessage in snapshot.Messages)
-                    {
-                        if (snapshotMessage?.Id is not { } snapshotMessageId)
-                        {
-                            continue;
-                        }
+                    // Authoritative: the snapshot restates the conversation and
+                    // consumers replace each message, so its owners replace recorded
+                    // ones. See SeedOwnersFromMessages.
+                    SeedOwnersFromMessages(snapshot.Messages, authoritative: true);
+                    break;
 
-                        if (!messageOwners.ContainsKey(snapshotMessageId))
-                        {
-                            messageOwners[snapshotMessageId] = snapshotMessage.SubagentRunId;
-                            RecordMessageOwner(snapshotMessageId, snapshotMessage.SubagentRunId);
-                        }
-
-                        if (snapshotMessage is AGUIAssistantMessage { ToolCalls: { } snapshotToolCalls })
-                        {
-                            foreach (var snapshotToolCall in snapshotToolCalls)
-                            {
-                                if (snapshotToolCall is null || toolCallOwners.ContainsKey(snapshotToolCall.Id))
-                                {
-                                    continue;
-                                }
-
-                                toolCallOwners[snapshotToolCall.Id] = snapshotMessage.SubagentRunId;
-                                RecordCallOwner(snapshotToolCall.Id, snapshotMessage.SubagentRunId);
-                            }
-                        }
-                    }
-
+                case RunStartedEvent seededRunStart:
+                    // The input echo carries replayed history consumers apply, so it
+                    // seeds ownership like a snapshot does (non-authoritatively — it
+                    // is history, not a rewrite). See SeedOwnersFromMessages.
+                    SeedOwnersFromMessages(seededRunStart.Input?.Messages, authoritative: false);
                     break;
 
                 // Attribution consistency for the ID-keyed entities, mirroring
@@ -513,6 +605,8 @@ internal static class EventStreamConverter
                     // message's owner (the continuation rule: absent means "whoever owns
                     // the surrounding entity").
                     var callOwner = toolStart.SubagentRunId;
+                    var parentOwnerKnown = false;
+                    string? inheritedParentOwner = null;
                     if (toolStart.ParentMessageId is { } parentMessageId
                         && messageOwners.TryGetValue(parentMessageId, out var parentOwner))
                     {
@@ -523,6 +617,8 @@ internal static class EventStreamConverter
                                 $"Cannot send 'TOOL_CALL_START': subagentRunId '{callTag}' does not match its parent message '{parentMessageId}' owner '{parentOwner ?? "(the parent agent)"}'. A tool call belongs to the message that carries it.");
                         }
 
+                        parentOwnerKnown = true;
+                        inheritedParentOwner = parentOwner;
                         callOwner ??= parentOwner;
                     }
 
@@ -535,6 +631,19 @@ internal static class EventStreamConverter
                     {
                         RejectOwnerMismatch(
                             toolStart.Type, toolStart.SubagentRunId, toolCallOwners, toolStart.ToolCallId, "tool call");
+                        // An untagged reopen's EFFECTIVE owner is the one it inherits
+                        // from its parent message — comparing only the (absent) raw tag
+                        // let a reopen under a different parent slip through: the call
+                        // stays inside the first parent and the new call's args land
+                        // there, so the new parent ends up with no call at all.
+                        if (toolStart.SubagentRunId is null
+                            && parentOwnerKnown
+                            && toolCallOwners.TryGetValue(toolStart.ToolCallId, out var retainedOwner)
+                            && !string.Equals(inheritedParentOwner, retainedOwner, StringComparison.Ordinal))
+                        {
+                            throw new System.InvalidOperationException(
+                                $"Cannot send 'TOOL_CALL_START': tool call '{toolStart.ToolCallId}' is owned by '{retainedOwner ?? "(the parent agent)"}' but its parent message '{toolStart.ParentMessageId}' is owned by '{inheritedParentOwner ?? "(the parent agent)"}'. A tool call belongs to the message that carries it.");
+                        }
                     }
 
                     break;

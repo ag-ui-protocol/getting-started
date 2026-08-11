@@ -1090,6 +1090,73 @@ describe("verifyEvents subagent ownership seeded from snapshots", () => {
     expect(events[events.length - 1].type).toBe(EventType.RUN_FINISHED);
   });
 
+  it("should seed ownership from the RUN_STARTED input echo", async () => {
+    // RUN_STARTED.input is inside the verified stream and the reducer applies
+    // its messages, so replayed history arriving this way must seed exactly
+    // like a snapshot — without it, reopening an input message under another
+    // owner appended the new producer's content into the old owner's message.
+    await expectRejectedWith(
+      [
+        {
+          type: EventType.RUN_STARTED,
+          threadId: "t",
+          runId: "r",
+          input: {
+            threadId: "t",
+            runId: "r",
+            state: {},
+            tools: [],
+            context: [],
+            messages: [{ id: "m", role: "assistant", content: "old", subagentRunId: "s1" }],
+          },
+        } as unknown as RunStartedEvent,
+        { type: EventType.TEXT_MESSAGE_START, messageId: "m", role: "assistant", subagentRunId: "s2" } as BaseEvent,
+      ],
+      /does not match the message 'm' opener's subagent 's1'/i,
+    );
+  });
+
+  it("should seed a snapshot reasoning message into the reasoning owner map", async () => {
+    await expectRejectedWith(
+      [
+        started,
+        snapshotWith([{ id: "r1", role: "reasoning", content: "old", subagentRunId: "s1" }]),
+        { type: EventType.REASONING_MESSAGE_START, messageId: "r1", subagentRunId: "s2" } as BaseEvent,
+      ],
+      /does not match the reasoning message 'r1' opener's subagent 's1'/i,
+    );
+  });
+
+  it("should let a later snapshot authoritatively replace a recorded owner", async () => {
+    // A snapshot restates the whole conversation and the reducer replaces the
+    // message, so the verifier's map must follow it — keeping the old owner
+    // while the document says otherwise made the two contradict each other.
+    await expectRejectedWith(
+      [
+        started,
+        { type: EventType.TEXT_MESSAGE_START, messageId: "m", role: "assistant", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.TEXT_MESSAGE_END, messageId: "m", subagentRunId: "s1" } as BaseEvent,
+        snapshotWith([{ id: "m", role: "assistant", content: "snapshot", subagentRunId: "s2" }]),
+        // The OLD owner no longer matches: the snapshot moved the message to s2.
+        { type: EventType.TEXT_MESSAGE_START, messageId: "m", role: "assistant", subagentRunId: "s1" } as BaseEvent,
+      ],
+      /does not match the message 'm' opener's subagent 's2'/i,
+    );
+  });
+
+  it("should accept the snapshot's new owner after it replaces the recorded one", async () => {
+    const events = await run([
+      started,
+      { type: EventType.TEXT_MESSAGE_START, messageId: "m", role: "assistant", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_END, messageId: "m", subagentRunId: "s1" } as BaseEvent,
+      snapshotWith([{ id: "m", role: "assistant", content: "snapshot", subagentRunId: "s2" }]),
+      { type: EventType.TEXT_MESSAGE_START, messageId: "m", role: "assistant", subagentRunId: "s2" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_END, messageId: "m", subagentRunId: "s2" } as BaseEvent,
+      finished,
+    ]);
+    expect(events[events.length - 1].type).toBe(EventType.RUN_FINISHED);
+  });
+
   it("should reject replaying a snapshot tool call under a different subagent", async () => {
     await expectRejectedWith(
       [
@@ -1268,6 +1335,34 @@ describe("verifyEvents tool call vs parent message ownership", () => {
         { type: EventType.TOOL_CALL_ARGS, toolCallId: "tc", delta: "{}", subagentRunId: "s2" } as ToolCallArgsEvent,
       ],
       /does not match the tool call 'tc' opener's subagent 's1'/i,
+    );
+  });
+
+  it("should reject an untagged reopen whose new parent's owner disagrees with the retained one", async () => {
+    // The raw tag is absent on both starts, but the second start's EFFECTIVE
+    // owner is s2 (inherited from m2) while the retained owner is s1 — the
+    // reducer would keep tc inside m1 and append s2's args there.
+    await expectRejectedWith(
+      [
+        started,
+        ...s1Message,
+        {
+          type: EventType.TOOL_CALL_START,
+          toolCallId: "tc",
+          toolCallName: "search",
+          parentMessageId: "m",
+        } as ToolCallStartEvent,
+        { type: EventType.TOOL_CALL_END, toolCallId: "tc" } as ToolCallEndEvent,
+        { type: EventType.TEXT_MESSAGE_START, messageId: "m2", role: "assistant", subagentRunId: "s2" } as BaseEvent,
+        { type: EventType.TEXT_MESSAGE_END, messageId: "m2", subagentRunId: "s2" } as BaseEvent,
+        {
+          type: EventType.TOOL_CALL_START,
+          toolCallId: "tc",
+          toolCallName: "search",
+          parentMessageId: "m2",
+        } as ToolCallStartEvent,
+      ],
+      /owned by 's1'.*parent message 'm2'.*owned by 's2'/i,
     );
   });
 });
