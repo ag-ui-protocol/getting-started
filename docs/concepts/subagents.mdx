@@ -118,6 +118,12 @@ An event with no `subagentRunId` belongs to the parent agent. Attribution is
 additive: a stream that never sets the field behaves exactly as it did before
 subagents existed.
 
+Attribution also stands on its own. A producer may tag events without ever
+emitting `SubagentStarted` / `SubagentFinished` — enough for a UI to group output
+by producer, without committing to reporting lifecycle. Clients must accept an
+identifier they have never seen announced; see
+[Rules clients enforce](#rules-clients-enforce).
+
 **Events that can carry attribution:** the text message family, the tool call
 family, activity events, the reasoning family, step events, state events, and
 `Raw`/`Custom`.
@@ -187,39 +193,86 @@ them. In particular:
 - A parent may finish before its child. `parentSubagentRunId` may therefore name
   a subagent that has already finished, which is valid.
 
+### Concurrency and the chunk shorthand
+
+The `TextMessageChunk` / `ToolCallChunk` / `ReasoningMessageChunk` events are a
+shorthand: a client synthesizes the START/CONTENT/END boundaries, and a chunk
+that omits its id means "the same as the previous one". Under concurrency,
+"previous" is only meaningful **per subagent** — so the shorthand resolves it
+within the sending subagent's own stream, not across the run.
+
+The practical consequence is one rule for producers: a chunk that carries neither
+an id nor a `subagentRunId` is only unambiguous while at most one stream of that
+kind is open. With several open at once there is nothing to resolve it against,
+and the client rejects it rather than guessing. **When streaming concurrently,
+attribute every chunk**, or repeat the id.
+
 ## Rules clients enforce
 
-When subagent events are present, a client validating the stream enforces:
+Every rule below is *conditional on the events being present*. Attribution alone
+is a complete, valid use of subagent support, so nothing here requires a stream
+to send lifecycle events at all.
 
-- A `subagentRunId` used for attribution names a subagent that has been started.
 - `SubagentFinished` and `SubagentError` name a subagent that is currently
   active, and a subagent is not started twice within a run.
 - Continuation and close events agree with the owner their entity was created
   under. A text message opened by one subagent cannot be continued by another.
-- Every subagent is closed before `RunFinished`.
-- State events are not attributed.
+- Steps are scoped to the agent that opened them: a subagent cannot close the
+  parent's step, or a sibling's.
+- Every started subagent is closed before `RunFinished`.
 
-Three things are deliberately **not** enforced, because the protocol does not
+Several things are deliberately **not** enforced, because the protocol does not
 require them:
 
+- **A `subagentRunId` used for attribution need not have been started.**
+  Attribution without lifecycle events is a supported mode, so a client must not
+  treat an unannounced identifier as an error. UIs should group by whatever ids
+  they see and fall back to the id when they have no `name`.
 - `parentSubagentRunId` need only name a subagent that has been *started*, not
   one still active — a parent legitimately finishes before its child.
 - Events attributed to an already-finished subagent are accepted. Continuation
   events carry the tag of the subagent they belong to even after it finishes.
 - Closure is required before `RunFinished` only, not before `RunError`. An
   unclosed subagent is the expected shape of an aborted run.
+- Attributed state events are accepted. A producer choosing not to emit them
+  mid-delegation is a producer-side decision, not a rule — see
+  [Attribution is provenance, not ownership](#attribution-is-provenance-not-ownership).
 
 ## Compatibility
 
-Subagent support is additive, so a stream that uses it stays valid for consumers
-that ignore it — they see an unattributed stream and three event types they can
-skip.
+<Warning>
+  **Older clients reject the lifecycle events outright.** Attribution is additive
+  and safe — `subagentRunId` is an unknown *field*, which clients tolerate — but
+  `SubagentStarted`, `SubagentFinished`, and `SubagentError` are unknown *event
+  types*, and a client older than subagent support fails on them while decoding,
+  before any application code runs. There is no way to filter them out
+  client-side.
 
-For the other direction, where the *agent* predates subagent support, the
-TypeScript client inserts a compatibility shim automatically based on the agent's
-reported version. It strips `subagentRunId` and drops the lifecycle events, so an
-older agent never receives fields it cannot interpret. Nothing is stripped on the
-way to the UI.
+  If some of your consumers predate subagent support, the producer must not emit
+  the lifecycle events to them.
+</Warning>
+
+The two directions are not symmetric, so they are worth separating.
+
+### A new agent talking to an older client
+
+The lifecycle events break it, so emitting them has to be **opt-in on the
+producer**. Integrations that support subagents therefore expose a flag to enable
+them, off by default; with it off, no lifecycle events are emitted, no
+`subagentRunId` is attributed, and nothing subagent-related reaches
+`MessagesSnapshot`, so the stream is what it was before subagent support existed.
+Turn it on once every consumer is new enough.
+
+Attribution alone is the safer intermediate step, since the field is ignored by
+clients that do not know it. A producer that wants grouping without a
+compatibility break can attribute events and skip the lifecycle entirely.
+
+### A new client talking to an older agent
+
+Handled automatically. The TypeScript client inserts a compatibility shim based
+on the agent's reported version, which strips `subagentRunId` and drops the
+lifecycle events on the way *out*, so an older agent never receives fields it
+cannot interpret. Nothing is stripped on the way to the UI.
 
 ## Support
 
@@ -232,6 +285,21 @@ way to the UI.
 The binary protobuf transport carries subagent attribution on both TypeScript
 and .NET, generated from the same schema, so a subagent-attributed stream
 survives a round trip across languages.
+
+### Known limitations
+
+- **Protobuf covers a subset of event types.** 19 of the 36 event types have a
+  protobuf mapping. That includes all three subagent events and every event that
+  carries attribution today, but it excludes the chunk shorthand: `TextMessageChunk`
+  and `ToolCallChunk` have message definitions and a `subagent_run_id` field, yet
+  no enum entry, so they cannot be encoded at all. Pre-existing, and unrelated to
+  subagents.
+- **.NET loses the second owner on parallel tool calls from different subagents.**
+  Converting a run to `Microsoft.Extensions.AI` messages merges consecutive tool
+  calls into one `ChatMessage`, and AG-UI attributes per message, so only the
+  first owner survives. It is a current limitation rather than an inherent
+  conflict — the provider constraint is adjacency, which interleaving would also
+  satisfy while preserving attribution.
 
 ## See also
 

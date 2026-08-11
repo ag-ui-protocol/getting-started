@@ -35,118 +35,143 @@ interface ReasoningMessageFields {
   subagentRunId?: string;
 }
 
+/**
+ * The stream one lane is currently assembling from chunks. A lane holds at most one,
+ * because the chunk shorthand identifies a continuation only by "the same as before".
+ */
+type PendingStream =
+  | { kind: "text"; fields: TextMessageFields }
+  | { kind: "tool"; fields: ToolCallFields }
+  | { kind: "reasoning"; fields: ReasoningMessageFields };
+
+/** The id a pending stream is keyed by, whichever kind it is. */
+const pendingEntityId = (pending: PendingStream): string =>
+  pending.kind === "tool" ? pending.fields.toolCallId : pending.fields.messageId;
+
+const missingIdFieldName = (kind: PendingStream["kind"]) =>
+  kind === "tool" ? "toolCallId" : "messageId";
+
 export const transformChunks =
   (debugLogger?: DebugLoggerInput) =>
   (events$: Observable<BaseEvent>): Observable<BaseEvent> => {
     const log = resolveDebugLogger(debugLogger);
-    let textMessageFields: TextMessageFields | undefined;
-    let toolCallFields: ToolCallFields | undefined;
-    let reasoningMessageFields: ReasoningMessageFields | undefined;
-    let mode: "text" | "tool" | "reasoning" | undefined;
 
-    const closeTextMessage = () => {
-      if (!textMessageFields || mode !== "text") {
-        throw new Error("No text message to close");
+    // One pending stream per LANE, where a lane is the subagent its chunks are attributed
+    // to and `undefined` is the parent agent. A single global slot meant only one stream
+    // could be mid-assembly per run, so two subagents streaming concurrently destroyed
+    // each other: the second chunk's opener closed the first's message, and because
+    // continuation chunks omit the id, the first subagent's next chunk then failed
+    // outright. Keyed by owner, each lane assembles independently. A run that never
+    // attributes anything uses only the `undefined` lane, so its behaviour is unchanged.
+    const lanes = new Map<string | undefined, PendingStream>();
+
+    /** Emit the END for whatever `owner` has open, and clear the lane. */
+    const closeLane = (owner: string | undefined): BaseEvent[] => {
+      const pending = lanes.get(owner);
+      if (!pending) return [];
+      lanes.delete(owner);
+
+      switch (pending.kind) {
+        case "text": {
+          const event = {
+            type: EventType.TEXT_MESSAGE_END,
+            messageId: pending.fields.messageId,
+            ...(pending.fields.subagentRunId !== undefined && {
+              subagentRunId: pending.fields.subagentRunId,
+            }),
+          } as TextMessageEndEvent;
+          log?.event("TRANSFORM", "TEXT_MESSAGE_END", event, { messageId: event.messageId });
+          return [event];
+        }
+        case "tool": {
+          const event = {
+            type: EventType.TOOL_CALL_END,
+            toolCallId: pending.fields.toolCallId,
+            ...(pending.fields.subagentRunId !== undefined && {
+              subagentRunId: pending.fields.subagentRunId,
+            }),
+          } as ToolCallEndEvent;
+          log?.event("TRANSFORM", "TOOL_CALL_END", event, { toolCallId: event.toolCallId });
+          return [event];
+        }
+        case "reasoning": {
+          const event = {
+            type: EventType.REASONING_MESSAGE_END,
+            messageId: pending.fields.messageId,
+            ...(pending.fields.subagentRunId !== undefined && {
+              subagentRunId: pending.fields.subagentRunId,
+            }),
+          } as ReasoningMessageEndEvent;
+          log?.event("TRANSFORM", "REASONING_MESSAGE_END", event, { messageId: event.messageId });
+          return [event];
+        }
       }
-      const event = {
-        type: EventType.TEXT_MESSAGE_END,
-        messageId: textMessageFields.messageId,
-        ...(textMessageFields.subagentRunId !== undefined && {
-          subagentRunId: textMessageFields.subagentRunId,
-        }),
-      } as TextMessageEndEvent;
-      mode = undefined;
-      textMessageFields = undefined;
-
-      log?.event("TRANSFORM", "TEXT_MESSAGE_END", event, {
-        messageId: event.messageId,
-      });
-
-      return event;
     };
 
-    const closeToolCall = () => {
-      if (!toolCallFields || mode !== "tool") {
-        throw new Error("No tool call to close");
+    /**
+     * Close every lane, in the order they opened. Used by the run-level events, which
+     * describe the run as a whole rather than any one producer within it.
+     */
+    const closeAllLanes = (): BaseEvent[] =>
+      [...lanes.keys()].flatMap((owner) => closeLane(owner));
+
+    /** The lane holding an open stream of `kind` under `entityId`, if any. */
+    const laneHolding = (kind: PendingStream["kind"], entityId: string) => {
+      for (const [owner, pending] of lanes) {
+        if (pending.kind === kind && pendingEntityId(pending) === entityId) return { owner };
       }
-      const event = {
-        type: EventType.TOOL_CALL_END,
-        toolCallId: toolCallFields.toolCallId,
-        ...(toolCallFields.subagentRunId !== undefined && {
-          subagentRunId: toolCallFields.subagentRunId,
-        }),
-      } as ToolCallEndEvent;
-      mode = undefined;
-      toolCallFields = undefined;
-
-      log?.event("TRANSFORM", "TOOL_CALL_END", event, {
-        toolCallId: event.toolCallId,
-      });
-
-      return event;
-    };
-
-    const closeReasoningMessage = () => {
-      if (!reasoningMessageFields || mode !== "reasoning") {
-        throw new Error("No reasoning message to close");
-      }
-      const event = {
-        type: EventType.REASONING_MESSAGE_END,
-        messageId: reasoningMessageFields.messageId,
-        ...(reasoningMessageFields.subagentRunId !== undefined && {
-          subagentRunId: reasoningMessageFields.subagentRunId,
-        }),
-      } as ReasoningMessageEndEvent;
-      mode = undefined;
-      reasoningMessageFields = undefined;
-
-      log?.event("TRANSFORM", "REASONING_MESSAGE_END", event, {
-        messageId: event.messageId,
-      });
-
-      return event;
-    };
-
-    /** Owner of the currently open stream, or undefined when none is open / untagged. */
-    const pendingStreamOwner = (): string | undefined => {
-      if (mode === "text") return textMessageFields?.subagentRunId;
-      if (mode === "tool") return toolCallFields?.subagentRunId;
-      if (mode === "reasoning") return reasoningMessageFields?.subagentRunId;
       return undefined;
     };
 
-    // #7 — a chunk that reuses an open stream's id under a DIFFERENT owner is a
-    // contradiction the defined continuation-owner rule forbids. Propagating the tag onto
-    // synthesized CONTENT surfaces it to verifyEvents, but only when the chunk carries a
-    // delta; a compact chunk with attribution and no delta emits nothing, so the
-    // disagreement would never be seen. Rejecting here covers both shapes uniformly, and
-    // matches how this transform already reports malformed chunk input.
-    const assertChunkOwner = (incoming: string | undefined, entityKind: string, entityId: string) => {
-      // An absent tag inherits, so it is never a disagreement. But an open stream with
-      // NO owner belongs to the parent, which is as much an owner as a subagent — so a
-      // tagged chunk on it does disagree. Comparing only when the stream had an owner
-      // let a parent-opened stream be continued under a subagent's tag, and because a
-      // no-delta chunk emits nothing the verifier never saw it either.
-      if (incoming === undefined) return;
-      const owner = pendingStreamOwner();
-      if (owner !== incoming) {
+    /**
+     * Decide which lane a chunk belongs to. Every chunk carries its own `subagentRunId`,
+     * which is what makes per-lane assembly possible at all — but the shorthand lets a
+     * continuation omit both the id and the tag, so the lane has to be inferred.
+     */
+    const resolveLane = (
+      kind: PendingStream["kind"],
+      entityId: string | undefined,
+      tag: string | undefined,
+      chunkType: string,
+      entityKind: string,
+    ): string | undefined => {
+      if (entityId !== undefined) {
+        // A named id continues wherever it is already open, regardless of who sends it,
+        // so the id remains the strongest signal. A tag that disagrees with that lane is
+        // the contradiction the continuation-owner rule forbids: rejected here rather
+        // than left to verifyEvents, because a chunk carrying attribution but no delta
+        // synthesizes nothing, so the disagreement would never reach the verifier.
+        const holder = laneHolding(kind, entityId);
+        if (holder) {
+          if (tag !== undefined && tag !== holder.owner) {
+            throw new Error(
+              `Cannot continue ${entityKind} '${entityId}': chunk subagentRunId '${tag}' does not match the open stream's subagent '${holder.owner ?? "(the parent agent)"}'.`,
+            );
+          }
+          return holder.owner;
+        }
+        // An id nobody holds opens a new stream, in the lane its own tag names.
+        return tag;
+      }
+
+      // Continuation shorthand. A tag names its lane outright.
+      if (tag !== undefined) return tag;
+
+      // Untagged means the parent agent, so prefer the parent's own open stream.
+      const parentPending = lanes.get(undefined);
+      if (parentPending?.kind === kind) return undefined;
+
+      // Otherwise fall back to the sole open stream of this kind, so producers that
+      // attribute only the opening chunk keep working.
+      const candidates = [...lanes.entries()].filter(([, pending]) => pending.kind === kind);
+      if (candidates.length === 1) return candidates[0][0];
+      if (candidates.length > 1) {
         throw new Error(
-          `Cannot continue ${entityKind} '${entityId}': chunk subagentRunId '${incoming}' does not match the open stream's subagent '${owner ?? "(the parent agent)"}'.`,
+          `Ambiguous ${chunkType}: it carries neither a ${missingIdFieldName(kind)} nor a subagentRunId, but ${candidates.length} lanes have an open ${entityKind}. Attribute the chunk to the subagent it belongs to.`,
         );
       }
-    };
-
-    const closePendingEvent = () => {
-      if (mode === "text") {
-        return [closeTextMessage()];
-      }
-      if (mode === "tool") {
-        return [closeToolCall()];
-      }
-      if (mode === "reasoning") {
-        return [closeReasoningMessage()];
-      }
-      return [];
+      // Nothing open anywhere — the caller reports the missing id.
+      return undefined;
     };
 
     return events$.pipe(
@@ -161,11 +186,7 @@ export const transformChunks =
           case EventType.TOOL_CALL_RESULT:
           case EventType.STATE_SNAPSHOT:
           case EventType.STATE_DELTA:
-          case EventType.MESSAGES_SNAPSHOT:
           case EventType.CUSTOM:
-          case EventType.RUN_STARTED:
-          case EventType.RUN_FINISHED:
-          case EventType.RUN_ERROR:
           case EventType.STEP_STARTED:
           case EventType.STEP_FINISHED:
           case EventType.THINKING_START:
@@ -178,7 +199,22 @@ export const transformChunks =
           case EventType.REASONING_MESSAGE_CONTENT:
           case EventType.REASONING_MESSAGE_END:
           case EventType.REASONING_END:
-            return [...closePendingEvent(), event];
+            // An explicit event closes only ITS OWN lane's pending stream. Closing the
+            // single global stream meant a parent's TEXT_MESSAGE_START ended a subagent's
+            // half-assembled message — the same class of cross-lane damage as closing on
+            // an unrelated subagent's terminal. Events that carry no tag read as the
+            // parent lane, which is what they are.
+            return [...closeLane((event as { subagentRunId?: string }).subagentRunId), event];
+          // Run-level events describe the run as a whole rather than any one producer
+          // within it, so every lane closes — otherwise a subagent's chunk stream would
+          // outlive the run that carried it. MESSAGES_SNAPSHOT belongs here too: it
+          // restates the entire conversation, and attributes per message rather than
+          // carrying one owner of its own.
+          case EventType.RUN_STARTED:
+          case EventType.RUN_FINISHED:
+          case EventType.RUN_ERROR:
+          case EventType.MESSAGES_SNAPSHOT:
+            return [...closeAllLanes(), event];
           case EventType.RAW:
           case EventType.ACTIVITY_SNAPSHOT:
           case EventType.ACTIVITY_DELTA:
@@ -196,44 +232,36 @@ export const transformChunks =
           // to a group it had already marked complete.
           case EventType.SUBAGENT_FINISHED:
           case EventType.SUBAGENT_ERROR: {
-            // Only when the finishing subagent OWNS the pending stream. There is one
-            // global pending stream here, so closing on any terminal broke unrelated
-            // lanes: with two subagents running, s2 finishing would close s1's open
-            // message, and because continuation chunks omit messageId the next s1 chunk
-            // then threw "First TEXT_MESSAGE_CHUNK must have a messageId".
+            // Its own lane only. A terminal with no id is malformed and must not be read
+            // as closing the parent lane.
             const terminalOwner = (event as { subagentRunId?: string }).subagentRunId;
-            if (terminalOwner !== undefined && pendingStreamOwner() === terminalOwner) {
-              return [...closePendingEvent(), event];
-            }
-            return [event];
+            if (terminalOwner === undefined) return [event];
+            return [...closeLane(terminalOwner), event];
           }
           case EventType.TEXT_MESSAGE_CHUNK: {
             const messageChunkEvent = event as TextMessageChunkEvent;
-            if (
-              mode === "text" &&
-              (messageChunkEvent.messageId === undefined ||
-                messageChunkEvent.messageId === textMessageFields?.messageId)
-            ) {
-              assertChunkOwner(
-                messageChunkEvent.subagentRunId,
-                "text message",
-                textMessageFields!.messageId,
-              );
-            }
-            const textMessageResult = [];
-            if (
-              // we are not in a text message
-              mode !== "text" ||
-              // or the message id is different
-              (messageChunkEvent.messageId !== undefined &&
-                messageChunkEvent.messageId !== textMessageFields?.messageId)
-            ) {
-              // close the current message if any
-              textMessageResult.push(...closePendingEvent());
-            }
+            const lane = resolveLane(
+              "text",
+              messageChunkEvent.messageId,
+              messageChunkEvent.subagentRunId,
+              "TEXT_MESSAGE_CHUNK",
+              "text message",
+            );
+            const open = lanes.get(lane);
+            const textMessageResult: BaseEvent[] = [];
 
-            // we are not in a text message, start a new one
-            if (mode !== "text") {
+            let textMessageFields: TextMessageFields;
+            if (
+              open?.kind === "text" &&
+              // An absent id continues; a present one must be the same message.
+              (messageChunkEvent.messageId === undefined ||
+                messageChunkEvent.messageId === open.fields.messageId)
+            ) {
+              textMessageFields = open.fields;
+            } else {
+              // Whatever else this lane had open ends before the new stream begins.
+              textMessageResult.push(...closeLane(lane));
+
               if (messageChunkEvent.messageId === undefined) {
                 throw new Error("First TEXT_MESSAGE_CHUNK must have a messageId");
               }
@@ -243,7 +271,7 @@ export const transformChunks =
                 name: messageChunkEvent.name,
                 subagentRunId: messageChunkEvent.subagentRunId,
               };
-              mode = "text";
+              lanes.set(lane, { kind: "text", fields: textMessageFields });
 
               const textMessageStartEvent = {
                 type: EventType.TEXT_MESSAGE_START,
@@ -263,26 +291,21 @@ export const transformChunks =
             }
 
             if (messageChunkEvent.delta !== undefined) {
+              const contentOwner = messageChunkEvent.subagentRunId ?? textMessageFields.subagentRunId;
               const textMessageContentEvent = {
                 type: EventType.TEXT_MESSAGE_CONTENT,
-                messageId: textMessageFields!.messageId,
+                messageId: textMessageFields.messageId,
                 delta: messageChunkEvent.delta,
-                // Carry the INCOMING chunk's tag, not the opener's. The chunk
-                // path keys a stream by id alone, so a chunk that reuses the id
-                // under a different owner would otherwise be absorbed silently
-                // and the whole message attributed to the opener. Propagating it
-                // lets verifyEvents — which runs after this transform — reject the
-                // ownership change the same way it does on the non-chunk path.
-                ...((messageChunkEvent.subagentRunId ?? textMessageFields!.subagentRunId) !==
-                  undefined && {
-                  subagentRunId: messageChunkEvent.subagentRunId ?? textMessageFields!.subagentRunId,
-                }),
+                // Prefer the INCOMING chunk's tag over the opener's, so a producer that
+                // attributes every chunk sees its own attribution on the output rather
+                // than a value this transform remembered.
+                ...(contentOwner !== undefined && { subagentRunId: contentOwner }),
               } as TextMessageContentEvent;
 
               textMessageResult.push(textMessageContentEvent);
 
               log?.event("TRANSFORM", "TEXT_MESSAGE_CONTENT", textMessageContentEvent, {
-                messageId: textMessageFields!.messageId,
+                messageId: textMessageFields.messageId,
               });
             }
 
@@ -290,30 +313,26 @@ export const transformChunks =
           }
           case EventType.TOOL_CALL_CHUNK: {
             const toolCallChunkEvent = event as ToolCallChunkEvent;
-            if (
-              mode === "tool" &&
-              (toolCallChunkEvent.toolCallId === undefined ||
-                toolCallChunkEvent.toolCallId === toolCallFields?.toolCallId)
-            ) {
-              assertChunkOwner(
-                toolCallChunkEvent.subagentRunId,
-                "tool call",
-                toolCallFields!.toolCallId,
-              );
-            }
-            const toolMessageResult = [];
-            if (
-              // we are not in a text message
-              mode !== "tool" ||
-              // or the tool call id is different
-              (toolCallChunkEvent.toolCallId !== undefined &&
-                toolCallChunkEvent.toolCallId !== toolCallFields?.toolCallId)
-            ) {
-              // close the current message if any
-              toolMessageResult.push(...closePendingEvent());
-            }
+            const lane = resolveLane(
+              "tool",
+              toolCallChunkEvent.toolCallId,
+              toolCallChunkEvent.subagentRunId,
+              "TOOL_CALL_CHUNK",
+              "tool call",
+            );
+            const open = lanes.get(lane);
+            const toolMessageResult: BaseEvent[] = [];
 
-            if (mode !== "tool") {
+            let toolCallFields: ToolCallFields;
+            if (
+              open?.kind === "tool" &&
+              (toolCallChunkEvent.toolCallId === undefined ||
+                toolCallChunkEvent.toolCallId === open.fields.toolCallId)
+            ) {
+              toolCallFields = open.fields;
+            } else {
+              toolMessageResult.push(...closeLane(lane));
+
               if (toolCallChunkEvent.toolCallId === undefined) {
                 throw new Error("First TOOL_CALL_CHUNK must have a toolCallId");
               }
@@ -326,7 +345,7 @@ export const transformChunks =
                 parentMessageId: toolCallChunkEvent.parentMessageId,
                 subagentRunId: toolCallChunkEvent.subagentRunId,
               };
-              mode = "tool";
+              lanes.set(lane, { kind: "tool", fields: toolCallFields });
 
               const toolCallStartEvent = {
                 type: EventType.TOOL_CALL_START,
@@ -347,26 +366,21 @@ export const transformChunks =
             }
 
             if (toolCallChunkEvent.delta !== undefined) {
+              const argsOwner = toolCallChunkEvent.subagentRunId ?? toolCallFields.subagentRunId;
               const toolCallArgsEvent = {
                 type: EventType.TOOL_CALL_ARGS,
-                toolCallId: toolCallFields!.toolCallId,
+                toolCallId: toolCallFields.toolCallId,
                 delta: toolCallChunkEvent.delta,
-                // Carry the INCOMING chunk's tag, not the opener's. The chunk
-                // path keys a stream by id alone, so a chunk that reuses the id
-                // under a different owner would otherwise be absorbed silently
-                // and the whole message attributed to the opener. Propagating it
-                // lets verifyEvents — which runs after this transform — reject the
-                // ownership change the same way it does on the non-chunk path.
-                ...((toolCallChunkEvent.subagentRunId ?? toolCallFields!.subagentRunId) !==
-                  undefined && {
-                  subagentRunId: toolCallChunkEvent.subagentRunId ?? toolCallFields!.subagentRunId,
-                }),
+                // Prefer the INCOMING chunk's tag over the opener's, so a producer that
+                // attributes every chunk sees its own attribution on the output rather
+                // than a value this transform remembered.
+                ...(argsOwner !== undefined && { subagentRunId: argsOwner }),
               } as ToolCallArgsEvent;
 
               toolMessageResult.push(toolCallArgsEvent);
 
               log?.event("TRANSFORM", "TOOL_CALL_ARGS", toolCallArgsEvent, {
-                toolCallId: toolCallFields!.toolCallId,
+                toolCallId: toolCallFields.toolCallId,
               });
             }
 
@@ -374,34 +388,30 @@ export const transformChunks =
           }
           case EventType.REASONING_MESSAGE_CHUNK: {
             const reasoningChunkEvent = event as ReasoningMessageChunkEvent;
-            if (
-              mode === "reasoning" &&
-              (reasoningChunkEvent.messageId === undefined ||
-                reasoningChunkEvent.messageId === reasoningMessageFields?.messageId)
-            ) {
-              assertChunkOwner(
-                reasoningChunkEvent.subagentRunId,
-                "reasoning message",
-                reasoningMessageFields!.messageId,
-              );
-            }
-            const reasoningMessageResult = [];
-            if (
-              // we are not in a reasoning message
-              mode !== "reasoning" ||
-              // or the message id is different. `!== undefined`, not truthiness, to match
-              // the text and tool branches: an explicitly empty id is a present id that
-              // denotes a NEW stream, and treating it as absent left this pointing at the
-              // previous message and stamped its content with the new chunk's owner.
-              (reasoningChunkEvent.messageId !== undefined &&
-                reasoningChunkEvent.messageId !== reasoningMessageFields?.messageId)
-            ) {
-              // close the current message if any
-              reasoningMessageResult.push(...closePendingEvent());
-            }
+            const lane = resolveLane(
+              "reasoning",
+              reasoningChunkEvent.messageId,
+              reasoningChunkEvent.subagentRunId,
+              "REASONING_MESSAGE_CHUNK",
+              "reasoning message",
+            );
+            const open = lanes.get(lane);
+            const reasoningMessageResult: BaseEvent[] = [];
 
-            // we are not in a reasoning message, start a new one
-            if (mode !== "reasoning") {
+            let reasoningMessageFields: ReasoningMessageFields;
+            if (
+              open?.kind === "reasoning" &&
+              // `!== undefined`, not truthiness, to match the text and tool branches: an
+              // explicitly empty id is a present id that denotes a NEW stream, and
+              // treating it as absent left this pointing at the previous message and
+              // stamped its content with the new chunk's owner.
+              (reasoningChunkEvent.messageId === undefined ||
+                reasoningChunkEvent.messageId === open.fields.messageId)
+            ) {
+              reasoningMessageFields = open.fields;
+            } else {
+              reasoningMessageResult.push(...closeLane(lane));
+
               if (reasoningChunkEvent.messageId === undefined) {
                 throw new Error("First REASONING_MESSAGE_CHUNK must have a messageId");
               }
@@ -410,7 +420,7 @@ export const transformChunks =
                 messageId: reasoningChunkEvent.messageId,
                 subagentRunId: reasoningChunkEvent.subagentRunId,
               };
-              mode = "reasoning";
+              lanes.set(lane, { kind: "reasoning", fields: reasoningMessageFields });
 
               const reasoningMessageStartEvent = {
                 type: EventType.REASONING_MESSAGE_START,
@@ -428,27 +438,22 @@ export const transformChunks =
             }
 
             if (reasoningChunkEvent.delta !== undefined) {
+              const contentOwner =
+                reasoningChunkEvent.subagentRunId ?? reasoningMessageFields.subagentRunId;
               const reasoningMessageContentEvent = {
                 type: EventType.REASONING_MESSAGE_CONTENT,
-                messageId: reasoningMessageFields!.messageId,
+                messageId: reasoningMessageFields.messageId,
                 delta: reasoningChunkEvent.delta,
-                // Carry the INCOMING chunk's tag, not the opener's. The chunk
-                // path keys a stream by id alone, so a chunk that reuses the id
-                // under a different owner would otherwise be absorbed silently
-                // and the whole message attributed to the opener. Propagating it
-                // lets verifyEvents — which runs after this transform — reject the
-                // ownership change the same way it does on the non-chunk path.
-                ...((reasoningChunkEvent.subagentRunId ?? reasoningMessageFields!.subagentRunId) !==
-                  undefined && {
-                  subagentRunId:
-                    reasoningChunkEvent.subagentRunId ?? reasoningMessageFields!.subagentRunId,
-                }),
+                // Prefer the INCOMING chunk's tag over the opener's, so a producer that
+                // attributes every chunk sees its own attribution on the output rather
+                // than a value this transform remembered.
+                ...(contentOwner !== undefined && { subagentRunId: contentOwner }),
               } as ReasoningMessageContentEvent;
 
               reasoningMessageResult.push(reasoningMessageContentEvent);
 
               log?.event("TRANSFORM", "REASONING_MESSAGE_CONTENT", reasoningMessageContentEvent, {
-                messageId: reasoningMessageFields!.messageId,
+                messageId: reasoningMessageFields.messageId,
               });
             }
 
@@ -460,7 +465,7 @@ export const transformChunks =
       }),
       finalize(() => {
         // This ensures that we close any pending events when the source observable completes
-        closePendingEvent();
+        closeAllLanes();
       }),
     );
   };

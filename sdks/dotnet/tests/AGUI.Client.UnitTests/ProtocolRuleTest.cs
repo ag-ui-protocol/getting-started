@@ -2127,6 +2127,84 @@ public sealed class ProtocolRuleTest
         Assert.Contains("inner (subagent 's1')", ex.Message, StringComparison.Ordinal);
     }
 
+    // Owner-namespace parity with TypeScript, from PR review. .NET already kept separate
+    // owner maps per kind, but routed REASONING_ENCRYPTED_VALUE by only two subtypes, so
+    // a "message" value was checked against reasoning owners instead of message owners --
+    // the inverse of the TypeScript bug, reachable by the same shape.
+
+    [Fact]
+    public async Task Subagent_EncryptedMessageValue_ChecksMessageOwners()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new SubagentStartedEvent { SubagentRunId = "s1", Name = "a" },
+            new SubagentStartedEvent { SubagentRunId = "s2", Name = "b" },
+            new TextMessageStartEvent { MessageId = "m", Role = "assistant", SubagentRunId = "s1" },
+            new ReasoningEncryptedValueEvent { Subtype = "message", EntityId = "m", EncryptedValue = "v", SubagentRunId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_EncryptedToolCallValue_StillChecksToolCallOwners()
+    {
+        // The case that already worked must keep working: routing by subtype must not
+        // collapse the three kinds back into two.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new SubagentStartedEvent { SubagentRunId = "s1", Name = "a" },
+            new SubagentStartedEvent { SubagentRunId = "s2", Name = "b" },
+            new ToolCallStartEvent { ToolCallId = "c", ToolCallName = "t", SubagentRunId = "s1" },
+            new ReasoningEncryptedValueEvent { Subtype = "tool-call", EntityId = "c", EncryptedValue = "v", SubagentRunId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_EmptyStringId_IsDistinctFromTheParent()
+    {
+        // "" is a legal opaque subagent id. .NET keys steps on a (owner, name) tuple so
+        // null and "" stay distinct; this pins the parity with TypeScript, which had
+        // flattened them into one string and lost the distinction.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new SubagentStartedEvent { SubagentRunId = "", Name = "a" },
+            new StepStartedEvent { StepName = "tools" },
+            new StepStartedEvent { StepName = "tools", SubagentRunId = "" },
+            new StepFinishedEvent { StepName = "tools", SubagentRunId = "" },
+            new StepFinishedEvent { StepName = "tools" },
+            new SubagentFinishedEvent { SubagentRunId = "" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        await ProcessEventsAsync(events);
+    }
+
+    [Fact]
+    public async Task Subagent_AttributionOnlyStream_IsAccepted()
+    {
+        // Phase-1 attribution without any lifecycle events is deliberately valid, so an id
+        // that no SUBAGENT_STARTED ever named must not be rejected. Pinned in both SDKs
+        // because a review asked for the opposite and the DOCS were the thing at fault.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new TextMessageStartEvent { MessageId = "m", Role = "assistant", SubagentRunId = "never-started" },
+            new TextMessageContentEvent { MessageId = "m", Delta = "x", SubagentRunId = "never-started" },
+            new TextMessageEndEvent { MessageId = "m", SubagentRunId = "never-started" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        await ProcessEventsAsync(events);
+    }
+
     private static async Task<List<ChatResponseUpdate>> ProcessEventsAsync(BaseEvent[] events)
     {
         using var httpClient = CreateMockHttpClient(events);

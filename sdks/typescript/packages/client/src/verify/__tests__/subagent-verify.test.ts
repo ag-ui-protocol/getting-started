@@ -697,4 +697,109 @@ describe("verifyEvents subagent lifecycle", () => {
       /steps are still active: inner \(subagent 's1'\)/i,
     );
   });
+
+  // Owner-namespace and default-value fixes from PR review. Each case below is the
+  // reviewer's own minimal sequence; each passed verification before the fix.
+
+  it("should reject an encrypted MESSAGE value whose id collides with a tool call", async () => {
+    // Ids are only unique within a kind, so a message and a tool call may both be "x".
+    // A single owner map let the tool-call write clobber the message's owner, and the
+    // encrypted value naming that id was then checked against the wrong owner.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "a" } as SubagentStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s2", name: "b" } as SubagentStartedEvent,
+        { type: EventType.TEXT_MESSAGE_START, messageId: "x", role: "assistant", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.TOOL_CALL_START, toolCallId: "x", toolCallName: "t", subagentRunId: "s2" } as BaseEvent,
+        { type: EventType.REASONING_ENCRYPTED_VALUE, subtype: "message", entityId: "x", value: "v", subagentRunId: "s2" } as BaseEvent,
+      ],
+      /does not match the message 'x'/i,
+    );
+  });
+
+  it("should keep a tool call's owner after TOOL_CALL_END for a later encrypted value", async () => {
+    // The reason owners are retained per run rather than dropped on close.
+    const inputEvents: BaseEvent[] = [
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "a" } as SubagentStartedEvent,
+      { type: EventType.TOOL_CALL_START, toolCallId: "c", toolCallName: "t", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TOOL_CALL_END, toolCallId: "c", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_ENCRYPTED_VALUE, subtype: "tool-call", entityId: "c", value: "v", subagentRunId: "s1" } as BaseEvent,
+    ];
+    const events = await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+    expect(events).toHaveLength(inputEvents.length);
+  });
+
+  it("should reject a second reasoning opener that contradicts the first", async () => {
+    // The verifier kept the first owner while the reducer mints the message from the
+    // SECOND, so content then appended to a message owned by someone else.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "a" } as SubagentStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s2", name: "b" } as SubagentStartedEvent,
+        { type: EventType.REASONING_START, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.REASONING_MESSAGE_START, messageId: "r1", role: "reasoning", subagentRunId: "s2" } as BaseEvent,
+      ],
+      /does not match the reasoning message 'r1'/i,
+    );
+  });
+
+  it("should treat the empty string as a real subagent id, distinct from the parent", async () => {
+    // "" is a legal opaque id. Joining owner and step name into one key with a separator
+    // made the parent (no owner) and an empty-id subagent collide, so that subagent could
+    // close the parent's step. Both directions are pinned.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "", name: "a" } as SubagentStartedEvent,
+        { type: EventType.STEP_STARTED, stepName: "tools" } as BaseEvent,
+        { type: EventType.STEP_FINISHED, stepName: "tools", subagentRunId: "" } as BaseEvent,
+      ],
+      /that step is open under the parent agent/i,
+    );
+
+    const valid: BaseEvent[] = [
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      { type: EventType.SUBAGENT_STARTED, subagentRunId: "", name: "a" } as SubagentStartedEvent,
+      { type: EventType.STEP_STARTED, stepName: "tools" } as BaseEvent,
+      { type: EventType.STEP_STARTED, stepName: "tools", subagentRunId: "" } as BaseEvent,
+      { type: EventType.STEP_FINISHED, stepName: "tools", subagentRunId: "" } as BaseEvent,
+      { type: EventType.STEP_FINISHED, stepName: "tools" } as BaseEvent,
+    ];
+    const events = await firstValueFrom(verifyEvents(false)(from(valid)).pipe(toArray()));
+    expect(events).toHaveLength(valid.length);
+  });
+
+  it("should treat an omitted activity `replace` as true, matching the schema and reducer", async () => {
+    // The schema defaults replace to true and the reducer uses `?? true`; the verifier
+    // required an explicit true, so it kept the first owner and rejected the valid delta
+    // for a typed producer that had not gone through Zod.
+    const inputEvents: BaseEvent[] = [
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "a" } as SubagentStartedEvent,
+      { type: EventType.SUBAGENT_STARTED, subagentRunId: "s2", name: "b" } as SubagentStartedEvent,
+      { type: EventType.ACTIVITY_SNAPSHOT, messageId: "a1", activityType: "x", content: {}, subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.ACTIVITY_SNAPSHOT, messageId: "a1", activityType: "x", content: {}, subagentRunId: "s2" } as BaseEvent,
+      { type: EventType.ACTIVITY_DELTA, messageId: "a1", content: {}, subagentRunId: "s2" } as BaseEvent,
+    ];
+    const events = await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+    expect(events).toHaveLength(inputEvents.length);
+  });
+
+  it("should still accept an attribution-only stream with ids that were never started", async () => {
+    // The design deliberately supports Phase-1 attribution WITHOUT lifecycle events, so
+    // an id that no SUBAGENT_STARTED ever named is valid. Pinned because a review asked
+    // for the opposite, and the docs -- not the code -- were what claimed the rule.
+    const inputEvents: BaseEvent[] = [
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      { type: EventType.TEXT_MESSAGE_START, messageId: "m", role: "assistant", subagentRunId: "never-started" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "m", delta: "x", subagentRunId: "never-started" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_END, messageId: "m", subagentRunId: "never-started" } as BaseEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
+    ];
+    const events = await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+    expect(events).toHaveLength(inputEvents.length);
+  });
 });

@@ -519,14 +519,27 @@ internal static class EventStreamConverter
                     break;
 
                 case ReasoningEncryptedValueEvent encrypted:
-                    // `subtype` decides which entity this continues: a "tool-call" value
-                    // belongs to a tool call, not a reasoning message.
+                    // `subtype` decides which entity this continues, and there are THREE
+                    // cases, not two. "message" means a TEXT message, whose owner lives in
+                    // messageOwners -- checking reasoningOwners for it found nothing and so
+                    // accepted a foreign tag against a message another subagent opened.
+                    // Mirrors the TypeScript verifier, which had the inverse of this bug.
                     RejectOwnerMismatch(
                         encrypted.Type,
                         encrypted.SubagentRunId,
-                        encrypted.Subtype == "tool-call" ? toolCallOwners : reasoningOwners,
+                        encrypted.Subtype switch
+                        {
+                            "tool-call" => toolCallOwners,
+                            "message" => messageOwners,
+                            _ => reasoningOwners,
+                        },
                         encrypted.EntityId,
-                        encrypted.Subtype == "tool-call" ? "tool call" : "reasoning message");
+                        encrypted.Subtype switch
+                        {
+                            "tool-call" => "tool call",
+                            "message" => "message",
+                            _ => "reasoning message",
+                        });
                     break;
 
                 case ActivitySnapshotEvent activitySnapshot:

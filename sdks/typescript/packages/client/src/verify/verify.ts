@@ -25,7 +25,23 @@ export const verifyEvents =
     // its entity closed — REASONING_ENCRYPTED_VALUE with subtype "tool-call" after
     // TOOL_CALL_END is the case in point, and nothing requires it to precede the close.
     // Losing the owner there made the mismatch unmatchable and accepted a wrong one.
-    const entityOwners = new Map<string, { subagentRunId?: string }>(); // entity ID -> owner
+    // Owners, retained for the whole run, in one bucket PER ENTITY KIND. An id is only
+    // unique within a kind: a message and a tool call may both be called "x" with no
+    // conflict. A single bucket let the tool-call write overwrite the message's owner, so
+    // a later encrypted value naming that id was checked against the wrong owner and
+    // accepted. .NET already keeps separate maps per kind; this matches it.
+    //
+    // Retained rather than cleared on close, because a continuation can legitimately
+    // arrive after its entity closed -- REASONING_ENCRYPTED_VALUE with subtype
+    // "tool-call" after TOOL_CALL_END is the case in point. The active* maps above stay
+    // purely "is this entity open?" state.
+    type Owner = { subagentRunId?: string };
+    const owners = {
+      message: new Map<string, Owner>(),
+      toolCall: new Map<string, Owner>(),
+      activity: new Map<string, Owner>(),
+      reasoning: new Map<string, Owner>(),
+    };
     let runFinished = false;
     let runError = false; // New flag to track if RUN_ERROR has been sent
     // New flags to track first/last event requirements
@@ -37,10 +53,25 @@ export const verifyEvents =
     // rejected that valid nesting with `Step "tools" is already active`, while ACCEPTING a
     // STEP_FINISHED that closed the parent's step under the subagent's tag -- the exact
     // shape a design partner reported from a real deepagents run.
-    const stepKey = (subagentRunId: string | undefined, stepName: string) =>
-      `${subagentRunId ?? ""}\u0000${stepName}`;
-    // key -> the owner and display name, kept for error messages and the RUN_FINISHED check
-    const activeSteps = new Map<string, { stepName: string; subagentRunId?: string }>();
+    // owner -> stepName -> true. Kept as a NESTED map rather than one joined key:
+    // joining the owner and the name with a separator made the parent (no owner) collide
+    // with a subagent whose id is the empty string, which is a legal opaque id -- so that
+    // subagent could close the parent's step. .NET keys on a (owner, name) tuple and so
+    // never had the problem; nesting matches it. A Map distinguishes the `undefined` key
+    // from the "" key, which is exactly the distinction that was lost.
+    const activeSteps = new Map<string | undefined, Map<string, true>>();
+    const stepsFor = (owner: string | undefined) => {
+      let m = activeSteps.get(owner);
+      if (!m) {
+        m = new Map<string, true>();
+        activeSteps.set(owner, m);
+      }
+      return m;
+    };
+    const anyStepsActive = () => {
+      for (const m of activeSteps.values()) if (m.size > 0) return true;
+      return false;
+    };
     const activeSubagents = new Map<string, boolean>(); // Map of subagent ID -> active status
     // Ids closed by a SUBAGENT_FINISHED / SUBAGENT_ERROR in this run. Needed because
     // "no duplicate SUBAGENT_STARTED for the same subagentRunId" has to hold for the whole
@@ -64,7 +95,10 @@ export const verifyEvents =
       activeToolCalls.clear();
       activeActivities.clear();
       activeReasoning.clear();
-      entityOwners.clear();
+      owners.message.clear();
+      owners.toolCall.clear();
+      owners.activity.clear();
+      owners.reasoning.clear();
       activeSteps.clear();
       activeSubagents.clear();
       closedSubagents.clear();
@@ -181,7 +215,7 @@ export const verifyEvents =
               if (subErr) return throwError(() => subErr);
             }
             activeMessages.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
-            entityOwners.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
+            owners.message.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
             return of(event);
           }
 
@@ -199,7 +233,7 @@ export const verifyEvents =
             }
 
             const subErr = subagentTagError(
-              eventType, (event.subagentRunId as string | undefined), activeMessages.get(messageId), "message", messageId,
+              eventType, (event.subagentRunId as string | undefined), owners.message.get(messageId), "message", messageId,
             );
             if (subErr) return throwError(() => subErr);
             return of(event);
@@ -219,7 +253,7 @@ export const verifyEvents =
             }
 
             const subErr = subagentTagError(
-              eventType, (event.subagentRunId as string | undefined), activeMessages.get(messageId), "message", messageId,
+              eventType, (event.subagentRunId as string | undefined), owners.message.get(messageId), "message", messageId,
             );
             if (subErr) return throwError(() => subErr);
             // Remove message from active set
@@ -248,7 +282,7 @@ export const verifyEvents =
               if (subErr) return throwError(() => subErr);
             }
             activeToolCalls.set(toolCallId, { subagentRunId: (event.subagentRunId as string | undefined) });
-            entityOwners.set(toolCallId, { subagentRunId: (event.subagentRunId as string | undefined) });
+            owners.toolCall.set(toolCallId, { subagentRunId: (event.subagentRunId as string | undefined) });
             return of(event);
           }
 
@@ -266,7 +300,7 @@ export const verifyEvents =
             }
 
             const subErr = subagentTagError(
-              eventType, (event.subagentRunId as string | undefined), activeToolCalls.get(toolCallId), "tool call", toolCallId,
+              eventType, (event.subagentRunId as string | undefined), owners.toolCall.get(toolCallId), "tool call", toolCallId,
             );
             if (subErr) return throwError(() => subErr);
             return of(event);
@@ -286,7 +320,7 @@ export const verifyEvents =
             }
 
             const subErr = subagentTagError(
-              eventType, (event.subagentRunId as string | undefined), activeToolCalls.get(toolCallId), "tool call", toolCallId,
+              eventType, (event.subagentRunId as string | undefined), owners.toolCall.get(toolCallId), "tool call", toolCallId,
             );
             if (subErr) return throwError(() => subErr);
             // Remove tool call from active set
@@ -298,8 +332,7 @@ export const verifyEvents =
           case EventType.STEP_STARTED: {
             const stepName = (event.stepName as string);
             const stepOwner = (event.subagentRunId as string | undefined);
-            const key = stepKey(stepOwner, stepName);
-            if (activeSteps.has(key)) {
+            if (stepsFor(stepOwner).has(stepName)) {
               return throwError(
                 () =>
                   new AGUIError(
@@ -309,15 +342,14 @@ export const verifyEvents =
                   ),
               );
             }
-            activeSteps.set(key, { stepName, subagentRunId: stepOwner });
+            stepsFor(stepOwner).set(stepName, true);
             return of(event);
           }
 
           case EventType.STEP_FINISHED: {
             const stepName = (event.stepName as string);
             const stepOwner = (event.subagentRunId as string | undefined);
-            const key = stepKey(stepOwner, stepName);
-            if (!activeSteps.has(key)) {
+            if (!stepsFor(stepOwner).has(stepName)) {
               // A step with this name IS open, but under a different owner. Reported
               // separately because it is a distinct and much more likely mistake than a
               // step that was never started: a producer that stamps its attribution from
@@ -326,19 +358,24 @@ export const verifyEvents =
               // has been popped. Both were observed in the same real run. The generic
               // "was not started" message sent the reader looking for a missing
               // STEP_STARTED that is in fact right there.
-              const sameName = Array.from(activeSteps.values()).find(
-                (v) => v.stepName === stepName,
-              );
-              if (sameName) {
+              // Find the owner that DOES hold a step of this name, if any.
+              let otherOwner: string | undefined;
+              let foundOther = false;
+              for (const [owner, names] of activeSteps) {
+                if (owner !== stepOwner && names.has(stepName)) {
+                  otherOwner = owner;
+                  foundOther = true;
+                  break;
+                }
+              }
+              if (foundOther) {
                 return throwError(
                   () =>
                     new AGUIError(
                       `Cannot send 'STEP_FINISHED' for step "${stepName}" attributed to ${
                         stepOwner !== undefined ? `subagent '${stepOwner}'` : "the parent agent"
                       }: that step is open under ${
-                        sameName.subagentRunId !== undefined
-                          ? `subagent '${sameName.subagentRunId}'`
-                          : "the parent agent"
+                        otherOwner !== undefined ? `subagent '${otherOwner}'` : "the parent agent"
                       }. A step must be finished by whoever started it.`,
                     ),
                 );
@@ -350,7 +387,7 @@ export const verifyEvents =
                   ),
               );
             }
-            activeSteps.delete(key);
+            stepsFor(stepOwner).delete(stepName);
             return of(event);
           }
 
@@ -379,8 +416,9 @@ export const verifyEvents =
             // the tracked owner here would let a following ACTIVITY_DELTA under the new
             // tag patch a message still owned by someone else.
             const isNew = !activeActivities.has(messageId);
-            if (isNew || (event.replace as boolean | undefined) === true) {
+            if (isNew || (event.replace as boolean | undefined) !== false) {
               activeActivities.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
+              owners.activity.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
             }
             return of(event);
           }
@@ -391,9 +429,20 @@ export const verifyEvents =
             // First writer records the owner. REASONING_START brackets the outer
             // reasoning and REASONING_MESSAGE_START the inner message, usually under the
             // same id, so whichever arrives first establishes it.
+            // A second opener that DISAGREES is a contradiction, not something to
+            // silently ignore: the verifier kept the first owner while the reducer mints
+            // the message from the second, so content then appended to a message owned by
+            // someone else and passed verification.
+            const existingReasoningOwner = owners.reasoning.get(messageId);
+            if (existingReasoningOwner) {
+              const subErr = subagentTagError(
+                eventType, (event.subagentRunId as string | undefined), existingReasoningOwner, "reasoning message", messageId,
+              );
+              if (subErr) return throwError(() => subErr);
+            }
             if (!activeReasoning.has(messageId)) {
               activeReasoning.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
-              entityOwners.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
+              owners.reasoning.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
             }
             return of(event);
           }
@@ -405,7 +454,7 @@ export const verifyEvents =
             const subErr = subagentTagError(
               eventType,
               (event.subagentRunId as string | undefined),
-              activeReasoning.get(messageId),
+              owners.reasoning.get(messageId),
               "reasoning message",
               messageId,
             );
@@ -424,12 +473,23 @@ export const verifyEvents =
             // "tool-call" encrypted value belongs to a TOOL CALL, so looking only in
             // activeReasoning found no owner and accepted s2's value against s1's call.
             const entityId = (event.entityId as string);
-            const isToolCall = (event.subtype as string | undefined) === "tool-call";
+            const subtype = (event.subtype as string | undefined);
+            // Three cases, not two. "message" means a TEXT message, whose owner lives in
+            // the message bucket -- looking it up among reasoning owners found nothing and
+            // accepted a foreign tag against a message another subagent opened.
+            const bucket =
+              subtype === "tool-call"
+                ? owners.toolCall
+                : subtype === "message"
+                  ? owners.message
+                  : owners.reasoning;
+            const kindLabel =
+              subtype === "tool-call" ? "tool call" : subtype === "message" ? "message" : "reasoning message";
             const subErr = subagentTagError(
               eventType,
               (event.subagentRunId as string | undefined),
-              entityOwners.get(entityId),
-              isToolCall ? "tool call" : "reasoning message",
+              bucket.get(entityId),
+              kindLabel,
               entityId,
             );
             if (subErr) return throwError(() => subErr);
@@ -441,7 +501,7 @@ export const verifyEvents =
             const subErr = subagentTagError(
               eventType,
               (event.subagentRunId as string | undefined),
-              activeActivities.get(messageId),
+              owners.activity.get(messageId),
               "activity",
               messageId,
             );
@@ -519,14 +579,14 @@ export const verifyEvents =
             // and can't happen after already being finished (already checked)
 
             // Check that all steps are finished before run ends
-            if (activeSteps.size > 0) {
-              const unfinishedSteps = Array.from(activeSteps.values())
-                .map((v) =>
-                  v.subagentRunId !== undefined
-                    ? `${v.stepName} (subagent '${v.subagentRunId}')`
-                    : v.stepName,
-                )
-                .join(", ");
+            if (anyStepsActive()) {
+              const parts: string[] = [];
+              for (const [owner, names] of activeSteps) {
+                for (const name of names.keys()) {
+                  parts.push(owner !== undefined ? `${name} (subagent '${owner}')` : name);
+                }
+              }
+              const unfinishedSteps = parts.join(", ");
               return throwError(
                 () =>
                   new AGUIError(

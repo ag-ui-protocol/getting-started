@@ -141,8 +141,8 @@ describe("subagentRunId attribution over protobuf", () => {
   it("documents that chunk events still cannot be encoded at all (pre-existing)", () => {
     // TEXT_MESSAGE_CHUNK and TOOL_CALL_CHUNK have proto messages AND oneof slots
     // but no EventType enum entry, so writing base_event.type throws. That
-    // predates subagents and is part of the wider protobuf-parity gap (only 18 of
-    // 31 event types are modelled), which is explicitly out of scope here — see
+    // predates subagents and is part of the wider protobuf-parity gap (only 19 of
+    // the 36 event types are modelled), which is explicitly out of scope here — see
     // PNI-277. Both messages did get a subagent_run_id field for when they are
     // wired up, but the field is unreachable until the enum entries exist.
     //

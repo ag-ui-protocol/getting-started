@@ -5,7 +5,9 @@ namespace AGUI.Abstractions;
 
 /// <summary>
 /// Event signaling that a subagent completed its work successfully. Terminal for the
-/// subagent it names: no further event may be attributed to that identifier.
+/// subagent it names: it may not be finished again, nor restarted within the run.
+/// Events attributed to it afterwards remain valid — a continuation carries the tag of
+/// the subagent it belongs to even after that subagent has finished.
 /// </summary>
 // Keep in sync with sdks/typescript/packages/core/src/events.ts
 public sealed class SubagentFinishedEvent : BaseEvent
