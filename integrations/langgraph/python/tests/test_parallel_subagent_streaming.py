@@ -426,5 +426,70 @@ class TestNoCrossRunState(unittest.TestCase):
         self.assertIsNone(agent.active_run)
 
 
+class TestParallelAttributionInvariants(unittest.TestCase):
+    """Regression for the S&P Global parallel-run report (feedback #3).
+
+    Their captured run — two `alpha` subagents fanned out in parallel, each
+    calling a tool and streaming a reply — showed three failures of one root
+    cause (a single global "current subagent" slot): a tool call whose START,
+    END and RESULT carried different tags; both subagents streaming text under
+    ONE shared message id, reopened three times; and step boundaries tagged
+    with whichever subagent's event came last. This test replays their
+    interleaving shape and asserts the two invariants their tables violate;
+    the step half lives in TestStepOwnership / TestPerLaneStepTransitions.
+    """
+
+    def test_every_entity_keeps_one_owner_across_interleaving(self):
+        agent = _make_agent()
+        a, b = "tools:3cab", "tools:0ca0"
+
+        # Their events 83-86: both subagents open a tool call back to back,
+        # then finish them — in the captured log call-a's END arrived tagged
+        # with subagent b because b's START had stolen the global slot.
+        _feed(agent, _tool_start_chunk("m-a", "tooluse_rXbq", "current_datetime"), a)
+        _feed(agent, _tool_start_chunk("m-b", "tooluse_HRj4", "current_datetime"), b)
+        _feed(agent, _model_end(), a)
+        _feed(agent, _model_end(), b)
+
+        # Their events 105-158: both subagents stream their reply,
+        # interleaved at chunk granularity — in the captured log both landed
+        # in ONE message id, START/END tags flipping between the two.
+        _feed(agent, _text_chunk("lc_run-a", "It "), a)
+        _feed(agent, _text_chunk("lc_run-b", "The "), b)
+        _feed(agent, _text_chunk("lc_run-a", "is "), a)
+        _feed(agent, _text_chunk("lc_run-b", "date "), b)
+        _feed(agent, _text_chunk("lc_run-a", "Tuesday."), a)
+        _feed(agent, _text_chunk("lc_run-b", "is Tuesday."), b)
+        _feed(agent, _model_end(), a)
+        _feed(agent, _model_end(), b)
+
+        # Invariant 1: every event of one tool call carries ONE tag — the
+        # opener's. (Their table: START 3cab / END 0ca0 on the same call.)
+        owners_by_call = {}
+        for e in agent.dispatched:
+            if e.type in (EventType.TOOL_CALL_START, EventType.TOOL_CALL_ARGS, EventType.TOOL_CALL_END):
+                owners_by_call.setdefault(e.tool_call_id, set()).add(e.subagent_run_id)
+        self.assertEqual(owners_by_call, {"tooluse_rXbq": {a}, "tooluse_HRj4": {b}})
+
+        # Invariant 2: each subagent streams under its OWN message id, opened
+        # once and closed once, every event of that id carrying one tag.
+        # (Their table: one shared id, three START/END pairs, tags flipping.)
+        owners_by_message = {}
+        opens = {}
+        closes = {}
+        for e in agent.dispatched:
+            if e.type in (EventType.TEXT_MESSAGE_START, EventType.TEXT_MESSAGE_CONTENT, EventType.TEXT_MESSAGE_END):
+                owners_by_message.setdefault(e.message_id, set()).add(e.subagent_run_id)
+            if e.type == EventType.TEXT_MESSAGE_START:
+                opens[e.message_id] = opens.get(e.message_id, 0) + 1
+            if e.type == EventType.TEXT_MESSAGE_END:
+                closes[e.message_id] = closes.get(e.message_id, 0) + 1
+        self.assertEqual(len(owners_by_message), 2, "two subagents must get two distinct message ids")
+        for owners in owners_by_message.values():
+            self.assertEqual(len(owners), 1, "a message id must never change owner")
+        self.assertEqual(opens, {mid: 1 for mid in owners_by_message})
+        self.assertEqual(closes, {mid: 1 for mid in owners_by_message})
+
+
 if __name__ == "__main__":
     unittest.main()
