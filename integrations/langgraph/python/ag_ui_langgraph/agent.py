@@ -350,6 +350,29 @@ def _clear_subagent_lanes(active_run, ids) -> None:
         step_owners.pop(lane, None)
 
 
+def _deepest_first(active_run, ids) -> list:
+    """Order subagent ids so children come before their (grand)parents.
+
+    active_subagents preserves registration order, which is shallow-first for
+    nested subagents — tearing down in that order ends an outer subagent's
+    lifecycle before its still-open inner one, violating containment. The sort
+    is stable, so siblings keep their registration order.
+    """
+    parents = active_run.get("subagent_parents") or {}
+
+    def depth(sid):
+        d = 0
+        cur = sid
+        seen = set()
+        while cur in parents and cur not in seen:
+            seen.add(cur)
+            cur = parents[cur]
+            d += 1
+        return d
+
+    return sorted(ids, key=depth, reverse=True)
+
+
 def drain_subagents(active_run) -> list:
     """Emit SUBAGENT_FINISHED for any still-open subagents (before RUN_FINISHED)."""
     ids = list(active_run.get("active_subagents", {}).keys())
@@ -361,13 +384,17 @@ def drain_subagents(active_run) -> list:
         active_run.setdefault("closed_subagents", set()).update(ids)
         active_run["current_subagent_run_id"] = None
         return []
-    # Steps for EVERY subagent lane still holding one, including lanes whose
-    # subagent already finished (see _lanes_needing_a_step_close). The terminal
-    # events below stay scoped to the still-open ids: a terminal is terminal for the
-    # id it names, so a closed subagent must not get a second one.
-    events = close_lane_steps(active_run, _lanes_needing_a_step_close(active_run, ids))
-    events += [SubagentFinishedEvent(type=EventType.SUBAGENT_FINISHED, subagent_run_id=sid)
-               for sid in ids]
+    # Trailing lanes first: lanes whose subagent already finished but still hold
+    # an open step (see _lanes_needing_a_step_close). Their owners get no second
+    # terminal, so their step closes cannot nest inside any window and lead.
+    trailing = [l for l in _lanes_needing_a_step_close(active_run, []) if l not in ids]
+    events = close_lane_steps(active_run, trailing)
+    # Then each still-open subagent, deepest-first, its step close immediately
+    # before its own terminal so the close lands inside its window and an inner
+    # subagent's lifecycle ends before its parent's.
+    for sid in _deepest_first(active_run, ids):
+        events += close_lane_steps(active_run, [sid])
+        events.append(SubagentFinishedEvent(type=EventType.SUBAGENT_FINISHED, subagent_run_id=sid))
     active_run["active_subagents"].clear()
     # Terminal for these ids — see reconcile_subagents.
     active_run.setdefault("closed_subagents", set()).update(ids)
@@ -396,10 +423,14 @@ def error_open_subagents(active_run, message: str) -> list:
     # Close each lane's open step before its terminal, same as the drain path. A step
     # left open on the error path fails the clients' "all steps closed" rule just as
     # surely as one left open on the success path — including a step opened by a
-    # trailing event in an already-closed subagent's lane.
-    events = close_lane_steps(active_run, _lanes_needing_a_step_close(active_run, ids))
-    events += [SubagentErrorEvent(type=EventType.SUBAGENT_ERROR, subagent_run_id=sid, message=message)
-               for sid in ids]
+    # trailing event in an already-closed subagent's lane. Same ordering as the
+    # drain: trailing lanes lead, then deepest-first with each step close
+    # immediately before its own terminal.
+    trailing = [l for l in _lanes_needing_a_step_close(active_run, []) if l not in ids]
+    events = close_lane_steps(active_run, trailing)
+    for sid in _deepest_first(active_run, ids):
+        events += close_lane_steps(active_run, [sid])
+        events.append(SubagentErrorEvent(type=EventType.SUBAGENT_ERROR, subagent_run_id=sid, message=message))
     active_run.get("active_subagents", {}).clear()
     # Terminal for these ids — see reconcile_subagents.
     active_run.setdefault("closed_subagents", set()).update(ids)
@@ -671,7 +702,10 @@ class LangGraphAgent:
         active_run.setdefault("subagent_task_meta", {})[subagent_run_id] = {
             "name": tool_input.get("subagent_type"),
             "description": tool_input.get("description"),
-            "parent_tool_call_id": task_call.get("tool_call_id"),
+            # The PUBLIC id when the call's chunk was streamed (what the client
+            # saw); the raw id is its own public id when no chunk supplied one
+            # (the id was then never emitted under a minted name).
+            "parent_tool_call_id": task_call.get("public_tool_call_id") or task_call.get("tool_call_id"),
             "parent_message_id": task_call.get("parent_message_id"),
         }
         # Map this `task` invocation's run_id to its subagent_run_id so the matching
@@ -2308,7 +2342,10 @@ class LangGraphAgent:
                 and tool_call_data
                 and tool_call_data.get("name")
                 and tool_call_data.get("id")
-                and tool_call_data["id"] != current_stream["tool_call_id"]
+                # The slot stores the PUBLIC id; compare like with like or a
+                # minted id would read as a new call for its own chunks.
+                and self._resolve_public_tool_call_id(tool_call_data["id"])
+                != current_stream["tool_call_id"]
             ):
                 yield self._dispatch_event(
                     ToolCallEndEvent(
@@ -2350,9 +2387,16 @@ class LangGraphAgent:
                     seen_tasks = self.active_run.setdefault("seen_task_call_ids", set())
                     if _tcc["id"] not in seen_tasks:
                         seen_tasks.add(_tcc["id"])
+                        # tool_call_id stays RAW — it is matched against the
+                        # ToolNode dispatch capture (graph-side raw ids). The
+                        # public pair is what SUBAGENT_STARTED must reference,
+                        # since those are the ids the client saw streamed.
                         self.active_run.setdefault("pending_task_calls", []).append({
                             "tool_call_id": _tcc["id"],
-                            "parent_message_id": chunk_id,
+                            "public_tool_call_id": self._resolve_public_tool_call_id(_tcc["id"]),
+                            "parent_message_id": (
+                                self._resolve_public_message_id(chunk_id) if chunk_id else chunk_id
+                            ),
                         })
 
             reasoning_data = resolve_reasoning_content(chunk) if chunk else None
@@ -2435,7 +2479,9 @@ class LangGraphAgent:
                 if current_stream and current_stream.get("id") and not current_stream.get("tool_call_id"):
                     text_stream_id = current_stream["id"]
                 elif message_content != "":
-                    text_stream_id = chunk_id
+                    # Public, not raw: another lane may already have claimed
+                    # this upstream chunk id (see _resolve_public_id).
+                    text_stream_id = self._resolve_public_message_id(chunk_id)
                     if should_emit_messages:
                         yield self._dispatch_event(
                             TextMessageStartEvent(
@@ -2499,26 +2545,37 @@ class LangGraphAgent:
                 return
 
             if is_tool_call_start_event:
+                # Public ids, not raw: another lane may already have claimed
+                # this call id or chunk id (see _resolve_public_id). The
+                # in-progress slot stores the PUBLIC pair so ARGS/END
+                # continuations and OnChatModelEnd emit consistently.
+                public_call_id = self._resolve_public_tool_call_id(tool_call_data["id"])
+                public_parent_id = (
+                    self._resolve_public_message_id(chunk_id) if chunk_id else chunk_id
+                )
                 # Record this tool_call_id as "already streamed" regardless of
                 # ``should_emit_tool_calls``. OnToolEnd uses this set to decide
                 # whether to re-emit Start/Args/End for the same id. Adding the
                 # id even when emission is suppressed preserves the prior
                 # behaviour where ``has_function_streaming=True`` blocked the
-                # OnToolEnd re-emit for opted-out tool calls.
-                self.active_run["streamed_tool_call_ids"].add(tool_call_data["id"])
+                # OnToolEnd re-emit for opted-out tool calls. Keyed by PUBLIC
+                # id: the raw id can be shared across lanes, and one lane's
+                # result discarding a shared raw key made the other lane's
+                # result spuriously re-emit its whole call.
+                self.active_run["streamed_tool_call_ids"].add(public_call_id)
                 if should_emit_tool_calls:
                     yield self._dispatch_event(
                         ToolCallStartEvent(
                             type=EventType.TOOL_CALL_START,
-                            tool_call_id=tool_call_data["id"],
+                            tool_call_id=public_call_id,
                             tool_call_name=tool_call_data["name"],
-                            parent_message_id=chunk_id,
+                            parent_message_id=public_parent_id,
                             raw_event=event,
                         )
                     )
                     self.set_message_in_progress(
                         self.active_run["id"],
-                        MessageInProgress(id=chunk_id, tool_call_id=tool_call_data["id"], tool_call_name=tool_call_data["name"])
+                        MessageInProgress(id=public_parent_id, tool_call_id=public_call_id, tool_call_name=tool_call_data["name"])
                     )
                 return
 
@@ -2688,21 +2745,27 @@ class LangGraphAgent:
                 # tool's Args to be emitted twice when the inner tool's
                 # OnToolEnd fires first.
                 for tool_msg in tool_messages:
-                    already_streamed = tool_msg.tool_call_id in self.active_run["streamed_tool_call_ids"]
+                    # Same lane as the streamed call, so the resolve returns the
+                    # public id its START carried (or the raw id when this call
+                    # was never streamed and is being emitted here first).
+                    public_call_id = self._resolve_public_tool_call_id(tool_msg.tool_call_id)
+                    already_streamed = public_call_id in self.active_run["streamed_tool_call_ids"]
                     if not already_streamed:
                         yield self._dispatch_event(
                             ToolCallStartEvent(
                                 type=EventType.TOOL_CALL_START,
-                                tool_call_id=tool_msg.tool_call_id,
+                                tool_call_id=public_call_id,
                                 tool_call_name=tool_msg.name or event.get("name", ""),
-                                parent_message_id=str(tool_msg.id or tool_msg.tool_call_id),
+                                parent_message_id=self._resolve_public_message_id(
+                                    str(tool_msg.id or tool_msg.tool_call_id)
+                                ),
                                 raw_event=event,
                             )
                         )
                         yield self._dispatch_event(
                             ToolCallArgsEvent(
                                 type=EventType.TOOL_CALL_ARGS,
-                                tool_call_id=tool_msg.tool_call_id,
+                                tool_call_id=public_call_id,
                                 delta=json.dumps(event["data"].get("input", {})),
                                 raw_event=event
                             )
@@ -2710,18 +2773,21 @@ class LangGraphAgent:
                         yield self._dispatch_event(
                             ToolCallEndEvent(
                                 type=EventType.TOOL_CALL_END,
-                                tool_call_id=tool_msg.tool_call_id,
+                                tool_call_id=public_call_id,
                                 raw_event=event
                             )
                         )
-                    self.active_run["streamed_tool_call_ids"].discard(tool_msg.tool_call_id)
+                    self.active_run["streamed_tool_call_ids"].discard(public_call_id)
 
                     yield self._dispatch_event(
                         ToolCallResultEvent(
                             type=EventType.TOOL_CALL_RESULT,
-                            tool_call_id=tool_msg.tool_call_id,
+                            tool_call_id=public_call_id,
                             # Match ToolMessage.id (or tool_call_id) so MESSAGES_SNAPSHOT merge works.
-                            message_id=str(tool_msg.id or tool_msg.tool_call_id),
+                            # Resolved through the same lane map as the START above.
+                            message_id=self._resolve_public_message_id(
+                                str(tool_msg.id or tool_msg.tool_call_id)
+                            ),
                             content=normalize_tool_content(tool_msg.content),
                             role="tool"
                         )
@@ -2742,21 +2808,27 @@ class LangGraphAgent:
                 )
                 return
 
-            already_streamed = tool_call_output.tool_call_id in self.active_run["streamed_tool_call_ids"]
+            # Same lane as the streamed call, so the resolve returns the public
+            # id its START carried (or the raw id when this call was never
+            # streamed and is being emitted here first).
+            public_call_id = self._resolve_public_tool_call_id(tool_call_output.tool_call_id)
+            already_streamed = public_call_id in self.active_run["streamed_tool_call_ids"]
             if not already_streamed:
                 yield self._dispatch_event(
                     ToolCallStartEvent(
                         type=EventType.TOOL_CALL_START,
-                        tool_call_id=tool_call_output.tool_call_id,
+                        tool_call_id=public_call_id,
                         tool_call_name=tool_call_output.name or event.get("name", ""),
-                        parent_message_id=str(tool_call_output.id or tool_call_output.tool_call_id),
+                        parent_message_id=self._resolve_public_message_id(
+                            str(tool_call_output.id or tool_call_output.tool_call_id)
+                        ),
                         raw_event=event,
                     )
                 )
                 yield self._dispatch_event(
                     ToolCallArgsEvent(
                         type=EventType.TOOL_CALL_ARGS,
-                        tool_call_id=tool_call_output.tool_call_id,
+                        tool_call_id=public_call_id,
                         delta=dump_json_safe(event["data"]["input"]),
                         raw_event=event
                     )
@@ -2764,18 +2836,21 @@ class LangGraphAgent:
                 yield self._dispatch_event(
                     ToolCallEndEvent(
                         type=EventType.TOOL_CALL_END,
-                        tool_call_id=tool_call_output.tool_call_id,
+                        tool_call_id=public_call_id,
                         raw_event=event
                     )
                 )
-            self.active_run["streamed_tool_call_ids"].discard(tool_call_output.tool_call_id)
+            self.active_run["streamed_tool_call_ids"].discard(public_call_id)
 
             yield self._dispatch_event(
                 ToolCallResultEvent(
                     type=EventType.TOOL_CALL_RESULT,
-                    tool_call_id=tool_call_output.tool_call_id,
+                    tool_call_id=public_call_id,
                     # Match ToolMessage.id (or tool_call_id) so MESSAGES_SNAPSHOT merge works.
-                    message_id=str(tool_call_output.id or tool_call_output.tool_call_id),
+                    # Resolved through the same lane map as the START above.
+                    message_id=self._resolve_public_message_id(
+                        str(tool_call_output.id or tool_call_output.tool_call_id)
+                    ),
                     content=normalize_tool_content(tool_call_output.content),
                     role="tool"
                 )
@@ -2981,39 +3056,51 @@ class LangGraphAgent:
         # node (None) never forces a reset, so absent metadata can't fragment a
         # bubble.
         if pins.get(lane) is None or (node is not None and pin_nodes.get(lane) != node):
-            pins[lane] = self._claim_public_message_id(fallback_id, lane)
+            pins[lane] = self._resolve_public_message_id(fallback_id, lane)
             pin_nodes[lane] = node
         return pins[lane]
 
-    def _claim_public_message_id(self, upstream_id: str, lane: str) -> str:
-        """Return a run-globally unique public id for a new text message.
+    def _resolve_public_id(self, upstream_id: str, kind: str, lane: Optional[str] = None) -> str:
+        """Map an upstream id to a run-globally unique public id, per lane.
 
-        Public message ids are run-global: the clients reject a second
-        TEXT_MESSAGE_START for an in-progress id, and the snapshot accumulator
-        is keyed by public id, so two lanes presenting the same upstream chunk
-        id crossed their text into one entry. Distinct LangChain runs mint
-        distinct ``lc_run--*`` ids, so a genuine collision needs upstream to
-        repeat itself — nothing guarantees it never does. First-comer keeps the
-        upstream id verbatim (single-lane streams stay byte-identical, and the
-        raw id is what the graph state's own message carries, which the
-        snapshot merge matches on); only colliders get a minted id, namespaced
-        by lane so it is stable and self-describing.
+        Public ids are run-global: the clients reject a second
+        TEXT_MESSAGE_START / TOOL_CALL_START for an in-progress id, and the
+        snapshot accumulator is keyed by public message id, so two lanes
+        presenting the same upstream id crossed their entities into one entry.
+        Distinct LangChain runs mint distinct ``lc_run--*`` ids and providers
+        mint per-response call ids, so a genuine collision needs upstream to
+        repeat itself — nothing guarantees it never does.
+
+        Resolution is a per-(lane, kind) mapping so every reference to the
+        same upstream id from the same lane yields the same public id — a
+        lane's text START, its tool call's parent_message_id, and its
+        on_tool_end result all land on one assistant message, exactly as with
+        raw ids. The first lane to present an id keeps it verbatim
+        (single-lane streams stay byte-identical, and the raw id is what the
+        graph state's own message carries, which the snapshot merge matches
+        on); only colliders get a minted id, namespaced by lane so it is
+        stable and self-describing.
+
+        Renaming happens at the emission boundary only — graph state keeps the
+        raw ids, and every internal correlation (ToolNode dispatch matching,
+        ``task_tool_call_ids_by_ns``, on_tool_end lookup) stays raw-keyed.
+        Both halves of a public pair (the assistant tool_call and its
+        TOOL_CALL_RESULT) resolve through the same lane map, so the client's
+        view stays self-consistent.
 
         Flag-off is untouched by construction: every event maps to the root
-        lane, whose pin either persists (same id returned, no new claim) or is
-        re-minted only on a node change — and there minting would alter the
-        pre-subagent stream shape, so the registry is only maintained when
-        subagent events are on.
-
-        Tool-call ids are deliberately NOT minted this way: they round-trip
-        through graph state (``ToolMessage.tool_call_id``) and on_tool_end
-        correlation, so renaming one here would orphan its result. A provider
-        emitting two identical call ids concurrently cannot be disambiguated
-        at this layer by anyone, including LangGraph itself.
+        lane and the registry is only maintained when subagent events are on,
+        so pre-subagent streams keep their exact ids.
         """
         if not self.emit_subagent_events:
             return upstream_id
-        used = self.active_run.setdefault("used_public_message_ids", set())
+        lane = lane if lane is not None else self._current_lane()
+        maps = self.active_run.setdefault("public_id_maps", {}).setdefault(kind, {})
+        lane_map = maps.setdefault(lane, {})
+        public_id = lane_map.get(upstream_id)
+        if public_id is not None:
+            return public_id
+        used = self.active_run.setdefault("used_public_ids", {}).setdefault(kind, set())
         public_id = upstream_id
         suffix = 0
         while public_id in used:
@@ -3024,7 +3111,14 @@ class LangGraphAgent:
                 else f"{upstream_id}::{lane}::{suffix}"
             )
         used.add(public_id)
+        lane_map[upstream_id] = public_id
         return public_id
+
+    def _resolve_public_message_id(self, upstream_id: str, lane: Optional[str] = None) -> str:
+        return self._resolve_public_id(upstream_id, "message", lane)
+
+    def _resolve_public_tool_call_id(self, upstream_id: str, lane: Optional[str] = None) -> str:
+        return self._resolve_public_id(upstream_id, "tool_call", lane)
 
     def handle_node_change(self, node_name: Optional[str]) -> Generator[ProcessedEvents, None, None]:
         """

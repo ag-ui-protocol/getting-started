@@ -24,6 +24,11 @@ from ag_ui.core import EventType
 from ag_ui_langgraph.agent import LangGraphAgent
 from ag_ui_langgraph.types import LangGraphEventTypes
 
+try:
+    from langchain.schema import ToolMessage
+except ImportError:  # langchain >= 1.0
+    from langchain_core.messages import ToolMessage
+
 
 def _fresh_active_run(run_id: str = "run-1") -> dict:
     """Mirror the lane-aware INITIAL_ACTIVE_RUN shape."""
@@ -348,8 +353,9 @@ class TestParallelTaskCallCapture(unittest.TestCase):
         self.assertEqual(
             agent.active_run["pending_task_calls"],
             [
-                {"tool_call_id": "call-a", "parent_message_id": "asst-1"},
-                {"tool_call_id": "call-b", "parent_message_id": "asst-1"},
+                # public_tool_call_id == tool_call_id: no cross-lane collision here.
+                {"tool_call_id": "call-a", "public_tool_call_id": "call-a", "parent_message_id": "asst-1"},
+                {"tool_call_id": "call-b", "public_tool_call_id": "call-b", "parent_message_id": "asst-1"},
             ],
         )
 
@@ -377,7 +383,7 @@ class TestParallelTaskCallCapture(unittest.TestCase):
         _feed(agent, chunk2, None)
         self.assertEqual(
             agent.active_run["pending_task_calls"],
-            [{"tool_call_id": "call-a", "parent_message_id": "asst-1"}],
+            [{"tool_call_id": "call-a", "public_tool_call_id": "call-a", "parent_message_id": "asst-1"}],
         )
 
 
@@ -556,6 +562,156 @@ class TestEqualUpstreamIdsAcrossLanes(unittest.TestCase):
             sorted(entries),
             [("A", "tools:a"), ("B", "tools:b")],
             "equal upstream ids must not cross lanes into one snapshot entry",
+        )
+
+
+class TestToolParentMessagesShareTheRegistry(unittest.TestCase):
+    """Tool-created assistant messages must claim public ids like text does.
+
+    TOOL_CALL_START's parent_message_id used the raw chunk id, bypassing the
+    public-id registry — so the equal-upstream-id collision fixed for text
+    stayed open for tool-calling subagents: a text start in another lane
+    reused the assistant message the tool call had created, crossing owners
+    in the accumulator and in the TypeScript reducer.
+    """
+
+    def test_tool_parent_and_foreign_text_get_distinct_public_ids(self):
+        agent = _make_agent()
+        _feed(agent, _tool_start_chunk("shared", "call-a", "search"), "tools:a")
+        _feed(agent, _text_chunk("shared", "B"), "tools:b")
+        _feed(agent, _model_end(), "tools:a")
+        _feed(agent, _model_end(), "tools:b")
+
+        tool_parent = next(
+            e.parent_message_id for e in agent.dispatched
+            if e.type == EventType.TOOL_CALL_START
+        )
+        text_id = next(
+            e.message_id for e in agent.dispatched
+            if e.type == EventType.TEXT_MESSAGE_START
+        )
+        self.assertNotEqual(tool_parent, text_id, "run-global ids must not collide")
+        self.assertEqual(tool_parent, "shared", "first-comer keeps the raw id")
+
+        entries = {
+            mid: (entry["subagent_run_id"], entry["content"], sorted(entry.get("tool_calls", {})))
+            for mid, entry in agent.active_run["subagent_messages"].items()
+        }
+        self.assertEqual(entries[tool_parent], ("tools:a", "", ["call-a"]))
+        self.assertEqual(entries[text_id], ("tools:b", "B", []))
+
+    def test_two_tool_only_lanes_with_one_upstream_id_stay_apart(self):
+        agent = _make_agent()
+        _feed(agent, _tool_start_chunk("shared", "call-a", "search"), "tools:a")
+        _feed(agent, _tool_start_chunk("shared", "call-b", "fetch"), "tools:b")
+        _feed(agent, _model_end(), "tools:a")
+        _feed(agent, _model_end(), "tools:b")
+
+        parents = [
+            (e.parent_message_id, e.subagent_run_id)
+            for e in agent.dispatched
+            if e.type == EventType.TOOL_CALL_START
+        ]
+        self.assertEqual(len(parents), 2)
+        self.assertEqual(len({mid for mid, _ in parents}), 2)
+        # One assistant entry per lane, each holding only its own call.
+        calls_by_owner = {
+            entry["subagent_run_id"]: sorted(entry.get("tool_calls", {}))
+            for entry in agent.active_run["subagent_messages"].values()
+        }
+        self.assertEqual(calls_by_owner, {"tools:a": ["call-a"], "tools:b": ["call-b"]})
+
+    def test_same_lane_text_then_tool_keeps_one_public_id(self):
+        # The merge case the registry must NOT break: one model invocation
+        # streaming text then a tool call under one chunk id is ONE assistant
+        # message, so the tool's parent must resolve to the text's public id.
+        agent = _make_agent()
+        _feed(agent, _text_chunk("m", "hi"), "tools:a")
+        _feed(agent, _tool_start_chunk("m", "call-1", "search"), "tools:a")
+        _feed(agent, _model_end(), "tools:a")
+
+        text_id = next(
+            e.message_id for e in agent.dispatched
+            if e.type == EventType.TEXT_MESSAGE_START
+        )
+        tool_parent = next(
+            e.parent_message_id for e in agent.dispatched
+            if e.type == EventType.TOOL_CALL_START
+        )
+        self.assertEqual(text_id, tool_parent, "same lane + same chunk id = one message")
+
+
+class TestEqualToolCallIdsAcrossLanes(unittest.TestCase):
+    """Two lanes presenting the SAME upstream tool-call id must not collide.
+
+    Public tool-call ids are run-global (the verifier rejects a second START
+    for an active id), and the streamed-ids set was raw-keyed, so lane A's
+    result discarding the shared raw id made lane B's result spuriously
+    re-emit START/ARGS/END. Emission now maps raw -> public per lane (raw ids
+    stay in graph state, so internal correlation is untouched); first-comer
+    keeps the raw id, colliders get a lane-namespaced mint.
+    """
+
+    def _stream_both(self):
+        agent = _make_agent()
+        _feed(agent, _tool_start_chunk("m-a", "dup", "search"), "tools:a")
+        _feed(agent, _tool_start_chunk("m-b", "dup", "fetch"), "tools:b")
+        _feed(agent, _tool_args_chunk("m-a", '{"q":1}'), "tools:a")
+        _feed(agent, _tool_args_chunk("m-b", '{"q":2}'), "tools:b")
+        _feed(agent, _model_end(), "tools:a")
+        _feed(agent, _model_end(), "tools:b")
+        return agent
+
+    def test_starts_args_and_ends_stay_lane_consistent(self):
+        agent = self._stream_both()
+        starts = [
+            (e.tool_call_id, e.subagent_run_id)
+            for e in agent.dispatched if e.type == EventType.TOOL_CALL_START
+        ]
+        self.assertEqual(len(starts), 2)
+        self.assertEqual(len({tid for tid, _ in starts}), 2, f"ids must differ: {starts}")
+        self.assertEqual(starts[0], ("dup", "tools:a"), "first-comer keeps the raw id")
+
+        public_by_owner = {owner: tid for tid, owner in starts}
+        for e in agent.dispatched:
+            if e.type == EventType.TOOL_CALL_ARGS:
+                self.assertEqual(e.tool_call_id, public_by_owner[e.subagent_run_id])
+        ends = [
+            (e.tool_call_id, e.subagent_run_id)
+            for e in agent.dispatched if e.type == EventType.TOOL_CALL_END
+        ]
+        self.assertEqual(sorted(ends), sorted(starts))
+
+    def test_one_lanes_result_does_not_reemit_the_other_lanes_call(self):
+        agent = self._stream_both()
+
+        def _tool_end(raw_id, content):
+            return {
+                "event": LangGraphEventTypes.OnToolEnd,
+                "name": "search",
+                "metadata": {},
+                "data": {
+                    "output": ToolMessage(content=content, tool_call_id=raw_id),
+                    "input": {"q": 1},
+                },
+            }
+
+        _feed(agent, _tool_end("dup", "result-a"), "tools:a")
+        _feed(agent, _tool_end("dup", "result-b"), "tools:b")
+
+        starts = [e for e in agent.dispatched if e.type == EventType.TOOL_CALL_START]
+        self.assertEqual(
+            len(starts), 2,
+            "a result for an already-streamed call must not re-emit its START",
+        )
+        results = [
+            (e.tool_call_id, e.subagent_run_id)
+            for e in agent.dispatched if e.type == EventType.TOOL_CALL_RESULT
+        ]
+        self.assertEqual(len(results), 2)
+        self.assertEqual(
+            len({tid for tid, _ in results}), 2,
+            f"each result must carry its own lane's public id: {results}",
         )
 
 

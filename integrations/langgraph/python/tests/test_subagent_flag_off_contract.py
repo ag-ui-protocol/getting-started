@@ -823,6 +823,52 @@ class TestRunErrorIsTerminal(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sorted(starts, key=_step_key), sorted(finishes, key=_step_key))
 
 
+class TestNestedTeardownIsDeepestFirst(unittest.TestCase):
+    """drain/error teardown must close nested subagents deepest-first.
+
+    With root -> outer -> inner all still open at stream end, insertion-order
+    teardown closed the outer subagent before the inner one, so the inner
+    lifecycle ended after its declared parent — violating the containment the
+    per-subagent windows promise. Each subagent's step close must also land
+    immediately before ITS terminal, not batched ahead of all terminals.
+    """
+
+    def _active_run(self):
+        return {
+            "emit_subagent_events": True,
+            # Insertion order is shallow-first: outer registered before inner.
+            "active_subagents": {"tools:outer": "o", "tools:outer:inner": "i"},
+            "subagent_parents": {"tools:outer:inner": "tools:outer"},
+            "lane_nodes": {"tools:outer": "plan", "tools:outer:inner": "model"},
+            "step_owners": {},
+            "current_subagent_run_id": None,
+        }
+
+    def _key(self, e):
+        t = e.type
+        if t == EventType.STEP_FINISHED:
+            return ("step", e.subagent_run_id)
+        return ("terminal", e.subagent_run_id)
+
+    def test_drain_finishes_the_inner_subagent_before_the_outer(self):
+        events = [self._key(e) for e in drain_subagents(self._active_run())]
+        self.assertEqual(events, [
+            ("step", "tools:outer:inner"),
+            ("terminal", "tools:outer:inner"),
+            ("step", "tools:outer"),
+            ("terminal", "tools:outer"),
+        ])
+
+    def test_error_teardown_uses_the_same_order(self):
+        events = [self._key(e) for e in error_open_subagents(self._active_run(), "boom")]
+        self.assertEqual(events, [
+            ("step", "tools:outer:inner"),
+            ("terminal", "tools:outer:inner"),
+            ("step", "tools:outer"),
+            ("terminal", "tools:outer"),
+        ])
+
+
 class TestRunEndFallbackClosesChildrenFirst(unittest.IsolatedAsyncioTestCase):
     """The run-end fallback must close a child before its parent wrapper.
 
