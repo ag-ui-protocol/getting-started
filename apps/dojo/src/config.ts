@@ -92,7 +92,7 @@ export const featureConfig: FeatureConfig[] = [
     id: "deepagents_subagents",
     name: "Deepagents Subagents",
     description:
-      "Deepagents dispatches work to subagents; watch subagentRunId attribution surface on their messages",
+      "A deepagents supervisor delegates to a research subagent that pauses for your approval mid-task; its messages group under one card keyed by subagentRunId",
     tags: ["Chat", "Multi-agent architecture", "Streaming", "Subagents"],
   }),
   createFeatureConfig({

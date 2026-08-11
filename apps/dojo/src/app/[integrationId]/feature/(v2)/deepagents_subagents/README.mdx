@@ -10,9 +10,10 @@ frontend — including a human-in-the-loop pause raised *inside* the subagent.
   with a `subagentRunId`, and that attribution transfers onto the messages it
   produces. The chat groups those messages under a collapsible subagent card,
   keyed by `subagentRunId` and labeled with the subagent's declared name.
-- **Lifecycle.** `SUBAGENT_STARTED` / `SUBAGENT_FINISHED` drive the card's
-  running/finished status via the `useSubagent` hook, so you can watch the
-  delegation open and close in real time.
+- **Lifecycle.** `SUBAGENT_STARTED` / `SUBAGENT_FINISHED` / `SUBAGENT_ERROR`
+  drive the card's status via the `useSubagent` hook — a pulsing dot while it
+  runs, a checkmark when it finishes, and a red mark if it fails — so you can
+  watch the delegation open and close in real time.
 - **HITL inside a subagent.** The research subagent calls a
   `request_human_approval` tool that raises a LangGraph `interrupt()`. The
   interrupt propagates out of the subagent to the top-level run, the dojo
@@ -21,12 +22,13 @@ frontend — including a human-in-the-loop pause raised *inside* the subagent.
 
 ## How to Interact
 
-Ask anything — the supervisor always delegates, e.g.:
+Ask anything — the supervisor always delegates. The suggestion pill sends:
 
-- "What makes octopus intelligence unusual?"
+- "Why is the sky blue? Answer in one sentence."
 
-Watch the subagent card appear in the chat, stream its research, then pause
-for your approval before finalizing.
+The subagent card appears in the chat collapsed. Click it to expand the card and
+watch the research stream; the subagent then pauses for your approval before
+finalizing its answer.
 
 ## Implementation Notes
 

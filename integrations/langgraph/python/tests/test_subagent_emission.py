@@ -59,6 +59,12 @@ def _run():
             "emit_subagent_events": True}
 
 
+def _step_key(pair):
+    """Sort key for (owner, step_name) pairs, tolerating the parent's ``None``."""
+    owner, name = pair
+    return (owner or "", name or "")
+
+
 class TestReconcileSubagents(unittest.TestCase):
     def test_enter_emits_started(self):
         ar = _run()
@@ -191,11 +197,18 @@ class TestDispatchStamping(unittest.TestCase):
         self.assertEqual(ev.subagent_run_id, "tools:s1")
 
     def test_does_not_stamp_subagent_lifecycle_event(self):
+        # A DIFFERENT id from the active lane, so the assertion can actually fail:
+        # with the lane's own id the test passed whether or not the chokepoint
+        # re-stamped lifecycle events.
         agent = self._agent("tools:s1")
         ev = agent._dispatch_event(
-            SubagentStartedEvent(type=EventType.SUBAGENT_STARTED, subagent_run_id="tools:s1", name="r")
+            SubagentStartedEvent(type=EventType.SUBAGENT_STARTED, subagent_run_id="tools:s2", name="r")
         )
-        self.assertEqual(ev.subagent_run_id, "tools:s1")  # its own id, unchanged (not re-stamped by chokepoint logic)
+        self.assertEqual(
+            ev.subagent_run_id, "tools:s2",
+            "SUBAGENT_* events carry their own id and must never be re-stamped "
+            "with whichever lane happens to be current",
+        )
 
     def test_stamps_encrypted_reasoning_value(self):
         # REASONING_ENCRYPTED_VALUE is emitted for redacted_thinking blocks and
@@ -629,12 +642,14 @@ class TestInterruptWithOpenSubagent(unittest.IsolatedAsyncioTestCase):
         finishes = [e for e in collected if getattr(e, "type", None) == EventType.STEP_FINISHED]
 
         self.assertTrue(starts and finishes, f"expected a step pair, got {types}")
-        for start, finish in zip(starts, finishes):
-            self.assertEqual(start.step_name, finish.step_name)
-            self.assertEqual(
-                start.subagent_run_id, finish.subagent_run_id,
-                "a step's two halves must carry the same owner",
-            )
+        # Match on (owner, name), not position: steps nest, so lanes close in LIFO
+        # order and positional pairing would compare a subagent's close against
+        # the parent's open the moment more than one lane is involved.
+        self.assertEqual(
+            sorted(((e.subagent_run_id, e.step_name) for e in starts), key=_step_key),
+            sorted(((e.subagent_run_id, e.step_name) for e in finishes), key=_step_key),
+            "every step must close under the same (owner, name) it opened with",
+        )
 
         # And the close still precedes the subagent's terminal event.
         self.assertLess(
@@ -693,12 +708,11 @@ class TestClosedSubagentsNeverRestart(unittest.TestCase):
         """Not re-opening a closed subagent must not hand its state to the parent.
 
         Routing a trailing event from a closed subagent's namespace to the root lane
-        fixes the duplicate SUBAGENT_STARTED, but the state guards key on "is a
+        would fix the duplicate SUBAGENT_STARTED, but the state guards key on "is a
         subagent open?" — so with the lane cleared they stop firing, and a trailing
         node exit carrying the subagent's own state update escapes as an
-        UNATTRIBUTED parent STATE_SNAPSHOT. Suppression has to key on whether the
-        event came from a subagent's namespace at all, which is still true after the
-        subagent closed.
+        UNATTRIBUTED parent STATE_SNAPSHOT. This asserts the SUPPRESSION itself (not
+        just the lane bookkeeping, which its sibling test above covers).
         """
         ar = _run()
         ar["subagent_segments"] = set()
@@ -707,12 +721,30 @@ class TestClosedSubagentsNeverRestart(unittest.TestCase):
         reconcile_subagents(ar, ns, "researcher", set())
         drain_subagents(ar)
         reconcile_subagents(ar, ns, "researcher", set())
+        self.assertEqual(ar["current_subagent_run_id"], "tools:s1")  # setup check
 
-        self.assertEqual(
-            ar["current_subagent_run_id"], "tools:s1",
-            "attribution follows the namespace even after the subagent closed; blanking "
-            "it would reparent the trailing output — and its state — to the parent",
+        agent = _make_agent()  # flag on
+        agent.active_run = {
+            **ar,
+            "id": "run-1",
+            "subagent_messages": {},
+            "subagent_tool_call_owner": {},
+            "inbound_subagent_messages": [],
+            "schema_keys": {
+                "input": ["messages"], "output": ["messages"],
+                "config": [], "context": [],
+            },
+        }
+        types = [
+            e.type
+            for e in asyncio.run(_collect(agent.get_state_and_messages_snapshots({})))
+        ]
+        self.assertNotIn(
+            EventType.STATE_SNAPSHOT, types,
+            "a trailing event from a CLOSED subagent's namespace still carries a "
+            "partial subgraph view, so its state must stay suppressed",
         )
+        self.assertIn(EventType.MESSAGES_SNAPSHOT, types)
 
     def test_root_events_are_not_attributed(self):
         # Control: a genuine root event stays unattributed, so the parent's own state is
@@ -852,8 +884,37 @@ class TestErrorOpenSubagents(unittest.TestCase):
         self.assertIsNone(active_run["current_subagent_run_id"])
 
     def test_no_open_subagents_is_noop(self):
-        active_run = {"active_subagents": {}, "current_subagent_run_id": None}
+        # The flag must be ON here, or this short-circuits on the flag and proves
+        # nothing about the empty case.
+        active_run = {
+            "active_subagents": {},
+            "current_subagent_run_id": None,
+            "emit_subagent_events": True,
+        }
         self.assertEqual(error_open_subagents(active_run, "boom"), [])
+
+    def test_the_lanes_step_closes_before_the_subagents_error(self):
+        # A step left open on the error path fails the clients' "all steps closed"
+        # rule just as surely as one left open on the success path, and its close
+        # has to land INSIDE the subagent's window — before its terminal.
+        active_run = {
+            "active_subagents": {"tools:s1": "researcher"},
+            "current_subagent_run_id": "tools:s1",
+            "emit_subagent_events": True,
+            "lane_nodes": {"tools:s1": "research"},
+            "step_owners": {"tools:s1": "tools:s1"},
+        }
+        events = error_open_subagents(active_run, "boom")
+        self.assertEqual(
+            [(e.type, e.subagent_run_id) for e in events],
+            [
+                (EventType.STEP_FINISHED, "tools:s1"),
+                (EventType.SUBAGENT_ERROR, "tools:s1"),
+            ],
+        )
+        self.assertEqual(events[0].step_name, "research")
+        self.assertEqual(active_run["lane_nodes"], {})
+        self.assertEqual(active_run["step_owners"], {})
 
 
 class TestFinishSubagentOnTaskEnd(unittest.TestCase):
@@ -1178,10 +1239,6 @@ class TestCrossTurnPersistence(unittest.TestCase):
         self.assertEqual(sum(1 for m in snap.messages if m.id == "dup"), 1)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestSubagentNewFields(unittest.TestCase):
     def test_started_carries_parent_links_from_task_meta(self):
         ar = {"active_subagents": {}, "current_subagent_run_id": None,
@@ -1357,4 +1414,8 @@ class TestEmitSubagentEventsOff(unittest.TestCase):
         graph.nodes = {}
         opted_in = LangGraphAgent(name="test", graph=graph, emit_subagent_events=True)
         self.assertTrue(opted_in.clone().emit_subagent_events)
+
+
+if __name__ == "__main__":
+    unittest.main()
 

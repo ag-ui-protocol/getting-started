@@ -1,0 +1,782 @@
+"""The governing contract for ``emit_subagent_events``.
+
+With the flag OFF (the default) the emitted stream must be indistinguishable
+from the pre-subagent integration: no SUBAGENT_* events, no ``subagentRunId``
+anywhere, no step-structure change, no MESSAGES_SNAPSHOT change and no
+state-snapshot change. Subagent *bookkeeping* still runs (other paths read it),
+so every place that reads that bookkeeping to decide what to EMIT has to be
+gated on the flag as well -- the violations pinned here.
+
+The flag-ON tests in this module cover the step-lifecycle invariants that the
+same bookkeeping controls: every STEP_STARTED must be paired with a
+STEP_FINISHED carrying the same (owner, name), or clients abort the run with
+"steps are still active".
+"""
+import logging
+import unittest
+from unittest.mock import AsyncMock, MagicMock
+
+from ag_ui.core import AssistantMessage, EventType, ToolMessage as AGUIToolMessage
+from ag_ui_langgraph.agent import LangGraphAgent, drain_subagents, error_open_subagents
+
+try:
+    from langchain.schema import ToolMessage
+except ImportError:  # langchain >= 1.0
+    from langchain_core.messages import ToolMessage
+
+
+def _make_agent(emit_subagent_events=False):
+    from langgraph.graph.state import CompiledStateGraph
+
+    graph = MagicMock(spec=CompiledStateGraph)
+    graph.config_specs = []
+    graph.nodes = {}
+    state = MagicMock()
+    state.values = {"messages": []}
+    state.tasks = []
+    state.next = []
+    state.metadata = {"writes": {}}
+    graph.aget_state = AsyncMock(return_value=state)
+    return LangGraphAgent(
+        name="test", graph=graph, emit_subagent_events=emit_subagent_events
+    )
+
+
+async def _drive(agent, events):
+    """Drive ``_handle_stream_events`` over a canned LangGraph event list.
+
+    The lane of every event is derived from its own metadata (nested checkpoint
+    ns + ``lc_agent_name``) by reconcile_subagents, exactly as in production --
+    nothing here sets ``current_subagent_run_id`` by hand, so the tests pin the
+    behaviour where it actually runs rather than at a helper.
+    """
+
+    async def fake_prepare(*args, **kwargs):
+        agent.active_run["schema_keys"] = {
+            "input": ["messages"], "output": ["messages"],
+            "config": [], "context": [],
+        }
+
+        async def gen():
+            for event in events:
+                yield event
+
+        return {
+            "stream": gen(),
+            "state": MagicMock(values={"messages": []}),
+            "config": {"configurable": {"thread_id": "t1"}},
+        }
+
+    agent.prepare_stream = fake_prepare
+
+    run_input = MagicMock()
+    run_input.run_id = "run-1"
+    run_input.thread_id = "t1"
+    run_input.forwarded_props = {}
+
+    return [ev async for ev in agent._handle_stream_events(run_input)]
+
+
+def _sub_meta(sid, node, name="researcher"):
+    return {
+        "langgraph_node": node,
+        "langgraph_checkpoint_ns": f"tools:{sid}|model:inner",
+        "lc_agent_name": name,
+    }
+
+
+def _chain_start(node, metadata, run_id="r-x"):
+    return {
+        "event": "on_chain_start",
+        "run_id": run_id,
+        "name": node,
+        "data": {},
+        "metadata": metadata,
+    }
+
+
+def _types(collected):
+    return [getattr(e, "type", None) for e in collected]
+
+
+def _step_key(pair):
+    """Sort key tolerating the parent lane's ``None`` owner."""
+    owner, name = pair
+    return (owner or "", name or "")
+
+
+def _steps(collected):
+    """The (owner, step_name) pairs opened and closed, in emission order."""
+    starts = [
+        (e.subagent_run_id, e.step_name)
+        for e in collected
+        if getattr(e, "type", None) == EventType.STEP_STARTED
+    ]
+    finishes = [
+        (e.subagent_run_id, e.step_name)
+        for e in collected
+        if getattr(e, "type", None) == EventType.STEP_FINISHED
+    ]
+    return starts, finishes
+
+
+class TestFlagOffStateSnapshotsSurvive(unittest.IsolatedAsyncioTestCase):
+    """Fix 1: the two state-snapshot suppressions were not gated on the flag.
+
+    ``reconcile_subagents`` sets ``current_subagent_run_id`` unconditionally
+    (other paths read it), so with the flag OFF both suppressions fired and
+    silently withheld snapshots that pre-subagent main emitted during a
+    delegation -- a state regression invisible to the client.
+    """
+
+    async def _node_exit(self, agent):
+        collected = await _drive(agent, [
+            _chain_start("n", {"langgraph_node": "n"}, run_id="run-1"),
+            {
+                "event": "on_chain_end",
+                "run_id": "run-1",
+                "name": "n",
+                "data": {"output": {"custom_key": "from_graph"}},
+                "metadata": _sub_meta("s1", "n"),
+            },
+        ])
+        # The end-of-run snapshots carry no raw_event; keying on the on_chain_end
+        # raw_event isolates the node-exit one.
+        return [
+            e for e in collected
+            if getattr(e, "type", None) == EventType.STATE_SNAPSHOT
+            and (getattr(e, "raw_event", None) or {}).get("event") == "on_chain_end"
+        ]
+
+    async def test_node_exit_snapshot_still_emitted_with_the_flag_off(self):
+        self.assertTrue(
+            await self._node_exit(_make_agent(emit_subagent_events=False)),
+            "with the flag off the node-exit STATE_SNAPSHOT must be emitted "
+            "exactly as it was before subagent support",
+        )
+
+    async def test_node_exit_snapshot_still_suppressed_with_the_flag_on(self):
+        # Control: the suppression itself is unchanged when the caller opted in.
+        self.assertEqual(await self._node_exit(_make_agent(emit_subagent_events=True)), [])
+
+    def _checkpoint_agent(self, emit_subagent_events):
+        agent = _make_agent(emit_subagent_events=emit_subagent_events)
+        agent.active_run = {
+            "id": "run-1",
+            "current_subagent_run_id": "tools:s1",
+            "active_subagents": {"tools:s1": "researcher"},
+            "subagent_messages": {},
+            "subagent_tool_call_owner": {},
+            "inbound_subagent_messages": [],
+            "schema_keys": {
+                "input": ["messages"], "output": ["messages"],
+                "config": [], "context": [],
+            },
+        }
+        return agent
+
+    async def test_checkpoint_snapshot_still_emitted_with_the_flag_off(self):
+        agent = self._checkpoint_agent(False)
+        types = [
+            e.type
+            async for e in agent.get_state_and_messages_snapshots({})
+        ]
+        self.assertIn(
+            EventType.STATE_SNAPSHOT, types,
+            "the checkpoint STATE_SNAPSHOT must not be withheld when the caller "
+            "never opted into subagent behaviour",
+        )
+
+    async def test_checkpoint_snapshot_still_suppressed_with_the_flag_on(self):
+        agent = self._checkpoint_agent(True)
+        types = [
+            e.type
+            async for e in agent.get_state_and_messages_snapshots({})
+        ]
+        self.assertNotIn(EventType.STATE_SNAPSHOT, types)
+        self.assertIn(EventType.MESSAGES_SNAPSHOT, types)
+
+
+class TestTrailingEventStepIsClosed(unittest.IsolatedAsyncioTestCase):
+    """Fix 2: a trailing event from a CLOSED subagent opened a step nothing closed.
+
+    reconcile_subagents deliberately keeps attributing trailing events to the
+    finished subagent (blanking the lane would reparent its output), so
+    handle_node_change opens a new step in that closed lane. drain_subagents only
+    closed lanes for ids still in ``active_subagents``, so the step survived to
+    RUN_FINISHED and clients abort with "steps are still active".
+    """
+
+    async def _run(self):
+        agent = _make_agent(emit_subagent_events=True)
+        return await _drive(agent, [
+            # The `task` delegation starts, in the subagent's own namespace.
+            {
+                "event": "on_tool_start",
+                "run_id": "task-run",
+                "name": "task",
+                "data": {"input": {"subagent_type": "researcher", "description": "d"}},
+                "metadata": {"langgraph_checkpoint_ns": "tools:s1"},
+            },
+            # The subagent works: SUBAGENT_STARTED + a step in its own lane.
+            _chain_start("n1", _sub_meta("s1", "n1"), run_id="r2"),
+            # The task returns: the lane's step closes and s1 gets its terminal.
+            {
+                "event": "on_tool_end",
+                "run_id": "task-run",
+                "name": "task",
+                "data": {"output": None},
+                "metadata": {"langgraph_checkpoint_ns": "tools:s1"},
+            },
+            # TRAILING event: still s1's namespace (its inner tooling can emit
+            # after the task tool returns) but a NEW node -> a step opens in the
+            # already-closed lane.
+            _chain_start("n2", _sub_meta("s1", "n2"), run_id="r4"),
+        ]), agent
+
+    async def test_the_trailing_lanes_step_is_closed_at_drain(self):
+        collected, agent = await self._run()
+        starts, finishes = _steps(collected)
+        self.assertIn(
+            ("tools:s1", "n2"), starts,
+            "setup check: the trailing event must open a step in the closed lane",
+        )
+        self.assertIn(
+            ("tools:s1", "n2"), finishes,
+            "a step opened in a closed subagent's lane must still be closed "
+            "before RUN_FINISHED",
+        )
+
+    async def test_every_step_start_has_a_matching_finish(self):
+        collected, agent = await self._run()
+        starts, finishes = _steps(collected)
+        self.assertEqual(
+            sorted(starts, key=_step_key), sorted(finishes, key=_step_key),
+            "every STEP_STARTED needs a STEP_FINISHED on the same "
+            "(subagent_run_id, step_name) or the client aborts the run",
+        )
+
+    async def test_no_lane_is_left_open(self):
+        collected, agent = await self._run()
+        # active_run is torn down in the finally block, so assert on the emitted
+        # stream plus the drain's own view: nothing may remain closable.
+        self.assertEqual(
+            _types(collected)[-1], EventType.RUN_FINISHED,
+        )
+
+    async def test_the_closed_subagent_gets_exactly_one_terminal(self):
+        # Closing the leaked step must NOT hand s1 a second SUBAGENT_FINISHED:
+        # a terminal is terminal for the id it names.
+        collected, agent = await self._run()
+        finished = [
+            e for e in collected
+            if getattr(e, "type", None) == EventType.SUBAGENT_FINISHED
+        ]
+        self.assertEqual([e.subagent_run_id for e in finished], ["tools:s1"])
+
+
+class TestPerLaneStepTransitions(unittest.IsolatedAsyncioTestCase):
+    """Fix 4: the step-transition guard compared against the GLOBAL node name.
+
+    ``active_run["node_name"]`` is a single flat field last written by whichever
+    lane transitioned. Two lanes on the SAME node name therefore collided: the
+    second lane's transition looked like a no-op and its step never opened.
+    """
+
+    async def test_two_lanes_on_the_same_node_name_each_open_their_step(self):
+        agent = _make_agent(emit_subagent_events=True)
+        collected = await _drive(agent, [
+            # Parent enters `tools` (the delegation wrapper).
+            _chain_start("tools", {"langgraph_node": "tools"}, run_id="r1"),
+            # s1 works in node `model`.
+            _chain_start("model", _sub_meta("s1", "model", "alpha"), run_id="r2"),
+            # s2 works in node `model` TOO -- same name, different lane.
+            _chain_start("model", _sub_meta("s2", "model", "beta"), run_id="r3"),
+        ])
+        starts, finishes = _steps(collected)
+        self.assertIn(
+            ("tools:s2", "model"), starts,
+            "s2 must get its own STEP_STARTED even though another lane is "
+            "already on a node of the same name",
+        )
+        self.assertIn((None, "tools"), starts)
+        self.assertIn(("tools:s1", "model"), starts)
+        self.assertEqual(
+            sorted(starts, key=_step_key), sorted(finishes, key=_step_key),
+            "each lane's step must close under its own owner",
+        )
+
+
+class TestFlagOffStreamLoopGate(unittest.IsolatedAsyncioTestCase):
+    """The two-line gate in the stream loop that withholds SUBAGENT_* events.
+
+    This must fail if someone deletes it: a DEFAULT-constructed agent driven
+    over unmistakably subagent-shaped events may not emit a single SUBAGENT_*
+    event of any type, and the subagent's text must still reach the client
+    untagged (it arrives as the parent's own work).
+    """
+
+    async def _run(self):
+        agent = _make_agent(emit_subagent_events=False)
+        return await _drive(agent, [
+            _chain_start("model", _sub_meta("s1", "model"), run_id="r1"),
+            {
+                "event": "on_chat_model_stream",
+                "run_id": "r2",
+                "name": "model",
+                "data": {"chunk": {
+                    "id": "chunk-1",
+                    "content": "from the subagent",
+                    "tool_call_chunks": [],
+                    "response_metadata": {},
+                }},
+                "metadata": {
+                    **_sub_meta("s1", "model"),
+                    "emit-messages": True,
+                    "emit-tool-calls": True,
+                },
+            },
+        ])
+
+    async def test_no_subagent_event_of_any_type_is_emitted(self):
+        collected = await self._run()
+        leaked = [
+            t for t in _types(collected)
+            if t is not None and str(getattr(t, "value", t)).upper().startswith("SUBAGENT")
+        ]
+        self.assertEqual(
+            leaked, [],
+            "a released @ag-ui/client rejects unknown event types as they come "
+            "off the wire, so not one SUBAGENT_* event may escape",
+        )
+
+    async def test_the_subagent_text_still_flows_untagged(self):
+        collected = await self._run()
+        text = [
+            e for e in collected
+            if getattr(e, "type", None) in (
+                EventType.TEXT_MESSAGE_START, EventType.TEXT_MESSAGE_CONTENT
+            )
+        ]
+        self.assertTrue(text, "the subagent's text must still reach the client")
+        for ev in text:
+            self.assertIsNone(
+                getattr(ev, "subagent_run_id", None),
+                "with the flag off nothing may carry subagentRunId",
+            )
+
+    async def test_nothing_at_all_carries_subagent_attribution(self):
+        collected = await self._run()
+        for ev in collected:
+            self.assertIsNone(
+                getattr(ev, "subagent_run_id", None),
+                f"{getattr(ev, 'type', None)} leaked a subagentRunId",
+            )
+
+
+class TestFlagOffInboundMessagesSurvive(unittest.TestCase):
+    """Fix 3: inbound subagent-attributed messages were silently DELETED.
+
+    ``run()`` splits every message carrying a ``subagent_run_id`` out of the
+    graph input unconditionally (they must never enter supervisor state), but
+    the re-emission early-returned when the flag was off -- so prior turns'
+    subagent messages vanished from MESSAGES_SNAPSHOT and the client, whose
+    snapshot apply is authoritative, deleted them.
+    """
+
+    def _agent(self, emit_subagent_events, inbound):
+        agent = _make_agent(emit_subagent_events=emit_subagent_events)
+        agent.active_run = {
+            "id": "run-1",
+            "current_subagent_run_id": None,
+            "active_subagents": {},
+            "subagent_messages": {},
+            "subagent_tool_call_owner": {},
+            "inbound_subagent_messages": inbound,
+        }
+        return agent
+
+    def test_flag_off_keeps_them_but_strips_the_attribution(self):
+        prior = AssistantMessage(
+            id="prev-sub-1", role="assistant", content="earlier finding",
+            subagent_run_id="tools:s1",
+        )
+        agent = self._agent(False, [prior])
+        merged = agent._merge_subagent_messages([])
+        by_id = {m.id: m for m in merged}
+        self.assertIn(
+            "prev-sub-1", by_id,
+            "the split removed it from graph input, so the snapshot is the only "
+            "thing keeping it in the client's display",
+        )
+        self.assertIsNone(
+            by_id["prev-sub-1"].subagent_run_id,
+            "with the flag off it must surface as an ordinary parent message",
+        )
+        self.assertEqual(by_id["prev-sub-1"].content, "earlier finding")
+        self.assertEqual(
+            prior.subagent_run_id, "tools:s1",
+            "the inbound message itself must not be mutated in place",
+        )
+
+    def test_flag_off_strips_attribution_from_tool_messages_too(self):
+        prior = AGUIToolMessage(
+            id="prev-tool-1", role="tool", content="ok", tool_call_id="call-1",
+            subagent_run_id="tools:s1",
+        )
+        merged = self._agent(False, [prior])._merge_subagent_messages([])
+        self.assertEqual([m.id for m in merged], ["prev-tool-1"])
+        self.assertIsNone(merged[0].subagent_run_id)
+
+    def test_flag_off_does_not_duplicate_a_message_already_in_the_snapshot(self):
+        prior = AssistantMessage(
+            id="dup", role="assistant", content="x", subagent_run_id="tools:s1",
+        )
+        existing = AssistantMessage(id="dup", role="assistant", content="x")
+        merged = self._agent(False, [prior])._merge_subagent_messages([existing])
+        self.assertEqual([m.id for m in merged], ["dup"])
+
+    def test_flag_off_still_merges_nothing_from_this_runs_stream(self):
+        # Only the inbound (client-echoed) messages are re-emitted with the flag
+        # off; this run's freshly-streamed subagent messages are already on the
+        # wire as the parent's own work, so merging them would duplicate them.
+        agent = self._agent(False, [])
+        agent.active_run["subagent_messages"] = {
+            "m1": {
+                "kind": "assistant", "id": "m1", "role": "assistant",
+                "content": "streamed", "subagent_run_id": "tools:s1",
+                "tool_calls": {},
+            }
+        }
+        self.assertEqual(agent._merge_subagent_messages([]), [])
+
+    def test_flag_on_keeps_the_attribution(self):
+        prior = AssistantMessage(
+            id="prev-sub-1", role="assistant", content="earlier finding",
+            subagent_run_id="tools:s1",
+        )
+        merged = self._agent(True, [prior])._merge_subagent_messages([])
+        self.assertEqual(merged[0].subagent_run_id, "tools:s1")
+
+    def test_the_docstring_is_reachable(self):
+        # The docstring sat BELOW the early return, so it was a no-op statement
+        # and __doc__ was None -- the method looked undocumented to help().
+        self.assertIsNotNone(LangGraphAgent._merge_subagent_messages.__doc__)
+
+
+class TestTaskEndResultExtraction(unittest.TestCase):
+    """Fix 6: ``msgs[0]`` was an unguarded index on an untyped payload.
+
+    A single ToolMessage (rather than a list) raised TypeError inside the
+    stream loop, which the run-level ``except`` turned into a failed run;
+    dict-shaped messages silently produced no result at all.
+    """
+
+    def _agent(self):
+        agent = _make_agent(emit_subagent_events=True)
+        agent.active_run = {
+            "active_subagents": {"tools:s1": "researcher"},
+            "current_subagent_run_id": "tools:s1",
+            "subagent_task_runs": {"run-1": "tools:s1"},
+        }
+        return agent
+
+    def _finish(self, output):
+        agent = self._agent()
+        return agent._finish_subagent_on_task_end(
+            {"event": "on_tool_end", "run_id": "run-1", "data": {"output": output}}
+        )
+
+    def test_a_single_tool_message_instead_of_a_list_does_not_raise(self):
+        class _Cmd:
+            update = {"messages": ToolMessage(content="solo", tool_call_id="c1")}
+
+        events = self._finish(_Cmd())
+        self.assertEqual([e.type for e in events], [EventType.SUBAGENT_FINISHED])
+        self.assertIsNone(
+            events[0].result,
+            "an un-listed payload yields no result rather than killing the run",
+        )
+
+    def test_a_dict_shaped_message_still_yields_its_content(self):
+        class _Cmd:
+            update = {"messages": [{"role": "tool", "content": "dict result"}]}
+
+        events = self._finish(_Cmd())
+        self.assertEqual(events[0].result, "dict result")
+
+    def test_the_first_tool_message_wins_over_a_leading_non_tool_message(self):
+        class _NotAToolMessage:
+            content = "the assistant's own text"
+
+        class _Cmd:
+            update = {"messages": [
+                _NotAToolMessage(),
+                ToolMessage(content="the subagent result", tool_call_id="c1"),
+            ]}
+
+        events = self._finish(_Cmd())
+        self.assertEqual(events[0].result, "the subagent result")
+
+    def test_no_extractable_content_logs_and_reports_no_result(self):
+        class _Cmd:
+            update = {"messages": [object()]}
+
+        with self.assertLogs("ag_ui_langgraph.agent", level=logging.DEBUG) as logs:
+            events = self._finish(_Cmd())
+        self.assertIsNone(events[0].result)
+        self.assertTrue(any("result" in r.getMessage() for r in logs.records))
+
+
+class TestErrorPathRobustness(unittest.IsolatedAsyncioTestCase):
+    """Fix 7: the error handlers could fail, or report nothing useful."""
+
+    async def test_a_non_string_upstream_error_message_still_produces_run_error(self):
+        # ``data.message`` is not guaranteed to be a string. A dict passes the
+        # truthiness guard and then explodes as a pydantic ValidationError INSIDE
+        # the error handler, so RUN_ERROR is never emitted at all.
+        agent = _make_agent(emit_subagent_events=True)
+        collected = await _drive(agent, [
+            _chain_start("n", _sub_meta("s1", "n"), run_id="r1"),
+            {"event": "error", "run_id": "r2", "data": {"message": {"code": 500}}},
+        ])
+        errors = [
+            e for e in collected if getattr(e, "type", None) == EventType.RUN_ERROR
+        ]
+        self.assertEqual(len(errors), 1, "RUN_ERROR must survive a non-string message")
+        self.assertIn("500", errors[0].message)
+        # And the open subagent still gets its terminal.
+        self.assertIn(EventType.SUBAGENT_ERROR, _types(collected))
+
+    async def test_a_bare_exception_does_not_yield_an_empty_subagent_error(self):
+        class _Bare(Exception):
+            pass
+
+        agent = _make_agent(emit_subagent_events=True)
+
+        async def fake_prepare(*args, **kwargs):
+            agent.active_run["schema_keys"] = {
+                "input": ["messages"], "output": ["messages"],
+                "config": [], "context": [],
+            }
+
+            async def gen():
+                yield _chain_start("n", _sub_meta("s1", "n"), run_id="r1")
+                raise _Bare()
+
+            return {
+                "stream": gen(),
+                "state": MagicMock(values={"messages": []}),
+                "config": {"configurable": {"thread_id": "t1"}},
+            }
+
+        agent.prepare_stream = fake_prepare
+        run_input = MagicMock()
+        run_input.run_id = "run-1"
+        run_input.thread_id = "t1"
+        run_input.forwarded_props = {}
+
+        collected = []
+        with self.assertRaises(_Bare):
+            async for ev in agent._handle_stream_events(run_input):
+                collected.append(ev)
+
+        errors = [
+            e for e in collected if getattr(e, "type", None) == EventType.SUBAGENT_ERROR
+        ]
+        self.assertEqual(len(errors), 1)
+        self.assertTrue(
+            errors[0].message.strip(),
+            "str(exc) is '' for a bare exception, so the message must fall back "
+            "to repr(exc) rather than reporting nothing",
+        )
+
+
+class TestAccumulatorDoesNotLoseText(unittest.TestCase):
+    """Fix 8a/8b/8c: silent degradation in the snapshot accumulator."""
+
+    def _agent(self):
+        agent = _make_agent(emit_subagent_events=True)
+        agent.active_run = {
+            "id": "run-1",
+            "current_subagent_run_id": "tools:s1",
+            "active_subagents": {"tools:s1": "researcher"},
+            "subagent_messages": {},
+            "subagent_tool_call_owner": {},
+            "inbound_subagent_messages": [],
+        }
+        return agent
+
+    def test_text_content_without_a_seen_opener_is_still_captured(self):
+        from ag_ui.core import TextMessageContentEvent
+
+        agent = self._agent()
+        with self.assertLogs("ag_ui_langgraph.agent", level=logging.WARNING):
+            agent._dispatch_event(TextMessageContentEvent(
+                type=EventType.TEXT_MESSAGE_CONTENT, message_id="m-late", delta="text"
+            ))
+        entry = agent.active_run["subagent_messages"].get("m-late")
+        self.assertIsNotNone(
+            entry, "discarding the delta loses the subagent's text from the snapshot"
+        )
+        self.assertEqual(entry["content"], "text")
+        self.assertEqual(entry["subagent_run_id"], "tools:s1")
+
+    def test_reasoning_content_without_a_seen_opener_is_still_captured(self):
+        from ag_ui.core import ReasoningMessageContentEvent
+
+        agent = self._agent()
+        with self.assertLogs("ag_ui_langgraph.agent", level=logging.WARNING):
+            agent._dispatch_event(ReasoningMessageContentEvent(
+                type=EventType.REASONING_MESSAGE_CONTENT, message_id="r-late", delta="hmm"
+            ))
+        entry = agent.active_run["subagent_messages"].get("r-late")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["kind"], "reasoning")
+        self.assertEqual(entry["content"], "hmm")
+
+    def test_unowned_tool_call_args_warns(self):
+        from ag_ui.core import ToolCallArgsEvent
+
+        agent = self._agent()
+        with self.assertLogs("ag_ui_langgraph.agent", level=logging.WARNING) as logs:
+            agent._dispatch_event(ToolCallArgsEvent(
+                type=EventType.TOOL_CALL_ARGS, tool_call_id="tc-unknown", delta="{}"
+            ))
+        self.assertTrue(any("tc-unknown" in r.getMessage() for r in logs.records))
+
+    def test_a_continuation_disagreeing_about_its_owner_warns(self):
+        from ag_ui.core import TextMessageContentEvent, TextMessageStartEvent
+
+        agent = self._agent()
+        agent._dispatch_event(TextMessageStartEvent(
+            type=EventType.TEXT_MESSAGE_START, message_id="m1", role="assistant"
+        ))
+        agent.active_run["current_subagent_run_id"] = "tools:s2"
+        with self.assertLogs("ag_ui_langgraph.agent", level=logging.WARNING):
+            agent._dispatch_event(TextMessageContentEvent(
+                type=EventType.TEXT_MESSAGE_CONTENT, message_id="m1", delta="more"
+            ))
+        # The entry keeps its original owner; the delta is not lost.
+        entry = agent.active_run["subagent_messages"]["m1"]
+        self.assertEqual(entry["subagent_run_id"], "tools:s1")
+        self.assertEqual(entry["content"], "more")
+
+
+class TestTaskMetaShapeLogging(unittest.TestCase):
+    """Fix 8: a `task` tool whose input no longer carries ``subagent_type`` is a
+    shape change worth reporting -- distinct from the correct silent no-op for
+    every other tool."""
+
+    def _agent(self):
+        agent = _make_agent(emit_subagent_events=True)
+        agent.active_run = {
+            "active_subagents": {},
+            "current_subagent_run_id": None,
+            "subagent_task_meta": {},
+            "subagent_task_runs": {},
+            "pending_task_calls": [],
+            "task_tool_call_ids_by_ns": {},
+        }
+        return agent
+
+    def test_task_tool_with_an_unexpected_input_shape_warns(self):
+        agent = self._agent()
+        with self.assertLogs("ag_ui_langgraph.agent", level=logging.WARNING) as logs:
+            agent._capture_subagent_task_meta({
+                "event": "on_tool_start",
+                "run_id": "run-1",
+                "name": "task",
+                "data": {"input": {"prompt": "no subagent_type here"}},
+                "metadata": {"langgraph_checkpoint_ns": "tools:s1"},
+            })
+        self.assertTrue(any("task" in r.getMessage() for r in logs.records))
+        self.assertEqual(agent.active_run["subagent_task_meta"], {})
+
+    def test_a_non_task_tool_stays_silent(self):
+        agent = self._agent()
+        with self.assertNoLogs("ag_ui_langgraph.agent", level=logging.WARNING):
+            agent._capture_subagent_task_meta({
+                "event": "on_tool_start",
+                "run_id": "run-1",
+                "name": "grep",
+                "data": {"input": {"pattern": "x"}},
+                "metadata": {"langgraph_checkpoint_ns": "tools:s1"},
+            })
+
+    def test_the_fifo_fallback_is_reported(self):
+        agent = self._agent()
+        agent.active_run["pending_task_calls"] = [
+            {"tool_call_id": "call-a", "parent_message_id": "msg-1"}
+        ]
+        with self.assertLogs("ag_ui_langgraph.agent", level=logging.WARNING) as logs:
+            agent._capture_subagent_task_meta({
+                "event": "on_tool_start",
+                "run_id": "run-1",
+                "name": "task",
+                "data": {"input": {"subagent_type": "researcher", "description": "d"}},
+                "metadata": {"langgraph_checkpoint_ns": "tools:s1"},
+            })
+        messages = " ".join(r.getMessage() for r in logs.records)
+        self.assertIn("call-a", messages)
+        self.assertIn("tools:s1", messages)
+
+
+class TestFlagOffTeardownClearsLanes(unittest.TestCase):
+    """The flag-off early returns still have to tear the lane bookkeeping down,
+    or the next turn starts with lanes that look open."""
+
+    def _active_run(self):
+        return {
+            "active_subagents": {"tools:s1": "researcher"},
+            "current_subagent_run_id": "tools:s1",
+            "emit_subagent_events": False,
+            "lane_nodes": {None: "tools", "tools:s1": "research"},
+            "step_owners": {None: None, "tools:s1": "tools:s1"},
+        }
+
+    def test_drain_emits_nothing_and_clears_subagent_lanes(self):
+        active_run = self._active_run()
+        self.assertEqual(drain_subagents(active_run), [])
+        self.assertEqual(active_run["active_subagents"], {})
+        self.assertIn("tools:s1", active_run["closed_subagents"])
+        self.assertIsNone(active_run["current_subagent_run_id"])
+        self.assertNotIn("tools:s1", active_run["lane_nodes"])
+        self.assertNotIn("tools:s1", active_run["step_owners"])
+        # The parent lane is untouched: its step is closed by handle_node_change.
+        self.assertEqual(active_run["lane_nodes"], {None: "tools"})
+
+    def test_error_emits_nothing_and_clears_subagent_lanes(self):
+        active_run = self._active_run()
+        self.assertEqual(error_open_subagents(active_run, "boom"), [])
+        self.assertEqual(active_run["active_subagents"], {})
+        self.assertIn("tools:s1", active_run["closed_subagents"])
+        self.assertIsNone(active_run["current_subagent_run_id"])
+        self.assertNotIn("tools:s1", active_run["lane_nodes"])
+        self.assertNotIn("tools:s1", active_run["step_owners"])
+
+
+class TestFlagOffLaneCollapse(unittest.TestCase):
+    """With the flag off, ALL transient streaming state lives in the root lane.
+
+    _current_lane reads current_subagent_run_id, which reconcile_subagents sets
+    even when the flag is off (lane bookkeeping still runs). Left ungated, the
+    text pin / reasoning / in-flight-message slots were keyed per subagent lane
+    with the flag off — a benign but real stream-shape change against
+    pre-subagent behavior, where everything shared one slot. The flag's
+    contract is byte-identity, not improvement.
+    """
+
+    def test_flag_off_collapses_every_lane_to_root(self):
+        agent = _make_agent(emit_subagent_events=False)
+        agent.active_run = {"current_subagent_run_id": "tools:s1", "active_subagents": {}}
+        self.assertEqual(agent._current_lane(), "__root__")
+
+    def test_flag_on_keeps_the_subagent_lane(self):
+        agent = _make_agent(emit_subagent_events=True)
+        agent.active_run = {"current_subagent_run_id": "tools:s1", "active_subagents": {}}
+        self.assertEqual(agent._current_lane(), "tools:s1")
+
+
+if __name__ == "__main__":
+    unittest.main()

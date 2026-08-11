@@ -49,12 +49,18 @@ function cx(...parts: Array<string | false | null | undefined>): string {
 function SubagentGroupHeader({
   isOpen,
   label,
+  labelStyle,
   onClick,
   title,
   children,
 }: {
   isOpen: boolean;
   label: string;
+  // Inline style rather than a class: the cpk: utilities come from CopilotKit's
+  // PREBUILT stylesheet (the dojo's Tailwind build does not emit that prefix),
+  // and it ships no cpk:opacity-* utilities — a class-based dim would silently
+  // do nothing.
+  labelStyle?: React.CSSProperties;
   onClick: () => void;
   title?: string;
   children?: React.ReactNode;
@@ -72,7 +78,9 @@ function SubagentGroupHeader({
         "cpk:hover:text-foreground cpk:cursor-pointer",
       )}
     >
-      <span className="cpk:font-medium">{label}</span>
+      <span className="cpk:font-medium" style={labelStyle}>
+        {label}
+      </span>
       {children}
       <svg
         width="14"
@@ -96,11 +104,21 @@ function SubagentGroupHeader({
   );
 }
 
+// Whether each subagent group is expanded, keyed by `subagentRunId` and held at
+// MODULE scope on purpose. The custom-message host memoizes on the group's
+// anchor message, so when a snapshot reordering makes a different message the
+// subagent's first attributed one, the SubagentGroup remounts — component state
+// would silently collapse a group the user just expanded. Keyed by the id, the
+// expansion survives that remount. Ids are per-invocation, so entries are never
+// reused across subagents; the map is small and lives for the page's lifetime.
+const subagentGroupOpen: Record<string, boolean> = {};
+
 // One collapsible group for a SINGLE subagent, rendered in the reasoning style
 // via the standalone SubagentGroupHeader (above) plus a custom collapse
-// container (below). Collapsed by default; a
-// subtle activity dot shows while THIS subagent is running — its own lifecycle,
-// read from `useSubagent`, which the registry flips to "finished" on the
+// container (below). Collapsed until the user expands it (expansion is
+// remembered per subagentRunId — see subagentGroupOpen). A subtle activity dot
+// shows while THIS subagent is running — its own lifecycle, read from
+// `useSubagent`, which the registry flips to "finished" on the
 // SUBAGENT_FINISHED the integration emits when the subagent's `task` delegation
 // returns (not when the parent run ends). The body gathers every message
 // carrying this subagentRunId from the live agent state, so when several subagents
@@ -116,7 +134,7 @@ function SubagentGroup({
   // the same per-invocation id the protocol carries. Both sides use
   // `subagentRunId` as of CopilotKit PR #5873, so this is plain shorthand — if
   // it ever needs an explicit mapping again, the two names have diverged.
-  const subagent = useSubagent({ subagentRunId });
+  const subagent = useSubagent({ subagentRunId, agentId });
   // Live subscription so the group re-renders as the subagent streams more
   // messages/tool calls. The custom-message host memoizes on the anchor
   // message, so without a store subscription of its own the body would freeze
@@ -125,16 +143,42 @@ function SubagentGroup({
     agentId,
     updates: [UseAgentUpdate.OnMessagesChanged],
   });
-  const members = React.useMemo(
-    () =>
-      (agent.messages as ChatMessage[]).filter(
-        (m) => m.role === "assistant" && getSubagentRunId(m) === subagentRunId,
-      ),
-    [agent.messages, subagentRunId],
+  const members = React.useMemo(() => {
+    // Dedupe by message id: unlike the main list (which runs CopilotKit's
+    // deduplicateMessages) this filters raw `agent.messages`, where a repeated
+    // id would render the same message twice under duplicate React keys.
+    const seen = new Set<string>();
+    return (agent.messages as ChatMessage[]).filter((m) => {
+      if (m.role !== "assistant" || getSubagentRunId(m) !== subagentRunId) {
+        return false;
+      }
+      if (seen.has(m.id)) {
+        return false;
+      }
+      seen.add(m.id);
+      return true;
+    });
+  }, [agent.messages, subagentRunId]);
+  // Three registry-backed states (running / finished / error) plus a fourth:
+  // `undefined` means the registry has never heard of this id. That is NOT
+  // "running" — the protocol allows attribution with no lifecycle events at
+  // all, and prior-turn messages replayed through MESSAGES_SNAPSHOT arrive
+  // without their SUBAGENT_STARTED. Render those neutrally (hollow marker,
+  // dimmed label) instead of a forever-pulsing dot.
+  const isUnregistered = subagent === undefined;
+  const running = subagent?.status === "running";
+  // Open/closed lives in the module-level registry (see subagentGroupOpen), so
+  // reading it into state here just seeds the first render.
+  const [isOpen, setIsOpen] = React.useState(
+    () => subagentGroupOpen[subagentRunId] ?? false,
   );
-  const running = !subagent || subagent.status === "running";
-  const [manualOpen, setManualOpen] = React.useState<boolean | null>(null);
-  const isOpen = manualOpen ?? false; // collapsed by default; a manual toggle wins
+  const toggleOpen = React.useCallback(() => {
+    setIsOpen((open) => {
+      const next = !open;
+      subagentGroupOpen[subagentRunId] = next; // write through so a remount keeps it
+      return next;
+    });
+  }, [subagentRunId]);
   const label = subagent?.name ?? subagentRunId; // name, falling back to the id
 
   return (
@@ -142,10 +186,34 @@ function SubagentGroup({
       <SubagentGroupHeader
         isOpen={isOpen}
         label={label}
-        onClick={() => setManualOpen(!isOpen)}
-        title={subagent?.description ?? `Subagent ${subagentRunId}`}
+        labelStyle={isUnregistered ? { opacity: 0.6 } : undefined}
+        onClick={toggleOpen}
+        title={
+          subagent?.description ??
+          (isUnregistered
+            ? `Subagent ${subagentRunId} (no lifecycle events received)`
+            : `Subagent ${subagentRunId}`)
+        }
       >
-        {running ? (
+        {isUnregistered ? (
+          // Unregistered: a hollow marker, deliberately neither the pulsing
+          // "running" dot nor the "finished" checkmark — we simply don't know.
+          <span
+            className="cpk:inline-flex cpk:items-center cpk:ml-1 cpk:text-muted-foreground"
+            style={{ opacity: 0.6 }}
+            data-testid="subagent-unregistered"
+            aria-label="unregistered"
+          >
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 9999,
+                border: "1px solid currentColor",
+              }}
+            />
+          </span>
+        ) : running ? (
           <span
             className="cpk:inline-flex cpk:items-center cpk:ml-1"
             data-testid="subagent-activity"
@@ -372,16 +440,43 @@ function SubagentAttributionDemo() {
       // The `on_interrupt` payload arrives as a JSON string (the integration
       // serializes the interrupt value), so parse it back into the object our
       // subagent tool passed to interrupt().
+      type ApprovalPayload = { summary?: string; question?: string };
+      const isObject = (v: unknown): v is Record<string, unknown> =>
+        v !== null && typeof v === "object";
+
       const raw = event?.value;
-      let value: { summary?: string; question?: string } = {};
+      let value: ApprovalPayload = {};
       if (typeof raw === "string") {
         try {
-          value = JSON.parse(raw);
-        } catch {
+          // JSON.parse succeeding is not enough: "null", "42" and "\"text\""
+          // all parse to non-objects, and reading `.question` off them either
+          // throws (null) or silently yields undefined. Only an object is a
+          // usable payload; anything else is treated as the question text.
+          const parsed: unknown = JSON.parse(raw);
+          value = isObject(parsed)
+            ? (parsed as ApprovalPayload)
+            : { question: raw };
+        } catch (error) {
+          console.warn(
+            "[deepagents_subagents] interrupt value is not valid JSON; " +
+              "showing it as the question text.",
+            { raw, error },
+          );
           value = { question: raw };
         }
-      } else if (raw && typeof raw === "object") {
-        value = raw as { summary?: string; question?: string };
+      } else if (isObject(raw)) {
+        // Some interrupt shapes (LangGraph's non-legacy `Interrupt` objects,
+        // and `emit_interrupt_outcome`) wrap the tool's payload under `.value`
+        // rather than being the payload themselves. Unwrap that when present;
+        // otherwise the object IS the payload.
+        const inner = raw.value;
+        if (isObject(inner)) {
+          value = inner as ApprovalPayload;
+        } else if (typeof inner === "string") {
+          value = { question: inner };
+        } else {
+          value = raw as ApprovalPayload;
+        }
       }
       return (
         <div className="subagent-hitl" data-testid="subagent-hitl">

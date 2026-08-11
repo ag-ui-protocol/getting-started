@@ -42,6 +42,20 @@
     "node": ">=18"
   },
   "version": "0.0.1",
+  "//ag-ui-workspace-overrides": [
+    "TEMPORARY, MUST BE REVERTED BEFORE RELEASE. Tracked in PNI-275 (same pin",
+    "as apps/dojo/package.json's //copilotkit-preview-pin -- remove both together).",
+    "The four \"@ag-ui/*\": \"workspace:*\" overrides at the top of pnpm.overrides",
+    "below exist only because of that pin: the pkg.pr.new CopilotKit preview",
+    "builds declare dependencies on the PUBLISHED @ag-ui/core (and friends), which",
+    "would install a second, older copy alongside the workspace packages this",
+    "branch is developing. Two copies means two Event/Message type identities and",
+    "subagent events that typecheck in one copy and not the other. Forcing every",
+    "resolution to the workspace copy keeps a single instance.",
+    "Remove these four entries together with the CopilotKit preview pin, once a",
+    "released @copilotkit/react-core depends on a published @ag-ui/core that",
+    "carries subagent support. The remaining overrides are unrelated and stay."
+  ],
   "pnpm": {
     "overrides": {
       "@ag-ui/client": "workspace:*",

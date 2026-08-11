@@ -106,19 +106,79 @@ RunMetadata = TypedDict("RunMetadata", {
     # concurrent subagents). See _get_or_pin_text_message_id.
     "current_text_message_nodes": NotRequired[Dict[str, Optional[str]]],
     # Deepagents subagent tracking. Maps a stable per-invocation subagent id
-    # (the leading `|`-separated checkpoint_ns segment, e.g. "tools:<uuid>")
-    # to the subagent's name (metadata's lc_agent_name), for every subagent
+    # (the DEEPEST recorded subagent-boundary segment of the event's
+    # `|`-separated checkpoint_ns, e.g. "tools:<uuid>" — see
+    # _record_subagent_boundaries, which is what distinguishes a nested subagent
+    # from a subagent's own inner tool call) to the subagent's reported name:
+    # the declared `subagent_type` from the `task` tool when it was captured,
+    # falling back to the runtime metadata's lc_agent_name. Holds every subagent
     # invocation currently active on this run.
     "active_subagents": NotRequired[Dict[str, str]],
     # The subagent id (see above) whose events are currently being processed,
     # or None when the current event originates at the root/supervisor level.
+    # Maintained regardless of `emit_subagent_events` (other paths read it), so
+    # every site that reads it to decide what to EMIT must check the flag too.
     "current_subagent_run_id": NotRequired[Optional[str]],
+    # Subagent ids that already received a terminal event (SUBAGENT_FINISHED or
+    # SUBAGENT_ERROR) on this run. A terminal is terminal for the id it names, so
+    # a closed id may never be re-opened by a trailing event from its namespace.
+    "closed_subagents": NotRequired[Set[str]],
+    # subagent id -> the id of the subagent that INVOKED it (None for a
+    # top-level subagent, whose parent is the root). Used to restore
+    # current_subagent_run_id to the invoking subagent when a nested child
+    # finishes, so the `task` result is attributed to the parent, not the root.
+    "subagent_parents": NotRequired[Dict[str, Optional[str]]],
+    # Accumulated `tools:<uuid>` checkpoint_ns segments confirmed to be genuine
+    # subagent boundaries (a `tools:` segment directly followed by a non-`tools`
+    # node). Lets derive_subagent_context tell a nested subagent apart from a
+    # subagent's own inner tool call.
+    "subagent_segments": NotRequired[Set[str]],
+    # LangGraph run_id of each `task` tool invocation -> the subagent id it
+    # spawned, so the matching OnToolEnd finishes exactly that subagent. Keyed by
+    # run_id rather than namespace because the subagent's own inner tools share
+    # its namespace and would finish it prematurely.
+    "subagent_task_runs": NotRequired[Dict[str, str]],
+    # Steps are tracked PER LANE: lane -> the node whose step is currently open
+    # in that lane. The parent/supervisor lane is the key None; each subagent's
+    # lane is its subagent id. With `emit_subagent_events` off every event maps
+    # to the None lane, so steps stay a single flat sequence exactly as they were
+    # before subagent support.
+    "lane_nodes": NotRequired[Dict[Optional[str], Optional[str]]],
+    # lane -> the subagent_run_id that was stamped on that lane's STEP_STARTED,
+    # so STEP_FINISHED can be attributed to whoever OPENED the step rather than
+    # to whichever lane happens to be current when it closes.
+    "step_owners": NotRequired[Dict[Optional[str], Optional[str]]],
+    # `task` delegation calls seen streaming from the supervisor, queued as
+    # {"tool_call_id", "parent_message_id"} so each spawned subagent can carry
+    # parentToolCallId / parentMessageId. Normally matched by namespace (see
+    # task_tool_call_ids_by_ns); FIFO order is only the fallback.
+    "pending_task_calls": NotRequired[List[Dict[str, Optional[str]]]],
+    # tool_call_ids already queued into pending_task_calls, since a call's id
+    # recurs across every one of its arg-streaming chunks.
+    "seen_task_call_ids": NotRequired[Set[str]],
+    # ToolNode dispatch namespace -> the single `task` tool_call_id dispatched in
+    # it. Lets a subagent be linked to its EXACT spawning call by namespace
+    # instead of by emission order (which tool-start reordering violates).
+    "task_tool_call_ids_by_ns": NotRequired[Dict[str, str]],
+    # Snapshot of LangGraphAgent.emit_subagent_events for this run. Read by the
+    # module-level subagent emitters, which have no instance, so the opt-in gate
+    # cannot be bypassed by a caller that forgets to check.
+    "emit_subagent_events": NotRequired[bool],
+    # Subagent-attributed messages the client echoed back from prior turns,
+    # split out of the graph input in run() (they must never enter supervisor
+    # state). Re-emitted in MESSAGES_SNAPSHOT so they persist in the client's
+    # display across turns — with their attribution stripped when the flag is
+    # off. See _merge_subagent_messages.
+    "inbound_subagent_messages": NotRequired[List[Any]],
     # Declared metadata for each subagent invocation, captured from the
     # deepagents `task` delegation tool's on_tool_start input (which runs in the
     # subagent's own checkpoint namespace, i.e. its subagent id). Maps subagent
-    # id -> {"name": subagent_type, "description": task description}, so
-    # SUBAGENT_STARTED can carry the declared subagent type and the
-    # per-invocation description rather than only the runtime lc_agent_name.
+    # id -> {"name": subagent_type, "description": task description,
+    # "parent_tool_call_id": the `task` call that spawned it,
+    # "parent_message_id": the assistant message that call streamed from}, so
+    # SUBAGENT_STARTED can carry the declared subagent type, the per-invocation
+    # description and the parent links rather than only the runtime
+    # lc_agent_name.
     "subagent_task_meta": NotRequired[Dict[str, Dict[str, Optional[str]]]],
     # Subagent-attributed messages streamed during this run, keyed by message
     # id. Assistant entries hold {kind:"assistant", id, role, content,
