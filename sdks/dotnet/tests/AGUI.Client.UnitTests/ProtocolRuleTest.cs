@@ -2545,6 +2545,191 @@ public sealed class ProtocolRuleTest
         await ProcessEventsAsync(events);
     }
 
+    // ────────────────────────────────────────────────
+    // Ownership seeded from MESSAGES_SNAPSHOT (mirrors verifyEvents)
+    // ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Snapshot_ReopenUnderDifferentSubagent_Throws()
+    {
+        // The replay-corruption door: without seeding, the reopen was accepted and
+        // s2's content was appended into s1's message.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new MessagesSnapshotEvent
+            {
+                Messages = [new AGUIAssistantMessage { Id = "m", Content = "old", SubagentRunId = "s1" }]
+            },
+            new TextMessageStartEvent { MessageId = "m", Role = "assistant", SubagentRunId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Snapshot_ReplayedToolCallUnderDifferentSubagent_Throws()
+    {
+        // A ToolCall carries no owner field of its own, so it belongs to its message.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new MessagesSnapshotEvent
+            {
+                Messages =
+                [
+                    new AGUIAssistantMessage
+                    {
+                        Id = "m",
+                        SubagentRunId = "s1",
+                        ToolCalls = [new AGUIToolCall { Id = "tc", Function = new() { Name = "search", Arguments = "{}" } }]
+                    }
+                ]
+            },
+            new ToolCallStartEvent { ToolCallId = "tc", ToolCallName = "search", SubagentRunId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Snapshot_ReopenMatchingOwner_Succeeds()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new MessagesSnapshotEvent
+            {
+                Messages = [new AGUIAssistantMessage { Id = "m", Content = "old", SubagentRunId = "s1" }]
+            },
+            new TextMessageStartEvent { MessageId = "m", Role = "assistant", SubagentRunId = "s1" },
+            new TextMessageContentEvent { MessageId = "m", Delta = "new", SubagentRunId = "s1" },
+            new TextMessageEndEvent { MessageId = "m", SubagentRunId = "s1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var result = await ProcessEventsAsync(events);
+        Assert.IsType<RunFinishedEvent>(result[^1].RawRepresentation);
+    }
+
+    // ────────────────────────────────────────────────
+    // Tool call vs parent message ownership (mirrors verifyEvents)
+    // ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ToolCall_OwnerConflictsWithParentMessage_Throws()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new TextMessageStartEvent { MessageId = "m", Role = "assistant", SubagentRunId = "s1" },
+            new TextMessageEndEvent { MessageId = "m", SubagentRunId = "s1" },
+            new ToolCallStartEvent { ToolCallId = "tc", ToolCallName = "search", ParentMessageId = "m", SubagentRunId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("parent message 'm'", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ToolCall_UntaggedInheritsParentMessageOwner_Succeeds()
+    {
+        // The untagged call inherits s1 from its parent message, so an s1-tagged
+        // continuation agrees with it.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new TextMessageStartEvent { MessageId = "m", Role = "assistant", SubagentRunId = "s1" },
+            new TextMessageEndEvent { MessageId = "m", SubagentRunId = "s1" },
+            new ToolCallStartEvent { ToolCallId = "tc", ToolCallName = "search", ParentMessageId = "m" },
+            new ToolCallArgsEvent { ToolCallId = "tc", Delta = "{}", SubagentRunId = "s1" },
+            new ToolCallEndEvent { ToolCallId = "tc" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var result = await ProcessEventsAsync(events);
+        Assert.IsType<RunFinishedEvent>(result[^1].RawRepresentation);
+    }
+
+    [Fact]
+    public async Task ToolCall_ContinuationDisagreesWithInheritedOwner_Throws()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new TextMessageStartEvent { MessageId = "m", Role = "assistant", SubagentRunId = "s1" },
+            new TextMessageEndEvent { MessageId = "m", SubagentRunId = "s1" },
+            new ToolCallStartEvent { ToolCallId = "tc", ToolCallName = "search", ParentMessageId = "m" },
+            new ToolCallArgsEvent { ToolCallId = "tc", Delta = "{}", SubagentRunId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    // ────────────────────────────────────────────────
+    // Ambiguous id-less reasoning chunks (mirrors the TypeScript chunk transform)
+    // ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ReasoningChunk_IdlessTaglessWithTwoOpenLanes_Throws()
+    {
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ReasoningMessageChunkEvent { MessageId = "ra", Delta = "a", SubagentRunId = "s1" },
+            new ReasoningMessageChunkEvent { MessageId = "rb", Delta = "b", SubagentRunId = "s2" },
+            new ReasoningMessageChunkEvent { Delta = "c" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("Ambiguous", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReasoningChunk_IdlessTaglessSoleOpenLane_ContinuesAndAttributes()
+    {
+        // With no parent stream open, the sole open lane is the chunk's only possible
+        // referent — and an event with no MessageId is otherwise unresolvable, so the
+        // inferred owner must be transferred onto the update explicitly.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ReasoningMessageChunkEvent { MessageId = "ra", Delta = "a", SubagentRunId = "s1" },
+            new ReasoningMessageChunkEvent { Delta = "c" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var result = await ProcessEventsAsync(events);
+        var idless = result.Single(u =>
+            u.RawRepresentation is ReasoningMessageChunkEvent { MessageId: null });
+        Assert.Equal("s1", idless.AdditionalProperties?[EventStreamConverter.AGUISubagentRunIdKey]);
+    }
+
+    [Fact]
+    public async Task ReasoningChunk_IdlessTaglessPrefersParentOpenStream()
+    {
+        // Untagged means the parent, so the parent's own open stream wins over a
+        // subagent lane — the update stays unattributed (no owner key).
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ReasoningMessageChunkEvent { MessageId = "rp", Delta = "p" },
+            new ReasoningMessageChunkEvent { MessageId = "ra", Delta = "a", SubagentRunId = "s1" },
+            new ReasoningMessageChunkEvent { Delta = "c" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var result = await ProcessEventsAsync(events);
+        var idless = result.Single(u =>
+            u.RawRepresentation is ReasoningMessageChunkEvent { MessageId: null });
+        Assert.False(
+            idless.AdditionalProperties?.ContainsKey(EventStreamConverter.AGUISubagentRunIdKey) == true,
+            "an id-less chunk continuing the parent's stream must not be attributed to a subagent");
+    }
+
     private static async Task<List<ChatResponseUpdate>> ProcessEventsAsync(BaseEvent[] events)
     {
         using var httpClient = CreateMockHttpClient(events);

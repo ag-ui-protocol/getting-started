@@ -215,9 +215,22 @@ is a complete, valid use of subagent support, so nothing here requires a stream
 to send lifecycle events at all.
 
 - `SubagentFinished` and `SubagentError` name a subagent that is currently
-  active, and a subagent is not started twice within a run.
+  active, and a subagent is not started twice within a run. The lifecycle
+  events carry their schema-required fields (`subagentRunId` on all three,
+  `name` on `SubagentStarted`, `message` on `SubagentError`) — clients enforce
+  this even for in-process producers that bypass wire-level schema validation.
 - Continuation and close events agree with the owner their entity was created
   under. A text message opened by one subagent cannot be continued by another.
+- Ownership is also established by replayed history: a message in a
+  `MessagesSnapshot` (and each tool call it carries) is owned by the
+  `subagentRunId` it carries — absent means the parent — and a later event
+  reopening that id under a different owner is rejected, exactly as a
+  conflicting second opener is.
+- A tool call belongs to the assistant message its `parentMessageId` names.
+  `ToolCall` itself carries no attribution field, so a `ToolCallStart` whose
+  explicit `subagentRunId` disagrees with that message's owner cannot be
+  represented faithfully and is rejected; an untagged tool call inherits the
+  parent message's owner.
 - Steps are scoped to the agent that opened them: a subagent cannot close the
   parent's step, or a sibling's.
 - Every started subagent is closed before `RunFinished`.

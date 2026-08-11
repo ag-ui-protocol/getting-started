@@ -1030,3 +1030,244 @@ describe("verifyEvents subagent lifecycle", () => {
     );
   });
 });
+
+describe("verifyEvents subagent ownership seeded from snapshots", () => {
+  const run = (inputEvents: BaseEvent[]) =>
+    firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+
+  const expectRejectedWith = async (inputEvents: BaseEvent[], message: RegExp) => {
+    let caught: unknown;
+    try {
+      await run(inputEvents);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(AGUIError);
+    expect((caught as Error).message).toMatch(message);
+  };
+
+  const started = { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent;
+  const finished = { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent;
+  const snapshotWith = (messages: unknown[]) =>
+    ({ type: EventType.MESSAGES_SNAPSHOT, messages } as BaseEvent);
+
+  it("should reject reopening a snapshot message under a different subagent", async () => {
+    // The exact replay-corruption sequence: without seeding, the verifier
+    // accepted this and the reducer appended s2's content into s1's message.
+    await expectRejectedWith(
+      [
+        started,
+        snapshotWith([{ id: "m", role: "assistant", content: "old", subagentRunId: "s1" }]),
+        { type: EventType.TEXT_MESSAGE_START, messageId: "m", role: "assistant", subagentRunId: "s2" } as BaseEvent,
+      ],
+      /does not match the message 'm' opener's subagent 's1'/i,
+    );
+  });
+
+  it("should reject a tagged reopen of a parent-owned snapshot message", async () => {
+    await expectRejectedWith(
+      [
+        started,
+        snapshotWith([{ id: "m", role: "assistant", content: "old" }]),
+        { type: EventType.TEXT_MESSAGE_START, messageId: "m", role: "assistant", subagentRunId: "s2" } as BaseEvent,
+      ],
+      /\(the parent agent\)/i,
+    );
+  });
+
+  it("should accept reopening a snapshot message under its own subagent, and untagged", async () => {
+    const events = await run([
+      started,
+      snapshotWith([{ id: "m", role: "assistant", content: "old", subagentRunId: "s1" }]),
+      { type: EventType.TEXT_MESSAGE_START, messageId: "m", role: "assistant", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "m", delta: "new" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_END, messageId: "m" } as BaseEvent,
+      // Untagged never disagrees with any owner.
+      { type: EventType.TEXT_MESSAGE_START, messageId: "m2", role: "assistant" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_END, messageId: "m2" } as BaseEvent,
+      finished,
+    ]);
+    expect(events[events.length - 1].type).toBe(EventType.RUN_FINISHED);
+  });
+
+  it("should reject replaying a snapshot tool call under a different subagent", async () => {
+    await expectRejectedWith(
+      [
+        started,
+        snapshotWith([
+          {
+            id: "m",
+            role: "assistant",
+            subagentRunId: "s1",
+            toolCalls: [
+              { id: "tc", type: "function", function: { name: "search", arguments: "{}" } },
+            ],
+          },
+        ]),
+        {
+          type: EventType.TOOL_CALL_START,
+          toolCallId: "tc",
+          toolCallName: "search",
+          subagentRunId: "s2",
+        } as ToolCallStartEvent,
+      ],
+      /does not match the tool call 'tc' opener's subagent 's1'/i,
+    );
+  });
+});
+
+describe("verifyEvents subagent lifecycle required fields", () => {
+  const started = { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent;
+
+  const expectRejectedWith = async (inputEvents: BaseEvent[], message: RegExp) => {
+    let caught: unknown;
+    try {
+      await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(AGUIError);
+    expect((caught as Error).message).toMatch(message);
+  };
+
+  it("should reject SUBAGENT_STARTED without a subagentRunId", async () => {
+    await expectRejectedWith(
+      [started, { type: EventType.SUBAGENT_STARTED, name: "worker" } as BaseEvent],
+      /SUBAGENT_STARTED.*subagentRunId/i,
+    );
+  });
+
+  it("should reject SUBAGENT_STARTED without a name", async () => {
+    await expectRejectedWith(
+      [started, { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1" } as BaseEvent],
+      /SUBAGENT_STARTED.*name/i,
+    );
+  });
+
+  it("should reject SUBAGENT_FINISHED without a subagentRunId", async () => {
+    await expectRejectedWith(
+      [
+        started,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "worker" } as BaseEvent,
+        { type: EventType.SUBAGENT_FINISHED } as BaseEvent,
+      ],
+      /SUBAGENT_FINISHED.*subagentRunId/i,
+    );
+  });
+
+  it("should reject SUBAGENT_ERROR without a message", async () => {
+    await expectRejectedWith(
+      [
+        started,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "worker" } as BaseEvent,
+        { type: EventType.SUBAGENT_ERROR, subagentRunId: "s1" } as BaseEvent,
+      ],
+      /SUBAGENT_ERROR.*message/i,
+    );
+  });
+});
+
+describe("verifyEvents tool call vs parent message ownership", () => {
+  const started = { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent;
+  const finished = { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent;
+
+  const run = (inputEvents: BaseEvent[]) =>
+    firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+
+  const expectRejectedWith = async (inputEvents: BaseEvent[], message: RegExp) => {
+    let caught: unknown;
+    try {
+      await run(inputEvents);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(AGUIError);
+    expect((caught as Error).message).toMatch(message);
+  };
+
+  const s1Message: BaseEvent[] = [
+    { type: EventType.TEXT_MESSAGE_START, messageId: "m", role: "assistant", subagentRunId: "s1" } as BaseEvent,
+    { type: EventType.TEXT_MESSAGE_END, messageId: "m", subagentRunId: "s1" } as BaseEvent,
+  ];
+
+  it("should reject a tool call whose explicit owner conflicts with its parent message's owner", async () => {
+    // ToolCall has no attribution field of its own, so accepting this
+    // guarantees s2's call is silently recorded inside s1's message.
+    await expectRejectedWith(
+      [
+        started,
+        ...s1Message,
+        {
+          type: EventType.TOOL_CALL_START,
+          toolCallId: "tc",
+          toolCallName: "search",
+          parentMessageId: "m",
+          subagentRunId: "s2",
+        } as ToolCallStartEvent,
+      ],
+      /parent message 'm'/i,
+    );
+  });
+
+  it("should reject a tagged tool call on a parent-owned message", async () => {
+    await expectRejectedWith(
+      [
+        started,
+        { type: EventType.TEXT_MESSAGE_START, messageId: "m", role: "assistant" } as BaseEvent,
+        { type: EventType.TEXT_MESSAGE_END, messageId: "m" } as BaseEvent,
+        {
+          type: EventType.TOOL_CALL_START,
+          toolCallId: "tc",
+          toolCallName: "search",
+          parentMessageId: "m",
+          subagentRunId: "s2",
+        } as ToolCallStartEvent,
+      ],
+      /\(the parent agent\)/i,
+    );
+  });
+
+  it("should accept a matching tag and let an untagged tool call inherit its parent's owner", async () => {
+    const events = await run([
+      started,
+      ...s1Message,
+      {
+        type: EventType.TOOL_CALL_START,
+        toolCallId: "tc",
+        toolCallName: "search",
+        parentMessageId: "m",
+        subagentRunId: "s1",
+      } as ToolCallStartEvent,
+      { type: EventType.TOOL_CALL_END, toolCallId: "tc" } as ToolCallEndEvent,
+      // Untagged inherits s1 from the parent message, so an s1-tagged
+      // continuation agrees with it.
+      {
+        type: EventType.TOOL_CALL_START,
+        toolCallId: "tc2",
+        toolCallName: "search",
+        parentMessageId: "m",
+      } as ToolCallStartEvent,
+      { type: EventType.TOOL_CALL_ARGS, toolCallId: "tc2", delta: "{}", subagentRunId: "s1" } as ToolCallArgsEvent,
+      { type: EventType.TOOL_CALL_END, toolCallId: "tc2" } as ToolCallEndEvent,
+      finished,
+    ]);
+    expect(events[events.length - 1].type).toBe(EventType.RUN_FINISHED);
+  });
+
+  it("should reject a continuation disagreeing with the owner an untagged tool call inherited", async () => {
+    await expectRejectedWith(
+      [
+        started,
+        ...s1Message,
+        {
+          type: EventType.TOOL_CALL_START,
+          toolCallId: "tc",
+          toolCallName: "search",
+          parentMessageId: "m",
+        } as ToolCallStartEvent,
+        { type: EventType.TOOL_CALL_ARGS, toolCallId: "tc", delta: "{}", subagentRunId: "s2" } as ToolCallArgsEvent,
+      ],
+      /does not match the tool call 'tc' opener's subagent 's1'/i,
+    );
+  });
+});

@@ -289,19 +289,50 @@ export const verifyEvents =
               );
             }
 
+            // A tool call lives INSIDE the assistant message parentMessageId names, and
+            // ToolCall itself carries no attribution field — so a call whose explicit tag
+            // disagrees with that message's owner cannot be represented: the reducer
+            // would record it in the other owner's message and the tag would be lost
+            // from every snapshot and round-trip. Rejected, rather than silently
+            // reattributed. An untagged call inherits the parent message's owner (the
+            // continuation rule: absent means "whoever owns the surrounding entity"),
+            // which is also what the reducer effectively does.
+            const parentMessageId = (event.parentMessageId as string | undefined);
+            const eventTag = (event.subagentRunId as string | undefined);
+            let inheritedOwner: { subagentRunId?: string } | undefined;
+            if (parentMessageId !== undefined) {
+              const parentOwner = owners.message.get(parentMessageId);
+              if (parentOwner) {
+                if (eventTag !== undefined && eventTag !== parentOwner.subagentRunId) {
+                  return throwError(
+                    () =>
+                      new AGUIError(
+                        `Cannot send 'TOOL_CALL_START': subagentRunId '${eventTag}' does not match its parent message '${parentMessageId}' owner '${parentOwner.subagentRunId ?? "(the parent agent)"}'. A tool call belongs to the message that carries it.`,
+                      ),
+                  );
+                }
+                inheritedOwner = parentOwner;
+              }
+            }
+
             // First writer wins, for the same reason as TEXT_MESSAGE_START above: the
             // retained owner still names whoever opened this id, and a different producer
             // reopening it would have its args appended to the first producer's call.
             const existingToolCallOwner = owners.toolCall.get(toolCallId);
             if (existingToolCallOwner) {
               const subErr = subagentTagError(
-                eventType, (event.subagentRunId as string | undefined), existingToolCallOwner, "tool call", toolCallId,
+                eventType, eventTag, existingToolCallOwner, "tool call", toolCallId,
               );
               if (subErr) return throwError(() => subErr);
             }
             activeToolCalls.add(toolCallId);
             if (!existingToolCallOwner) {
-              owners.toolCall.set(toolCallId, { subagentRunId: (event.subagentRunId as string | undefined) });
+              owners.toolCall.set(
+                toolCallId,
+                eventTag !== undefined
+                  ? { subagentRunId: eventTag }
+                  : inheritedOwner ?? { subagentRunId: undefined },
+              );
             }
             return of(event);
           }
@@ -546,7 +577,24 @@ export const verifyEvents =
           // Subagent flow
           case EventType.SUBAGENT_STARTED: {
             // Required on the lifecycle events -- this is the subagent's own identity,
-            // not the optional attribution tag other events carry.
+            // not the optional attribution tag other events carry. The zod schema
+            // requires these, but an in-process producer hands plain objects straight
+            // to this verifier without wire parsing — and a Map happily keys on
+            // `undefined`, so an id-less lifecycle silently corrupted the tracking
+            // state a schema-checked stream could never produce. Python (pydantic)
+            // and .NET (RequireProvided) both reject these; checking here keeps the
+            // three SDKs interchangeable. Empty string is NOT rejected: it is a legal
+            // opaque id everywhere else in this verifier.
+            if (typeof event.subagentRunId !== "string") {
+              return throwError(
+                () => new AGUIError(`Cannot send 'SUBAGENT_STARTED' without a 'subagentRunId'.`),
+              );
+            }
+            if (typeof (event as { name?: unknown }).name !== "string") {
+              return throwError(
+                () => new AGUIError(`Cannot send 'SUBAGENT_STARTED' without a 'name'.`),
+              );
+            }
             const subagentRunId = (event.subagentRunId as string);
             const parentSubagentRunId = (event.parentSubagentRunId as string | undefined);
             if (activeSubagents.has(subagentRunId)) {
@@ -587,6 +635,19 @@ export const verifyEvents =
           case EventType.SUBAGENT_FINISHED:
           case EventType.SUBAGENT_ERROR: {
             // Required here too, for the same reason as SUBAGENT_STARTED above.
+            if (typeof event.subagentRunId !== "string") {
+              return throwError(
+                () => new AGUIError(`Cannot send '${eventType}' without a 'subagentRunId'.`),
+              );
+            }
+            if (
+              eventType === EventType.SUBAGENT_ERROR &&
+              typeof (event as { message?: unknown }).message !== "string"
+            ) {
+              return throwError(
+                () => new AGUIError(`Cannot send 'SUBAGENT_ERROR' without a 'message'.`),
+              );
+            }
             const subagentRunId = (event.subagentRunId as string);
             if (!activeSubagents.has(subagentRunId)) {
               return throwError(
@@ -598,6 +659,40 @@ export const verifyEvents =
             }
             activeSubagents.delete(subagentRunId);
             closedSubagents.add(subagentRunId);
+            return of(event);
+          }
+
+          case EventType.MESSAGES_SNAPSHOT: {
+            // A snapshot establishes ownership just as an opener does: each message's
+            // subagentRunId (absent = the parent agent) is on record from here on, and
+            // so is each assistant message's tool calls' — a ToolCall carries no owner
+            // field of its own, so it belongs to its message. Without this seeding, a
+            // later event reopening a snapshot id under a DIFFERENT owner was accepted,
+            // and the reducer appended the new producer's content into the recorded
+            // owner's message — silent misattribution via the replay door. First writer
+            // still wins: ids the stream already established keep their recorded owner
+            // (a snapshot restating them agrees by construction; checking it would
+            // re-verify the reducer, not the producer).
+            //
+            // Initial history handed to an agent OUTSIDE the event stream (RunAgentInput
+            // messages) never passes through this operator and cannot be seeded here;
+            // producers replaying such ids must tag consistently with that history.
+            const messages = ((event as { messages?: unknown }).messages ?? []) as Array<{
+              id?: string;
+              subagentRunId?: string;
+              toolCalls?: Array<{ id?: string }>;
+            }>;
+            for (const msg of messages) {
+              if (!msg || typeof msg.id !== "string") continue;
+              if (!owners.message.has(msg.id)) {
+                owners.message.set(msg.id, { subagentRunId: msg.subagentRunId });
+              }
+              for (const tc of msg.toolCalls ?? []) {
+                if (tc && typeof tc.id === "string" && !owners.toolCall.has(tc.id)) {
+                  owners.toolCall.set(tc.id, { subagentRunId: msg.subagentRunId });
+                }
+              }
+            }
             return of(event);
           }
 

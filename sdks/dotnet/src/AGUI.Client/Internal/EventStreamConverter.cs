@@ -290,6 +290,12 @@ internal static class EventStreamConverter
 
         await foreach (var evt in events.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
+            // Lane inferred for an id-less REASONING_MESSAGE_CHUNK by the validation
+            // below, carried to the processing switch so the resulting update can be
+            // stamped — an event with no MessageId is unresolvable through the owner
+            // maps, so without this the inferred owner never reached the consumer.
+            string? inferredReasoningChunkOwner = null;
+
             // Verify event ordering and lifecycle rules
             if (runError)
             {
@@ -422,6 +428,47 @@ internal static class EventStreamConverter
                     throw new System.InvalidOperationException(
                         $"Cannot send 'RUN_FINISHED' while subagents are still active: {string.Join(", ", activeSubagents.Keys)}");
 
+                case MessagesSnapshotEvent snapshot:
+                    // A snapshot establishes ownership just as an opener does: each
+                    // message's subagentRunId (null = the parent agent) goes on record,
+                    // and so does each assistant message's tool calls' — a ToolCall
+                    // carries no owner field of its own, so it belongs to its message.
+                    // Without this seeding, a later event reopening a snapshot id under a
+                    // DIFFERENT owner was accepted and the reducer merged the new
+                    // producer's content into the recorded owner's message — silent
+                    // misattribution via the replay door. First writer still wins: ids
+                    // the stream already established keep their recorded owner. Mirrors
+                    // verifyEvents.
+                    foreach (var snapshotMessage in snapshot.Messages)
+                    {
+                        if (snapshotMessage?.Id is not { } snapshotMessageId)
+                        {
+                            continue;
+                        }
+
+                        if (!messageOwners.ContainsKey(snapshotMessageId))
+                        {
+                            messageOwners[snapshotMessageId] = snapshotMessage.SubagentRunId;
+                            RecordMessageOwner(snapshotMessageId, snapshotMessage.SubagentRunId);
+                        }
+
+                        if (snapshotMessage is AGUIAssistantMessage { ToolCalls: { } snapshotToolCalls })
+                        {
+                            foreach (var snapshotToolCall in snapshotToolCalls)
+                            {
+                                if (snapshotToolCall is null || toolCallOwners.ContainsKey(snapshotToolCall.Id))
+                                {
+                                    continue;
+                                }
+
+                                toolCallOwners[snapshotToolCall.Id] = snapshotMessage.SubagentRunId;
+                                RecordCallOwner(snapshotToolCall.Id, snapshotMessage.SubagentRunId);
+                            }
+                        }
+                    }
+
+                    break;
+
                 // Attribution consistency for the ID-keyed entities, mirroring
                 // verifyEvents. The FIRST opener records the owner; a continuation, a
                 // close, or a second opener tagged with a different subagent is a
@@ -456,10 +503,33 @@ internal static class EventStreamConverter
                     break;
 
                 case ToolCallStartEvent toolStart:
+                {
+                    // A tool call lives INSIDE the assistant message parentMessageId
+                    // names, and ToolCall itself carries no attribution field — so a call
+                    // whose explicit tag disagrees with that message's owner cannot be
+                    // represented: it would be recorded in the other owner's message and
+                    // the tag lost from every snapshot and round-trip. Rejected, exactly
+                    // as verifyEvents rejects it. An untagged call inherits the parent
+                    // message's owner (the continuation rule: absent means "whoever owns
+                    // the surrounding entity").
+                    var callOwner = toolStart.SubagentRunId;
+                    if (toolStart.ParentMessageId is { } parentMessageId
+                        && messageOwners.TryGetValue(parentMessageId, out var parentOwner))
+                    {
+                        if (toolStart.SubagentRunId is { } callTag
+                            && !string.Equals(callTag, parentOwner, StringComparison.Ordinal))
+                        {
+                            throw new System.InvalidOperationException(
+                                $"Cannot send 'TOOL_CALL_START': subagentRunId '{callTag}' does not match its parent message '{parentMessageId}' owner '{parentOwner ?? "(the parent agent)"}'. A tool call belongs to the message that carries it.");
+                        }
+
+                        callOwner ??= parentOwner;
+                    }
+
                     if (!toolCallOwners.ContainsKey(toolStart.ToolCallId))
                     {
-                        toolCallOwners[toolStart.ToolCallId] = toolStart.SubagentRunId;
-                        RecordCallOwner(toolStart.ToolCallId, toolStart.SubagentRunId);
+                        toolCallOwners[toolStart.ToolCallId] = callOwner;
+                        RecordCallOwner(toolStart.ToolCallId, callOwner);
                     }
                     else
                     {
@@ -468,6 +538,7 @@ internal static class EventStreamConverter
                     }
 
                     break;
+                }
 
                 // A creation event: it both references the call and mints the tool message.
                 case ToolCallResultEvent toolResult:
@@ -559,21 +630,43 @@ internal static class EventStreamConverter
                     else
                     {
                         // A tag names its lane outright; an untagged chunk continues the
-                        // parent's. Only that ONE lane is consulted: measuring the
-                        // continuation against the newest stream of ANY lane rejected chunks
-                        // that agreed perfectly with their own. A lane with nothing open
-                        // leaves nothing to disagree with, and the parent's lane resolves to
-                        // a null tag, which can never disagree either — so an untagged chunk
-                        // is always accepted, and its cursor is tracked to complete the
-                        // per-lane picture rather than to reject anything.
+                        // parent's own open stream when it has one. Only that ONE lane is
+                        // consulted first: measuring the continuation against the newest
+                        // stream of ANY lane rejected chunks that agreed perfectly with
+                        // their own.
+                        //
+                        // When the chunk carries neither and the parent has nothing open,
+                        // the TypeScript chunk transform's rule applies (documented in
+                        // subagents.mdx): the SOLE open stream is the chunk's only
+                        // possible referent — an id-less chunk can never OPEN a stream —
+                        // so it continues that lane and the update is attributed to it;
+                        // with MORE than one open lane the chunk is ambiguous and the
+                        // stream is rejected, identically to TypeScript. Accepting it
+                        // left the event unattributed on a stream the other SDK refuses.
                         string? openId;
                         if (reasoningChunk.SubagentRunId is { } laneTag)
                         {
                             subagentReasoningChunkIds.TryGetValue(laneTag, out openId);
+                            inferredReasoningChunkOwner = laneTag;
+                        }
+                        else if (parentReasoningChunkId is not null)
+                        {
+                            openId = parentReasoningChunkId;
+                        }
+                        else if (subagentReasoningChunkIds.Count == 1)
+                        {
+                            var soleLane = subagentReasoningChunkIds.First();
+                            openId = soleLane.Value;
+                            inferredReasoningChunkOwner = soleLane.Key;
+                        }
+                        else if (subagentReasoningChunkIds.Count > 1)
+                        {
+                            throw new System.InvalidOperationException(
+                                $"Ambiguous REASONING_MESSAGE_CHUNK: it carries neither a messageId nor a subagentRunId, but {subagentReasoningChunkIds.Count} lanes have an open reasoning message. Attribute the chunk to the subagent it belongs to.");
                         }
                         else
                         {
-                            openId = parentReasoningChunkId;
+                            openId = null;
                         }
 
                         if (openId is not null)
@@ -978,6 +1071,15 @@ internal static class EventStreamConverter
                         ResponseId = responseId,
                         RawRepresentation = evt
                     };
+                    // The lane the validation inferred for an id-less reasoning chunk —
+                    // unresolvable through the owner maps (no MessageId), so it is
+                    // stamped here directly. StampOwner below only ADDS a key when its
+                    // own resolution succeeds, so this survives buffering unchanged.
+                    if (inferredReasoningChunkOwner is not null)
+                    {
+                        update.AdditionalProperties ??= new AdditionalPropertiesDictionary();
+                        update.AdditionalProperties[AGUISubagentRunIdKey] = inferredReasoningChunkOwner;
+                    }
                     if (toolCallBuilder.IsBuffering)
                     {
                         toolCallBuilder.BufferUpdate(StampOwner(update, owners));
