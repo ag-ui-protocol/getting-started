@@ -778,5 +778,95 @@ class TestFlagOffLaneCollapse(unittest.TestCase):
         self.assertEqual(agent._current_lane(), "tools:s1")
 
 
+class TestRunErrorIsTerminal(unittest.IsolatedAsyncioTestCase):
+    """An in-band ``error`` event must end the stream at RUN_ERROR.
+
+    Clients reject EVERY event after RUN_ERROR ("The run has already errored").
+    The error branch used to ``break`` out of the stream loop and then fall
+    through normal finalisation — STEP_FINISHED, STATE_SNAPSHOT,
+    MESSAGES_SNAPSHOT and a second terminal (RUN_FINISHED) — so a conforming
+    client aborted the errored run at the first trailing event.
+    """
+
+    _EVENTS = [
+        _chain_start("tools", {"langgraph_node": "tools"}, run_id="r1"),
+        _chain_start("model", _sub_meta("s1", "model"), run_id="r2"),
+        {"event": "error", "run_id": "r3", "data": {"message": "boom"}, "metadata": {}},
+    ]
+
+    async def test_flag_on_nothing_follows_run_error(self):
+        collected = await _drive(_make_agent(emit_subagent_events=True), self._EVENTS)
+        types = _types(collected)
+        self.assertEqual(types[-1], EventType.RUN_ERROR, f"trailing events: {types}")
+        terminals = [t for t in types if t in (EventType.RUN_FINISHED, EventType.RUN_ERROR)]
+        self.assertEqual(terminals, [EventType.RUN_ERROR], "exactly one terminal")
+
+    async def test_flag_on_every_step_and_subagent_closes_before_run_error(self):
+        collected = await _drive(_make_agent(emit_subagent_events=True), self._EVENTS)
+        starts, finishes = _steps(collected)
+        self.assertEqual(
+            sorted(starts, key=_step_key), sorted(finishes, key=_step_key),
+            "every STEP_STARTED needs its matching close before the terminal",
+        )
+        types = _types(collected)
+        self.assertIn(EventType.SUBAGENT_ERROR, types)
+        self.assertLess(types.index(EventType.SUBAGENT_ERROR), types.index(EventType.RUN_ERROR))
+
+    async def test_flag_off_nothing_follows_run_error_either(self):
+        collected = await _drive(_make_agent(emit_subagent_events=False), self._EVENTS)
+        types = _types(collected)
+        self.assertEqual(types[-1], EventType.RUN_ERROR, f"trailing events: {types}")
+        terminals = [t for t in types if t in (EventType.RUN_FINISHED, EventType.RUN_ERROR)]
+        self.assertEqual(terminals, [EventType.RUN_ERROR])
+        # And the flat (pre-subagent) step still closes before the terminal.
+        starts, finishes = _steps(collected)
+        self.assertEqual(sorted(starts, key=_step_key), sorted(finishes, key=_step_key))
+
+
+class TestRunEndFallbackClosesChildrenFirst(unittest.IsolatedAsyncioTestCase):
+    """The run-end fallback must close a child before its parent wrapper.
+
+    When the stream ends while a subagent is still open (its task's
+    on_tool_end never fired — interrupt/fallback paths), the parent's
+    wrapper step used to close via handle_node_change BEFORE drain_subagents
+    closed the child's step and finished the subagent. That inverts the
+    stated containment semantics: the child's lifecycle must sit inside the
+    parent step that spawned it.
+    """
+
+    _EVENTS = [
+        _chain_start("tools", {"langgraph_node": "tools"}, run_id="r1"),
+        _chain_start("model", _sub_meta("s1", "model"), run_id="r2"),
+        # Stream ends here: no on_tool_end for the task, no error event.
+    ]
+
+    async def test_child_step_and_terminal_precede_the_parent_step_close(self):
+        collected = await _drive(_make_agent(emit_subagent_events=True), self._EVENTS)
+        types = _types(collected)
+
+        child_step_close = next(
+            i for i, e in enumerate(collected)
+            if getattr(e, "type", None) == EventType.STEP_FINISHED
+            and getattr(e, "subagent_run_id", None) == "tools:s1"
+        )
+        child_terminal = types.index(EventType.SUBAGENT_FINISHED)
+        parent_step_close = next(
+            i for i, e in enumerate(collected)
+            if getattr(e, "type", None) == EventType.STEP_FINISHED
+            and getattr(e, "subagent_run_id", None) is None
+            and e.step_name == "tools"
+        )
+        self.assertLess(child_step_close, child_terminal,
+                        "the child's step closes inside its own window")
+        self.assertLess(child_terminal, parent_step_close,
+                        "the child finishes before the parent wrapper closes")
+        self.assertEqual(types[-1], EventType.RUN_FINISHED)
+
+    async def test_the_fallback_still_closes_every_step(self):
+        collected = await _drive(_make_agent(emit_subagent_events=True), self._EVENTS)
+        starts, finishes = _steps(collected)
+        self.assertEqual(sorted(starts, key=_step_key), sorted(finishes, key=_step_key))
+
+
 if __name__ == "__main__":
     unittest.main()

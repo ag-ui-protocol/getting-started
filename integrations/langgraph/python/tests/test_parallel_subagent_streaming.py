@@ -491,5 +491,73 @@ class TestParallelAttributionInvariants(unittest.TestCase):
         self.assertEqual(closes, {mid: 1 for mid in owners_by_message})
 
 
+class TestEqualUpstreamIdsAcrossLanes(unittest.TestCase):
+    """Two lanes presenting the SAME upstream chunk id must not collide.
+
+    Public message ids are run-global: the client rejects a second
+    TEXT_MESSAGE_START for an id already in progress, and the snapshot
+    accumulator (keyed by public id) crossed both lanes' text into one
+    entry ("AB") owned by whichever lane came first. Distinct LangChain
+    runs mint distinct ``lc_run--*`` ids, so this needs two lanes to
+    genuinely present the same id — but nothing upstream *guarantees*
+    that, so the producer must keep public ids unique itself. The first
+    lane to present an id keeps it verbatim (single-lane streams stay
+    byte-identical); colliders get a minted, lane-namespaced id.
+    """
+
+    def _drive_shared_id(self):
+        agent = _make_agent()
+        _feed(agent, _text_chunk("shared", "A"), "tools:a")
+        _feed(agent, _text_chunk("shared", "B"), "tools:b")
+        _feed(agent, _model_end(), "tools:a")
+        _feed(agent, _model_end(), "tools:b")
+        return agent
+
+    def test_the_second_lane_gets_a_minted_run_global_id(self):
+        agent = self._drive_shared_id()
+        starts = [
+            (e.message_id, e.subagent_run_id)
+            for e in agent.dispatched
+            if e.type == EventType.TEXT_MESSAGE_START
+        ]
+        self.assertEqual(len(starts), 2)
+        ids = [mid for mid, _ in starts]
+        self.assertEqual(len(set(ids)), 2, f"public ids must be run-global: {starts}")
+        # First-comer keeps the raw upstream id.
+        self.assertEqual(starts[0], ("shared", "tools:a"))
+        self.assertEqual(starts[1][1], "tools:b")
+
+    def test_content_and_end_follow_each_lanes_public_id(self):
+        agent = self._drive_shared_id()
+        by_type = {}
+        for e in agent.dispatched:
+            if e.type in (
+                EventType.TEXT_MESSAGE_START,
+                EventType.TEXT_MESSAGE_CONTENT,
+                EventType.TEXT_MESSAGE_END,
+            ):
+                by_type.setdefault(e.type, []).append((e.message_id, e.subagent_run_id))
+        start_ids = dict(by_type[EventType.TEXT_MESSAGE_START])
+        # Every content/end event pairs the id its own lane opened.
+        for mid, owner in by_type[EventType.TEXT_MESSAGE_CONTENT]:
+            self.assertEqual(start_ids.get(mid), owner)
+        self.assertEqual(
+            sorted(by_type[EventType.TEXT_MESSAGE_END]),
+            sorted(by_type[EventType.TEXT_MESSAGE_START]),
+        )
+
+    def test_the_snapshot_accumulator_keeps_the_lanes_apart(self):
+        agent = self._drive_shared_id()
+        entries = [
+            (entry["content"], entry["subagent_run_id"])
+            for entry in agent.active_run["subagent_messages"].values()
+        ]
+        self.assertEqual(
+            sorted(entries),
+            [("A", "tools:a"), ("B", "tools:b")],
+            "equal upstream ids must not cross lanes into one snapshot entry",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1182,10 +1182,25 @@ class LangGraphAgent:
                     # contradictory SUBAGENT_FINISHED for a subagent that errored.
                     for sub_ev in error_open_subagents(self.active_run, error_message):
                         yield self._dispatch_event(sub_ev)
+                    # Close the parent's own open step too, and BEFORE the
+                    # terminal. error_open_subagents has already cleared
+                    # current_subagent_run_id, so this closes the parent lane
+                    # untagged. Without it the parent's step was still closed --
+                    # but by the fallthrough below, i.e. after RUN_ERROR.
+                    for ev in self.handle_node_change(None):
+                        yield ev
                     yield self._dispatch_event(
                         RunErrorEvent(type=EventType.RUN_ERROR, message=error_message, raw_event=event)
                     )
-                    break
+                    # RUN_ERROR is terminal: the clients reject EVERY event after
+                    # it ("The run has already errored with 'RUN_ERROR'"). `break`
+                    # only left the stream loop and then fell through to normal
+                    # finalisation, which emitted STEP_FINISHED, STATE_SNAPSHOT,
+                    # MESSAGES_SNAPSHOT and finally a SECOND terminal
+                    # (RUN_FINISHED) -- so an errored run ended with two terminals
+                    # and a conforming client aborted at the first trailing event.
+                    # Return, so the error path emits nothing after its terminal.
+                    return
 
                 current_node_name = (event.get("metadata") or {}).get("langgraph_node")
                 event_type = event.get("event")
@@ -1373,6 +1388,22 @@ class LangGraphAgent:
             # emitting them; drain_subagents below still finishes open subagents.
             self.active_run["current_subagent_run_id"] = None
 
+            # Finish any open subagents FIRST — before the parent's own
+            # node-change / final step close below. Two reasons:
+            # 1. The AG-UI client forbids RUN_FINISHED while a subagent is still
+            #    active, and this is required even on the interrupt path: an
+            #    interrupt surfaces the pause by ENDING the run with
+            #    RUN_FINISHED. A subagent suspended at a HITL interrupt is
+            #    finished here; on resume it re-emits SUBAGENT_STARTED (the run
+            #    replays) and finishes again.
+            # 2. Containment: the child's step close and terminal must land
+            #    inside the parent wrapper step that spawned it. Draining after
+            #    handle_node_change closed the parent's step BEFORE the child's,
+            #    inverting the wrapper semantics on exactly the fallback path
+            #    this drain exists for.
+            for sub_ev in drain_subagents(self.active_run):
+                yield self._dispatch_event(sub_ev)
+
             if self.active_run.get("node_name") != node_name:
                 for ev in self.handle_node_change(node_name):
                     yield ev
@@ -1382,15 +1413,6 @@ class LangGraphAgent:
 
             for ev in self.handle_node_change(None):
                 yield ev
-
-            # Finish any open subagents before RUN_FINISHED. This is required
-            # even on the interrupt path: an interrupt surfaces the pause by
-            # ENDING the run with RUN_FINISHED, and the AG-UI client forbids
-            # RUN_FINISHED while a subagent is still active. A subagent suspended
-            # at a HITL interrupt is therefore finished here; on resume it
-            # re-emits SUBAGENT_STARTED (the run replays) and finishes again.
-            for sub_ev in drain_subagents(self.active_run):
-                yield self._dispatch_event(sub_ev)
 
             if interrupts:
                 for ev in self._emit_interrupt_finish(
@@ -2959,9 +2981,50 @@ class LangGraphAgent:
         # node (None) never forces a reset, so absent metadata can't fragment a
         # bubble.
         if pins.get(lane) is None or (node is not None and pin_nodes.get(lane) != node):
-            pins[lane] = fallback_id
+            pins[lane] = self._claim_public_message_id(fallback_id, lane)
             pin_nodes[lane] = node
         return pins[lane]
+
+    def _claim_public_message_id(self, upstream_id: str, lane: str) -> str:
+        """Return a run-globally unique public id for a new text message.
+
+        Public message ids are run-global: the clients reject a second
+        TEXT_MESSAGE_START for an in-progress id, and the snapshot accumulator
+        is keyed by public id, so two lanes presenting the same upstream chunk
+        id crossed their text into one entry. Distinct LangChain runs mint
+        distinct ``lc_run--*`` ids, so a genuine collision needs upstream to
+        repeat itself — nothing guarantees it never does. First-comer keeps the
+        upstream id verbatim (single-lane streams stay byte-identical, and the
+        raw id is what the graph state's own message carries, which the
+        snapshot merge matches on); only colliders get a minted id, namespaced
+        by lane so it is stable and self-describing.
+
+        Flag-off is untouched by construction: every event maps to the root
+        lane, whose pin either persists (same id returned, no new claim) or is
+        re-minted only on a node change — and there minting would alter the
+        pre-subagent stream shape, so the registry is only maintained when
+        subagent events are on.
+
+        Tool-call ids are deliberately NOT minted this way: they round-trip
+        through graph state (``ToolMessage.tool_call_id``) and on_tool_end
+        correlation, so renaming one here would orphan its result. A provider
+        emitting two identical call ids concurrently cannot be disambiguated
+        at this layer by anyone, including LangGraph itself.
+        """
+        if not self.emit_subagent_events:
+            return upstream_id
+        used = self.active_run.setdefault("used_public_message_ids", set())
+        public_id = upstream_id
+        suffix = 0
+        while public_id in used:
+            suffix += 1
+            public_id = (
+                f"{upstream_id}::{lane}"
+                if suffix == 1
+                else f"{upstream_id}::{lane}::{suffix}"
+            )
+        used.add(public_id)
+        return public_id
 
     def handle_node_change(self, node_name: Optional[str]) -> Generator[ProcessedEvents, None, None]:
         """
