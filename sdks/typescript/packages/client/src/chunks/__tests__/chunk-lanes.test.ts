@@ -252,6 +252,31 @@ describe("transformChunks lanes: resolving which lane a chunk belongs to", () =>
     ]);
   });
 
+  it("continues the sole open text stream when the parent's open stream is a DIFFERENT kind", async () => {
+    // The parent has a tool call in flight and s1 has the only open text message. An
+    // id-less, tag-less text chunk cannot OPEN a parent message (a first chunk must
+    // carry its id, the transform throws), so s1's message is the only stream it can
+    // possibly continue — the sole-candidate fallback applies even though the parent
+    // lane is not empty. Pinned deliberately: narrowing the fallback to "parent has
+    // nothing open at all" would look like a tightening but would hard-fail this
+    // perfectly legal opener-only-tagging stream.
+    const events = await run(
+      toolChunk("{", undefined, "c1"),
+      textChunk("A", "s1", "m1"),
+      textChunk("B"),
+      RUN_FINISHED,
+    );
+
+    expect(shape(events).filter((e) => e[0] === EventType.TEXT_MESSAGE_CONTENT)).toEqual([
+      [EventType.TEXT_MESSAGE_CONTENT, "m1", "A", "s1"],
+      [EventType.TEXT_MESSAGE_CONTENT, "m1", "B", "s1"],
+    ]);
+    // The parent's tool call was untouched by the text traffic.
+    expect(shape(events).filter((e) => e[0] === EventType.TOOL_CALL_END)).toEqual([
+      [EventType.TOOL_CALL_END, "c1", "", null],
+    ]);
+  });
+
   it("still requires an id for the first chunk in a lane", async () => {
     // s2 has nothing open, so "the same as before" has no referent even though the tag
     // is unambiguous.

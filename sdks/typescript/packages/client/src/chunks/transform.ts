@@ -162,7 +162,13 @@ export const transformChunks =
       if (parentPending?.kind === kind) return undefined;
 
       // Otherwise fall back to the sole open stream of this kind, so producers that
-      // attribute only the opening chunk keep working.
+      // attribute only the opening chunk keep working. This is not overriding the
+      // untagged-means-parent rule above: an id-less chunk can never OPEN a stream
+      // (a first chunk must carry its id — the caller throws), so when the parent has
+      // no stream of this kind to continue, the sole open stream is the chunk's only
+      // possible referent. The alternatives are continuing it or failing a stream
+      // that is perfectly legal for an opener-only-tagging producer whose parent
+      // happens to have a different-kind stream in flight.
       const candidates = [...lanes.entries()].filter(([, pending]) => pending.kind === kind);
       if (candidates.length === 1) return candidates[0][0];
       if (candidates.length > 1) {
