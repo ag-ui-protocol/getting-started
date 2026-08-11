@@ -441,6 +441,10 @@ class LangGraphAgent:
                 enable_legacy_on_interrupt_event=self.enable_legacy_on_interrupt_event,
                 emit_interrupt_outcome=self.emit_interrupt_outcome,
                 emit_raw_events=self.emit_raw_events,
+                # Every constructor flag must survive a clone: the FastAPI endpoint
+                # clones per request, so a flag dropped here silently reverts to its
+                # default in the standard serving path.
+                emit_subagent_events=self.emit_subagent_events,
             )
         except TypeError as exc:
             raise TypeError(
@@ -631,6 +635,19 @@ class LangGraphAgent:
         parent_subagent_run_id = (active_run.get("subagent_parents") or {}).pop(subagent_run_id, None)
         if active_run.get("current_subagent_run_id") == subagent_run_id:
             active_run["current_subagent_run_id"] = parent_subagent_run_id
+        # Same gate as drain_subagents / error_open_subagents: the lifecycle
+        # bookkeeping above still has to happen so lanes and parents stay
+        # coherent, but the client-visible event is withheld when the flag is
+        # off. This emitter was the one path missing the gate, so a deepagents
+        # run leaked SUBAGENT_FINISHED with the flag at its default — the exact
+        # event the flag exists to withhold, and one that even new clients
+        # reject when no SUBAGENT_STARTED preceded it. Read from self, like
+        # _dispatch_event does (the module-level emitters read active_run only
+        # because they have no instance).
+        if not self.emit_subagent_events:
+            (active_run.get("lane_nodes") or {}).pop(subagent_run_id, None)
+            (active_run.get("step_owners") or {}).pop(subagent_run_id, None)
+            return []
         # The subagent's output is the `task` tool's result. deepagents returns a
         # Command whose state update carries the ToolMessage; surface its content
         # as the finished subagent's `result` (mirrors RUN_FINISHED.result).
@@ -641,7 +658,12 @@ class LangGraphAgent:
             msgs = update.get("messages")
             if msgs:
                 result = getattr(msgs[0], "content", None)
-        return [SubagentFinishedEvent(
+        # Close this lane's open step BEFORE the terminal, exactly as
+        # drain_subagents does. This path removes the id from active_subagents,
+        # so the drain at run end no longer sees it — without closing here the
+        # subagent's last step stayed open forever and clients failed
+        # RUN_FINISHED with "steps are still active".
+        return close_lane_steps(active_run, [subagent_run_id]) + [SubagentFinishedEvent(
             type=EventType.SUBAGENT_FINISHED, subagent_run_id=subagent_run_id, result=result,
         )]
 

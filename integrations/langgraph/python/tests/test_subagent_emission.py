@@ -984,6 +984,34 @@ class TestFinishSubagentOnTaskEnd(unittest.TestCase):
         )
         self.assertEqual(agent.active_run["pending_task_calls"], [])
 
+    def test_task_end_closes_the_subagents_open_step_before_the_terminal(self):
+        # This path removes the id from active_subagents, so the drain at run end
+        # no longer sees it — close_lane_steps must therefore run HERE, or the
+        # subagent's last step stays open forever and clients fail RUN_FINISHED
+        # with "steps are still active".
+        agent = self._agent()
+        agent.active_run["node_name"] = None
+        agent.active_run["subagent_messages"] = {}
+        agent.active_run["subagent_task_runs"]["run-task-1"] = "tools:sub1"
+        agent.active_run["active_subagents"]["tools:sub1"] = "researcher"
+        agent.active_run["current_subagent_run_id"] = "tools:sub1"
+        list(agent.handle_node_change("research"))  # opens a step in sub1's lane
+
+        events = agent._finish_subagent_on_task_end(
+            {"event": "on_tool_end", "run_id": "run-task-1"}
+        )
+
+        self.assertEqual(
+            [e.type for e in events],
+            [EventType.STEP_FINISHED, EventType.SUBAGENT_FINISHED],
+            "the lane's step must close inside the subagent's window, before its terminal",
+        )
+        self.assertEqual(events[0].step_name, "research")
+        self.assertEqual(events[0].subagent_run_id, "tools:sub1")
+        # Nothing left for the run-end drain to close or leak.
+        self.assertNotIn("tools:sub1", agent.active_run.get("lane_nodes", {}))
+        self.assertEqual(drain_subagents(agent.active_run), [])
+
     def test_inner_tool_end_does_not_finish_subagent_early(self):
         # A subagent's inner tool (grep/write_file) shares the subagent's
         # checkpoint ns but has a DIFFERENT run_id, so its OnToolEnd must NOT
@@ -1296,4 +1324,37 @@ class TestEmitSubagentEventsOff(unittest.TestCase):
             [m["id"] for m in merged], ["parent"],
             "no subagent-attributed history may surface in MESSAGES_SNAPSHOT",
         )
+
+    def test_task_end_emits_nothing(self):
+        # The one emitter that was missed when the flag gate went in: with the flag
+        # off, a deepagents `task` return leaked SUBAGENT_FINISHED — the exact event
+        # the flag exists to withhold, and one even NEW clients reject when no
+        # SUBAGENT_STARTED preceded it (the flag withheld that too).
+        agent = self._agent()
+        agent.active_run["subagent_task_runs"] = {"run-task-1": "tools:sub1"}
+        agent.active_run["active_subagents"]["tools:sub1"] = "researcher"
+        agent.active_run["current_subagent_run_id"] = "tools:sub1"
+
+        events = agent._finish_subagent_on_task_end(
+            {"event": "on_tool_end", "run_id": "run-task-1"}
+        )
+
+        self.assertEqual(events, [])
+        # The lifecycle bookkeeping still tears down, so the run stays coherent.
+        self.assertEqual(agent.active_run["active_subagents"], {})
+        self.assertIn("tools:sub1", agent.active_run["closed_subagents"])
+        self.assertIsNone(agent.active_run["current_subagent_run_id"])
+
+    def test_clone_preserves_the_flag(self):
+        # The FastAPI endpoint clones per request, so a flag dropped by clone()
+        # silently reverts to its default in the standard serving path.
+        agent = self._agent()
+        self.assertFalse(agent.clone().emit_subagent_events)
+
+        from langgraph.graph.state import CompiledStateGraph
+        graph = MagicMock(spec=CompiledStateGraph)
+        graph.config_specs = []
+        graph.nodes = {}
+        opted_in = LangGraphAgent(name="test", graph=graph, emit_subagent_events=True)
+        self.assertTrue(opted_in.clone().emit_subagent_events)
 

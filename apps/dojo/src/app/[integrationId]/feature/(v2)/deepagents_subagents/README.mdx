@@ -1,35 +1,36 @@
-# Deepagents Subagents: AG-UI Subagent Attribution (Step 1)
+# Deepagents Subagents: AG-UI Subagent Attribution
 
-This demo runs the **deepagents** 3-subagent LangGraph agent and proves that
-**subagent attribution surfaces through AG-UI** to the frontend.
+This demo runs a **deepagents** supervisor that delegates to a research
+subagent, and shows **subagent attribution surfacing through AG-UI** to the
+frontend — including a human-in-the-loop pause raised *inside* the subagent.
 
 ## What This Demo Shows
 
-The deepagents integration dispatches work to specialized subagents. As those
-subagents emit messages, the integration stamps each message with a
-`subagentRunId` field. This demo reads that field straight off `agent.messages`
-and renders a small `⟐ {subagentRunId}` marker next to any message that carries
-one.
-
-This is intentionally **minimal** — the goal of this step is only to prove
-that the `subagentRunId` attribution makes it from the backend all the way to
-the frontend message objects. Polished UI (grouping by subagent, avatars,
-etc.) is a follow-up, not part of this demo.
+- **Attribution.** As the subagent works, the integration stamps its events
+  with a `subagentRunId`, and that attribution transfers onto the messages it
+  produces. The chat groups those messages under a collapsible subagent card,
+  keyed by `subagentRunId` and labeled with the subagent's declared name.
+- **Lifecycle.** `SUBAGENT_STARTED` / `SUBAGENT_FINISHED` drive the card's
+  running/finished status via the `useSubagent` hook, so you can watch the
+  delegation open and close in real time.
+- **HITL inside a subagent.** The research subagent calls a
+  `request_human_approval` tool that raises a LangGraph `interrupt()`. The
+  interrupt propagates out of the subagent to the top-level run, the dojo
+  renders an Approve/Reject prompt, and the decision resumes the subagent on
+  the same thread.
 
 ## How to Interact
 
-Send a prompt that requires the supervisor to delegate to its subagents, e.g.:
+Ask anything — the supervisor always delegates, e.g.:
 
-- "Research the topic of octopus intelligence using your subagents and summarize the findings."
+- "What makes octopus intelligence unusual?"
 
-Watch the **Message Attribution** panel on the right: every message lists its
-role, and any message produced by a subagent shows the `⟐ {subagentRunId}`
-marker.
+Watch the subagent card appear in the chat, stream its research, then pause
+for your approval before finalizing.
 
 ## Implementation Notes
 
-- `subagentRunId` is an AG-UI message field (see `@ag-ui/core`). At the time of
-  writing it isn't part of the CopilotKit `Message` type, so the demo reads it
-  via a cast (`(message as unknown as { subagentRunId?: string }).subagentRunId`).
-- The chat panel uses `useAgent` with `UseAgentUpdate.OnMessagesChanged` so the
-  attribution list re-renders as new messages stream in.
+- The backend opts in with `emit_subagent_events=True`; the flag defaults to
+  off because released clients reject the `SUBAGENT_*` event types outright.
+- `subagentRunId` is an AG-UI message field (see `@ag-ui/core`) read straight
+  off `agent.messages`; grouping is plain filtering by that field.
