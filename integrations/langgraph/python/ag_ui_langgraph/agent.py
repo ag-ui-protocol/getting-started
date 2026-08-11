@@ -692,11 +692,17 @@ class LangGraphAgent:
                 None,
             )
             if match_index is None:
-                # No lane-exact record; a raw-only match is safe only when it
-                # is unambiguous (exactly one candidate across all lanes).
+                # No lane-exact record; a raw-only match is safe only for a
+                # record that carries no lane at all (legacy shape). A record
+                # whose lane DIFFERS from parent_lane is another lane's call
+                # that happens to share the raw id — "only one candidate" does
+                # not make stealing it safe: the spawning lane's call may
+                # simply never have streamed a chunk (OnToolEnd re-emits such
+                # calls later, under the parent lane's public id).
                 raw_matches = [
                     i for i, c in enumerate(pending)
                     if c.get("tool_call_id") == originating_tool_call_id
+                    and c.get("lane") is None
                 ]
                 match_index = raw_matches[0] if len(raw_matches) == 1 else None
             if match_index is not None:
@@ -704,7 +710,16 @@ class LangGraphAgent:
             else:
                 # The exact call is known even if no streamed chunk supplied its
                 # parent_message_id (e.g. tool-call emission not yet observed).
-                task_call = {"tool_call_id": originating_tool_call_id}
+                # Resolve the PUBLIC id in the parent lane — that is the id the
+                # client will see when the call is eventually emitted (the
+                # OnToolEnd re-emit resolves through the same lane map), and the
+                # raw id may name another lane's already-claimed public id.
+                task_call = {
+                    "tool_call_id": originating_tool_call_id,
+                    "public_tool_call_id": self._resolve_public_tool_call_id(
+                        originating_tool_call_id, parent_lane
+                    ),
+                }
         elif pending:
             # FIFO fallback: prefer the parent lane's own queue before the
             # global one, so a missing dispatch capture in one lane cannot

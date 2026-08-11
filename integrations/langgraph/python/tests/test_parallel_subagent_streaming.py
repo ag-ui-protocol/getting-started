@@ -769,6 +769,42 @@ class TestNestedDuplicateTaskCallIds(unittest.TestCase):
         )
         self.assertEqual(meta["parent_message_id"], "outer-msg")
 
+    def test_an_unstreamed_colliding_call_does_not_steal_the_other_lanes_record(self):
+        # Same collision, but the outer lane's `task` call never streams a
+        # model chunk (this producer supports that: OnToolEnd re-emits such
+        # calls). The raw-only fallback must NOT treat the root's record as an
+        # "unambiguous" match — its lane explicitly differs — and the
+        # dispatch-known fallback must resolve the public id for the parent
+        # lane, matching what the outer lane's later re-emit will carry.
+        agent = _make_agent()
+        _feed(agent, _tool_start_chunk("root-msg", "dup", "task"), None)
+        agent._capture_task_tool_dispatch({
+            "event": LangGraphEventTypes.OnChainStart.value,
+            "name": "tools",
+            "metadata": {
+                "langgraph_node": "tools",
+                "langgraph_checkpoint_ns": "tools:outer|tools:inner",
+            },
+            "data": {"input": {"type": "tool_call", "name": "task", "id": "dup"}},
+        })
+        agent._capture_subagent_task_meta({
+            "event": LangGraphEventTypes.OnToolStart.value,
+            "name": "task",
+            "metadata": {"langgraph_checkpoint_ns": "tools:outer|tools:inner"},
+            "data": {"input": {"subagent_type": "researcher", "description": "d"}},
+        })
+
+        meta = agent.active_run["subagent_task_meta"]["tools:inner"]
+        self.assertEqual(
+            meta["parent_tool_call_id"], "dup::tools:outer",
+            "must resolve the parent lane's public id, not borrow the root's raw call",
+        )
+        self.assertIsNone(meta["parent_message_id"])
+        # The root's record stays pending for the root's own subagent.
+        remaining = agent.active_run["pending_task_calls"]
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0]["parent_message_id"], "root-msg")
+
 
 if __name__ == "__main__":
     unittest.main()
