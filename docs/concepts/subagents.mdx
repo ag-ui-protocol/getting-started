@@ -258,10 +258,20 @@ The two directions are not symmetric, so they are worth separating.
 
 The lifecycle events break it, so emitting them has to be **opt-in on the
 producer**. Integrations that support subagents therefore expose a flag to enable
-them, off by default; with it off, no lifecycle events are emitted, no
-`subagentRunId` is attributed, and nothing subagent-related reaches
-`MessagesSnapshot`, so the stream is what it was before subagent support existed.
-Turn it on once every consumer is new enough.
+them, off by default — in the LangGraph integration it is `emit_subagent_events`:
+
+```python
+agent = LangGraphAgent(
+    name="my-agent",
+    graph=graph,
+    emit_subagent_events=True,
+)
+```
+
+With it off, no lifecycle events are emitted, no `subagentRunId` is attributed,
+and nothing subagent-related reaches `MessagesSnapshot`, so the stream is what it
+was before subagent support existed. Turn it on once every consumer is new
+enough.
 
 Attribution alone is the safer intermediate step, since the field is ignored by
 clients that do not know it. A producer that wants grouping without a
