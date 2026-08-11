@@ -445,10 +445,21 @@ internal static class EventStreamConverter
                 // Both open a reasoning entity, usually under the same id; first writer
                 // records the owner. Registering only REASONING_MESSAGE_START left
                 // REASONING_START(r, s1) / REASONING_END(r, s2) with nothing to compare.
+                // A SECOND opener that disagrees with the first is a contradiction, not
+                // something to silently ignore: the recorded owner stayed the first
+                // subagent's while the minted message was restamped with the second's,
+                // so this converter's own state disagreed with itself. TypeScript
+                // rejects the same shape.
                 case ReasoningStartEvent outerReasoningStart:
                     if (!reasoningOwners.ContainsKey(outerReasoningStart.MessageId))
                     {
                         reasoningOwners[outerReasoningStart.MessageId] = outerReasoningStart.SubagentRunId;
+                    }
+                    else
+                    {
+                        RejectOwnerMismatch(
+                            outerReasoningStart.Type, outerReasoningStart.SubagentRunId, reasoningOwners,
+                            outerReasoningStart.MessageId, "reasoning message");
                     }
 
                     RecordMessageOwner(outerReasoningStart.MessageId, outerReasoningStart.SubagentRunId);
@@ -458,6 +469,12 @@ internal static class EventStreamConverter
                     if (!reasoningOwners.ContainsKey(reasoningStart.MessageId))
                     {
                         reasoningOwners[reasoningStart.MessageId] = reasoningStart.SubagentRunId;
+                    }
+                    else
+                    {
+                        RejectOwnerMismatch(
+                            reasoningStart.Type, reasoningStart.SubagentRunId, reasoningOwners,
+                            reasoningStart.MessageId, "reasoning message");
                     }
 
                     RecordMessageOwner(reasoningStart.MessageId, reasoningStart.SubagentRunId);

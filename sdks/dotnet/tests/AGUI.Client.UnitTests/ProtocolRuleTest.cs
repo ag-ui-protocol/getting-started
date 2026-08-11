@@ -1838,6 +1838,61 @@ public sealed class ProtocolRuleTest
     }
 
     [Fact]
+    public async Task Subagent_SecondReasoningOpenerThatContradictsTheFirst_Throws()
+    {
+        // The recorded owner stayed the first subagent's while the minted message was
+        // restamped with the second's, so the converter's own state disagreed with
+        // itself. TypeScript rejects the same shape.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ReasoningStartEvent { MessageId = "r1", SubagentRunId = "s1" },
+            new ReasoningMessageStartEvent { MessageId = "r1", SubagentRunId = "s2" }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ProcessEventsAsync(events));
+        Assert.Contains("does not match", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subagent_SecondReasoningOpenerThatAgrees_IsAccepted()
+    {
+        // The usual pair: REASONING_START brackets the outer reasoning and
+        // REASONING_MESSAGE_START the inner message under the same id and owner.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ReasoningStartEvent { MessageId = "r1", SubagentRunId = "s1" },
+            new ReasoningMessageStartEvent { MessageId = "r1", SubagentRunId = "s1" },
+            new ReasoningMessageEndEvent { MessageId = "r1", SubagentRunId = "s1" },
+            new ReasoningEndEvent { MessageId = "r1", SubagentRunId = "s1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var result = await ProcessEventsAsync(events);
+        Assert.NotEmpty(result);
+    }
+
+    [Fact]
+    public async Task Subagent_SecondUntaggedReasoningOpener_IsAccepted()
+    {
+        // An absent tag is never a disagreement -- producers that tag only the outer
+        // bracket keep working.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ReasoningStartEvent { MessageId = "r1", SubagentRunId = "s1" },
+            new ReasoningMessageStartEvent { MessageId = "r1" },
+            new ReasoningMessageEndEvent { MessageId = "r1" },
+            new ReasoningEndEvent { MessageId = "r1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var result = await ProcessEventsAsync(events);
+        Assert.NotEmpty(result);
+    }
+
+    [Fact]
     public async Task Subagent_CompactReasoningChunkOwnerChange_Throws()
     {
         // The one compact stream this SDK models; TypeScript's chunk transform rejects the

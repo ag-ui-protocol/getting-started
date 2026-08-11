@@ -202,10 +202,11 @@ that omits its id means "the same as the previous one". Under concurrency,
 within the sending subagent's own stream, not across the run.
 
 The practical consequence is one rule for producers: a chunk that carries neither
-an id nor a `subagentRunId` is only unambiguous while at most one stream of that
-kind is open. With several open at once there is nothing to resolve it against,
-and the client rejects it rather than guessing. **When streaming concurrently,
-attribute every chunk**, or repeat the id.
+an id nor a `subagentRunId` is resolved to the parent's open stream of that kind
+if there is one — untagged means the parent — and otherwise to the sole open
+stream of that kind. When several subagents' streams could all claim it, there is
+nothing to resolve it against, and the client rejects it rather than guessing.
+**When streaming concurrently, attribute every chunk**, or repeat the id.
 
 ## Rules clients enforce
 
@@ -299,11 +300,12 @@ survives a round trip across languages.
 ### Known limitations
 
 - **Protobuf covers a subset of event types.** 19 of the 36 event types have a
-  protobuf mapping. That includes all three subagent events and every event that
-  carries attribution today, but it excludes the chunk shorthand: `TextMessageChunk`
-  and `ToolCallChunk` have message definitions and a `subagent_run_id` field, yet
-  no enum entry, so they cannot be encoded at all. Pre-existing, and unrelated to
-  subagents.
+  protobuf mapping: all three subagent events, plus the text message, tool call
+  start/args/end, state, step, and run families. The rest cannot be encoded at
+  all — and several of those carry attribution: `ToolCallResult`, the reasoning
+  family, and the activity events. The chunk shorthand is in the same position
+  despite having message definitions and a `subagent_run_id` field, since it has
+  no enum entry. All of this predates subagent support.
 - **.NET loses the second owner on parallel tool calls from different subagents.**
   Converting a run to `Microsoft.Extensions.AI` messages merges consecutive tool
   calls into one `ChatMessage`, and AG-UI attributes per message, so only the
