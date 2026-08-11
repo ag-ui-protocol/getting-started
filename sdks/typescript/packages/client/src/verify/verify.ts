@@ -7,24 +7,25 @@ export const verifyEvents =
   (debugLogger?: DebugLoggerInput) =>
   (source$: Observable<BaseEvent>): Observable<BaseEvent> => {
     const log = resolveDebugLogger(debugLogger);
-    // Declare variables in closure to maintain state across events
-    // Value carries the owning subagentRunId (if any) so continuation/close events
-    // can be checked for attribution consistency.
-    const activeMessages = new Map<string, { subagentRunId?: string }>(); // message ID -> owner
-    const activeToolCalls = new Map<string, { subagentRunId?: string }>(); // tool call ID -> owner
+    // Declare variables in closure to maintain state across events.
+    // The four sets below hold IDS ONLY: membership answers "is this entity still open?"
+    // (for activities, which have no close event, "has it been seen at all?"). Ownership
+    // is NOT here — it lives in `owners` below, which is what every attribution check
+    // reads, openers included.
+    const activeMessages = new Set<string>(); // open text message IDs
+    const activeToolCalls = new Set<string>(); // open tool call IDs
     // Activity messages are keyed by their own messageId and continued by
-    // ACTIVITY_DELTA, so they need the same owner tracking as text messages.
-    const activeActivities = new Map<string, { subagentRunId?: string }>(); // activity ID -> owner
-    // Reasoning messages are opened by REASONING_MESSAGE_START and continued by
-    // REASONING_MESSAGE_CONTENT/END, REASONING_END and REASONING_ENCRYPTED_VALUE, all
-    // keyed by the same id — the last ID-keyed entity that had no owner check, so an
-    // s2 delta could be appended to the reasoning message minted for s1.
-    const activeReasoning = new Map<string, { subagentRunId?: string }>(); // reasoning ID -> owner
-    // Owners retained for the whole run. The maps above double as "is this entity open?"
-    // state and so are cleared on close, but a continuation can legitimately arrive after
-    // its entity closed — REASONING_ENCRYPTED_VALUE with subtype "tool-call" after
-    // TOOL_CALL_END is the case in point, and nothing requires it to precede the close.
-    // Losing the owner there made the mismatch unmatchable and accepted a wrong one.
+    // ACTIVITY_DELTA, so they need an owner tracked for them just like text messages —
+    // see `owners.activity`. This set only records that the activity exists, which is
+    // what tells a replacing snapshot from a first one.
+    const activeActivities = new Set<string>(); // known activity IDs
+    // Reasoning messages are opened by REASONING_START / REASONING_MESSAGE_START and
+    // continued by REASONING_MESSAGE_CONTENT/END and REASONING_END, all keyed by the same
+    // id — the last ID-keyed entity that had no owner check, so an s2 delta could be
+    // appended to the reasoning message minted for s1. REASONING_ENCRYPTED_VALUE also
+    // continues a reasoning message, but it is keyed by `entityId` and its `subtype` may
+    // route it to a different bucket entirely.
+    const activeReasoning = new Set<string>(); // open reasoning IDs
     // Owners, retained for the whole run, in one bucket PER ENTITY KIND. An id is only
     // unique within a kind: a message and a tool call may both be called "x" with no
     // conflict. A single bucket let the tool-call write overwrite the message's owner, so
@@ -33,8 +34,9 @@ export const verifyEvents =
     //
     // Retained rather than cleared on close, because a continuation can legitimately
     // arrive after its entity closed -- REASONING_ENCRYPTED_VALUE with subtype
-    // "tool-call" after TOOL_CALL_END is the case in point. The active* maps above stay
-    // purely "is this entity open?" state.
+    // "tool-call" after TOOL_CALL_END is the case in point, and nothing requires it to
+    // precede the close. Losing the owner there made the mismatch unmatchable and
+    // accepted a wrong one. The active* sets above stay purely "is this entity open?".
     type Owner = { subagentRunId?: string };
     const owners = {
       message: new Map<string, Owner>(),
@@ -208,14 +210,26 @@ export const verifyEvents =
               );
             }
 
-            {
+            // First writer wins, exactly as for the reasoning opener below. Owners are
+            // retained for the run, so a message this id already had is still on record
+            // after its TEXT_MESSAGE_END -- and a DIFFERENT producer reopening that id is
+            // a contradiction, since the reducer appends the second producer's content
+            // into the first producer's message. Passing `undefined` as the owner here
+            // made the check a no-op and accepted exactly that.
+            const existingMessageOwner = owners.message.get(messageId);
+            if (existingMessageOwner) {
               const subErr = subagentTagError(
-                eventType, (event.subagentRunId as string | undefined), undefined, "message", messageId,
+                eventType, (event.subagentRunId as string | undefined), existingMessageOwner, "message", messageId,
               );
               if (subErr) return throwError(() => subErr);
             }
-            activeMessages.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
-            owners.message.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
+            activeMessages.add(messageId);
+            // Only when there is no entry yet: an UNTAGGED reopen agrees with any owner
+            // (an absent tag never disagrees), but it must not overwrite an s1 record
+            // with `undefined` and hand the message to the parent.
+            if (!existingMessageOwner) {
+              owners.message.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
+            }
             return of(event);
           }
 
@@ -275,14 +289,20 @@ export const verifyEvents =
               );
             }
 
-            {
+            // First writer wins, for the same reason as TEXT_MESSAGE_START above: the
+            // retained owner still names whoever opened this id, and a different producer
+            // reopening it would have its args appended to the first producer's call.
+            const existingToolCallOwner = owners.toolCall.get(toolCallId);
+            if (existingToolCallOwner) {
               const subErr = subagentTagError(
-                eventType, (event.subagentRunId as string | undefined), undefined, "tool call", toolCallId,
+                eventType, (event.subagentRunId as string | undefined), existingToolCallOwner, "tool call", toolCallId,
               );
               if (subErr) return throwError(() => subErr);
             }
-            activeToolCalls.set(toolCallId, { subagentRunId: (event.subagentRunId as string | undefined) });
-            owners.toolCall.set(toolCallId, { subagentRunId: (event.subagentRunId as string | undefined) });
+            activeToolCalls.add(toolCallId);
+            if (!existingToolCallOwner) {
+              owners.toolCall.set(toolCallId, { subagentRunId: (event.subagentRunId as string | undefined) });
+            }
             return of(event);
           }
 
@@ -417,7 +437,7 @@ export const verifyEvents =
             // tag patch a message still owned by someone else.
             const isNew = !activeActivities.has(messageId);
             if (isNew || (event.replace as boolean | undefined) !== false) {
-              activeActivities.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
+              activeActivities.add(messageId);
               owners.activity.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
             }
             return of(event);
@@ -440,8 +460,11 @@ export const verifyEvents =
               );
               if (subErr) return throwError(() => subErr);
             }
-            if (!activeReasoning.has(messageId)) {
-              activeReasoning.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
+            activeReasoning.add(messageId);
+            // Only the first writer records the owner, and the owner outlives the close --
+            // so an untagged reopen after REASONING_END does not hand the reasoning back
+            // to the parent either.
+            if (!existingReasoningOwner) {
               owners.reasoning.set(messageId, { subagentRunId: (event.subagentRunId as string | undefined) });
             }
             return of(event);
@@ -459,9 +482,12 @@ export const verifyEvents =
               messageId,
             );
             if (subErr) return throwError(() => subErr);
-            // Only REASONING_END retires the owner. Deleting it at
-            // REASONING_MESSAGE_END left the outer close with nothing to compare
-            // against, so `REASONING_END(r, s2)` after an s1 message was accepted.
+            // Only REASONING_END closes the reasoning. Clearing at REASONING_MESSAGE_END
+            // instead had also dropped the owner, which left the outer close with nothing
+            // to compare against, so `REASONING_END(r, s2)` after an s1 message was
+            // accepted. What is dropped here is only the OPEN flag —
+            // `owners.reasoning` is retained for the rest of the run, so a later
+            // REASONING_ENCRYPTED_VALUE naming this id still has an owner to check.
             if (eventType === EventType.REASONING_END) {
               activeReasoning.delete(messageId);
             }
@@ -470,25 +496,33 @@ export const verifyEvents =
 
           case EventType.REASONING_ENCRYPTED_VALUE: {
             // Continues an entity by entityId, and `subtype` says which kind: a
-            // "tool-call" encrypted value belongs to a TOOL CALL, so looking only in
-            // activeReasoning found no owner and accepted s2's value against s1's call.
+            // "tool-call" encrypted value belongs to a TOOL CALL, so looking only among
+            // reasoning owners found none and accepted s2's value against s1's call.
             const entityId = (event.entityId as string);
             const subtype = (event.subtype as string | undefined);
-            // Three cases, not two. "message" means a TEXT message, whose owner lives in
-            // the message bucket -- looking it up among reasoning owners found nothing and
-            // accepted a foreign tag against a message another subagent opened.
-            const bucket =
+            // The "message" subtype spans BOTH message kinds: a text message opened by
+            // TEXT_MESSAGE_START and a reasoning message opened by
+            // REASONING_MESSAGE_START. Reading only `owners.message` covered the first and
+            // missed the second -- and attaching an encrypted value to a REASONING message
+            // is the documented, canonical use of this subtype, so the check silently never
+            // fired for the case it exists for. Ids are unique per kind, so at most one of
+            // the two buckets holds this id and consulting both cannot pick a wrong owner.
+            const owner =
               subtype === "tool-call"
-                ? owners.toolCall
+                ? owners.toolCall.get(entityId)
                 : subtype === "message"
-                  ? owners.message
-                  : owners.reasoning;
+                  ? (owners.message.get(entityId) ?? owners.reasoning.get(entityId))
+                  // Fallback only. The schema defines exactly "tool-call" and "message",
+                  // so this branch is unreachable for a schema-valid event; it treats an
+                  // unknown subtype as a plain reasoning continuation rather than skipping
+                  // the check.
+                  : owners.reasoning.get(entityId);
             const kindLabel =
               subtype === "tool-call" ? "tool call" : subtype === "message" ? "message" : "reasoning message";
             const subErr = subagentTagError(
               eventType,
               (event.subagentRunId as string | undefined),
-              bucket.get(entityId),
+              owner,
               kindLabel,
               entityId,
             );

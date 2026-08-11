@@ -346,4 +346,105 @@ describe("defaultApplyEvents with subagentRunId attribution", () => {
       "subagentRunId",
     );
   });
+
+  // A REPLACING ACTIVITY_SNAPSHOT re-mints the activity, so it brings its own attribution
+  // with it -- including the ABSENCE of attribution. Spreading the old message kept the
+  // old owner, so a subagent's snapshot could not take over a parent activity and, in the
+  // other direction, the parent could never reclaim one a subagent had taken. All four
+  // directions of the branch are pinned here.
+  const applySnapshots = async (...snapshots: BaseEvent[]) => {
+    const events$ = new Subject<BaseEvent>();
+    const initialState: RunAgentInput = {
+      messages: [],
+      state: {},
+      threadId: "test-thread",
+      runId: "test-run",
+      tools: [],
+      context: [],
+    };
+
+    const agent = createAgent(initialState.messages);
+    const result$ = defaultApplyEvents(initialState, events$, agent, []);
+    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    for (const snapshot of snapshots) {
+      events$.next(snapshot);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    events$.complete();
+
+    const stateUpdates = await stateUpdatesPromise;
+    const finalUpdate = stateUpdates[stateUpdates.length - 1];
+    return finalUpdate?.messages?.find((m) => m.id === "act");
+  };
+
+  /** The activity every case below starts from: created by, and owned by, s1. */
+  const ownedByS1 = {
+    type: EventType.ACTIVITY_SNAPSHOT,
+    messageId: "act",
+    activityType: "search",
+    content: { step: 1 },
+    subagentRunId: "s1",
+  } as BaseEvent;
+
+  it("should re-own an activity when a replacing snapshot comes from another subagent", async () => {
+    const message = await applySnapshots(ownedByS1, {
+      type: EventType.ACTIVITY_SNAPSHOT,
+      messageId: "act",
+      activityType: "search",
+      content: { step: 2 },
+      replace: true,
+      subagentRunId: "s2",
+    } as BaseEvent);
+
+    expect((message as any).subagentRunId).toBe("s2");
+    expect(message!.content).toEqual({ step: 2 });
+  });
+
+  it("should DROP the attribution when an UNTAGGED replacing snapshot takes over", async () => {
+    const message = await applySnapshots(ownedByS1, {
+      type: EventType.ACTIVITY_SNAPSHOT,
+      messageId: "act",
+      activityType: "search",
+      content: { step: 2 },
+      replace: true,
+    } as BaseEvent);
+
+    // The key is deleted, not set to undefined: an unattributed message belongs to the
+    // parent, and a consumer checking `"subagentRunId" in message` must see it gone.
+    expect(message).toBeDefined();
+    expect("subagentRunId" in (message as object)).toBe(false);
+  });
+
+  it("should treat an omitted `replace` as replacing and drop the attribution too", async () => {
+    // The schema defaults replace to true, so an omitted flag must behave as `true` here
+    // as well -- for a typed producer that never went through Zod.
+    const message = await applySnapshots(ownedByS1, {
+      type: EventType.ACTIVITY_SNAPSHOT,
+      messageId: "act",
+      activityType: "search",
+      content: { step: 2 },
+    } as BaseEvent);
+
+    expect(message).toBeDefined();
+    expect("subagentRunId" in (message as object)).toBe(false);
+    expect(message!.content).toEqual({ step: 2 });
+  });
+
+  it("should leave the owner alone when a non-replacing snapshot arrives from another subagent", async () => {
+    // replace:false leaves the existing message untouched, attribution included.
+    const message = await applySnapshots(ownedByS1, {
+      type: EventType.ACTIVITY_SNAPSHOT,
+      messageId: "act",
+      activityType: "search",
+      content: { step: 2 },
+      replace: false,
+      subagentRunId: "s2",
+    } as BaseEvent);
+
+    expect((message as any).subagentRunId).toBe("s1");
+    expect(message!.content).toEqual({ step: 1 });
+  });
 });

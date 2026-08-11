@@ -218,9 +218,9 @@ internal static class ProtoEventMapper
                     Snapshot = ProtoValueConverter.ToValue(e.Snapshot),
                 };
 
-                // Carried for schema parity only — a conforming producer never attributes
-                // state to a subagent. Mapped rather than dropped so a non-conforming
-                // stream stays diagnosable end to end instead of losing the evidence here.
+                // Attribution here is PROVENANCE: it records which subagent produced the
+                // update, while the state itself stays run-scoped and is applied run-scoped.
+                // Mapped rather than dropped so the producer stays identifiable end to end.
                 if (e.SubagentRunId is not null)
                 {
                     stateSnapshot.SubagentRunId = e.SubagentRunId;
@@ -306,6 +306,8 @@ internal static class ProtoEventMapper
             }
             case SubagentStartedEvent e:
             {
+                RequireProvided(e.SubagentRunId, "subagentRunId", AGUIEventTypes.SubagentStarted);
+                RequireProvided(e.Name, "name", AGUIEventTypes.SubagentStarted);
                 var subagentStarted = new Proto.SubagentStartedEvent
                 {
                     BaseEvent = BuildBaseEvent(e, Proto.EventType.SubagentStarted),
@@ -337,6 +339,7 @@ internal static class ProtoEventMapper
             }
             case SubagentFinishedEvent e:
             {
+                RequireProvided(e.SubagentRunId, "subagentRunId", AGUIEventTypes.SubagentFinished);
                 var subagentFinished = new Proto.SubagentFinishedEvent
                 {
                     BaseEvent = BuildBaseEvent(e, Proto.EventType.SubagentFinished),
@@ -352,6 +355,8 @@ internal static class ProtoEventMapper
             }
             case SubagentErrorEvent e:
             {
+                RequireProvided(e.SubagentRunId, "subagentRunId", AGUIEventTypes.SubagentError);
+                RequireProvided(e.Message, "message", AGUIEventTypes.SubagentError);
                 var subagentError = new Proto.SubagentErrorEvent
                 {
                     BaseEvent = BuildBaseEvent(e, Proto.EventType.SubagentError),
@@ -606,6 +611,22 @@ internal static class ProtoEventMapper
             default:
                 throw new NotSupportedException(
                     "The protobuf message does not contain a supported AG-UI event variant.");
+        }
+    }
+
+    // Throws when a protocol-required string was ABSENT, before it reaches a generated
+    // protobuf setter. Those setters reject null with a bare ArgumentNullException naming
+    // only "value", which says nothing about the event or the field. Checks for null and not
+    // for empty, exactly as the client's own RequireProvided does: the TypeScript schemas
+    // mark these mandatory with z.string(), which requires the key to be present but accepts
+    // an empty value, and the properties are nullable precisely so the two stay
+    // distinguishable.
+    private static void RequireProvided(string? value, string propertyName, string eventType)
+    {
+        if (value is null)
+        {
+            throw new InvalidOperationException(
+                $"Cannot encode '{eventType}': '{propertyName}' is required.");
         }
     }
 

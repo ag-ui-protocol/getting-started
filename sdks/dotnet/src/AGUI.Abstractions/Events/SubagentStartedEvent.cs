@@ -13,9 +13,10 @@ public sealed class SubagentStartedEvent : BaseEvent
     public override string Type => AGUIEventTypes.SubagentStarted;
 
     /// <summary>
-    /// Gets or sets the identifier of the subagent this event opens. Every event
-    /// the subagent goes on to produce carries this same value in its
-    /// <c>subagentRunId</c>.
+    /// Gets or sets the identifier of the subagent this event opens. It is the value the
+    /// subagent's later events use in their <c>subagentRunId</c> to attribute themselves to
+    /// it — attribution is optional per event, so an untagged continuation of something this
+    /// subagent opened is equally valid.
     /// </summary>
     [JsonPropertyName("subagentRunId")]
     public string? SubagentRunId { get; set; }

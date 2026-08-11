@@ -10,8 +10,10 @@ namespace AGUI.Client;
 internal static class EventStreamConverter
 {
     /// <summary>
-    /// Converts an AG-UI event stream to <see cref="ChatResponseUpdate"/>s, stamping each
-    /// one with the subagent that produced it.
+    /// Converts an AG-UI event stream to <see cref="ChatResponseUpdate"/>s, stamping the
+    /// ones a subagent produced with that subagent's id. An update produced by the parent —
+    /// or one whose entity has no recorded owner — carries no
+    /// <c>agui.subagentRunId</c> key at all.
     /// </summary>
     /// <remarks>
     /// Carried in <see cref="ChatResponseUpdate.AdditionalProperties"/> under the same key
@@ -222,17 +224,20 @@ internal static class EventStreamConverter
         // mismatches TypeScript does.
         var reasoningOwners = new Dictionary<string, string?>(StringComparer.Ordinal);
         // Id of the compact reasoning stream currently open, so a continuation chunk that
-        // omits messageId can still be checked against its opener.
-        string? openReasoningChunkId = null;
+        // omits messageId can still be checked against its opener — tracked PER LANE, one
+        // cursor for the parent plus one per subagent. A single cursor for the whole run
+        // pointed at whichever stream opened LAST, so two subagents interleaving compact
+        // reasoning had their id-less continuations checked against each other's stream and
+        // rejected, while the TypeScript chunk transform resolves the lane from the tag
+        // first and accepts. Dictionary keys cannot be null, hence the parent's own field.
+        string? parentReasoningChunkId = null;
+        var subagentReasoningChunkIds = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        // Records the owner for an entity on a CREATION event. Creation events carry
-        // attribution explicitly (D3/D5), so an untagged one means the parent owns it —
-        // which must overwrite any stale entry, or an untagged TOOL_CALL_RESULT would
-        // inherit the tool call's subagent and mint a wrongly-attributed tool message.
-        // Buffered updates are flushed after later events have mutated the owner map, so
-        // resolving at yield time would stamp them with whoever owns the entity by then.
-        // Stamping here freezes the owner as of creation; the wrapper leaves an already
-        // stamped update alone.
+        // READS the owner map as it stands right now and writes the answer onto the update.
+        // Buffered updates are flushed after later events have mutated the map, so resolving
+        // at yield time would stamp them with whoever owns the entity by then. Reading here
+        // freezes the owner as of creation; the wrapper leaves an already stamped update
+        // alone.
         static ChatResponseUpdate StampOwner(ChatResponseUpdate update, Dictionary<string, string?> map)
         {
             update.AdditionalProperties ??= new AdditionalPropertiesDictionary();
@@ -250,6 +255,16 @@ internal static class EventStreamConverter
             return update;
         }
 
+        // Records the owner for an entity on a CREATION event, for the RESOLUTION map the
+        // wrapper stamps updates from. Creation events carry attribution explicitly ("a
+        // creation event's subagentRunId transfers to the message it mints"), so an untagged
+        // one means the parent owns it — which must overwrite any stale entry, or an
+        // untagged TOOL_CALL_RESULT would inherit the tool call's subagent and mint a
+        // wrongly-attributed tool message. Callers that accept a SECOND opener for an
+        // already-known id must therefore skip this: recording unconditionally there
+        // restamped the entity as parent-owned while the validation map still named the
+        // first subagent, leaving the two maps contradicting each other.
+        //
         // Null means the event has no such entity; an EMPTY id is a valid string the schemas
         // accept, so skipping it lost the owner and the response came back parent-owned while
         // TypeScript kept the attribution.
@@ -315,7 +330,8 @@ internal static class EventStreamConverter
                     toolCallOwners.Clear();
                     activityOwners.Clear();
                     reasoningOwners.Clear();
-                    openReasoningChunkId = null;
+                    parentReasoningChunkId = null;
+                    subagentReasoningChunkIds.Clear();
                     owners.Clear();
                     runFinished = false;
                     runError = false;
@@ -406,14 +422,27 @@ internal static class EventStreamConverter
                     throw new System.InvalidOperationException(
                         $"Cannot send 'RUN_FINISHED' while subagents are still active: {string.Join(", ", activeSubagents.Keys)}");
 
-                // Attribution consistency for the two ID-keyed entities, mirroring
-                // verifyEvents. An opener records its owner; a continuation or close
-                // tagged with a different subagent is a contradiction, and for tool
-                // calls it is the consequential one — args and results are what travel
-                // back to the provider on the next turn.
+                // Attribution consistency for the ID-keyed entities, mirroring
+                // verifyEvents. The FIRST opener records the owner; a continuation, a
+                // close, or a second opener tagged with a different subagent is a
+                // contradiction, and for tool calls it is the consequential one — args and
+                // results are what travel back to the provider on the next turn.
+                //
+                // First writer, not last: an id closed by its END may legally be reopened,
+                // and overwriting on the reopen accepted — and silently re-owned — a
+                // message or call that another subagent had opened.
                 case TextMessageStartEvent textStart:
-                    messageOwners[textStart.MessageId] = textStart.SubagentRunId;
-                    RecordMessageOwner(textStart.MessageId, textStart.SubagentRunId);
+                    if (!messageOwners.ContainsKey(textStart.MessageId))
+                    {
+                        messageOwners[textStart.MessageId] = textStart.SubagentRunId;
+                        RecordMessageOwner(textStart.MessageId, textStart.SubagentRunId);
+                    }
+                    else
+                    {
+                        RejectOwnerMismatch(
+                            textStart.Type, textStart.SubagentRunId, messageOwners, textStart.MessageId, "message");
+                    }
+
                     break;
 
                 case TextMessageContentEvent textContent:
@@ -427,18 +456,26 @@ internal static class EventStreamConverter
                     break;
 
                 case ToolCallStartEvent toolStart:
-                    toolCallOwners[toolStart.ToolCallId] = toolStart.SubagentRunId;
-                    RecordCallOwner(toolStart.ToolCallId, toolStart.SubagentRunId);
+                    if (!toolCallOwners.ContainsKey(toolStart.ToolCallId))
+                    {
+                        toolCallOwners[toolStart.ToolCallId] = toolStart.SubagentRunId;
+                        RecordCallOwner(toolStart.ToolCallId, toolStart.SubagentRunId);
+                    }
+                    else
+                    {
+                        RejectOwnerMismatch(
+                            toolStart.Type, toolStart.SubagentRunId, toolCallOwners, toolStart.ToolCallId, "tool call");
+                    }
+
                     break;
 
-                // A creation event under D5: it both references the call and mints the tool
-                // message, and carries its own attribution — so an untagged one is
-                // parent-owned and must clear the call's recorded owner.
+                // A creation event: it both references the call and mints the tool message.
                 case ToolCallResultEvent toolResult:
-                    // Only the minted tool message. D5 gives this event its own attribution
-                    // precisely so the executor can differ from the caller (client-side tool
-                    // execution), so writing it onto the tool call would restamp the
-                    // buffered FunctionCallContent and lose the caller's owner.
+                    // Only the minted tool message. TOOL_CALL_RESULT carries its own
+                    // attribution — the executor can differ from the caller (client-side
+                    // tool execution) — so it is recorded unconditionally, and writing it
+                    // onto the tool call would restamp the buffered FunctionCallContent and
+                    // lose the caller's owner.
                     RecordMessageOwner(toolResult.MessageId, toolResult.SubagentRunId);
                     break;
 
@@ -454,6 +491,7 @@ internal static class EventStreamConverter
                     if (!reasoningOwners.ContainsKey(outerReasoningStart.MessageId))
                     {
                         reasoningOwners[outerReasoningStart.MessageId] = outerReasoningStart.SubagentRunId;
+                        RecordMessageOwner(outerReasoningStart.MessageId, outerReasoningStart.SubagentRunId);
                     }
                     else
                     {
@@ -462,13 +500,13 @@ internal static class EventStreamConverter
                             outerReasoningStart.MessageId, "reasoning message");
                     }
 
-                    RecordMessageOwner(outerReasoningStart.MessageId, outerReasoningStart.SubagentRunId);
                     break;
 
                 case ReasoningMessageStartEvent reasoningStart:
                     if (!reasoningOwners.ContainsKey(reasoningStart.MessageId))
                     {
                         reasoningOwners[reasoningStart.MessageId] = reasoningStart.SubagentRunId;
+                        RecordMessageOwner(reasoningStart.MessageId, reasoningStart.SubagentRunId);
                     }
                     else
                     {
@@ -477,24 +515,30 @@ internal static class EventStreamConverter
                             reasoningStart.MessageId, "reasoning message");
                     }
 
-                    RecordMessageOwner(reasoningStart.MessageId, reasoningStart.SubagentRunId);
                     break;
 
-                // #4 — the one compact stream this SDK models. Its opener establishes the
-                // owner and a later chunk must not disagree, exactly as the TypeScript
-                // chunk transform enforces.
+                // The one compact stream this SDK models. Its opener establishes the owner
+                // and a later chunk must not disagree, exactly as the TypeScript chunk
+                // transform enforces.
                 case ReasoningMessageChunkEvent reasoningChunk:
                     // Null means the chunk omits the id and so continues the open stream;
                     // an EMPTY id is a present id, since messageId is an optional
                     // z.string(). Treating empty as absent skipped both registration and
                     // the open-stream cursor, so .NET accepted a mismatch TypeScript
-                    // rejects. Same distinction as RecordOwner above.
+                    // rejects. Same distinction as RecordMessageOwner above.
                     if (reasoningChunk.MessageId is { } chunkId)
                     {
-                        if (!reasoningOwners.ContainsKey(chunkId))
+                        // The lane the cursor moves in is the one that OWNS the id: its
+                        // recorded owner if the id is already known, its own tag if this
+                        // chunk is what registers it. An id is the strongest signal, so it
+                        // continues wherever it is already open regardless of who sends it —
+                        // the same order the TypeScript transform resolves lanes in.
+                        string? laneOwner;
+                        if (!reasoningOwners.TryGetValue(chunkId, out laneOwner))
                         {
-                            reasoningOwners[chunkId] = reasoningChunk.SubagentRunId;
-                            RecordMessageOwner(chunkId, reasoningChunk.SubagentRunId);
+                            laneOwner = reasoningChunk.SubagentRunId;
+                            reasoningOwners[chunkId] = laneOwner;
+                            RecordMessageOwner(chunkId, laneOwner);
                         }
                         else
                         {
@@ -502,17 +546,42 @@ internal static class EventStreamConverter
                                 reasoningChunk.Type, reasoningChunk.SubagentRunId, reasoningOwners,
                                 chunkId, "reasoning message");
                         }
-                    }
-                    else if (openReasoningChunkId is not null)
-                    {
-                        RejectOwnerMismatch(
-                            reasoningChunk.Type, reasoningChunk.SubagentRunId, reasoningOwners,
-                            openReasoningChunkId, "reasoning message");
-                    }
 
-                    if (reasoningChunk.MessageId is { } newOpen)
+                        if (laneOwner is null)
+                        {
+                            parentReasoningChunkId = chunkId;
+                        }
+                        else
+                        {
+                            subagentReasoningChunkIds[laneOwner] = chunkId;
+                        }
+                    }
+                    else
                     {
-                        openReasoningChunkId = newOpen;
+                        // A tag names its lane outright; an untagged chunk continues the
+                        // parent's. Only that ONE lane is consulted: measuring the
+                        // continuation against the newest stream of ANY lane rejected chunks
+                        // that agreed perfectly with their own. A lane with nothing open
+                        // leaves nothing to disagree with, and the parent's lane resolves to
+                        // a null tag, which can never disagree either — so an untagged chunk
+                        // is always accepted, and its cursor is tracked to complete the
+                        // per-lane picture rather than to reject anything.
+                        string? openId;
+                        if (reasoningChunk.SubagentRunId is { } laneTag)
+                        {
+                            subagentReasoningChunkIds.TryGetValue(laneTag, out openId);
+                        }
+                        else
+                        {
+                            openId = parentReasoningChunkId;
+                        }
+
+                        if (openId is not null)
+                        {
+                            RejectOwnerMismatch(
+                                reasoningChunk.Type, reasoningChunk.SubagentRunId, reasoningOwners,
+                                openId, "reasoning message");
+                        }
                     }
 
                     break;
@@ -537,17 +606,22 @@ internal static class EventStreamConverter
 
                 case ReasoningEncryptedValueEvent encrypted:
                     // `subtype` decides which entity this continues, and there are THREE
-                    // cases, not two. "message" means a TEXT message, whose owner lives in
-                    // messageOwners -- checking reasoningOwners for it found nothing and so
-                    // accepted a foreign tag against a message another subagent opened.
-                    // Mirrors the TypeScript verifier, which had the inverse of this bug.
+                    // cases, not two. "message" means a MESSAGE — which may be a text
+                    // message (owner in messageOwners) or a reasoning message (owner in
+                    // reasoningOwners); the canonical use is attaching the encrypted
+                    // chain-of-thought to a reasoning message, so checking messageOwners
+                    // alone found nothing there and accepted a foreign tag. Ids are unique
+                    // per kind, so preferring the text bucket and falling back to the
+                    // reasoning bucket is unambiguous. Mirrors the TypeScript verifier.
                     RejectOwnerMismatch(
                         encrypted.Type,
                         encrypted.SubagentRunId,
                         encrypted.Subtype switch
                         {
                             "tool-call" => toolCallOwners,
-                            "message" => messageOwners,
+                            "message" => messageOwners.ContainsKey(encrypted.EntityId)
+                                ? messageOwners
+                                : reasoningOwners,
                             _ => reasoningOwners,
                         },
                         encrypted.EntityId,

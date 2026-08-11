@@ -133,12 +133,60 @@ public sealed class SubagentRoundTripTest
     }
 
     [Fact]
+    public void SubagentStarted_WithoutItsRequiredFields_FailsWithADescriptiveMessage()
+    {
+        // The generated protobuf setters reject null with a bare ArgumentNullException
+        // naming only "value", which says nothing about which event or field was at fault.
+        // These properties are nullable so a MISSING value stays distinguishable from an
+        // explicit "" (see the client's RequireProvided), which means null reaches the
+        // encoder and has to be reported here.
+        var missingId = Assert.Throws<InvalidOperationException>(
+            () => AGUIProtobuf.Encode(new SubagentStartedEvent { Name = "researcher" }));
+        Assert.Equal("Cannot encode 'SUBAGENT_STARTED': 'subagentRunId' is required.", missingId.Message);
+
+        var missingName = Assert.Throws<InvalidOperationException>(
+            () => AGUIProtobuf.Encode(new SubagentStartedEvent { SubagentRunId = "s1" }));
+        Assert.Equal("Cannot encode 'SUBAGENT_STARTED': 'name' is required.", missingName.Message);
+    }
+
+    [Fact]
+    public void SubagentFinished_WithoutItsRequiredField_FailsWithADescriptiveMessage()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => AGUIProtobuf.Encode(new SubagentFinishedEvent()));
+        Assert.Equal("Cannot encode 'SUBAGENT_FINISHED': 'subagentRunId' is required.", ex.Message);
+    }
+
+    [Fact]
+    public void SubagentError_WithoutItsRequiredFields_FailsWithADescriptiveMessage()
+    {
+        var missingId = Assert.Throws<InvalidOperationException>(
+            () => AGUIProtobuf.Encode(new SubagentErrorEvent { Message = "boom" }));
+        Assert.Equal("Cannot encode 'SUBAGENT_ERROR': 'subagentRunId' is required.", missingId.Message);
+
+        var missingMessage = Assert.Throws<InvalidOperationException>(
+            () => AGUIProtobuf.Encode(new SubagentErrorEvent { SubagentRunId = "s1" }));
+        Assert.Equal("Cannot encode 'SUBAGENT_ERROR': 'message' is required.", missingMessage.Message);
+    }
+
+    [Fact]
+    public void EmptyRequiredFields_StillEncode()
+    {
+        // The control for the three tests above: "" is a value the schemas accept, so only
+        // an ABSENT field is an error. Rejecting empty here would make .NET stricter than
+        // TypeScript and Python.
+        var result = RoundTrip(new SubagentStartedEvent { SubagentRunId = "", Name = "" });
+        Assert.Equal("", result.SubagentRunId);
+        Assert.Equal("", result.Name);
+    }
+
+    [Fact]
     public void StateEvents_PreserveAttribution_SoNonConformanceStaysDiagnosable()
     {
-        // Only the parent owns state, so a conforming producer never sets this. It is
-        // mapped rather than dropped so an offending stream can still be diagnosed at the
-        // consumer instead of losing the evidence on the wire — the client's stream
-        // validation is what rejects it.
+        // Attribution on a state event records which subagent PRODUCED the update; the
+        // state itself stays run-scoped and is applied run-scoped. The client accepts these
+        // streams, so this is ordinary provenance rather than evidence of a fault — mapping
+        // it keeps the producer identifiable end to end instead of dropping it on the wire.
         Assert.Equal("s1", RoundTrip(new StateSnapshotEvent { Snapshot = JsonTestHelpers.Parse("{\"a\":1}"), SubagentRunId = "s1" }).SubagentRunId);
         Assert.Equal("s1", RoundTrip(new StateDeltaEvent { Delta = JsonTestHelpers.Parse("[]"), SubagentRunId = "s1" }).SubagentRunId);
     }

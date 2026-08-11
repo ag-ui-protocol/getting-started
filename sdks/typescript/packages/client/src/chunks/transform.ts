@@ -170,7 +170,8 @@ export const transformChunks =
           `Ambiguous ${chunkType}: it carries neither a ${missingIdFieldName(kind)} nor a subagentRunId, but ${candidates.length} lanes have an open ${entityKind}. Attribute the chunk to the subagent it belongs to.`,
         );
       }
-      // Nothing open anywhere — the caller reports the missing id.
+      // No lane has an open stream of this kind, so there is nothing to continue: the
+      // caller opens a new stream in the parent lane, or reports the missing id.
       return undefined;
     };
 
@@ -464,7 +465,12 @@ export const transformChunks =
         return [];
       }),
       finalize(() => {
-        // This ensures that we close any pending events when the source observable completes
+        // Drops any lane still mid-assembly when the source completes. The END events
+        // closeAllLanes() builds are DISCARDED here — finalize runs after the stream has
+        // terminated and cannot emit — so this only clears the state, which matters for
+        // an operator instance that outlives one subscription. A stream that ends without
+        // a run terminal therefore has no synthesized END; the run-level cases above are
+        // what actually emit them.
         closeAllLanes();
       }),
     );

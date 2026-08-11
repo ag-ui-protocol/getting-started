@@ -802,4 +802,231 @@ describe("verifyEvents subagent lifecycle", () => {
     const events = await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
     expect(events).toHaveLength(inputEvents.length);
   });
+
+  const expectAccepted = async (inputEvents: BaseEvent[]) => {
+    const events = await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
+    expect(events).toHaveLength(inputEvents.length);
+  };
+
+  // The `subtype: "message"` encrypted value spans BOTH message kinds. Its canonical use
+  // in the docs is attaching an opaque provider blob to a REASONING message, whose owner
+  // lives in the reasoning bucket -- so looking only at the text-message bucket meant the
+  // check silently never fired for the case it was written for.
+
+  it("should reject a `message` encrypted value that disagrees with its REASONING owner", async () => {
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "a" } as SubagentStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s2", name: "b" } as SubagentStartedEvent,
+        { type: EventType.REASONING_START, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.REASONING_MESSAGE_START, messageId: "r1", role: "reasoning", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.REASONING_MESSAGE_END, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.REASONING_ENCRYPTED_VALUE, subtype: "message", entityId: "r1", value: "v", subagentRunId: "s2" } as BaseEvent,
+      ],
+      /does not match the message 'r1'/i,
+    );
+  });
+
+  it("should accept a `message` encrypted value that agrees with its REASONING owner", async () => {
+    await expectAccepted([
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "a" } as SubagentStartedEvent,
+      { type: EventType.SUBAGENT_STARTED, subagentRunId: "s2", name: "b" } as SubagentStartedEvent,
+      { type: EventType.REASONING_START, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_MESSAGE_START, messageId: "r1", role: "reasoning", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_MESSAGE_END, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_ENCRYPTED_VALUE, subtype: "message", entityId: "r1", value: "v", subagentRunId: "s1" } as BaseEvent,
+    ]);
+  });
+
+  it("should reject a `message` encrypted value that disagrees with its TEXT message owner", async () => {
+    // The other half of the "message" subtype, kept alongside the reasoning case so the
+    // two-bucket lookup cannot regress in either direction.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "a" } as SubagentStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s2", name: "b" } as SubagentStartedEvent,
+        { type: EventType.TEXT_MESSAGE_START, messageId: "m1", role: "assistant", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.TEXT_MESSAGE_END, messageId: "m1", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.REASONING_ENCRYPTED_VALUE, subtype: "message", entityId: "m1", value: "v", subagentRunId: "s2" } as BaseEvent,
+      ],
+      /does not match the message 'm1'/i,
+    );
+  });
+
+  // Reopening a CLOSED id. The openers used to check attribution against an owner of
+  // `undefined`, which can never disagree, so a second producer could reopen an id the
+  // first one had closed -- and the reducer appends its content into the first's message.
+
+  it("should reject a TEXT_MESSAGE_START that reopens a closed id under a different subagent", async () => {
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.TEXT_MESSAGE_START, messageId: "m1", role: "assistant", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "m1", delta: "x", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.TEXT_MESSAGE_END, messageId: "m1", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.TEXT_MESSAGE_START, messageId: "m1", role: "assistant", subagentRunId: "s2" } as BaseEvent,
+      ],
+      /does not match the message 'm1'/i,
+    );
+  });
+
+  it("should reject a TOOL_CALL_START that reopens a closed id under a different subagent", async () => {
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.TOOL_CALL_START, toolCallId: "tc1", toolCallName: "search", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.TOOL_CALL_ARGS, toolCallId: "tc1", delta: "{}", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.TOOL_CALL_END, toolCallId: "tc1", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.TOOL_CALL_START, toolCallId: "tc1", toolCallName: "search", subagentRunId: "s2" } as BaseEvent,
+      ],
+      /does not match the tool call 'tc1'/i,
+    );
+  });
+
+  it("should accept reopening a closed id under the SAME subagent", async () => {
+    await expectAccepted([
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      { type: EventType.TEXT_MESSAGE_START, messageId: "m1", role: "assistant", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_END, messageId: "m1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_START, messageId: "m1", role: "assistant", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_END, messageId: "m1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TOOL_CALL_START, toolCallId: "tc1", toolCallName: "search", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TOOL_CALL_END, toolCallId: "tc1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TOOL_CALL_START, toolCallId: "tc1", toolCallName: "search", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TOOL_CALL_END, toolCallId: "tc1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
+    ]);
+  });
+
+  it("should keep the first owner when an UNTAGGED opener reopens a tagged id", async () => {
+    // First writer wins. An untagged reopen is not a disagreement (an absent tag never
+    // is), but it must not OVERWRITE the retained owner with `undefined` either -- the
+    // s1-tagged continuation that follows proves the owner is still s1.
+    await expectAccepted([
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      { type: EventType.TEXT_MESSAGE_START, messageId: "m1", role: "assistant", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_END, messageId: "m1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_START, messageId: "m1", role: "assistant" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "m1", delta: "x", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TEXT_MESSAGE_END, messageId: "m1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TOOL_CALL_START, toolCallId: "tc1", toolCallName: "search", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TOOL_CALL_END, toolCallId: "tc1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TOOL_CALL_START, toolCallId: "tc1", toolCallName: "search" } as BaseEvent,
+      { type: EventType.TOOL_CALL_ARGS, toolCallId: "tc1", delta: "{}", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TOOL_CALL_END, toolCallId: "tc1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
+    ]);
+  });
+
+  it("should reject an encrypted value naming a CLOSED tool call under a different subagent", async () => {
+    // The reject direction of owner retention. The accept-direction test above cannot
+    // fail if retention is reverted, since a missing owner is simply not checked.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "a" } as SubagentStartedEvent,
+        { type: EventType.TOOL_CALL_START, toolCallId: "c", toolCallName: "t", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.TOOL_CALL_END, toolCallId: "c", subagentRunId: "s1" } as BaseEvent,
+        { type: EventType.REASONING_ENCRYPTED_VALUE, subtype: "tool-call", entityId: "c", value: "v", subagentRunId: "s2" } as BaseEvent,
+      ],
+      /does not match the tool call 'c'/i,
+    );
+  });
+
+  it("should clear the retained owner buckets on a new run", async () => {
+    // Owners are retained for the RUN, not forever: run 2 knows nothing about run 1's
+    // tool call, so an encrypted value naming that id has no owner to disagree with.
+    await expectAccepted([
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r1" } as RunStartedEvent,
+      { type: EventType.TOOL_CALL_START, toolCallId: "c", toolCallName: "t", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.TOOL_CALL_END, toolCallId: "c", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r1" } as RunFinishedEvent,
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r2" } as RunStartedEvent,
+      { type: EventType.REASONING_ENCRYPTED_VALUE, subtype: "tool-call", entityId: "c", value: "v", subagentRunId: "s2" } as BaseEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r2" } as RunFinishedEvent,
+    ]);
+  });
+
+  // Reasoning openers. Only the disagreeing case was pinned, so the three directions
+  // that must NOT change were free to drift.
+
+  it("should accept a second reasoning opener that agrees with the first", async () => {
+    await expectAccepted([
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      { type: EventType.REASONING_START, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_MESSAGE_START, messageId: "r1", role: "reasoning", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_MESSAGE_END, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_END, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
+    ]);
+  });
+
+  it("should accept an UNTAGGED second reasoning opener on a tagged first", async () => {
+    // An absent tag never disagrees, and the retained owner stays s1 -- which the
+    // s1-tagged content that follows would fail on if it had been overwritten.
+    await expectAccepted([
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      { type: EventType.REASONING_START, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_MESSAGE_START, messageId: "r1", role: "reasoning" } as BaseEvent,
+      { type: EventType.REASONING_MESSAGE_CONTENT, messageId: "r1", delta: "x", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_MESSAGE_END, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_END, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
+    ]);
+  });
+
+  it("should keep the reasoning owner when an UNTAGGED opener reopens after REASONING_END", async () => {
+    // Same first-writer-wins rule as the message and tool-call openers: the owner
+    // outlives REASONING_END, so an untagged reopen must not hand the id to the parent.
+    await expectAccepted([
+      { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+      { type: EventType.REASONING_START, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_END, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_START, messageId: "r1" } as BaseEvent,
+      { type: EventType.REASONING_MESSAGE_START, messageId: "r1", role: "reasoning", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_MESSAGE_END, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.REASONING_END, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
+    ]);
+  });
+
+  it("should reject a TAGGED second reasoning opener on an UNTAGGED (parent-owned) first", async () => {
+    // The parent is an owner too, so the second opener contradicts it.
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.REASONING_START, messageId: "r1" } as BaseEvent,
+        { type: EventType.REASONING_MESSAGE_START, messageId: "r1", role: "reasoning", subagentRunId: "s1" } as BaseEvent,
+      ],
+      /does not match the reasoning message 'r1' opener's subagent '\(the parent agent\)'/i,
+    );
+  });
+
+  // The empty string is a legal opaque subagent id, and it is falsy -- so it must be
+  // distinguished from "no tag" on the message path too, not only on steps.
+
+  it("should reject an empty-string-tagged continuation of a parent-owned message", async () => {
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.TEXT_MESSAGE_START, messageId: "m", role: "assistant" } as BaseEvent,
+        { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "m", delta: "x", subagentRunId: "" } as BaseEvent,
+      ],
+      /does not match the message 'm' opener's subagent '\(the parent agent\)'/i,
+    );
+  });
+
+  it("should reject an s1-tagged continuation of a message owned by the empty-string subagent", async () => {
+    await expectRejectedWith(
+      [
+        { type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as RunStartedEvent,
+        { type: EventType.TEXT_MESSAGE_START, messageId: "m", role: "assistant", subagentRunId: "" } as BaseEvent,
+        { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "m", delta: "x", subagentRunId: "s1" } as BaseEvent,
+      ],
+      /does not match the message 'm' opener's subagent ''/i,
+    );
+  });
 });

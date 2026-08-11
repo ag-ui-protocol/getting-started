@@ -38,10 +38,11 @@ function stripMessages(messages: MessageLike[]): MessageLike[] {
  * The old party is the upstream agent, not the downstream consumer (the current client
  * supports subagents).
  *
- *  - input (client -> old agent): strips `subagentRunId` from every top-level message so a
- *    pre-subagent agent never receives attribution it doesn't understand. This is the
- *    substantive path — the client's replayed message history can carry `subagentRunId`.
- *  - output (old agent -> client): defensive normalization. A genuinely pre-subagent
+ *  - client → agent (the run input): strips `subagentRunId` from every top-level message so
+ *    a pre-subagent agent never receives attribution it doesn't understand. This is the
+ *    load-bearing half — the client's replayed message history can carry `subagentRunId`,
+ *    and this is what protects the old agent from it.
+ *  - agent → client (the event stream): defensive normalization. A genuinely pre-subagent
  *    agent cannot emit `SUBAGENT_*` events or `subagentRunId`, and any `RUN_STARTED.input`
  *    echo was already sanitized on the way in — so this path guards mixed/proxied
  *    pipelines rather than doing load-bearing translation. It drops
@@ -60,14 +61,13 @@ function stripMessages(messages: MessageLike[]): MessageLike[] {
  * directions; there is no field/event to translate (unlike 0.0.45's THINKING->REASONING).
  *
  * Who this actually fires for: `maxVersion` defaults to this library's own version, but
- * agent subclasses OVERRIDE it to declare the protocol level their backend speaks. Four
- * integrations do -- llama-index, pydantic-ai and ag2 at 0.0.39, and crew-ai pinned at
- * exactly 0.0.57, the version before subagents. So this shim is live for all four today,
- * and the OUTBOUND stripping is the load-bearing half: those backends predate subagents,
- * and events carrying subagent data can still reach a consumer wired to them -- replayed
- * history, a stored thread written by a newer client, or a proxy forwarding a newer
- * upstream. Stripping is what keeps such a consumer from receiving events it has no
- * concept of.
+ * agent subclasses OVERRIDE it to declare the protocol level their backend speaks. Six
+ * integrations do -- llama-index, pydantic-ai, ag2 and community/spring-ai at 0.0.39,
+ * agno at 0.0.53, and crew-ai pinned at exactly 0.0.57, the version before subagents. So
+ * this shim is live for all six today, and the client → agent strip is what carries the
+ * weight: those backends predate subagents, so a replayed history or a stored thread
+ * written by a newer client must not deliver them attribution they cannot interpret.
+ * The agent → client strip is the defensive counterpart described above.
  */
 export class BackwardCompatibility_0_0_57 extends Middleware {
   private warnDroppedLifecycleEvent(eventType: string) {

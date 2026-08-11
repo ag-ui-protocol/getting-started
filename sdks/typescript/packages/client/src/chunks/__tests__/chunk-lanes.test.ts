@@ -473,6 +473,121 @@ describe("transformChunks lanes: closing", () => {
       [EventType.TEXT_MESSAGE_CONTENT, "p1", "B", null],
     ]);
   });
+
+  it("closes every open lane at a second RUN_STARTED, in the order they opened", async () => {
+    // RUN_STARTED is a run-level event like RUN_FINISHED: a lane from the previous run
+    // must not survive into the next one, where its id means nothing.
+    const events = await run(
+      RUN_STARTED,
+      textChunk("A", "s2", "m2"),
+      textChunk("B", undefined, "p1"),
+      textChunk("C", "s1", "m1"),
+      RUN_STARTED,
+    );
+
+    expect(shape(events).filter((e) => e[0] === EventType.TEXT_MESSAGE_END)).toEqual([
+      [EventType.TEXT_MESSAGE_END, "m2", "", "s2"],
+      [EventType.TEXT_MESSAGE_END, "p1", "", null],
+      [EventType.TEXT_MESSAGE_END, "m1", "", "s1"],
+    ]);
+    expect(shape(events).at(-1)?.[0]).toBe(EventType.RUN_STARTED);
+  });
+
+  // The pass-through set: these events are emitted untouched, so they must leave every
+  // lane alone even when they carry a subagent's tag. A lane is proven still open by its
+  // next continuation landing on the same entity, and by no END appearing before the run
+  // terminal.
+  const passThroughEvents: [string, unknown][] = [
+    [
+      EventType.SUBAGENT_STARTED,
+      { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "a" },
+    ],
+    [
+      EventType.REASONING_ENCRYPTED_VALUE,
+      {
+        type: EventType.REASONING_ENCRYPTED_VALUE,
+        subtype: "message",
+        entityId: "m1",
+        encryptedValue: "opaque",
+        subagentRunId: "s1",
+      },
+    ],
+    [
+      EventType.ACTIVITY_SNAPSHOT,
+      {
+        type: EventType.ACTIVITY_SNAPSHOT,
+        messageId: "a1",
+        activityType: "search",
+        content: {},
+        subagentRunId: "s1",
+      },
+    ],
+    [
+      EventType.ACTIVITY_DELTA,
+      { type: EventType.ACTIVITY_DELTA, messageId: "a1", delta: [], subagentRunId: "s1" },
+    ],
+    [EventType.RAW, { type: EventType.RAW, event: {}, subagentRunId: "s1" }],
+  ];
+
+  it.each(passThroughEvents)("does not close any lane on %s", async (_type, passThrough) => {
+    const events = await run(
+      textChunk("A", "s1", "m1"),
+      textChunk("P", undefined, "p1"),
+      passThrough,
+      textChunk("B", "s1"),
+      textChunk("Q"),
+      RUN_FINISHED,
+    );
+
+    expect(shape(events).filter((e) => e[0] === EventType.TEXT_MESSAGE_CONTENT)).toEqual([
+      [EventType.TEXT_MESSAGE_CONTENT, "m1", "A", "s1"],
+      [EventType.TEXT_MESSAGE_CONTENT, "p1", "P", null],
+      [EventType.TEXT_MESSAGE_CONTENT, "m1", "B", "s1"],
+      [EventType.TEXT_MESSAGE_CONTENT, "p1", "Q", null],
+    ]);
+    // Both lanes closed by the run terminal, not by the pass-through event.
+    expect(shape(events).slice(-3)).toEqual([
+      [EventType.TEXT_MESSAGE_END, "m1", "", "s1"],
+      [EventType.TEXT_MESSAGE_END, "p1", "", null],
+      [EventType.RUN_FINISHED, "", "", null],
+    ]);
+  });
+
+  // These two DO close their own lane, and an untagged one names the parent lane — so
+  // they must not reach across into a subagent's.
+  const untaggedOwnLaneClosers: [string, unknown][] = [
+    [
+      EventType.TOOL_CALL_RESULT,
+      {
+        type: EventType.TOOL_CALL_RESULT,
+        messageId: "tr1",
+        toolCallId: "c9",
+        content: "{}",
+        role: "tool",
+      },
+    ],
+    [EventType.STEP_FINISHED, { type: EventType.STEP_FINISHED, stepName: "work" }],
+  ];
+
+  it.each(untaggedOwnLaneClosers)(
+    "does not close a subagent's lane on an untagged %s",
+    async (_type, closer) => {
+      const events = await run(
+        textChunk("A", "s1", "m1"),
+        closer,
+        textChunk("B", "s1"),
+        RUN_FINISHED,
+      );
+
+      expect(shape(events).filter((e) => e[0] === EventType.TEXT_MESSAGE_CONTENT)).toEqual([
+        [EventType.TEXT_MESSAGE_CONTENT, "m1", "A", "s1"],
+        [EventType.TEXT_MESSAGE_CONTENT, "m1", "B", "s1"],
+      ]);
+      expect(shape(events).filter((e) => e[0] === EventType.TEXT_MESSAGE_END)).toEqual([
+        [EventType.TEXT_MESSAGE_END, "m1", "", "s1"],
+      ]);
+    },
+  );
 });
 
 describe("transformChunks lanes: unattributed runs are unaffected", () => {
@@ -551,6 +666,61 @@ describe("transformChunks lanes: the output is a valid stream", () => {
         textChunk("P", undefined, "p1"),
         toolChunk("{", "s1", "c1"),
         textChunk("Q"),
+        { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s1" },
+        RUN_FINISHED,
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  // Only the text family was checked against the verifier. The tool and reasoning
+  // families synthesize their own boundaries and carry their own attribution, so each
+  // needs the same round trip.
+  it("accepts interleaved subagents' tool calls", async () => {
+    await expect(
+      runVerified(
+        RUN_STARTED,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "a" },
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s2", name: "b" },
+        toolChunk('{"a', "s1", "c1"),
+        toolChunk('{"b', "s2", "c2"),
+        toolChunk('":1}', "s1"),
+        { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s1" },
+        { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s2" },
+        RUN_FINISHED,
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it("accepts interleaved subagents' reasoning messages", async () => {
+    await expect(
+      runVerified(
+        RUN_STARTED,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "a" },
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s2", name: "b" },
+        reasoningChunk("A", "s1", "r1"),
+        reasoningChunk("B", "s2", "r2"),
+        reasoningChunk("C", "s1"),
+        { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s1" },
+        { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s2" },
+        RUN_FINISHED,
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it("accepts a two-run stream whose lanes are reopened in the second run", async () => {
+    // Ids are per-run, so run 2 legitimately reuses m1 and s1 after run 1 closed them.
+    await expect(
+      runVerified(
+        RUN_STARTED,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "a" },
+        textChunk("A", "s1", "m1"),
+        textChunk("P", undefined, "p1"),
+        { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s1" },
+        RUN_FINISHED,
+        RUN_STARTED,
+        { type: EventType.SUBAGENT_STARTED, subagentRunId: "s1", name: "a" },
+        textChunk("B", "s1", "m1"),
+        textChunk("Q", undefined, "p1"),
         { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s1" },
         RUN_FINISHED,
       ),

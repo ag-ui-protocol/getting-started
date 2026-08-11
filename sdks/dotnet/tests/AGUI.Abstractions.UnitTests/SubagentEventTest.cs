@@ -322,6 +322,79 @@ public sealed class SubagentAttributionTest
     }
 
     [Fact]
+    public void ParentFirstParallelCalls_StayParentOwned()
+    {
+        // The FIRST owner in the run wins, and the parent is an owner like any subagent. A
+        // "first non-null owner wins" capture promoted s2 onto a run the parent opened, so
+        // the merged message — including the parent's own tool call — came back attributed
+        // to a subagent that never made it. Losing s2's attribution is the acknowledged
+        // limitation above; inventing an owner for the parent's call is not.
+        var chatMessages = new List<AGUIMessage>
+        {
+            new AGUIAssistantMessage
+            {
+                Id = "m1",
+                ToolCalls = new List<AGUIToolCall>
+                {
+                    new() { Id = "tc1", Type = "function", Function = new AGUIToolCallFunction { Name = "search", Arguments = "{}" } },
+                },
+            },
+            new AGUIAssistantMessage
+            {
+                Id = "m2",
+                SubagentRunId = "s2",
+                ToolCalls = new List<AGUIToolCall>
+                {
+                    new() { Id = "tc2", Type = "function", Function = new AGUIToolCallFunction { Name = "write", Arguments = "{}" } },
+                },
+            },
+        }.AsChatMessages().ToList();
+
+        var merged = Assert.Single(chatMessages);
+        Assert.Equal(
+            new[] { "tc1", "tc2" },
+            merged.Contents.OfType<FunctionCallContent>().Select(c => c.CallId).ToArray());
+        Assert.False(merged.AdditionalProperties?.ContainsKey("agui.subagentRunId") == true);
+    }
+
+    [Fact]
+    public void ToolCallRunOwner_IsCapturedAfreshAfterAFlush()
+    {
+        // The capture flag is per run, so the run a non-tool-call message ends must not
+        // carry its owner into the next one: here the parent's run flushes, then s1 opens a
+        // new run that has to be attributed to s1.
+        var chatMessages = new List<AGUIMessage>
+        {
+            new AGUIAssistantMessage
+            {
+                Id = "m1",
+                ToolCalls = new List<AGUIToolCall>
+                {
+                    new() { Id = "tc1", Type = "function", Function = new AGUIToolCallFunction { Name = "search", Arguments = "{}" } },
+                },
+            },
+            new AGUIToolMessage { Id = "t1", ToolCallId = "tc1", Content = "done" },
+            new AGUIAssistantMessage
+            {
+                Id = "m2",
+                SubagentRunId = "s1",
+                ToolCalls = new List<AGUIToolCall>
+                {
+                    new() { Id = "tc2", Type = "function", Function = new AGUIToolCallFunction { Name = "write", Arguments = "{}" } },
+                },
+            },
+        }.AsChatMessages().ToList();
+
+        var parentRun = chatMessages[0];
+        Assert.False(parentRun.AdditionalProperties?.ContainsKey("agui.subagentRunId") == true);
+
+        var subagentRun = chatMessages[2];
+        Assert.Equal(
+            "s1",
+            subagentRun.AdditionalProperties?.TryGetValue("agui.subagentRunId", out string? v) == true ? v : null);
+    }
+
+    [Fact]
     public void UnattributedMessages_DoNotGainAnAdditionalProperty()
     {
         // A parent-owned message must not acquire the key at all, or every consumer

@@ -70,6 +70,12 @@ public static class AGUIChatMessageExtensions
         // non-subagent parallel calls as well, so it is a deliberate decision rather than a
         // drive-by fix. PNI-293 carries the analysis.
         string? pendingToolCallSubagentRunId = null;
+        // Whether the run's owner has been captured yet. A separate flag rather than
+        // "pendingToolCallSubagentRunId is still null", because the PARENT is an owner too
+        // and its owner IS null: capturing the first non-null value promoted a later
+        // subagent onto a run the parent opened, attributing the parent's own tool call to
+        // it.
+        var pendingToolCallOwnerCaptured = false;
 
         foreach (var message in aguiMessages)
         {
@@ -77,9 +83,14 @@ public static class AGUIChatMessageExtensions
             {
                 pendingToolCallContents ??= new List<AIContent>();
                 pendingToolCallId ??= message.Id;
-                // First owner in the run wins. Splitting the run when the owner changes was
-                // tried and reverted: see the note on pendingToolCallSubagentRunId.
-                pendingToolCallSubagentRunId ??= message.SubagentRunId;
+                // First owner in the run wins, whoever that is. Splitting the run when the
+                // owner changes was tried and reverted: see the note on
+                // pendingToolCallSubagentRunId.
+                if (!pendingToolCallOwnerCaptured)
+                {
+                    pendingToolCallSubagentRunId = message.SubagentRunId;
+                    pendingToolCallOwnerCaptured = true;
+                }
 
                 if (!string.IsNullOrEmpty(toolCallAssistant.Content))
                 {
@@ -110,6 +121,7 @@ public static class AGUIChatMessageExtensions
                 pendingToolCallContents = null;
                 pendingToolCallId = null;
                 pendingToolCallSubagentRunId = null;
+                pendingToolCallOwnerCaptured = false;
             }
 
             var role = MapChatRole(message.Role);

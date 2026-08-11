@@ -281,9 +281,23 @@ compatibility break can attribute events and skip the lifecycle entirely.
 ### A new client talking to an older agent
 
 Handled automatically. The TypeScript client inserts a compatibility shim based
-on the agent's reported version, which strips `subagentRunId` and drops the
-lifecycle events on the way *out*, so an older agent never receives fields it
-cannot interpret. Nothing is stripped on the way to the UI.
+on the agent's reported version, and it acts in **both** directions.
+
+- **Client → agent.** The shim strips `subagentRunId` from the outgoing input
+  messages, so an older agent never receives attribution it cannot interpret.
+  This is the load-bearing half: a replayed message history, or a stored thread
+  written by a newer client, really can carry the field.
+- **Agent → client.** The shim also drops `SubagentStarted`, `SubagentFinished`
+  and `SubagentError`, and strips `subagentRunId` from every remaining event
+  (including `MessagesSnapshot` messages and the `RunStarted` input echo). This is
+  defensive normalization rather than translation — an agent that reports a
+  pre-subagent version should not be emitting either of those in the first place,
+  so what it really guards is a mixed or proxied pipeline.
+
+The consequence of the second direction is worth knowing: a consumer sitting
+behind this shim sees a **flattened, unattributed stream**, even if something
+upstream did attribute it. If you want attribution to reach your UI, the agent has
+to report a version that supports subagents.
 
 ## Support
 
@@ -301,11 +315,13 @@ survives a round trip across languages.
 
 - **Protobuf covers a subset of event types.** 19 of the 36 event types have a
   protobuf mapping: all three subagent events, plus the text message, tool call
-  start/args/end, state, step, and run families. The rest cannot be encoded at
-  all — and several of those carry attribution: `ToolCallResult`, the reasoning
-  family, and the activity events. The chunk shorthand is in the same position
-  despite having message definitions and a `subagent_run_id` field, since it has
-  no enum entry. All of this predates subagent support.
+  start/args/end, state, step and run families, and `MessagesSnapshot`, `Raw` and
+  `Custom`. The rest cannot be encoded at all — and several of those carry
+  attribution: `ToolCallResult`, the reasoning family, and the activity events.
+  The chunk shorthand is unencodable too: `TextMessageChunk` and `ToolCallChunk`
+  have message definitions carrying `subagent_run_id`, but no `EventType` enum
+  entry to select them, and `ReasoningMessageChunk` has no proto message at all.
+  All of this predates subagent support.
 - **.NET loses the second owner on parallel tool calls from different subagents.**
   Converting a run to `Microsoft.Extensions.AI` messages merges consecutive tool
   calls into one `ChatMessage`, and AG-UI attributes per message, so only the
