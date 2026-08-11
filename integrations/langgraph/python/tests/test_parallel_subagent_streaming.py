@@ -354,8 +354,8 @@ class TestParallelTaskCallCapture(unittest.TestCase):
             agent.active_run["pending_task_calls"],
             [
                 # public_tool_call_id == tool_call_id: no cross-lane collision here.
-                {"tool_call_id": "call-a", "public_tool_call_id": "call-a", "parent_message_id": "asst-1"},
-                {"tool_call_id": "call-b", "public_tool_call_id": "call-b", "parent_message_id": "asst-1"},
+                {"lane": "__root__", "tool_call_id": "call-a", "public_tool_call_id": "call-a", "parent_message_id": "asst-1"},
+                {"lane": "__root__", "tool_call_id": "call-b", "public_tool_call_id": "call-b", "parent_message_id": "asst-1"},
             ],
         )
 
@@ -383,7 +383,7 @@ class TestParallelTaskCallCapture(unittest.TestCase):
         _feed(agent, chunk2, None)
         self.assertEqual(
             agent.active_run["pending_task_calls"],
-            [{"tool_call_id": "call-a", "public_tool_call_id": "call-a", "parent_message_id": "asst-1"}],
+            [{"lane": "__root__", "tool_call_id": "call-a", "public_tool_call_id": "call-a", "parent_message_id": "asst-1"}],
         )
 
 
@@ -713,6 +713,61 @@ class TestEqualToolCallIdsAcrossLanes(unittest.TestCase):
             len({tid for tid, _ in results}), 2,
             f"each result must carry its own lane's public id: {results}",
         )
+
+
+class TestNestedDuplicateTaskCallIds(unittest.TestCase):
+    """Colliding raw `task` ids across lanes must not mislink SUBAGENT_STARTED.
+
+    The pending-task capture deduped by a run-global set of RAW tool-call ids,
+    so a second lane's `task` call with an already-seen raw id never recorded
+    its public tool-call/message pair — and the ns->tool_call_id join matched
+    pending records by raw id alone, popping the OTHER lane's record. The
+    nested subagent's SUBAGENT_STARTED then referenced the root's unrelated
+    call ("dup") instead of the spawning call the client actually saw
+    ("dup::tools:outer").
+    """
+
+    def _capture_both_and_join(self):
+        agent = _make_agent()
+        # Root and an outer subagent each fan out a `task` call with the same
+        # raw id but different assistant chunks.
+        _feed(agent, _tool_start_chunk("root-msg", "dup", "task"), None)
+        _feed(agent, _tool_start_chunk("outer-msg", "dup", "task"), "tools:outer")
+        # The outer lane's dispatch: its ToolNode schedules the inner subagent.
+        agent._capture_task_tool_dispatch({
+            "event": LangGraphEventTypes.OnChainStart.value,
+            "name": "tools",
+            "metadata": {
+                "langgraph_node": "tools",
+                "langgraph_checkpoint_ns": "tools:outer|tools:inner",
+            },
+            "data": {"input": {"type": "tool_call", "name": "task", "id": "dup"}},
+        })
+        agent._capture_subagent_task_meta({
+            "event": LangGraphEventTypes.OnToolStart.value,
+            "name": "task",
+            "metadata": {"langgraph_checkpoint_ns": "tools:outer|tools:inner"},
+            "data": {"input": {"subagent_type": "researcher", "description": "d"}},
+        })
+        return agent
+
+    def test_both_lanes_task_calls_are_captured(self):
+        agent = self._capture_both_and_join()
+        # The root's record must still be pending for ITS spawned subagent —
+        # the raw-global dedupe used to swallow the second capture entirely.
+        remaining = agent.active_run["pending_task_calls"]
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0]["parent_message_id"], "root-msg")
+
+    def test_the_inner_subagent_links_to_the_spawning_lanes_public_call(self):
+        agent = self._capture_both_and_join()
+        meta = agent.active_run["subagent_task_meta"]["tools:inner"]
+        self.assertEqual(
+            meta["parent_tool_call_id"], "dup::tools:outer",
+            "the client saw the outer lane's call as dup::tools:outer; linking "
+            f"to {meta['parent_tool_call_id']!r} points at the root's unrelated call",
+        )
+        self.assertEqual(meta["parent_message_id"], "outer-msg")
 
 
 if __name__ == "__main__":

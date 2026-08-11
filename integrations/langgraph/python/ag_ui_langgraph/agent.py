@@ -677,13 +677,28 @@ class LangGraphAgent:
         # which is always wrong. FIFO is the correct degradation instead.
         pending = active_run.get("pending_task_calls") or []
         originating_tool_call_id = (active_run.get("task_tool_call_ids_by_ns") or {}).get(ns)
+        # The spawning `task` call was streamed by this subagent's PARENT lane
+        # (the second-deepest `tools:` segment; the root lane for top-level
+        # subagents). Raw call ids can collide across lanes, so the raw id
+        # alone can name another lane's unrelated call — the lane pins which
+        # record (and thus which PUBLIC ids) the client actually saw.
+        parent_lane = tool_segs[-2] if len(tool_segs) >= 2 else _ROOT_LANE
         task_call = {}
         if originating_tool_call_id is not None:
             match_index = next(
                 (i for i, c in enumerate(pending)
-                 if c.get("tool_call_id") == originating_tool_call_id),
+                 if c.get("tool_call_id") == originating_tool_call_id
+                 and c.get("lane") == parent_lane),
                 None,
             )
+            if match_index is None:
+                # No lane-exact record; a raw-only match is safe only when it
+                # is unambiguous (exactly one candidate across all lanes).
+                raw_matches = [
+                    i for i, c in enumerate(pending)
+                    if c.get("tool_call_id") == originating_tool_call_id
+                ]
+                match_index = raw_matches[0] if len(raw_matches) == 1 else None
             if match_index is not None:
                 task_call = pending.pop(match_index)
             else:
@@ -691,7 +706,14 @@ class LangGraphAgent:
                 # parent_message_id (e.g. tool-call emission not yet observed).
                 task_call = {"tool_call_id": originating_tool_call_id}
         elif pending:
-            task_call = pending.pop(0)
+            # FIFO fallback: prefer the parent lane's own queue before the
+            # global one, so a missing dispatch capture in one lane cannot
+            # steal another lane's pending record.
+            lane_fifo = next(
+                (i for i, c in enumerate(pending) if c.get("lane") == parent_lane),
+                None,
+            )
+            task_call = pending.pop(lane_fifo if lane_fifo is not None else 0)
             logger.warning(
                 "no per-call `task` ToolNode dispatch captured for ns=%r; falling back "
                 "to FIFO order and linking this subagent to tool_call_id=%r, which is "
@@ -2385,17 +2407,25 @@ class LangGraphAgent:
             for _tcc in tool_call_chunks_list:
                 if _tcc.get("name") == "task" and _tcc.get("id"):
                     seen_tasks = self.active_run.setdefault("seen_task_call_ids", set())
-                    if _tcc["id"] not in seen_tasks:
-                        seen_tasks.add(_tcc["id"])
+                    # Deduped per (lane, raw id), not per raw id: two lanes can
+                    # fan out `task` calls sharing a raw id, and a run-global
+                    # raw key swallowed the second lane's capture — its spawned
+                    # subagent then joined against the FIRST lane's record and
+                    # SUBAGENT_STARTED referenced an unrelated call.
+                    _lane = self._current_lane()
+                    _key = (_lane, _tcc["id"])
+                    if _key not in seen_tasks:
+                        seen_tasks.add(_key)
                         # tool_call_id stays RAW — it is matched against the
                         # ToolNode dispatch capture (graph-side raw ids). The
                         # public pair is what SUBAGENT_STARTED must reference,
                         # since those are the ids the client saw streamed.
                         self.active_run.setdefault("pending_task_calls", []).append({
+                            "lane": _lane,
                             "tool_call_id": _tcc["id"],
-                            "public_tool_call_id": self._resolve_public_tool_call_id(_tcc["id"]),
+                            "public_tool_call_id": self._resolve_public_tool_call_id(_tcc["id"], _lane),
                             "parent_message_id": (
-                                self._resolve_public_message_id(chunk_id) if chunk_id else chunk_id
+                                self._resolve_public_message_id(chunk_id, _lane) if chunk_id else chunk_id
                             ),
                         })
 
