@@ -389,6 +389,70 @@ describe("Event Compaction", () => {
       expect(compacted[5].type).toBe(EventType.RUN_FINISHED);
     });
 
+    it("should carry cumulative state across runs with add, replace, and remove deltas", () => {
+      const events = [
+        { type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" },
+        {
+          type: EventType.STATE_SNAPSHOT,
+          snapshot: { count: 1, label: "before", obsolete: true },
+        },
+        { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" },
+        { type: EventType.RUN_STARTED, threadId: "t1", runId: "r2" },
+        { type: EventType.STATE_DELTA, delta: [{ op: "add", path: "/added", value: "run-2" }] },
+        {
+          type: EventType.STATE_DELTA,
+          delta: [{ op: "replace", path: "/label", value: "after" }],
+        },
+        { type: EventType.STATE_DELTA, delta: [{ op: "remove", path: "/obsolete" }] },
+        { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r2" },
+      ];
+
+      const snapshots = compactEvents(events)
+        .filter((event): event is StateSnapshotEvent => event.type === EventType.STATE_SNAPSHOT)
+        .map((event) => event.snapshot);
+
+      expect(snapshots).toEqual([
+        { count: 1, label: "before", obsolete: true },
+        { count: 1, label: "after", added: "run-2" },
+      ]);
+    });
+
+    it("should not emit another state snapshot for a later run without state events", () => {
+      const events = [
+        { type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" },
+        { type: EventType.STATE_SNAPSHOT, snapshot: { count: 1 } },
+        { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" },
+        { type: EventType.RUN_STARTED, threadId: "t1", runId: "r2" },
+        { type: EventType.TEXT_MESSAGE_START, messageId: "msg1", role: "assistant" },
+        { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "msg1", delta: "No state change" },
+        { type: EventType.TEXT_MESSAGE_END, messageId: "msg1" },
+        { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r2" },
+      ];
+
+      const snapshots = compactEvents(events).filter(
+        (event) => event.type === EventType.STATE_SNAPSHOT,
+      );
+
+      expect(snapshots).toHaveLength(1);
+      expect((snapshots[0] as StateSnapshotEvent).snapshot).toEqual({ count: 1 });
+    });
+
+    it("should throw for an invalid delta after state was established in an earlier run", () => {
+      const events = [
+        { type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" },
+        { type: EventType.STATE_SNAPSHOT, snapshot: { existing: true } },
+        { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" },
+        { type: EventType.RUN_STARTED, threadId: "t1", runId: "r2" },
+        {
+          type: EventType.STATE_DELTA,
+          delta: [{ op: "replace", path: "/missing", value: "invalid" }],
+        },
+        { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r2" },
+      ];
+
+      expect(() => compactEvents(events)).toThrow();
+    });
+
     it("should not emit state snapshot when no state events in run", () => {
       const events = [
         { type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" },
