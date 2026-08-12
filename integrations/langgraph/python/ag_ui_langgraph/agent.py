@@ -3238,14 +3238,21 @@ class LangGraphAgent:
         if public_id is not None:
             return public_id
         used = self.active_run.setdefault("used_public_ids", {}).setdefault(kind, set())
-        # A verbatim upstream id that LOOKS root-minted must never be emitted
-        # as-is: seeding reverse-translates the '::__root__' suffix on the next
-        # turn's input, so a genuine upstream id matching it would be stripped
-        # to a different id and duplicated against the checkpoint. Minting it
-        # keeps the suffix's exclusivity real (a root-lane mint of such an id
-        # gains a second '::__root__' layer, which the reverse-translation
-        # unwinds one layer per turn — converging, never corrupting).
-        upstream_looks_minted = _minted_root_suffix_re().search(upstream_id) is not None
+        # A verbatim upstream id that LOOKS minted must never be emitted
+        # as-is. Two suffixes are load-bearing on the next turn's input:
+        # '::__root__' is reverse-translated for graph consumption, and the
+        # claiming lane's own '::<lane>' is stripped by tagged seeding to
+        # recover the raw form a HITL resume replays. A genuine upstream id
+        # matching either would be stripped to a DIFFERENT id — duplicating
+        # against the checkpoint (root) or forking the resumed call (lane).
+        # Minting keeps both suffixes' exclusivity real: the mint gains a
+        # second suffix layer, which the stripping unwinds one layer per turn,
+        # converging. An id ending in ANOTHER lane's suffix is never stripped
+        # by anything, so no check is needed for it.
+        upstream_looks_minted = (
+            _minted_root_suffix_re().search(upstream_id) is not None
+            or _lane_mint_suffix_re(lane).search(upstream_id) is not None
+        )
         public_id = upstream_id
         suffix = 0
         while public_id in used or (suffix == 0 and upstream_looks_minted):

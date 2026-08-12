@@ -1140,6 +1140,30 @@ class TestInputSeedingProtectsHistoryIds(unittest.TestCase):
         other = agent._resolve_public_tool_call_id("call", "tools:s2")
         self.assertNotIn(other, ("call::tools:s1",))
 
+    def test_an_upstream_id_ending_in_its_own_lane_suffix_is_never_emitted_verbatim(self):
+        # Symmetric to the root-suffix rule: tagged seeding strips the lane's
+        # OWN mint suffix on resume, so a lane emitting a genuine raw id that
+        # ends in that suffix verbatim would have it stripped to a DIFFERENT
+        # id — the resumed replay then forked into a new message/call instead
+        # of completing the displayed one.
+        from ag_ui.core import AssistantMessage
+
+        agent = _make_agent()
+        public = agent._resolve_public_message_id("provider-id::tools:s1", "tools:s1")
+        self.assertNotEqual(public, "provider-id::tools:s1")
+
+        # Round trip: a resumed lane seeded with the minted id recovers the
+        # raw form and resolves straight back to it — no fork.
+        agent2 = _make_agent()
+        agent2._inbound_subagent_messages = [
+            AssistantMessage(id=public, role="assistant", content="x", subagent_run_id="tools:s1"),
+        ]
+        agent2._seed_public_ids_from_input(self._input([]))
+        self.assertEqual(
+            agent2._resolve_public_message_id("provider-id::tools:s1", "tools:s1"),
+            public,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
