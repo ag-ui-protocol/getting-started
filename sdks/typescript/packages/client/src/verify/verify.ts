@@ -8,14 +8,14 @@ export const verifyEvents =
   (source$: Observable<BaseEvent>): Observable<BaseEvent> => {
     const log = resolveDebugLogger(debugLogger);
     // Declare variables in closure to maintain state across events
-    let activeMessages = new Map<string, boolean>(); // Map of message ID -> active status
-    let activeToolCalls = new Map<string, boolean>(); // Map of tool call ID -> active status
+    const activeMessages = new Map<string, boolean>(); // Map of message ID -> active status
+    const activeToolCalls = new Map<string, boolean>(); // Map of tool call ID -> active status
     let runFinished = false;
     let runError = false; // New flag to track if RUN_ERROR has been sent
     // New flags to track first/last event requirements
     let firstEventReceived = false;
     // Track active steps
-    let activeSteps = new Map<string, boolean>(); // Map of step name -> active status
+    const activeSteps = new Map<string, boolean>(); // Map of step name -> active status
     let activeThinkingStep = false;
     let activeThinkingStepMessage = false;
     let runStarted = false; // Track if a run has started
@@ -90,7 +90,7 @@ export const verifyEvents =
         switch (eventType) {
           // Text message flow
           case EventType.TEXT_MESSAGE_START: {
-            const messageId = (event as any).messageId;
+            const messageId = event.messageId as string;
 
             // Check if this message is already in progress
             if (activeMessages.has(messageId)) {
@@ -107,7 +107,7 @@ export const verifyEvents =
           }
 
           case EventType.TEXT_MESSAGE_CONTENT: {
-            const messageId = (event as any).messageId;
+            const messageId = event.messageId as string;
 
             // Must be in a message with this ID
             if (!activeMessages.has(messageId)) {
@@ -123,7 +123,7 @@ export const verifyEvents =
           }
 
           case EventType.TEXT_MESSAGE_END: {
-            const messageId = (event as any).messageId;
+            const messageId = event.messageId as string;
 
             // Must be in a message with this ID
             if (!activeMessages.has(messageId)) {
@@ -142,7 +142,7 @@ export const verifyEvents =
 
           // Tool call flow
           case EventType.TOOL_CALL_START: {
-            const toolCallId = (event as any).toolCallId;
+            const toolCallId = event.toolCallId as string;
 
             // Check if this tool call is already in progress
             if (activeToolCalls.has(toolCallId)) {
@@ -159,7 +159,7 @@ export const verifyEvents =
           }
 
           case EventType.TOOL_CALL_ARGS: {
-            const toolCallId = (event as any).toolCallId;
+            const toolCallId = event.toolCallId as string;
 
             // Must be in a tool call with this ID
             if (!activeToolCalls.has(toolCallId)) {
@@ -175,7 +175,7 @@ export const verifyEvents =
           }
 
           case EventType.TOOL_CALL_END: {
-            const toolCallId = (event as any).toolCallId;
+            const toolCallId = event.toolCallId as string;
 
             // Must be in a tool call with this ID
             if (!activeToolCalls.has(toolCallId)) {
@@ -194,7 +194,7 @@ export const verifyEvents =
 
           // Step flow
           case EventType.STEP_STARTED: {
-            const stepName = (event as any).stepName;
+            const stepName = event.stepName as string;
             if (activeSteps.has(stepName)) {
               return throwError(
                 () => new AGUIError(`Step "${stepName}" is already active for 'STEP_STARTED'`),
@@ -205,7 +205,7 @@ export const verifyEvents =
           }
 
           case EventType.STEP_FINISHED: {
-            const stepName = (event as any).stepName;
+            const stepName = event.stepName as string;
             if (!activeSteps.has(stepName)) {
               return throwError(
                 () =>

@@ -31,5 +31,5 @@ class CrewChatCrew:
             tasks=[assist_task],
             process=Process.sequential,
             verbose=False,
-            chat_llm="openai/gpt-4o",
+            chat_llm="openai/gpt-5.4",
         )

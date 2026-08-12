@@ -57,6 +57,16 @@ function Page({ params }: PageProps) {
       }
     });
 
+    // DEFERRED (PNI-272): `react-hooks/set-state-in-effect`. Caching the chat
+    // elements here is load-bearing, not incidental: it pins each chat's
+    // `onNotification` closure for the lifetime of the tab. Rendering <A2AChat>
+    // directly instead creates a fresh closure every parent render, which
+    // re-fires the notification effect in a2a_chat.tsx (it lists
+    // `onNotification` in its deps); that calls `setTabNotifications`, which
+    // always allocates a new object, re-renders this component and loops
+    // forever for any inactive tab holding messages. Left as-is until the
+    // notification wiring is reshaped to pass a stable callback.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setChatInstances(newInstances);
   }, [tabs, params, addNotification]);
 

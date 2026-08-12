@@ -1,48 +1,16 @@
 """
 An example demonstrating tool-based generative UI.
+
+The ``generate_haiku`` tool is defined on the FRONTEND (via ``useFrontendTool``):
+its handler renders the haiku onto the main canvas and picks the background
+image and gradient. So the flow binds the frontend actions and lets the model
+call that tool, rather than defining a backend tool of the same name (which would
+render the chat card but never run the frontend handler that updates the canvas).
 """
 
 from crewai.flow.flow import Flow, start
 from litellm import acompletion
 from ..sdk import copilotkit_stream, CopilotKitState
-
-
-# This tool generates a haiku on the server.
-# The tool call will be streamed to the frontend as it is being generated.
-GENERATE_HAIKU_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "generate_haiku",
-        "description": "Generate a haiku in Japanese and its English translation",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "japanese": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "description": "An array of three lines of the haiku in Japanese"
-                },
-                "english": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "description": "An array of three lines of the haiku in English"
-                },
-                "image_names": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "description": "Names of 3 relevant images from the provided list"
-                }
-            },
-            "required": ["japanese", "english", "image_names"]
-        }
-    }
-}
 
 
 class ToolBasedGenerativeUIFlow(Flow[CopilotKitState]):
@@ -52,49 +20,27 @@ class ToolBasedGenerativeUIFlow(Flow[CopilotKitState]):
 
     @start()
     async def chat(self):
-        """
-        The main function handling chat and tool calls.
-        """
-        system_prompt = "You assist the user in generating a haiku. When generating a haiku using the 'generate_haiku' tool, you MUST also select exactly 3 image filenames from the following list that are most relevant to the haiku's content or theme. Return the filenames in the 'image_names' parameter. Dont provide the relavent image names in your final response to the user. "
+        system_prompt = (
+            "Help the user write haikus. When the user asks for a haiku, call the "
+            "generate_haiku tool to display it. Choose a fitting background image "
+            "and gradient for the haiku's theme."
+        )
 
-
-        # 1. Run the model and stream the response
-        #    Note: In order to stream the response, wrap the completion call in
-        #    copilotkit_stream and set stream=True.
         response = await copilotkit_stream(
             await acompletion(
-
-                # 1.1 Specify the model to use
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 messages=[
-                    {
-                        "role": "system", 
-                        "content": system_prompt
-                    },
-                    *self.state.messages
+                    {"role": "system", "content": system_prompt},
+                    *self.state.messages,
                 ],
-
-                # 1.2 Bind the available tools to the model
-                tools=[ GENERATE_HAIKU_TOOL ],
-
-                # 1.3 Disable parallel tool calls to avoid race conditions,
-                #     enable this for faster performance if you want to manage
-                #     the complexity of running tool calls in parallel.
+                # Bind the frontend-provided tools (generate_haiku lives on the
+                # frontend, so its handler updates the canvas when called).
+                tools=[
+                    *self.state.copilotkit.actions,
+                ],
                 parallel_tool_calls=False,
-                stream=True
+                stream=True,
             )
         )
-        message = response.choices[0].message
 
-        # 2. Append the message to the messages in state
-        self.state.messages.append(message)
-
-        # 3. If there are tool calls, append a tool message to the messages in state
-        if message.tool_calls:
-            self.state.messages.append(
-                {
-                    "tool_call_id": message.tool_calls[0].id,
-                    "role": "tool",
-                    "content": "Haiku generated."
-                }
-            )
+        self.state.messages.append(response.choices[0].message)

@@ -98,7 +98,7 @@ describe("verifyEvents debug logging", () => {
       const result$ = verifyEvents(logger)(source$).pipe(toArray());
       const resultPromise = firstValueFrom(result$);
       emitCompleteSequence(source$);
-      const events = await resultPromise;
+      await resultPromise;
 
       const verifyCalls = debugSpy.mock.calls.filter(
         (call) => typeof call[0] === "string" && call[0].startsWith("[VERIFY]"),

@@ -5,7 +5,7 @@ import packageJson from "../../../package.json";
 
 describe("AbstractAgent maxVersion default", () => {
   class VersionAgent extends AbstractAgent {
-    run(input: RunAgentInput): Observable<BaseEvent> {
+    run(_input: RunAgentInput): Observable<BaseEvent> {
       return new Observable<BaseEvent>((subscriber) => {
         subscriber.complete();
       });

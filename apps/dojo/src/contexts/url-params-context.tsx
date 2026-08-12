@@ -141,9 +141,13 @@ export function URLParamsProvider({ children }: URLParamsProviderProps) {
   };
 
   // Sync state with URL changes (e.g., browser back/forward)
+  //
+  // NOTE (PNI-272): kept as an effect. Adjusting during render would drop the
+  // intermediate commit consumers currently see, which is a behaviour change.
   useEffect(() => {
     const newState: URLParamsState = generateURLParamsState(searchParams);
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setState(newState);
   }, [searchParams]);
 

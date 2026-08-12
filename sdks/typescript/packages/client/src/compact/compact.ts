@@ -160,7 +160,7 @@ export function compactEvents(events: BaseEvent[]): BaseEvent[] {
       let addedToBuffer = false;
 
       // Check text messages
-      for (const [messageId, pending] of pendingTextMessages) {
+      for (const [, pending] of pendingTextMessages) {
         // If we have a start but no end yet, this event is "in between"
         if (pending.start && !pending.end) {
           pending.otherEvents.push(event);
@@ -171,7 +171,7 @@ export function compactEvents(events: BaseEvent[]): BaseEvent[] {
 
       // Check tool calls if not already buffered
       if (!addedToBuffer) {
-        for (const [toolCallId, pending] of pendingToolCalls) {
+        for (const [, pending] of pendingToolCalls) {
           // If we have a start but no end yet, this event is "in between"
           if (pending.start && !pending.end) {
             pending.otherEvents.push(event);
@@ -290,7 +290,7 @@ function flushState(
     return;
   }
 
-  let state: any = {};
+  let state: Record<string, unknown> = {};
 
   for (const event of stateEvents) {
     if (event.type === EventType.STATE_SNAPSHOT) {

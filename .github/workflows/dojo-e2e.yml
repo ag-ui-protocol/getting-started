@@ -59,6 +59,13 @@ jobs:
         with:
           version: 10.33.4
 
+      # Mirrors the `test:crewai-config` package script; run via npx (no install)
+      # to match the generate step below. Guards the CrewAI Flows + Conversational
+      # Flows dojo config that ships with this column.
+      - name: Validate CrewAI dojo config (Flows + Conversational Flows)
+        working-directory: apps/dojo
+        run: npx tsx --test src/crewai.test.ts
+
       - name: Validate agentFilesMapper and regenerate files.json
         working-directory: apps/dojo
         run: pnpm generate-content-json
@@ -104,6 +111,10 @@ jobs:
             wait_on: http://localhost:9999,tcp:localhost:8002
           - suite: crew-ai
             test_path: tests/crewAITests
+            services: ["dojo", "crew-ai"]
+            wait_on: http://localhost:9999,tcp:localhost:8003
+          - suite: crewai-conversational-flows
+            test_path: tests/crewAIConversationalFlowsTests
             services: ["dojo", "crew-ai"]
             wait_on: http://localhost:9999,tcp:localhost:8003
           - suite: langroid

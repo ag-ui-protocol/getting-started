@@ -516,6 +516,7 @@ describe("convertAGUIMessagesToMastra", () => {
             toolCallId: "tc-1",
             toolName: "get_weather",
             result: "72°F",
+            isError: false,
           },
         ],
       });
@@ -542,8 +543,33 @@ describe("convertAGUIMessagesToMastra", () => {
             toolCallId: "tc-orphan",
             toolName: "unknown",
             result: "some result",
+            isError: false,
           },
         ],
+      });
+    });
+
+    it("carries a tool error onto the AI SDK isError flag", () => {
+      // A client-reported tool failure must reach the model as an error, not a
+      // silent success. AG-UI's ToolMessage.error sets the tool-result isError flag.
+      const messages: Message[] = [
+        {
+          id: "1",
+          role: "tool",
+          content: "Tool failed: invalid id",
+          toolCallId: "tc-1",
+          error: "invalid id",
+        },
+      ];
+
+      const result = convertAGUIMessagesToMastra(messages);
+
+      expect((result[0] as any).content[0]).toEqual({
+        type: "tool-result",
+        toolCallId: "tc-1",
+        toolName: "unknown",
+        result: "Tool failed: invalid id",
+        isError: true,
       });
     });
   });

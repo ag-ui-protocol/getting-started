@@ -176,6 +176,10 @@ def convert_agui_content_to_strands(content: List[Any]) -> List[Dict[str, Any]]:
         else:
             logger.warning("Skipping unknown content type: %s", type(item).__name__)
 
+    # Bedrock rejects a message that contains document blocks but no text block.
+    if any("document" in b for b in blocks) and not any("text" in b for b in blocks):
+        blocks.insert(0, {"text": " "})
+
     return blocks
 
 

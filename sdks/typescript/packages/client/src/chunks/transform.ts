@@ -143,7 +143,7 @@ export const transformChunks =
           case EventType.ACTIVITY_DELTA:
           case EventType.REASONING_ENCRYPTED_VALUE:
             return [event];
-          case EventType.TEXT_MESSAGE_CHUNK:
+          case EventType.TEXT_MESSAGE_CHUNK: {
             const messageChunkEvent = event as TextMessageChunkEvent;
             const textMessageResult = [];
             if (
@@ -198,7 +198,8 @@ export const transformChunks =
             }
 
             return textMessageResult;
-          case EventType.TOOL_CALL_CHUNK:
+          }
+          case EventType.TOOL_CALL_CHUNK: {
             const toolCallChunkEvent = event as ToolCallChunkEvent;
             const toolMessageResult = [];
             if (
@@ -256,7 +257,8 @@ export const transformChunks =
             }
 
             return toolMessageResult;
-          case EventType.REASONING_MESSAGE_CHUNK:
+          }
+          case EventType.REASONING_MESSAGE_CHUNK: {
             const reasoningChunkEvent = event as ReasoningMessageChunkEvent;
             const reasoningMessageResult = [];
             if (
@@ -307,6 +309,7 @@ export const transformChunks =
             }
 
             return reasoningMessageResult;
+          }
         }
         const _exhaustiveCheck: never = event.type;
         return [];

@@ -10,6 +10,18 @@ import {
 import { z } from "zod";
 import { CopilotKit } from "@copilotkit/react-core";
 
+/** Shape of the `get_weather` tool result once parsed out of its JSON string. */
+type WeatherResult = {
+  city?: string;
+  temperature?: number;
+  humidity?: number;
+  windSpeed?: number;
+  wind_speed?: number;
+  conditions?: string;
+  feels_like?: number;
+  feelsLike?: number;
+};
+
 interface AgenticChatProps {
   params: Promise<{
     integrationId: string;
@@ -37,7 +49,7 @@ const Chat = () => {
     parameters: z.object({
       location: z.string(),
     })  ,
-    render: ({ args, result, status }: any) => {
+    render: ({ parameters, result, status }) => {
       if (status !== "complete") {
         return (
           <div className=" bg-[#667eea] text-white p-4 rounded-lg max-w-md">
@@ -50,7 +62,7 @@ const Chat = () => {
       // string in the ToolMessage content rather than a parsed object. Normalize
       // so property access works in either case; otherwise every field falls
       // through to its `|| 0` default and the card shows 0° C.
-      let parsed: any = result;
+      let parsed: unknown = result;
       if (typeof parsed === "string") {
         try {
           parsed = JSON.parse(parsed);
@@ -58,22 +70,22 @@ const Chat = () => {
           parsed = {};
         }
       }
-      parsed = parsed ?? {};
+      const weather = (parsed ?? {}) as WeatherResult;
 
       const weatherResult: WeatherToolResult = {
-        temperature: parsed.temperature ?? 0,
-        conditions: parsed.conditions ?? "clear",
-        humidity: parsed.humidity ?? 0,
-        windSpeed: parsed.wind_speed ?? parsed.windSpeed ?? 0,
+        temperature: weather.temperature ?? 0,
+        conditions: weather.conditions ?? "clear",
+        humidity: weather.humidity ?? 0,
+        windSpeed: weather.wind_speed ?? weather.windSpeed ?? 0,
         feelsLike:
-          parsed.feels_like ?? parsed.feelsLike ?? parsed.temperature ?? 0,
+          weather.feels_like ?? weather.feelsLike ?? weather.temperature ?? 0,
       };
 
       const themeColor = getThemeColor(weatherResult.conditions);
 
       return (
         <WeatherCard
-          location={args.location}
+          location={parameters.location}
           themeColor={themeColor}
           result={weatherResult}
           status={status || "complete"}

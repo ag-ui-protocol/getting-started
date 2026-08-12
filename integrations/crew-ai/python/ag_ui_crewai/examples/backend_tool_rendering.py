@@ -68,7 +68,7 @@ class BackendToolRenderingFlow(Flow[CopilotKitState]):
                 "get_weather tool to look up the weather before you answer."
             ),
             tools=[get_weather],
-            llm="openai/gpt-4o",
+            llm="openai/gpt-5.4",
             verbose=False,
         )
         task = Task(

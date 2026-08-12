@@ -11,6 +11,16 @@ import {
 import { z } from "zod";
 import { CopilotKit } from "@copilotkit/react-core";
 
+/** Shape of the `get_weather` tool result once parsed out of its JSON string. */
+type WeatherResult = {
+  city?: string;
+  temperature?: number;
+  humidity?: number;
+  windSpeed?: number;
+  wind_speed?: number;
+  conditions?: string;
+};
+
 interface AgenticChatProps {
   params: Promise<{
     integrationId: string;
@@ -60,7 +70,7 @@ const Chat = () => {
     parameters: z.object({
       location: z.string(),
     })  ,
-    render: ({ args, result, status }: any) => {
+    render: ({ parameters, result, status }) => {
       if (status !== "complete") {
         return <div data-testid="weather-info-loading">Loading weather...</div>;
       }
@@ -69,7 +79,7 @@ const Chat = () => {
       // string in the ToolMessage content rather than a parsed object. Normalize
       // so property access works in either case; otherwise every field reads as
       // undefined and the card renders empty values.
-      let parsed: any = result;
+      let parsed: unknown = result;
       if (typeof parsed === "string") {
         try {
           parsed = JSON.parse(parsed);
@@ -77,15 +87,15 @@ const Chat = () => {
           parsed = {};
         }
       }
-      parsed = parsed ?? {};
+      const weather = (parsed ?? {}) as WeatherResult;
 
       return (
         <div data-testid="weather-info">
-          <strong>Weather in {parsed.city ?? args.location}</strong>
-          <div>Temperature: {parsed.temperature}°C</div>
-          <div>Humidity: {parsed.humidity}%</div>
-          <div>Wind Speed: {parsed.windSpeed ?? parsed.wind_speed} mph</div>
-          <div>Conditions: {parsed.conditions}</div>
+          <strong>Weather in {weather.city ?? parameters.location}</strong>
+          <div>Temperature: {weather.temperature}°C</div>
+          <div>Humidity: {weather.humidity}%</div>
+          <div>Wind Speed: {weather.windSpeed ?? weather.wind_speed} mph</div>
+          <div>Conditions: {weather.conditions}</div>
         </div>
       );
     },
