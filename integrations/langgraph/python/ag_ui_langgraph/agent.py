@@ -130,6 +130,21 @@ class SubagentContext:
 # Subagent lanes use the derived subagent id (e.g. "tools:<uuid>").
 _ROOT_LANE = "__root__"
 
+# A public id minted for the root lane ends '::__root__' (optionally '::N' for
+# repeated collisions). The suffix is load-bearing across turns: seeding
+# reverse-translates it to recover the raw id the graph checkpoint holds — so
+# _resolve_public_id ENFORCES its exclusivity by never emitting a verbatim
+# upstream id that matches it (such an id is minted instead, which the
+# reverse-translation unwinds one layer at a time, converging).
+
+
+def _minted_root_suffix_re() -> "re.Pattern[str]":
+    return _lane_mint_suffix_re(_ROOT_LANE)
+
+
+def _lane_mint_suffix_re(lane: str) -> "re.Pattern[str]":
+    return re.compile(re.escape("::" + lane) + r"(?:::\d+)?$")
+
 
 def _record_subagent_boundaries(ns: str, known: set, excluded: Optional[set] = None) -> None:
     """Record `tools:<uuid>` segments that are genuine subagent boundaries.
@@ -3223,9 +3238,17 @@ class LangGraphAgent:
         if public_id is not None:
             return public_id
         used = self.active_run.setdefault("used_public_ids", {}).setdefault(kind, set())
+        # A verbatim upstream id that LOOKS root-minted must never be emitted
+        # as-is: seeding reverse-translates the '::__root__' suffix on the next
+        # turn's input, so a genuine upstream id matching it would be stripped
+        # to a different id and duplicated against the checkpoint. Minting it
+        # keeps the suffix's exclusivity real (a root-lane mint of such an id
+        # gains a second '::__root__' layer, which the reverse-translation
+        # unwinds one layer per turn — converging, never corrupting).
+        upstream_looks_minted = _minted_root_suffix_re().search(upstream_id) is not None
         public_id = upstream_id
         suffix = 0
-        while public_id in used:
+        while public_id in used or (suffix == 0 and upstream_looks_minted):
             suffix += 1
             public_id = (
                 f"{upstream_id}::{lane}"
@@ -3262,8 +3285,7 @@ class LangGraphAgent:
         """
         if not self.emit_subagent_events:
             return input
-        root_suffix = "::" + _ROOT_LANE
-        minted_re = re.compile(re.escape(root_suffix) + r"(?:::\d+)?$")
+        minted_re = _minted_root_suffix_re()
 
         def raw_form(public_id: str) -> str:
             match = minted_re.search(public_id)
@@ -3280,14 +3302,25 @@ class LangGraphAgent:
             return "reasoning" if getattr(message, "role", None) == "reasoning" else "message"
 
         # Subagent-tagged history (split out of the graph input in run()).
+        # Recover the RAW form from the lane's own mint suffix: a HITL resume
+        # replays the SAME lane (checkpoint namespaces persist), and its
+        # upstream events carry the raw id — recording only public->public left
+        # both forms reserved but unmapped, so the resumed lane minted a THIRD
+        # id and the replayed call/result no longer matched its own history.
         for message in getattr(self, "_inbound_subagent_messages", None) or []:
             lane = getattr(message, "subagent_run_id", None) or _ROOT_LANE
+            lane_suffix_re = _lane_mint_suffix_re(lane)
+
+            def lane_raw_form(public_id: str) -> str:
+                match = lane_suffix_re.search(public_id)
+                return public_id[: match.start()] if match else public_id
+
             message_id = getattr(message, "id", None)
             if isinstance(message_id, str):
-                reserve(kind_for(message), lane, message_id, message_id)
+                reserve(kind_for(message), lane, lane_raw_form(message_id), message_id)
             for tool_call in getattr(message, "tool_calls", None) or []:
                 if isinstance(getattr(tool_call, "id", None), str):
-                    reserve("tool_call", lane, tool_call.id, tool_call.id)
+                    reserve("tool_call", lane, lane_raw_form(tool_call.id), tool_call.id)
 
         # Root-owned history: seed and reverse-translate minted ids.
         rewritten = []
@@ -3295,10 +3328,14 @@ class LangGraphAgent:
         for message in input.messages or []:
             if getattr(message, "subagent_run_id", None) is not None:
                 # Tagged messages reaching here means the caller bypassed the
-                # run() split; seed their own lane and leave them alone.
+                # run() split; seed their own lane (recovering the raw form,
+                # as above) and leave them alone.
                 lane = getattr(message, "subagent_run_id")
+                bypass_suffix_re = _lane_mint_suffix_re(lane)
                 if isinstance(getattr(message, "id", None), str):
-                    reserve(kind_for(message), lane, message.id, message.id)
+                    match = bypass_suffix_re.search(message.id)
+                    raw_bypass = message.id[: match.start()] if match else message.id
+                    reserve(kind_for(message), lane, raw_bypass, message.id)
                 rewritten.append(message)
                 continue
             update: dict = {}

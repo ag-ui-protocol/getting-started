@@ -1085,6 +1085,61 @@ class TestInputSeedingProtectsHistoryIds(unittest.TestCase):
         self.assertIs(out, original)
         self.assertNotIn("public_id_maps", agent.active_run)
 
+    def test_an_upstream_id_that_looks_minted_is_never_emitted_verbatim(self):
+        # The '::__root__' suffix is load-bearing: the next turn's seeding
+        # strips it to recover the raw checkpoint id. Emitting a genuine
+        # upstream id matching it verbatim would strip it to a DIFFERENT id
+        # and duplicate the message against the checkpoint — so the resolver
+        # enforces the suffix's exclusivity by minting instead. The mint gains
+        # a second suffix layer, which reverse-translation unwinds one layer
+        # per turn, converging.
+        from ag_ui.core import AssistantMessage
+
+        agent = _make_agent()
+        public = agent._resolve_public_message_id("provider-id::__root__", "__root__")
+        self.assertNotEqual(public, "provider-id::__root__")
+
+        # Round trip: seeding a fresh run with the minted id recovers the raw
+        # form for the graph and re-presents the minted id publicly.
+        agent2 = _make_agent()
+        out = agent2._seed_public_ids_from_input(self._input([
+            AssistantMessage(id=public, role="assistant", content="x"),
+        ]))
+        self.assertEqual(out.messages[0].id, "provider-id::__root__")
+        translated = agent2._translate_snapshot_ids([
+            AssistantMessage(id="provider-id::__root__", role="assistant", content="x"),
+        ])
+        self.assertEqual(translated[0].id, public)
+
+    def test_a_resumed_lane_recovers_its_minted_tool_call_mapping(self):
+        # HITL resume replays the SAME lane (checkpoint namespaces persist)
+        # and its upstream events carry the RAW id. Seeding must map
+        # raw -> public for that lane, or the resumed call minted a THIRD id
+        # and the replayed call/result no longer matched its own history.
+        from ag_ui.core import AssistantMessage, ToolCall, FunctionCall
+
+        agent = _make_agent()
+        agent._inbound_subagent_messages = [
+            AssistantMessage(
+                id="m1::tools:s1", role="assistant", subagent_run_id="tools:s1",
+                tool_calls=[ToolCall(id="call::tools:s1", type="function",
+                                     function=FunctionCall(name="search", arguments="{}"))],
+            ),
+        ]
+        agent._seed_public_ids_from_input(self._input([]))
+        self.assertEqual(
+            agent._resolve_public_tool_call_id("call", "tools:s1"),
+            "call::tools:s1",
+            "the resumed lane resolves its raw id back to the minted public id",
+        )
+        self.assertEqual(
+            agent._resolve_public_message_id("m1", "tools:s1"),
+            "m1::tools:s1",
+        )
+        # Another lane claiming the same raw id still mints something new.
+        other = agent._resolve_public_tool_call_id("call", "tools:s2")
+        self.assertNotIn(other, ("call::tools:s1",))
+
 
 if __name__ == "__main__":
     unittest.main()
