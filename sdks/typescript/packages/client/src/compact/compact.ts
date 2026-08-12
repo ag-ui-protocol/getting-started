@@ -17,8 +17,8 @@ import { structuredClone_ } from "../utils";
  * Compacts streaming events by consolidating multiple deltas into single events.
  * For text messages: multiple content deltas become one concatenated delta.
  * For tool calls: multiple args deltas become one concatenated delta.
- * For state: all STATE_SNAPSHOT and STATE_DELTA events within a run are compacted
- *   into a single STATE_SNAPSHOT representing the final state.
+ * For state: STATE_SNAPSHOT and STATE_DELTA events are applied cumulatively across
+ *   the event history and compacted into STATE_SNAPSHOT events at run boundaries.
  * Events between related streaming events are reordered to keep streaming events together.
  *
  * @param events - Array of events to compact
@@ -47,6 +47,7 @@ export function compactEvents(events: BaseEvent[]): BaseEvent[] {
 
   // State compaction: collects state events, flushed at RUN_STARTED (pre-run/inter-run), RUN_FINISHED/RUN_ERROR (in-run), and at end (trailing)
   let stateEvents: (StateSnapshotEvent | StateDeltaEvent)[] = [];
+  let state: Record<string, unknown> = {};
 
   for (const event of events) {
     // Handle text message streaming events
@@ -138,7 +139,7 @@ export function compactEvents(events: BaseEvent[]): BaseEvent[] {
       pendingToolCalls.delete(toolCallId);
     } else if (event.type === EventType.RUN_STARTED) {
       // Flush any pre-run state events before starting a new run
-      flushState(stateEvents, compacted);
+      state = flushState(stateEvents, state, compacted);
       stateEvents = [];
       compacted.push(event);
     } else if (
@@ -146,7 +147,7 @@ export function compactEvents(events: BaseEvent[]): BaseEvent[] {
       event.type === EventType.RUN_ERROR
     ) {
       // Flush compacted state into output before the run boundary event
-      flushState(stateEvents, compacted);
+      state = flushState(stateEvents, state, compacted);
       stateEvents = [];
       compacted.push(event);
     } else if (
@@ -199,7 +200,7 @@ export function compactEvents(events: BaseEvent[]): BaseEvent[] {
   }
 
   // Flush any remaining state events (incomplete run or events outside runs)
-  flushState(stateEvents, compacted);
+  flushState(stateEvents, state, compacted);
 
   return compacted;
 }
@@ -284,13 +285,12 @@ function flushToolCall(
 
 function flushState(
   stateEvents: (StateSnapshotEvent | StateDeltaEvent)[],
+  state: Record<string, unknown>,
   compacted: BaseEvent[],
-): void {
+): Record<string, unknown> {
   if (stateEvents.length === 0) {
-    return;
+    return state;
   }
-
-  let state: Record<string, unknown> = {};
 
   for (const event of stateEvents) {
     if (event.type === EventType.STATE_SNAPSHOT) {
@@ -303,8 +303,9 @@ function flushState(
 
   const compactedSnapshot: StateSnapshotEvent = {
     type: EventType.STATE_SNAPSHOT,
-    snapshot: state,
+    snapshot: structuredClone_(state),
   };
 
   compacted.push(compactedSnapshot);
+  return state;
 }
