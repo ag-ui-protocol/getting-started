@@ -17,7 +17,6 @@ from .types import (
     LangGraphReasoning,
 )
 from .utils import json_safe_stringify, make_json_safe
-from .endpoint import add_langgraph_fastapi_endpoint
 from .middlewares.state_streaming import StateStreamingMiddleware, StateItem
 from .a2ui_tool import (
     get_a2ui_tools,
@@ -26,6 +25,10 @@ from .a2ui_tool import (
     A2UI_OPERATIONS_KEY,
     BASIC_CATALOG_ID,
 )
+
+# FastAPI is an optional extra. Keep the endpoint import lazy so middleware-only
+# installs (`pip install ag-ui-langgraph` without `[fastapi]`) can still import
+# LangGraphAgent and helpers without requiring fastapi (#2013).
 
 __all__ = [
     "LangGraphAgent",
@@ -53,5 +56,13 @@ __all__ = [
     "StateStreamingMiddleware",
     "StateItem",
     "json_safe_stringify",
-    "make_json_safe"
+    "make_json_safe",
 ]
+
+
+def __getattr__(name: str):
+    if name == "add_langgraph_fastapi_endpoint":
+        from .endpoint import add_langgraph_fastapi_endpoint
+
+        return add_langgraph_fastapi_endpoint
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
