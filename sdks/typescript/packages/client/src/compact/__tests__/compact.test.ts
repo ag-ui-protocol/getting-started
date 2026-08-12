@@ -1,6 +1,12 @@
 import { compactEvents } from "../compact";
+import { defaultApplyEvents } from "../../apply/default";
+import { AbstractAgent } from "@/agent";
+import { AgentStateMutation } from "@/agent/subscriber";
 import {
+  BaseEvent,
   EventType,
+  Message,
+  RunAgentInput,
   TextMessageStartEvent,
   TextMessageContentEvent,
   ToolCallStartEvent,
@@ -8,6 +14,33 @@ import {
   CustomEvent,
   StateSnapshotEvent,
 } from "@ag-ui/core";
+import { firstValueFrom, of } from "rxjs";
+import { toArray } from "rxjs/operators";
+
+async function serializeDefaultReducerResult(events: BaseEvent[]): Promise<string> {
+  const input: RunAgentInput = {
+    threadId: "t1",
+    runId: "restore",
+    state: {},
+    messages: [],
+    tools: [],
+    context: [],
+    forwardedProps: {},
+  };
+  const agent = { messages: [] } as unknown as AbstractAgent;
+  const mutations = await firstValueFrom(
+    defaultApplyEvents(input, of(...events), agent, []).pipe(toArray()),
+  );
+  const final = mutations.reduce<{ messages: Message[]; state: Record<string, unknown> }>(
+    (current, mutation: AgentStateMutation) => ({
+      messages: mutation.messages ?? current.messages,
+      state: mutation.state ?? current.state,
+    }),
+    { messages: input.messages, state: input.state },
+  );
+
+  return JSON.stringify(final);
+}
 
 describe("Event Compaction", () => {
   describe("Text Message Compaction", () => {
@@ -416,6 +449,59 @@ describe("Event Compaction", () => {
         { count: 1, label: "after", added: "run-2" },
       ]);
     });
+
+    it.each([
+      {
+        operation: "add",
+        initialState: { count: 1, label: "kept" },
+        delta: [{ op: "add", path: "/added", value: true }],
+        finalState: { count: 1, label: "kept", added: true },
+      },
+      {
+        operation: "replace",
+        initialState: { count: 1, label: "kept" },
+        delta: [{ op: "replace", path: "/count", value: 2 }],
+        finalState: { count: 2, label: "kept" },
+      },
+      {
+        operation: "remove",
+        initialState: { count: 1, obsolete: true, label: "kept" },
+        delta: [{ op: "remove", path: "/obsolete" }],
+        finalState: { count: 1, label: "kept" },
+      },
+    ])(
+      "should preserve default reducer output byte-for-byte for a cross-run $operation delta",
+      async ({ operation, initialState, delta, finalState }) => {
+        const events: BaseEvent[] = [
+          { type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" },
+          { type: EventType.STATE_SNAPSHOT, snapshot: initialState },
+          { type: EventType.TEXT_MESSAGE_START, messageId: "msg-r1", role: "assistant" },
+          { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "msg-r1", delta: "First " },
+          { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "msg-r1", delta: "run" },
+          { type: EventType.TEXT_MESSAGE_END, messageId: "msg-r1" },
+          { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" },
+          { type: EventType.RUN_STARTED, threadId: "t1", runId: "r2" },
+          { type: EventType.TEXT_MESSAGE_START, messageId: "msg-r2", role: "assistant" },
+          { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "msg-r2", delta: `${operation} ` },
+          { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "msg-r2", delta: "delta" },
+          { type: EventType.TEXT_MESSAGE_END, messageId: "msg-r2" },
+          { type: EventType.STATE_DELTA, delta },
+          { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r2" },
+        ];
+
+        const raw = await serializeDefaultReducerResult(events);
+        const compacted = await serializeDefaultReducerResult(compactEvents(events));
+
+        expect(JSON.parse(raw)).toEqual({
+          messages: [
+            { id: "msg-r1", role: "assistant", content: "First run" },
+            { id: "msg-r2", role: "assistant", content: `${operation} delta` },
+          ],
+          state: finalState,
+        });
+        expect(compacted).toBe(raw);
+      },
+    );
 
     it("should not emit another state snapshot for a later run without state events", () => {
       const events = [
