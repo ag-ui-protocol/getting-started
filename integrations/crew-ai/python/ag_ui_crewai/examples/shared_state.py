@@ -139,10 +139,24 @@ class SharedStateFlow(Flow[AgentState]):
         Standard chat node.
         """
  
-        system_prompt = f"""You are a helpful assistant for creating recipes. 
-        This is the current state of the recipe: {self.state.model_dump_json(indent=2)}
-        You can modify the recipe by calling the generate_recipe tool.
-        If you have just created or modified the recipe, just answer in one sentence what you did.
+        recipe_json = (
+            self.state.recipe.model_dump_json(indent=2)
+            if self.state.recipe is not None
+            else "{}"
+        )
+        system_prompt = f"""You are a helpful assistant for creating recipes.
+        This is the current state of the recipe: {recipe_json}
+        You can improve the recipe by calling the generate_recipe tool.
+
+        IMPORTANT:
+        1. Create a recipe using the existing ingredients and instructions. Make sure the recipe is complete.
+        2. The recipe MUST comply with the selected dietary preferences (special_preferences). If an existing ingredient violates a selected preference (for example butter or Parmesan cheese when "Vegan" is selected), REPLACE it with a compliant alternative (e.g. olive oil, a plant-based butter, nutritional yeast) or remove it, and update the affected instructions to match.
+        3. Keep the selected special_preferences in the recipe you return, and keep every existing ingredient and instruction that already complies, appending any new ones.
+        4. 'ingredients' is always an array of objects with 'icon', 'name', and 'amount' fields
+        5. 'instructions' is always an array of strings
+        6. For the 'icon' field in ingredients, ALWAYS use actual Unicode emoji characters (like 🥕 🍅 🧅 🥖 🧈 🥛 🧂 etc.), NEVER use text, ANSI codes, or placeholders
+
+        If you have just created or modified the recipe, just answer in one sentence what you did. dont describe the recipe, just say what you did.
         """
 
         # 1. Here we specify that we want to stream the tool call to generate_recipe
@@ -161,7 +175,7 @@ class SharedStateFlow(Flow[AgentState]):
             await acompletion(
 
                 # 2.1 Specify the model to use
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 messages=[
                     {
                         "role": "system", 

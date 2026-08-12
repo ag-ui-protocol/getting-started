@@ -87,7 +87,7 @@ class PredictiveStateUpdatesFlow(Flow[AgentState]):
             await acompletion(
 
                 # 2.1 Specify the model to use
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 messages=[
                     {
                         "role": "system", 

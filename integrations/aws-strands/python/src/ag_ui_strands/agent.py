@@ -162,7 +162,10 @@ def _build_snapshot_messages(input_messages: List[Any]) -> List[Any]:
             continue
         msg_id = _coerce_id(getattr(msg, "id", None))
         if role == "user":
-            out.append(UserMessage(id=msg_id, role="user", content=_coerce_text(msg.content)))
+            raw = msg.content
+            # Preserve list content (multimodal) as-is; only stringify unexpected types.
+            content = raw if isinstance(raw, (str, list)) else _coerce_text(raw)
+            out.append(UserMessage(id=msg_id, role="user", content=content))
         elif role == "assistant":
             tool_calls_list = None
             raw_tool_calls = getattr(msg, "tool_calls", None)

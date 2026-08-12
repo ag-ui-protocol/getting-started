@@ -29,6 +29,8 @@ chunks.
 from __future__ import annotations
 
 import asyncio
+import contextvars
+from collections.abc import Mapping
 import json
 import logging
 import threading
@@ -429,9 +431,7 @@ class A2UITool:
             },
         }
 
-    async def _emit_chunk(
-        self, flow: Any, payload: dict, name_state: dict
-    ) -> None:
+    async def _emit_chunk(self, flow: Any, payload: dict, name_state: dict) -> None:
         """Translate one sub-agent stream payload into a bridged TOOL_CALL_CHUNK.
 
         ``start`` stashes the render tool name/id; the first following ``args``
@@ -459,7 +459,13 @@ class A2UITool:
             )
             await yield_control()
 
-    def _emit_tool_result(self, flow: Any, tool_call_id: Optional[str], envelope: str) -> None:
+    def _emit_tool_result(
+        self,
+        flow: Any,
+        tool_call_id: Optional[str],
+        envelope: str,
+        message_id: Optional[str] = None,
+    ) -> None:
         """Emit the TOOL_CALL_RESULT for this generate_a2ui call so the a2ui
         middleware closes the outer call and can commit / hard-fail from the
         envelope. Emitted here (not left to the caller) so a flow that forgets
@@ -470,7 +476,7 @@ class A2UITool:
             flow,
             BridgedToolCallResultEvent(
                 type=EventType.TOOL_CALL_RESULT,
-                message_id=str(uuid.uuid4()),
+                message_id=message_id or str(uuid.uuid4()),
                 tool_call_id=tool_call_id,
                 content=envelope,
                 role="tool",
@@ -482,6 +488,7 @@ class A2UITool:
         args: Optional[dict],
         *,
         tool_call_id: Optional[str] = None,
+        result_message_id: Optional[str] = None,
         flow: Any = None,
     ) -> str:
         """Generate (or update) an A2UI surface and return the operations
@@ -493,6 +500,12 @@ class A2UITool:
         ``render_a2ui`` progress to the wire; on validation failure the toolkit
         recovery loop retries, each attempt re-streaming render so the middleware
         shows building -> retrying -> paint.
+
+        ``result_message_id`` is the id to stream that result under. Pass the id
+        the caller stamps onto the tool message it persists, so the terminal
+        MESSAGES_SNAPSHOT updates that message in place; left unset, the streamed
+        result and the persisted one carry different ids and the client remounts
+        the surface card from the snapshot.
         """
         flow = flow if flow is not None else flow_context.get(None)
         if flow is None:
@@ -520,14 +533,14 @@ class A2UITool:
             target_surface_id=target_surface_id,
             changes=changes,
             messages=agui_messages,
-            state=glue_state if isinstance(glue_state, dict) else {},
+            state=dict(glue_state) if isinstance(glue_state, Mapping) else {},
             guidelines=cfg["guidelines"],
         )
 
         if prep.get("error"):
             logger.warning("A2UI request prep failed: %s", prep["error"])
             envelope = wrap_error_envelope(prep["error"])
-            self._emit_tool_result(flow, tool_call_id, envelope)
+            self._emit_tool_result(flow, tool_call_id, envelope, result_message_id)
             return envelope
 
         if cfg["model_kwargs"] is None:
@@ -581,9 +594,18 @@ class A2UITool:
                 default_catalog_id=cfg["default_catalog_id"],
             )
 
+        # Run the recovery on a COPY of the caller's context. ``run_in_executor``
+        # does not propagate ``contextvars`` into the worker thread, so without
+        # this the request-scoped state the subagent reads (``flow_context`` and
+        # the litellm/bus context an ``acompletion`` turn resolves) is ``None``
+        # there -- which drops the a2ui-recovery surface. Mirrors the conversational
+        # stream worker (``_conversation.SyncStreamSessionAdapter``), which copies
+        # the context onto its thread for the same reason.
+        recovery_context = contextvars.copy_context()
         future = loop.run_in_executor(
             None,
-            lambda: run_a2ui_generation_with_recovery(
+            lambda: recovery_context.run(
+                run_a2ui_generation_with_recovery,
                 base_prompt=prep["prompt"],
                 catalog=cfg["catalog"],
                 config=cfg["recovery"],
@@ -645,7 +667,7 @@ class A2UITool:
             raise
 
         envelope = future.result()["envelope"]
-        self._emit_tool_result(flow, tool_call_id, envelope)
+        self._emit_tool_result(flow, tool_call_id, envelope, result_message_id)
         return envelope
 
 
@@ -731,7 +753,7 @@ def plan_a2ui_injection(
     """
     log = log or logger
     config = config or {}
-    ag_ui = state.get("ag-ui") if isinstance(state, dict) else None
+    ag_ui = state.get("ag-ui") if isinstance(state, Mapping) else None
     ag_ui = ag_ui if isinstance(ag_ui, dict) else {}
 
     flag = ag_ui.get("inject_a2ui_tool")
@@ -755,7 +777,7 @@ def plan_a2ui_injection(
 
     render_tool_name = flag if isinstance(flag, str) else RENDER_A2UI_TOOL_NAME
 
-    resolved = resolve_a2ui_catalog(state) if isinstance(state, dict) else None
+    resolved = resolve_a2ui_catalog(state) if isinstance(state, Mapping) else None
     runtime_schema, runtime_catalog_id = resolved if resolved else (None, None)
 
     catalog = config.get("catalog")
@@ -778,9 +800,9 @@ def plan_a2ui_injection(
         },
         glue={
             "messages": list(state.get("messages") or [])
-            if isinstance(state, dict)
+            if isinstance(state, Mapping)
             else [],
-            "state": state if isinstance(state, dict) else {},
+            "state": dict(state) if isinstance(state, Mapping) else {},
         },
     )
     setattr(tool, _A2UI_AUTOINJECT_ATTR, True)

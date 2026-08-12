@@ -43,6 +43,9 @@
   },
   "version": "0.0.1",
   "pnpm": {
+    "patchedDependencies": {
+      "@copilotkit/aimock@1.37.4": "patches/@copilotkit__aimock@1.37.4.patch"
+    },
     "overrides": {
       "langium": "3.2.0",
       "@copilotkit/runtime>@ag-ui/a2ui-middleware": "0.0.8",

@@ -44,6 +44,10 @@ import { Ag2Agent } from "@ag-ui/ag2";
 import { LangroidHttpAgent } from "@ag-ui/langroid";
 import { WatsonxAgent } from "@ag-ui/watsonx";
 import { A2UIMiddleware } from "@ag-ui/a2ui-middleware";
+import {
+  CREWAI_CONVERSATIONAL_AGENT_PATHS,
+  CREWAI_FLOW_AGENT_PATHS,
+} from "./crewai";
 
 const envVars = getEnvVars();
 
@@ -83,6 +87,24 @@ export const CREWAI_A2UI_INJECT_AGENTS: string[] = [
   "a2ui_dynamic_schema",
   "a2ui_recovery",
 ];
+
+function createCrewAIIntegrationAgents<const T extends Record<string, string>>(
+  paths: T,
+) {
+  const agents = mapAgents(
+    (path) => new CrewAIAgent({ url: `${envVars.crewAiUrl}/${path}` }),
+    paths,
+  );
+  for (const id of CREWAI_A2UI_INJECT_AGENTS) {
+    (agents as Record<string, AbstractAgent>)[id]?.use(
+      new A2UIMiddleware({
+        injectA2UITool: true,
+        defaultCatalogId: A2UI_DOJO_CATALOG_ID,
+      }),
+    );
+  }
+  return agents;
+}
 
 export const agentsIntegrations = {
   "middleware-starter": async () => ({
@@ -413,38 +435,10 @@ export const agentsIntegrations = {
       },
     ),
 
-  crewai: async () => {
-    const agents = mapAgents(
-      (path) => new CrewAIAgent({ url: `${envVars.crewAiUrl}/${path}` }),
-      {
-        agentic_chat: "agentic_chat",
-        backend_tool_rendering: "backend_tool_rendering",
-        interrupt: "interrupt",
-        human_in_the_loop: "human_in_the_loop",
-        tool_based_generative_ui: "tool_based_generative_ui",
-        agentic_generative_ui: "agentic_generative_ui",
-        shared_state: "shared_state",
-        predictive_state_updates: "predictive_state_updates",
-        crew_chat: "crew_chat",
-        error_flow: "error_flow",
-        a2ui_dynamic_schema: "a2ui_dynamic_schema",
-        a2ui_recovery: "a2ui_recovery",
-        a2ui_fixed_schema: "a2ui_fixed_schema",
-      },
-    );
-    // Auto-inject generate_a2ui for the subagent demos (dynamic + recovery);
-    // a2ui_fixed_schema wires its own backend tools and is deliberately left
-    // out. Excluded from the runtime a2ui config in route.ts (double-apply).
-    for (const id of CREWAI_A2UI_INJECT_AGENTS) {
-      (agents as Record<string, AbstractAgent>)[id]?.use(
-        new A2UIMiddleware({
-          injectA2UITool: true,
-          defaultCatalogId: A2UI_DOJO_CATALOG_ID,
-        }),
-      );
-    }
-    return agents;
-  },
+  crewai: async () => createCrewAIIntegrationAgents(CREWAI_FLOW_AGENT_PATHS),
+
+  "crewai-conversational-flows": async () =>
+    createCrewAIIntegrationAgents(CREWAI_CONVERSATIONAL_AGENT_PATHS),
 
   "agent-spec-langgraph": async () =>
     mapAgents(

@@ -114,7 +114,7 @@ class _DoubleInterruptFlow(Flow[_DemoState]):
 # --------------------------------------------------------------------------
 
 def test_hitl_symbols_resolve_on_supported_crewai():
-    # The lock pins crewai 1.15.7, which exposes the whole async-HITL surface.
+    # The lock pins crewai 1.15.11, which exposes the whole async-HITL surface.
     assert caps.HumanFeedbackPending is not None
     assert caps.HumanFeedbackRequestedEvent is not None
     assert caps.FlowPausedEvent is not None

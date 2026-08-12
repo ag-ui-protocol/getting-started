@@ -17,7 +17,7 @@ DEFINE_TASK_TOOL = {
     "type": "function",
     "function": {
         "name": "generate_task_steps",
-        "description": "Make up 10 steps (only a couple of words per step) that are required for a task. The step should be in imperative form (i.e. Dig hole, Open door, ...)",
+        "description": "Make up the number of task steps requested by the user (only a couple of words per step). If the user does not request a count, make a concise plan. Each step should be in imperative form (i.e. Dig hole, Open door, ...)",
         "parameters": {
             "type": "object",
             "properties": {
@@ -38,13 +38,27 @@ DEFINE_TASK_TOOL = {
                         },
                         "required": ["description", "status"]
                     },
-                    "description": "An array of 10 step objects, each containing text and status"
+                    "description": "An array containing the requested number of step objects, each with text and status"
                 }
             },
             "required": ["steps"]
         }
     }
 }
+
+HITL_SYSTEM_PROMPT = """
+You are a helpful assistant that can perform any task.
+CRITICAL: You MUST call the `generate_task_steps` function when the user asks you to perform a task.
+CRITICAL: Generate exactly the step count requested by the user. If no count is requested, generate a concise plan.
+When the function `generate_task_steps` is called, the user will decide to enable or disable a step and either accept or reject the plan.
+CRITICAL: If the tool result has `accepted: false`, the plan was rejected. Do not perform the rejected plan. Wait for revision instructions from the user.
+CRITICAL: After a rejection, interpret a terse numeric reply such as `5.` as a revised requested step count, then call `generate_task_steps` again with exactly that many steps.
+If the tool result has `accepted: true`, provide a textual description of how you are performing only the accepted, enabled steps.
+If the user has disabled a step, you are not allowed to perform that step.
+However, you should find a creative workaround to perform the task, and if an essential step is disabled, you can even use
+some humor in the description of how you are performing the task.
+Don't just repeat a list of steps, come up with a creative but short description (3 sentences max) of how you are performing the task.
+"""
 
 class TaskStep(BaseModel):
     description: str
@@ -78,17 +92,6 @@ class HumanInTheLoopFlow(Flow[AgentState]):
         """
         Standard chat node.
         """
-        system_prompt = """
-        You are a helpful assistant that can perform any task.
-        You MUST call the `generate_task_steps` function when the user asks you to perform a task.
-        When the function `generate_task_steps` is called, the user will decide to enable or disable a step.
-        After the user has decided which steps to perform, provide a textual description of how you are performing the task.
-        If the user has disabled a step, you are not allowed to perform that step.
-        However, you should find a creative workaround to perform the task, and if an essential step is disabled, you can even use
-        some humor in the description of how you are performing the task.
-        Don't just repeat a list of steps, come up with a creative but short description (3 sentences max) of how you are performing the task.
-        """
-
         # 1. Run the model and stream the response
         #    Note: In order to stream the response, wrap the completion call in
         #    copilotkit_stream and set stream=True.
@@ -96,11 +99,11 @@ class HumanInTheLoopFlow(Flow[AgentState]):
             await acompletion(
 
                 # 1.1 Specify the model to use
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 messages=[
                     {
                         "role": "system", 
-                        "content": system_prompt
+                        "content": HITL_SYSTEM_PROMPT
                     },
                     *self.state.messages
                 ],

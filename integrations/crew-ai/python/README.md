@@ -43,6 +43,70 @@ app = FastAPI()
 add_crewai_flow_fastapi_endpoint(app, MyFlow(), "/flow")
 ```
 
+### Conversational Flows
+
+CrewAI 1.15.11's Conversational Flows use the same AG-UI event translation,
+state synchronization, tools, reasoning, multimodal content, interrupts, and
+generative UI support as regular Flows. Opt the Flow into CrewAI's public
+conversation API and register the endpoint with `conversational=True`.
+
+> **Important:** CrewAI builds a Flow's graph from the subclass's own
+> `__dict__`, so a subclass that only sets `conversational = True` inherits
+> **none** of the base Flow's `@start`/`@listen` methods and runs an empty graph
+> (your steps silently never fire). Re-copy the base's flow methods onto the
+> conversational type — this is exactly what the dojo's
+> `examples/conversational.py::_conversational_type` helper does:
+
+```python
+from crewai.experimental.conversational import ConversationConfig
+
+_flow_methods = {
+    name: value
+    for name, value in MyFlow.__dict__.items()
+    if not name.startswith("_") and hasattr(value, "__flow_method_definition__")
+}
+
+MyConversationalFlow = type(
+    "MyConversationalFlow",
+    (MyFlow,),
+    {
+        **_flow_methods,
+        "conversational": True,
+        "conversational_config": ConversationConfig(defer_trace_finalization=False),
+    },
+)
+
+add_crewai_flow_fastapi_endpoint(
+    app,
+    MyConversationalFlow(),
+    "/conversational-flow",
+    conversational=True,
+)
+```
+
+The bridge invokes `flow.stream_turn(message, session_id=thread_id)`: AG-UI's
+`threadId` is the CrewAI conversation session ID. It hydrates prior messages into
+the Flow state before the current turn, passes only the latest user's text to
+`stream_turn`, and preserves media blocks on that current message. Each HTTP
+request finalizes its own CrewAI trace even if the Flow's conversation config
+would normally defer finalization across turns.
+
+Conversational mode requires CrewAI's ordered `StreamFrame` transport and a Flow
+that both sets `conversational=True` and exposes `stream_turn`. If any part of
+that contract is unavailable, the endpoint emits a correlated `RUN_ERROR` with
+code `AGUI_CREWAI_CONVERSATIONAL_FLOW_UNSUPPORTED`; it never silently falls back
+to a regular Flow kickoff. `get_capabilities()["conversationalFlows"]` declares
+whether the installed runtime exposes both the required transport and public
+turn API.
+
+The AG-UI dojo presents these as two separate framework choices:
+
+- `crewai`: **CrewAI Flows**, preserving the existing `/crewai/...` URLs and
+  including the legacy `crew_chat` example.
+- `crewai-conversational-flows`: **CrewAI Conversational Flows**, with the same
+  Flow feature matrix under `/crewai-conversational-flows/...`; `crew_chat` is
+  intentionally excluded because it is not a Flow.
+
 ## Features
 
 - **Native CrewAI integration** – Direct support for CrewAI flows, crews, and multi-agent systems
@@ -111,12 +175,12 @@ saturated buffer degrades mirroring (logged) rather than the run.
 ### Memory is isolated per `threadId` (default ON)
 
 A crew served with `Crew(memory=True)` keeps its memories in one on-disk store,
-namespaced by the *crew name*. Nothing in that namespace derives from the AG-UI
+namespaced by the _crew name_. Nothing in that namespace derives from the AG-UI
 `threadId`, so without help every chat served by an endpoint reads and writes the
 same namespace and one user's remembered facts surface in another user's chat.
 (Setting `inputs["id"] = thread_id` does not help: that scopes crewai's flow-state
 persistence, a different subsystem.) `Agent(memory=True)` has the same shape one
-level down: the agent builds its *own* memory, which crewai prefers over the
+level down: the agent builds its _own_ memory, which crewai prefers over the
 crew's.
 
 The bridge closes that by giving each request a `MemoryScope` view of the crew's
@@ -127,7 +191,7 @@ sprawl.
 
 Because crewai picks the executing agent off `task.agent` (or `manager_agent`
 under the hierarchical process) and reaches the crew's memory through
-`agent.crew`, the request gets shallow *views* of the crew, its agents and its
+`agent.crew`, the request gets shallow _views_ of the crew, its agents and its
 tasks, wired to each other. Nothing shared between concurrent requests is
 mutated, and everything below the views (tools, LLMs, knowledge, the store
 itself) stays shared.
@@ -144,7 +208,7 @@ Limitations, in order of how likely you are to hit them:
 - **Only crews and agents the bridge can reach are scoped.** That means the crew
   you passed to `add_crewai_crew_fastapi_endpoint`, plus any crew or standalone
   agent your `Flow` holds as an attribute (a crew's own agents and tasks come
-  with it). A crew or agent *constructed inside* a flow method is created after
+  with it). A crew or agent _constructed inside_ a flow method is created after
   this point and is not scoped; construct it as a flow attribute, or pass it a
   `Memory` you scope yourself.
 - **Per-request views are shallow.** Each request runs against copies of the
@@ -170,11 +234,11 @@ from ag_ui_crewai import get_capabilities
 get_capabilities(llm=my_agent.llm, emit_raw_events=True)
 ```
 
-`transport`, `rawEvents`, `reasoning` and `crewChat` come from runtime probes;
-`humanInTheLoop` and `state` are static declarations of what the bridge implements
-today. `emit_raw_events` defaults to re-reading the environment, so pass the same
-value your endpoint was registered with if you want the declaration to describe
-*that* endpoint.
+`transport`, `rawEvents`, `reasoning`, `conversationalFlows`, and `crewChat` come
+from runtime probes; `humanInTheLoop` and `state` are static declarations of what
+the bridge implements today. `emit_raw_events` defaults to re-reading the
+environment, so pass the same value your endpoint was registered with if you want
+the declaration to describe _that_ endpoint.
 
 Reasoning surfaces as first-class `REASONING_*` events (`REASONING_START` /
 `REASONING_MESSAGE_START` / `REASONING_MESSAGE_CONTENT` / `REASONING_MESSAGE_END` /
@@ -241,6 +305,12 @@ process indefinitely.
 - When the ceiling fires, the stream yields a `RUN_ERROR` event with
   code `AGUI_CREWAI_FLOW_TIMEOUT` and a message carrying the configured
   ceiling plus thread/run correlation IDs.
+- **Conversational mode:** the ceiling bounds the AG-UI HTTP response, not
+  the CrewAI worker. Conversational Flows drive a synchronous `StreamSession`
+  on a background thread that cannot be closed from the request loop, so a
+  hung upstream call keeps that worker alive until it emits or returns. (The
+  async StreamFrame path cancels the CrewAI kickoff task and pins nothing; this
+  opt-in conversational path does not.)
 
 ### `AGUI_CREWAI_CANCEL_JOIN_TIMEOUT_SECONDS`
 

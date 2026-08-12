@@ -25,7 +25,7 @@ from litellm import acompletion
 from ..sdk import CopilotKitState, copilotkit_stream
 from .._hitl import agui_feedback_provider
 
-MODEL = "openai/gpt-4o"
+MODEL = "openai/gpt-5.4"
 
 EXTRACT_PROMPT = """You are a scheduling assistant. From the conversation, work out which meeting the user wants to book.
 
