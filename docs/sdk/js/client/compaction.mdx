@@ -24,21 +24,28 @@ function compactEvents(events: BaseEvent[]): BaseEvent[]
 ## What it does
 
 - Text messages: Groups `TEXT_MESSAGE_START` → `TEXT_MESSAGE_CONTENT*` →
-  `TEXT_MESSAGE_END` for the same `messageId`, concatenating all `delta`
-  chunks into a single `TEXT_MESSAGE_CONTENT` event.
-- Tool calls: Groups `TOOL_CALL_START` → `TOOL_CALL_ARGS*` → `TOOL_CALL_END`
-  for the same `toolCallId`, concatenating all `delta` chunks into a single
+  `TEXT_MESSAGE_END` for the same `messageId`, concatenating all `delta` chunks
+  into a single `TEXT_MESSAGE_CONTENT` event.
+- Tool calls: Groups `TOOL_CALL_START` → `TOOL_CALL_ARGS*` → `TOOL_CALL_END` for
+  the same `toolCallId`, concatenating all `delta` chunks into a single
   `TOOL_CALL_ARGS` event.
+- State: Applies `STATE_SNAPSHOT` and `STATE_DELTA` events in input order using
+  one cumulative state for the thread. At each existing state flush boundary, it
+  replaces the state events since the previous boundary with a cumulative
+  `STATE_SNAPSHOT`. A later `STATE_SNAPSHOT` replaces the accumulated state;
+  later deltas continue from it.
 - Interleaved events: Any events that occur between a start/end pair are moved
   after that sequence so the streaming block remains contiguous.
-- Pass‑through: All other events (state, custom, etc.) are preserved unchanged.
+- Pass‑through: Other event types, including `RAW`, are retained. The generic
+  helper does not remove `RAW` events; an API that wants to omit them must add
+  that behavior explicitly.
 
 ## Example
 
 Before:
 
 ```ts
-[
+const before = [
   { type: EventType.TEXT_MESSAGE_START, messageId: "m1", role: "assistant" },
   { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "m1", delta: "Hello" },
   { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "m1", delta: " " },
@@ -51,15 +58,47 @@ Before:
 After:
 
 ```ts
-[
+const after = [
   { type: EventType.TEXT_MESSAGE_START, messageId: "m1", role: "assistant" },
-  { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "m1", delta: "Hello world" },
+  {
+    type: EventType.TEXT_MESSAGE_CONTENT,
+    messageId: "m1",
+    delta: "Hello world",
+  },
   { type: EventType.TEXT_MESSAGE_END, messageId: "m1" },
   { type: EventType.CUSTOM, name: "thinking" },
 ]
 ```
 
 Tool call compaction works analogously for `TOOL_CALL_ARGS` chunks.
+
+### State across runs
+
+State is cumulative across the ordered input, even when a later run contains
+only deltas:
+
+```ts
+const compacted = compactEvents([
+  { type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" },
+  { type: EventType.STATE_SNAPSHOT, snapshot: { count: 1, stale: true } },
+  { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" },
+  { type: EventType.RUN_STARTED, threadId: "t1", runId: "r2" },
+  {
+    type: EventType.STATE_DELTA,
+    delta: [
+      { op: "replace", path: "/count", value: 2 },
+      { op: "remove", path: "/stale" },
+    ],
+  },
+  { type: EventType.RUN_FINISHED, threadId: "t1", runId: "r2" },
+])
+
+// The emitted state snapshots are { count: 1, stale: true }, then { count: 2 }.
+```
+
+Pending state events are flushed before `RUN_STARTED`, before `RUN_FINISHED` or
+`RUN_ERROR`, and at the end of the input. A boundary with no new state events
+does not produce another state snapshot.
 
 ## When to use
 
@@ -69,8 +108,12 @@ Tool call compaction works analogously for `TOOL_CALL_ARGS` chunks.
 
 ## Notes & limitations
 
-- This utility focuses on message and tool‑call streams. It does not modify
-  state events (`STATE_SNAPSHOT`/`STATE_DELTA`) or generate message snapshots.
+- `STATE_DELTA` uses JSON Patch validation. An invalid operation throws; callers
+  evaluating candidates for persistence can treat that exception as a failed
+  compaction candidate and keep or reject the original candidate as appropriate.
+- The helper does not generate `MESSAGES_SNAPSHOT` events, normalize
+  `RUN_STARTED.input`, or strip `RAW` events.
+- State is accumulated across the full array passed to one call. If histories
+  from multiple threads are stored together, compact each thread separately.
 - For background and broader patterns (branching, normalization), see
   [Serialization](/concepts/serialization).
-

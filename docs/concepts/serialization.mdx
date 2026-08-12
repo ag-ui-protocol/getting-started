@@ -1,6 +1,8 @@
 ---
 title: "Serialization"
-description: "Serialize event streams for history restore, branching, and compaction in AG-UI"
+description:
+  "Serialize event streams for history restore, branching, and compaction in
+  AG-UI"
 ---
 
 # Serialization
@@ -20,10 +22,10 @@ patterns with examples.
 
 - Stream serialization – Convert the full event history to and from a portable
   representation (e.g., JSON) for storage in databases, files, or logs.
-- Event compaction – Reduce verbose streams to snapshots while preserving
-  semantics (e.g., merge content chunks, collapse deltas into snapshots).
-- Run lineage – Track branches of conversation using a `parentRunId`, forming
-  a git‑like append‑only log that enables time travel and alternative paths.
+- Event compaction – Reduce verbose streams while preserving semantics (e.g.,
+  merge text and tool-call chunks, collapse state deltas into snapshots).
+- Run lineage – Track branches of conversation using a `parentRunId`, forming a
+  git‑like append‑only log that enables time travel and alternative paths.
 
 ## Updated Event Fields
 
@@ -55,13 +57,22 @@ declare function compactEvents(events: BaseEvent[]): BaseEvent[]
 
 Common compaction rules include:
 
-- Message streams – Combine `TEXT_MESSAGE_*` sequences into a single message
-  snapshot; concatenate adjacent `TEXT_MESSAGE_CONTENT` for the same message.
-- Tool calls – Collapse tool call start/content/end into a compact record.
-- State – Merge consecutive `STATE_DELTA` events into a single final
-  `STATE_SNAPSHOT` and discard superseded updates.
-- Run input normalization – Remove from `RunStarted.input.messages` any
-  messages already present earlier in the stream.
+- Message streams – Retain `TEXT_MESSAGE_START` and `TEXT_MESSAGE_END`, and
+  concatenate the intervening `TEXT_MESSAGE_CONTENT` chunks for the same
+  `messageId` into one content event.
+- Tool calls – Retain `TOOL_CALL_START` and `TOOL_CALL_END`, and concatenate the
+  intervening `TOOL_CALL_ARGS` chunks for the same `toolCallId` into one args
+  event.
+- State – Apply `STATE_SNAPSHOT` and `STATE_DELTA` events in order using one
+  cumulative state across runs. Emit a cumulative `STATE_SNAPSHOT` at each
+  boundary that has pending state events; a later snapshot resets the
+  accumulator before subsequent deltas are applied.
+- Other events – Retain other event types, including `RAW`. The generic helper
+  does not strip `RAW`, normalize run input, or generate message snapshots.
+
+State deltas are validated JSON Patch operations. An invalid delta causes
+`compactEvents` to throw. A persistence layer evaluating compacted candidates
+can catch that exception and treat the candidate as a compaction failure.
 
 ## Branching and Time Travel
 
@@ -109,28 +120,41 @@ const compacted = compactEvents(restored);
 Before:
 
 ```ts
-[
-  { type: "TEXT_MESSAGE_START", messageId: "msg1", role: "user" },
+const before = [
+  { type: "RUN_STARTED", threadId: "thread1", runId: "run1" },
+  { type: "TEXT_MESSAGE_START", messageId: "msg1", role: "assistant" },
   { type: "TEXT_MESSAGE_CONTENT", messageId: "msg1", delta: "Hello " },
   { type: "TEXT_MESSAGE_CONTENT", messageId: "msg1", delta: "world" },
   { type: "TEXT_MESSAGE_END", messageId: "msg1" },
-  { type: "STATE_DELTA", patch: { op: "add", path: "/foo", value: 1 } },
-  { type: "STATE_DELTA", patch: { op: "replace", path: "/foo", value: 2 } },
+  { type: "STATE_SNAPSHOT", snapshot: { count: 1, stale: true } },
+  { type: "RUN_FINISHED", threadId: "thread1", runId: "run1" },
+  { type: "RUN_STARTED", threadId: "thread1", runId: "run2" },
+  { type: "RAW", event: { source: "provider" } },
+  {
+    type: "STATE_DELTA",
+    delta: [
+      { op: "replace", path: "/count", value: 2 },
+      { op: "remove", path: "/stale" },
+    ],
+  },
+  { type: "RUN_FINISHED", threadId: "thread1", runId: "run2" },
 ]
 ```
 
 After:
 
 ```ts
-[
-  {
-    type: "MESSAGES_SNAPSHOT",
-    messages: [{ id: "msg1", role: "user", content: "Hello world" }],
-  },
-  {
-    type: "STATE_SNAPSHOT",
-    state: { foo: 2 },
-  },
+const after = [
+  { type: "RUN_STARTED", threadId: "thread1", runId: "run1" },
+  { type: "TEXT_MESSAGE_START", messageId: "msg1", role: "assistant" },
+  { type: "TEXT_MESSAGE_CONTENT", messageId: "msg1", delta: "Hello world" },
+  { type: "TEXT_MESSAGE_END", messageId: "msg1" },
+  { type: "STATE_SNAPSHOT", snapshot: { count: 1, stale: true } },
+  { type: "RUN_FINISHED", threadId: "thread1", runId: "run1" },
+  { type: "RUN_STARTED", threadId: "thread1", runId: "run2" },
+  { type: "RAW", event: { source: "provider" } },
+  { type: "STATE_SNAPSHOT", snapshot: { count: 2 } },
+  { type: "RUN_FINISHED", threadId: "thread1", runId: "run2" },
 ]
 ```
 
@@ -185,4 +209,3 @@ After:
 
 - Concepts: [Events](/concepts/events), [State Management](/concepts/state)
 - SDKs: TypeScript encoder and core event types
-
