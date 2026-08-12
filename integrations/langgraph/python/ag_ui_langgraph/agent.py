@@ -1142,6 +1142,12 @@ class LangGraphAgent:
             "inbound_subagent_messages": getattr(self, "_inbound_subagent_messages", []) or [],
         }
         self.active_run = INITIAL_ACTIVE_RUN
+        # Seed the public-id registry from the run's INPUT (client-echoed
+        # history), and translate minted root ids back to their raw form for
+        # graph consumption. Derived from the input each run — no state is
+        # retained between runs. Must run before prepare_stream so the graph
+        # receives the reverse-translated messages.
+        input = self._seed_public_ids_from_input(input)
         try:
 
             forwarded_props = input.forwarded_props
@@ -3229,6 +3235,109 @@ class LangGraphAgent:
         used.add(public_id)
         lane_map[upstream_id] = public_id
         return public_id
+
+    def _seed_public_ids_from_input(self, input: RunAgentInput) -> RunAgentInput:
+        """Seed the public-id registry from client-echoed history, translating
+        minted ROOT ids back to raw for graph consumption.
+
+        The registry is per-run, so without seeding it knows nothing about ids
+        the client already displays: (a) a lane claiming a raw id equal to a
+        HISTORY message's id kept it verbatim, and the snapshot merge then
+        deduped that lane's entry against the history message — content loss;
+        (b) a root id minted in a PRIOR run ('{raw}::__root__') came back from
+        the client as a new-looking id, and the graph's message merge
+        duplicated the message against its checkpoint copy, which still holds
+        the raw id.
+
+        Everything here derives from the run's input — no state persists
+        between runs. Untagged (root-owned) history seeds the root lane's
+        maps; a minted root id is recognized by its '::__root__' suffix
+        (producer-chosen — only the mint ever writes it) and is rewritten to
+        its raw form for the graph, with the raw->public mapping recorded so
+        this run's stream and snapshot keep presenting the id the client
+        knows. Subagent-tagged history never enters the graph (see the split
+        in run()); its ids seed their own lanes and the used set, so a new
+        lane colliding with them mints. Both raw and public forms are
+        reserved. Flag-off is a no-op, preserving byte identity.
+        """
+        if not self.emit_subagent_events:
+            return input
+        root_suffix = "::" + _ROOT_LANE
+        minted_re = re.compile(re.escape(root_suffix) + r"(?:::\d+)?$")
+
+        def raw_form(public_id: str) -> str:
+            match = minted_re.search(public_id)
+            return public_id[: match.start()] if match else public_id
+
+        def reserve(kind: str, lane: str, raw_id: str, public_id: str) -> None:
+            maps = self.active_run.setdefault("public_id_maps", {}).setdefault(kind, {})
+            maps.setdefault(lane, {}).setdefault(raw_id, public_id)
+            used = self.active_run.setdefault("used_public_ids", {}).setdefault(kind, set())
+            used.add(public_id)
+            used.add(raw_id)
+
+        def kind_for(message) -> str:
+            return "reasoning" if getattr(message, "role", None) == "reasoning" else "message"
+
+        # Subagent-tagged history (split out of the graph input in run()).
+        for message in getattr(self, "_inbound_subagent_messages", None) or []:
+            lane = getattr(message, "subagent_run_id", None) or _ROOT_LANE
+            message_id = getattr(message, "id", None)
+            if isinstance(message_id, str):
+                reserve(kind_for(message), lane, message_id, message_id)
+            for tool_call in getattr(message, "tool_calls", None) or []:
+                if isinstance(getattr(tool_call, "id", None), str):
+                    reserve("tool_call", lane, tool_call.id, tool_call.id)
+
+        # Root-owned history: seed and reverse-translate minted ids.
+        rewritten = []
+        changed_any = False
+        for message in input.messages or []:
+            if getattr(message, "subagent_run_id", None) is not None:
+                # Tagged messages reaching here means the caller bypassed the
+                # run() split; seed their own lane and leave them alone.
+                lane = getattr(message, "subagent_run_id")
+                if isinstance(getattr(message, "id", None), str):
+                    reserve(kind_for(message), lane, message.id, message.id)
+                rewritten.append(message)
+                continue
+            update: dict = {}
+            message_id = getattr(message, "id", None)
+            if isinstance(message_id, str):
+                raw_id = raw_form(message_id)
+                reserve(kind_for(message), _ROOT_LANE, raw_id, message_id)
+                if raw_id != message_id:
+                    update["id"] = raw_id
+            tool_calls = getattr(message, "tool_calls", None)
+            if tool_calls:
+                new_calls = []
+                calls_changed = False
+                for tool_call in tool_calls:
+                    call_id = getattr(tool_call, "id", None)
+                    if isinstance(call_id, str):
+                        raw_call = raw_form(call_id)
+                        reserve("tool_call", _ROOT_LANE, raw_call, call_id)
+                        if raw_call != call_id:
+                            new_calls.append(tool_call.model_copy(update={"id": raw_call}))
+                            calls_changed = True
+                            continue
+                    new_calls.append(tool_call)
+                if calls_changed:
+                    update["tool_calls"] = new_calls
+            call_ref = getattr(message, "tool_call_id", None)
+            if isinstance(call_ref, str):
+                raw_ref = raw_form(call_ref)
+                reserve("tool_call", _ROOT_LANE, raw_ref, call_ref)
+                if raw_ref != call_ref:
+                    update["tool_call_id"] = raw_ref
+            if update:
+                changed_any = True
+                rewritten.append(message.model_copy(update=update))
+            else:
+                rewritten.append(message)
+        if changed_any:
+            return input.model_copy(update={"messages": rewritten})
+        return input
 
     def _resolve_public_message_id(self, upstream_id: str, lane: Optional[str] = None) -> str:
         return self._resolve_public_id(upstream_id, "message", lane)

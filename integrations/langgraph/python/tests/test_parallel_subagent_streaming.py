@@ -1006,5 +1006,85 @@ class TestOrdinaryToolIsNotASubagentBoundary(unittest.TestCase):
         self.assertEqual(events[0].parent_subagent_run_id, "tools:outer")
 
 
+class TestInputSeedingProtectsHistoryIds(unittest.TestCase):
+    """The registry must know the ids the client already displays.
+
+    The registry is per-run, so unseeded it protected only same-turn
+    collisions: (a) a lane claiming a raw id equal to a HISTORY message's id
+    kept it verbatim and the snapshot merge deduped that lane's entry away —
+    content loss across turns; (b) a root id minted in a prior run came back
+    from the client as a new-looking id and the graph's merge duplicated the
+    message against its checkpoint copy, which still holds the raw id.
+    Seeding derives from the run's input alone — nothing persists between
+    runs.
+    """
+
+    def _input(self, messages):
+        from ag_ui.core import RunAgentInput
+
+        return RunAgentInput(
+            thread_id="t", run_id="r", state={}, messages=messages,
+            tools=[], context=[], forwarded_props={},
+        )
+
+    def test_a_lane_colliding_with_a_history_id_mints(self):
+        from ag_ui.core import AssistantMessage
+
+        agent = _make_agent()
+        history = AssistantMessage(id="shared", role="assistant", content="prior root text")
+        agent._seed_public_ids_from_input(self._input([history]))
+        _feed(agent, _text_chunk("shared", "sub says hi"), "tools:s1")
+        _feed(agent, _model_end(), "tools:s1")
+
+        start = next(e for e in agent.dispatched if e.type == EventType.TEXT_MESSAGE_START)
+        self.assertNotEqual(start.message_id, "shared", "the history id is taken")
+
+        merged = agent._merge_subagent_messages(
+            agent._translate_snapshot_ids([history])
+        )
+        ids = [m.id for m in merged]
+        self.assertIn("shared", ids, "the history message survives")
+        self.assertIn(start.message_id, ids, "the subagent's entry survives the dedup")
+
+    def test_minted_root_ids_reverse_translate_for_the_graph(self):
+        from ag_ui.core import AssistantMessage
+
+        agent = _make_agent()
+        out = agent._seed_public_ids_from_input(self._input([
+            AssistantMessage(id="shared::__root__", role="assistant", content="root text"),
+        ]))
+        # The graph sees the raw id its checkpoint already holds — no duplicate.
+        self.assertEqual([m.id for m in out.messages], ["shared"])
+        # And this run's snapshot keeps presenting the id the client knows.
+        translated = agent._translate_snapshot_ids([
+            AssistantMessage(id="shared", role="assistant", content="root text"),
+        ])
+        self.assertEqual(translated[0].id, "shared::__root__")
+
+    def test_tagged_inbound_history_ids_are_reserved(self):
+        from ag_ui.core import AssistantMessage
+
+        agent = _make_agent()
+        agent._inbound_subagent_messages = [
+            AssistantMessage(id="taken", role="assistant", content="x", subagent_run_id="tools:old"),
+        ]
+        agent._seed_public_ids_from_input(self._input([]))
+        _feed(agent, _text_chunk("taken", "new text"), "tools:new")
+        start = next(e for e in agent.dispatched if e.type == EventType.TEXT_MESSAGE_START)
+        self.assertNotEqual(start.message_id, "taken")
+
+    def test_flag_off_leaves_the_input_untouched(self):
+        from ag_ui.core import AssistantMessage
+
+        agent = LangGraphAgent(name="test", graph=MagicMock(), emit_subagent_events=False)
+        agent.active_run = _fresh_active_run()
+        original = self._input([
+            AssistantMessage(id="shared::__root__", role="assistant", content="x"),
+        ])
+        out = agent._seed_public_ids_from_input(original)
+        self.assertIs(out, original)
+        self.assertNotIn("public_id_maps", agent.active_run)
+
+
 if __name__ == "__main__":
     unittest.main()
