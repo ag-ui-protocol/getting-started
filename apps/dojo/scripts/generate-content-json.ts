@@ -91,7 +91,10 @@ async function getFeatureFrontendFiles(featureId: string) {
   const retrievedFiles = [];
 
   for (const fileName of featureFiles) {
-    retrievedFiles.push(await getFile(featurePath, fileName));
+    const filePath = path.join(featurePath, fileName);
+    if (fs.existsSync(filePath)) {
+      retrievedFiles.push(await getFile(featurePath, fileName));
+    }
   }
 
   return retrievedFiles;
@@ -561,6 +564,21 @@ const agentFilesMapper: Record<
             __dirname,
             integrationsFolderPath,
             `/claude-agent-sdk/typescript/examples/${agentId}.ts`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
+  "openai-agents-python": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/openai-agents/python/examples/agents_examples/${agentId}.py`,
           ),
         ],
       }),

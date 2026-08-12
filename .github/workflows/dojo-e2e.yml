@@ -193,6 +193,10 @@ jobs:
             test_path: tests/agUiDotnetTests
             services: ["dojo", "ag-ui-dotnet"]
             wait_on: http://localhost:9999,tcp:localhost:8023
+          - suite: openai-agents-python
+            test_path: tests/openaiAgentsPythonTests
+            services: ["dojo", "openai-agents-python"]
+            wait_on: http://localhost:9999,tcp:localhost:8027
           # - suite: vercel-ai-sdk
           #   test_path: tests/vercelAISdkTests
           #   services: ["dojo"]

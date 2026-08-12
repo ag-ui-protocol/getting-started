@@ -309,7 +309,7 @@
 }
 
 @utility mix-from-* {
-  --tw-mix-from-color: --value(--color-*, color, [color]);
+  --tw-mix-from-color: --value(--color-*, [color]);
   --tw-mix-from-opacity: --modifier(--opacity-*, [percentage]);
   --tw-mix-from-opacity: calc(--modifier(number) * 1%);
   --tw-mix-from-opacity: calc(--modifier([number]) * 100%);
@@ -326,7 +326,7 @@
 }
 
 @utility mix-to-* {
-  --tw-mix-to-color: --value(--color-*, color, [color]);
+  --tw-mix-to-color: --value(--color-*, [color]);
   --tw-mix-to-opacity: --modifier(--opacity-*, [percentage]);
   --tw-mix-to-opacity: calc(--modifier(number) * 1%);
   --tw-mix-to-opacity: calc(--modifier([number]) * 100%);

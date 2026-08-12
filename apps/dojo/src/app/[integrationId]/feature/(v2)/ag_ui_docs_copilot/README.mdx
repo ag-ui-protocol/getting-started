@@ -1,0 +1,31 @@
+# 📚 AG-UI Docs Copilot
+
+## What This Demo Shows
+
+A developer assistant that answers questions using the documentation packaged
+with `ag-ui-protocol` and `ag-ui-openai-agents`.
+
+The agent receives the available README headings in its instructions. When a
+question needs documentation, it calls one of two backend tools to load only
+the relevant section from the installed Python package metadata. The tool call
+and its progress are rendered in the chat.
+
+No internet search or external retrieval service is used.
+
+## How to Interact
+
+- Ask how `AGUITranslator.to_openai()` and `to_agui()` connect an application
+  to AG-UI.
+- Ask for a minimal FastAPI streaming endpoint.
+- Ask how messages, tools, state, lifecycle events, or errors are translated.
+
+## Technical Details
+
+- `read_ag_ui_protocol_docs` reads the AG-UI Protocol Python README.
+- `read_ag_ui_openai_agents_docs` reads the OpenAI Agents integration README.
+- Each tool receives a heading and returns one matching Markdown section,
+  keeping the full documents out of the model prompt.
+- The backend uses `AGUITranslator` directly around
+  `Runner.run_streamed()`, then encodes the resulting AG-UI events as SSE.
+- For a larger documentation collection, replace the heading lookup with an
+  application-appropriate retrieval system.

@@ -1,0 +1,27 @@
+# 🌐 Dynamic System Prompt
+
+## What This Demo Shows
+
+The frontend sends the selected reply language through the AG-UI context
+channel. The backend reads that context on every run and uses the OpenAI Agents
+SDK dynamic-instructions API to rebuild the agent's system prompt.
+
+Changing the language affects the next response without restarting the server
+or storing the selection in agent state.
+
+## How to Interact
+
+- Select English, Arabic, or German in the sidebar, then ask a question.
+- Change the language and send another message. The next response follows the
+  new selection immediately.
+
+## Technical Details
+
+- `useAgentContext` adds `{ description: "Reply language", value: language }`
+  to `RunAgentInput.context` on every request.
+- `OpenAIAgentsAgent` forwards the translated context to
+  `Runner.run_streamed(..., context=...)`.
+- The agent's `instructions` callable reads `RunContextWrapper.context` and
+  returns a new system prompt for that run.
+- Context is read-only request information in this example; no shared-state
+  bridge is required.

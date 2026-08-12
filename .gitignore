@@ -52,3 +52,6 @@ node_modules
 
 # actionlint linter binary (dev tool, do not commit)
 /actionlint
+
+# Dev
+.playwright-mcp/

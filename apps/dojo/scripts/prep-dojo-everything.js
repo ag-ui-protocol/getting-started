@@ -134,6 +134,11 @@ const ALL_TARGETS = {
     name: "Dojo (dev)",
     cwd: gitRoot,
   },
+  "openai-agents-python": {
+    command: "uv sync",
+    name: "OpenAI Agents SDK (Python)",
+    cwd: path.join(integrationsRoot, "openai-agents/python/examples"),
+  },
   "claude-agent-sdk-python": {
     command: "uv sync",
     name: "Claude Agent SDK (Python)",

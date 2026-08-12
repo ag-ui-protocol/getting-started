@@ -1,0 +1,60 @@
+{
+  "name": "@ag-ui/openai-agents",
+  "//": "private: @ag-ui/openai-agents is currently an empty HttpAgent subclass with no added behavior — intentionally NOT published. Mirrors integrations/langroid/typescript's precedent. See src/index.ts.",
+  "private": true,
+  "version": "0.0.1",
+  "description": "AG-UI integration for the OpenAI Agents SDK — thin TypeScript client for the companion Python integration (ag-ui-openai-agents)",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist/**",
+    "README.md"
+  ],
+  "keywords": [
+    "ag-ui",
+    "openai",
+    "openai-agents",
+    "agents",
+    "ai"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "clean": "git clean -fdX --exclude=\"!.env\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "link:global": "pnpm link --global",
+    "unlink:global": "pnpm unlink --global"
+  },
+  "peerDependencies": {
+    "@ag-ui/core": ">=0.0.57",
+    "@ag-ui/client": ">=0.0.57",
+    "rxjs": "7.8.1"
+  },
+  "devDependencies": {
+    "@ag-ui/core": "workspace:*",
+    "@ag-ui/client": "workspace:*",
+    "@types/node": "^20.11.19",
+    "tsdown": "^0.20.1",
+    "typescript": "^5.3.3",
+    "vitest": "^4.0.18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ag-ui-protocol/ag-ui.git",
+    "directory": "integrations/openai-agents/typescript"
+  },
+  "author": "Abdelrahman Abozied <me@abdelrahman.ai>",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  }
+}

@@ -25,6 +25,7 @@ type envVars = {
   awsStrandsTypescriptUrl: string;
   claudeAgentSdkPythonUrl: string;
   claudeAgentSdkTypescriptUrl: string;
+  openaiAgentsPythonUrl: string;
   claudeManagedAgentsDotnetUrl: string;
   claudeManagedAgentsPythonUrl: string;
   claudeManagedAgentsTypescriptUrl: string;
@@ -87,6 +88,8 @@ export default function getEnvVars(): envVars {
       process.env.CLAUDE_AGENT_SDK_PYTHON_URL || "http://localhost:8019",
     claudeAgentSdkTypescriptUrl:
       process.env.CLAUDE_AGENT_SDK_TYPESCRIPT_URL || "http://localhost:8020",
+    openaiAgentsPythonUrl:
+      process.env.OPENAI_AGENTS_PYTHON_URL || "http://localhost:8027",
     claudeManagedAgentsDotnetUrl:
       process.env.CLAUDE_MANAGED_AGENTS_DOTNET_URL || "http://localhost:8026",
     claudeManagedAgentsPythonUrl:

@@ -1,0 +1,36 @@
+[project]
+name = "ag-ui-openai-agents"
+version = "0.1.0"
+description = "AG-UI integration for OpenAI Agents SDK"
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+authors = [
+    { name = "Abdelrahman Abozied", email = "me@abdelrahman.ai" },
+]
+requires-python = ">=3.10"
+dependencies = [
+    "ag-ui-protocol>=0.1.19",
+    "openai-agents>=0.8.4",
+    "pydantic>=2.13.4",
+    "fastapi>=0.115.12",
+    "uvicorn>=0.51.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ag-ui.scripts]
+test = "python -m pytest"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ag_ui_openai_agents"]

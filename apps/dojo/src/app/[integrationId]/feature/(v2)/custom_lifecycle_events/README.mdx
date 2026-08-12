@@ -1,0 +1,30 @@
+# 🪝 Custom Lifecycle Events
+
+## What This Demo Shows
+
+A custom AG-UI event can carry application-specific information alongside the
+standard run events. This example emits a `run_usage` event containing the
+actual input and output token counts, then displays those counts beneath the
+completed assistant message.
+
+The usage is emitted at the end of the run because final token totals are only
+available after the OpenAI Agents SDK stream has completed.
+
+## How to Interact
+
+- Ask: "Say hi in one sentence."
+- Ask: "Tell me one interesting fact about AI."
+- After the response completes, check the input and output token counts shown
+  directly below it.
+
+## Technical Details
+
+- The backend uses `AGUITranslator` directly so it can access the
+  `RunResultStreaming` object and its final usage totals.
+- It passes a `CustomEvent` named `run_usage` through the translator's
+  `end_custom_event` option. The event is emitted immediately before
+  `RUN_FINISHED`.
+- The event value is resolved after the stream finishes, when
+  `context_wrapper.usage` contains the actual totals.
+- The frontend subscribes to `run_usage`, associates it with the completed
+  assistant message, and renders a compact usage label.

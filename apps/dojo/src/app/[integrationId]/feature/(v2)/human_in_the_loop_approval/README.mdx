@@ -1,0 +1,31 @@
+---
+title: Human in the Loop Approval
+description: Pause a backend tool call until a person approves or rejects it.
+---
+
+# 🤝 Human in the Loop Approval
+
+## What This Demo Shows
+
+A backend-owned refund tool pauses before execution and asks the user for an
+explicit decision. Approving runs the tool; rejecting resumes the agent
+without issuing the refund.
+
+## How to Interact
+
+- Ask: "Refund order ORD-1001."
+- Select **Approve** to execute the refund, or **Reject** to continue without
+  executing it.
+- Ask about the order afterward to see how the agent handled the decision.
+
+## Technical Details
+
+- `issue_refund` uses the OpenAI Agents SDK's `needs_approval=True` option.
+- After the SDK reports an interruption, the backend saves `result.to_state()`
+  under the AG-UI `thread_id` and emits an `approval_request` custom event.
+- The frontend sends the selected decision and matching tool `call_id` in the
+  next request's `forwarded_props`.
+- The backend applies `state.approve()` or `state.reject()` and resumes the
+  saved OpenAI Agents SDK run.
+- This demo keeps paused runs in process memory. Production applications need
+  durable, concurrency-safe storage shared by all server instances.

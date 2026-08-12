@@ -18,6 +18,12 @@ function createFeatureConfig({
 
 export const featureConfig: FeatureConfig[] = [
   createFeatureConfig({
+    id: "ag_ui_docs_copilot",
+    name: "AG-UI Docs Copilot",
+    description: "Ask questions about the OpenAI Agents integration and delegate code snippets to a specialist agent",
+    tags: ["AG-UI", "OpenAI Agents", "Documentation", "Copilot"],
+  }),
+  createFeatureConfig({
     id: "agentic_chat",
     name: "Agentic Chat",
     description: "Chat with your Copilot and call frontend tools",
@@ -35,6 +41,13 @@ export const featureConfig: FeatureConfig[] = [
     description:
       "Plan a task together and direct the Copilot to take the right steps",
     tags: ["HITL", "Interactivity"],
+  }),
+  createFeatureConfig({
+    id: "human_in_the_loop_approval",
+    name: "Human in the Loop (Backend Approval)",
+    description:
+      "A real backend tool (issue a refund) pauses for human approval before it runs, then resumes",
+    tags: ["HITL", "Interactivity", "Approval"],
   }),
   createFeatureConfig({
     id: "interrupt",
@@ -87,6 +100,27 @@ export const featureConfig: FeatureConfig[] = [
     description:
       "Have your tasks performed by multiple agents, working together",
     tags: ["Chat", "Multi-agent architecture", "Streaming", "Subgraphs"],
+  }),
+  createFeatureConfig({
+    id: "subagents",
+    name: "Sub-agents",
+    description:
+      "Supervisor agent calls specialist agents as tools and synthesizes the result",
+    tags: ["Multi-agent architecture", "Sub-agents", "Orchestrator", "Agent as tool"],
+  }),
+  createFeatureConfig({
+    id: "custom_lifecycle_events",
+    name: "Custom Lifecycle Events",
+    description:
+      "Manual CUSTOM events bracket the run — a session marker right after start, a usage summary right before finish",
+    tags: ["Custom Events", "Lifecycle", "Translator"],
+  }),
+  createFeatureConfig({
+    id: "dynamic_system_prompt",
+    name: "Dynamic System Prompt",
+    description:
+      "Reply language picked from the AG-UI context channel, baked fresh into the system prompt every turn",
+    tags: ["Context", "Dynamic System Prompt"],
   }),
   createFeatureConfig({
     id: "a2a_chat",

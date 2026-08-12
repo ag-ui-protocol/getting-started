@@ -257,7 +257,7 @@ export const agentsIntegrations = {
 
   // Disabled until we can support Vercel AI SDK v5
   // "vercel-ai-sdk": async () => ({
-  //   agentic_chat: new VercelAISDKAgent({ model: openai("gpt-4o") }),
+  //   agentic_chat: new VercelAISDKAgent({ model: openai("gpt-5.5") }),
   // }),
 
   langgraph: async () => ({
@@ -377,7 +377,7 @@ export const agentsIntegrations = {
   //   const agent = new LangChainAgent({
   //     chainFn: async ({ messages, tools, threadId }) => {
   //       const { ChatOpenAI } = await import("@langchain/openai");
-  //       const chatOpenAI = new ChatOpenAI({ model: "gpt-4o" });
+  //       const chatOpenAI = new ChatOpenAI({ model: "gpt-5.5" });
   //       const model = chatOpenAI.bindTools(tools, {
   //         strict: true,
   //       });
@@ -657,6 +657,23 @@ export const agentsIntegrations = {
       shared_state: "shared_state",
       tool_based_generative_ui: "tool_based_generative_ui",
     }),
+
+  "openai-agents-python": async () =>
+    mapAgents(
+      (path) =>
+        new HttpAgent({ url: `${envVars.openaiAgentsPythonUrl}/${path}/` }),
+      {
+        ag_ui_docs_copilot: "ag_ui_docs_copilot",
+        agentic_chat: "agentic_chat",
+        backend_tool_rendering: "backend_tool_rendering",
+        human_in_the_loop: "human_in_the_loop",
+        human_in_the_loop_approval: "human_in_the_loop_approval",
+        tool_based_generative_ui: "tool_based_generative_ui",
+        subagents: "subagents",
+        custom_lifecycle_events: "custom_lifecycle_events",
+        dynamic_system_prompt: "dynamic_system_prompt",
+      },
+    ),
 
   "claude-agent-sdk-python": async () =>
     mapAgents(

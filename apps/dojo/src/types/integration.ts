@@ -1,9 +1,11 @@
 import type { menuIntegrations } from "../menu";
 
 export type Feature =
+  | "ag_ui_docs_copilot"
   | "agentic_chat"
   | "agentic_generative_ui"
   | "human_in_the_loop"
+  | "human_in_the_loop_approval"
   | "interrupt"
   | "predictive_state_updates"
   | "shared_state"
@@ -20,6 +22,9 @@ export type Feature =
   | "a2ui_advanced"
   | "a2ui_recovery"
   | "crew_chat"
+  | "subagents"
+  | "custom_lifecycle_events"
+  | "dynamic_system_prompt"
   | "error_flow"
   | "background_agents"
   | "observational_memory";

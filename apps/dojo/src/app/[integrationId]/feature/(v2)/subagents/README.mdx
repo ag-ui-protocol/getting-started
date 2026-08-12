@@ -1,0 +1,27 @@
+# 🧭 Subagents
+
+## What This Demo Shows
+
+A supervisor agent delegates a writing task to three specialist agents:
+researcher, writer, and critic. The supervisor remains responsible for the
+conversation, calls the specialists as tools, and produces the final response.
+
+The sidebar shows which specialist is working and records every delegation in
+order. Simple questions can be answered directly without calling the team.
+
+## How to Interact
+
+- Ask: "Write a short piece about the history of coffee." The supervisor
+  calls the researcher, writer, and critic before returning the final draft.
+- Ask: "What is 2 + 2?" The supervisor answers directly without delegating.
+
+## Technical Details
+
+- The OpenAI Agents SDK exposes each specialist through `Agent.as_tool()`.
+  This is call-and-return delegation; it is not a handoff of the conversation.
+- Each delegation becomes an AG-UI tool-call sequence followed by a
+  `TOOL_CALL_RESULT` event.
+- A `useRenderTool` renderer for each specialist updates the role indicators
+  and delegation log.
+- The specialists' internal model turns remain inside the OpenAI Agents SDK;
+  the client receives one supervisor-owned conversation.
