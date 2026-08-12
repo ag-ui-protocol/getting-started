@@ -528,6 +528,76 @@ class TestTaskEndResultExtraction(unittest.TestCase):
         self.assertTrue(any("result" in r.getMessage() for r in logs.records))
 
 
+class TestTaskToolErrorTerminatesTheSubagent(unittest.TestCase):
+    """A failed `task` delegation must end in SUBAGENT_ERROR, not FINISHED.
+
+    on_tool_error cleared streaming flags but left the task/subagent mappings
+    active, so a recovered task failure (parent catches it and completes
+    normally) emitted no terminal at error time — and run-end draining then
+    reported the failed subagent as successfully FINISHED.
+    """
+
+    def _agent(self):
+        agent = _make_agent(emit_subagent_events=True)
+        agent.active_run = {
+            "active_subagents": {"tools:s1": "researcher"},
+            "current_subagent_run_id": "tools:s1",
+            "subagent_task_runs": {"run-1": "tools:s1"},
+            "subagent_parents": {"tools:s1": None},
+            "lane_nodes": {"tools:s1": "model"},
+            "step_owners": {},
+            "emit_subagent_events": True,
+        }
+        return agent
+
+    def test_a_task_tool_error_emits_subagent_error(self):
+        agent = self._agent()
+        events = agent._finish_subagent_on_task_end({
+            "event": "on_tool_error",
+            "run_id": "run-1",
+            "data": {"error": RuntimeError("boom")},
+        })
+        types = [e.type for e in events]
+        self.assertIn(EventType.SUBAGENT_ERROR, types)
+        self.assertNotIn(EventType.SUBAGENT_FINISHED, types)
+        error = next(e for e in events if e.type == EventType.SUBAGENT_ERROR)
+        self.assertIn("boom", error.message)
+        # The lane's open step closes inside the window, before the terminal.
+        self.assertEqual(types[0], EventType.STEP_FINISHED)
+        # The subagent is closed: the run-end drain must not emit a second,
+        # contradictory terminal for it.
+        self.assertNotIn("tools:s1", agent.active_run["active_subagents"])
+        self.assertIn("tools:s1", agent.active_run["closed_subagents"])
+        self.assertEqual(drain_subagents(agent.active_run), [])
+
+    def test_a_bare_exception_still_produces_a_message(self):
+        agent = self._agent()
+
+        class _Bare(Exception):
+            pass
+
+        events = agent._finish_subagent_on_task_end({
+            "event": "on_tool_error",
+            "run_id": "run-1",
+            "data": {"error": _Bare()},
+        })
+        error = next(e for e in events if e.type == EventType.SUBAGENT_ERROR)
+        self.assertTrue(error.message.strip(), "str() of a bare exception is ''")
+
+    def test_flag_off_still_tears_the_lane_down_silently(self):
+        agent = self._agent()
+        agent.emit_subagent_events = False
+        agent.active_run["emit_subagent_events"] = False
+        events = agent._finish_subagent_on_task_end({
+            "event": "on_tool_error",
+            "run_id": "run-1",
+            "data": {"error": RuntimeError("boom")},
+        })
+        self.assertEqual(events, [])
+        self.assertNotIn("tools:s1", agent.active_run["active_subagents"])
+        self.assertNotIn("tools:s1", agent.active_run.get("lane_nodes", {}))
+
+
 class TestErrorPathRobustness(unittest.IsolatedAsyncioTestCase):
     """Fix 7: the error handlers could fail, or report nothing useful."""
 

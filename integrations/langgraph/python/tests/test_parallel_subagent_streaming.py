@@ -806,5 +806,205 @@ class TestNestedDuplicateTaskCallIds(unittest.TestCase):
         self.assertEqual(remaining[0]["parent_message_id"], "root-msg")
 
 
+class TestEqualReasoningIdsAcrossLanes(unittest.TestCase):
+    """Two lanes presenting the SAME provider reasoning id must not collide.
+
+    Reasoning ids are run-global on the client (its owner map keys reasoning
+    messages by id), so the second lane's opener was rejected by the verifier.
+    Same rule as text/tool-call ids, in reasoning's own kind namespace.
+    """
+
+    def _reason(self, agent, subagent_run_id, data):
+        agent.active_run["current_subagent_run_id"] = subagent_run_id
+        list(agent.handle_reasoning_event(data))
+
+    def test_the_second_lane_gets_a_minted_reasoning_id(self):
+        agent = _make_agent()
+        self._reason(agent, "tools:a", {"type": "text", "text": "A", "index": 0, "id": "rs-shared"})
+        self._reason(agent, "tools:b", {"type": "text", "text": "B", "index": 0, "id": "rs-shared"})
+
+        starts = [
+            (e.message_id, e.subagent_run_id)
+            for e in agent.dispatched
+            if e.type == EventType.REASONING_START
+        ]
+        self.assertEqual(len(starts), 2)
+        self.assertEqual(starts[0], ("rs-shared", "tools:a"), "first-comer keeps the raw id")
+        self.assertNotEqual(starts[1][0], "rs-shared", f"run-global ids: {starts}")
+        # Content follows each lane's own public id.
+        for e in agent.dispatched:
+            if e.type == EventType.REASONING_MESSAGE_CONTENT:
+                expected = starts[0][0] if e.subagent_run_id == "tools:a" else starts[1][0]
+                self.assertEqual(e.message_id, expected)
+
+
+class TestEqualManualEmitIdsAcrossLanes(unittest.TestCase):
+    """Manually emitted message/tool-call ids are caller-chosen and can collide
+    across lanes; they resolve through the same registry as streamed ids."""
+
+    def test_manual_messages_with_one_id_stay_apart(self):
+        agent = _make_agent()
+        for lane, text in (("tools:a", "A"), ("tools:b", "B")):
+            _feed(agent, {
+                "event": LangGraphEventTypes.OnCustomEvent,
+                "name": "manually_emit_message",
+                "metadata": {},
+                "data": {"message_id": "manual-1", "message": text},
+            }, lane)
+
+        starts = [
+            (e.message_id, e.subagent_run_id)
+            for e in agent.dispatched
+            if e.type == EventType.TEXT_MESSAGE_START
+        ]
+        self.assertEqual(len(starts), 2)
+        self.assertEqual(len({mid for mid, _ in starts}), 2, f"ids must differ: {starts}")
+        self.assertEqual(starts[0], ("manual-1", "tools:a"))
+
+    def test_manual_tool_calls_with_one_id_stay_apart(self):
+        agent = _make_agent()
+        for lane in ("tools:a", "tools:b"):
+            _feed(agent, {
+                "event": LangGraphEventTypes.OnCustomEvent,
+                "name": "manually_emit_tool_call",
+                "metadata": {},
+                "data": {"id": "call-1", "name": "search", "args": "{}"},
+            }, lane)
+
+        starts = [
+            (e.tool_call_id, e.subagent_run_id)
+            for e in agent.dispatched
+            if e.type == EventType.TOOL_CALL_START
+        ]
+        self.assertEqual(len(starts), 2)
+        self.assertEqual(len({tid for tid, _ in starts}), 2, f"ids must differ: {starts}")
+
+
+class TestSnapshotIdsTranslateToPublicIds(unittest.TestCase):
+    """The snapshot must present the ids the client actually saw streamed.
+
+    A root/subagent raw-id collision used to delete the subagent's output at
+    snapshot time: the subagent claimed public id 'shared', the root's copy was
+    minted 'shared::__root__' on the stream, but the state snapshot still said
+    'shared' — so the merge's dedup matched the SUBAGENT's accumulator entry
+    against the ROOT's message and discarded it, and the root's snapshot id no
+    longer matched its own streamed events.
+    """
+
+    def _collide(self):
+        agent = _make_agent()
+        # Subagent s1 claims raw id 'shared'; the root then mints 'shared::__root__'.
+        _feed(agent, _text_chunk("shared", "sub says hi"), "tools:s1")
+        _feed(agent, _model_end(), "tools:s1")
+        _feed(agent, _text_chunk("shared", "root says hi"), None)
+        _feed(agent, _model_end(), None)
+        return agent
+
+    def test_root_snapshot_message_carries_its_streamed_public_id(self):
+        from ag_ui.core import AssistantMessage
+
+        agent = self._collide()
+        translated = agent._translate_snapshot_ids([
+            AssistantMessage(id="shared", role="assistant", content="root says hi"),
+        ])
+        self.assertEqual(translated[0].id, "shared::__root__")
+
+    def test_the_subagent_entry_survives_the_merge_dedup(self):
+        from ag_ui.core import AssistantMessage
+
+        agent = self._collide()
+        merged = agent._merge_subagent_messages(
+            agent._translate_snapshot_ids([
+                AssistantMessage(id="shared", role="assistant", content="root says hi"),
+            ])
+        )
+        by_id = {m.id: m for m in merged}
+        self.assertIn("shared", by_id, "the subagent's public id is 'shared'")
+        self.assertEqual(getattr(by_id["shared"], "subagent_run_id", None), "tools:s1")
+        self.assertIn("shared::__root__", by_id, "the root's streamed id")
+
+    def test_ids_the_stream_never_claimed_pass_through(self):
+        from ag_ui.core import AssistantMessage, UserMessage
+
+        agent = self._collide()
+        translated = agent._translate_snapshot_ids([
+            UserMessage(id="user-1", role="user", content="hi"),
+            AssistantMessage(id="unrelated", role="assistant", content="x"),
+        ])
+        self.assertEqual([m.id for m in translated], ["user-1", "unrelated"])
+
+
+class TestOrdinaryToolIsNotASubagentBoundary(unittest.TestCase):
+    """An ordinary tool that invokes a runnable must not fabricate a subagent.
+
+    The boundary heuristic assumed an inner ToolNode is always a leaf, but a
+    tool that internally invokes a model produces tools:X|model:Y — which
+    satisfied the heuristic, so all the tool's inner output was attributed to
+    a fabricated nested subagent with its own SUBAGENT_STARTED. The per-call
+    ToolNode dispatch names the call being dispatched, so a non-`task`
+    dispatch is positive evidence its segment is NOT a subagent boundary.
+    """
+
+    def _agent_inside_outer(self):
+        from ag_ui_langgraph.agent import reconcile_subagents
+
+        agent = _make_agent()
+        # The outer subagent is genuinely active.
+        list_events = reconcile_subagents(
+            agent.active_run, "tools:outer|model:m", "researcher", set()
+        )
+        self.assertEqual([e.type for e in list_events], [EventType.SUBAGENT_STARTED])
+        return agent
+
+    def test_a_non_task_dispatch_excludes_its_segment(self):
+        from ag_ui_langgraph.agent import reconcile_subagents
+
+        agent = self._agent_inside_outer()
+        agent._capture_task_tool_dispatch({
+            "event": LangGraphEventTypes.OnChainStart,
+            "name": "tools",
+            "metadata": {
+                "langgraph_node": "tools",
+                "langgraph_checkpoint_ns": "tools:outer|tools:ordinary-call",
+            },
+            "data": {"input": {"type": "tool_call", "name": "web_search", "id": "c9"}},
+        })
+        events = reconcile_subagents(
+            agent.active_run,
+            "tools:outer|tools:ordinary-call|model:inside-tool",
+            "researcher",
+            set(),
+        )
+        self.assertEqual(
+            [e.type for e in events], [],
+            "an ordinary tool's inner model run is the OUTER subagent's work",
+        )
+        self.assertEqual(agent.active_run["current_subagent_run_id"], "tools:outer")
+        self.assertNotIn("tools:ordinary-call", agent.active_run["active_subagents"])
+
+    def test_a_task_dispatch_still_creates_the_nested_boundary(self):
+        from ag_ui_langgraph.agent import reconcile_subagents
+
+        agent = self._agent_inside_outer()
+        agent._capture_task_tool_dispatch({
+            "event": LangGraphEventTypes.OnChainStart,
+            "name": "tools",
+            "metadata": {
+                "langgraph_node": "tools",
+                "langgraph_checkpoint_ns": "tools:outer|tools:inner",
+            },
+            "data": {"input": {"type": "tool_call", "name": "task", "id": "t1"}},
+        })
+        events = reconcile_subagents(
+            agent.active_run,
+            "tools:outer|tools:inner|model:inside",
+            "researcher",
+            set(),
+        )
+        self.assertEqual([e.type for e in events], [EventType.SUBAGENT_STARTED])
+        self.assertEqual(events[0].subagent_run_id, "tools:inner")
+        self.assertEqual(events[0].parent_subagent_run_id, "tools:outer")
+
+
 if __name__ == "__main__":
     unittest.main()

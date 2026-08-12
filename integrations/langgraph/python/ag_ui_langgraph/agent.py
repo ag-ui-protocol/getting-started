@@ -131,13 +131,18 @@ class SubagentContext:
 _ROOT_LANE = "__root__"
 
 
-def _record_subagent_boundaries(ns: str, known: set) -> None:
+def _record_subagent_boundaries(ns: str, known: set, excluded: Optional[set] = None) -> None:
     """Record `tools:<uuid>` segments that are genuine subagent boundaries.
 
     A boundary is a `tools:` segment directly followed by a non-`tools` node
-    (the subagent's own model/middleware). A regular inner tool's ToolNode is a
-    leaf (never followed by such a node), so it is never recorded — which is how
-    a nested subagent is told apart from a subagent's own tool call.
+    (the subagent's own model/middleware). A regular inner tool's ToolNode is
+    USUALLY a leaf, which is how a nested subagent is told apart from a
+    subagent's own tool call — but a tool that internally invokes a model or
+    chain also produces `tools:X|model:Y` and would satisfy the shape test.
+    ``excluded`` carries the positive counter-evidence: segments whose per-call
+    ToolNode dispatch named a NON-`task` call (see _capture_task_tool_dispatch)
+    are ordinary tools whatever their inner namespaces look like, and recording
+    them fabricated a nested subagent that swallowed the tool's inner output.
     """
     if not ns:
         return
@@ -147,6 +152,7 @@ def _record_subagent_boundaries(ns: str, known: set) -> None:
             seg.split(":")[0] == "tools"
             and i + 1 < len(segs)
             and segs[i + 1].split(":")[0] != "tools"
+            and not (excluded and seg in excluded)
         ):
             known.add(seg)
 
@@ -231,7 +237,7 @@ def reconcile_subagents(active_run, ns, lc_agent_name, subgraphs) -> list:
     end never arrived (e.g. the graph paused at an interrupt inside one), and
     ``error_open_subagents`` is the failure-path equivalent."""
     known = active_run.setdefault("subagent_segments", set())
-    _record_subagent_boundaries(ns, known)
+    _record_subagent_boundaries(ns, known, active_run.get("non_subagent_segments"))
     ctx = derive_subagent_context(ns, lc_agent_name, subgraphs, known)
     new_id = ctx.subagent_run_id if ctx else None
 
@@ -596,6 +602,22 @@ class LangGraphAgent:
             c for c in candidates
             if isinstance(c, dict) and c.get("name") == "task" and isinstance(c.get("id"), str)
         ]
+        active_run = getattr(self, "active_run", None)
+        if active_run is None:
+            return
+        ns = metadata.get("langgraph_checkpoint_ns")
+        # A dispatch whose calls are all NON-`task` is an ordinary tool: its
+        # namespace segment must never be treated as a subagent boundary, even
+        # if the tool internally invokes a model and so produces the
+        # tools:X|model:Y shape the boundary heuristic looks for (see
+        # _record_subagent_boundaries). Without this counter-evidence a
+        # runnable-invoking tool fabricated a nested subagent that swallowed
+        # its inner output.
+        if candidates and not task_calls and ns:
+            tool_segs = [s for s in ns.split("|") if s.split(":")[0] == "tools"]
+            if tool_segs:
+                active_run.setdefault("non_subagent_segments", set()).add(tool_segs[-1])
+            return
         # A single task call per ToolNode namespace is the unambiguous case.
         # Multiple in one namespace (older batched shapes) fall back to FIFO.
         if len(task_calls) != 1:
@@ -607,11 +629,7 @@ class LangGraphAgent:
                     metadata.get("langgraph_checkpoint_ns"),
                 )
             return
-        active_run = getattr(self, "active_run", None)
-        if active_run is None:
-            return
         tool_call_id = task_calls[0]["id"]
-        ns = metadata.get("langgraph_checkpoint_ns")
         if ns:
             active_run.setdefault("task_tool_call_ids_by_ns", {})[ns] = tool_call_id
 
@@ -721,21 +739,36 @@ class LangGraphAgent:
                     ),
                 }
         elif pending:
-            # FIFO fallback: prefer the parent lane's own queue before the
-            # global one, so a missing dispatch capture in one lane cannot
-            # steal another lane's pending record.
-            lane_fifo = next(
-                (i for i, c in enumerate(pending) if c.get("lane") == parent_lane),
-                None,
-            )
-            task_call = pending.pop(lane_fifo if lane_fifo is not None else 0)
-            logger.warning(
-                "no per-call `task` ToolNode dispatch captured for ns=%r; falling back "
-                "to FIFO order and linking this subagent to tool_call_id=%r, which is "
-                "wrong if the task starts were reordered",
-                ns,
-                task_call.get("tool_call_id"),
-            )
+            # Fallback with no dispatch info: prefer the parent lane's own
+            # queue before the global one, so a missing dispatch capture in one
+            # lane cannot steal another lane's pending record. With exactly ONE
+            # candidate the link is unambiguous (a single call cannot reorder).
+            # With MORE than one, a FIFO guess names the wrong call whenever
+            # the task starts reorder (async wrappers, HITL, concurrent
+            # scheduling) — and a wrong parent link nests the subagent under
+            # another delegation's tool card. Attribution is never invented on
+            # this branch, so the links are omitted instead: the lifecycle event
+            # simply carries no parent correlation, which the protocol allows
+            # (the fields are optional).
+            candidate_indexes = [
+                i for i, c in enumerate(pending) if c.get("lane") == parent_lane
+            ] or list(range(len(pending)))
+            if len(candidate_indexes) == 1:
+                task_call = pending.pop(candidate_indexes[0])
+                logger.warning(
+                    "no per-call `task` ToolNode dispatch captured for ns=%r; linking "
+                    "this subagent to the sole pending call tool_call_id=%r",
+                    ns,
+                    task_call.get("tool_call_id"),
+                )
+            else:
+                logger.warning(
+                    "no per-call `task` ToolNode dispatch captured for ns=%r and %d "
+                    "pending `task` calls are candidates; omitting parentToolCallId/"
+                    "parentMessageId rather than guessing a possibly-wrong link",
+                    ns,
+                    len(candidate_indexes),
+                )
         active_run.setdefault("subagent_task_meta", {})[subagent_run_id] = {
             "name": tool_input.get("subagent_type"),
             "description": tool_input.get("description"),
@@ -765,9 +798,20 @@ class LangGraphAgent:
         by the run_id recorded in _capture_subagent_task_meta so only the task
         call (not the subagent's inner tool calls, which share its namespace)
         triggers the finish. No-op for non-task tool ends.
+
+        Also handles ``on_tool_error`` for the same run_id: a failed delegation
+        ends in SUBAGENT_ERROR. Without this the error only cleared streaming
+        flags, the mappings stayed active, and — when the parent recovered and
+        the run completed normally — the run-end drain reported the FAILED
+        subagent as successfully FINISHED.
         """
-        if event.get("event") != LangGraphEventTypes.OnToolEnd.value:
+        event_name = event.get("event")
+        if event_name not in (
+            LangGraphEventTypes.OnToolEnd.value,
+            LangGraphEventTypes.OnToolError.value,
+        ):
             return []
+        is_error = event_name == LangGraphEventTypes.OnToolError.value
         active_run = getattr(self, "active_run", None)
         if active_run is None:
             return []
@@ -801,6 +845,17 @@ class LangGraphAgent:
             (active_run.get("lane_nodes") or {}).pop(subagent_run_id, None)
             (active_run.get("step_owners") or {}).pop(subagent_run_id, None)
             return []
+        if is_error:
+            # str(exc) is "" for a bare exception; fall back to repr so the
+            # terminal always says something (same rule as the hard-exception
+            # path in _handle_stream_events).
+            error = (event.get("data") or {}).get("error")
+            message = (str(error) if error is not None else "") or (
+                repr(error) if error is not None else "task tool failed"
+            )
+            return close_lane_steps(active_run, [subagent_run_id]) + [SubagentErrorEvent(
+                type=EventType.SUBAGENT_ERROR, subagent_run_id=subagent_run_id, message=message,
+            )]
         # The subagent's output is the `task` tool's result. deepagents returns a
         # Command whose state update carries the ToolMessage; surface its content
         # as the finished subagent's `result` (mirrors RUN_FINISHED.result).
@@ -2696,42 +2751,50 @@ class LangGraphAgent:
 
         elif event_type == LangGraphEventTypes.OnCustomEvent:
             if event["name"] == CustomEventNames.ManuallyEmitMessage:
+                # Public, not raw: manual ids are caller-chosen, and a subagent's
+                # graph code can emit the same id as another lane. Same-lane
+                # single use keeps the caller's id verbatim (first claim).
+                manual_message_id = self._resolve_public_message_id(event["data"]["message_id"])
                 yield self._dispatch_event(
-                    TextMessageStartEvent(type=EventType.TEXT_MESSAGE_START, role="assistant", message_id=event["data"]["message_id"], raw_event=event)
+                    TextMessageStartEvent(type=EventType.TEXT_MESSAGE_START, role="assistant", message_id=manual_message_id, raw_event=event)
                 )
                 yield self._dispatch_event(
                     TextMessageContentEvent(
                         type=EventType.TEXT_MESSAGE_CONTENT,
-                        message_id=event["data"]["message_id"],
+                        message_id=manual_message_id,
                         delta=event["data"]["message"],
                         raw_event=event,
                     )
                 )
                 yield self._dispatch_event(
-                    TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=event["data"]["message_id"], raw_event=event)
+                    TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=manual_message_id, raw_event=event)
                 )
 
             elif event["name"] == CustomEventNames.ManuallyEmitToolCall:
+                # Same resolution as streamed tool calls: the call id in its own
+                # kind namespace, the parent message id in the message one.
+                manual_call_id = self._resolve_public_tool_call_id(event["data"]["id"])
+                manual_parent_id = self._resolve_public_message_id(event["data"]["id"])
                 yield self._dispatch_event(
                     ToolCallStartEvent(
                         type=EventType.TOOL_CALL_START,
-                        tool_call_id=event["data"]["id"],
+                        tool_call_id=manual_call_id,
                         tool_call_name=event["data"]["name"],
-                        parent_message_id=event["data"]["id"],
+                        parent_message_id=manual_parent_id,
                         raw_event=event,
                     )
                 )
                 yield self._dispatch_event(
                     ToolCallArgsEvent(
                         type=EventType.TOOL_CALL_ARGS,
-                        tool_call_id=event["data"]["id"],
+                        tool_call_id=manual_call_id,
                         delta=event["data"]["args"] if isinstance(event["data"]["args"], str) else json.dumps(
                             event["data"]["args"]),
                         raw_event=event
                     )
                 )
                 yield self._dispatch_event(
-                    ToolCallEndEvent(type=EventType.TOOL_CALL_END, tool_call_id=event["data"]["id"], raw_event=event)
+                    ToolCallEndEvent(type=EventType.TOOL_CALL_END, tool_call_id=manual_call_id, raw_event=event)
                 )
 
             elif event["name"] == CustomEventNames.ManuallyEmitState:
@@ -2975,11 +3038,19 @@ class LangGraphAgent:
             # under that id, and only a matching id lets the client reconcile
             # the streamed copy with the snapshot copy instead of rendering
             # both.
-            message_id = (
+            raw_reasoning_id = (
                 reasoning_data.get("id")
                 or (self.active_run.get("pending_reasoning_ids") or {}).pop(lane, None)
                 or str(uuid.uuid4())
             )
+            # Public, not raw: reasoning ids are run-global on the client (its
+            # owner map keys reasoning messages by id), so two lanes presenting
+            # the same provider id must not collide — same rule as text and
+            # tool-call ids, in reasoning's own kind namespace. The snapshot
+            # converter translates state reasoning blocks through the same map
+            # (see _translate_snapshot_ids), so streamed and snapshot copies
+            # still reconcile by id.
+            message_id = self._resolve_public_id(raw_reasoning_id, "reasoning", lane)
             yield self._dispatch_event(
                 ReasoningStartEvent(
                     type=EventType.REASONING_START,
@@ -3355,7 +3426,7 @@ class LangGraphAgent:
 
         snapshot_messages = self._filter_orphan_tool_messages(state_values.get("messages", []))
         agui_messages = self._merge_subagent_messages(
-            langchain_messages_to_agui(snapshot_messages)
+            self._translate_snapshot_ids(langchain_messages_to_agui(snapshot_messages))
         )
         yield self._dispatch_event(
             MessagesSnapshotEvent(
@@ -3363,6 +3434,63 @@ class LangGraphAgent:
                 messages=agui_messages,
             )
         )
+
+    def _translate_snapshot_ids(self, agui_messages: list) -> list:
+        """Rewrite root-graph snapshot ids to the PUBLIC ids the stream emitted.
+
+        Graph state carries raw upstream ids, but the stream resolves every
+        emitted id through the per-lane public registry (see _resolve_public_id)
+        — so when the root's raw id was minted (another lane claimed it first),
+        the snapshot's copy of that message no longer matches what the client
+        saw streamed. Worse, _merge_subagent_messages dedups the accumulated
+        subagent entries against snapshot ids: comparing PUBLIC accumulator ids
+        with RAW snapshot ids made a root/subagent raw-id collision discard the
+        subagent's entry entirely — attribution and content loss at snapshot
+        time.
+
+        Root state holds only the root lane's messages (subagent output lives
+        in subagent checkpoints and is merged from the accumulator), so the
+        translation reads the ROOT lane's maps, read-only: ids the stream never
+        claimed pass through unchanged, which also covers client-echoed history
+        that already carries public ids. Messages are copied on change, never
+        mutated — they alias graph state. Flag-off: the registry is empty by
+        construction, so this is a no-op and the snapshot stays byte-identical.
+        """
+        maps = (self.active_run or {}).get("public_id_maps") or {}
+        root = {
+            kind: (maps.get(kind) or {}).get(_ROOT_LANE) or {}
+            for kind in ("message", "tool_call", "reasoning")
+        }
+        if not any(root.values()):
+            return agui_messages
+        translated = []
+        for message in agui_messages:
+            update: dict = {}
+            kind = "reasoning" if getattr(message, "role", None) == "reasoning" else "message"
+            raw_id = getattr(message, "id", None)
+            public_id = root[kind].get(raw_id)
+            if public_id is not None and public_id != raw_id:
+                update["id"] = public_id
+            tool_calls = getattr(message, "tool_calls", None)
+            if tool_calls:
+                new_calls = []
+                calls_changed = False
+                for tool_call in tool_calls:
+                    public_call = root["tool_call"].get(tool_call.id)
+                    if public_call is not None and public_call != tool_call.id:
+                        new_calls.append(tool_call.model_copy(update={"id": public_call}))
+                        calls_changed = True
+                    else:
+                        new_calls.append(tool_call)
+                if calls_changed:
+                    update["tool_calls"] = new_calls
+            raw_call_ref = getattr(message, "tool_call_id", None)
+            if raw_call_ref is not None:
+                public_call_ref = root["tool_call"].get(raw_call_ref)
+                if public_call_ref is not None and public_call_ref != raw_call_ref:
+                    update["tool_call_id"] = public_call_ref
+            translated.append(message.model_copy(update=update) if update else message)
+        return translated
 
     def _merge_subagent_messages(self, agui_messages: list) -> list:
         """Append subagent-attributed messages to a snapshot's message list,

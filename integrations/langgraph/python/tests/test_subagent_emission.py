@@ -1016,10 +1016,15 @@ class TestFinishSubagentOnTaskEnd(unittest.TestCase):
         )
         self.assertIsNone(agent.active_run["current_subagent_run_id"])
 
-    def test_parallel_task_calls_link_each_subagent_fifo(self):
-        """Two subagents fanned out in one turn each get their OWN
-        parentToolCallId (bug #4: previously only the first was queued, so the
-        second got None)."""
+    def test_parallel_task_calls_without_dispatch_omit_links_but_keep_meta(self):
+        """Two subagents fanned out with NO per-call dispatch captured: the two
+        pending calls are ambiguous candidates for both, so neither gets a
+        (possibly swapped) parent link — a wrong link nests the subagent under
+        the other delegation's tool card. Names and descriptions still come
+        from each subagent's own on_tool_start, which is never ambiguous.
+        (Linked parallel fan-out is pinned by
+        test_reordered_tool_starts_do_not_swap_parent_links, where the
+        dispatches ARE captured.)"""
         agent = self._agent()
         agent.active_run["pending_task_calls"] = [
             {"tool_call_id": "call-a", "parent_message_id": "msg-1"},
@@ -1035,15 +1040,11 @@ class TestFinishSubagentOnTaskEnd(unittest.TestCase):
             "data": {"input": {"subagent_type": "writer", "description": "B"}},
             "metadata": {"langgraph_checkpoint_ns": "tools:subB|model:y"},
         })
-        self.assertEqual(
-            agent.active_run["subagent_task_meta"]["tools:subA"]["parent_tool_call_id"],
-            "call-a",
-        )
-        self.assertEqual(
-            agent.active_run["subagent_task_meta"]["tools:subB"]["parent_tool_call_id"],
-            "call-b",
-        )
-        self.assertEqual(agent.active_run["pending_task_calls"], [])
+        meta = agent.active_run["subagent_task_meta"]
+        self.assertIsNone(meta["tools:subA"]["parent_tool_call_id"])
+        self.assertIsNone(meta["tools:subB"]["parent_tool_call_id"])
+        self.assertEqual(meta["tools:subA"]["name"], "researcher")
+        self.assertEqual(meta["tools:subB"]["name"], "writer")
 
     def test_task_end_closes_the_subagents_open_step_before_the_terminal(self):
         # This path removes the id from active_subagents, so the drain at run end
@@ -1151,32 +1152,50 @@ class TestRobustParentLinkJoin(unittest.TestCase):
         self.assertEqual(meta["tools:subA"]["parent_message_id"], "msg-1")
         self.assertEqual(agent.active_run["pending_task_calls"], [])
 
-    def test_fifo_fallback_when_no_dispatch_captured(self):
-        # Older/batched ToolNode shape: no per-call dispatch captured -> FIFO.
+    def test_ambiguous_fallback_omits_links_rather_than_guessing(self):
+        # Older/batched ToolNode shape: no per-call dispatch captured, and TWO
+        # pending calls could be the spawning one. A FIFO guess names the wrong
+        # call whenever the task starts reorder, and a wrong parent link nests
+        # the subagent under another delegation's tool card — so no link is
+        # emitted at all (the fields are optional).
         agent = self._agent()
+        self._task_start(agent, "tools:subA", "task-run-A", "researcher")
+        meta = agent.active_run["subagent_task_meta"]["tools:subA"]
+        self.assertIsNone(meta["parent_tool_call_id"])
+        self.assertIsNone(meta["parent_message_id"])
+        # Nothing was consumed: the records stay available for a subagent that
+        # CAN be matched.
+        self.assertEqual(len(agent.active_run["pending_task_calls"]), 2)
+
+    def test_sole_pending_call_is_still_linked_without_a_dispatch(self):
+        # One candidate cannot reorder, so the link is unambiguous.
+        agent = self._agent()
+        agent.active_run["pending_task_calls"] = [
+            {"tool_call_id": "call-a", "parent_message_id": "msg-1"}
+        ]
         self._task_start(agent, "tools:subA", "task-run-A", "researcher")
         self.assertEqual(
             agent.active_run["subagent_task_meta"]["tools:subA"]["parent_tool_call_id"],
             "call-a",
         )
 
-    def test_batched_multi_task_dispatch_left_to_fifo(self):
+    def test_batched_multi_task_dispatch_omits_links(self):
         # A single ToolNode namespace carrying TWO task calls is ambiguous, so
-        # _capture_task_tool_dispatch records nothing and FIFO is used.
+        # _capture_task_tool_dispatch records nothing — and with two pending
+        # candidates the join refuses to guess.
         agent = self._agent()
         self._dispatch(agent, "tools:x", ["call-a", "call-b"])
         self.assertEqual(agent.active_run["task_tool_call_ids_by_ns"], {})
-        # The subagent then falls through to FIFO (first queued call).
         self._task_start(agent, "tools:x", "task-run-x", "researcher")
-        self.assertEqual(
+        self.assertIsNone(
             agent.active_run["subagent_task_meta"]["tools:x"]["parent_tool_call_id"],
-            "call-a",
         )
 
     def test_nested_uncaptured_child_does_not_match_ancestor(self):
         """Regression for the ancestor-run fallback bug: a nested child whose
-        own dispatch was NOT captured (batched) must fall to FIFO, NOT borrow
-        the outer subagent's captured call via a parent_ids/run-id scan."""
+        own dispatch was NOT captured (batched) must never borrow the outer
+        subagent's captured call via a parent_ids/run-id scan — and with two
+        remaining candidates it refuses to guess, emitting no link at all."""
         agent = self._agent()
         # pending is [call-a, call-b]; add the child's second call.
         agent.active_run["pending_task_calls"].append(
@@ -1195,12 +1214,13 @@ class TestRobustParentLinkJoin(unittest.TestCase):
         self.assertNotIn("tools:outer|tools:child",
                          agent.active_run["task_tool_call_ids_by_ns"])
         # Child task start: ns uncaptured; parent_ids includes the outer
-        # ToolNode run. Must fall to FIFO (call-b), NOT borrow the outer's
-        # call-a. (With the old run-id fallback this returned call-a.)
+        # ToolNode run. call-b and call-c are both candidates, so no link is
+        # emitted — and in particular NOT the outer's call-a. (With the old
+        # run-id fallback this returned call-a; with FIFO guessing, call-b.)
         self._task_start(agent, "tools:outer|tools:child", "task-run-child", "writer",
                          parent_ids=["run-outer"])
         link = agent.active_run["subagent_task_meta"]["tools:child"]["parent_tool_call_id"]
-        self.assertEqual(link, "call-b")
+        self.assertIsNone(link)
         self.assertNotEqual(link, "call-a")
 
 
