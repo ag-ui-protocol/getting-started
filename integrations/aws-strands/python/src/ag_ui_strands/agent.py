@@ -1581,6 +1581,45 @@ class StrandsAgent:
                         if tu_id and tu_name and tu_id not in _tool_call_id_to_name:
                             _tool_call_id_to_name[tu_id] = tu_name
 
+            # The durable wire->native map recorded at emission, read back from session
+            # state. Read here because the continuation derivation below needs it. Guarded:
+            # a store failure becomes ``reconciliation_setup_error``, handled below.
+            wire_to_native: Dict[str, str] = {}
+            reconciliation_setup_error: Exception | None = None
+            if session_manager is not None:
+                try:
+                    wire_to_native = (
+                        strands_agent.state.get(AG_UI_WIRE_MAP_STATE_KEY) or {}
+                    )
+                except Exception as e:  # noqa: BLE001 - handled below by checkpoint state
+                    reconciliation_setup_error = e
+
+            # The durable per-``toolUseId`` call metadata map recorded at
+            # emission (see the ``current_tool_use`` handler). On a RESUME
+            # run this is the ONLY source of ``{name, args, input,
+            # strands_tool_id}`` for the interrupted tool, since Strands does
+            # not re-emit ``current_tool_use`` events for it. Guarded because
+            # test doubles / stub agents may lack ``state`` entirely; a
+            # missing store just means "no persisted meta yet".
+            persisted_tool_call_meta: Dict[str, Dict[str, Any]] = {}
+            _agent_state = getattr(strands_agent, "state", None)
+            if _agent_state is not None:
+                try:
+                    persisted_tool_call_meta = (
+                        _agent_state.get(AG_UI_TOOL_CALL_MAP_STATE_KEY) or {}
+                    )
+                except Exception as e:  # noqa: BLE001 - handled by checkpoint state
+                    if has_active_interrupt:
+                        if reconciliation_setup_error is None:
+                            reconciliation_setup_error = e
+                    else:
+                        logger.warning(
+                            "Persisted tool-call metadata is unavailable; "
+                            "continuing without historical callback metadata: %s",
+                            e,
+                            exc_info=True,
+                        )
+
             # Get the latest user message for state context builder.
             # For continuation runs (has_pending_tool_result), derive a meaningful
             # message from the frontend tool that was just executed so the agent
@@ -1597,7 +1636,21 @@ class StrandsAgent:
                 _result_parts: list[str] = []
                 for msg in reversed(input_data.messages):
                     if msg.role == "tool" and hasattr(msg, "tool_call_id"):
-                        tool_name = _tool_call_id_to_name.get(msg.tool_call_id)
+                        # ``_tool_call_id_to_name`` is keyed by the NATIVE ``tooluse_...`` id
+                        # (from assistant ``toolUse`` blocks in the input / restored history),
+                        # but a frontend tool's result arrives keyed by the fresh wire uuid
+                        # handed to the client. A wire-id lookup therefore misses on a
+                        # delta-only continuation (which omits the naming assistant message),
+                        # leaving user_message empty -> stream_async("") -> the model gets no
+                        # input and re-asks the same question. Translate through the
+                        # wire->native map first (a backend tool's ids are equal, so it is
+                        # unaffected).
+                        native_tool_call_id = wire_to_native.get(
+                            msg.tool_call_id, msg.tool_call_id
+                        )
+                        tool_name = _tool_call_id_to_name.get(
+                            msg.tool_call_id
+                        ) or _tool_call_id_to_name.get(native_tool_call_id)
                         if tool_name and tool_name in frontend_tool_names:
                             # Forward the ACTUAL result so the model can act on the
                             # human's decision (e.g. an approval resolving to
@@ -1715,44 +1768,8 @@ class StrandsAgent:
             # result when its tool name is client-declared, or (for delta-only
             # payloads that omit the assistant message) when its wire id was
             # recorded in the wire->native map when the call was emitted.
-            # The durable wire->native map recorded at emission, read back from
-            # session state (restored from the store on a fresh process).
-            wire_to_native: Dict[str, str] = {}
-            reconciliation_setup_error: Exception | None = None
-            if session_manager is not None:
-                try:
-                    wire_to_native = (
-                        strands_agent.state.get(AG_UI_WIRE_MAP_STATE_KEY) or {}
-                    )
-                except Exception as e:  # noqa: BLE001 - handled below by checkpoint state
-                    reconciliation_setup_error = e
-
-            # The durable per-``toolUseId`` call metadata map recorded at
-            # emission (see the ``current_tool_use`` handler). On a RESUME
-            # run this is the ONLY source of ``{name, args, input,
-            # strands_tool_id}`` for the interrupted tool, since Strands does
-            # not re-emit ``current_tool_use`` events for it. Guarded because
-            # test doubles / stub agents may lack ``state`` entirely; a
-            # missing store just means "no persisted meta yet".
-            persisted_tool_call_meta: Dict[str, Dict[str, Any]] = {}
-            _agent_state = getattr(strands_agent, "state", None)
-            if _agent_state is not None:
-                try:
-                    persisted_tool_call_meta = (
-                        _agent_state.get(AG_UI_TOOL_CALL_MAP_STATE_KEY) or {}
-                    )
-                except Exception as e:  # noqa: BLE001 - handled by checkpoint state
-                    if has_active_interrupt:
-                        if reconciliation_setup_error is None:
-                            reconciliation_setup_error = e
-                    else:
-                        logger.warning(
-                            "Persisted tool-call metadata is unavailable; "
-                            "continuing without historical callback metadata: %s",
-                            e,
-                            exc_info=True,
-                        )
-
+            # wire_to_native, persisted_tool_call_meta and reconciliation_setup_error are
+            # read above; reused here.
             # Scope to the TRAILING tool results (this continuation's just-
             # returned results). ``pending_tool_result_ids`` holds those ids;
             # without this, a multi-turn continuation re-sends already-reconciled
