@@ -385,22 +385,24 @@ def _interrupts_from_tool_error(error) -> Optional[tuple]:
     """
     if error is None:
         return None
-    is_graph_interrupt = False
     try:
         from langgraph.errors import GraphInterrupt
-
-        is_graph_interrupt = isinstance(error, GraphInterrupt)
+        from langgraph.types import Interrupt
     except ImportError:  # pragma: no cover - langgraph is a hard dependency
-        pass
+        return None
     candidates = getattr(error, "args", None) or ()
     # GraphInterrupt((interrupt, ...)) puts the interrupt TUPLE in args[0].
     if len(candidates) == 1 and isinstance(candidates[0], (tuple, list)):
         candidates = tuple(candidates[0])
-    looks_like_interrupts = bool(candidates) and all(
-        hasattr(c, "value") and hasattr(c, "id") for c in candidates
-    )
-    if is_graph_interrupt or looks_like_interrupts:
-        return tuple(candidates) if looks_like_interrupts else ()
+    if isinstance(error, GraphInterrupt):
+        return tuple(c for c in candidates if isinstance(c, Interrupt))
+    # A re-raised/wrapped propagation still counts — but only when every arg
+    # is an ACTUAL langgraph Interrupt instance. Structural duck typing
+    # (attributes named `value` and `id`) misclassified ordinary recovered
+    # failures whose exception happened to carry a payload of that shape,
+    # reporting a genuinely FAILED subagent as FINISHED.
+    if candidates and all(isinstance(c, Interrupt) for c in candidates):
+        return tuple(candidates)
     return None
 
 

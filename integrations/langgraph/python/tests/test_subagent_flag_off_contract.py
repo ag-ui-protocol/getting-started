@@ -655,6 +655,40 @@ class TestTaskInterruptIsNotAnError(unittest.TestCase):
         })
         self.assertIn(EventType.SUBAGENT_ERROR, [e.type for e in events])
 
+    def test_a_domain_error_payload_with_value_and_id_is_still_an_error(self):
+        # Structural duck typing is not enough: any exception whose args happen
+        # to carry `value` and `id` attributes (a domain error payload, say)
+        # must stay a FAILURE. Only actual langgraph Interrupt instances count.
+        class DomainErrorPayload:
+            def __init__(self):
+                self.value = "invalid action"
+                self.id = "domain-1"
+
+        agent = self._agent()
+        events = agent._finish_subagent_on_task_end({
+            "event": "on_tool_error",
+            "run_id": "run-1",
+            "data": {"error": RuntimeError(DomainErrorPayload())},
+        })
+        self.assertIn(EventType.SUBAGENT_ERROR, [e.type for e in events])
+        self.assertNotIn("interrupt_subagents", agent.active_run)
+
+    def test_a_rewrapped_real_interrupt_still_counts_as_an_interrupt(self):
+        # A re-raised propagation whose args are ACTUAL Interrupt instances is
+        # still recognized without being a GraphInterrupt subclass.
+        from langgraph.types import Interrupt
+
+        agent = self._agent()
+        events = agent._finish_subagent_on_task_end({
+            "event": "on_tool_error",
+            "run_id": "run-1",
+            "data": {"error": Exception(Interrupt(value={"type": "hitl"}, id="int-9"))},
+        })
+        self.assertEqual(events, [])
+        self.assertEqual(
+            agent.active_run.get("interrupt_subagents"), {"int-9": "tools:s1"}
+        )
+
     def test_flag_off_interrupt_keeps_the_silent_teardown_for_the_drain(self):
         agent = self._agent()
         agent.emit_subagent_events = False
