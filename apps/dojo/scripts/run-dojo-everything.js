@@ -193,6 +193,14 @@ const ALL_SERVICES = {
       env: { PORT: 8010 },
     },
   ],
+  "adk-middleware-java": [
+    {
+      command: "mvn -q -f pom.xml exec:java",
+      name: "ADK Middleware (Java)",
+      cwd: path.join(integrationsRoot, "adk-middleware/java/examples"),
+      env: { HOST: "0.0.0.0", PORT: 8027 },
+    },
+  ],
   "a2a-middleware": [
     {
       command: "uv run buildings_management.py",
@@ -357,6 +365,7 @@ const ALL_SERVICES = {
         MASTRA_URL: "http://localhost:8008",
         PYDANTIC_AI_URL: "http://localhost:8009",
         ADK_MIDDLEWARE_URL: "http://localhost:8010",
+        ADK_MIDDLEWARE_JAVA_URL: "http://localhost:8027",
         A2A_MIDDLEWARE_BUILDINGS_MANAGEMENT_URL: "http://localhost:8011",
         A2A_MIDDLEWARE_FINANCE_URL: "http://localhost:8012",
         A2A_MIDDLEWARE_IT_URL: "http://localhost:8013",
@@ -396,6 +405,7 @@ const ALL_SERVICES = {
         MASTRA_URL: "http://localhost:8008",
         PYDANTIC_AI_URL: "http://localhost:8009",
         ADK_MIDDLEWARE_URL: "http://localhost:8010",
+        ADK_MIDDLEWARE_JAVA_URL: "http://localhost:8027",
         A2A_MIDDLEWARE_BUILDINGS_MANAGEMENT_URL: "http://localhost:8011",
         A2A_MIDDLEWARE_FINANCE_URL: "http://localhost:8012",
         A2A_MIDDLEWARE_IT_URL: "http://localhost:8013",

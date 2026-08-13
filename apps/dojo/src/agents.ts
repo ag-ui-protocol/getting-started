@@ -159,6 +159,17 @@ export const agentsIntegrations = {
     return agents;
   },
 
+  "adk-middleware-java": async () =>
+    mapAgents(
+      (path) =>
+        new ADKAgent({ url: `${envVars.adkMiddlewareJavaUrl}/${path}` }),
+      {
+        agentic_chat: "chat",
+        human_in_the_loop: "adk-human-in-loop-agent",
+        agentic_generative_ui: "adk-agentic-generative-ui",
+      },
+    ),
+
   "server-starter-all-features": async () =>
     mapAgents(
       (path) =>

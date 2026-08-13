@@ -13,6 +13,7 @@ type envVars = {
   agentSpecUrl: string;
   pydanticAIUrl: string;
   adkMiddlewareUrl: string;
+  adkMiddlewareJavaUrl: string;
   agentFrameworkPythonUrl: string;
   a2aUrl: string;
   agentFrameworkDotnetUrl: string;
@@ -64,6 +65,8 @@ export default function getEnvVars(): envVars {
     agentSpecUrl: process.env.AGENT_SPEC_URL || "http://localhost:9003",
     pydanticAIUrl: process.env.PYDANTIC_AI_URL || "http://localhost:9000",
     adkMiddlewareUrl: process.env.ADK_MIDDLEWARE_URL || "http://localhost:8000",
+    adkMiddlewareJavaUrl:
+      process.env.ADK_MIDDLEWARE_JAVA_URL || "http://localhost:8027",
     agentFrameworkPythonUrl:
       process.env.AGENT_FRAMEWORK_PYTHON_URL || "http://localhost:8015",
     agentFrameworkDotnetUrl:
