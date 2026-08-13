@@ -30,7 +30,8 @@
   "dependencies": {
     "@ag-ui/core": "workspace:*",
     "@bufbuild/protobuf": "^2.2.5",
-    "@protobuf-ts/protoc": "^2.11.1"
+    "@protobuf-ts/protoc": "^2.11.1",
+    "zod": "^3.25.18 || ^4.0.0"
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^4.0.18",

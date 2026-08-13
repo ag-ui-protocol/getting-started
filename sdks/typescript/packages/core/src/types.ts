@@ -1,258 +1,196 @@
-import { z } from "zod";
+// Canonical TypeScript types for AG-UI messages, tools, run input, and core
+// supporting types. This is the authoritative type surface of @ag-ui/core.
 
-export const FunctionCallSchema = z.object({
-  name: z.string(),
-  arguments: z.string(),
-});
+export interface FunctionCall {
+  name: string;
+  arguments: string;
+}
 
-export const ToolCallSchema = z.object({
-  id: z.string(),
-  type: z.literal("function"),
-  function: FunctionCallSchema,
-  encryptedValue: z.string().optional(),
-});
+export interface ToolCall {
+  id: string;
+  type: "function";
+  function: FunctionCall;
+  encryptedValue?: string;
+}
 
-export const BaseMessageSchema = z.object({
-  id: z.string(),
-  role: z.string(),
-  content: z.string().optional(),
-  name: z.string().optional(),
-  encryptedValue: z.string().optional(),
-});
+export interface TextInputContent {
+  type: "text";
+  text: string;
+}
 
-export const TextInputContentSchema = z.object({
-  type: z.literal("text"),
-  text: z.string(),
-});
+export interface InputContentDataSource {
+  type: "data";
+  value: string;
+  mimeType: string;
+}
 
-export const InputContentDataSourceSchema = z.object({
-  type: z.literal("data"),
-  value: z.string(),
-  mimeType: z.string(),
-});
+export interface InputContentUrlSource {
+  type: "url";
+  value: string;
+  mimeType?: string;
+}
 
-export const InputContentUrlSourceSchema = z.object({
-  type: z.literal("url"),
-  value: z.string(),
-  mimeType: z.string().optional(),
-});
+export type InputContentSource = InputContentDataSource | InputContentUrlSource;
 
-export const InputContentSourceSchema = z.discriminatedUnion("type", [
-  InputContentDataSourceSchema,
-  InputContentUrlSourceSchema,
-]);
+export interface ImageInputContent {
+  type: "image";
+  source: InputContentSource;
+  metadata?: unknown;
+}
 
-export const ImageInputContentSchema = z.object({
-  type: z.literal("image"),
-  source: InputContentSourceSchema,
-  metadata: z.unknown().optional(),
-});
+export interface AudioInputContent {
+  type: "audio";
+  source: InputContentSource;
+  metadata?: unknown;
+}
 
-export const AudioInputContentSchema = z.object({
-  type: z.literal("audio"),
-  source: InputContentSourceSchema,
-  metadata: z.unknown().optional(),
-});
+export interface VideoInputContent {
+  type: "video";
+  source: InputContentSource;
+  metadata?: unknown;
+}
 
-export const VideoInputContentSchema = z.object({
-  type: z.literal("video"),
-  source: InputContentSourceSchema,
-  metadata: z.unknown().optional(),
-});
+export interface DocumentInputContent {
+  type: "document";
+  source: InputContentSource;
+  metadata?: unknown;
+}
 
-export const DocumentInputContentSchema = z.object({
-  type: z.literal("document"),
-  source: InputContentSourceSchema,
-  metadata: z.unknown().optional(),
-});
-
-export const ImageInputPartSchema = ImageInputContentSchema;
-export const AudioInputPartSchema = AudioInputContentSchema;
-export const VideoInputPartSchema = VideoInputContentSchema;
-export const DocumentInputPartSchema = DocumentInputContentSchema;
-
-const LegacyBinaryInputContentObjectSchema = z.object({
-  type: z.literal("binary"),
-  mimeType: z.string(),
-  id: z.string().optional(),
-  url: z.string().optional(),
-  data: z.string().optional(),
-  filename: z.string().optional(),
-});
-
-const ensureBinaryPayload = (
-  value: { id?: string; url?: string; data?: string },
-  ctx: z.RefinementCtx,
-) => {
-  if (!value.id && !value.url && !value.data) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "BinaryInputContent requires at least one of id, url, or data.",
-      path: ["id"],
-    });
-  }
-};
-
-export const BinaryInputContentSchema = LegacyBinaryInputContentObjectSchema.superRefine(
-  (value, ctx) => {
-    ensureBinaryPayload(value, ctx);
-  },
-);
-
-const InputContentBaseSchema = z.discriminatedUnion("type", [
-  TextInputContentSchema,
-  ImageInputContentSchema,
-  AudioInputContentSchema,
-  VideoInputContentSchema,
-  DocumentInputContentSchema,
-  LegacyBinaryInputContentObjectSchema,
-]);
-
-export const InputContentSchema = InputContentBaseSchema.superRefine((value, ctx) => {
-  if (value.type === "binary") {
-    ensureBinaryPayload(value, ctx);
-  }
-});
-
-export const DeveloperMessageSchema = BaseMessageSchema.extend({
-  role: z.literal("developer"),
-  content: z.string(),
-});
-
-export const SystemMessageSchema = BaseMessageSchema.extend({
-  role: z.literal("system"),
-  content: z.string(),
-});
-
-export const AssistantMessageSchema = BaseMessageSchema.extend({
-  role: z.literal("assistant"),
-  content: z.string().optional(),
-  toolCalls: z.array(ToolCallSchema).optional(),
-});
-
-export const UserMessageSchema = BaseMessageSchema.extend({
-  role: z.literal("user"),
-  content: z.union([z.string(), z.array(InputContentSchema)]),
-});
-
-export const ToolMessageSchema = z.object({
-  id: z.string(),
-  content: z.string(),
-  role: z.literal("tool"),
-  toolCallId: z.string(),
-  error: z.string().optional(),
-  encryptedValue: z.string().optional(),
-});
-
-export const ActivityMessageSchema = z.object({
-  id: z.string(),
-  role: z.literal("activity"),
-  activityType: z.string(),
-  content: z.record(z.any()),
-});
-
-export const ReasoningMessageSchema = z.object({
-  id: z.string(),
-  role: z.literal("reasoning"),
-  content: z.string(),
-  encryptedValue: z.string().optional(),
-});
-
-export const MessageSchema = z.discriminatedUnion("role", [
-  DeveloperMessageSchema,
-  SystemMessageSchema,
-  AssistantMessageSchema,
-  UserMessageSchema,
-  ToolMessageSchema,
-  ActivityMessageSchema,
-  ReasoningMessageSchema,
-]);
-
-export const RoleSchema = z.union([
-  z.literal("developer"),
-  z.literal("system"),
-  z.literal("assistant"),
-  z.literal("user"),
-  z.literal("tool"),
-  z.literal("activity"),
-  z.literal("reasoning"),
-]);
-
-export const ContextSchema = z.object({
-  description: z.string(),
-  value: z.string(),
-});
-
-export const ToolSchema = z.object({
-  name: z.string(),
-  description: z.string(),
-  parameters: z.any(), // JSON Schema for the tool parameters
-  metadata: z.record(z.any()).optional(), // Arbitrary tool metadata (e.g. a2ui schema)
-});
-
-export const InterruptSchema = z.object({
-  id: z.string(),
-  reason: z.string(),
-  message: z.string().optional(),
-  toolCallId: z.string().optional(),
-  responseSchema: z.record(z.any()).optional(),
-  expiresAt: z.string().optional(),
-  metadata: z.record(z.any()).optional(),
-});
-
-export const ResumeEntrySchema = z.object({
-  interruptId: z.string(),
-  status: z.enum(["resolved", "cancelled"]),
-  payload: z.any().optional(),
-});
-
-export const RunAgentInputSchema = z.object({
-  threadId: z.string(),
-  runId: z.string(),
-  parentRunId: z.string().optional(),
-  state: z.any(),
-  messages: z.array(MessageSchema),
-  tools: z.array(ToolSchema),
-  context: z.array(ContextSchema),
-  forwardedProps: z.any(),
-  resume: z.array(ResumeEntrySchema).optional(),
-});
-
-export const StateSchema = z.any();
-
-export type ToolCall = z.infer<typeof ToolCallSchema>;
-export type FunctionCall = z.infer<typeof FunctionCallSchema>;
-export type TextInputContent = z.infer<typeof TextInputContentSchema>;
-export type InputContentDataSource = z.infer<typeof InputContentDataSourceSchema>;
-export type InputContentUrlSource = z.infer<typeof InputContentUrlSourceSchema>;
-export type InputContentSource = z.infer<typeof InputContentSourceSchema>;
-export type ImageInputContent = z.infer<typeof ImageInputContentSchema>;
-export type AudioInputContent = z.infer<typeof AudioInputContentSchema>;
-export type VideoInputContent = z.infer<typeof VideoInputContentSchema>;
-export type DocumentInputContent = z.infer<typeof DocumentInputContentSchema>;
 export type ImageInputPart = ImageInputContent;
 export type AudioInputPart = AudioInputContent;
 export type VideoInputPart = VideoInputContent;
 export type DocumentInputPart = DocumentInputContent;
-export type BinaryInputContent = z.infer<typeof BinaryInputContentSchema>;
-export type InputContent = z.infer<typeof InputContentSchema>;
-export type InputContentPart = z.infer<typeof InputContentSchema>;
-export type DeveloperMessage = z.infer<typeof DeveloperMessageSchema>;
-export type SystemMessage = z.infer<typeof SystemMessageSchema>;
-export type AssistantMessage = z.infer<typeof AssistantMessageSchema>;
-export type UserMessage = z.infer<typeof UserMessageSchema>;
-export type ToolMessage = z.infer<typeof ToolMessageSchema>;
-export type ActivityMessage = z.infer<typeof ActivityMessageSchema>;
-export type ReasoningMessage = z.infer<typeof ReasoningMessageSchema>;
-export type Message = z.infer<typeof MessageSchema>;
-export type Context = z.infer<typeof ContextSchema>;
-export type Tool = z.infer<typeof ToolSchema>;
-export type RunAgentInput = z.infer<typeof RunAgentInputSchema>;
-export type State = z.infer<typeof StateSchema>;
-export type Role = z.infer<typeof RoleSchema>;
-export type Interrupt = z.infer<typeof InterruptSchema>;
-export type ResumeEntry = z.infer<typeof ResumeEntrySchema>;
-export type ResumeStatus = z.infer<typeof ResumeEntrySchema>["status"];
+
+export interface BinaryInputContent {
+  type: "binary";
+  mimeType: string;
+  id?: string;
+  url?: string;
+  data?: string;
+  filename?: string;
+}
+
+export type InputContent =
+  | TextInputContent
+  | ImageInputContent
+  | AudioInputContent
+  | VideoInputContent
+  | DocumentInputContent
+  | BinaryInputContent;
+
+export type InputContentPart = InputContent;
+
+interface BaseMessageFields {
+  id: string;
+  name?: string;
+  encryptedValue?: string;
+}
+
+export interface DeveloperMessage extends BaseMessageFields {
+  role: "developer";
+  content: string;
+}
+
+export interface SystemMessage extends BaseMessageFields {
+  role: "system";
+  content: string;
+}
+
+export interface AssistantMessage extends BaseMessageFields {
+  role: "assistant";
+  content?: string;
+  toolCalls?: ToolCall[];
+}
+
+export interface UserMessage extends BaseMessageFields {
+  role: "user";
+  content: string | InputContent[];
+}
+
+export interface ToolMessage {
+  id: string;
+  content: string;
+  role: "tool";
+  toolCallId: string;
+  error?: string;
+  encryptedValue?: string;
+}
+
+export interface ActivityMessage {
+  id: string;
+  role: "activity";
+  activityType: string;
+  content: Record<string, any>;
+}
+
+export interface ReasoningMessage {
+  id: string;
+  role: "reasoning";
+  content: string;
+  encryptedValue?: string;
+}
+
+export type Message =
+  | DeveloperMessage
+  | SystemMessage
+  | AssistantMessage
+  | UserMessage
+  | ToolMessage
+  | ActivityMessage
+  | ReasoningMessage;
+
+export type Role =
+  | "developer"
+  | "system"
+  | "assistant"
+  | "user"
+  | "tool"
+  | "activity"
+  | "reasoning";
+
+export interface Context {
+  description: string;
+  value: string;
+}
+
+export interface Tool {
+  name: string;
+  description: string;
+  parameters?: any;
+  metadata?: Record<string, any>;
+}
+
+export interface Interrupt {
+  id: string;
+  reason: string;
+  message?: string;
+  toolCallId?: string;
+  responseSchema?: Record<string, any>;
+  expiresAt?: string;
+  metadata?: Record<string, any>;
+}
+
+export type ResumeStatus = "resolved" | "cancelled";
+
+export interface ResumeEntry {
+  interruptId: string;
+  status: ResumeStatus;
+  payload?: any;
+}
+
+export interface RunAgentInput {
+  threadId: string;
+  runId: string;
+  parentRunId?: string;
+  state?: any;
+  messages: Message[];
+  tools: Tool[];
+  context: Context[];
+  forwardedProps?: any;
+  resume?: ResumeEntry[];
+}
+
+export type State = any;
 
 export class AGUIError extends Error {
   constructor(message: string) {

@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  EventSchemas,
-  EventType,
-  ToolCallChunkEventSchema,
-  type ToolCallStartEvent,
-  type ToolCallStartEventProps,
-  ToolCallStartEventSchema,
-} from "../events";
+import { z } from "zod/v4";
+import { EventType, type ToolCallStartEvent } from "../events";
+import { EventSchemas, ToolCallChunkEventSchema, ToolCallStartEventSchema } from "../schemas";
 
 describe("ToolCallStartEventSchema — parentMessageId is optional and back-compat", () => {
   it("parses an event with no parentMessageId", () => {
@@ -86,25 +81,31 @@ describe("ToolCallStart — public type contract is not broken (compile-time)", 
     const read: string | undefined = consumerOmits.parentMessageId;
     expect(read).toBeUndefined();
 
-    // Construction/props type (`z.input`) only WIDENS — `null` is now accepted
-    // ALONGSIDE the previously-valid string and omitted forms. This is additive:
-    // every input that compiled before still compiles.
-    const propsWithNull: ToolCallStartEventProps = {
+    // Schema INPUT only WIDENS — `null` is now accepted ALONGSIDE the previously
+    // valid string and omitted forms. This is additive: every input that parsed
+    // before still parses. The schemas are the source of truth for wire
+    // validation here; the hand-written `ToolCallStartEventProps` construction
+    // type stays `string | undefined`, since accepting `null` is a wire concern.
+    type ToolCallStartInput = z.input<typeof ToolCallStartEventSchema>;
+    const inputWithNull: ToolCallStartInput = {
+      type: EventType.TOOL_CALL_START,
       toolCallId: "tc-1",
       toolCallName: "get_weather",
       parentMessageId: null,
     };
-    const propsWithString: ToolCallStartEventProps = {
+    const inputWithString: ToolCallStartInput = {
+      type: EventType.TOOL_CALL_START,
       toolCallId: "tc-1",
       toolCallName: "get_weather",
       parentMessageId: "msg-1",
     };
-    const propsOmitted: ToolCallStartEventProps = {
+    const inputOmitted: ToolCallStartInput = {
+      type: EventType.TOOL_CALL_START,
       toolCallId: "tc-1",
       toolCallName: "get_weather",
     };
-    expect(propsWithNull.parentMessageId).toBeNull();
-    expect(propsWithString.parentMessageId).toBe("msg-1");
-    expect(propsOmitted.parentMessageId).toBeUndefined();
+    expect(inputWithNull.parentMessageId).toBeNull();
+    expect(inputWithString.parentMessageId).toBe("msg-1");
+    expect(inputOmitted.parentMessageId).toBeUndefined();
   });
 });

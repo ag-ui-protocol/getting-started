@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { InterruptSchema, ResumeEntrySchema, RunAgentInputSchema } from "../types";
+import { InterruptSchema, ResumeEntrySchema, RunAgentInputSchema } from "../schemas";
 
 describe("InterruptSchema", () => {
   it("accepts an interrupt with only required fields", () => {

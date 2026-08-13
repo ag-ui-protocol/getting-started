@@ -7,11 +7,11 @@ For more information visit the [official documentation](https://docs.ag-ui.com/)
 ## Multimodal user messages
 
 ```ts
-import { UserMessageSchema } from "@ag-ui/core";
+import type { UserMessage } from "@ag-ui/core";
 
-const message = UserMessageSchema.parse({
+const message: UserMessage = {
   id: "user-123",
-  role: "user" as const,
+  role: "user",
   content: [
     { type: "text", text: "Please describe this image" },
     {
@@ -23,7 +23,7 @@ const message = UserMessageSchema.parse({
       },
     },
   ],
-});
+};
 
 console.log(message);
 // { id: "user-123", role: "user", content: [...] }

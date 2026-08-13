@@ -1,0 +1,151 @@
+---
+title: "Migrating to @ag-ui/core 0.1.0"
+description: "Update your code from 0.0.x to 0.1.0: schemas moved to a subpath, zod is now an optional peer dependency."
+---
+
+# Migrating to @ag-ui/core 0.1.0
+
+`@ag-ui/core` 0.1.0 splits the package surface: TypeScript types stay on the main entry, zod schemas move to a new opt-in subpath `@ag-ui/core/schemas`, and zod becomes an optional peer dependency.
+
+If your code only imports types (`Message`, `Tool`, `EventType`, etc.) from `@ag-ui/core`, you don't need to change anything — just bump the version. If you import any `*Schema` constant (`UserMessageSchema`, `EventSchemas`, `AgentCapabilitiesSchema`, etc.) or any `create*Event` factory, update the import path to `@ag-ui/core/schemas`.
+
+If you import from `@ag-ui/client` rather than `@ag-ui/core`, nothing changes at all — `@ag-ui/client` re-exports the schemas subpath.
+
+## Why this changed
+
+Prior versions shipped zod 3.x as a hard runtime dependency. Consumers running zod 4 in their app ended up with two zod copies in their dependency graph, which broke `instanceof ZodError` checks across module boundaries and inflated bundle size. Making zod a peer dependency (now accepting `^3.25.18 || ^4.0.0`) lets the consumer pick exactly one version. Moving schemas to an opt-in subpath means consumers who only use types pay no zod cost at all.
+
+### How one build supports both zod majors
+
+The schemas subpath imports `zod/v4`, not `zod`. zod 3.25.x shipped the entire zod 4 implementation at that subpath, and zod 4.x keeps `zod/v4` as an alias for its own entry — so both majors expose an identical API, and one set of published `.d.ts` files type-checks against either.
+
+Importing bare `zod` would instead bake major-specific declaration shapes (`ZodEnum<[...]>`, five-parameter `ZodObject`, `ZodEffects`) into the published types, which is why zod 4 consumers previously saw hundreds of library type errors. Every supported zod version is now checked in CI with `skipLibCheck` disabled.
+
+### Why the floor is 3.25.18
+
+It is a specific number because it was found by bisection rather than assumed:
+
+- zod **3.24.x** has no `zod/v4` subpath at all.
+- zod **3.25.0** is a broken publish — its tarball contains only `src/` and `package.json`, no `dist/`, so even `require("zod")` fails.
+- zod **3.25.1 through 3.25.17** ship `zod/v4` declarations that fail TypeScript variance checks (four `TS2636` errors inside zod's own `.d.ts`) for any strict consumer compiling without `skipLibCheck`.
+- zod **3.25.18** is the first release that type-checks cleanly.
+
+If you are below 3.25.18, upgrading to the latest 3.25.x is a patch-level move within zod 3. Installing zod fresh gets you a supported version automatically.
+
+<Callout type="info">
+**Do you need to migrate?**
+- **No** — if you import from `@ag-ui/client`, or if your code only imports types and value enums from `@ag-ui/core` (`Message`, `EventType`, `AGUIError`, etc.). Just bump the version.
+- **Yes** — if your code imports any `*Schema` constant (e.g. `UserMessageSchema`, `EventSchemas`, `AgentCapabilitiesSchema`) or any `create*Event` factory (e.g. `createTextMessageStartEvent`) **from `@ag-ui/core`**.
+</Callout>
+
+## Manual migration steps
+
+<Steps>
+  <Step title="Update @ag-ui/core in package.json">
+    Bump the version constraint to `^0.1.0`:
+
+    ```json
+    {
+      "dependencies": {
+        "@ag-ui/core": "^0.1.0"
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Install zod explicitly (schema consumers only)">
+    If you import anything from `@ag-ui/core/schemas`, install zod as a direct dependency. zod 3.25.18+ and all of zod 4 are supported:
+
+    ```bash
+    # Pick whichever major your project already uses
+    npm install zod          # latest (zod 4)
+    npm install zod@^3.25.18  # stay on zod 3
+    ```
+
+    The supported peer dependency range is `^3.25.18 || ^4.0.0`. If your project has no opinion on zod, installing the latest is fine.
+  </Step>
+
+  <Step title="Redirect *Schema imports to the new subpath">
+    Every schema that was exported from `@ag-ui/core` in 0.0.x is now exported from `@ag-ui/core/schemas`. Names are unchanged — only the import source changes.
+
+    <Tabs>
+      <Tab title="Schemas only">
+        ```ts
+        // Before
+        import { UserMessageSchema, EventSchemas } from "@ag-ui/core";
+
+        // After
+        import { UserMessageSchema, EventSchemas } from "@ag-ui/core/schemas";
+        ```
+      </Tab>
+      <Tab title="Mixed types and schemas">
+        ```ts
+        // Before
+        import { Message, UserMessageSchema } from "@ag-ui/core";
+
+        // After
+        import { Message } from "@ag-ui/core";
+        import { UserMessageSchema } from "@ag-ui/core/schemas";
+        ```
+      </Tab>
+      <Tab title="Types only (unchanged)">
+        ```ts
+        // Before — unchanged
+        import type { Message, Tool, EventType } from "@ag-ui/core";
+
+        // After — unchanged
+        import type { Message, Tool, EventType } from "@ag-ui/core";
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Verify">
+    Reinstall and rebuild to confirm everything resolves correctly:
+
+    ```bash
+    pnpm install && pnpm build
+    ```
+
+    If you're using npm or yarn, substitute the equivalent commands. The build should complete without unresolved-module or missing-peer errors.
+  </Step>
+</Steps>
+
+## Automated migration
+
+For codebases with many `*Schema` or `create*Event` imports, a jscodeshift codemod is shipped in
+the `ag-ui` repo at `codemods/0.1.0-schemas-to-subpath.ts`. It
+splits combined imports and redirects every `*Schema` and `create*Event` import to `@ag-ui/core/schemas`.
+
+Run it from your project root:
+
+```bash
+npx jscodeshift -t https://raw.githubusercontent.com/ag-ui-protocol/ag-ui/main/codemods/0.1.0-schemas-to-subpath.ts \
+  --parser=tsx \
+  --extensions=ts,tsx \
+  src/
+```
+
+The transform is idempotent — running it twice has no extra effect. See
+[the codemod README](https://github.com/ag-ui-protocol/ag-ui/blob/main/codemods/README.md)
+for details and a list of recognized schemas.
+
+## FAQ
+
+**Q: I'm on zod 4. Can I use AG-UI now?**
+
+Yes — `@ag-ui/core/schemas` declares `zod ^3.25.18 || ^4.0.0` as an optional peer dependency. Install whichever major you prefer; there's no longer a hard pin to zod 3. Both ends of the range are exercised in CI — the 3.25.18 and 4.0.0 floors plus the latest zod 4 — type-checked with `skipLibCheck` off and run against a shared event corpus that must return identical verdicts on every version.
+
+**Q: I don't want zod at all. Can I still use AG-UI?**
+
+Yes — the main `@ag-ui/core` entry has zero runtime dependencies. Use the TypeScript types directly and validate runtime data with whatever library you prefer (valibot, arktype, hand-written checks, or no validation at all).
+
+**Q: Where can I find the full list of exports that moved?**
+
+Every schema that was exported from `@ag-ui/core` in 0.0.x is now exported from `@ag-ui/core/schemas`, along with every `create*Event` factory. Names are unchanged. The complete list lives in [`schemas.ts`](https://github.com/ag-ui-protocol/ag-ui/blob/main/sdks/typescript/packages/core/src/schemas.ts) and [`event-factories.ts`](https://github.com/ag-ui-protocol/ag-ui/blob/main/sdks/typescript/packages/core/src/event-factories.ts) in the source.
+
+**Q: I'm on zod 3.25.x. Does anything change for me at runtime?**
+
+Yes, in two ways. The schemas now execute zod's **v4 engine** (via `zod/v4`) instead of zod 3 classic, so validation errors are `ZodError`s from `zod/v4`: read `error.issues`, not `error.errors`, and do not compare message strings. And `Tool.parameters`, `RunAgentInput.state`, `RunAgentInput.forwardedProps`, `StateSnapshotEvent.snapshot`, `RawEvent.event` and `CustomEvent.value` are now explicitly optional in both the schemas and the types — these were the fields whose accept/reject behavior varied between zod engine versions, so pinning them is what makes the contract identical on every supported zod.
+
+Accepted payloads are unchanged otherwise: the schemas converge on the laxer, already-shipped zod 3 behavior, so anything that validated before still validates.

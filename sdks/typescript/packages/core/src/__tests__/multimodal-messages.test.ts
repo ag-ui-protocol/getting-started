@@ -8,7 +8,7 @@ import {
   InputContentDataSourceSchema,
   InputContentUrlSourceSchema,
   BinaryInputContentSchema,
-} from "../types";
+} from "../schemas";
 
 const MODALITIES = ["image", "audio", "video", "document"] as const;
 

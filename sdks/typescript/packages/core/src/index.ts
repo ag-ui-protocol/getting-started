@@ -1,39 +1,13 @@
-// Export all base types and schemas
+// Base types
 export * from "./types";
 
-// Export all capability-related types and schemas
-export {
-  SubAgentInfoSchema,
-  IdentityCapabilitiesSchema,
-  TransportCapabilitiesSchema,
-  ToolsCapabilitiesSchema,
-  OutputCapabilitiesSchema,
-  StateCapabilitiesSchema,
-  MultiAgentCapabilitiesSchema,
-  ReasoningCapabilitiesSchema,
-  MultimodalInputCapabilitiesSchema,
-  MultimodalOutputCapabilitiesSchema,
-  MultimodalCapabilitiesSchema,
-  ExecutionCapabilitiesSchema,
-  HumanInTheLoopCapabilitiesSchema,
-  AgentCapabilitiesSchema,
-} from "./capabilities";
-export type {
-  SubAgentInfo,
-  IdentityCapabilities,
-  TransportCapabilities,
-  ToolsCapabilities,
-  OutputCapabilities,
-  StateCapabilities,
-  MultiAgentCapabilities,
-  ReasoningCapabilities,
-  MultimodalInputCapabilities,
-  MultimodalOutputCapabilities,
-  MultimodalCapabilities,
-  ExecutionCapabilities,
-  HumanInTheLoopCapabilities,
-  AgentCapabilities,
-} from "./capabilities";
+// Capability types
+export * from "./capabilities";
 
-// Export all event-related types and schemas
+// Event types and EventType enum
 export * from "./events";
+
+// NOTE: the `create*Event` factories are NOT exported here. They validate via zod
+// and therefore live in the `@ag-ui/core/schemas` subpath, keeping this entry
+// dependency-free. `@ag-ui/client` re-exports that subpath, so client consumers
+// are unaffected. See docs/sdk/js/core/migration-0-1-0.mdx.

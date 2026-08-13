@@ -43,7 +43,8 @@
     "@arethetypeswrong/cli": "^0.17.4",
     "tsdown": "^0.20.1",
     "typescript": "^5.3.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "zod": "^3.25.18 || ^4.0.0"
   },
   "repository": {
     "type": "git",
@@ -58,6 +59,7 @@
   },
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "require": "./dist/index.js",
       "import": "./dist/index.mjs"
     },

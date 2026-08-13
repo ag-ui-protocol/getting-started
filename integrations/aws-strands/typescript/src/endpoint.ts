@@ -1,12 +1,8 @@
 /** Express endpoint utilities for AWS Strands integration. */
 
 import type { Express, Request, Response } from "express";
-import {
-  EventType,
-  RunAgentInputSchema,
-  type BaseEvent,
-  type RunAgentInput,
-} from "@ag-ui/core";
+import { EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/core";
+import { RunAgentInputSchema } from "@ag-ui/core/schemas";
 import { EventEncoder } from "@ag-ui/encoder";
 import type { StrandsAgent } from "./agent";
 

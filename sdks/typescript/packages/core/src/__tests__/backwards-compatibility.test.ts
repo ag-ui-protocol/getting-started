@@ -1,3 +1,4 @@
+import { EventType } from "../events";
 import {
   UserMessageSchema,
   AssistantMessageSchema,
@@ -6,8 +7,7 @@ import {
   RunStartedEventSchema,
   ToolSchema,
   ContextSchema,
-  EventType,
-} from "../index";
+} from "../schemas";
 
 describe("Backwards Compatibility", () => {
   describe("Message Schemas", () => {
@@ -243,7 +243,7 @@ describe("Backwards Compatibility", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.messages.length).toBe(2);
-        expect(result.data.messages[1].toolCalls?.length).toBe(1);
+        expect((result.data.messages[1] as any).toolCalls?.length).toBe(1);
         expect(result.data.tools.length).toBe(1);
         expect(result.data.context.length).toBe(1);
       }

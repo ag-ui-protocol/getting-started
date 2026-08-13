@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { EventType } from "../events";
 import {
   EventSchemas,
-  EventType,
   RunFinishedEventSchema,
   RunFinishedOutcomeSchema,
-} from "../events";
+} from "../schemas";
 
 describe("RunFinishedEventSchema — outcome is optional and back-compat", () => {
   it("parses a legacy event with no outcome", () => {

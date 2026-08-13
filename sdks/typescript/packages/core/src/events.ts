@@ -1,13 +1,7 @@
-import { z } from "zod";
-import { MessageSchema, StateSchema, RunAgentInputSchema, InterruptSchema } from "./types";
+// Canonical event types and the EventType enum for AG-UI. This is the
+// authoritative event-surface module of @ag-ui/core.
 
-// Text messages can have any role except "tool"
-const TextMessageRoleSchema = z.union([
-  z.literal("developer"),
-  z.literal("system"),
-  z.literal("assistant"),
-  z.literal("user"),
-]);
+import type { Message, RunAgentInput, Interrupt } from "./types";
 
 export enum EventType {
   TEXT_MESSAGE_START = "TEXT_MESSAGE_START",
@@ -19,25 +13,15 @@ export enum EventType {
   TOOL_CALL_END = "TOOL_CALL_END",
   TOOL_CALL_CHUNK = "TOOL_CALL_CHUNK",
   TOOL_CALL_RESULT = "TOOL_CALL_RESULT",
-  /**
-   * @deprecated Use REASONING_START instead. Will be removed in 1.0.0.
-   */
+  /** @deprecated Use REASONING_START instead. Will be removed in 1.0.0. */
   THINKING_START = "THINKING_START",
-  /**
-   * @deprecated Use REASONING_END instead. Will be removed in 1.0.0.
-   */
+  /** @deprecated Use REASONING_END instead. Will be removed in 1.0.0. */
   THINKING_END = "THINKING_END",
-  /**
-   * @deprecated Use REASONING_MESSAGE_START instead. Will be removed in 1.0.0.
-   */
+  /** @deprecated Use REASONING_MESSAGE_START instead. Will be removed in 1.0.0. */
   THINKING_TEXT_MESSAGE_START = "THINKING_TEXT_MESSAGE_START",
-  /**
-   * @deprecated Use REASONING_MESSAGE_CONTENT instead. Will be removed in 1.0.0.
-   */
+  /** @deprecated Use REASONING_MESSAGE_CONTENT instead. Will be removed in 1.0.0. */
   THINKING_TEXT_MESSAGE_CONTENT = "THINKING_TEXT_MESSAGE_CONTENT",
-  /**
-   * @deprecated Use REASONING_MESSAGE_END instead. Will be removed in 1.0.0.
-   */
+  /** @deprecated Use REASONING_MESSAGE_END instead. Will be removed in 1.0.0. */
   THINKING_TEXT_MESSAGE_END = "THINKING_TEXT_MESSAGE_END",
   STATE_SNAPSHOT = "STATE_SNAPSHOT",
   STATE_DELTA = "STATE_DELTA",
@@ -60,308 +44,323 @@ export enum EventType {
   REASONING_ENCRYPTED_VALUE = "REASONING_ENCRYPTED_VALUE",
 }
 
-export const BaseEventSchema = z
-  .object({
-    type: z.nativeEnum(EventType),
-    timestamp: z.number().optional(),
-    rawEvent: z.any().optional(),
-  })
-  .passthrough();
+// ---------------------------------------------------------------------------
+// Shared primitives
+// ---------------------------------------------------------------------------
 
-export const TextMessageStartEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.TEXT_MESSAGE_START),
-  messageId: z.string(),
-  role: TextMessageRoleSchema.default("assistant"),
-  name: z.string().optional(),
-});
+export type TextMessageRole = "developer" | "system" | "assistant" | "user";
 
-export const TextMessageContentEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.TEXT_MESSAGE_CONTENT),
-  messageId: z.string(),
-  delta: z.string(),
-});
+export type ReasoningEncryptedValueSubtype = "tool-call" | "message";
 
-export const TextMessageEndEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.TEXT_MESSAGE_END),
-  messageId: z.string(),
-});
+// ---------------------------------------------------------------------------
+// BaseEvent
+// ---------------------------------------------------------------------------
 
-export const TextMessageChunkEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.TEXT_MESSAGE_CHUNK),
-  messageId: z.string().optional(),
-  role: TextMessageRoleSchema.optional(),
-  delta: z.string().optional(),
-  name: z.string().optional(),
-});
+export interface BaseEvent {
+  type: EventType;
+  timestamp?: number;
+  rawEvent?: any;
+  [k: string]: unknown;
+}
 
-/**
- * @deprecated Use ReasoningMessageStartEventSchema instead. Will be removed in 1.0.0.
- */
-export const ThinkingTextMessageStartEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.THINKING_TEXT_MESSAGE_START),
-});
+// Alias kept for parity with events.ts
+export type BaseEventFields = BaseEvent;
 
-/**
- * @deprecated Use ReasoningMessageContentEventSchema instead. Will be removed in 1.0.0.
- */
-export const ThinkingTextMessageContentEventSchema = TextMessageContentEventSchema.omit({
-  messageId: true,
-  type: true,
-}).extend({
-  type: z.literal(EventType.THINKING_TEXT_MESSAGE_CONTENT),
-});
+// ---------------------------------------------------------------------------
+// Text-message events
+// ---------------------------------------------------------------------------
 
-/**
- * @deprecated Use ReasoningMessageEndEventSchema instead. Will be removed in 1.0.0.
- */
-export const ThinkingTextMessageEndEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.THINKING_TEXT_MESSAGE_END),
-});
+export interface TextMessageStartEvent extends BaseEvent {
+  type: EventType.TEXT_MESSAGE_START;
+  messageId: string;
+  // .default("assistant") means z.infer gives non-optional TextMessageRole
+  role: TextMessageRole;
+  name?: string;
+}
 
-export const ToolCallStartEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.TOOL_CALL_START),
-  toolCallId: z.string(),
-  toolCallName: z.string(),
-  // Accept `null` and treat it as omitted, so producers that serialize optional
-  // fields as JSON `null` (e.g. the .NET Microsoft Agent Framework adapter,
-  // whose System.Text.Json emits `"parentMessageId": null`) still validate
-  // instead of aborting the run on the first tool call.
-  parentMessageId: z
-    .string()
-    .nullable()
-    .optional()
-    .transform((v) => v ?? undefined),
-});
+export interface TextMessageContentEvent extends BaseEvent {
+  type: EventType.TEXT_MESSAGE_CONTENT;
+  messageId: string;
+  delta: string;
+}
 
-export const ToolCallArgsEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.TOOL_CALL_ARGS),
-  toolCallId: z.string(),
-  delta: z.string(),
-});
+export interface TextMessageEndEvent extends BaseEvent {
+  type: EventType.TEXT_MESSAGE_END;
+  messageId: string;
+}
 
-export const ToolCallEndEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.TOOL_CALL_END),
-  toolCallId: z.string(),
-});
+export interface TextMessageChunkEvent extends BaseEvent {
+  type: EventType.TEXT_MESSAGE_CHUNK;
+  messageId?: string;
+  role?: TextMessageRole;
+  delta?: string;
+  name?: string;
+}
 
-export const ToolCallResultEventSchema = BaseEventSchema.extend({
-  messageId: z.string(),
-  type: z.literal(EventType.TOOL_CALL_RESULT),
-  toolCallId: z.string(),
-  content: z.string(),
-  role: z.literal("tool").optional(),
-});
+// ---------------------------------------------------------------------------
+// Deprecated Thinking events (aliased to Reasoning counterparts in 1.0.0)
+// ---------------------------------------------------------------------------
 
-export const ToolCallChunkEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.TOOL_CALL_CHUNK),
-  toolCallId: z.string().optional(),
-  toolCallName: z.string().optional(),
-  // Accept `null` as omitted — same cross-language quirk as TOOL_CALL_START.
-  parentMessageId: z
-    .string()
-    .nullable()
-    .optional()
-    .transform((v) => v ?? undefined),
-  delta: z.string().optional(),
-});
+/** @deprecated Use ReasoningTextMessageStartEvent instead. Will be removed in 1.0.0. */
+export interface ThinkingTextMessageStartEvent extends BaseEvent {
+  type: EventType.THINKING_TEXT_MESSAGE_START;
+}
 
-/**
- * @deprecated Use ReasoningStartEventSchema instead. Will be removed in 1.0.0.
- */
-export const ThinkingStartEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.THINKING_START),
-  title: z.string().optional(),
-});
+/** @deprecated Use ReasoningMessageContentEvent instead. Will be removed in 1.0.0. */
+export interface ThinkingTextMessageContentEvent extends BaseEvent {
+  type: EventType.THINKING_TEXT_MESSAGE_CONTENT;
+  // ThinkingTextMessageContentEventSchema omits messageId from TextMessageContentEventSchema
+  delta: string;
+}
 
-/**
- * @deprecated Use ReasoningEndEventSchema instead. Will be removed in 1.0.0.
- */
-export const ThinkingEndEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.THINKING_END),
-});
+/** @deprecated Use ReasoningMessageEndEvent instead. Will be removed in 1.0.0. */
+export interface ThinkingTextMessageEndEvent extends BaseEvent {
+  type: EventType.THINKING_TEXT_MESSAGE_END;
+}
 
-export const StateSnapshotEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.STATE_SNAPSHOT),
-  snapshot: StateSchema,
-});
+// ---------------------------------------------------------------------------
+// Tool-call events
+// ---------------------------------------------------------------------------
 
-export const StateDeltaEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.STATE_DELTA),
-  delta: z.array(z.any()), // JSON Patch (RFC 6902)
-});
+export interface ToolCallStartEvent extends BaseEvent {
+  type: EventType.TOOL_CALL_START;
+  toolCallId: string;
+  toolCallName: string;
+  parentMessageId?: string;
+}
 
-export const MessagesSnapshotEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.MESSAGES_SNAPSHOT),
-  messages: z.array(MessageSchema),
-});
+export interface ToolCallArgsEvent extends BaseEvent {
+  type: EventType.TOOL_CALL_ARGS;
+  toolCallId: string;
+  delta: string;
+}
 
-export const ActivitySnapshotEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.ACTIVITY_SNAPSHOT),
-  messageId: z.string(),
-  activityType: z.string(),
-  content: z.record(z.any()),
-  replace: z.boolean().optional().default(true),
-});
+export interface ToolCallEndEvent extends BaseEvent {
+  type: EventType.TOOL_CALL_END;
+  toolCallId: string;
+}
 
-export const ActivityDeltaEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.ACTIVITY_DELTA),
-  messageId: z.string(),
-  activityType: z.string(),
-  patch: z.array(z.any()),
-});
+export interface ToolCallResultEvent extends BaseEvent {
+  messageId: string;
+  type: EventType.TOOL_CALL_RESULT;
+  toolCallId: string;
+  content: string;
+  role?: "tool";
+}
 
-export const RawEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.RAW),
-  event: z.any(),
-  source: z.string().optional(),
-});
+export interface ToolCallChunkEvent extends BaseEvent {
+  type: EventType.TOOL_CALL_CHUNK;
+  toolCallId?: string;
+  toolCallName?: string;
+  parentMessageId?: string;
+  delta?: string;
+}
 
-export const CustomEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.CUSTOM),
-  name: z.string(),
-  value: z.any(),
-});
+// ---------------------------------------------------------------------------
+// Deprecated Thinking start/end
+// ---------------------------------------------------------------------------
 
-export const RunStartedEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.RUN_STARTED),
-  threadId: z.string(),
-  runId: z.string(),
-  parentRunId: z.string().optional(),
-  input: RunAgentInputSchema.optional(),
-});
+/** @deprecated Use ReasoningStartEvent instead. Will be removed in 1.0.0. */
+export interface ThinkingStartEvent extends BaseEvent {
+  type: EventType.THINKING_START;
+  title?: string;
+}
 
-export const RunFinishedSuccessOutcomeSchema = z
-  .object({
-    type: z.literal("success"),
-  })
-  .strict();
+/** @deprecated Use ReasoningEndEvent instead. Will be removed in 1.0.0. */
+export interface ThinkingEndEvent extends BaseEvent {
+  type: EventType.THINKING_END;
+}
 
-export const RunFinishedInterruptOutcomeSchema = z
-  .object({
-    type: z.literal("interrupt"),
-    interrupts: z.array(InterruptSchema).min(1),
-  })
-  .strict();
+// ---------------------------------------------------------------------------
+// State / message snapshot events
+// ---------------------------------------------------------------------------
 
-export const RunFinishedOutcomeSchema = z.discriminatedUnion("type", [
-  RunFinishedSuccessOutcomeSchema,
-  RunFinishedInterruptOutcomeSchema,
-]);
+export interface StateSnapshotEvent extends BaseEvent {
+  type: EventType.STATE_SNAPSHOT;
+  snapshot?: any;
+}
 
-export const RunFinishedEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.RUN_FINISHED),
-  threadId: z.string(),
-  runId: z.string(),
-  result: z.any().optional(),
-  // Accept `null` and treat it as omitted, so producers like the Pydantic-based
-  // Python SDK that serialize via `model_dump()` (without `exclude_none=True`)
-  // and emit `"outcome": null` for the legacy no-outcome case still validate.
-  outcome: RunFinishedOutcomeSchema.nullable()
-    .optional()
-    .transform((v) => v ?? undefined),
-});
+export interface StateDeltaEvent extends BaseEvent {
+  type: EventType.STATE_DELTA;
+  delta: any[];
+}
 
-export const RunErrorEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.RUN_ERROR),
-  message: z.string(),
-  code: z.string().optional(),
-});
+export interface MessagesSnapshotEvent extends BaseEvent {
+  type: EventType.MESSAGES_SNAPSHOT;
+  messages: Message[];
+}
 
-export const StepStartedEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.STEP_STARTED),
-  stepName: z.string(),
-});
+export interface ActivitySnapshotEvent extends BaseEvent {
+  type: EventType.ACTIVITY_SNAPSHOT;
+  messageId: string;
+  activityType: string;
+  content: Record<string, any>;
+  // .optional().default(true) — z.infer OUTPUT is boolean (not optional)
+  replace: boolean;
+}
 
-export const StepFinishedEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.STEP_FINISHED),
-  stepName: z.string(),
-});
+export interface ActivityDeltaEvent extends BaseEvent {
+  type: EventType.ACTIVITY_DELTA;
+  messageId: string;
+  activityType: string;
+  patch: any[];
+}
 
-// Schema for the encrypted signature subtype
-export const ReasoningEncryptedValueSubtypeSchema = z.union([
-  z.literal("tool-call"),
-  z.literal("message"),
-]);
+// ---------------------------------------------------------------------------
+// Raw / Custom events
+// ---------------------------------------------------------------------------
 
-export const ReasoningStartEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.REASONING_START),
-  messageId: z.string(),
-});
+export interface RawEvent extends BaseEvent {
+  type: EventType.RAW;
+  event?: any;
+  source?: string;
+}
 
-export const ReasoningMessageStartEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.REASONING_MESSAGE_START),
-  messageId: z.string(),
-  role: z.literal("reasoning"),
-});
+export interface CustomEvent extends BaseEvent {
+  type: EventType.CUSTOM;
+  name: string;
+  value?: any;
+}
 
-export const ReasoningMessageContentEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.REASONING_MESSAGE_CONTENT),
-  messageId: z.string(),
-  delta: z.string(),
-});
+// ---------------------------------------------------------------------------
+// Run lifecycle events
+// ---------------------------------------------------------------------------
 
-export const ReasoningMessageEndEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.REASONING_MESSAGE_END),
-  messageId: z.string(),
-});
+export interface RunStartedEvent extends BaseEvent {
+  type: EventType.RUN_STARTED;
+  threadId: string;
+  runId: string;
+  parentRunId?: string;
+  input?: RunAgentInput;
+}
 
-export const ReasoningMessageChunkEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.REASONING_MESSAGE_CHUNK),
-  messageId: z.string().optional(),
-  delta: z.string().optional(),
-});
+export interface RunFinishedSuccessOutcome {
+  type: "success";
+}
 
-export const ReasoningEndEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.REASONING_END),
-  messageId: z.string(),
-});
+export interface RunFinishedInterruptOutcome {
+  type: "interrupt";
+  interrupts: Interrupt[];
+}
 
-export const ReasoningEncryptedValueEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.REASONING_ENCRYPTED_VALUE),
-  subtype: ReasoningEncryptedValueSubtypeSchema,
-  entityId: z.string(),
-  encryptedValue: z.string(),
-});
+export type RunFinishedOutcome = RunFinishedSuccessOutcome | RunFinishedInterruptOutcome;
 
-export const EventSchemas = z.discriminatedUnion("type", [
-  TextMessageStartEventSchema,
-  TextMessageContentEventSchema,
-  TextMessageEndEventSchema,
-  TextMessageChunkEventSchema,
-  ThinkingStartEventSchema,
-  ThinkingEndEventSchema,
-  ThinkingTextMessageStartEventSchema,
-  ThinkingTextMessageContentEventSchema,
-  ThinkingTextMessageEndEventSchema,
-  ToolCallStartEventSchema,
-  ToolCallArgsEventSchema,
-  ToolCallEndEventSchema,
-  ToolCallChunkEventSchema,
-  ToolCallResultEventSchema,
-  StateSnapshotEventSchema,
-  StateDeltaEventSchema,
-  MessagesSnapshotEventSchema,
-  ActivitySnapshotEventSchema,
-  ActivityDeltaEventSchema,
-  RawEventSchema,
-  CustomEventSchema,
-  RunStartedEventSchema,
-  RunFinishedEventSchema,
-  RunErrorEventSchema,
-  StepStartedEventSchema,
-  StepFinishedEventSchema,
-  ReasoningStartEventSchema,
-  ReasoningMessageStartEventSchema,
-  ReasoningMessageContentEventSchema,
-  ReasoningMessageEndEventSchema,
-  ReasoningMessageChunkEventSchema,
-  ReasoningEndEventSchema,
-  ReasoningEncryptedValueEventSchema,
-]);
+export interface RunFinishedEvent extends BaseEvent {
+  type: EventType.RUN_FINISHED;
+  threadId: string;
+  runId: string;
+  result?: any;
+  // nullable().optional().transform(v => v ?? undefined) → output is RunFinishedOutcome | undefined
+  outcome?: RunFinishedOutcome;
+}
 
-export type BaseEvent = z.infer<typeof BaseEventSchema>;
-export type AGUIEvent = z.infer<typeof EventSchemas>;
-export type BaseEventFields = z.infer<typeof BaseEventSchema>;
+export interface RunErrorEvent extends BaseEvent {
+  type: EventType.RUN_ERROR;
+  message: string;
+  code?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Step events
+// ---------------------------------------------------------------------------
+
+export interface StepStartedEvent extends BaseEvent {
+  type: EventType.STEP_STARTED;
+  stepName: string;
+}
+
+export interface StepFinishedEvent extends BaseEvent {
+  type: EventType.STEP_FINISHED;
+  stepName: string;
+}
+
+// ---------------------------------------------------------------------------
+// Reasoning events
+// ---------------------------------------------------------------------------
+
+export interface ReasoningStartEvent extends BaseEvent {
+  type: EventType.REASONING_START;
+  messageId: string;
+}
+
+export interface ReasoningMessageStartEvent extends BaseEvent {
+  type: EventType.REASONING_MESSAGE_START;
+  messageId: string;
+  role: "reasoning";
+}
+
+export interface ReasoningMessageContentEvent extends BaseEvent {
+  type: EventType.REASONING_MESSAGE_CONTENT;
+  messageId: string;
+  delta: string;
+}
+
+export interface ReasoningMessageEndEvent extends BaseEvent {
+  type: EventType.REASONING_MESSAGE_END;
+  messageId: string;
+}
+
+export interface ReasoningMessageChunkEvent extends BaseEvent {
+  type: EventType.REASONING_MESSAGE_CHUNK;
+  messageId?: string;
+  delta?: string;
+}
+
+export interface ReasoningEndEvent extends BaseEvent {
+  type: EventType.REASONING_END;
+  messageId: string;
+}
+
+export interface ReasoningEncryptedValueEvent extends BaseEvent {
+  type: EventType.REASONING_ENCRYPTED_VALUE;
+  subtype: ReasoningEncryptedValueSubtype;
+  entityId: string;
+  encryptedValue: string;
+}
+
+// ---------------------------------------------------------------------------
+// AGUIEvent discriminated union
+// ---------------------------------------------------------------------------
+
+export type AGUIEvent =
+  | TextMessageStartEvent
+  | TextMessageContentEvent
+  | TextMessageEndEvent
+  | TextMessageChunkEvent
+  | ThinkingStartEvent
+  | ThinkingEndEvent
+  | ThinkingTextMessageStartEvent
+  | ThinkingTextMessageContentEvent
+  | ThinkingTextMessageEndEvent
+  | ToolCallStartEvent
+  | ToolCallArgsEvent
+  | ToolCallEndEvent
+  | ToolCallChunkEvent
+  | ToolCallResultEvent
+  | StateSnapshotEvent
+  | StateDeltaEvent
+  | MessagesSnapshotEvent
+  | ActivitySnapshotEvent
+  | ActivityDeltaEvent
+  | RawEvent
+  | CustomEvent
+  | RunStartedEvent
+  | RunFinishedEvent
+  | RunErrorEvent
+  | StepStartedEvent
+  | StepFinishedEvent
+  | ReasoningStartEvent
+  | ReasoningMessageStartEvent
+  | ReasoningMessageContentEvent
+  | ReasoningMessageEndEvent
+  | ReasoningMessageChunkEvent
+  | ReasoningEndEvent
+  | ReasoningEncryptedValueEvent;
+
+// ---------------------------------------------------------------------------
+// AGUIEventByType mapped type
+// ---------------------------------------------------------------------------
+
 export type AGUIEventByType = {
   [EventType.TEXT_MESSAGE_START]: TextMessageStartEvent;
   [EventType.TEXT_MESSAGE_CONTENT]: TextMessageContentEvent;
@@ -397,89 +396,75 @@ export type AGUIEventByType = {
   [EventType.REASONING_END]: ReasoningEndEvent;
   [EventType.REASONING_ENCRYPTED_VALUE]: ReasoningEncryptedValueEvent;
 };
+
 export type AGUIEventOf<T extends EventType> = AGUIEventByType[T];
 export type EventPayloadOf<T extends EventType> = Omit<AGUIEventOf<T>, keyof BaseEventFields>;
 
-type EventProps<Schema extends z.ZodTypeAny> = Omit<z.input<Schema>, "type">;
+// ---------------------------------------------------------------------------
+// Props types (mirror z.input<Schema> with "type" omitted)
+// Fields with .default() are optional in Props (callers can omit them)
+// ---------------------------------------------------------------------------
 
-export type BaseEventProps = EventProps<typeof BaseEventSchema>;
+/**
+ * Factory input for event `E`: the event minus its `type` discriminant.
+ *
+ * The `type?: never` member is load-bearing. `BaseEvent` carries an
+ * `[k: string]: unknown` index signature to mirror the wire-level passthrough
+ * behavior, and that index signature survives `Omit<E, "type">` — so without an
+ * explicit `type` declaration, `{ type: EventType.RUN_ERROR, ... }` would satisfy
+ * every event's Props and let a caller silently override the discriminant.
+ */
+export type EventProps<E extends BaseEvent> = Omit<E, "type"> & { type?: never };
 
-export type TextMessageStartEventProps = EventProps<typeof TextMessageStartEventSchema>;
-export type TextMessageContentEventProps = EventProps<typeof TextMessageContentEventSchema>;
-export type TextMessageEndEventProps = EventProps<typeof TextMessageEndEventSchema>;
-export type TextMessageChunkEventProps = EventProps<typeof TextMessageChunkEventSchema>;
-export type ThinkingTextMessageStartEventProps = EventProps<
-  typeof ThinkingTextMessageStartEventSchema
->;
-export type ThinkingTextMessageContentEventProps = EventProps<
-  typeof ThinkingTextMessageContentEventSchema
->;
-export type ThinkingTextMessageEndEventProps = EventProps<typeof ThinkingTextMessageEndEventSchema>;
-export type ToolCallStartEventProps = EventProps<typeof ToolCallStartEventSchema>;
-export type ToolCallArgsEventProps = EventProps<typeof ToolCallArgsEventSchema>;
-export type ToolCallEndEventProps = EventProps<typeof ToolCallEndEventSchema>;
-export type ToolCallChunkEventProps = EventProps<typeof ToolCallChunkEventSchema>;
-export type ToolCallResultEventProps = EventProps<typeof ToolCallResultEventSchema>;
-export type ThinkingStartEventProps = EventProps<typeof ThinkingStartEventSchema>;
-export type ThinkingEndEventProps = EventProps<typeof ThinkingEndEventSchema>;
-export type StateSnapshotEventProps = EventProps<typeof StateSnapshotEventSchema>;
-export type StateDeltaEventProps = EventProps<typeof StateDeltaEventSchema>;
-export type MessagesSnapshotEventProps = EventProps<typeof MessagesSnapshotEventSchema>;
-export type ActivitySnapshotEventProps = EventProps<typeof ActivitySnapshotEventSchema>;
-export type ActivityDeltaEventProps = EventProps<typeof ActivityDeltaEventSchema>;
-export type RawEventProps = EventProps<typeof RawEventSchema>;
-export type CustomEventProps = EventProps<typeof CustomEventSchema>;
-export type RunStartedEventProps = EventProps<typeof RunStartedEventSchema>;
-export type RunFinishedEventProps = EventProps<typeof RunFinishedEventSchema>;
-export type RunErrorEventProps = EventProps<typeof RunErrorEventSchema>;
-export type StepStartedEventProps = EventProps<typeof StepStartedEventSchema>;
-export type StepFinishedEventProps = EventProps<typeof StepFinishedEventSchema>;
-export type ReasoningStartEventProps = EventProps<typeof ReasoningStartEventSchema>;
-export type ReasoningMessageStartEventProps = EventProps<typeof ReasoningMessageStartEventSchema>;
-export type ReasoningMessageContentEventProps = EventProps<
-  typeof ReasoningMessageContentEventSchema
->;
-export type ReasoningMessageEndEventProps = EventProps<typeof ReasoningMessageEndEventSchema>;
-export type ReasoningMessageChunkEventProps = EventProps<typeof ReasoningMessageChunkEventSchema>;
-export type ReasoningEndEventProps = EventProps<typeof ReasoningEndEventSchema>;
-export type ReasoningEncryptedValueEventProps = EventProps<
-  typeof ReasoningEncryptedValueEventSchema
->;
+export type BaseEventProps = Omit<BaseEvent, "type">;
 
-export type TextMessageStartEvent = z.infer<typeof TextMessageStartEventSchema>;
-export type TextMessageContentEvent = z.infer<typeof TextMessageContentEventSchema>;
-export type TextMessageEndEvent = z.infer<typeof TextMessageEndEventSchema>;
-export type TextMessageChunkEvent = z.infer<typeof TextMessageChunkEventSchema>;
-export type ThinkingTextMessageStartEvent = z.infer<typeof ThinkingTextMessageStartEventSchema>;
-export type ThinkingTextMessageContentEvent = z.infer<typeof ThinkingTextMessageContentEventSchema>;
-export type ThinkingTextMessageEndEvent = z.infer<typeof ThinkingTextMessageEndEventSchema>;
-export type ToolCallStartEvent = z.infer<typeof ToolCallStartEventSchema>;
-export type ToolCallArgsEvent = z.infer<typeof ToolCallArgsEventSchema>;
-export type ToolCallEndEvent = z.infer<typeof ToolCallEndEventSchema>;
-export type ToolCallChunkEvent = z.infer<typeof ToolCallChunkEventSchema>;
-export type ToolCallResultEvent = z.infer<typeof ToolCallResultEventSchema>;
-export type ThinkingStartEvent = z.infer<typeof ThinkingStartEventSchema>;
-export type ThinkingEndEvent = z.infer<typeof ThinkingEndEventSchema>;
-export type StateSnapshotEvent = z.infer<typeof StateSnapshotEventSchema>;
-export type StateDeltaEvent = z.infer<typeof StateDeltaEventSchema>;
-export type MessagesSnapshotEvent = z.infer<typeof MessagesSnapshotEventSchema>;
-export type ActivitySnapshotEvent = z.infer<typeof ActivitySnapshotEventSchema>;
-export type ActivityDeltaEvent = z.infer<typeof ActivityDeltaEventSchema>;
-export type RawEvent = z.infer<typeof RawEventSchema>;
-export type CustomEvent = z.infer<typeof CustomEventSchema>;
-export type RunStartedEvent = z.infer<typeof RunStartedEventSchema>;
-export type RunFinishedEvent = z.infer<typeof RunFinishedEventSchema>;
-export type RunFinishedOutcome = z.infer<typeof RunFinishedOutcomeSchema>;
-export type RunFinishedSuccessOutcome = z.infer<typeof RunFinishedSuccessOutcomeSchema>;
-export type RunFinishedInterruptOutcome = z.infer<typeof RunFinishedInterruptOutcomeSchema>;
-export type RunErrorEvent = z.infer<typeof RunErrorEventSchema>;
-export type StepStartedEvent = z.infer<typeof StepStartedEventSchema>;
-export type StepFinishedEvent = z.infer<typeof StepFinishedEventSchema>;
-export type ReasoningStartEvent = z.infer<typeof ReasoningStartEventSchema>;
-export type ReasoningMessageStartEvent = z.infer<typeof ReasoningMessageStartEventSchema>;
-export type ReasoningMessageContentEvent = z.infer<typeof ReasoningMessageContentEventSchema>;
-export type ReasoningMessageEndEvent = z.infer<typeof ReasoningMessageEndEventSchema>;
-export type ReasoningMessageChunkEvent = z.infer<typeof ReasoningMessageChunkEventSchema>;
-export type ReasoningEndEvent = z.infer<typeof ReasoningEndEventSchema>;
-export type ReasoningEncryptedValueEvent = z.infer<typeof ReasoningEncryptedValueEventSchema>;
-export type ReasoningEncryptedValueSubtype = z.infer<typeof ReasoningEncryptedValueSubtypeSchema>;
+// TextMessageStartEvent: role has .default("assistant") → optional in Props
+export type TextMessageStartEventProps = Omit<TextMessageStartEvent, "type" | "role"> & {
+  role?: TextMessageRole;
+  type?: never;
+};
+export type TextMessageContentEventProps = EventProps<TextMessageContentEvent>;
+export type TextMessageEndEventProps = EventProps<TextMessageEndEvent>;
+export type TextMessageChunkEventProps = EventProps<TextMessageChunkEvent>;
+
+export type ThinkingTextMessageStartEventProps = EventProps<ThinkingTextMessageStartEvent>;
+export type ThinkingTextMessageContentEventProps = EventProps<ThinkingTextMessageContentEvent>;
+export type ThinkingTextMessageEndEventProps = EventProps<ThinkingTextMessageEndEvent>;
+
+export type ToolCallStartEventProps = EventProps<ToolCallStartEvent>;
+export type ToolCallArgsEventProps = EventProps<ToolCallArgsEvent>;
+export type ToolCallEndEventProps = EventProps<ToolCallEndEvent>;
+export type ToolCallChunkEventProps = EventProps<ToolCallChunkEvent>;
+export type ToolCallResultEventProps = EventProps<ToolCallResultEvent>;
+
+export type ThinkingStartEventProps = EventProps<ThinkingStartEvent>;
+export type ThinkingEndEventProps = EventProps<ThinkingEndEvent>;
+
+export type StateSnapshotEventProps = EventProps<StateSnapshotEvent>;
+export type StateDeltaEventProps = EventProps<StateDeltaEvent>;
+export type MessagesSnapshotEventProps = EventProps<MessagesSnapshotEvent>;
+
+// ActivitySnapshotEvent: replace has .optional().default(true) → optional in Props
+export type ActivitySnapshotEventProps = Omit<ActivitySnapshotEvent, "type" | "replace"> & {
+  replace?: boolean;
+  type?: never;
+};
+export type ActivityDeltaEventProps = EventProps<ActivityDeltaEvent>;
+
+export type RawEventProps = EventProps<RawEvent>;
+export type CustomEventProps = EventProps<CustomEvent>;
+
+export type RunStartedEventProps = EventProps<RunStartedEvent>;
+export type RunFinishedEventProps = EventProps<RunFinishedEvent>;
+export type RunErrorEventProps = EventProps<RunErrorEvent>;
+
+export type StepStartedEventProps = EventProps<StepStartedEvent>;
+export type StepFinishedEventProps = EventProps<StepFinishedEvent>;
+
+export type ReasoningStartEventProps = EventProps<ReasoningStartEvent>;
+export type ReasoningMessageStartEventProps = EventProps<ReasoningMessageStartEvent>;
+export type ReasoningMessageContentEventProps = EventProps<ReasoningMessageContentEvent>;
+export type ReasoningMessageEndEventProps = EventProps<ReasoningMessageEndEvent>;
+export type ReasoningMessageChunkEventProps = EventProps<ReasoningMessageChunkEvent>;
+export type ReasoningEndEventProps = EventProps<ReasoningEndEvent>;
+export type ReasoningEncryptedValueEventProps = EventProps<ReasoningEncryptedValueEvent>;

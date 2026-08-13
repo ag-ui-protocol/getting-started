@@ -1,10 +1,11 @@
-import { BaseEvent, EventSchemas } from "@ag-ui/core";
+import type { BaseEvent } from "@ag-ui/core";
+import { EventType } from "@ag-ui/core";
+import { EventSchemas } from "@ag-ui/core/schemas";
 import { Subject, ReplaySubject, Observable } from "rxjs";
 import { HttpEvent, HttpEventType } from "../run/http-request";
 import { parseSSEStream } from "./sse";
 import { parseProtoStream } from "./proto";
 import * as proto from "@ag-ui/proto";
-import { EventType } from "@ag-ui/core";
 import { type DebugLoggerInput, resolveDebugLogger } from "@/debug-logger";
 
 /**

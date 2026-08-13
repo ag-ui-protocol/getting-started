@@ -1,4 +1,5 @@
-import { TextMessageStartEventSchema, TextMessageChunkEventSchema, EventType } from "../events";
+import { EventType } from "../events";
+import { TextMessageStartEventSchema, TextMessageChunkEventSchema } from "../schemas";
 
 describe("Event role defaults", () => {
   it("should default TextMessageStartEvent role to 'assistant' when not provided", () => {
@@ -9,7 +10,7 @@ describe("Event role defaults", () => {
     };
 
     const parsed = TextMessageStartEventSchema.parse(eventData);
-    
+
     expect(parsed.type).toBe(EventType.TEXT_MESSAGE_START);
     expect(parsed.messageId).toBe("test-msg");
     expect(parsed.role).toBe("assistant"); // Should default to assistant
@@ -23,7 +24,7 @@ describe("Event role defaults", () => {
     };
 
     const parsed = TextMessageStartEventSchema.parse(eventData);
-    
+
     expect(parsed.type).toBe(EventType.TEXT_MESSAGE_START);
     expect(parsed.messageId).toBe("test-msg");
     expect(parsed.role).toBe("user"); // Should use provided role
@@ -31,7 +32,7 @@ describe("Event role defaults", () => {
 
   it("should accept all valid text message roles in TextMessageStartEvent", () => {
     const textMessageRoles = ["developer", "system", "assistant", "user"];
-    
+
     textMessageRoles.forEach(role => {
       const eventData = {
         type: EventType.TEXT_MESSAGE_START,

@@ -4,6 +4,10 @@ description:
   "Documentation for the events used in the Agent User Interaction Protocol SDK"
 ---
 
+<Callout type="info">
+**Upgrading from 0.0.x?** See the [0.1.0 migration guide](/sdk/js/core/migration-0-1-0) — schemas moved to a new subpath and zod is now an optional peer dependency.
+</Callout>
+
 # Events
 
 The Agent User Interaction Protocol SDK uses a streaming event-based
@@ -589,43 +593,32 @@ The following event types are deprecated:
 See [Reasoning Migration](/concepts/reasoning#migration-from-thinking-events)
 for detailed migration guidance.
 
-## Event Schemas
+## Event validation
 
-The SDK uses Zod schemas to validate events:
+`@ag-ui/core` ships TypeScript types for every event but does not bundle a runtime
+schema validator in its main entry. The zod schemas live on an opt-in subpath:
 
 ```typescript
-const EventSchemas = z.discriminatedUnion("type", [
-  TextMessageStartEventSchema,
-  TextMessageContentEventSchema,
-  TextMessageEndEventSchema,
-  ToolCallStartEventSchema,
-  ToolCallArgsEventSchema,
-  ToolCallEndEventSchema,
-  ToolCallResultEventSchema,
-  StateSnapshotEventSchema,
-  StateDeltaEventSchema,
-  MessagesSnapshotEventSchema,
-  ActivitySnapshotEventSchema,
-  ActivityDeltaEventSchema,
-  RawEventSchema,
-  CustomEventSchema,
-  RunStartedEventSchema,
-  RunFinishedEventSchema,
-  RunErrorEventSchema,
-  StepStartedEventSchema,
-  StepFinishedEventSchema,
-  ReasoningStartEventSchema,
-  ReasoningMessageStartEventSchema,
-  ReasoningMessageContentEventSchema,
-  ReasoningMessageEndEventSchema,
-  ReasoningMessageChunkEventSchema,
-  ReasoningEndEventSchema,
-  ReasoningEncryptedValueEventSchema,
-])
+import { EventSchemas } from "@ag-ui/core/schemas";
+
+const result = EventSchemas.safeParse(incoming);
+if (result.success) {
+  // result.data is typed as the discriminated AGUIEvent union
+} else {
+  console.error(result.error);
+}
 ```
 
-This allows for runtime validation of events and provides TypeScript type
-inference.
+zod is an optional peer dependency of `@ag-ui/core/schemas`. Install it explicitly
+if you import from this module:
+
+```bash
+npm install zod
+# or pnpm/yarn — zod 3.25.18+ and all of zod 4 are supported
+```
+
+If you'd rather use a different validation library, define your own schemas locally
+using your library of choice. The TypeScript types from `@ag-ui/core` are the contract.
 
 ### ToolCallChunkEvent
 

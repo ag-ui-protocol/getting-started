@@ -85,7 +85,8 @@
                   "sdk/js/core/overview",
                   "sdk/js/core/types",
                   "sdk/js/core/multimodal-inputs",
-                  "sdk/js/core/events"
+                  "sdk/js/core/events",
+                  "sdk/js/core/migration-0-1-0"
                 ]
               },
               {

@@ -1,11 +1,11 @@
 import {
   BaseEvent,
   AGUIEvent,
-  EventSchemas,
   EventType,
   Message,
   RunFinishedOutcome,
 } from "@ag-ui/core";
+import { EventSchemas } from "@ag-ui/core/schemas";
 import * as protoEvents from "./generated/events";
 import * as protoPatch from "./generated/patch";
 
