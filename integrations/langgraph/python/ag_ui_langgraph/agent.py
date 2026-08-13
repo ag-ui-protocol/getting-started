@@ -371,6 +371,39 @@ def _clear_subagent_lanes(active_run, ids) -> None:
         step_owners.pop(lane, None)
 
 
+def _interrupts_from_tool_error(error) -> Optional[tuple]:
+    """The Interrupt objects carried by an interrupt-shaped tool "error", or None.
+
+    LangGraph propagates an interrupt raised INSIDE a subagent (e.g.
+    HumanInTheLoopMiddleware) through the parent's ``task`` tool as an
+    ``on_tool_error`` whose error is a ``GraphInterrupt`` — a pause, not a
+    failure. Callers use this to tell the two apart. Returns a (possibly
+    empty) tuple of Interrupt objects when the error is interrupt-shaped,
+    else None. The isinstance check is primary; the duck-typed fallback
+    (args that are all Interrupt-shaped: ``value`` + ``id``) covers wrapped
+    or re-raised variants.
+    """
+    if error is None:
+        return None
+    is_graph_interrupt = False
+    try:
+        from langgraph.errors import GraphInterrupt
+
+        is_graph_interrupt = isinstance(error, GraphInterrupt)
+    except ImportError:  # pragma: no cover - langgraph is a hard dependency
+        pass
+    candidates = getattr(error, "args", None) or ()
+    # GraphInterrupt((interrupt, ...)) puts the interrupt TUPLE in args[0].
+    if len(candidates) == 1 and isinstance(candidates[0], (tuple, list)):
+        candidates = tuple(candidates[0])
+    looks_like_interrupts = bool(candidates) and all(
+        hasattr(c, "value") and hasattr(c, "id") for c in candidates
+    )
+    if is_graph_interrupt or looks_like_interrupts:
+        return tuple(candidates) if looks_like_interrupts else ()
+    return None
+
+
 def _deepest_first(active_run, ids) -> list:
     """Order subagent ids so children come before their (grand)parents.
 
@@ -831,6 +864,28 @@ class LangGraphAgent:
         if active_run is None:
             return []
         run_id = event.get("run_id")
+        if is_error:
+            # An interrupt raised inside the subagent propagates through the
+            # `task` tool as an on_tool_error carrying a GraphInterrupt. That
+            # is a PAUSE, not a failure: emitting SUBAGENT_ERROR (with the raw
+            # Interrupt repr as its message) reported a healthy, suspended
+            # subagent as dead — a design partner hit exactly this with
+            # HumanInTheLoopMiddleware. Leave every mapping intact: the run is
+            # about to end on the interrupt path, drain_subagents finishes the
+            # subagent (the documented suspend contract — on resume it replays
+            # and re-emits SUBAGENT_STARTED), and the recorded interrupt ids
+            # let the run-end interrupt tail attribute on_interrupt to the
+            # subagent that raised it (see _emit_interrupt_finish).
+            interrupts = _interrupts_from_tool_error((event.get("data") or {}).get("error"))
+            if interrupts is not None:
+                suspended = (active_run.get("subagent_task_runs") or {}).get(run_id)
+                if suspended and self.emit_subagent_events:
+                    owners = active_run.setdefault("interrupt_subagents", {})
+                    for interrupt in interrupts:
+                        interrupt_id = getattr(interrupt, "id", None)
+                        if interrupt_id:
+                            owners[interrupt_id] = suspended
+                return []
         subagent_run_id = (active_run.get("subagent_task_runs") or {}).pop(run_id, None)
         if not subagent_run_id:
             return []
@@ -2292,6 +2347,18 @@ class LangGraphAgent:
         Caller is responsible for any preceding STATE_SNAPSHOT / MESSAGES_SNAPSHOT.
         """
         agui_interrupts = self._interrupts_to_agui(lg_interrupts)
+        # An interrupt raised INSIDE a subagent is that subagent's request:
+        # the on_tool_error path recorded its id -> subagentRunId (flag-gated,
+        # see _finish_subagent_on_task_end), so the legacy on_interrupt event
+        # carries the attribution and a client can render the approval inside
+        # the subagent's group. Attributing an already-finished subagent is
+        # protocol-legal (the drain finishes the suspended subagent before this
+        # tail). Root-raised interrupts have no recording and stay untagged.
+        interrupt_owners = (
+            ((self.active_run or {}).get("interrupt_subagents") or {})
+            if self.emit_subagent_events
+            else {}
+        )
         events: List[ProcessedEvents] = []
         if self.enable_legacy_on_interrupt_event:
             for raw, mapped in zip(lg_interrupts, agui_interrupts):
@@ -2301,6 +2368,7 @@ class LangGraphAgent:
                         name=LangGraphEventTypes.OnInterrupt.value,
                         value=dump_json_safe(raw.value),
                         raw_event=raw,
+                        subagent_run_id=interrupt_owners.get(getattr(raw, "id", None)),
                     )
                 )
         # Emit the structured outcome when opted in, OR whenever the legacy

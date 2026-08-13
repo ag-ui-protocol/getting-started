@@ -598,6 +598,131 @@ class TestTaskToolErrorTerminatesTheSubagent(unittest.TestCase):
         self.assertNotIn("tools:s1", agent.active_run.get("lane_nodes", {}))
 
 
+class TestTaskInterruptIsNotAnError(unittest.TestCase):
+    """An in-subagent HITL interrupt must not terminate the subagent as failed.
+
+    LangGraph propagates an interrupt raised inside a subagent (e.g.
+    HumanInTheLoopMiddleware) through the parent's `task` tool as an
+    on_tool_error whose error is a GraphInterrupt. Treating every tool error
+    as a failure emitted SUBAGENT_ERROR with the raw Interrupt repr as the
+    message — a design partner hit exactly this. An interrupt is a pause: the
+    subagent stays open (the run-end drain finishes it; on resume it replays),
+    and the interrupt's identity is recorded so the run-end interrupt tail can
+    attribute the on_interrupt event to the subagent that raised it.
+    """
+
+    def _agent(self):
+        agent = _make_agent(emit_subagent_events=True)
+        agent.active_run = {
+            "active_subagents": {"tools:s1": "clock"},
+            "current_subagent_run_id": "tools:s1",
+            "subagent_task_runs": {"run-1": "tools:s1"},
+            "subagent_parents": {"tools:s1": None},
+            "lane_nodes": {"tools:s1": "model"},
+            "step_owners": {},
+            "emit_subagent_events": True,
+        }
+        return agent
+
+    def _graph_interrupt(self):
+        from langgraph.errors import GraphInterrupt
+        from langgraph.types import Interrupt
+
+        return GraphInterrupt((Interrupt(value={"type": "hitl"}, id="int-1"),))
+
+    def test_an_interrupt_shaped_tool_error_emits_no_terminal(self):
+        agent = self._agent()
+        events = agent._finish_subagent_on_task_end({
+            "event": "on_tool_error",
+            "run_id": "run-1",
+            "data": {"error": self._graph_interrupt()},
+        })
+        self.assertEqual(events, [])
+        # The subagent is SUSPENDED, not closed: the run-end drain finishes it.
+        self.assertIn("tools:s1", agent.active_run["active_subagents"])
+        self.assertNotIn("tools:s1", agent.active_run.get("closed_subagents", set()))
+        # The interrupt's identity is recorded for tail attribution.
+        self.assertEqual(
+            agent.active_run.get("interrupt_subagents"), {"int-1": "tools:s1"}
+        )
+
+    def test_a_real_tool_error_still_errors_the_subagent(self):
+        agent = self._agent()
+        events = agent._finish_subagent_on_task_end({
+            "event": "on_tool_error",
+            "run_id": "run-1",
+            "data": {"error": RuntimeError("boom")},
+        })
+        self.assertIn(EventType.SUBAGENT_ERROR, [e.type for e in events])
+
+    def test_flag_off_interrupt_keeps_the_silent_teardown_for_the_drain(self):
+        agent = self._agent()
+        agent.emit_subagent_events = False
+        agent.active_run["emit_subagent_events"] = False
+        events = agent._finish_subagent_on_task_end({
+            "event": "on_tool_error",
+            "run_id": "run-1",
+            "data": {"error": self._graph_interrupt()},
+        })
+        self.assertEqual(events, [])
+        self.assertIn("tools:s1", agent.active_run["active_subagents"])
+        # No attribution is recorded with the flag off.
+        self.assertNotIn("interrupt_subagents", agent.active_run)
+
+
+class TestInterruptTailAttribution(unittest.TestCase):
+    """The run-end on_interrupt CUSTOM event names the subagent that raised it."""
+
+    def _interrupt(self, iid="int-1"):
+        from langgraph.types import Interrupt
+
+        return Interrupt(value={"type": "hitl"}, id=iid)
+
+    def test_the_on_interrupt_event_carries_the_subagents_id(self):
+        agent = _make_agent(emit_subagent_events=True)
+        agent.active_run = {
+            "active_subagents": {},
+            "current_subagent_run_id": None,
+            "interrupt_subagents": {"int-1": "tools:s1"},
+            "emit_subagent_events": True,
+        }
+        events = agent._emit_interrupt_finish(
+            thread_id="t1", run_id="r1", lg_interrupts=[self._interrupt()],
+        )
+        custom = next(e for e in events if e.type == EventType.CUSTOM)
+        self.assertEqual(custom.subagent_run_id, "tools:s1")
+        finished = next(e for e in events if e.type == EventType.RUN_FINISHED)
+        self.assertIsNone(getattr(finished, "subagent_run_id", None))
+
+    def test_an_unrecorded_interrupt_stays_unattributed(self):
+        agent = _make_agent(emit_subagent_events=True)
+        agent.active_run = {
+            "active_subagents": {},
+            "current_subagent_run_id": None,
+            "emit_subagent_events": True,
+        }
+        events = agent._emit_interrupt_finish(
+            thread_id="t1", run_id="r1", lg_interrupts=[self._interrupt("other")],
+        )
+        custom = next(e for e in events if e.type == EventType.CUSTOM)
+        self.assertIsNone(custom.subagent_run_id)
+
+    def test_flag_off_never_attributes_the_tail(self):
+        agent = _make_agent(emit_subagent_events=False)
+        agent.active_run = {
+            "active_subagents": {},
+            "current_subagent_run_id": None,
+            # Even if something recorded a mapping, flag-off output stays clean.
+            "interrupt_subagents": {"int-1": "tools:s1"},
+            "emit_subagent_events": False,
+        }
+        events = agent._emit_interrupt_finish(
+            thread_id="t1", run_id="r1", lg_interrupts=[self._interrupt()],
+        )
+        custom = next(e for e in events if e.type == EventType.CUSTOM)
+        self.assertIsNone(custom.subagent_run_id)
+
+
 class TestErrorPathRobustness(unittest.IsolatedAsyncioTestCase):
     """Fix 7: the error handlers could fail, or report nothing useful."""
 
