@@ -45,6 +45,7 @@ import {
   buildA2UIEnvelope,
   prepareA2UIRequest,
   resolveA2UIToolParams,
+  resolveExternalData,
   wrapErrorEnvelope,
   runA2UIGenerationWithRecovery,
   type A2UIToolParams,
@@ -82,6 +83,13 @@ interface GenerateA2UIArgs {
   target_surface_id?: string;
   /** Optional natural-language description of the changes to apply on update. */
   changes?: string;
+  /**
+   * Optional tool-call-id of a prior tool result whose content is the dataset to
+   * render by reference (OSS-2005). Pass this id — NOT the rows — when a backend
+   * tool already fetched the data, so the subagent renders structure only and
+   * never re-serializes the dataset as output tokens.
+   */
+  data_ref?: string;
 }
 
 /**
@@ -165,6 +173,17 @@ export function getA2UITools<TModel = A2UISubagentModel>(
       // Strip current (unbalanced) tool call from history.
       const messages = allMessages.slice(0, -1);
 
+      // Resolve the host's by-reference data (OSS-2005): Channel A is the
+      // forwardedProps blob parked into ag-ui state; Channel B is the dataset
+      // held in the `data_ref` tool result. Absent → the subagent's own data
+      // arg is used (unchanged behavior).
+      const agUi = (state["ag-ui"] ?? {}) as Record<string, unknown>;
+      const externalData = resolveExternalData({
+        a2uiData: agUi.a2ui_data as Record<string, unknown> | undefined,
+        dataRef: input.data_ref,
+        messages,
+      });
+
       // Shared: decide create/update, find prior surface, build the prompt.
       const prep = prepareA2UIRequest({
         intent: input.intent,
@@ -173,6 +192,7 @@ export function getA2UITools<TModel = A2UISubagentModel>(
         messages,
         state,
         guidelines,
+        externalData,
       });
       if (prep.error) return wrapErrorEnvelope(prep.error);
 
@@ -192,6 +212,7 @@ export function getA2UITools<TModel = A2UISubagentModel>(
       const { envelope } = await runA2UIGenerationWithRecovery({
         basePrompt: prep.prompt,
         catalog,
+        externalData,
         config: recovery,
         onAttempt: onA2UIAttempt,
         invokeSubagent: (prompt) =>
@@ -204,6 +225,7 @@ export function getA2UITools<TModel = A2UISubagentModel>(
             prior: prep.prior,
             defaultSurfaceId,
             defaultCatalogId,
+            externalData,
           }),
       });
       return envelope;
@@ -226,6 +248,10 @@ export function getA2UITools<TModel = A2UISubagentModel>(
           changes: {
             type: "string",
             description: GENERATE_A2UI_ARG_DESCRIPTIONS.changes,
+          },
+          data_ref: {
+            type: "string",
+            description: GENERATE_A2UI_ARG_DESCRIPTIONS.data_ref,
           },
         },
       } as any,

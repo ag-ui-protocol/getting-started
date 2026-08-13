@@ -1008,6 +1008,15 @@ class LangGraphAgent:
         elif "injectA2UITool" in forwarded:
             ag_ui_state["inject_a2ui_tool"] = forwarded["injectA2UITool"]
 
+        # Surface the by-reference data model (OSS-2005) into ag-ui state so the
+        # generate_a2ui tool can merge it without the subagent re-emitting the
+        # rows. The contract key is lowercase snake (`a2ui_data`) precisely so it
+        # survives camel_to_snake unchanged; accept the camelCase form too.
+        if "a2ui_data" in forwarded:
+            ag_ui_state["a2ui_data"] = forwarded["a2ui_data"]
+        elif "a2uiData" in forwarded:
+            ag_ui_state["a2ui_data"] = forwarded["a2uiData"]
+
         return {
             **state,
             "messages": new_messages,

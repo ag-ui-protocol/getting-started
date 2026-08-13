@@ -42,6 +42,7 @@ from ag_ui_a2ui_toolkit import (
     build_a2ui_envelope,
     prepare_a2ui_request,
     resolve_a2ui_tool_params,
+    resolve_external_data,
     run_a2ui_generation_with_recovery,
     wrap_error_envelope,
 )
@@ -150,6 +151,14 @@ class A2UISubAgentTool(BaseTool):
                         type=types.Type.STRING,
                         description="Natural-language changes to apply on update.",
                     ),
+                    "data_ref": types.Schema(
+                        type=types.Type.STRING,
+                        description=(
+                            "Optional tool-call-id of a prior tool result whose content is "
+                            "the dataset to render by reference. Pass this id, NOT the rows, "
+                            "when a tool already fetched the data so you render structure only."
+                        ),
+                    ),
                 },
             ),
         )
@@ -159,6 +168,7 @@ class A2UISubAgentTool(BaseTool):
         intent = args.get("intent", "create")
         target_surface_id = args.get("target_surface_id")
         changes = args.get("changes")
+        data_ref = args.get("data_ref")
 
         events = self._session_events(tool_context)
         # AG-UI messages drive prepare_a2ui_request's prior-surface lookup
@@ -166,6 +176,17 @@ class A2UISubAgentTool(BaseTool):
         messages = self._normalize_a2ui_tool_results(adk_events_to_messages(events))
         conversation = self._conversation_contents(events)
         state, schema_value = self._state_view(tool_context)
+
+        # Resolve the host's by-reference data (OSS-2005): Channel A is the
+        # forwardedProps blob parked into ag-ui state; Channel B is the dataset
+        # held in the `data_ref` tool result. Absent → the subagent's own data
+        # arg is used (unchanged behavior).
+        ag_ui_state = state.get("ag-ui") if isinstance(state.get("ag-ui"), dict) else {}
+        external_data = resolve_external_data(
+            a2ui_data=ag_ui_state.get("a2ui_data"),
+            data_ref=data_ref,
+            messages=messages,
+        )
 
         # Single catalog, client-sourced (no drift): prefer a host-supplied catalog
         # param, else the middleware-injected schema. Render it via Google's
@@ -188,6 +209,7 @@ class A2UISubAgentTool(BaseTool):
             messages=messages,
             state=state,
             guidelines=self._guidelines,
+            external_data=external_data,
         )
         if prep.get("error"):
             return self._as_tool_return(wrap_error_envelope(prep["error"]))
@@ -223,12 +245,14 @@ class A2UISubAgentTool(BaseTool):
                 prior=prep.get("prior"),
                 default_surface_id=self._default_surface_id,
                 default_catalog_id=self._default_catalog_id,
+                external_data=external_data,
             )
 
         result = await asyncio.to_thread(
             run_a2ui_generation_with_recovery,
             base_prompt=prep["prompt"],
             catalog=validation_catalog,
+            external_data=external_data,
             config=self._recovery,
             invoke_subagent=_invoke_subagent,
             build_envelope=_build_envelope,

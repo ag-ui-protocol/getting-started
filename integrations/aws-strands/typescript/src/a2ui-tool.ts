@@ -45,6 +45,7 @@ import {
   prepareA2UIRequest,
   resolveA2UICatalog,
   resolveA2UIToolParams,
+  resolveExternalData,
   runA2UIGenerationWithRecovery,
   splitA2UISchemaContext,
   wrapErrorEnvelope,
@@ -78,6 +79,12 @@ interface GenerateA2UIArgs {
   intent?: "create" | "update";
   target_surface_id?: string;
   changes?: string;
+  /**
+   * Optional tool-call-id of a prior tool result whose content is the dataset to
+   * render by reference (OSS-2005). Pass this id, NOT the rows, when a backend
+   * tool already fetched the data so the subagent renders structure only.
+   */
+  data_ref?: string;
 }
 
 /**
@@ -179,6 +186,10 @@ export function getA2UITools<TModel = Model>(
             type: "string",
             description: GENERATE_A2UI_ARG_DESCRIPTIONS.changes,
           },
+          data_ref: {
+            type: "string",
+            description: GENERATE_A2UI_ARG_DESCRIPTIONS.data_ref,
+          },
         },
       },
     },
@@ -205,6 +216,25 @@ export function getA2UITools<TModel = Model>(
         ...strandsToolResultsToAgui(strandsMessages),
       ];
 
+      const safeState =
+        glue.state && typeof glue.state === "object" && !Array.isArray(glue.state)
+          ? glue.state
+          : {};
+
+      // Resolve the host's by-reference data (OSS-2005): Channel A is the
+      // forwardedProps blob parked into ag-ui state; Channel B is the dataset
+      // held in the `data_ref` tool result. Absent → the subagent's own data
+      // arg is used (unchanged behavior).
+      const agUi = ((safeState as Record<string, unknown>)["ag-ui"] ?? {}) as Record<
+        string,
+        unknown
+      >;
+      const externalData = resolveExternalData({
+        a2uiData: agUi.a2ui_data as Record<string, unknown> | undefined,
+        dataRef: input.data_ref,
+        messages: aguiMessages,
+      });
+
       const prep = prepareA2UIRequest({
         intent: input.intent,
         targetSurfaceId: input.target_surface_id,
@@ -212,11 +242,9 @@ export function getA2UITools<TModel = Model>(
         messages: aguiMessages,
         // `RunAgentInput.state` is `any` on the wire; a truthy non-object
         // must degrade to empty state (mirrors the Python adapter's guard).
-        state:
-          glue.state && typeof glue.state === "object" && !Array.isArray(glue.state)
-            ? glue.state
-            : {},
+        state: safeState,
         guidelines,
+        externalData,
       });
 
       // The sub-agent's render_a2ui call must STREAM to the AG-UI wire — the
@@ -251,6 +279,7 @@ export function getA2UITools<TModel = Model>(
         : runA2UIGenerationWithRecovery({
             basePrompt: prep.prompt,
             catalog,
+            externalData,
             config: recovery,
             onAttempt: onA2UIAttempt,
             invokeSubagent: (prompt) => {
@@ -280,6 +309,7 @@ export function getA2UITools<TModel = Model>(
                 prior: prep.prior,
                 defaultSurfaceId,
                 defaultCatalogId,
+                externalData,
               }),
           }).then((r) => r.envelope);
 

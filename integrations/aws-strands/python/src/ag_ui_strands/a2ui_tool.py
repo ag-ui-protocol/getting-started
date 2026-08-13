@@ -48,6 +48,7 @@ from ag_ui_a2ui_toolkit import (
     prepare_a2ui_request,
     resolve_a2ui_catalog,
     resolve_a2ui_tool_params,
+    resolve_external_data,
     run_a2ui_generation_with_recovery,
     wrap_error_envelope,
 )
@@ -425,6 +426,10 @@ class _GenerateA2UITool(AgentTool):
                             "type": "string",
                             "description": GENERATE_A2UI_ARG_DESCRIPTIONS["changes"],
                         },
+                        "data_ref": {
+                            "type": "string",
+                            "description": GENERATE_A2UI_ARG_DESCRIPTIONS["data_ref"],
+                        },
                     },
                 }
             },
@@ -450,6 +455,7 @@ class _GenerateA2UITool(AgentTool):
         intent = args.get("intent")
         target_surface_id = args.get("target_surface_id")
         changes = args.get("changes")
+        data_ref = args.get("data_ref")
 
         # Strands history for the sub-agent, minus the in-flight generate_a2ui
         # call. Prefer the LIVE calling agent (execution-time history); fall
@@ -471,11 +477,26 @@ class _GenerateA2UITool(AgentTool):
             strands_tool_results_to_agui(strands_messages)
         )
 
+        # Resolve the host's by-reference data (OSS-2005): Channel A is the
+        # forwardedProps blob parked into ag-ui state; Channel B is the dataset
+        # held in the `data_ref` tool result. Absent → the subagent's own data
+        # arg is used (unchanged behavior).
+        glue_state = glue.get("state") if isinstance(glue.get("state"), dict) else {}
+        ag_ui_state = (
+            glue_state.get("ag-ui") if isinstance(glue_state.get("ag-ui"), dict) else {}
+        )
+        external_data = resolve_external_data(
+            a2ui_data=ag_ui_state.get("a2ui_data"),
+            data_ref=data_ref,
+            messages=agui_messages,
+        )
+
         prep = prepare_a2ui_request(
             intent=intent,
             target_surface_id=target_surface_id,
             changes=changes,
             messages=agui_messages,
+            external_data=external_data,
             # `RunAgentInput.state` is Any on the wire; a truthy non-dict must
             # degrade to empty state (generation proceeds without it) rather
             # than crash the tool before the recovery loop engages.
@@ -548,6 +569,7 @@ class _GenerateA2UITool(AgentTool):
                     prior=prep.get("prior"),
                     default_surface_id=cfg["default_surface_id"],
                     default_catalog_id=cfg["default_catalog_id"],
+                    external_data=external_data,
                 )
 
             future = loop.run_in_executor(
@@ -555,6 +577,7 @@ class _GenerateA2UITool(AgentTool):
                 lambda: run_a2ui_generation_with_recovery(
                     base_prompt=prep["prompt"],
                     catalog=cfg["catalog"],
+                    external_data=external_data,
                     config=cfg["recovery"],
                     on_attempt=cfg["on_a2ui_attempt"],
                     invoke_subagent=_invoke_subagent,

@@ -14,7 +14,7 @@ dependencies = [
     # validate→retry loop shared with the LangGraph adapter and the a2ui-middleware
     # paint gate. 0.0.3 carries the A2UIToolParams/guidelines API (OSS-248); published
     # on PyPI, so no local source bridge is needed.
-    "ag-ui-a2ui-toolkit>=0.0.3",
+    "ag-ui-a2ui-toolkit>=0.0.5",
     # Google's A2UI Agent SDK (OSS-158): we reuse the two parts that are independent
     # of its strict validator and safe to use with the client-supplied catalog as-is —
     # catalog/prompt rendering (A2uiSchemaManager + catalog.render_as_llm_instructions,

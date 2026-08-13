@@ -49,6 +49,7 @@ from ag_ui_a2ui_toolkit import (
     build_a2ui_envelope,
     prepare_a2ui_request,
     resolve_a2ui_tool_params,
+    resolve_external_data,
     wrap_error_envelope,
     run_a2ui_generation_with_recovery,
 )
@@ -143,6 +144,7 @@ def get_a2ui_tools(params: A2UIToolParams):
         intent: str = "create",
         target_surface_id: Optional[str] = None,
         changes: Optional[str] = None,
+        data_ref: Optional[str] = None,
     ) -> str:
         """Generate or edit an A2UI surface.
 
@@ -153,11 +155,27 @@ def get_a2ui_tools(params: A2UIToolParams):
                 id of the prior render to modify.
             changes: Optional natural-language description of the changes to
                 apply when ``intent="update"``.
+            data_ref: Optional tool-call-id of a prior tool result whose content
+                is the dataset to render by reference (OSS-2005). Pass this id —
+                NOT the rows — when a backend tool already fetched the data, so
+                the subagent renders structure only and never re-serializes the
+                dataset as output tokens.
         """
         # Defensive: a custom state schema may not preseed ``messages``, and
         # ``state["messages"]`` would then raise KeyError mid-tool — mirror the
         # TS adapter's `state.messages ?? []` graceful-degrade.
         messages = runtime.state.get("messages", [])[:-1]
+
+        # Resolve the host's by-reference data (OSS-2005): Channel A is the
+        # forwardedProps blob parked into ag-ui state; Channel B is the dataset
+        # held in the `data_ref` tool result. Absent → the subagent's own data
+        # arg is used (unchanged behavior).
+        ag_ui_state = runtime.state.get("ag-ui", {}) or {}
+        external_data = resolve_external_data(
+            a2ui_data=ag_ui_state.get("a2ui_data"),
+            data_ref=data_ref,
+            messages=messages,
+        )
 
         # Shared: decide create/update, find prior surface, build the prompt.
         prep = prepare_a2ui_request(
@@ -167,6 +185,7 @@ def get_a2ui_tools(params: A2UIToolParams):
             messages=messages,
             state=runtime.state,
             guidelines=guidelines,
+            external_data=external_data,
         )
         if prep.get("error"):
             return wrap_error_envelope(prep["error"])
@@ -187,6 +206,7 @@ def get_a2ui_tools(params: A2UIToolParams):
                 prior=prep["prior"],
                 default_surface_id=default_surface_id,
                 default_catalog_id=default_catalog_id,
+                external_data=external_data,
             )
 
         # Shared: validate->retry loop (mirrors the TS adapter). On each retry the
@@ -204,6 +224,7 @@ def get_a2ui_tools(params: A2UIToolParams):
             run_a2ui_generation_with_recovery,
             base_prompt=prep["prompt"],
             catalog=catalog,
+            external_data=external_data,
             config=recovery,
             invoke_subagent=lambda prompt, attempt: asyncio.run(
                 _invoke_subagent(prompt, attempt)
