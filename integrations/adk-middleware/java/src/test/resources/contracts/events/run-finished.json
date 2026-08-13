@@ -1,0 +1,6 @@
+{
+  "type": "RUN_FINISHED",
+  "threadId": "thread-contract",
+  "runId": "run-contract",
+  "result": { "status": "ok" }
+}

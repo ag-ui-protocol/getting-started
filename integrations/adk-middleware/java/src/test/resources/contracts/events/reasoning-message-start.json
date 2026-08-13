@@ -1,0 +1,5 @@
+{
+  "type": "REASONING_MESSAGE_START",
+  "messageId": "reasoning-message-contract",
+  "role": "reasoning"
+}

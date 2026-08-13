@@ -1,0 +1,7 @@
+{
+  "type": "TOOL_CALL_RESULT",
+  "messageId": "tool-result-contract",
+  "toolCallId": "backend-call-contract",
+  "content": "{\"score\":\"2-1\"}",
+  "role": "tool"
+}

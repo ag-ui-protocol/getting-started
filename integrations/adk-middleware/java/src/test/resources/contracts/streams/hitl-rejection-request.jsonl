@@ -1,0 +1,3 @@
+{"type":"RUN_STARTED","threadId":"thread-hitl-rejection","runId":"run-hitl-rejection-request"}
+{"type":"TOOL_CALL_CHUNK","toolCallId":"rejection-call","toolCallName":"request_approval","parentMessageId":"message-hitl-rejection-request","delta":"{\"action\":\"delete\"}"}
+{"type":"RUN_FINISHED","threadId":"thread-hitl-rejection","runId":"run-hitl-rejection-request","result":{"status":"pending-confirmation"}}

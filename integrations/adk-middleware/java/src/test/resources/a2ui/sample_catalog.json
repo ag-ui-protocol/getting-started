@@ -1,0 +1,1 @@
+{"components": {"DisplayField": {"type": "object", "properties": {"label": {"type": "string"}, "value": {"type": "string"}}}, "FillInEscrowTask": {"type": "object", "properties": {"taskId": {"type": "string"}, "message": {"type": "string"}}}}, "catalogId": "esig-demo", "$schema": "https://json-schema.org/draft/2020-12/schema"}

@@ -1,0 +1,5 @@
+{
+  "type": "TOOL_CALL_ARGS",
+  "toolCallId": "backend-call-contract",
+  "delta": "{\"team\":\"Lions\"}"
+}

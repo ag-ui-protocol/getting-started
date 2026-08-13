@@ -1,0 +1,7 @@
+{
+  "type": "TOOL_CALL_CHUNK",
+  "toolCallId": "frontend-call-contract",
+  "toolCallName": "show_sports_list",
+  "parentMessageId": "message-contract",
+  "delta": "{\"league\":\"premier\"}"
+}

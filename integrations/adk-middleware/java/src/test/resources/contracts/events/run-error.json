@@ -1,0 +1,5 @@
+{
+  "type": "RUN_ERROR",
+  "message": "Persistence failed",
+  "code": "PERSISTENCE_FAILURE"
+}

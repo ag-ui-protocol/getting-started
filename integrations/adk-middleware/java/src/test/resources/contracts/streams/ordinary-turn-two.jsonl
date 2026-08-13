@@ -1,0 +1,3 @@
+{"type":"RUN_STARTED","threadId":"thread-ordinary-turns","runId":"run-ordinary-two"}
+{"type":"TEXT_MESSAGE_CHUNK","messageId":"assistant-ordinary-two","role":"assistant","delta":"Second answer"}
+{"type":"RUN_FINISHED","threadId":"thread-ordinary-turns","runId":"run-ordinary-two","result":{"turn":2}}

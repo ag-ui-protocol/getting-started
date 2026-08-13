@@ -1,0 +1,6 @@
+{"type":"RUN_STARTED","threadId":"thread-backend-tool","runId":"run-backend-tool"}
+{"type":"TOOL_CALL_START","toolCallId":"backend-call-one","toolCallName":"lookup_score","parentMessageId":"message-backend-tool"}
+{"type":"TOOL_CALL_ARGS","toolCallId":"backend-call-one","delta":"{\"team\":\"Lions\"}"}
+{"type":"TOOL_CALL_END","toolCallId":"backend-call-one"}
+{"type":"TOOL_CALL_RESULT","messageId":"result-backend-tool","toolCallId":"backend-call-one","content":"{\"score\":\"2-1\"}","role":"tool"}
+{"type":"RUN_FINISHED","threadId":"thread-backend-tool","runId":"run-backend-tool","result":{"status":"complete"}}

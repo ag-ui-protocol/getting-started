@@ -1,0 +1,13 @@
+{"type":"RUN_STARTED","threadId":"thread-state-reasoning","runId":"run-state-reasoning"}
+{"type":"REASONING_START","messageId":"reasoning-run"}
+{"type":"REASONING_MESSAGE_START","messageId":"reasoning-message","role":"reasoning"}
+{"type":"REASONING_MESSAGE_CONTENT","messageId":"reasoning-message","delta":"Private reasoning"}
+{"type":"REASONING_ENCRYPTED_VALUE","subtype":"message","entityId":"reasoning-message","encryptedValue":"ciphertext-reasoning"}
+{"type":"REASONING_MESSAGE_END","messageId":"reasoning-message"}
+{"type":"REASONING_END","messageId":"reasoning-run"}
+{"type":"TEXT_MESSAGE_START","messageId":"assistant-state-reasoning","role":"assistant"}
+{"type":"TEXT_MESSAGE_CONTENT","messageId":"assistant-state-reasoning","delta":"Public answer"}
+{"type":"TEXT_MESSAGE_END","messageId":"assistant-state-reasoning"}
+{"type":"STATE_DELTA","delta":[{"op":"replace","path":"/phase","value":"ready"},{"op":"replace","path":"/score","value":1}]}
+{"type":"STATE_SNAPSHOT","snapshot":{"phase":"complete","score":2}}
+{"type":"RUN_FINISHED","threadId":"thread-state-reasoning","runId":"run-state-reasoning","result":{"status":"complete"}}

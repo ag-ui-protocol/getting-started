@@ -1,0 +1,2 @@
+{"type":"RUN_STARTED","threadId":"thread-terminal-error","runId":"run-terminal-error"}
+{"type":"RUN_ERROR","message":"Persistence failed","code":"PERSISTENCE_FAILURE"}

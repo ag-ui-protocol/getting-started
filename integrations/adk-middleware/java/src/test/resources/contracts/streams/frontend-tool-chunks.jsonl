@@ -1,0 +1,4 @@
+{"type":"RUN_STARTED","threadId":"thread-tool-chunks","runId":"run-tool-chunks"}
+{"type":"TOOL_CALL_CHUNK","toolCallId":"frontend-call-one","toolCallName":"show_sports_list","parentMessageId":"message-tool-chunks","delta":"{\"league\":\"premier\"}"}
+{"type":"TOOL_CALL_CHUNK","toolCallId":"frontend-call-two","toolCallName":"show_sports_list","parentMessageId":"message-tool-chunks","delta":"{\"league\":\"championship\"}"}
+{"type":"RUN_FINISHED","threadId":"thread-tool-chunks","runId":"run-tool-chunks","result":{"status":"pending-tools"}}
