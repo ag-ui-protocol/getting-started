@@ -15,6 +15,7 @@ import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { SystemMessage } from "@langchain/core/messages";
 import { RunnableConfig } from "@langchain/core/runnables";
 import { Annotation, MessagesAnnotation, StateGraph, Command, START, END } from "@langchain/langgraph";
+import { aguiTransformer } from "@ag-ui/langgraph/transformer";
 
 const AgentStateAnnotation = Annotation.Root({
   tools: Annotation<any[]>({
@@ -54,7 +55,7 @@ async function chatNode(state: AgentState, config?: RunnableConfig) {
   } else {
     // Default: OpenAI
     model = new ChatOpenAI({
-      model: "o4-mini",
+      model: "gpt-5.4",
       useResponsesApi: true,
       reasoning: { effort: "high", summary: "auto" },
     });
@@ -99,4 +100,6 @@ const workflow = new StateGraph(AgentStateAnnotation)
   .addEdge("chatNode", END);
 
 // Compile the graph
-export const agenticChatReasoningGraph = workflow.compile();
+export const agenticChatReasoningGraph = workflow.compile({
+  transformers: [aguiTransformer],
+});

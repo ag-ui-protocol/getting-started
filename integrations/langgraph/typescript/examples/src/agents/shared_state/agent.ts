@@ -7,6 +7,7 @@ import { SystemMessage } from "@langchain/core/messages";
 import { RunnableConfig } from "@langchain/core/runnables";
 import { dispatchCustomEvent } from "@langchain/core/callbacks/dispatch";
 import { Command, Annotation, MessagesAnnotation, StateGraph, END, START } from "@langchain/langgraph";
+import { aguiTransformer } from "@ag-ui/langgraph/transformer";
 
 enum SkillLevel {
   BEGINNER = "Beginner",
@@ -278,4 +279,6 @@ workflow.addEdge("start_flow", "chat_node");
 workflow.addEdge("chat_node", END);
 
 // Compile the graph
-export const sharedStateGraph = workflow.compile();
+export const sharedStateGraph = workflow.compile({
+  transformers: [aguiTransformer],
+});

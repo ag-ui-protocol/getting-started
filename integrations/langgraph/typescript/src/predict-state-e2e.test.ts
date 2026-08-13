@@ -17,6 +17,8 @@ import type { LangGraphAgentConfig } from "./agent";
 
 function makeConfig(): LangGraphAgentConfig {
   return {
+    // Legacy `handleStreamEvents` path — see subgraph-streaming.test.ts
+    // for the same opt-out rationale.
     deploymentUrl: "http://localhost:2024",
     graphId: "test-graph",
     client: {
@@ -150,7 +152,7 @@ async function runStream(chunks: any[], initialState: any = {}) {
     modelMadeToolCall: false,
   };
 
-  await (agent as any).handleStreamEvents(
+  await (agent as any).handleStreamEventsV2(
     makeStreamArg(chunks, initialState),
     "thread1",
     { next: (e: any) => dispatched.push(e), error: () => {}, complete: () => {} },
@@ -339,5 +341,44 @@ describe("predict_state: no STATE_SNAPSHOT with absent todos during streaming", 
     );
 
     expect(predictStateEvents).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B6 — mid-run state-diff STATE_SNAPSHOT actually fires
+//
+// updatedState aliased state and was mutated in place, so
+// `JSON.stringify(updatedState) !== JSON.stringify(state)` was always false
+// and the state-diff branch was dead: state changes while staying on the same
+// node emitted no snapshot. Capturing the serialized state before mutation
+// restores the trigger.
+// ---------------------------------------------------------------------------
+
+describe("B6: state-diff STATE_SNAPSHOT (same node, changing values)", () => {
+  it("emits a snapshot when state values change without a node change", async () => {
+    const chunks = [
+      // First event on node "model" → node-change snapshot (state still empty).
+      makeEventsChunk({ event: "on_chain_start", metadata: { langgraph_node: "model" }, data: {} }),
+      // State changes.
+      makeValuesChunk({ counter: 1 }),
+      // Same node again — only a working state-diff can fire the snapshot here.
+      makeEventsChunk({ event: "on_chain_start", metadata: { langgraph_node: "model" }, data: {} }),
+      // State changes again.
+      makeValuesChunk({ counter: 2 }),
+      // Same node once more.
+      makeEventsChunk({ event: "on_chain_start", metadata: { langgraph_node: "model" }, data: {} }),
+    ];
+
+    const dispatched = await runStream(chunks, {});
+    const snapshots = stateSnapshots(dispatched);
+    const counters = snapshots
+      .map((s) => (s.snapshot ?? s)?.counter)
+      .filter((c) => c !== undefined);
+
+    // The post-run getState mock carries no `counter`, so a snapshot with
+    // counter===1 and counter===2 can ONLY come from the mid-run state-diff
+    // branch. Before the fix these never appeared (branch was dead).
+    expect(counters).toContain(1);
+    expect(counters).toContain(2);
   });
 });

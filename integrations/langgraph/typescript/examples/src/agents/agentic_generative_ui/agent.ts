@@ -7,6 +7,7 @@ import { SystemMessage } from "@langchain/core/messages";
 import { RunnableConfig } from "@langchain/core/runnables";
 import { dispatchCustomEvent } from "@langchain/core/callbacks/dispatch";
 import { Annotation, Command, MessagesAnnotation, StateGraph, END } from "@langchain/langgraph";
+import { aguiTransformer } from "@ag-ui/langgraph/transformer";
 
 // This tool simulates performing a task on the server.
 // The tool call will be streamed to the frontend as it is being generated.
@@ -174,4 +175,6 @@ const workflow = new StateGraph(AgentStateAnnotation)
   .addEdge("chat_node", "__end__");
 
 // Compile the graph
-export const agenticGenerativeUiGraph = workflow.compile();
+export const agenticGenerativeUiGraph = workflow.compile({
+  // transformers: [aguiTransformer],
+});

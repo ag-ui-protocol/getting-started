@@ -375,4 +375,25 @@ describe("handleReasoningEvent canonical id", () => {
     agent.handleReasoningEvent({ type: "text", text: "", index: 0 });
     expect(dispatched).toHaveLength(0);
   });
+
+  // B1 — index 0 must close on an index change. The guard used a truthiness
+  // check (`this.reasoningProcess?.index && ...`), so a process open at
+  // index 0 was never closed when a new index arrived: REASONING_END for
+  // index 0 was silently skipped. resolveReasoningContent defaults index to
+  // 0, so index 0 is the common case.
+  it("closes the index-0 reasoning process when a new index arrives", () => {
+    const { agent, dispatched } = buildAgent();
+    // Open a reasoning process at index 0.
+    agent.handleReasoningEvent({ type: "text", text: "first block", index: 0 });
+    // A new reasoning block at index 1 must close the index-0 one first.
+    agent.handleReasoningEvent({ type: "text", text: "second block", index: 1 });
+
+    const ends = dispatched.filter((e) => e.type === EventType.REASONING_END);
+    const starts = dispatched.filter(
+      (e) => e.type === EventType.REASONING_START,
+    );
+    // The index-0 process was closed (END) and a fresh one opened for index 1.
+    expect(ends).toHaveLength(1);
+    expect(starts).toHaveLength(2);
+  });
 });

@@ -6,15 +6,16 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { SystemMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import { RunnableConfig } from "@langchain/core/runnables";
-import { 
-  Annotation, 
-  MessagesAnnotation, 
-  StateGraph, 
-  Command, 
-  START, 
-  END, 
-  interrupt 
+import {
+  Annotation,
+  MessagesAnnotation,
+  StateGraph,
+  Command,
+  START,
+  END,
+  interrupt
 } from "@langchain/langgraph";
+import { aguiTransformer } from "@ag-ui/langgraph/transformer";
 
 // Travel data interfaces
 interface Flight {
@@ -384,4 +385,6 @@ workflow.addEdge("hotels_agent", "supervisor");
 workflow.addEdge("experiences_agent", "supervisor");
 
 // Compile the graph
-export const subGraphsAgentGraph = workflow.compile();
+export const subGraphsAgentGraph = workflow.compile({
+  transformers: [aguiTransformer],
+});

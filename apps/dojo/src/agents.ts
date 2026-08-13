@@ -330,6 +330,8 @@ export const agentsIntegrations = {
   "langgraph-typescript": async () => ({
     ...mapAgents(
       (graphId) => {
+        // Protocol (v3 vs legacy) is auto-detected at run time (v3 is
+        // attempted first, falling back to v2) — no per-agent opt-in needed.
         return new LangGraphAgent({
           deploymentUrl: envVars.langgraphTypescriptUrl,
           graphId,

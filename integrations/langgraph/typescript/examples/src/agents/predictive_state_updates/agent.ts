@@ -7,6 +7,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { SystemMessage } from "@langchain/core/messages";
 import { RunnableConfig } from "@langchain/core/runnables";
 import { Command, Annotation, MessagesAnnotation, StateGraph, END, START } from "@langchain/langgraph";
+import { aguiTransformer } from "@ag-ui/langgraph/transformer";
 
 const WRITE_DOCUMENT_TOOL = {
   type: "function",
@@ -153,4 +154,6 @@ workflow.addEdge(START, "chat_node");
 workflow.addEdge("chat_node", END);
 
 // Compile the graph
-export const predictiveStateUpdatesGraph = workflow.compile();
+export const predictiveStateUpdatesGraph = workflow.compile({
+  transformers: [aguiTransformer],
+});

@@ -17,6 +17,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { SystemMessage } from "@langchain/core/messages";
 import { RunnableConfig } from "@langchain/core/runnables";
 import { Command, interrupt, Annotation, MessagesAnnotation, StateGraph, END, START } from "@langchain/langgraph";
+import { aguiTransformer } from "@ag-ui/langgraph/transformer";
 
 const DEFINE_TASK_TOOL = {
   type: "function",
@@ -283,4 +284,6 @@ workflow.addConditionalEdges(
 );
 
 // Compile the graph
-export const humanInTheLoopGraph = workflow.compile();
+export const humanInTheLoopGraph = workflow.compile({
+  transformers: [aguiTransformer],
+});

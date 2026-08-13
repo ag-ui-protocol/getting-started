@@ -30,6 +30,10 @@ function nsRoot(ns: string): string {
 
 function makeConfig(): LangGraphAgentConfig {
   return {
+    // These tests exercise the legacy `handleStreamEvents` translator
+    // — they synthesise events-mode chunks. The transformer path
+    // consumes a different stream shape (`thread.extensions.agui`),
+    // so opt out explicitly.
     deploymentUrl: "http://localhost:2024",
     graphId: "test-graph",
     client: {

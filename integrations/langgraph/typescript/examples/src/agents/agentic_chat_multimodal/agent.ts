@@ -51,6 +51,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { SystemMessage } from "@langchain/core/messages";
 import { RunnableConfig } from "@langchain/core/runnables";
 import { Annotation, MessagesAnnotation, StateGraph, Command, START, END } from "@langchain/langgraph";
+import { aguiTransformer } from "@ag-ui/langgraph/transformer";
 
 const AgentStateAnnotation = Annotation.Root({
   tools: Annotation<any[]>({
@@ -115,4 +116,6 @@ const workflow = new StateGraph(AgentStateAnnotation)
   .addEdge("visionChatNode", END);
 
 // Compile the graph
-export const agenticChatMultimodalGraph = workflow.compile();
+export const agenticChatMultimodalGraph = workflow.compile({
+  transformers: [aguiTransformer],
+});

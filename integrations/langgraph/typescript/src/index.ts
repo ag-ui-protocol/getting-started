@@ -28,6 +28,10 @@ export type {
   A2UIValidationCatalog,
   A2UIAttemptRecord,
 } from '@ag-ui/a2ui-toolkit'
+// Transformer is intentionally NOT re-exported from the main entry. It
+// imports `@langchain/langgraph` (server-only) and would force every
+// consumer (e.g. dojo's Next.js bundle) to resolve that dep. Demo agents
+// import it from `@ag-ui/langgraph/transformer` instead.
 export class LangGraphHttpAgent extends HttpAgent {
   // Mirror LangGraphAgent: keep legacy forwardedProps.command.resume working
   // when an upstream agent emits RUN_FINISHED.outcome=interrupt (which records

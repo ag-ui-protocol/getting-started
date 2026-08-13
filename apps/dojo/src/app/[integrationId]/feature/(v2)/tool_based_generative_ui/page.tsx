@@ -94,13 +94,14 @@ function HaikuDisplay() {
   useFrontendTool(
     {
       agentId: "tool_based_generative_ui",
+      description: "Generates a haiku with Japanese and English translations, an image name, and a CSS gradient for the background.",
       name: "generate_haiku",
        parameters: z.object({
         japanese: z.array(z.string()).describe("3 lines of haiku in Japanese"),
         english: z.array(z.string()).describe("3 lines of haiku translated to English"),
         image_name: z.string().describe(`One relevant image name from: ${VALID_IMAGE_NAMES.join(", ")}`),
         gradient: z.string().describe("CSS Gradient color for the background"),
-      })  ,
+      }),
       followUp: false,
       handler: async ({ japanese, english, image_name, gradient }: { japanese: string[]; english: string[]; image_name: string; gradient: string }) => {
         const newHaiku: Haiku = {

@@ -7,7 +7,8 @@ const concurrently = require("concurrently");
 // 1.2.3: the in-memory dev server provisions persistence itself, so graphs no
 // longer need to compile their own checkpointer for threads.getState (1.1.13
 // 500'd with "No checkpointer set" once the compiled MemorySaver was removed).
-// Supersedes the old 1.1.13 pin that dodged the 1.1.14 schema-extraction regression.
+// It also ships the v3 thread-stream protocol (POST /threads/:tid/commands,
+// /stream/events) that the AG-UI transformer path depends on.
 const LANGGRAPH_CLI_VERSION = "1.2.3";
 
 // Parse command line arguments
