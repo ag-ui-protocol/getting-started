@@ -43,7 +43,12 @@ def request_human_approval(answer_summary: str) -> str:
             "question": "The research assistant wants to finalize this answer. Approve?",
         }
     )
-    return f"The user responded with: {decision}"
+    if isinstance(decision, dict) and decision.get("approved"):
+        return "The user APPROVED. Present the answer as your final answer."
+    return (
+        "The user REJECTED the answer. Do NOT present it. Start your reply with "
+        "'You rejected my draft answer.' and offer to revise it."
+    )
 
 
 research_assistant: SubAgent = {
@@ -57,9 +62,9 @@ research_assistant: SubAgent = {
         "1. Decide on a concise (2-3 sentence) answer.\n"
         "2. You MUST call the `request_human_approval` tool exactly once, passing "
         "a short summary of that intended answer, and wait for the decision.\n"
-        "3. If the user's decision indicates approval, give the final answer. If "
-        "they did NOT approve, briefly revise into a shorter, safer answer and "
-        "give that instead.\n"
+        "3. Follow the tool result's instruction exactly: on approval give the "
+        "final answer; on rejection do NOT give the answer — begin with 'You "
+        "rejected my draft answer.' and offer to revise.\n"
         "NEVER give a final answer without first calling `request_human_approval`."
     ),
     "tools": [request_human_approval],
