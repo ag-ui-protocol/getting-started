@@ -74,6 +74,63 @@ public sealed class SubagentRoundTripTest
     }
 
     [Fact]
+    public void SubagentFinished_RoundTrips_Outcomes()
+    {
+        // Legacy: no outcome comes back as no outcome.
+        var legacy = RoundTrip(new SubagentFinishedEvent { SubagentRunId = "sub-1" });
+        Assert.Null(legacy.Outcome);
+
+        var success = RoundTrip(new SubagentFinishedEvent
+        {
+            SubagentRunId = "sub-1",
+            Outcome = new SubagentFinishedSuccessOutcome(),
+        });
+        Assert.IsType<SubagentFinishedSuccessOutcome>(success.Outcome);
+
+        var suspended = RoundTrip(new SubagentFinishedEvent
+        {
+            SubagentRunId = "sub-1",
+            Outcome = new SubagentFinishedSuspendedOutcome
+            {
+                InterruptIds = new List<string> { "int-1", "int-2" },
+            },
+        });
+        var suspendedOutcome = Assert.IsType<SubagentFinishedSuspendedOutcome>(suspended.Outcome);
+        Assert.Equal(new[] { "int-1", "int-2" }, suspendedOutcome.InterruptIds);
+
+        // An ancestor suspended by a descendant owns no interrupts itself.
+        var ancestor = RoundTrip(new SubagentFinishedEvent
+        {
+            SubagentRunId = "sub-outer",
+            Outcome = new SubagentFinishedSuspendedOutcome(),
+        });
+        var ancestorOutcome = Assert.IsType<SubagentFinishedSuspendedOutcome>(ancestor.Outcome);
+        Assert.Null(ancestorOutcome.InterruptIds);
+    }
+
+    [Fact]
+    public void Interrupt_SubagentRunId_SurvivesTheRunFinishedOutcome()
+    {
+        var result = RoundTrip(new RunFinishedEvent
+        {
+            ThreadId = "t1",
+            RunId = "r1",
+            Outcome = new RunFinishedInterruptOutcome
+            {
+                Interrupts =
+                {
+                    new AGUIInterrupt { Id = "int-1", Reason = "hitl", SubagentRunId = "tools:s1" },
+                    new AGUIInterrupt { Id = "int-2", Reason = "hitl" },
+                },
+            },
+        });
+
+        var outcome = Assert.IsType<RunFinishedInterruptOutcome>(result.Outcome);
+        Assert.Equal("tools:s1", outcome.Interrupts[0].SubagentRunId);
+        Assert.Null(outcome.Interrupts[1].SubagentRunId);
+    }
+
+    [Fact]
     public void SubagentError_RoundTrips_WithAndWithoutCode()
     {
         var withCode = RoundTrip(new SubagentErrorEvent

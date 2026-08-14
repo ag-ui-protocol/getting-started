@@ -82,6 +82,53 @@ public sealed class SubagentEventTest
     }
 
     [Fact]
+    public void SubagentFinished_RoundTripsOutcomes()
+    {
+        // Legacy: no outcome serializes without the property and reads back null.
+        var legacy = new SubagentFinishedEvent { SubagentRunId = "sub-1" };
+        var legacyJson = JsonSerializer.Serialize(legacy, AGUIJsonSerializerContext.Default.SubagentFinishedEvent);
+        using (var doc = JsonDocument.Parse(legacyJson))
+        {
+            Assert.False(doc.RootElement.TryGetProperty("outcome", out _));
+        }
+
+        var suspended = new SubagentFinishedEvent
+        {
+            SubagentRunId = "sub-1",
+            Outcome = new SubagentFinishedSuspendedOutcome { InterruptIds = new List<string> { "int-1" } },
+        };
+        var json = JsonSerializer.Serialize(suspended, AGUIJsonSerializerContext.Default.SubagentFinishedEvent);
+        Assert.Contains("\"suspended\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"interruptIds\"", json, StringComparison.Ordinal);
+        var back = JsonSerializer.Deserialize(json, AGUIJsonSerializerContext.Default.SubagentFinishedEvent);
+        var suspendedBack = Assert.IsType<SubagentFinishedSuspendedOutcome>(back!.Outcome);
+        Assert.Equal(new[] { "int-1" }, suspendedBack.InterruptIds);
+
+        var success = new SubagentFinishedEvent
+        {
+            SubagentRunId = "sub-1",
+            Outcome = new SubagentFinishedSuccessOutcome(),
+        };
+        var successJson = JsonSerializer.Serialize(success, AGUIJsonSerializerContext.Default.SubagentFinishedEvent);
+        var successBack = JsonSerializer.Deserialize(successJson, AGUIJsonSerializerContext.Default.SubagentFinishedEvent);
+        Assert.IsType<SubagentFinishedSuccessOutcome>(successBack!.Outcome);
+    }
+
+    [Fact]
+    public void Interrupt_CarriesTheRaisingSubagent()
+    {
+        var owned = new AGUIInterrupt { Id = "int-1", Reason = "hitl", SubagentRunId = "tools:s1" };
+        var json = JsonSerializer.Serialize(owned, AGUIJsonSerializerContext.Default.AGUIInterrupt);
+        Assert.Contains("\"subagentRunId\":\"tools:s1\"", json, StringComparison.Ordinal);
+        var back = JsonSerializer.Deserialize(json, AGUIJsonSerializerContext.Default.AGUIInterrupt);
+        Assert.Equal("tools:s1", back!.SubagentRunId);
+
+        var root = new AGUIInterrupt { Id = "int-2", Reason = "hitl" };
+        var rootJson = JsonSerializer.Serialize(root, AGUIJsonSerializerContext.Default.AGUIInterrupt);
+        Assert.DoesNotContain("subagentRunId", rootJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SubagentError_RoundTripsWithAndWithoutCode()
     {
         var evt = new SubagentErrorEvent

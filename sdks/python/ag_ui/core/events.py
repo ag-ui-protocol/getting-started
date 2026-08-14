@@ -424,12 +424,43 @@ class SubagentStartedEvent(BaseEvent):
     parent_message_id: Optional[str] = None
 
 
+class SubagentFinishedSuccessOutcome(ConfiguredBaseModel):
+    """Outcome variant signalling that a subagent completed its work."""
+
+    type: Literal["success"] = "success"
+
+
+class SubagentFinishedSuspendedOutcome(ConfiguredBaseModel):
+    """Outcome variant signalling that a subagent is paused awaiting outside input.
+
+    The subagent's stream segment closes for THIS run (the run itself ends
+    with an interrupt outcome); on resume the same ``subagent_run_id`` is
+    re-announced as a continuation of the suspended invocation.
+    ``interrupt_ids`` names the run-level interrupts this subagent directly
+    owns — it MAY be empty or omitted for an ancestor suspended because a
+    descendant interrupted.
+    """
+
+    type: Literal["suspended"] = "suspended"
+    interrupt_ids: Optional[List[str]] = None
+
+
+# Mirrors RunFinishedOutcome one level down. An omitted outcome means legacy
+# success; without the distinction a paused subagent was indistinguishable
+# from a completed one.
+SubagentFinishedOutcome = Annotated[
+    Union[SubagentFinishedSuccessOutcome, SubagentFinishedSuspendedOutcome],
+    Field(discriminator="type"),
+]
+
+
 class SubagentFinishedEvent(BaseEvent):
     """Event indicating a subagent has finished."""
     type: Literal[EventType.SUBAGENT_FINISHED] = EventType.SUBAGENT_FINISHED  # pyright: ignore[reportIncompatibleVariableOverride]
     subagent_run_id: str
     # The subagent's completion payload, mirroring RunFinishedEvent.result.
     result: Optional[Any] = None
+    outcome: Optional[SubagentFinishedOutcome] = None
 
 
 class SubagentErrorEvent(BaseEvent):

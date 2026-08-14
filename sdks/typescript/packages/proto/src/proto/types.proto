@@ -91,4 +91,7 @@ message Interrupt {
   optional google.protobuf.Value response_schema = 5;
   optional string expires_at = 6;
   optional google.protobuf.Value metadata = 7;
+  // The subagent whose work raised this interrupt; absent for a root-raised
+  // interrupt.
+  optional string subagent_run_id = 8;
 }

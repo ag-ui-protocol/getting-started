@@ -875,3 +875,28 @@ const AGUI.Abstractions.AGUIEventTypes.SubagentStarted = "SUBAGENT_STARTED" -> s
 override AGUI.Abstractions.SubagentErrorEvent.Type.get -> string!
 override AGUI.Abstractions.SubagentFinishedEvent.Type.get -> string!
 override AGUI.Abstractions.SubagentStartedEvent.Type.get -> string!
+AGUI.Abstractions.SubagentFinishedOutcome
+abstract AGUI.Abstractions.SubagentFinishedOutcome.Type.get -> string!
+AGUI.Abstractions.SubagentFinishedSuccessOutcome
+AGUI.Abstractions.SubagentFinishedSuccessOutcome.SubagentFinishedSuccessOutcome() -> void
+override AGUI.Abstractions.SubagentFinishedSuccessOutcome.Type.get -> string!
+AGUI.Abstractions.SubagentFinishedSuspendedOutcome
+AGUI.Abstractions.SubagentFinishedSuspendedOutcome.SubagentFinishedSuspendedOutcome() -> void
+AGUI.Abstractions.SubagentFinishedSuspendedOutcome.InterruptIds.get -> System.Collections.Generic.IList<string!>?
+AGUI.Abstractions.SubagentFinishedSuspendedOutcome.InterruptIds.set -> void
+override AGUI.Abstractions.SubagentFinishedSuspendedOutcome.Type.get -> string!
+AGUI.Abstractions.SubagentFinishedOutcomeJsonConverter
+AGUI.Abstractions.SubagentFinishedOutcomeJsonConverter.SubagentFinishedOutcomeJsonConverter() -> void
+override AGUI.Abstractions.SubagentFinishedOutcomeJsonConverter.CanConvert(System.Type! typeToConvert) -> bool
+override AGUI.Abstractions.SubagentFinishedOutcomeJsonConverter.Read(ref System.Text.Json.Utf8JsonReader reader, System.Type! typeToConvert, System.Text.Json.JsonSerializerOptions! options) -> AGUI.Abstractions.SubagentFinishedOutcome!
+override AGUI.Abstractions.SubagentFinishedOutcomeJsonConverter.Write(System.Text.Json.Utf8JsonWriter! writer, AGUI.Abstractions.SubagentFinishedOutcome! value, System.Text.Json.JsonSerializerOptions! options) -> void
+AGUI.Abstractions.SubagentFinishedOutcomeTypes
+const AGUI.Abstractions.SubagentFinishedOutcomeTypes.Success = "success" -> string!
+const AGUI.Abstractions.SubagentFinishedOutcomeTypes.Suspended = "suspended" -> string!
+AGUI.Abstractions.SubagentFinishedEvent.Outcome.get -> AGUI.Abstractions.SubagentFinishedOutcome?
+AGUI.Abstractions.SubagentFinishedEvent.Outcome.set -> void
+AGUI.Abstractions.AGUIInterrupt.SubagentRunId.get -> string?
+AGUI.Abstractions.AGUIInterrupt.SubagentRunId.set -> void
+AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedOutcome>
+AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedSuccessOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedSuccessOutcome>
+AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedSuspendedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedSuspendedOutcome>

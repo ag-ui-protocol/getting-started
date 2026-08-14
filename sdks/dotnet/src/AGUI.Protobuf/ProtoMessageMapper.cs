@@ -278,6 +278,11 @@ internal static class ProtoMessageMapper
             proto.Metadata = ProtoValueConverter.ToValue(interrupt.Metadata.Value);
         }
 
+        if (interrupt.SubagentRunId is not null)
+        {
+            proto.SubagentRunId = interrupt.SubagentRunId;
+        }
+
         return proto;
     }
 
@@ -292,6 +297,7 @@ internal static class ProtoMessageMapper
             ResponseSchema = ProtoValueConverter.ToJsonElementOrNull(proto.ResponseSchema),
             ExpiresAt = proto.HasExpiresAt ? proto.ExpiresAt : null,
             Metadata = ProtoValueConverter.ToJsonElementOrNull(proto.Metadata),
+            SubagentRunId = proto.HasSubagentRunId ? proto.SubagentRunId : null,
         };
     }
 

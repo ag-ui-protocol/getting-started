@@ -202,6 +202,13 @@ export const InterruptSchema = z.object({
   responseSchema: z.record(z.any()).optional(),
   expiresAt: z.string().optional(),
   metadata: z.record(z.any()).optional(),
+  // The subagent whose work raised this interrupt, when it was raised inside
+  // one — absent for a root-raised interrupt. Attribution lives on each
+  // interrupt rather than on RUN_FINISHED because one run can carry
+  // interrupts from several subagents. Lets a client render the approval
+  // request inside that subagent's group without correlating the legacy
+  // on_interrupt CUSTOM event by ordering.
+  subagentRunId: z.string().optional(),
 });
 
 export const ResumeEntrySchema = z.object({

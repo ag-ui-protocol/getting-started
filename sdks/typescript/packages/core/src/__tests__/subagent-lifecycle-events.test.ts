@@ -3,7 +3,9 @@ import {
   EventType,
   EventSchemas,
   SubagentStartedEventSchema,
+  SubagentFinishedEventSchema,
   SubagentErrorEventSchema,
+  RunFinishedEventSchema,
 } from "../events";
 import {
   createSubagentStartedEvent,
@@ -72,5 +74,50 @@ describe("subagent lifecycle events", () => {
       EventSchemas.parse({ type: EventType.SUBAGENT_STARTED, subagentRunId: "s" }),
     ).toThrow();
     expect(() => EventSchemas.parse({ type: EventType.SUBAGENT_ERROR, subagentRunId: "s" })).toThrow();
+  });
+
+  it("parses SUBAGENT_FINISHED outcomes and treats null as omitted", () => {
+    const legacy = SubagentFinishedEventSchema.parse({
+      type: EventType.SUBAGENT_FINISHED,
+      subagentRunId: "s1",
+      outcome: null, // Pydantic producers serialize the no-outcome case as null
+    });
+    expect(legacy.outcome).toBeUndefined();
+
+    const success = SubagentFinishedEventSchema.parse({
+      type: EventType.SUBAGENT_FINISHED,
+      subagentRunId: "s1",
+      outcome: { type: "success" },
+    });
+    expect(success.outcome).toEqual({ type: "success" });
+
+    const suspended = SubagentFinishedEventSchema.parse({
+      type: EventType.SUBAGENT_FINISHED,
+      subagentRunId: "s1",
+      outcome: { type: "suspended", interruptIds: ["int-1"] },
+    });
+    expect(suspended.outcome).toEqual({ type: "suspended", interruptIds: ["int-1"] });
+
+    expect(() =>
+      SubagentFinishedEventSchema.parse({
+        type: EventType.SUBAGENT_FINISHED,
+        subagentRunId: "s1",
+        outcome: { type: "paused" },
+      }),
+    ).toThrow();
+  });
+
+  it("carries the raising subagent on an Interrupt inside the run outcome", () => {
+    const finished = RunFinishedEventSchema.parse({
+      type: EventType.RUN_FINISHED,
+      threadId: "t1",
+      runId: "r1",
+      outcome: {
+        type: "interrupt",
+        interrupts: [{ id: "int-1", reason: "hitl", subagentRunId: "tools:s1" }],
+      },
+    });
+    const outcome = finished.outcome as { interrupts: Array<{ subagentRunId?: string }> };
+    expect(outcome.interrupts[0].subagentRunId).toBe("tools:s1");
   });
 });

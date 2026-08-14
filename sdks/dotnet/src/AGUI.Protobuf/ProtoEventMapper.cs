@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text.Json;
 using AGUI.Abstractions;
 using Proto = AGUI.ProtocolBuffers;
@@ -13,6 +14,7 @@ internal static class ProtoEventMapper
 {
     private const string OutcomeSuccess = "success";
     private const string OutcomeInterrupt = "interrupt";
+    private const string OutcomeSuspended = "suspended";
 
     public static Proto.Event ToProto(BaseEvent evt)
     {
@@ -351,6 +353,27 @@ internal static class ProtoEventMapper
                     subagentFinished.Result = ProtoValueConverter.ToValue(e.Result.Value);
                 }
 
+                // Same flattening as RunFinishedEvent's outcome, one level down.
+                if (e.Outcome is SubagentFinishedSuspendedOutcome suspendedOutcome)
+                {
+                    subagentFinished.Outcome = OutcomeSuspended;
+                    if (suspendedOutcome.InterruptIds is not null)
+                    {
+                        foreach (var interruptId in suspendedOutcome.InterruptIds)
+                        {
+                            subagentFinished.InterruptIds.Add(interruptId);
+                        }
+                    }
+                }
+                else if (e.Outcome is SubagentFinishedSuccessOutcome)
+                {
+                    subagentFinished.Outcome = OutcomeSuccess;
+                }
+                else
+                {
+                    subagentFinished.Outcome = string.Empty;
+                }
+
                 return new Proto.Event { SubagentFinished = subagentFinished };
             }
             case SubagentErrorEvent e:
@@ -592,6 +615,7 @@ internal static class ProtoEventMapper
                 {
                     SubagentRunId = e.SubagentRunId,
                     Result = ProtoValueConverter.ToJsonElementOrNull(e.Result),
+                    Outcome = BuildSubagentOutcome(e),
                 };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
@@ -681,6 +705,27 @@ internal static class ProtoEventMapper
         if (proto.Outcome == OutcomeSuccess)
         {
             return new RunFinishedSuccessOutcome();
+        }
+
+        return null;
+    }
+
+    private static SubagentFinishedOutcome? BuildSubagentOutcome(Proto.SubagentFinishedEvent proto)
+    {
+        if (proto.Outcome == OutcomeSuspended)
+        {
+            var outcome = new SubagentFinishedSuspendedOutcome();
+            if (proto.InterruptIds.Count > 0)
+            {
+                outcome.InterruptIds = new List<string>(proto.InterruptIds);
+            }
+
+            return outcome;
+        }
+
+        if (proto.Outcome == OutcomeSuccess)
+        {
+            return new SubagentFinishedSuccessOutcome();
         }
 
         return null;

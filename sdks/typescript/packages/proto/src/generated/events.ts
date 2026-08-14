@@ -196,7 +196,20 @@ export interface SubagentFinishedEvent {
   baseEvent: BaseEvent | undefined;
   subagentRunId: string;
   /** The subagent's completion payload, mirroring RunFinishedEvent.result. */
-  result?: any | undefined;
+  result?:
+    | any
+    | undefined;
+  /**
+   * Typed outcome, flattened like RunFinishedEvent's: "" (legacy success,
+   * field omitted on the JSON side), "success", or "suspended".
+   */
+  outcome: string;
+  /**
+   * Ids of the run-level interrupts this subagent directly owns; only
+   * meaningful when outcome == "suspended". May be empty for an ancestor
+   * suspended because a descendant interrupted.
+   */
+  interruptIds: string[];
 }
 
 export interface SubagentErrorEvent {
@@ -1937,7 +1950,7 @@ export const SubagentStartedEvent: MessageFns<SubagentStartedEvent> = {
 };
 
 function createBaseSubagentFinishedEvent(): SubagentFinishedEvent {
-  return { baseEvent: undefined, subagentRunId: "", result: undefined };
+  return { baseEvent: undefined, subagentRunId: "", result: undefined, outcome: "", interruptIds: [] };
 }
 
 export const SubagentFinishedEvent: MessageFns<SubagentFinishedEvent> = {
@@ -1950,6 +1963,12 @@ export const SubagentFinishedEvent: MessageFns<SubagentFinishedEvent> = {
     }
     if (message.result !== undefined) {
       Value.encode(Value.wrap(message.result), writer.uint32(26).fork()).join();
+    }
+    if (message.outcome !== "") {
+      writer.uint32(34).string(message.outcome);
+    }
+    for (const v of message.interruptIds) {
+      writer.uint32(42).string(v!);
     }
     return writer;
   },
@@ -1985,6 +2004,22 @@ export const SubagentFinishedEvent: MessageFns<SubagentFinishedEvent> = {
           message.result = Value.unwrap(Value.decode(reader, reader.uint32()));
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.outcome = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.interruptIds.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2004,6 +2039,8 @@ export const SubagentFinishedEvent: MessageFns<SubagentFinishedEvent> = {
       : undefined;
     message.subagentRunId = object.subagentRunId ?? "";
     message.result = object.result ?? undefined;
+    message.outcome = object.outcome ?? "";
+    message.interruptIds = object.interruptIds?.map((e) => e) || [];
     return message;
   },
 };

@@ -85,3 +85,48 @@ class TestSubagentLifecycleEvents(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestSubagentFinishedOutcome(unittest.TestCase):
+    def test_outcome_roundtrip_and_camel_case_wire_form(self):
+        from ag_ui.core import (
+            SubagentFinishedEvent,
+            SubagentFinishedSuspendedOutcome,
+            SubagentFinishedSuccessOutcome,
+        )
+
+        suspended = SubagentFinishedEvent(
+            subagent_run_id="s1",
+            outcome=SubagentFinishedSuspendedOutcome(interrupt_ids=["int-1"]),
+        )
+        wire = suspended.model_dump(by_alias=True, exclude_none=True)
+        self.assertEqual(
+            wire["outcome"], {"type": "suspended", "interruptIds": ["int-1"]}
+        )
+        back = SubagentFinishedEvent.model_validate(wire)
+        self.assertEqual(back.outcome.type, "suspended")
+        self.assertEqual(back.outcome.interrupt_ids, ["int-1"])
+
+        success = SubagentFinishedEvent.model_validate(
+            {"type": "SUBAGENT_FINISHED", "subagentRunId": "s1", "outcome": {"type": "success"}}
+        )
+        self.assertIsInstance(success.outcome, SubagentFinishedSuccessOutcome)
+
+        # Legacy: omitted (or null) outcome stays None.
+        legacy = SubagentFinishedEvent.model_validate(
+            {"type": "SUBAGENT_FINISHED", "subagentRunId": "s1", "outcome": None}
+        )
+        self.assertIsNone(legacy.outcome)
+
+    def test_interrupt_carries_the_raising_subagent(self):
+        from ag_ui.core.types import Interrupt
+
+        owned = Interrupt.model_validate(
+            {"id": "int-1", "reason": "hitl", "subagentRunId": "tools:s1"}
+        )
+        self.assertEqual(owned.subagent_run_id, "tools:s1")
+        self.assertEqual(
+            owned.model_dump(by_alias=True, exclude_none=True)["subagentRunId"],
+            "tools:s1",
+        )
+        root = Interrupt.model_validate({"id": "int-2", "reason": "hitl"})
+        self.assertIsNone(root.subagent_run_id)

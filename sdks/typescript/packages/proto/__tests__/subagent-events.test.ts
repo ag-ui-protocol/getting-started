@@ -1,4 +1,5 @@
 import {
+  BaseEvent,
   EventType,
   SubagentStartedEvent,
   SubagentFinishedEvent,
@@ -65,6 +66,56 @@ describe("Subagent lifecycle events over protobuf", () => {
     expect(bare.type).toBe(EventType.SUBAGENT_FINISHED);
     expect(bare.subagentRunId).toBe("sub-1");
     expect(bare.result).toBeUndefined();
+  });
+
+  it("should round-trip SUBAGENT_FINISHED outcomes: legacy, success, suspended", () => {
+    // Legacy (no outcome) decodes back to no outcome.
+    const legacy = roundTrip({
+      type: EventType.SUBAGENT_FINISHED,
+      subagentRunId: "sub-1",
+    } as SubagentFinishedEvent);
+    expect((legacy as { outcome?: unknown }).outcome).toBeUndefined();
+
+    expectRoundTripEquality({
+      type: EventType.SUBAGENT_FINISHED,
+      subagentRunId: "sub-1",
+      outcome: { type: "success" },
+    } as SubagentFinishedEvent);
+
+    expectRoundTripEquality({
+      type: EventType.SUBAGENT_FINISHED,
+      subagentRunId: "sub-1",
+      outcome: { type: "suspended", interruptIds: ["int-1", "int-2"] },
+    } as SubagentFinishedEvent);
+
+    // Suspended with no owned interrupts (ancestor of the interrupting
+    // descendant): the empty list decodes back to an omitted field.
+    const ancestor = roundTrip({
+      type: EventType.SUBAGENT_FINISHED,
+      subagentRunId: "sub-outer",
+      outcome: { type: "suspended" },
+    } as SubagentFinishedEvent);
+    expect((ancestor as { outcome?: { type?: string; interruptIds?: unknown } }).outcome).toEqual({
+      type: "suspended",
+    });
+  });
+
+  it("should round-trip Interrupt.subagentRunId inside the RUN_FINISHED outcome", () => {
+    const decoded = roundTrip({
+      type: EventType.RUN_FINISHED,
+      threadId: "t1",
+      runId: "r1",
+      outcome: {
+        type: "interrupt",
+        interrupts: [
+          { id: "int-1", reason: "hitl", subagentRunId: "tools:s1" },
+          { id: "int-2", reason: "hitl" },
+        ],
+      },
+    } as unknown as BaseEvent);
+    const outcome = (decoded as { outcome?: { interrupts?: Array<Record<string, unknown>> } }).outcome;
+    expect(outcome?.interrupts?.[0].subagentRunId).toBe("tools:s1");
+    expect(outcome?.interrupts?.[1].subagentRunId).toBeUndefined();
   });
 
   it("should round-trip SUBAGENT_ERROR with and without a code", () => {

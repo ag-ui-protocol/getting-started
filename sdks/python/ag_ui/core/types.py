@@ -273,6 +273,11 @@ class Interrupt(ConfiguredBaseModel):
     response_schema: Optional[Dict[str, Any]] = None
     expires_at: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    # The subagent whose work raised this interrupt, when it was raised inside
+    # one — None for a root-raised interrupt. Attribution lives per interrupt
+    # rather than on the run outcome because one run can carry interrupts from
+    # several subagents.
+    subagent_run_id: Optional[str] = None
 
 
 ResumeStatus = Literal["resolved", "cancelled"]

@@ -41,6 +41,13 @@ So:
 - **Do not** persist anything by `subagentRunId` expecting it to be meaningful on
   a later run, and do not treat two invocations of one subagent as sharing a
   value. Use `name` when you mean "which kind of subagent this is".
+- **One exception**: a subagent that finished with `outcome: "suspended"`
+  **may** reuse its id on a resuming run. Producers that can correlate the
+  resumed work with the suspended invocation should do so, and a client must
+  treat that later `SubagentStarted` as a continuation (waiting → running),
+  never as a duplicate. A producer that cannot correlate mints a new id — the
+  client's waiting state then resolves through the interrupt ids it answered,
+  not through id reuse (see [Suspension](#suspension)).
 
 <Note>
   This field was called `subagentId` in prerelease builds. It was renamed because
@@ -92,12 +99,41 @@ inspect `rawEvent`.
 
 ### SubagentFinished
 
-Marks a subagent invocation as complete.
+Closes a subagent invocation's stream segment for this run.
 
 | Property        | Description                                             |
 | --------------- | ------------------------------------------------------- |
 | `subagentRunId` | Matches the id from `SubagentStarted`. Required          |
 | `result`        | Optional completion payload, mirroring `RunFinished.result` |
+| `outcome`       | Optional typed outcome, mirroring `RunFinished.outcome`: `{ type: "success" }` or `{ type: "suspended", interruptIds?: [...] }`. Omitted means success |
+
+#### Suspension
+
+A subagent can pause mid-task waiting for outside input — a human approval
+raised inside it, say. The run then ends with an interrupt outcome (see
+[Interrupts](/concepts/interrupts)), and because every started subagent closes
+before `RunFinished`, the paused subagent still emits `SubagentFinished` — but
+with `outcome: { type: "suspended" }`, so a UI can render "waiting" instead of
+"done". `interruptIds` names the run-level interrupts this subagent directly
+owns (each such `Interrupt` also carries `subagentRunId` back-reference); it
+may be empty or omitted for an ancestor suspended because a *descendant*
+interrupted.
+
+Suspension is the one case where a `subagentRunId` may deliberately span
+runs — with different obligations on each side:
+
+- **Clients must accept** a later run's `SubagentStarted` that reuses a
+  suspended invocation's id, and treat it as a *continuation* — transition the
+  existing group from waiting back to running, never render a duplicate.
+- **Producers should reuse the id when they can** correlate the resumed work
+  with the suspended invocation. The LangGraph integration does: its ids
+  derive from checkpoint task identity, which survives the pause. Reuse is
+  what lets a client continue the group seamlessly.
+- **Producers that cannot correlate mint a new id**, and that is valid. The
+  client's waiting state does not dangle: the suspended outcome's
+  `interruptIds` and the resume entries the client itself sent identify which
+  approvals were answered, so the waiting badge resolves on that basis even if
+  no continuation arrives under the old id.
 
 ### SubagentError
 

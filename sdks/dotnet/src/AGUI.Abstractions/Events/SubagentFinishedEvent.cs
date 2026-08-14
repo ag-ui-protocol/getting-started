@@ -4,10 +4,14 @@ using System.Text.Json.Serialization;
 namespace AGUI.Abstractions;
 
 /// <summary>
-/// Event signaling that a subagent completed its work successfully. Terminal for the
+/// Event closing a subagent's stream segment for this run. Terminal for the
 /// subagent it names: it may not be finished again, nor restarted within the run.
 /// Events attributed to it afterwards remain valid — a continuation carries the tag of
 /// the subagent it belongs to even after that subagent has finished.
+/// <see cref="Outcome"/> distinguishes completed work ("success", also the meaning
+/// of an omitted outcome) from a workflow paused awaiting outside input
+/// ("suspended") — on resume the same subagentRunId is re-announced as a
+/// continuation of the suspended invocation.
 /// </summary>
 // Keep in sync with sdks/typescript/packages/core/src/events.ts
 public sealed class SubagentFinishedEvent : BaseEvent
@@ -29,4 +33,12 @@ public sealed class SubagentFinishedEvent : BaseEvent
     [JsonPropertyName("result")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Result { get; set; }
+
+    /// <summary>
+    /// Gets or sets the typed outcome, mirroring <see cref="RunFinishedEvent.Outcome"/>.
+    /// Null means legacy success.
+    /// </summary>
+    [JsonPropertyName("outcome")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SubagentFinishedOutcome? Outcome { get; set; }
 }

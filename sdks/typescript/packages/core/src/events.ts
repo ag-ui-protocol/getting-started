@@ -374,11 +374,45 @@ export const SubagentStartedEventSchema = BaseEventSchema.extend({
   parentMessageId: nullableOptionalString,
 });
 
+export const SubagentFinishedSuccessOutcomeSchema = z
+  .object({
+    type: z.literal("success"),
+  })
+  .strict();
+
+export const SubagentFinishedSuspendedOutcomeSchema = z
+  .object({
+    type: z.literal("suspended"),
+    // The ids of the run-level interrupts this subagent directly owns (see
+    // Interrupt.subagentRunId). MAY be empty or omitted: an ancestor subagent
+    // suspended because a DESCENDANT interrupted owns no interrupt itself.
+    interruptIds: z.array(z.string()).optional(),
+  })
+  .strict();
+
+// Mirrors RunFinishedOutcome one level down: a subagent's terminal closes its
+// stream segment for THIS run either because the work completed ("success")
+// or because the workflow is paused awaiting outside input ("suspended" — the
+// run ends with an interrupt outcome, and on resume the same subagentRunId is
+// re-announced as a continuation of the suspended invocation). An omitted
+// outcome means legacy success. Without this, a paused subagent was
+// indistinguishable from a completed one and every UI had to reverse-engineer
+// "waiting" from a later interrupt event.
+export const SubagentFinishedOutcomeSchema = z.discriminatedUnion("type", [
+  SubagentFinishedSuccessOutcomeSchema,
+  SubagentFinishedSuspendedOutcomeSchema,
+]);
+
 export const SubagentFinishedEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.SUBAGENT_FINISHED),
   subagentRunId: z.string(),
   // The subagent's completion payload, mirroring RUN_FINISHED.result.
   result: z.any().optional(),
+  // Accept `null` and treat it as omitted, for the same Pydantic-producer
+  // reason as RUN_FINISHED.outcome above.
+  outcome: SubagentFinishedOutcomeSchema.nullable()
+    .optional()
+    .transform((v) => v ?? undefined),
 });
 
 export const SubagentErrorEventSchema = BaseEventSchema.extend({
@@ -546,6 +580,9 @@ export type RunFinishedEvent = z.infer<typeof RunFinishedEventSchema>;
 export type RunFinishedOutcome = z.infer<typeof RunFinishedOutcomeSchema>;
 export type RunFinishedSuccessOutcome = z.infer<typeof RunFinishedSuccessOutcomeSchema>;
 export type RunFinishedInterruptOutcome = z.infer<typeof RunFinishedInterruptOutcomeSchema>;
+export type SubagentFinishedOutcome = z.infer<typeof SubagentFinishedOutcomeSchema>;
+export type SubagentFinishedSuccessOutcome = z.infer<typeof SubagentFinishedSuccessOutcomeSchema>;
+export type SubagentFinishedSuspendedOutcome = z.infer<typeof SubagentFinishedSuspendedOutcomeSchema>;
 export type RunErrorEvent = z.infer<typeof RunErrorEventSchema>;
 export type StepStartedEvent = z.infer<typeof StepStartedEventSchema>;
 export type StepFinishedEvent = z.infer<typeof StepFinishedEventSchema>;

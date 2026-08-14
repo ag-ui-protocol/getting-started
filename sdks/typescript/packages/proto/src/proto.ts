@@ -5,6 +5,7 @@ import {
   EventType,
   Message,
   RunFinishedOutcome,
+  SubagentFinishedOutcome,
 } from "@ag-ui/core";
 import * as protoEvents from "./generated/events";
 import * as protoPatch from "./generated/patch";
@@ -268,6 +269,22 @@ export function encode(event: BaseEvent): Uint8Array {
     }
   }
 
+  // SubagentFinishedEvent: same flattening as RunFinishedEvent's outcome, one
+  // level down — `outcome` (string) plus `interrupt_ids` (repeated).
+  if (type === EventType.SUBAGENT_FINISHED) {
+    const outcome = rest.outcome as SubagentFinishedOutcome | undefined;
+    if (outcome === undefined) {
+      rest.outcome = "";
+      rest.interruptIds = [];
+    } else if (outcome.type === "suspended") {
+      rest.outcome = "suspended";
+      rest.interruptIds = outcome.interruptIds ?? [];
+    } else {
+      rest.outcome = "success";
+      rest.interruptIds = [];
+    }
+  }
+
   // custom mapping for json patch operations
   if (type === EventType.STATE_DELTA && Array.isArray(rest.delta)) {
     rest.delta = (rest.delta as LooseRecord[]).map((operation) => ({
@@ -355,6 +372,33 @@ export function decode(data: Uint8Array): BaseEvent {
       runFinished.outcome = { type: "success" };
     } else {
       delete runFinished.outcome;
+    }
+  }
+
+  // SubagentFinishedEvent: rebuild the nested `outcome` union from the flat
+  // proto fields, mirroring RunFinishedEvent above. Empty/missing decodes to
+  // `undefined` (legacy success).
+  if (decoded.type === EventType.SUBAGENT_FINISHED) {
+    const subagentFinished = decoded as LooseRecord;
+    const wireOutcome: string | undefined =
+      typeof subagentFinished.outcome === "string" && subagentFinished.outcome !== ""
+        ? subagentFinished.outcome
+        : undefined;
+    const wireInterruptIds: unknown[] = Array.isArray(subagentFinished.interruptIds)
+      ? subagentFinished.interruptIds
+      : [];
+
+    delete subagentFinished.interruptIds;
+
+    if (wireOutcome === "suspended") {
+      subagentFinished.outcome = {
+        type: "suspended",
+        ...(wireInterruptIds.length > 0 && { interruptIds: wireInterruptIds }),
+      };
+    } else if (wireOutcome === "success") {
+      subagentFinished.outcome = { type: "success" };
+    } else {
+      delete subagentFinished.outcome;
     }
   }
 

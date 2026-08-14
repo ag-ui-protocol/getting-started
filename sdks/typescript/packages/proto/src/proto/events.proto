@@ -186,6 +186,13 @@ message SubagentFinishedEvent {
   string subagent_run_id = 2;
   // The subagent's completion payload, mirroring RunFinishedEvent.result.
   optional google.protobuf.Value result = 3;
+  // Typed outcome, flattened like RunFinishedEvent's: "" (legacy success,
+  // field omitted on the JSON side), "success", or "suspended".
+  string outcome = 4;
+  // Ids of the run-level interrupts this subagent directly owns; only
+  // meaningful when outcome == "suspended". May be empty for an ancestor
+  // suspended because a descendant interrupted.
+  repeated string interrupt_ids = 5;
 }
 
 message SubagentErrorEvent {
