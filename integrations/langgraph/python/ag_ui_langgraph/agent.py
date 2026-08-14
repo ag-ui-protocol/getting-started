@@ -372,6 +372,42 @@ def _clear_subagent_lanes(active_run, ids) -> None:
         step_owners.pop(lane, None)
 
 
+def _pending_tool_calls_are_all_task(messages) -> bool:
+    """True when the checkpoint's pending tool calls are all `task` delegations.
+
+    "Pending" = an assistant tool call with no matching ToolMessage yet — for a
+    run interrupted mid-delegation, that is exactly the spawning `task` call
+    that has not returned. This is the durable, checkpoint-persisted evidence
+    that an interrupted `tools` task IS a deepagents delegation (see the
+    no-resume replay attribution in prepare_stream). Any pending NON-task call
+    means the interrupted tasks may be ordinary tool executions, so the caller
+    must not attribute; no pending calls at all (e.g. a declared subgraph node
+    that happens to be named "tools") means the same.
+    """
+    if not messages:
+        return False
+    answered = {
+        getattr(m, "tool_call_id", None)
+        for m in messages
+        if isinstance(m, ToolMessage)
+    }
+    pending = [
+        tool_call
+        for m in messages
+        if isinstance(m, AIMessage)
+        for tool_call in (getattr(m, "tool_calls", None) or [])
+        if (tool_call.get("id") if isinstance(tool_call, dict) else getattr(tool_call, "id", None))
+        not in answered
+    ]
+    if not pending:
+        return False
+    return all(
+        (tool_call.get("name") if isinstance(tool_call, dict) else getattr(tool_call, "name", None))
+        == "task"
+        for tool_call in pending
+    )
+
+
 def _interrupts_from_tool_error(error) -> Optional[tuple]:
     """The Interrupt objects carried by an interrupt-shaped tool "error", or None.
 
@@ -1842,22 +1878,31 @@ class LangGraphAgent:
             # subagent lane is exactly "<task.name>:<task.id>" — the OUTERMOST
             # delegation boundary the interrupt surfaced through, which is a
             # factual attribution even when the interrupt originated in a
-            # deeper nested subagent. Attribution is never invented: the task
-            # name alone is NOT delegation evidence (a root ToolNode whose
-            # ordinary tool calls interrupt() has name "tools" and NO subagent
-            # exists), so a nested-graph checkpoint on the task
-            # (``task.state``, which LangGraph populates for interrupted
-            # subgraph tasks) is required as well — without it the interrupt
-            # stays untagged, omission over invention. Flag-gated.
-            if self.emit_subagent_events:
+            # deeper nested subagent.
+            #
+            # Attribution is never invented, so the task name alone is NOT
+            # delegation evidence: a root ToolNode whose ordinary tool calls
+            # interrupt() is also named "tools" and no subagent exists. Nor is
+            # ``task.state`` — empirically (LangGraph 0.6-1.2), it is None for
+            # a deepagents delegation (the subgraph runs INSIDE the tool
+            # function) and populated for a declared subgraph NODE, the exact
+            # opposite of delegation. The durable, checkpoint-persisted
+            # evidence is SEMANTIC: the delegation's spawning `task` tool call
+            # is still pending in the checkpoint messages (an AIMessage
+            # tool_call with name "task" and no matching ToolMessage) while
+            # the run sits interrupted. Only when every pending call is a
+            # `task` call are the interrupted `tools` tasks delegations; any
+            # pending non-task call makes the tasks ambiguous, and omission is
+            # safer than a guessed owner. Flag-gated.
+            if self.emit_subagent_events and _pending_tool_calls_are_all_task(
+                (agent_state.values or {}).get("messages")
+            ):
                 owners = self.active_run.setdefault("interrupt_subagents", {})
                 for task in agent_state.tasks or ():
                     if getattr(task, "name", None) != "tools":
                         continue
                     task_id = getattr(task, "id", None)
                     if not task_id:
-                        continue
-                    if getattr(task, "state", None) is None:
                         continue
                     for task_interrupt in getattr(task, "interrupts", None) or ():
                         interrupt_id = getattr(task_interrupt, "id", None)

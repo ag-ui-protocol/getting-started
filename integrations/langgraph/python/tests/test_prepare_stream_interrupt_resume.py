@@ -789,14 +789,16 @@ class TestCheckpointSignature(unittest.TestCase):
 class FakeDelegationTask:
     """A checkpoint task shaped like a deepagents `task` ToolNode dispatch.
 
-    ``state`` is the delegation evidence: LangGraph populates it for
-    interrupted SUBGRAPH tasks (the nested graph's checkpoint), and a root
-    ToolNode whose ordinary tool interrupts has none."""
+    Empirically (LangGraph 0.6-1.2) the task object itself carries NO
+    delegation marker — deepagents runs the subgraph inside the tool function,
+    so ``task.state`` stays None. The delegation evidence lives in the
+    CHECKPOINT MESSAGES instead: the spawning `task` tool call is still
+    pending. The tests below build those messages explicitly."""
 
     name: str = "tools"
     id: str = "55ff4651-74d3-1dfa-901e-854219cb0bc3"
     interrupts: List[FakeInterrupt] = field(default_factory=list)
-    state: Any = "nested-graph-checkpoint"
+    state: Any = None
 
 
 class TestNoResumeInterruptAttribution(unittest.IsolatedAsyncioTestCase):
@@ -809,11 +811,23 @@ class TestNoResumeInterruptAttribution(unittest.IsolatedAsyncioTestCase):
     interrupt surfaced through.
     """
 
-    async def _short_circuit(self, emit_subagent_events):
+    def _delegation_messages(self, call_name="task"):
+        # The durable evidence: the spawning tool call is still pending in the
+        # checkpoint (no ToolMessage answers it) while the run sits interrupted.
+        return [
+            HumanMessage(id="h1", content="what time is it"),
+            AIMessage(
+                id="ai1",
+                content="",
+                tool_calls=[{"id": "call-1", "name": call_name, "args": {}}],
+            ),
+        ]
+
+    async def _short_circuit(self, emit_subagent_events, call_name="task"):
         agent = make_agent(emit_subagent_events=emit_subagent_events)
         agent.active_run = {"id": "run-1", "mode": "start"}
         state = _make_state(
-            messages=[HumanMessage(id="h1", content="what time is it")],
+            messages=self._delegation_messages(call_name),
             tasks=[FakeDelegationTask(interrupts=[FakeInterrupt(value="approve?", id="int-9")])],
         )
         inp = _make_input(messages=[UserMessage(id="h1", role="user", content="what time is it")])
@@ -834,16 +848,26 @@ class TestNoResumeInterruptAttribution(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_root_toolnode_with_an_interrupting_tool_stays_untagged(self):
         # The task NAME alone is not delegation evidence: a root ToolNode whose
-        # ordinary tool calls interrupt() is also named "tools" but has no
-        # nested-graph checkpoint — attributing it would invent a subagent
-        # that never existed.
+        # ordinary tool calls interrupt() is also named "tools". Its pending
+        # checkpoint call is that ORDINARY tool, not `task` — attributing it
+        # would invent a subagent that never existed.
+        events = await self._short_circuit(
+            emit_subagent_events=True, call_name="current_datetime"
+        )
+        custom = next(e for e in events if getattr(e, "type", None) == EventType.CUSTOM)
+        self.assertIsNone(custom.subagent_run_id)
+
+    async def test_a_declared_subgraph_named_tools_stays_untagged(self):
+        # A declared subgraph NODE named "tools" is dispatched by an edge, not
+        # by a tool call — no pending `task` call exists in the checkpoint, so
+        # nothing is attributed.
         agent = make_agent(emit_subagent_events=True)
         agent.active_run = {"id": "run-1", "mode": "start"}
         state = _make_state(
             messages=[HumanMessage(id="h1", content="hi")],
             tasks=[FakeDelegationTask(
-                interrupts=[FakeInterrupt(value="approve?", id="int-3")],
-                state=None,
+                interrupts=[FakeInterrupt(value="approve?", id="int-4")],
+                state={"messages": []},  # subgraph-node checkpoint IS populated
             )],
         )
         inp = _make_input(messages=[UserMessage(id="h1", role="user", content="hi")])
