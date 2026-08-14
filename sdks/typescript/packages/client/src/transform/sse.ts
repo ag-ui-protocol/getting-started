@@ -13,8 +13,12 @@ import { type DebugLoggerInput, resolveDebugLogger } from "@/debug-logger";
 export const parseSSEStream = (
   source$: Observable<HttpEvent>,
   debugLogger?: DebugLoggerInput,
+  // DEFERRED (PNI-272): this is the exported stream element type; changing it
+  // to `unknown` ripples into every consumer of parseSSEStream.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Observable<any> => {
   const log = resolveDebugLogger(debugLogger);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches the exported Observable<any> above
   const jsonSubject = new Subject<any>();
   // Create TextDecoder with stream option set to true to handle split UTF-8 characters
   const decoder = new TextDecoder("utf-8", { fatal: false });

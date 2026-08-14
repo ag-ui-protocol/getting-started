@@ -179,6 +179,24 @@ describe("Message Conversion - All Types", () => {
       const result: any[] = langchainMessagesToAgui([msg]);
       expect(result[0].role).toBe("tool");
       expect(result[0].toolCallId).toBe("tc1");
+      // No status / "success" carries no failure signal, so error stays unset.
+      expect(result[0].error).toBeUndefined();
+    });
+
+    it("should map a tool message error status onto AG-UI's error field", () => {
+      // The reverse of #2263: a LangChain tool result with status "error" must set
+      // AG-UI's error so the failure survives the round trip. The value is a fixed
+      // sentinel — the original text is not recoverable from the flag alone (#2305).
+      const msg = {
+        id: "t1",
+        type: "tool",
+        content: "Tool failed: invalid id",
+        tool_call_id: "tc1",
+        status: "error",
+      } as any as LangGraphMessage;
+      const result: any[] = langchainMessagesToAgui([msg]);
+      expect(result[0].role).toBe("tool");
+      expect(result[0].error).toBe("error");
     });
 
     it("should handle generic (ChatMessage) type as assistant", () => {

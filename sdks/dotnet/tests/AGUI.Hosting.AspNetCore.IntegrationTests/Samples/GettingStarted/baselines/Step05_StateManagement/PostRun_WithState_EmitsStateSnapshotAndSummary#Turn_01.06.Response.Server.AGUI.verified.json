@@ -914,6 +914,15 @@
     "runId": "run_Id_1",
     "outcome": {
       "type": "success"
-    }
+    },
+    "usage": [
+      {
+        "inputTokens": 658,
+        "outputTokens": 188,
+        "totalTokens": 846,
+        "reasoningTokens": 128,
+        "cachedInputTokens": 0
+      }
+    ]
   }
 ]

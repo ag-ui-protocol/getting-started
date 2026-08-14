@@ -1,6 +1,6 @@
 [project]
 name = "ag-ui-crewai"
-version = "0.2.1"
+version = "0.3.0"
 description = "Implementation of the AG-UI protocol for CrewAI"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -50,15 +50,20 @@ dependencies = [
 # never imports it (see the note above, CPK-7721 review #6).
 tools = ["crewai-tools>=0.38.1"]
 
-[project.scripts]
-dev = "ag_ui_crewai.dojo:main"
-
 [dependency-groups]
 dev = [
     "pytest>=8.0,<9.0",
     "pytest-asyncio>=0.24,<0.25",
     # Dev-only; <0.29 guards against a breaking httpx 0.x minor.
     "httpx>=0.27,<0.29",
+    # tests/test_packaging.py asserts against the real wheel and sdist, and builds
+    # them with `uv build --no-build-isolation` so the run needs neither network nor
+    # a warm uv cache. That takes the backend from here, which also means a hatchling
+    # upgrade arrives as a reviewable uv.lock change instead of a silent shift in
+    # what gets published. Mirrors build-system.requires below.
+    "hatchling>=1.27,<2",
+    # tomllib is 3.11+ and requires-python still admits 3.10.
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [build-system]
@@ -66,16 +71,36 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 # Shared across wheel and sdist so the exclude list is not repeated per target.
+#
+# CANONICAL RATIONALE for how the dojo is launched. ``render.yaml`` and
+# ``apps/dojo/scripts/run-dojo-everything.js`` point here rather than repeat it.
+#
+# The dojo server, its launcher and its demo flows are development-only, so they
+# stay out of both artifacts and nothing shipped may reference them: an entry point
+# declared in ``[project.scripts]`` survives the exclude and would install a ``dev``
+# command that raises ModuleNotFoundError. ``tests/test_packaging.py`` enforces the
+# split. Run the dojo from a source checkout with ``uv run python -m ag_ui_crewai``.
+#
+# That target must be the PACKAGE, not the module: ``-m ag_ui_crewai.dojo`` has no
+# ``__main__`` guard, so it builds the app and exits 0 having served nothing.
+# ``ag_ui_crewai/__main__.py`` owns the uvicorn call.
 [tool.hatch.build]
 exclude = [
     "ag_ui_crewai/dojo.py",
+    "ag_ui_crewai/__main__.py",
     "ag_ui_crewai/examples/**",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["ag_ui_crewai"]
 
-# Lean sdist: package + metadata only (~31 KB), matching the pre-migration Poetry sdist.
+# Lean sdist: package plus metadata only, no tests and no build output. No size
+# figure here on purpose; the previous one rotted by 5x with nothing catching it. The
+# guard is ``tests/test_packaging.py``, which builds the tarball and compares its
+# whole file list. Only the ``ag_ui_crewai`` entry below actually selects anything:
+# hatchling force-includes the readme, the license, ``pyproject.toml``, ``PKG-INFO``
+# and ``.gitignore`` into every sdist whatever this list says. The other three stay
+# listed as a statement of intent, and the guard catches it if that stops holding.
 [tool.hatch.build.targets.sdist]
 include = [
     "ag_ui_crewai",

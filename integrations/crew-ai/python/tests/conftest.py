@@ -18,6 +18,14 @@ import tempfile
 
 import pytest
 
+# crewai telemetry is opt-OUT and defaults to on, so any test that runs a real
+# Crew talks to crewai's collector. Set unconditionally rather than via
+# setdefault: an inherited ``CREWAI_DISABLE_TELEMETRY=false`` would otherwise
+# survive, and a test suite must never phone home. crewai re-reads this on every
+# telemetry operation (``Telemetry._is_telemetry_disabled``), so setting it here
+# covers the whole session.
+os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
+
 # Redirect crewai's on-disk storage root BEFORE anything imports crewai.
 #
 # crewai resolves its storage root at MODULE-IMPORT time (``crewai.rag.chromadb.

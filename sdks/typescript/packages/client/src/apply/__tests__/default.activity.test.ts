@@ -43,7 +43,9 @@ async function applySnapshot(initial: Message[], snapshotMessages: Message[]): P
       messages: snapshotMessages,
     });
   });
-  return updates[0]?.messages!;
+  // Cast, not a non-null assertion on the optional chain: `?.` must keep
+  // returning undefined when there is no update, exactly as before.
+  return updates[0]?.messages as Message[];
 }
 
 describe("defaultApplyEvents with activity events", () => {

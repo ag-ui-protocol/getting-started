@@ -88,6 +88,29 @@ def test_litellm_conversion_accepts_litellm_message_object():
     assert isinstance(out[0].id, str)
 
 
+def test_litellm_conversion_omits_client_owned_reasoning_from_snapshot():
+    """CrewAI does not own a complete canonical reasoning-message set.
+
+    Including prior reasoning in an authoritative ``MESSAGES_SNAPSHOT`` makes
+    the client replace all streamed reasoning, including the current turn, and
+    the whitelist also strips its encrypted continuation value. A snapshot with
+    no reasoning tells the client to preserve its complete local set instead.
+    """
+    out = litellm_messages_to_ag_ui_messages([
+        {"role": "user", "id": "u1", "content": "question"},
+        {
+            "role": "reasoning",
+            "id": "rs_1",
+            "content": "thinking",
+            "encrypted_value": "ENCRYPTED_STATE",
+        },
+        {"role": "assistant", "id": "a1", "content": "answer"},
+    ])
+
+    assert [message.id for message in out] == ["u1", "a1"]
+    assert all(message.role != "reasoning" for message in out)
+
+
 # --------------------------------------------------------------------------
 # crewai_prepare_inputs (inbound preparation)
 # --------------------------------------------------------------------------

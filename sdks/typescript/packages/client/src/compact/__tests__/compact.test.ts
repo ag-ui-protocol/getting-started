@@ -7,7 +7,6 @@ import {
   ToolCallArgsEvent,
   CustomEvent,
   StateSnapshotEvent,
-  StateDeltaEvent,
 } from "@ag-ui/core";
 
 describe("Event Compaction", () => {

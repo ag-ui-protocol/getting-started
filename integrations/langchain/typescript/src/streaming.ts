@@ -7,6 +7,7 @@ import {
   ToolCallResultEvent,
   BaseEvent,
 } from "@ag-ui/client";
+import { TokenUsage, tokenUsageFromLangChainMetadata } from "@ag-ui/core";
 import {
   AIMessage,
   AIMessageChunk,
@@ -49,8 +50,20 @@ function isStream(obj: any): obj is IterableReadableStream<any> {
  * Converts LangChain response to AG-UI events
  */
 export async function* streamLangChainResponse(
-  response: LangChainResponse
+  response: LangChainResponse,
+  usageSink?: (usage: TokenUsage) => void,
 ): AsyncGenerator<BaseEvent> {
+  // Report provider-reported numeric token usage from a message/chunk to the
+  // optional sink. Reads only `usage_metadata` (+ model_name label) — never
+  // content. No-op when usage is absent or no sink was provided.
+  const reportUsage = (msg: any): void => {
+    if (!usageSink) return;
+    const usage = tokenUsageFromLangChainMetadata(msg?.usage_metadata, {
+      model: msg?.response_metadata?.model_name,
+    });
+    if (usage) usageSink(usage);
+  };
+
   // 1. Handle string response
   if (typeof response === "string") {
     const messageId = randomUUID();
@@ -65,6 +78,7 @@ export async function* streamLangChainResponse(
 
   // 2. Handle AIMessage (complete message with content and tool calls)
   if (isAIMessage(response)) {
+    reportUsage(response);
     const messageId = randomUUID();
 
     // Emit text content if present
@@ -138,6 +152,10 @@ export async function* streamLangChainResponse(
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+
+        // LangChain attaches usage_metadata to the final streamed chunk; report
+        // it as it arrives (no-op on chunks without it).
+        reportUsage(value);
 
         let hasToolCall = false;
         let toolCallId: string | undefined;

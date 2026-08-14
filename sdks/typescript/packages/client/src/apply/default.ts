@@ -11,7 +11,6 @@ import {
   type AssistantMessage,
   type BaseEvent,
   type CustomEvent,
-  DeveloperMessage,
   EventType,
   type Message,
   type MessagesSnapshotEvent,
@@ -31,7 +30,6 @@ import {
   type StateSnapshotEvent,
   type StepFinishedEvent,
   type StepStartedEvent,
-  SystemMessage,
   type TextMessageContentEvent,
   type TextMessageEndEvent,
   type TextMessageStartEvent,
@@ -40,12 +38,11 @@ import {
   type ToolCallResultEvent,
   type ToolCallStartEvent,
   type ToolMessage,
-  UserMessage,
 } from "@ag-ui/core";
 import jsonpatch from "fast-json-patch";
 import { EMPTY, of } from "rxjs";
 import type { Observable } from "rxjs";
-import { concatMap, defaultIfEmpty, mergeAll, mergeMap } from "rxjs/operators";
+import { concatMap, defaultIfEmpty, mergeAll } from "rxjs/operators";
 import untruncateJson from "untruncate-json";
 import { structuredClone_ } from "../utils";
 import { type DebugLoggerInput, resolveDebugLogger } from "@/debug-logger";
@@ -383,7 +380,10 @@ export const defaultApplyEvents = (
               try {
                 // Parse from toolCallBuffer only (before current delta is applied)
                 partialToolCallArgs = untruncateJson(toolCallBuffer);
-              } catch (error) {}
+              } catch (_error) {
+                // Streaming args are mid-flight and frequently unparseable;
+                // fall through with the last good partial object.
+              }
 
               return subscriber.onToolCallArgsEvent?.({
                 event: event as ToolCallArgsEvent,
@@ -440,7 +440,10 @@ export const defaultApplyEvents = (
               let toolCallArgs = {};
               try {
                 toolCallArgs = JSON.parse(toolCallArgsString);
-              } catch (error) {}
+              } catch (_error) {
+                // A malformed final payload must not abort the run; downstream
+                // sees the empty object.
+              }
               return subscriber.onToolCallEndEvent?.({
                 event: event as ToolCallEndEvent,
                 messages,
@@ -1216,6 +1219,6 @@ export const defaultApplyEvents = (
     mergeAll(),
     // Only use defaultIfEmpty when there are subscribers to avoid emitting empty updates
     // when patches fail and there are no subscribers (like in state patching test)
-    subscribers.length > 0 ? defaultIfEmpty({} as AgentStateMutation) : (stream: any) => stream,
+    subscribers.length > 0 ? defaultIfEmpty({} as AgentStateMutation) : <T>(stream: T) => stream,
   );
 };

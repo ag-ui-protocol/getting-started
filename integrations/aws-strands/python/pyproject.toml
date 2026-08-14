@@ -1,7 +1,7 @@
 [project]
 name = "ag_ui_strands"
 license = "MIT"
-version = "0.2.4"
+version = "0.2.5"
 license-files = ["LICENSE"]
 authors = [
     { name = "AG-UI Contributors" }
@@ -9,7 +9,7 @@ authors = [
 requires-python = ">=3.10, <3.15"
 dependencies = [
     "ag-ui-a2ui-toolkit>=0.0.4",
-    "ag-ui-protocol>=0.1.18",
+    "ag-ui-protocol>=0.1.19",
     "fastapi>=0.115.12",
     "strands-agents>=1.15.0",
 ]

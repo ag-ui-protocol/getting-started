@@ -43,6 +43,7 @@ from ag_ui.core.events import (
     RunFinishedOutcome,
     RunFinishedSuccessOutcome,
     RunFinishedInterruptOutcome,
+    TokenUsage,
     Event
 )
 
@@ -141,6 +142,7 @@ __all__ = [
     "ReasoningMessageRole",
     "RunFinishedOutcome",
     "RunFinishedSuccessOutcome",
+    "TokenUsage",
     "RunFinishedInterruptOutcome",
     "Event",
     # Types

@@ -104,6 +104,18 @@ message RunStartedEvent {
   string run_id = 3;
 }
 
+// Numeric-only, per-(provider, model) token usage summary. Carries no
+// content-bearing or identifying fields — only labels and token counts.
+message Usage {
+  optional string provider = 1;
+  optional string model = 2;
+  optional int64 input_tokens = 3;
+  optional int64 output_tokens = 4;
+  optional int64 total_tokens = 5;
+  optional int64 reasoning_tokens = 6;
+  optional int64 cached_input_tokens = 7;
+}
+
 message RunFinishedEvent {
   BaseEvent base_event = 1;
   string thread_id = 2;
@@ -111,12 +123,14 @@ message RunFinishedEvent {
   optional google.protobuf.Value result = 4;
   string outcome = 5;
   repeated Interrupt interrupts = 6;
+  repeated Usage usage = 7;
 }
 
 message RunErrorEvent {
   BaseEvent base_event = 1;
   optional string code = 2;
   string message = 3;
+  repeated Usage usage = 4;
 }
 
 message StepStartedEvent {

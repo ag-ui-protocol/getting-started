@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Text.Json;
 using AGUI.Abstractions;
+using Google.Protobuf.Collections;
 using Proto = AGUI.ProtocolBuffers;
 
 namespace AGUI.Protobuf;
@@ -59,6 +61,8 @@ internal static class ProtoEventMapper
                     runFinished.Outcome = string.Empty;
                 }
 
+                AddUsage(runFinished.Usage, e.Usage);
+
                 return new Proto.Event { RunFinished = runFinished };
             }
             case RunErrorEvent e:
@@ -73,6 +77,8 @@ internal static class ProtoEventMapper
                 {
                     runError.Code = e.Code;
                 }
+
+                AddUsage(runError.Usage, e.Usage);
 
                 return new Proto.Event { RunError = runError };
             }
@@ -263,6 +269,7 @@ internal static class ProtoEventMapper
                     RunId = e.RunId,
                     Result = ProtoValueConverter.ToJsonElementOrNull(e.Result),
                     Outcome = BuildOutcome(e),
+                    Usage = BuildUsage(e.Usage),
                 };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
@@ -274,6 +281,7 @@ internal static class ProtoEventMapper
                 {
                     Message = e.Message,
                     Code = e.HasCode ? e.Code : null,
+                    Usage = BuildUsage(e.Usage),
                 };
                 ApplyBaseEvent(result, e.BaseEvent);
                 return result;
@@ -457,6 +465,85 @@ internal static class ProtoEventMapper
         }
 
         return null;
+    }
+
+    // Token usage maps 1:1 onto the `repeated Usage` field. An absent list and an
+    // empty list both encode to zero entries, so legacy events (no usage) stay
+    // byte-for-byte identical on the wire; decoding mirrors that by returning null
+    // rather than an empty list. Counts are `optional` in the schema, so a count the
+    // producer never reported stays null instead of collapsing to 0.
+    private static void AddUsage(RepeatedField<Proto.Usage> target, IList<TokenUsage>? usage)
+    {
+        if (usage is null)
+        {
+            return;
+        }
+
+        foreach (var entry in usage)
+        {
+            var proto = new Proto.Usage();
+            if (entry.Provider is not null)
+            {
+                proto.Provider = entry.Provider;
+            }
+
+            if (entry.Model is not null)
+            {
+                proto.Model = entry.Model;
+            }
+
+            if (entry.InputTokens is { } inputTokens)
+            {
+                proto.InputTokens = inputTokens;
+            }
+
+            if (entry.OutputTokens is { } outputTokens)
+            {
+                proto.OutputTokens = outputTokens;
+            }
+
+            if (entry.TotalTokens is { } totalTokens)
+            {
+                proto.TotalTokens = totalTokens;
+            }
+
+            if (entry.ReasoningTokens is { } reasoningTokens)
+            {
+                proto.ReasoningTokens = reasoningTokens;
+            }
+
+            if (entry.CachedInputTokens is { } cachedInputTokens)
+            {
+                proto.CachedInputTokens = cachedInputTokens;
+            }
+
+            target.Add(proto);
+        }
+    }
+
+    private static IList<TokenUsage>? BuildUsage(RepeatedField<Proto.Usage> usage)
+    {
+        if (usage.Count == 0)
+        {
+            return null;
+        }
+
+        var result = new List<TokenUsage>(usage.Count);
+        foreach (var entry in usage)
+        {
+            result.Add(new TokenUsage
+            {
+                Provider = entry.HasProvider ? entry.Provider : null,
+                Model = entry.HasModel ? entry.Model : null,
+                InputTokens = entry.HasInputTokens ? entry.InputTokens : null,
+                OutputTokens = entry.HasOutputTokens ? entry.OutputTokens : null,
+                TotalTokens = entry.HasTotalTokens ? entry.TotalTokens : null,
+                ReasoningTokens = entry.HasReasoningTokens ? entry.ReasoningTokens : null,
+                CachedInputTokens = entry.HasCachedInputTokens ? entry.CachedInputTokens : null,
+            });
+        }
+
+        return result;
     }
 
     private static JsonElement BuildPatchArray(Proto.StateDeltaEvent proto)

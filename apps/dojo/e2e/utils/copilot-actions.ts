@@ -36,6 +36,25 @@ async function waitForCurrentCopilotRunToFinish(
   await waitForNoActiveCopilotRun(page, timeout);
 }
 
+/**
+ * Wait until the assistant message count grows past `countBefore`, proving the
+ * run we just triggered has actually started and we are not observing a stale
+ * idle flag from the previous run.
+ */
+async function waitForNewAssistantMessage(
+  page: Page,
+  countBefore: number,
+  timeout = LLM_RESPONSE_TIMEOUT,
+) {
+  await page.waitForFunction(
+    (before) =>
+      document.querySelectorAll('[data-testid="copilot-assistant-message"]')
+        .length > before,
+    countBefore,
+    { timeout },
+  );
+}
+
 async function expectSubmittedUserMessage(
   page: Page,
   userMessageIndex: number,
@@ -111,16 +130,33 @@ export async function sendAndAwaitResponse(
 
   // Wait for a NEW assistant message to appear, proving the agent
   // started responding to our message (not a stale previous response).
-  await page.waitForFunction(
-    (before) =>
-      document.querySelectorAll('[data-testid="copilot-assistant-message"]')
-        .length > before,
-    countBefore,
-    { timeout },
-  );
+  await waitForNewAssistantMessage(page, countBefore, timeout);
 
   // Now wait for the current run to finish. This helper first gives the UI a
   // chance to report running=true, so a stale idle flag cannot end the wait.
+  await waitForCurrentCopilotRunToFinish(page, timeout);
+}
+
+/**
+ * Run an interaction that starts an agent run without going through the chat
+ * input (clicking a button rendered by the agent, for example) and wait for
+ * that run to finish.
+ *
+ * Anchors on a NEW assistant message the same way `sendAndAwaitResponse` does:
+ * `awaitLLMResponseDone` alone can return before the triggered run has started,
+ * because its run-start window is short and a stale idle flag then ends the
+ * wait immediately, leaving the caller's assertions racing the response.
+ */
+export async function awaitResponseAfterAction(
+  page: Page,
+  action: () => Promise<void>,
+  timeout = LLM_RESPONSE_TIMEOUT,
+) {
+  const countBefore = await CopilotSelectors.assistantMessages(page).count();
+
+  await action();
+
+  await waitForNewAssistantMessage(page, countBefore, timeout);
   await waitForCurrentCopilotRunToFinish(page, timeout);
 }
 
