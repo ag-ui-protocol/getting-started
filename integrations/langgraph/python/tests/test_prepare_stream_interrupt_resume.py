@@ -811,23 +811,27 @@ class TestNoResumeInterruptAttribution(unittest.IsolatedAsyncioTestCase):
     interrupt surfaced through.
     """
 
-    def _delegation_messages(self, call_name="task"):
+    def _delegation_messages(self, call_name="task", args=None):
         # The durable evidence: the spawning tool call is still pending in the
-        # checkpoint (no ToolMessage answers it) while the run sits interrupted.
+        # checkpoint (no ToolMessage answers it) while the run sits
+        # interrupted — and it matches the deepagents task-call SHAPE
+        # (subagent_type in args), not merely the name.
+        if args is None:
+            args = {"subagent_type": "clock", "description": "tells time"}
         return [
             HumanMessage(id="h1", content="what time is it"),
             AIMessage(
                 id="ai1",
                 content="",
-                tool_calls=[{"id": "call-1", "name": call_name, "args": {}}],
+                tool_calls=[{"id": "call-1", "name": call_name, "args": args}],
             ),
         ]
 
-    async def _short_circuit(self, emit_subagent_events, call_name="task"):
+    async def _short_circuit(self, emit_subagent_events, call_name="task", args=None):
         agent = make_agent(emit_subagent_events=emit_subagent_events)
         agent.active_run = {"id": "run-1", "mode": "start"}
         state = _make_state(
-            messages=self._delegation_messages(call_name),
+            messages=self._delegation_messages(call_name, args),
             tasks=[FakeDelegationTask(interrupts=[FakeInterrupt(value="approve?", id="int-9")])],
         )
         inp = _make_input(messages=[UserMessage(id="h1", role="user", content="what time is it")])
@@ -852,7 +856,18 @@ class TestNoResumeInterruptAttribution(unittest.IsolatedAsyncioTestCase):
         # checkpoint call is that ORDINARY tool, not `task` — attributing it
         # would invent a subagent that never existed.
         events = await self._short_circuit(
-            emit_subagent_events=True, call_name="current_datetime"
+            emit_subagent_events=True, call_name="current_datetime", args={}
+        )
+        custom = next(e for e in events if getattr(e, "type", None) == EventType.CUSTOM)
+        self.assertIsNone(custom.subagent_run_id)
+
+    async def test_an_ordinary_root_tool_merely_named_task_stays_untagged(self):
+        # The NAME collision: a root ToolNode may legally expose an
+        # interrupting tool called "task". Its pending call lacks the
+        # deepagents shape (no subagent_type in args), so no subagent is
+        # invented on replay.
+        events = await self._short_circuit(
+            emit_subagent_events=True, call_name="task", args={}
         )
         custom = next(e for e in events if getattr(e, "type", None) == EventType.CUSTOM)
         self.assertIsNone(custom.subagent_run_id)

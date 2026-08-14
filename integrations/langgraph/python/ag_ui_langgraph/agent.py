@@ -372,6 +372,26 @@ def _clear_subagent_lanes(active_run, ids) -> None:
         step_owners.pop(lane, None)
 
 
+def _is_deepagents_task_call(tool_call) -> bool:
+    """A pending call counts as a deepagents delegation only by SHAPE.
+
+    The name alone is not evidence — an ordinary root tool may legally be
+    named "task". The adapter's runtime contract (see
+    _capture_subagent_task_meta) is that a deepagents `task` input carries
+    ``subagent_type``; the replay evidence requires exactly the same marker,
+    no stricter and no looser than the live path.
+    """
+    name = (
+        tool_call.get("name") if isinstance(tool_call, dict) else getattr(tool_call, "name", None)
+    )
+    if name != "task":
+        return False
+    args = (
+        tool_call.get("args") if isinstance(tool_call, dict) else getattr(tool_call, "args", None)
+    )
+    return isinstance(args, dict) and "subagent_type" in args
+
+
 def _pending_tool_calls_are_all_task(messages) -> bool:
     """True when the checkpoint's pending tool calls are all `task` delegations.
 
@@ -379,10 +399,12 @@ def _pending_tool_calls_are_all_task(messages) -> bool:
     run interrupted mid-delegation, that is exactly the spawning `task` call
     that has not returned. This is the durable, checkpoint-persisted evidence
     that an interrupted `tools` task IS a deepagents delegation (see the
-    no-resume replay attribution in prepare_stream). Any pending NON-task call
-    means the interrupted tasks may be ordinary tool executions, so the caller
-    must not attribute; no pending calls at all (e.g. a declared subgraph node
-    that happens to be named "tools") means the same.
+    no-resume replay attribution in prepare_stream). A delegation is matched
+    by SHAPE, not name (see _is_deepagents_task_call). Any pending call that
+    is not a delegation means the interrupted tasks may be ordinary tool
+    executions, so the caller must not attribute; no pending calls at all
+    (e.g. a declared subgraph node that happens to be named "tools") means
+    the same.
     """
     if not messages:
         return False
@@ -401,11 +423,7 @@ def _pending_tool_calls_are_all_task(messages) -> bool:
     ]
     if not pending:
         return False
-    return all(
-        (tool_call.get("name") if isinstance(tool_call, dict) else getattr(tool_call, "name", None))
-        == "task"
-        for tool_call in pending
-    )
+    return all(_is_deepagents_task_call(tool_call) for tool_call in pending)
 
 
 def _interrupts_from_tool_error(error) -> Optional[tuple]:
