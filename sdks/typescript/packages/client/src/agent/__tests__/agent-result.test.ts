@@ -2,6 +2,7 @@ import { AbstractAgent } from "../agent";
 import { AgentSubscriber } from "../subscriber";
 import {
   ActivityDeltaEvent,
+  ActivityMessage,
   ActivitySnapshotEvent,
   BaseEvent,
   EventType,
@@ -370,7 +371,9 @@ describe("Agent Result", () => {
 
       const result = await agent.runAgent({ runId: "run-ops" });
 
-      const activityMessage = agent.messages.find((message) => message.id === "activity-ops");
+      const activityMessage = agent.messages.find((message) => message.id === "activity-ops") as
+        | ActivityMessage
+        | undefined;
 
       expect(activityMessage).toBeTruthy();
       expect(activityMessage?.role).toBe("activity");

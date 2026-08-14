@@ -291,6 +291,9 @@ describe("AbstractAgent multiple runs", () => {
         messageId: "activity-1",
         activityType: "PLAN",
         content: { tasks: ["task 1"] },
+        // Schema default; apply/default.ts reads `replace ?? true`, so this
+        // spells out the behaviour the fixture already had.
+        replace: true,
       } as ActivitySnapshotEvent,
       {
         type: EventType.RUN_FINISHED,

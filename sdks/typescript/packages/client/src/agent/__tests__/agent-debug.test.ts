@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { MockInstance } from "vitest";
 import { AbstractAgent } from "../agent";
 import { DebugLogger } from "@/debug-logger";
 import {
@@ -107,7 +108,7 @@ describe("Agent construction debug config", () => {
 });
 
 describe("Agent run lifecycle logging", () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: MockInstance<typeof console.debug>;
 
   beforeEach(() => {
     debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
@@ -243,7 +244,7 @@ describe("Agent run lifecycle logging", () => {
 });
 
 describe("Agent run error logging", () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: MockInstance<typeof console.debug>;
 
   beforeEach(() => {
     debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
@@ -288,7 +289,7 @@ describe("Agent run error logging", () => {
 });
 
 describe("Agent pipeline integration", () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: MockInstance<typeof console.debug>;
 
   beforeEach(() => {
     debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});

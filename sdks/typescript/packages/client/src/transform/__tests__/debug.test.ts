@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { MockInstance } from "vitest";
 import { Subject, firstValueFrom } from "rxjs";
 import { take } from "rxjs/operators";
 import { parseSSEStream } from "../sse";
@@ -8,7 +9,7 @@ import { HttpEvent, HttpEventType } from "../../run/http-request";
 import { EventType } from "@ag-ui/core";
 
 describe("parseSSEStream debug logging", () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: MockInstance<typeof console.debug>;
 
   beforeEach(() => {
     debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
@@ -104,7 +105,7 @@ describe("parseSSEStream debug logging", () => {
 });
 
 describe("transformHttpEventStream debug logging", () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: MockInstance<typeof console.debug>;
 
   beforeEach(() => {
     debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});

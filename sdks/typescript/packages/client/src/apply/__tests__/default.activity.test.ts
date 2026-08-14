@@ -1,7 +1,7 @@
 import { Subject } from "rxjs";
 import { toArray } from "rxjs/operators";
 import { firstValueFrom } from "rxjs";
-import { BaseEvent, EventType, Message, RunAgentInput } from "@ag-ui/core";
+import { ActivityMessage, BaseEvent, EventType, Message, RunAgentInput } from "@ag-ui/core";
 import { defaultApplyEvents } from "../default";
 import { AbstractAgent } from "@/agent";
 import { AgentStateMutation } from "@/agent/subscriber";
@@ -69,9 +69,10 @@ describe("defaultApplyEvents with activity events", () => {
     expect(updates.length).toBe(2);
 
     const snapshotUpdate = updates[0];
-    expect(snapshotUpdate?.messages?.[0]?.role).toBe("activity");
-    expect(snapshotUpdate?.messages?.[0]?.activityType).toBe("PLAN");
-    expect(snapshotUpdate?.messages?.[0]?.content).toEqual({ tasks: ["search"] });
+    const snapshotActivity = snapshotUpdate?.messages?.[0] as ActivityMessage | undefined;
+    expect(snapshotActivity?.role).toBe("activity");
+    expect(snapshotActivity?.activityType).toBe("PLAN");
+    expect(snapshotActivity?.content).toEqual({ tasks: ["search"] });
 
     const deltaUpdate = updates[1];
     expect(deltaUpdate?.messages?.[0]?.content).toEqual({ tasks: ["✓ search"] });
@@ -106,11 +107,12 @@ describe("defaultApplyEvents with activity events", () => {
 
     expect(updates.length).toBe(3);
     expect(updates[0]?.messages?.[0]?.content).toEqual({ operations: [] });
-    expect(updates[1]?.messages?.[0]?.content?.operations).toEqual([firstOperation]);
-    expect(updates[2]?.messages?.[0]?.content?.operations).toEqual([
-      firstOperation,
-      secondOperation,
-    ]);
+    expect((updates[1]?.messages?.[0] as ActivityMessage | undefined)?.content?.operations).toEqual(
+      [firstOperation],
+    );
+    expect((updates[2]?.messages?.[0] as ActivityMessage | undefined)?.content?.operations).toEqual(
+      [firstOperation, secondOperation],
+    );
   });
 
   it("does not replace existing activity message when replace is false", async () => {
@@ -426,7 +428,7 @@ describe("MESSAGES_SNAPSHOT preserves client-only messages", () => {
       [
         { id: "m1", role: "user", content: "create a dashboard" },
         { id: "asst-1", role: "assistant", content: "I'll create that for you" },
-        { id: "tool-stream", role: "tool", content: '{"a2ui": true}' },
+        { id: "tool-stream", role: "tool", content: '{"a2ui": true}', toolCallId: "tc-1" },
         {
           id: "act-1",
           role: "activity",
@@ -438,7 +440,7 @@ describe("MESSAGES_SNAPSHOT preserves client-only messages", () => {
       [
         { id: "m1", role: "user", content: "create a dashboard" },
         { id: "asst-1", role: "assistant", content: "I'll create that for you" },
-        { id: "tool-canon", role: "tool", content: '{"a2ui": true}' },
+        { id: "tool-canon", role: "tool", content: '{"a2ui": true}', toolCallId: "tc-1" },
         { id: "asst-2", role: "assistant", content: "Here's your dashboard" },
       ],
     );
