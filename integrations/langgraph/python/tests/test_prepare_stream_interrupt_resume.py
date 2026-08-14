@@ -787,11 +787,16 @@ class TestCheckpointSignature(unittest.TestCase):
 
 @dataclass
 class FakeDelegationTask:
-    """A checkpoint task shaped like a deepagents `task` ToolNode dispatch."""
+    """A checkpoint task shaped like a deepagents `task` ToolNode dispatch.
+
+    ``state`` is the delegation evidence: LangGraph populates it for
+    interrupted SUBGRAPH tasks (the nested graph's checkpoint), and a root
+    ToolNode whose ordinary tool interrupts has none."""
 
     name: str = "tools"
     id: str = "55ff4651-74d3-1dfa-901e-854219cb0bc3"
     interrupts: List[FakeInterrupt] = field(default_factory=list)
+    state: Any = "nested-graph-checkpoint"
 
 
 class TestNoResumeInterruptAttribution(unittest.IsolatedAsyncioTestCase):
@@ -825,6 +830,28 @@ class TestNoResumeInterruptAttribution(unittest.IsolatedAsyncioTestCase):
     async def test_flag_off_replay_stays_untagged(self):
         events = await self._short_circuit(emit_subagent_events=False)
         custom = next(e for e in events if getattr(e, "type", None) == EventType.CUSTOM)
+        self.assertIsNone(custom.subagent_run_id)
+
+    async def test_a_root_toolnode_with_an_interrupting_tool_stays_untagged(self):
+        # The task NAME alone is not delegation evidence: a root ToolNode whose
+        # ordinary tool calls interrupt() is also named "tools" but has no
+        # nested-graph checkpoint — attributing it would invent a subagent
+        # that never existed.
+        agent = make_agent(emit_subagent_events=True)
+        agent.active_run = {"id": "run-1", "mode": "start"}
+        state = _make_state(
+            messages=[HumanMessage(id="h1", content="hi")],
+            tasks=[FakeDelegationTask(
+                interrupts=[FakeInterrupt(value="approve?", id="int-3")],
+                state=None,
+            )],
+        )
+        inp = _make_input(messages=[UserMessage(id="h1", role="user", content="hi")])
+        result = await agent.prepare_stream(inp, state, {"configurable": {"thread_id": "t1"}})
+        custom = next(
+            e for e in result.get("events_to_dispatch", [])
+            if getattr(e, "type", None) == EventType.CUSTOM
+        )
         self.assertIsNone(custom.subagent_run_id)
 
     async def test_a_root_interrupt_task_stays_untagged(self):

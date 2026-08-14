@@ -931,6 +931,141 @@ class TestInterruptSuspendsEndToEnd(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(EventType.CUSTOM, types)
 
 
+class _FanOutAgent(LangGraphAgent):
+    """Fans each raw interrupt into two AG-UI interrupts, like a
+    HumanInTheLoopMiddleware override splitting action_requests."""
+
+    def _interrupts_to_agui(self, lg_interrupts):
+        from ag_ui.core import Interrupt as AGUIInterrupt
+
+        mapped = []
+        for raw in lg_interrupts:
+            for suffix in ("a", "b"):
+                mapped.append(AGUIInterrupt(id=f"{raw.id}::{suffix}", reason="hitl"))
+        return mapped
+
+
+def _make_fanout_agent():
+    from langgraph.graph.state import CompiledStateGraph
+
+    graph = MagicMock(spec=CompiledStateGraph)
+    graph.config_specs = []
+    graph.nodes = {}
+    return _FanOutAgent(name="test", graph=graph, emit_subagent_events=True)
+
+
+class TestFanOutInterruptProvenance(unittest.TestCase):
+    """One raw interrupt fanning into N AG-UI interrupts keeps its owner.
+
+    A flat zip of raw and mapped lists crossed owners as soon as one raw
+    fanned out: the second mapped interrupt of raw #1 took raw #2's slot, and
+    the suspended outcome named RAW ids the client can never answer.
+    """
+
+    def _interrupt(self, iid):
+        from langgraph.types import Interrupt
+
+        return Interrupt(value={"type": "hitl"}, id=iid)
+
+    def test_every_mapped_interrupt_inherits_its_own_raws_owner(self):
+        agent = _make_fanout_agent()
+        agent.emit_interrupt_outcome = True
+        agent.active_run = {
+            "active_subagents": {},
+            "current_subagent_run_id": None,
+            "interrupt_subagents": {"int-1": "tools:s1", "int-2": "tools:s2"},
+            "emit_subagent_events": True,
+        }
+        events = agent._emit_interrupt_finish(
+            thread_id="t1", run_id="r1",
+            lg_interrupts=[self._interrupt("int-1"), self._interrupt("int-2")],
+        )
+        finished = next(e for e in events if e.type == EventType.RUN_FINISHED)
+        owners = [(i.id, i.subagent_run_id) for i in finished.outcome.interrupts]
+        self.assertEqual(owners, [
+            ("int-1::a", "tools:s1"),
+            ("int-1::b", "tools:s1"),
+            ("int-2::a", "tools:s2"),
+            ("int-2::b", "tools:s2"),
+        ])
+        # One legacy CUSTOM per RAW interrupt, each with its own owner.
+        customs = [(e.subagent_run_id) for e in events if e.type == EventType.CUSTOM]
+        self.assertEqual(customs, ["tools:s1", "tools:s2"])
+
+
+class TestFanOutSuspendedCorrelation(unittest.IsolatedAsyncioTestCase):
+    """The suspended outcome names the EMITTED interrupt ids, not raw ids."""
+
+    async def test_suspended_interrupt_ids_match_the_structured_outcome(self):
+        from types import SimpleNamespace
+        from langgraph.errors import GraphInterrupt
+        from langgraph.types import Interrupt
+
+        agent = _make_fanout_agent()
+        agent.emit_interrupt_outcome = True
+        events = [
+            _chain_start("model", _sub_meta("s1", "model", "clock"), run_id="r1"),
+            {
+                "event": "on_tool_start",
+                "run_id": "task-run-1",
+                "metadata": {"langgraph_checkpoint_ns": "tools:s1|model:x"},
+                "data": {"input": {"subagent_type": "clock", "description": "d"}},
+            },
+            {
+                "event": "on_tool_error",
+                "run_id": "task-run-1",
+                "metadata": {},
+                "data": {"error": GraphInterrupt((Interrupt(value={"type": "hitl"}, id="int-1"),))},
+            },
+        ]
+        collected = await _drive_with_state(
+            agent, events,
+            tasks=[SimpleNamespace(interrupts=[Interrupt(value={"type": "hitl"}, id="int-1")])],
+        )
+        finished = next(e for e in collected if e.type == EventType.SUBAGENT_FINISHED)
+        self.assertEqual(finished.outcome.interrupt_ids, ["int-1::a", "int-1::b"])
+        run_finished = next(e for e in collected if e.type == EventType.RUN_FINISHED)
+        emitted_ids = [i.id for i in run_finished.outcome.interrupts]
+        self.assertEqual(emitted_ids, ["int-1::a", "int-1::b"])
+        for interrupt in run_finished.outcome.interrupts:
+            self.assertEqual(interrupt.subagent_run_id, "tools:s1")
+
+
+class TestNestedInterruptKeepsDeepestOwner(unittest.TestCase):
+    """A nested interrupt bubbling through both task boundaries keeps the
+    deepest owner: the outer boundary's later recording must not overwrite the
+    inner one. The outer lane still suspends as an ancestor with no owned ids
+    (pinned by the reconciliation's ancestor expansion)."""
+
+    def test_the_outer_boundary_does_not_overwrite_the_inner_owner(self):
+        from langgraph.errors import GraphInterrupt
+        from langgraph.types import Interrupt
+
+        agent = _make_agent(emit_subagent_events=True)
+        agent.active_run = {
+            "active_subagents": {"tools:outer": "o", "tools:inner": "i"},
+            "current_subagent_run_id": "tools:inner",
+            "subagent_task_runs": {"run-inner": "tools:inner", "run-outer": "tools:outer"},
+            "subagent_parents": {"tools:inner": "tools:outer", "tools:outer": None},
+            "lane_nodes": {},
+            "step_owners": {},
+            "emit_subagent_events": True,
+        }
+        interrupt_error = GraphInterrupt((Interrupt(value={"type": "hitl"}, id="nested-int"),))
+        # Child-first, as LangGraph surfaces it, then the outer boundary.
+        agent._finish_subagent_on_task_end({
+            "event": "on_tool_error", "run_id": "run-inner",
+            "data": {"error": interrupt_error},
+        })
+        agent._finish_subagent_on_task_end({
+            "event": "on_tool_error", "run_id": "run-outer",
+            "data": {"error": interrupt_error},
+        })
+        self.assertEqual(
+            agent.active_run["interrupt_subagents"], {"nested-int": "tools:inner"}
+        )
+
+
 class TestErrorPathRobustness(unittest.IsolatedAsyncioTestCase):
     """Fix 7: the error handlers could fail, or report nothing useful."""
 

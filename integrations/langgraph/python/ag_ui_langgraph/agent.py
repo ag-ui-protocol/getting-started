@@ -904,7 +904,14 @@ class LangGraphAgent:
                     for interrupt in interrupts:
                         interrupt_id = getattr(interrupt, "id", None)
                         if interrupt_id:
-                            owners[interrupt_id] = suspended
+                            # setdefault, not assignment: a nested interrupt
+                            # bubbles child-first through the inner and then
+                            # the OUTER task boundary with the same id — the
+                            # first (deepest) recording is the owner, and the
+                            # outer boundary must not overwrite it. The outer
+                            # lane still suspends as an ancestor (with no owned
+                            # ids) via the reconciliation's ancestor expansion.
+                            owners.setdefault(interrupt_id, suspended)
                 return []
         subagent_run_id = (active_run.get("subagent_task_runs") or {}).pop(run_id, None)
         if not subagent_run_id:
@@ -1625,9 +1632,20 @@ class LangGraphAgent:
                     if interrupt_id in final_interrupt_ids
                 }
                 self.active_run["interrupt_subagents"] = confirmed
+                # Map raw -> AG-UI interrupts exactly once, with provenance (see
+                # _prepare_interrupt_tail); _emit_interrupt_finish reuses this.
+                # The suspended outcome must name the EMITTED interrupt ids —
+                # the ones a client can answer — not raw ids, which differ as
+                # soon as a fan-out override is in play.
+                prepared_tail = self._prepare_interrupt_tail(interrupts)
+                self.active_run["prepared_interrupt_tail"] = prepared_tail
                 suspended_lanes: dict = {}
-                for interrupt_id, lane in confirmed.items():
-                    suspended_lanes.setdefault(lane, []).append(interrupt_id)
+                for raw, mapped in prepared_tail:
+                    lane = confirmed.get(getattr(raw, "id", None))
+                    if lane:
+                        suspended_lanes.setdefault(lane, []).extend(
+                            agui_interrupt.id for agui_interrupt in mapped
+                        )
                 parents = self.active_run.get("subagent_parents") or {}
                 for lane in list(suspended_lanes):
                     ancestor = parents.get(lane)
@@ -1823,10 +1841,14 @@ class LangGraphAgent:
             # deepagents delegation's task is the ToolNode dispatch whose
             # subagent lane is exactly "<task.name>:<task.id>" — the OUTERMOST
             # delegation boundary the interrupt surfaced through, which is a
-            # factual (never invented) attribution even when the interrupt
-            # originated in a deeper nested subagent. Only derived for `tools`
-            # tasks (the delegation ToolNode); a root-level interrupt task
-            # (e.g. a model node) stays untagged. Flag-gated.
+            # factual attribution even when the interrupt originated in a
+            # deeper nested subagent. Attribution is never invented: the task
+            # name alone is NOT delegation evidence (a root ToolNode whose
+            # ordinary tool calls interrupt() has name "tools" and NO subagent
+            # exists), so a nested-graph checkpoint on the task
+            # (``task.state``, which LangGraph populates for interrupted
+            # subgraph tasks) is required as well — without it the interrupt
+            # stays untagged, omission over invention. Flag-gated.
             if self.emit_subagent_events:
                 owners = self.active_run.setdefault("interrupt_subagents", {})
                 for task in agent_state.tasks or ():
@@ -1834,6 +1856,8 @@ class LangGraphAgent:
                         continue
                     task_id = getattr(task, "id", None)
                     if not task_id:
+                        continue
+                    if getattr(task, "state", None) is None:
                         continue
                     for task_interrupt in getattr(task, "interrupts", None) or ():
                         interrupt_id = getattr(task_interrupt, "id", None)
@@ -2394,8 +2418,46 @@ class LangGraphAgent:
         (e.g. HumanInTheLoopMiddleware's ``action_requests`` /
         ``review_configs``) and you need to fan out N AG-UI Interrupts per
         LangGraph interrupt — write the loop yourself in the override.
+
+        Attribution and the suspended-outcome correlation call this PER RAW
+        interrupt (a single-element list), so a fan-out override must not
+        depend on seeing the whole batch at once — everything an override
+        needs must come from the one interrupt it is given.
         """
         return lg_interrupts_to_agui(lg_interrupts)
+
+    def _prepare_interrupt_tail(self, lg_interrupts) -> list:
+        """Map raw interrupts to AG-UI interrupts WITH provenance preserved.
+
+        Returns ``[(raw, [mapped, ...]), ...]``, mapping each raw interrupt
+        separately so a fan-out override (one raw -> N AG-UI interrupts) keeps
+        its raw's identity: every mapped interrupt inherits the raw's recorded
+        subagent owner, and the suspended-outcome correlation can name the
+        EMITTED (mapped) interrupt ids — the ids a client can actually answer
+        — rather than raw ids that never reach the wire. A single zip over two
+        flat lists crossed owners as soon as one raw fanned out, and the two
+        attribution channels disagreed with each other.
+
+        Mapping happens exactly once per run-tail (the reconciliation stores
+        the result and _emit_interrupt_finish reuses it), so an override with
+        non-deterministic mapped ids cannot desync the suspended outcome from
+        the emitted interrupts.
+        """
+        owners = (
+            ((self.active_run or {}).get("interrupt_subagents") or {})
+            if self.emit_subagent_events
+            else {}
+        )
+        prepared = []
+        for raw in lg_interrupts:
+            mapped = self._interrupts_to_agui([raw])
+            owner = owners.get(getattr(raw, "id", None))
+            if owner:
+                for agui_interrupt in mapped:
+                    if getattr(agui_interrupt, "subagent_run_id", None) is None:
+                        agui_interrupt.subagent_run_id = owner
+            prepared.append((raw, mapped))
+        return prepared
 
     def _emit_interrupt_finish(
         self,
@@ -2424,7 +2486,6 @@ class LangGraphAgent:
 
         Caller is responsible for any preceding STATE_SNAPSHOT / MESSAGES_SNAPSHOT.
         """
-        agui_interrupts = self._interrupts_to_agui(lg_interrupts)
         # An interrupt raised INSIDE a subagent is that subagent's request:
         # the on_tool_error path recorded its id -> subagentRunId (flag-gated,
         # confirmed against final state in _handle_stream_events), so BOTH
@@ -2435,19 +2496,29 @@ class LangGraphAgent:
         # drain finishes the suspended subagent, outcome "suspended", before
         # this tail). Root-raised interrupts have no recording and stay
         # untagged.
+        #
+        # Raw -> mapped provenance comes from _prepare_interrupt_tail. The
+        # normal run path prepared (and correlated the suspended outcomes
+        # against) this exact tail during reconciliation; reuse it so mapping
+        # happens exactly once. The short-circuit replay path prepares fresh.
+        stored_tail = (self.active_run or {}).get("prepared_interrupt_tail")
+        if stored_tail is not None and [
+            getattr(raw, "id", None) for raw, _ in stored_tail
+        ] == [getattr(raw, "id", None) for raw in lg_interrupts]:
+            prepared_tail = stored_tail
+        else:
+            prepared_tail = self._prepare_interrupt_tail(lg_interrupts)
+        agui_interrupts = [
+            agui_interrupt for _, mapped in prepared_tail for agui_interrupt in mapped
+        ]
         interrupt_owners = (
             ((self.active_run or {}).get("interrupt_subagents") or {})
             if self.emit_subagent_events
             else {}
         )
-        if interrupt_owners:
-            for raw, mapped in zip(lg_interrupts, agui_interrupts):
-                owner = interrupt_owners.get(getattr(raw, "id", None))
-                if owner and getattr(mapped, "subagent_run_id", None) is None:
-                    mapped.subagent_run_id = owner
         events: List[ProcessedEvents] = []
         if self.enable_legacy_on_interrupt_event:
-            for raw, mapped in zip(lg_interrupts, agui_interrupts):
+            for raw, _mapped in prepared_tail:
                 events.append(
                     CustomEvent(
                         type=EventType.CUSTOM,
