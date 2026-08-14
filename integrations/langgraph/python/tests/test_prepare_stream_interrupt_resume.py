@@ -783,3 +783,61 @@ class TestCheckpointSignature(unittest.TestCase):
         messages[0].tool_calls[0]["args"]["approved"] = True
 
         self.assertNotEqual(before, _checkpoint_signature(messages))
+
+
+@dataclass
+class FakeDelegationTask:
+    """A checkpoint task shaped like a deepagents `task` ToolNode dispatch."""
+
+    name: str = "tools"
+    id: str = "55ff4651-74d3-1dfa-901e-854219cb0bc3"
+    interrupts: List[FakeInterrupt] = field(default_factory=list)
+
+
+class TestNoResumeInterruptAttribution(unittest.IsolatedAsyncioTestCase):
+    """A fresh request on an interrupted thread re-attributes the interrupt.
+
+    The interrupt-ownership registry is per-run, so the short-circuit replay
+    started with nothing and re-emitted an untagged interrupt. Ownership is
+    derived from the checkpoint task holding the interrupt: a delegation's
+    task lane is exactly "<task.name>:<task.id>" — the outermost boundary the
+    interrupt surfaced through.
+    """
+
+    async def _short_circuit(self, emit_subagent_events):
+        agent = make_agent(emit_subagent_events=emit_subagent_events)
+        agent.active_run = {"id": "run-1", "mode": "start"}
+        state = _make_state(
+            messages=[HumanMessage(id="h1", content="what time is it")],
+            tasks=[FakeDelegationTask(interrupts=[FakeInterrupt(value="approve?", id="int-9")])],
+        )
+        inp = _make_input(messages=[UserMessage(id="h1", role="user", content="what time is it")])
+        result = await agent.prepare_stream(inp, state, {"configurable": {"thread_id": "t1"}})
+        return result.get("events_to_dispatch", [])
+
+    async def test_the_replayed_interrupt_names_its_delegation_lane(self):
+        events = await self._short_circuit(emit_subagent_events=True)
+        custom = next(e for e in events if getattr(e, "type", None) == EventType.CUSTOM)
+        self.assertEqual(
+            custom.subagent_run_id, "tools:55ff4651-74d3-1dfa-901e-854219cb0bc3"
+        )
+
+    async def test_flag_off_replay_stays_untagged(self):
+        events = await self._short_circuit(emit_subagent_events=False)
+        custom = next(e for e in events if getattr(e, "type", None) == EventType.CUSTOM)
+        self.assertIsNone(custom.subagent_run_id)
+
+    async def test_a_root_interrupt_task_stays_untagged(self):
+        agent = make_agent(emit_subagent_events=True)
+        agent.active_run = {"id": "run-1", "mode": "start"}
+        state = _make_state(
+            messages=[HumanMessage(id="h1", content="hi")],
+            tasks=[FakeTask(interrupts=[FakeInterrupt(value="confirm?", id="int-2")])],
+        )
+        inp = _make_input(messages=[UserMessage(id="h1", role="user", content="hi")])
+        result = await agent.prepare_stream(inp, state, {"configurable": {"thread_id": "t1"}})
+        custom = next(
+            e for e in result.get("events_to_dispatch", [])
+            if getattr(e, "type", None) == EventType.CUSTOM
+        )
+        self.assertIsNone(custom.subagent_run_id)

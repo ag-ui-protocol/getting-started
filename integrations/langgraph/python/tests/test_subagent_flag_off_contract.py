@@ -77,6 +77,43 @@ async def _drive(agent, events):
     return [ev async for ev in agent._handle_stream_events(run_input)]
 
 
+async def _drive_with_state(agent, events, tasks=None):
+    """Like ``_drive``, but the FINAL checkpoint state carries ``tasks`` —
+    for pinning the interrupt path, where state.tasks is what decides whether
+    the run actually suspended."""
+
+    async def fake_prepare(*args, **kwargs):
+        agent.active_run["schema_keys"] = {
+            "input": ["messages"], "output": ["messages"],
+            "config": [], "context": [],
+        }
+
+        async def gen():
+            for event in events:
+                yield event
+
+        return {
+            "stream": gen(),
+            "state": MagicMock(values={"messages": []}),
+            "config": {"configurable": {"thread_id": "t1"}},
+        }
+
+    agent.prepare_stream = fake_prepare
+    final_state = MagicMock()
+    final_state.values = {"messages": []}
+    final_state.tasks = tasks or []
+    final_state.next = []
+    final_state.metadata = {"writes": {}}
+    agent.graph.aget_state = AsyncMock(return_value=final_state)
+
+    run_input = MagicMock()
+    run_input.run_id = "run-1"
+    run_input.thread_id = "t1"
+    run_input.forwarded_props = {}
+
+    return [ev async for ev in agent._handle_stream_events(run_input)]
+
+
 def _sub_meta(sid, node, name="researcher"):
     return {
         "langgraph_node": node,
@@ -741,6 +778,22 @@ class TestInterruptTailAttribution(unittest.TestCase):
         custom = next(e for e in events if e.type == EventType.CUSTOM)
         self.assertIsNone(custom.subagent_run_id)
 
+    def test_the_structured_outcome_interrupts_carry_the_owner_too(self):
+        agent = _make_agent(emit_subagent_events=True)
+        agent.emit_interrupt_outcome = True
+        agent.active_run = {
+            "active_subagents": {},
+            "current_subagent_run_id": None,
+            "interrupt_subagents": {"int-1": "tools:s1"},
+            "emit_subagent_events": True,
+        }
+        events = agent._emit_interrupt_finish(
+            thread_id="t1", run_id="r1", lg_interrupts=[self._interrupt()],
+        )
+        finished = next(e for e in events if e.type == EventType.RUN_FINISHED)
+        self.assertEqual(finished.outcome.type, "interrupt")
+        self.assertEqual(finished.outcome.interrupts[0].subagent_run_id, "tools:s1")
+
     def test_flag_off_never_attributes_the_tail(self):
         agent = _make_agent(emit_subagent_events=False)
         agent.active_run = {
@@ -755,6 +808,127 @@ class TestInterruptTailAttribution(unittest.TestCase):
         )
         custom = next(e for e in events if e.type == EventType.CUSTOM)
         self.assertIsNone(custom.subagent_run_id)
+
+
+class TestSuspendedOutcomeOnDrain(unittest.TestCase):
+    """A lane suspended by a confirmed interrupt closes with outcome=suspended."""
+
+    def test_suspended_lane_carries_its_interrupt_ids(self):
+        active_run = {
+            "emit_subagent_events": True,
+            "active_subagents": {"tools:s1": "clock"},
+            "subagent_parents": {"tools:s1": None},
+            "lane_nodes": {},
+            "step_owners": {},
+            "current_subagent_run_id": None,
+            "suspended_subagent_interrupts": {"tools:s1": ["int-1"]},
+        }
+        events = drain_subagents(active_run)
+        finished = next(e for e in events if e.type == EventType.SUBAGENT_FINISHED)
+        self.assertEqual(finished.outcome.type, "suspended")
+        self.assertEqual(finished.outcome.interrupt_ids, ["int-1"])
+
+    def test_ancestor_of_a_suspended_lane_is_suspended_with_no_owned_ids(self):
+        active_run = {
+            "emit_subagent_events": True,
+            "active_subagents": {"tools:outer": "o", "tools:inner": "i"},
+            "subagent_parents": {"tools:inner": "tools:outer"},
+            "lane_nodes": {},
+            "step_owners": {},
+            "current_subagent_run_id": None,
+            "suspended_subagent_interrupts": {"tools:inner": ["int-1"], "tools:outer": []},
+        }
+        events = drain_subagents(active_run)
+        finished = {e.subagent_run_id: e for e in events if e.type == EventType.SUBAGENT_FINISHED}
+        self.assertEqual(finished["tools:inner"].outcome.interrupt_ids, ["int-1"])
+        self.assertEqual(finished["tools:outer"].outcome.type, "suspended")
+        self.assertIsNone(finished["tools:outer"].outcome.interrupt_ids)
+
+    def test_a_lane_without_a_confirmed_interrupt_stays_plain(self):
+        active_run = {
+            "emit_subagent_events": True,
+            "active_subagents": {"tools:s1": "clock"},
+            "subagent_parents": {},
+            "lane_nodes": {},
+            "step_owners": {},
+            "current_subagent_run_id": None,
+        }
+        events = drain_subagents(active_run)
+        finished = next(e for e in events if e.type == EventType.SUBAGENT_FINISHED)
+        self.assertIsNone(finished.outcome)
+
+
+class TestInterruptSuspendsEndToEnd(unittest.IsolatedAsyncioTestCase):
+    """The full S&P sequence: an in-subagent HITL interrupt suspends, never errors.
+
+    Drives the real stream loop: the subagent starts, its `task` delegation
+    raises a GraphInterrupt through on_tool_error, and the final checkpoint
+    holds the interrupt. The tail must be: lane closed, SUBAGENT_FINISHED with
+    outcome=suspended naming the interrupt, attributed on_interrupt CUSTOM,
+    RUN_FINISHED — and no SUBAGENT_ERROR anywhere.
+    """
+
+    def _events(self):
+        from langgraph.errors import GraphInterrupt
+        from langgraph.types import Interrupt
+
+        return [
+            _chain_start("model", _sub_meta("s1", "model", "clock"), run_id="r1"),
+            {
+                "event": "on_tool_start",
+                "run_id": "task-run-1",
+                "metadata": {"langgraph_checkpoint_ns": "tools:s1|model:x"},
+                "data": {"input": {"subagent_type": "clock", "description": "tells time"}},
+            },
+            {
+                "event": "on_tool_error",
+                "run_id": "task-run-1",
+                "metadata": {},
+                "data": {"error": GraphInterrupt((Interrupt(value={"type": "hitl"}, id="int-1"),))},
+            },
+        ]
+
+    async def _drive_with_final_interrupt(self, agent, with_interrupt=True):
+        from types import SimpleNamespace
+        from langgraph.types import Interrupt
+
+        collected = await _drive_with_state(
+            agent,
+            self._events(),
+            tasks=(
+                [SimpleNamespace(interrupts=[Interrupt(value={"type": "hitl"}, id="int-1")])]
+                if with_interrupt
+                else []
+            ),
+        )
+        return collected
+
+    async def test_the_subagent_suspends_with_attribution(self):
+        agent = _make_agent(emit_subagent_events=True)
+        collected = await self._drive_with_final_interrupt(agent)
+        types = _types(collected)
+        self.assertNotIn(EventType.SUBAGENT_ERROR, types)
+        finished = next(e for e in collected if e.type == EventType.SUBAGENT_FINISHED)
+        self.assertEqual(finished.subagent_run_id, "tools:s1")
+        self.assertEqual(finished.outcome.type, "suspended")
+        self.assertEqual(finished.outcome.interrupt_ids, ["int-1"])
+        custom = next(e for e in collected if e.type == EventType.CUSTOM)
+        self.assertEqual(custom.subagent_run_id, "tools:s1")
+        self.assertEqual(types[-1], EventType.RUN_FINISHED)
+
+    async def test_an_unconfirmed_candidate_does_not_suspend_or_attribute(self):
+        # The parent handled the failure and the run completed normally: the
+        # recorded candidate is absent from the final tasks, so the subagent
+        # closes plain and nothing carries interrupt attribution.
+        agent = _make_agent(emit_subagent_events=True)
+        collected = await self._drive_with_final_interrupt(agent, with_interrupt=False)
+        types = _types(collected)
+        self.assertNotIn(EventType.SUBAGENT_ERROR, types)
+        finished = next(e for e in collected if e.type == EventType.SUBAGENT_FINISHED)
+        self.assertIsNone(finished.outcome)
+        # No interrupt reached the final state, so nothing emits an interrupt
+        # tail and nothing carries interrupt attribution.
+        self.assertNotIn(EventType.CUSTOM, types)
 
 
 class TestErrorPathRobustness(unittest.IsolatedAsyncioTestCase):

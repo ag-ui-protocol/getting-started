@@ -83,6 +83,7 @@ from ag_ui.core import (
     ReasoningEncryptedValueEvent,
     SubagentStartedEvent,
     SubagentFinishedEvent,
+    SubagentFinishedSuspendedOutcome,
     SubagentErrorEvent,
 )
 from .interrupts import lg_interrupts_to_agui, DEFAULT_RESUME_SENTINEL_CANCELLED, DEFAULT_RESUME_SENTINEL_MAP
@@ -448,9 +449,26 @@ def drain_subagents(active_run) -> list:
     # Then each still-open subagent, deepest-first, its step close immediately
     # before its own terminal so the close lands inside its window and an inner
     # subagent's lifecycle ends before its parent's.
+    #
+    # A lane whose confirmed interrupt suspended the run (see the
+    # reconciliation in _handle_stream_events) closes with a typed "suspended"
+    # outcome carrying the interrupt ids it owns, so the client renders
+    # "waiting" rather than "done" — an ancestor of a suspended lane is
+    # suspended too, with no owned ids. Every other lane keeps the legacy
+    # plain FINISHED (omitted outcome means success).
+    suspended_lanes = active_run.get("suspended_subagent_interrupts") or {}
     for sid in _deepest_first(active_run, ids):
         events += close_lane_steps(active_run, [sid])
-        events.append(SubagentFinishedEvent(type=EventType.SUBAGENT_FINISHED, subagent_run_id=sid))
+        if sid in suspended_lanes:
+            events.append(SubagentFinishedEvent(
+                type=EventType.SUBAGENT_FINISHED,
+                subagent_run_id=sid,
+                outcome=SubagentFinishedSuspendedOutcome(
+                    interrupt_ids=suspended_lanes[sid] or None,
+                ),
+            ))
+        else:
+            events.append(SubagentFinishedEvent(type=EventType.SUBAGENT_FINISHED, subagent_run_id=sid))
     active_run["active_subagents"].clear()
     # Terminal for these ids — see reconcile_subagents.
     active_run.setdefault("closed_subagents", set()).update(ids)
@@ -1585,6 +1603,41 @@ class LangGraphAgent:
 
             node_name = "__end__" if is_end_node else node_name
 
+            # Reconcile the mid-stream interrupt candidates against the
+            # authoritative final state. The on_tool_error path records
+            # candidate interrupt ownership when a GraphInterrupt propagates
+            # through a `task` tool, but only state.tasks decides whether the
+            # run actually suspended — a candidate whose interrupt is absent
+            # from the final tasks (the parent handled it and continued) must
+            # not attribute anything or mark anyone suspended. Confirmed
+            # candidates drive both the interrupt-tail attribution and the
+            # suspended SUBAGENT_FINISHED outcomes below; ancestors of a
+            # suspended lane are suspended too, owning no interrupts of their
+            # own. Flag-gated: interrupt_subagents is only ever recorded with
+            # subagent events on.
+            if self.emit_subagent_events and self.active_run.get("interrupt_subagents"):
+                final_interrupt_ids = {
+                    getattr(interrupt, "id", None) for interrupt in interrupts
+                }
+                confirmed = {
+                    interrupt_id: lane
+                    for interrupt_id, lane in self.active_run["interrupt_subagents"].items()
+                    if interrupt_id in final_interrupt_ids
+                }
+                self.active_run["interrupt_subagents"] = confirmed
+                suspended_lanes: dict = {}
+                for interrupt_id, lane in confirmed.items():
+                    suspended_lanes.setdefault(lane, []).append(interrupt_id)
+                parents = self.active_run.get("subagent_parents") or {}
+                for lane in list(suspended_lanes):
+                    ancestor = parents.get(lane)
+                    seen: set = set()
+                    while ancestor and ancestor not in seen:
+                        seen.add(ancestor)
+                        suspended_lanes.setdefault(ancestor, [])
+                        ancestor = parents.get(ancestor)
+                self.active_run["suspended_subagent_interrupts"] = suspended_lanes
+
             # End-of-run events (node-change STEP_*, final root STATE_SNAPSHOT)
             # are supervisor-level. If the stream ended while a subagent was
             # still open (e.g. its task OnToolEnd never fired), current_subagent_run_id
@@ -1763,6 +1816,29 @@ class LangGraphAgent:
 
         events_to_dispatch = []
         if has_active_interrupts and not has_resume_input:
+            # A fresh request on an interrupted thread starts with an empty
+            # interrupt-ownership registry (per-run state, by design), so the
+            # re-emitted interrupt would lose its subagent attribution. Derive
+            # it from the checkpoint task that holds the interrupt: a
+            # deepagents delegation's task is the ToolNode dispatch whose
+            # subagent lane is exactly "<task.name>:<task.id>" — the OUTERMOST
+            # delegation boundary the interrupt surfaced through, which is a
+            # factual (never invented) attribution even when the interrupt
+            # originated in a deeper nested subagent. Only derived for `tools`
+            # tasks (the delegation ToolNode); a root-level interrupt task
+            # (e.g. a model node) stays untagged. Flag-gated.
+            if self.emit_subagent_events:
+                owners = self.active_run.setdefault("interrupt_subagents", {})
+                for task in agent_state.tasks or ():
+                    if getattr(task, "name", None) != "tools":
+                        continue
+                    task_id = getattr(task, "id", None)
+                    if not task_id:
+                        continue
+                    for task_interrupt in getattr(task, "interrupts", None) or ():
+                        interrupt_id = getattr(task_interrupt, "id", None)
+                        if interrupt_id:
+                            owners.setdefault(interrupt_id, f"tools:{task_id}")
             events_to_dispatch.append(
                 RunStartedEvent(
                     type=EventType.RUN_STARTED,
@@ -2351,16 +2427,24 @@ class LangGraphAgent:
         agui_interrupts = self._interrupts_to_agui(lg_interrupts)
         # An interrupt raised INSIDE a subagent is that subagent's request:
         # the on_tool_error path recorded its id -> subagentRunId (flag-gated,
-        # see _finish_subagent_on_task_end), so the legacy on_interrupt event
-        # carries the attribution and a client can render the approval inside
-        # the subagent's group. Attributing an already-finished subagent is
-        # protocol-legal (the drain finishes the suspended subagent before this
-        # tail). Root-raised interrupts have no recording and stay untagged.
+        # confirmed against final state in _handle_stream_events), so BOTH
+        # channels carry the attribution — the legacy on_interrupt CUSTOM
+        # event and the structured Interrupt.subagentRunId — and a client can
+        # render the approval inside the subagent's group on either.
+        # Attributing an already-finished subagent is protocol-legal (the
+        # drain finishes the suspended subagent, outcome "suspended", before
+        # this tail). Root-raised interrupts have no recording and stay
+        # untagged.
         interrupt_owners = (
             ((self.active_run or {}).get("interrupt_subagents") or {})
             if self.emit_subagent_events
             else {}
         )
+        if interrupt_owners:
+            for raw, mapped in zip(lg_interrupts, agui_interrupts):
+                owner = interrupt_owners.get(getattr(raw, "id", None))
+                if owner and getattr(mapped, "subagent_run_id", None) is None:
+                    mapped.subagent_run_id = owner
         events: List[ProcessedEvents] = []
         if self.enable_legacy_on_interrupt_event:
             for raw, mapped in zip(lg_interrupts, agui_interrupts):
