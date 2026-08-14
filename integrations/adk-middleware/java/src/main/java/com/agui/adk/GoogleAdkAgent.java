@@ -58,6 +58,7 @@ import com.agui.adk.tool.FrontendToolExposure;
 import com.agui.adk.translator.EventTranslatorFactory;
 import com.agui.adk.session.ResolvedSession;
 import com.agui.adk.session.SessionCleanupPolicy;
+import com.agui.adk.serialization.JacksonAgUiSerializer;
 import com.agui.community.core.agent.Agent;
 import com.agui.community.core.agent.RunAgentInput;
 import com.agui.community.core.event.Event;
@@ -72,6 +73,7 @@ import com.agui.community.core.message.AssistantMessage;
 import com.agui.community.core.message.Message;
 import com.agui.community.core.message.ToolCall;
 import com.agui.community.core.tool.Tool;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.core.Single;
@@ -238,10 +240,13 @@ public final class GoogleAdkAgent implements Agent, AutoCloseable {
                 memoryService,
                 new com.agui.adk.session.InMemoryThreadSessionMappingStore(),
                 options);
+        JacksonAgUiSerializer serializer = new JacksonAgUiSerializer(new ObjectMapper());
         return GoogleAdkAgent.builder()
                 .runner(new GoogleAdkRunnerClient(runner))
                 .sessionManager(manager)
                 .userIdExtractor(userIdExtractor)
+                .eventEncoder(event -> new com.agui.adk.encoding.EncodedEvent(
+                        event, serializer.serialize(event)))
                 .configuredBackendToolNames(Set.of())
                 .adkResumable(app.resumabilityConfig() != null && app.resumabilityConfig().isResumable())
                 .options(options)

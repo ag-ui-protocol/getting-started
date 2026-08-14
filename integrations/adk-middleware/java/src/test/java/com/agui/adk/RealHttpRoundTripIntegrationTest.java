@@ -18,6 +18,7 @@ import com.google.adk.artifacts.InMemoryArtifactService;
 import com.google.adk.memory.InMemoryMemoryService;
 import com.google.adk.sessions.InMemorySessionService;
 import com.google.genai.types.Content;
+import com.google.genai.types.FunctionCall;
 import com.google.genai.types.Part;
 import com.sun.net.httpserver.HttpServer;
 import io.reactivex.rxjava3.core.Flowable;
@@ -47,12 +48,13 @@ class RealHttpRoundTripIntegrationTest {
 
     private static final String RESPONSE_TEXT = "Hello from the Java ADK middleware!";
 
+    private BaseLlm model;
     private HttpServer server;
     private int port;
 
     @BeforeEach
     void startServer() throws Exception {
-        BaseLlm model = mock(BaseLlm.class);
+        model = mock(BaseLlm.class);
         when(model.model()).thenReturn("stub-model");
         LlmResponse response = LlmResponse.builder()
                 .content(Content.builder()
@@ -97,6 +99,64 @@ class RealHttpRoundTripIntegrationTest {
                 {"threadId":"t1","runId":"r1","state":{},"messages":[{"id":"m1","role":"user","content":"hello"}],"tools":[],"context":[],"forwardedProps":{}}
                 """;
 
+        HttpURLConnection connection = post(body);
+
+        assertThat(connection.getResponseCode()).isEqualTo(200);
+        assertThat(connection.getHeaderField("Content-Type")).contains("text/event-stream");
+
+        String frames = readSse(connection);
+        assertThat(frames).contains("RUN_STARTED");
+        assertThat(frames).contains("TEXT_MESSAGE_CONTENT");
+        assertThat(frames).contains(RESPONSE_TEXT);
+        assertThat(frames).contains("RUN_FINISHED");
+    }
+
+    @Test
+    void realHttpRoundTripStreamsFrontendToolCallAndFinishes() throws Exception {
+        LlmResponse toolCallResponse = LlmResponse.builder()
+                .content(Content.builder()
+                        .role("model")
+                        .parts(List.of(Part.builder()
+                                .functionCall(FunctionCall.builder()
+                                        .id("call-dashboard")
+                                        .name("propose_dashboard")
+                                        .args(Map.of("title", "Sales"))
+                                        .build())
+                                .build()))
+                        .build())
+                .build();
+        LlmResponse finalResponse = LlmResponse.builder()
+                .content(Content.builder()
+                        .role("model")
+                        .parts(List.of(Part.builder().text(RESPONSE_TEXT).build()))
+                        .build())
+                .build();
+        when(model.generateContent(any(LlmRequest.class), eq(true)))
+                .thenReturn(Flowable.just(toolCallResponse), Flowable.just(finalResponse));
+        when(model.generateContent(any(LlmRequest.class), eq(false)))
+                .thenReturn(Flowable.just(toolCallResponse), Flowable.just(finalResponse));
+
+        String body = """
+                {"threadId":"tools-thread","runId":"tools-run","state":{},"messages":[{"id":"tools-message","role":"user","content":"build a dashboard"}],"tools":[{"name":"propose_dashboard","description":"Propose a dashboard","parameters":{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}}],"context":[],"forwardedProps":{}}
+                """;
+
+        HttpURLConnection connection = post(body);
+
+        assertThat(connection.getResponseCode()).isEqualTo(200);
+        assertThat(connection.getHeaderField("Content-Type")).contains("text/event-stream");
+
+        String frames = readSse(connection);
+        assertThat(frames).contains("RUN_STARTED");
+        assertThat(frames).contains(
+                "\"type\":\"TOOL_CALL_CHUNK\"",
+                "\"toolCallId\":\"call-dashboard\"",
+                "\"toolCallName\":\"propose_dashboard\"",
+                "\"delta\":\"{\\\"title\\\":\\\"Sales\\\"}\"");
+        assertThat(frames).contains("RUN_FINISHED");
+        assertThat(frames).doesNotContain("RUN_ERROR", "ENCODING_ERROR");
+    }
+
+    private HttpURLConnection post(String body) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) URI.create(
                 "http://127.0.0.1:" + port + "/chat").toURL().openConnection();
         connection.setRequestMethod("POST");
@@ -106,10 +166,10 @@ class RealHttpRoundTripIntegrationTest {
         try (OutputStream out = connection.getOutputStream()) {
             out.write(body.getBytes(StandardCharsets.UTF_8));
         }
+        return connection;
+    }
 
-        assertThat(connection.getResponseCode()).isEqualTo(200);
-        assertThat(connection.getHeaderField("Content-Type")).contains("text/event-stream");
-
+    private String readSse(HttpURLConnection connection) throws IOException {
         StringBuilder sse = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
@@ -118,11 +178,6 @@ class RealHttpRoundTripIntegrationTest {
                 sse.append(line).append('\n');
             }
         }
-
-        String frames = sse.toString();
-        assertThat(frames).contains("RUN_STARTED");
-        assertThat(frames).contains("TEXT_MESSAGE_CONTENT");
-        assertThat(frames).contains(RESPONSE_TEXT);
-        assertThat(frames).contains("RUN_FINISHED");
+        return sse.toString();
     }
 }
