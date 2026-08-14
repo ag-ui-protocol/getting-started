@@ -70,7 +70,13 @@
       "@strands-agents/sdk>zod": "^4.4.3",
       "@ag-ui/aws-strands>zod": "^4.4.3",
       "@ag-ui/aws-strands-examples>zod": "^4.4.3",
-      "hono": "4.12.27"
+      "hono": "4.12.27",
+      "@copilotkit/core": "https://pkg.pr.new/CopilotKit/CopilotKit/@copilotkit/core@40205f3",
+      "@copilotkit/a2ui-renderer": "https://pkg.pr.new/CopilotKit/CopilotKit/@copilotkit/a2ui-renderer@40205f3",
+      "@copilotkit/shared": "https://pkg.pr.new/CopilotKit/CopilotKit/@copilotkit/shared@40205f3",
+      "@copilotkit/runtime-client-gql": "https://pkg.pr.new/CopilotKit/CopilotKit/@copilotkit/runtime-client-gql@40205f3",
+      "@copilotkit/web-components": "https://pkg.pr.new/CopilotKit/CopilotKit/@copilotkit/web-components@40205f3",
+      "@copilotkit/web-inspector": "https://pkg.pr.new/CopilotKit/CopilotKit/@copilotkit/web-inspector@40205f3"
     }
   }
 }
