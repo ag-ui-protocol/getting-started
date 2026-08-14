@@ -12,12 +12,18 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.annotation.JsonValue;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.module.SimpleModule;
+
+import java.io.IOException;
 
 import java.util.List;
 import java.util.Objects;
@@ -43,6 +49,8 @@ public final class JacksonAgUiSerializer implements Serializer {
         objectMapper.addMixIn(Role.class, RoleMixin.class);
         objectMapper.addMixIn(OutcomeType.class, OutcomeTypeMixin.class);
         objectMapper.addMixIn(ResumeStatus.class, ResumeStatusMixin.class);
+        objectMapper.registerModule(new SimpleModule().addDeserializer(
+                ResumeStatus.class, new ResumeStatusDeserializer()));
     }
 
     @Override
@@ -219,6 +227,26 @@ public final class JacksonAgUiSerializer implements Serializer {
     /** Maps resume statuses to their official lowercase wire values. */
     private abstract static class ResumeStatusMixin {
         @JsonValue abstract String value();
-        @JsonCreator static ResumeStatus fromValue(String value) { return ResumeStatus.fromValue(value); }
     }
+
+    /** Accepts both canonical lowercase values and Java enum names from older clients. */
+    private static final class ResumeStatusDeserializer extends JsonDeserializer<ResumeStatus> {
+        @Override
+        public ResumeStatus deserialize(JsonParser parser, DeserializationContext context)
+                throws IOException {
+            String value = parser.getValueAsString();
+            try {
+                return ResumeStatus.fromValue(value);
+            } catch (IllegalArgumentException wireValueFailure) {
+                try {
+                    return ResumeStatus.valueOf(value);
+                } catch (IllegalArgumentException enumNameFailure) {
+                    enumNameFailure.addSuppressed(wireValueFailure);
+                    throw context.weirdStringException(
+                            value, ResumeStatus.class, "Unknown resume status");
+                }
+            }
+        }
+    }
+
 }

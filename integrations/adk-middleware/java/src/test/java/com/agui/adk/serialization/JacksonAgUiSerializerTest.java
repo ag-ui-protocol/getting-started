@@ -1,5 +1,6 @@
 package com.agui.adk.serialization;
 
+import com.agui.community.core.agent.RunAgentInput;
 import com.agui.community.core.event.Event;
 import com.agui.community.core.event.EventType;
 import com.agui.community.core.event.ToolCallChunkEvent;
@@ -99,6 +100,20 @@ class JacksonAgUiSerializerTest {
             assertThat(serializer.deserialize(json, Resume.class)).isEqualTo(resume);
             assertThat(JSON.readTree(json).path("status").asText()).isEqualTo(status.value());
         }
+    }
+
+    @Test
+    void acceptsEnumNameResumeStatusesInRunAgentInput() {
+        RunAgentInput input = serializer.deserialize(
+                "{\"threadId\":\"t\",\"runId\":\"r\","
+                        + "\"messages\":[{\"id\":\"m\",\"role\":\"user\",\"content\":\"hi\"}],"
+                        + "\"tools\":[],\"context\":[],"
+                        + "\"resume\":[{\"interruptId\":\"i\",\"status\":\"RESOLVED\",\"payload\":{}}]}",
+                RunAgentInput.class);
+
+        Resume resume = input.resume().getFirst();
+        assertThat(resume.status()).isEqualTo(ResumeStatus.RESOLVED);
+        assertThat(serializer.serialize(resume)).contains("\"status\":\"resolved\"");
     }
 
     @Test
