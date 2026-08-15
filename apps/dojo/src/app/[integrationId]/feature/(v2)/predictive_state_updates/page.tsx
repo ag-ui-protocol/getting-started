@@ -212,8 +212,12 @@ const DocumentEditor = () => {
   // Track when a run transitions from running to not running (replaces nodeName == "end")
   const wasRunning = useRef(false);
 
+  // NOTE (PNI-272): these effects read from the TipTap editor across the run
+  // lifecycle and are kept exactly as they were; the rule's remedy would change
+  // commit timing and the editor integration's shape.
   useEffect(() => {
     if (isLoading) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentDocument(editor?.getText() || "");
     }
     editor?.setEditable(!isLoading);
@@ -249,9 +253,11 @@ const DocumentEditor = () => {
   const text = editor?.getText() || "";
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPlaceholderVisible(text.length === 0);
 
     if (!isLoading) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentDocument(text);
       setAgentState({
         document: text,
@@ -331,14 +337,14 @@ const DocumentEditor = () => {
 };
 
 interface ConfirmChangesProps {
-  args: any;
-  respond: any;
-  status: any;
+  args: { document?: string };
+  respond?: (result: unknown) => Promise<void>;
+  status: string;
   onReject: () => void;
   onConfirm: () => void;
 }
 
-function ConfirmChanges({ args, respond, status, onReject, onConfirm }: ConfirmChangesProps) {
+function ConfirmChanges({ args: _args, respond, status, onReject, onConfirm }: ConfirmChangesProps) {
   const [accepted, setAccepted] = useState<boolean | null>(null);
   return (
     <div

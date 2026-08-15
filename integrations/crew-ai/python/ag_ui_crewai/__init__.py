@@ -14,6 +14,7 @@ from .sdk import (
   copilotkit_stream,
   copilotkit_exit,
 )
+from ._responses import copilotkit_responses, responses_channel_available
 from .a2ui_tool import (
   A2UITool,
   get_a2ui_tools,
@@ -46,6 +47,8 @@ __all__ = [
   "copilotkit_emit_state",
   "copilotkit_emit_tool_result",
   "copilotkit_stream",
+  "copilotkit_responses",
+  "responses_channel_available",
   "copilotkit_exit",
   "A2UITool",
   "get_a2ui_tools",

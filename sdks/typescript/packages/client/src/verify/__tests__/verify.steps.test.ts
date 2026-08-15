@@ -1,6 +1,4 @@
 import { Subject } from "rxjs";
-import { toArray, catchError } from "rxjs/operators";
-import { firstValueFrom } from "rxjs";
 import { verifyEvents } from "../verify";
 import {
   BaseEvent,
@@ -8,7 +6,6 @@ import {
   AGUIError,
   RunStartedEvent,
   RunFinishedEvent,
-  RunErrorEvent,
   StepStartedEvent,
   StepFinishedEvent,
 } from "@ag-ui/core";

@@ -51,6 +51,44 @@ SessionManagerProvider = Callable[[RunAgentInput], Awaitable[Optional[SessionMan
 
 
 @dataclass
+class ToolStreamEventContext:
+    """Context passed to tool_stream_event_handler hooks.
+
+    Carries every piece of information available at the point a tool yields an
+    intermediate streaming event, so handlers can make routing decisions without
+    needing to close over external state.
+    """
+
+    tool_use_id: str
+    """The Strands ``toolUseId`` for the tool call that produced this event."""
+
+    tool_name: str
+    """The name of the tool that produced this event."""
+
+    stream_data: Any
+    """The raw data payload yielded by the tool (the ``data`` field of the
+    ``tool_stream_event`` dict emitted by Strands)."""
+
+
+ToolStreamEventHandler = Callable[["ToolStreamEventContext"], AsyncIterator[Any]]
+"""Handler for raw tool_stream_event data emitted by async-generator tools.
+
+Must be an **async generator function** — i.e. it must contain at least one
+``yield`` statement.  A plain ``async def`` that returns an ``AsyncIterator``
+will satisfy the type but will not be iterated correctly.
+
+Called with a :class:`ToolStreamEventContext` for every intermediate event
+yielded by the tool while it is executing.  The handler may yield zero or more
+AG-UI Event objects which are forwarded directly into the top-level event
+stream.
+
+When a handler is registered for a tool, the default behaviour of emitting a
+``StateSnapshotEvent`` for ``{"state": ...}`` payloads is suppressed for that
+tool.  The handler is responsible for any state updates it wants to emit.
+"""
+
+
+@dataclass
 class PredictStateMapping:
     """Declarative mapping telling the UI how to predict state from tool args."""
 
@@ -79,11 +117,16 @@ class ToolBehavior:
     """
     continue_after_frontend_call: bool = False
     stop_streaming_after_result: bool = False
+    interrupt_on_call: bool = False
+    """Interrupt before a server-executed tool runs. Client-provided tools
+    should gate execution in the client.
+    """
     predict_state: Optional[Iterable[PredictStateMapping]] = None
     args_streamer: Optional[ArgsStreamer] = None
     state_from_args: Optional[StateFromArgs] = None
     state_from_result: Optional[StateFromResult] = None
     custom_result_handler: Optional[CustomResultHandler] = None
+    tool_stream_event_handler: Optional[ToolStreamEventHandler] = None
 
 
 @dataclass

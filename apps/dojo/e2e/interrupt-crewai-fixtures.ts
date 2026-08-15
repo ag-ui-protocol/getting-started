@@ -14,7 +14,12 @@
  *
  * Register via `registerInterruptCrewAIFixtures(mockServer)` from aimock-setup.ts.
  */
-import type { LLMock, ChatMessage } from "@copilotkit/aimock";
+import type {
+  LLMock,
+  ChatMessage,
+  ChatCompletionRequest,
+  ToolDefinition,
+} from "@copilotkit/aimock";
 
 const textOf = (content: ChatMessage["content"] | undefined): string => {
   if (typeof content === "string") return content;
@@ -37,7 +42,7 @@ export function registerInterruptCrewAIFixtures(mockServer: LLMock): void {
   // Step 1: extract the meeting -> bare JSON the picker reads (topic/attendee).
   mockServer.addFixture({
     match: {
-      predicate: (req: any) =>
+      predicate: (req: ChatCompletionRequest) =>
         /work out which meeting the user wants to book/i.test(
           systemText(req.messages),
         ),
@@ -53,7 +58,7 @@ export function registerInterruptCrewAIFixtures(mockServer: LLMock): void {
   // Step 2: after resume, confirm the booking as the agent's follow-up text.
   mockServer.addFixture({
     match: {
-      predicate: (req: any) =>
+      predicate: (req: ChatCompletionRequest) =>
         /asked the user to pick a meeting time/i.test(systemText(req.messages)),
     },
     response: {

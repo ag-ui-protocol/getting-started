@@ -677,7 +677,7 @@ describe("buildA2UIEnvelope", () => {
       }),
     );
     const ops = env[A2UI_OPERATIONS_KEY];
-    const cs = ops.find((o: any) => o.createSurface).createSurface;
+    const cs = ops.find((o: Record<string, unknown>) => o.createSurface).createSurface;
     expect(cs.surfaceId).not.toBe("");
     expect(cs.catalogId).not.toBe("");
     expect(cs.surfaceId).toBe(DEFAULT_SURFACE_ID);
@@ -693,11 +693,11 @@ describe("buildA2UIEnvelope", () => {
     for (const bad of [42, ["x"], null, { a: 1 }, true]) {
       const env = JSON.parse(
         buildA2UIEnvelope({
-          args: { surfaceId: bad as any, components: [] },
+          args: { surfaceId: bad as unknown as string, components: [] },
           isUpdate: false,
         }),
       );
-      const cs = env[A2UI_OPERATIONS_KEY].find((o: any) => o.createSurface).createSurface;
+      const cs = env[A2UI_OPERATIONS_KEY].find((o: Record<string, unknown>) => o.createSurface).createSurface;
       expect(cs.surfaceId).toBe(DEFAULT_SURFACE_ID);
       expect(typeof cs.surfaceId).toBe("string");
     }
@@ -716,7 +716,7 @@ describe("buildA2UIEnvelope", () => {
       }),
     );
     const ops = env[A2UI_OPERATIONS_KEY];
-    const uc = ops.find((o: any) => o.updateComponents).updateComponents;
+    const uc = ops.find((o: Record<string, unknown>) => o.updateComponents).updateComponents;
     expect(uc.surfaceId).toBe(DEFAULT_SURFACE_ID);
     expect(uc.surfaceId).not.toBe("");
   });
@@ -731,7 +731,7 @@ describe("buildA2UIEnvelope", () => {
       }),
     );
     const ops = env[A2UI_OPERATIONS_KEY];
-    expect(ops.some((o: any) => o.createSurface)).toBe(false);
+    expect(ops.some((o: Record<string, unknown>) => o.createSurface)).toBe(false);
     expect(ops[0].updateComponents.surfaceId).toBe("s1");
   });
 });

@@ -12,12 +12,6 @@ import {
 import { LegacyRuntimeProtocolEvent } from "../types";
 
 describe("convertToLegacyEvents - State Management", () => {
-  const defaultParams = {
-    threadId: "test-thread",
-    runId: "test-run",
-    agentName: "test-agent",
-  };
-
   it("should handle state updates from complete tool call arguments", async () => {
     const mockEvents: BaseEvent[] = [
       {

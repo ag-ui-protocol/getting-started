@@ -11,7 +11,7 @@
 
     <name>java-ag-ui</name>
     <description>Modular Java library for the AG-UI protocol</description>
-    <url>https://github.com/ag-ui-4j/ag-ui</url>
+    <url>https://github.com/ag-ui-protocol/ag-ui</url>
 
     <licenses>
         <license>
@@ -28,10 +28,14 @@
         </developer>
     </developers>
 
+    <!-- Must point at the repository the artifacts are actually released from.
+         Maven Central renders these on the artifact page, and the release runs
+         out of ag-ui-protocol/ag-ui under that org's com.ag-ui.community
+         namespace. -->
     <scm>
-        <connection>scm:git:https://github.com/ag-ui-4j/ag-ui.git</connection>
-        <developerConnection>scm:git:ssh://git@github.com/ag-ui-4j/ag-ui.git</developerConnection>
-        <url>https://github.com/ag-ui-4j/ag-ui</url>
+        <connection>scm:git:https://github.com/ag-ui-protocol/ag-ui.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/ag-ui-protocol/ag-ui.git</developerConnection>
+        <url>https://github.com/ag-ui-protocol/ag-ui</url>
     </scm>
 
     <modules>
@@ -45,15 +49,6 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <junit.version>6.1.0</junit.version>
         <jacoco.version>0.8.13</jacoco.version>
-
-        <!-- SonarQube Cloud (sonarcloud.io). These are the keys SonarCloud
-             assigns when importing the ag-ui-4j org; adjust if they differ. -->
-        <sonar.organization>ag-ui-4j</sonar.organization>
-        <sonar.projectKey>ag-ui-4j_ag-ui</sonar.projectKey>
-        <sonar.host.url>https://sonarcloud.io</sonar.host.url>
-        <!-- Do not run analysis on test sources (no issues raised on test code).
-             Coverage of main code by these tests is unaffected. -->
-        <sonar.test.exclusions>**/*</sonar.test.exclusions>
     </properties>
 
     <dependencyManagement>
@@ -111,8 +106,7 @@
         </pluginManagement>
 
         <plugins>
-            <!-- Produces the per-module coverage report Sonar reads from
-                 target/site/jacoco/jacoco.xml. -->
+            <!-- Per-module coverage report at target/site/jacoco/jacoco.xml. -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -137,7 +131,9 @@
     </build>
 
     <profiles>
-        <!-- Activated when publishing to Maven Central (see .github/workflows/release.yml). -->
+        <!-- Activated by the `publish-maven` job in
+             .github/workflows/publish-release.yml when publishing to Maven
+             Central. Never activate it locally: it requires a GPG key. -->
         <profile>
             <id>release</id>
             <build>

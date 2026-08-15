@@ -1,5 +1,3 @@
-import os
-import uvicorn
 from fastapi import FastAPI
 
 from .endpoint import add_crewai_flow_fastapi_endpoint, add_crewai_crew_fastapi_endpoint
@@ -16,6 +14,9 @@ from .examples.interrupt_flow import InterruptFlow
 from .examples.a2ui_dynamic_schema import A2UIDynamicSchemaFlow
 from .examples.a2ui_recovery import A2UIRecoveryFlow
 from .examples.a2ui_fixed_schema import A2UIFixedSchemaFlow
+from .examples.agentic_chat_multimodal import AgenticChatMultimodalFlow
+from .examples.agentic_chat_reasoning import AgenticChatReasoningFlow
+from .examples.conversational import CONVERSATIONAL_FLOW_TYPES
 
 app = FastAPI(title="CrewAI Dojo Example Server")
 
@@ -102,12 +103,23 @@ add_crewai_flow_fastapi_endpoint(
     path="/a2ui_fixed_schema",
 )
 
-def main():
-    """Run the uvicorn server."""
-    port = int(os.getenv("PORT", "8000"))
-    uvicorn.run(
-        "ag_ui_crewai.dojo:app",
-        host="0.0.0.0",
-        port=port,
-        reload=True
+add_crewai_flow_fastapi_endpoint(
+    app=app,
+    flow=AgenticChatMultimodalFlow(),
+    path="/agentic_chat_multimodal",
+)
+
+add_crewai_flow_fastapi_endpoint(
+    app=app,
+    flow=AgenticChatReasoningFlow(),
+    path="/agentic_chat_reasoning",
+)
+
+for feature, flow_type in CONVERSATIONAL_FLOW_TYPES.items():
+    add_crewai_flow_fastapi_endpoint(
+        app=app,
+        flow=flow_type(),
+        path=f"/conversational_flows/{feature}",
+        conversational=True,
+        emit_interrupt_outcome=feature == "interrupt",
     )

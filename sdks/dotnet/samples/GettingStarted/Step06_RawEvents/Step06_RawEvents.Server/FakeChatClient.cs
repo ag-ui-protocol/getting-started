@@ -59,9 +59,10 @@ internal sealed class FakeChatClient : IChatClient
             ModelId = "fake-model",
         };
 
-        // Surface token-usage just like a real model would on the final update, so the
-        // UsageRawEventsChatClient turns it into an AG-UI RawEvent and the sample
-        // demonstrates raw telemetry end-to-end even without LLM credentials.
+        // Surface token-usage just like a real model would on the final update, so the sample
+        // works end-to-end without LLM credentials. The standard counts flow to the typed
+        // RUN_FINISHED.usage field automatically; AdditionalCounts carries the provider-specific
+        // entries that the typed field deliberately omits, which is what the RawEvent is for.
         yield return new ChatResponseUpdate
         {
             Role = ChatRole.Assistant,
@@ -73,6 +74,7 @@ internal sealed class FakeChatClient : IChatClient
                     InputTokenCount = 9,
                     OutputTokenCount = 12,
                     TotalTokenCount = 21,
+                    AdditionalCounts = new() { ["OutputTokenDetails.AcceptedPredictionTokenCount"] = 3 },
                 }),
             ],
         };

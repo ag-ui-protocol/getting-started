@@ -88,6 +88,18 @@ export function predictStateMappingToPayload(m: PredictStateMapping): {
   };
 }
 
+/** Context passed to toolStreamEventHandler hooks. */
+export interface ToolStreamEventContext {
+  toolUseId: string;
+  toolName: string;
+  streamData: unknown;
+}
+
+/** Handler for mid-execution tool stream events. Must return an async iterable. */
+export type ToolStreamEventHandler = (
+  ctx: ToolStreamEventContext,
+) => AsyncIterable<BaseEvent | null | undefined>;
+
 /** Declarative configuration for tool-specific handling. */
 export interface ToolBehavior {
   /**
@@ -110,6 +122,13 @@ export interface ToolBehavior {
   stateFromResult?: StateFromResult;
   /** Async iterator that can emit arbitrary AG-UI events in response to a result. */
   customResultHandler?: CustomResultHandler;
+  /**
+   * Interrupt before a server-executed tool runs, requiring human approval.
+   * Client-provided tools should gate execution in the client.
+   */
+  interruptOnCall?: boolean;
+  /** Custom handler for mid-execution tool stream events. Suppresses default state snapshot behavior. */
+  toolStreamEventHandler?: ToolStreamEventHandler;
 }
 
 /** Top-level configuration for the Strands agent adapter. */

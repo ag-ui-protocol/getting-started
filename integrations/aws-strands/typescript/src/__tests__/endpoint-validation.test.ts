@@ -326,8 +326,8 @@ describe("addStrandsExpressEndpoint request validation", () => {
       const err = events.find((e) => e.type === EventType.RUN_ERROR) as
         | { code?: string; message?: string }
         | undefined;
-      expect(err?.code).toBe("UNKNOWN_INTERRUPT");
-      expect(err?.message).toMatch(/does-not-exist/);
+      expect(err?.code).toBe("UNKNOWN_INTERRUPT_ID");
+      expect(err?.message).toMatch(/No pending interrupts/);
     } finally {
       await close();
     }

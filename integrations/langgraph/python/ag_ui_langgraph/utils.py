@@ -251,6 +251,11 @@ def langchain_messages_to_agui(messages: List[BaseMessage]) -> List[AGUIMessage]
                 role="tool",
                 content=stringify_if_needed(resolve_message_content(message.content)),
                 tool_call_id=message.tool_call_id,
+                # A LangChain tool result signals failure only through `status`, with
+                # no error text. Restore AG-UI's `error` so the failure survives the
+                # round trip; the value is a fixed sentinel (#2305) because the
+                # original text is not recoverable from the flag alone.
+                error="error" if message.status == "error" else None,
             ))
         else:
             raise TypeError(f"Unsupported message type: {type(message)}")
