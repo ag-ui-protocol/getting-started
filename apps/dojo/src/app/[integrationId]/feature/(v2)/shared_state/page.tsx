@@ -248,12 +248,15 @@ function Recipe() {
   const setAgentState = (s: RecipeAgentState) => agent.setState(s);
   const isLoading = agent.isRunning;
 
-  // Set initial state on mount
+  // Seed initial state. `useAgent` can hand back a NEW agent instance after the
+  // first render, and state does not carry over to the replacement — so this
+  // must depend on `agent` and re-seed whenever that identity changes, or the
+  // seed lands on a discarded instance and the run sends empty state.
   useEffect(() => {
     if (!agentState?.recipe) {
       setAgentState(INITIAL_STATE);
     }
-  }, []);
+  }, [agent]);
 
   const [recipe, setRecipe] = useState(INITIAL_STATE.recipe);
   const [editingInstructionIndex, setEditingInstructionIndex] = useState<number | null>(null);
