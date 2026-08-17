@@ -331,17 +331,17 @@ export const defaultApplyEvents = (
 
             targetMessage.toolCalls ??= [];
 
-            // Add the new tool call
-            targetMessage.toolCalls.push({
-              id: toolCallId,
-              type: "function",
-              function: {
-                name: toolCallName,
-                arguments: "",
-              },
-            });
-
-            applyMutation({ messages });
+            if (!targetMessage.toolCalls.some((tc) => tc.id === toolCallId)) {
+              targetMessage.toolCalls.push({
+                id: toolCallId,
+                type: "function",
+                function: {
+                  name: toolCallName,
+                  arguments: "",
+                },
+              });
+              applyMutation({ messages });
+            }
           }
 
           return emitUpdates();

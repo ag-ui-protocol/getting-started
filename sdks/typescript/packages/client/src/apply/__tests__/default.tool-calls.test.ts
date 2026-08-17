@@ -763,6 +763,63 @@ describe("defaultApplyEvents with tool calls", () => {
     expect(collidingAssistant!.id).not.toBe(collidingId);
   });
 
+  it("should not duplicate a tool call when TOOL_CALL_START is replayed for an existing toolCallId", async () => {
+    // Regression test for issue #1524: on reconnection, connect() may replay
+    // historical TOOL_CALL_START events over a pre-populated message state.
+    // The handler must be idempotent — no duplicate entry should be pushed.
+    const events$ = new Subject<BaseEvent>();
+    const initialState: RunAgentInput = {
+      messages: [
+        {
+          id: "msg-1",
+          role: "assistant",
+          toolCalls: [
+            {
+              id: "tc-1",
+              type: "function",
+              function: { name: "search", arguments: '{"query":"test"}' },
+            },
+          ],
+        } as AssistantMessage,
+      ],
+      state: {},
+      threadId: "test-thread",
+      runId: "test-run",
+      tools: [],
+      context: [],
+    };
+
+    const agent = createAgent(initialState.messages as Message[]);
+    const result$ = defaultApplyEvents(initialState, events$, agent, []);
+    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    // Replay TOOL_CALL_START for a toolCallId that already exists in the message
+    events$.next({
+      type: EventType.TOOL_CALL_START,
+      toolCallId: "tc-1",
+      toolCallName: "search",
+      parentMessageId: "msg-1",
+    } as ToolCallStartEvent);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    events$.complete();
+
+    const stateUpdates = await stateUpdatesPromise;
+
+    // TOOL_CALL_START is a no-op when the tool call already exists → 0 state updates
+    expect(stateUpdates.length).toBe(0);
+
+    // toolCalls must still have exactly one entry — not duplicated
+    expect(agent.messages.length).toBe(1);
+    expect((agent.messages[0] as AssistantMessage).toolCalls?.length).toBe(1);
+    expect((agent.messages[0] as AssistantMessage).toolCalls?.[0]?.id).toBe("tc-1");
+    // Original arguments must be preserved unchanged
+    expect(
+      (agent.messages[0] as AssistantMessage).toolCalls?.[0]?.function?.arguments,
+    ).toBe('{"query":"test"}');
+  });
+
   it("should create new assistant message when parentMessageId is not found anywhere", async () => {
     // When TOOL_CALL_START arrives with a parentMessageId that doesn't match
     // any existing message, a new assistant message should be created with
