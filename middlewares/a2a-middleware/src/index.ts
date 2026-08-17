@@ -47,6 +47,17 @@ export class A2AMiddlewareAgent extends AbstractAgent {
     this.orchestrationAgent = config.orchestrationAgent;
   }
 
+  public clone() {
+    const cloned = Object.assign(super.clone(), {
+      instructions: this.instructions,
+      agentClients: [...this.agentClients],
+      agentCards: this.agentCards.then((cards) => [...cards]),
+      orchestrationAgent: this.orchestrationAgent.clone(),
+    });
+
+    return cloned;
+  }
+
   finishTextMessages(
     observer: Subscriber<{
       type: EventType;
