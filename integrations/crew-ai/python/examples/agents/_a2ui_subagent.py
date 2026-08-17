@@ -13,8 +13,8 @@ import uuid
 
 from litellm import acompletion
 
-from ..sdk import copilotkit_stream
-from ..a2ui_tool import apply_a2ui_plan_to_tools, plan_a2ui_injection
+from ag_ui_crewai.sdk import copilotkit_stream
+from ag_ui_crewai.a2ui_tool import apply_a2ui_plan_to_tools, plan_a2ui_injection
 from ._model_turn import (
     append_assistant_message,
     frontend_tool_names,

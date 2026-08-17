@@ -15,7 +15,7 @@ from crewai import Agent, Crew, Process, Task
 from crewai.flow.flow import Flow, start
 from crewai.tools import tool
 
-from ..sdk import CopilotKitState, copilotkit_exit
+from ag_ui_crewai.sdk import CopilotKitState, copilotkit_exit
 
 
 @tool("get_weather")

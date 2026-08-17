@@ -24,6 +24,9 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+# Build backends and their dependencies get fetched into the project dir often
+# enough that stray wheels here would otherwise show up as untracked.
+*.whl
 MANIFEST
 
 # PyInstaller

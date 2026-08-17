@@ -244,7 +244,7 @@ Reasoning surfaces as first-class `REASONING_*` events (`REASONING_START` /
 `REASONING_MESSAGE_START` / `REASONING_MESSAGE_CONTENT` / `REASONING_MESSAGE_END` /
 `REASONING_END`, plus `REASONING_ENCRYPTED_VALUE` for signature / redacted-thinking
 blocks), **provider-agnostic** and on **both** transports. It needs neither
-`emit_raw_events` nor the `StreamFrame` transport. Two channels feed it:
+`emit_raw_events` nor the `StreamFrame` transport. Three channels feed it:
 
 - **litellm delta** (`copilotkit_stream`): reads `reasoning_content` /
   `thinking_blocks` for any reasoning-capable model routed through litellm
@@ -253,13 +253,39 @@ blocks), **provider-agnostic** and on **both** transports. It needs neither
   provider-agnostic path and drives the crew-serving path in `crews.py` too.
 - **native `LLMThinkingChunkEvent`** (crewai's Gemini provider, crewai >= 1.10.1):
   an additional source on the `StreamFrame` path.
+- **OpenAI Responses API** (`copilotkit_responses`): OpenAI's reasoning models
+  expose their reasoning **summaries** only here, and carry none at all on
+  chat-completions, so an OpenAI trace needs this channel. Open the stream with
+  `copilotkit_responses(...)` and hand it to the same `copilotkit_stream(...)`,
+  which returns the same chat-shaped `ModelResponse` either way. Pass
+  `reasoning={"effort": ..., "summary": "auto"}`: without a `summary` OpenAI
+  streams no summary deltas and the run succeeds with no trace. Probe
+  `responses_channel_available()` first to degrade to chat-completions on a
+  litellm without the `aresponses` entrypoint. See
+  `examples/agentic_chat_reasoning.py`.
+
+crewai capabilities are probed at runtime, never version-gated. litellm is the one
+deliberate exception: it is a direct dependency whose version this package
+controls, so the Responses event vocabulary is covered by the declared
+`litellm>=1.70.4,<2` range instead of by probing litellm internals. Below that
+floor, litellm raises on the reasoning-summary delta types this channel reads
+(1.60.2 through 1.67), or pins `openai<1.76`, which cannot co-exist with the
+`openai>=2.30` crewai 1.15 needs (1.68.0 through 1.70.2). `pyproject.toml` carries
+the full measurement, including the two 1.70.x versions that were never published. **This raises the previous `litellm>=1.60.2` floor**, so a
+consumer pinned below 1.70.4 must upgrade litellm. Both ends of the range run the
+full suite in CI: the floor leg is pinned and gating, the ceiling leg resolves the
+newest 1.x at install time and reports as a warning, since its input moves whenever
+litellm publishes. Neither leg gates a merge until its job name is added to the
+branch's required status checks.
 
 `reasoning.supported` is therefore True whenever a reasoning channel is live (the
 litellm channel is effectively always live, as litellm is a direct dependency). A
 non-reasoning model simply emits nothing (graceful no-op). `requiresEmitRawEvents`
-is `False`. The `nativeGeminiProvider` / `resolvedProvider` fields are
-informational (the native event is an extra source, not a requirement), and
-`thinkingEventAvailable` reports whether the native Gemini event resolved.
+is `False`. `responsesApiChannel` reports whether the OpenAI Responses channel
+resolved; it and `responses_channel_available()` both read the same probe. The
+`nativeGeminiProvider` / `resolvedProvider` fields are informational (the native
+event is an extra source, not a requirement), and `thinkingEventAvailable` reports
+whether the native Gemini event resolved.
 
 ## Tuning knobs
 
@@ -328,8 +354,16 @@ Covers the grace window, force-cancel join, AND outer-cancel recovery
 
 ## To run the dojo examples
 
+The dojo server and its demo flows are a separate project next door, so they are not
+part of this package. It needs a checkout of the
+[ag-ui repository](https://github.com/ag-ui-protocol/ag-ui) and does not work from an
+installed release.
+
 ```bash
-cd integrations/crew-ai/python
+cd integrations/crew-ai/python/examples
 uv sync
 uv run dev
 ```
+
+See [`examples/README.md`](examples/README.md) for the routes it mounts and the
+environment variables it reads.

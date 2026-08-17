@@ -38,5 +38,39 @@
   {
     "type": "STEP_FINISHED",
     "stepName": "process_payment"
+  },
+  {
+    "type": "RUN_FINISHED",
+    "timestamp": 1234567890,
+    "threadId": "thread-1234",
+    "runId": "run-5678",
+    "usage": [
+      {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "inputTokens": 11,
+        "outputTokens": 22,
+        "totalTokens": 33,
+        "reasoningTokens": 44,
+        "cachedInputTokens": 55
+      },
+      {
+        "provider": "anthropic",
+        "model": "claude-opus-4",
+        "inputTokens": 1
+      }
+    ]
+  },
+  {
+    "type": "RUN_ERROR",
+    "message": "API request failed",
+    "code": "API_ERROR",
+    "usage": [
+      {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "inputTokens": 120
+      }
+    ]
   }
 ]

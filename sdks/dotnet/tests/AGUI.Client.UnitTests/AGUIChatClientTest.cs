@@ -425,6 +425,107 @@ public sealed class AGUIChatClientTest
         }
     }
 
+    [Fact]
+    public async Task GetStreamingResponse_SurfacesRunFinishedUsageAsUsageContent()
+    {
+        var transport = new StaticTransport(
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new TextMessageStartEvent { MessageId = "m1", Role = "assistant" },
+            new TextMessageContentEvent { MessageId = "m1", Delta = "hi" },
+            new TextMessageEndEvent { MessageId = "m1" },
+            new RunFinishedEvent
+            {
+                ThreadId = "t1",
+                RunId = "r1",
+                Usage =
+                [
+                    new TokenUsage
+                    {
+                        Provider = "openai",
+                        Model = "gpt-4o",
+                        InputTokens = 11,
+                        OutputTokens = 22,
+                        TotalTokens = 33,
+                        ReasoningTokens = 44,
+                        CachedInputTokens = 55
+                    }
+                ]
+            });
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var u in client.GetStreamingResponseAsync(
+            new[] { new ChatMessage(ChatRole.User, "hi") }))
+        {
+            updates.Add(u);
+        }
+
+        // ToChatResponse aggregates UsageContent across updates — this is how a caller of
+        // the IChatClient abstraction actually reads usage.
+        var usage = updates.ToChatResponse().Usage;
+        Assert.NotNull(usage);
+        Assert.Equal(11, usage.InputTokenCount);
+        Assert.Equal(22, usage.OutputTokenCount);
+        Assert.Equal(33, usage.TotalTokenCount);
+        Assert.Equal(44, usage.ReasoningTokenCount);
+        Assert.Equal(55, usage.CachedInputTokenCount);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_UsageContentCarriesModelId()
+    {
+        var transport = new StaticTransport(
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new RunFinishedEvent
+            {
+                ThreadId = "t1",
+                RunId = "r1",
+                Usage =
+                [
+                    new TokenUsage { Model = "gpt-4o", InputTokens = 10 },
+                    new TokenUsage { Model = "gpt-4o-mini", InputTokens = 5 }
+                ]
+            });
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var u in client.GetStreamingResponseAsync(
+            new[] { new ChatMessage(ChatRole.User, "hi") }))
+        {
+            updates.Add(u);
+        }
+
+        // Per-model attribution must survive: one UsageContent per entry, each labelled.
+        var usageUpdates = updates
+            .Where(u => u.Contents.OfType<UsageContent>().Any())
+            .ToList();
+
+        Assert.Equal(2, usageUpdates.Count);
+        Assert.Equal("gpt-4o", usageUpdates[0].ModelId);
+        Assert.Equal(10, usageUpdates[0].Contents.OfType<UsageContent>().Single().Details.InputTokenCount);
+        Assert.Equal("gpt-4o-mini", usageUpdates[1].ModelId);
+        Assert.Equal(5, usageUpdates[1].Contents.OfType<UsageContent>().Single().Details.InputTokenCount);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_NoUsage_EmitsNoUsageContent()
+    {
+        var transport = new StaticTransport(
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" });
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var u in client.GetStreamingResponseAsync(
+            new[] { new ChatMessage(ChatRole.User, "hi") }))
+        {
+            updates.Add(u);
+        }
+
+        Assert.DoesNotContain(updates, u => u.Contents.OfType<UsageContent>().Any());
+        Assert.Null(updates.ToChatResponse().Usage);
+    }
+
     private sealed class CapturingTransport(params BaseEvent[] middleEvents) : IAGUITransport
     {
         public RunAgentInput? LastInput { get; private set; }

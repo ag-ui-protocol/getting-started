@@ -397,3 +397,51 @@ test(
     rmSync(root, { recursive: true, force: true });
   },
 );
+
+// Re-locking the file on disk is only half the job. The release workflow stages
+// exactly the paths named in `files` (`for f in $FILES; do git add "$f"; done`),
+// so a lock that is rewritten but not reported never reaches the release commit
+// and the `uv lock --check` gate rejects the PR. crew-ai 0.3.0 (#2366) and
+// aws-strands 0.2.5 (#2374) both had to be unblocked by hand for this reason.
+test(
+  "a Python version bump reports uv.lock among the modified files",
+  { timeout: 120_000, skip: haveUv() ? false : "uv not on PATH" },
+  async () => {
+    const root = await buildFixture();
+
+    const result = await runPrepareRelease(["--scope", "fixture-py", "--bump", "minor"], {
+      PREPARE_RELEASE_ROOT: root,
+    });
+    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+
+    const output = JSON.parse(result.stdout);
+    assert.deepEqual(
+      output.files,
+      ["fixture-pkg/pyproject.toml", "fixture-pkg/uv.lock"],
+      "uv.lock missing from `files` — the release workflow would not stage it",
+    );
+
+    rmSync(root, { recursive: true, force: true });
+  },
+);
+
+// A package with no uv.lock must not gain a phantom entry in `files`: the
+// workflow would `git add` a path that does not exist and abort the release.
+// (buildFixture seeds a real lock with `uv lock`, hence the same uv guard.)
+test("a Python bump with no uv.lock reports only the manifest", {
+  timeout: 120_000,
+  skip: haveUv() ? false : "uv not on PATH",
+}, async () => {
+  const root = await buildFixture();
+  rmSync(join(root, "fixture-pkg/uv.lock"), { force: true });
+
+  const result = await runPrepareRelease(["--scope", "fixture-py", "--bump", "minor"], {
+    PREPARE_RELEASE_ROOT: root,
+  });
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.files, ["fixture-pkg/pyproject.toml"]);
+
+  rmSync(root, { recursive: true, force: true });
+});

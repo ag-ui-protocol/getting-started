@@ -867,7 +867,7 @@ async def test_e2e_resume_ceiling_is_flow_timeout():
 async def test_e2e_crew_endpoint_rejects_resume():
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from ag_ui_crewai.examples.crew_chat import CrewChatCrew
+    from agents.crew_chat import CrewChatCrew
 
     app = FastAPI()
     ep.add_crewai_crew_fastapi_endpoint(app=app, crew=CrewChatCrew(), path="/crew")

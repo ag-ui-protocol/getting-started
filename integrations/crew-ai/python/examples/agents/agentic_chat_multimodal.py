@@ -8,7 +8,7 @@ model at the conversation.
 
 from crewai.flow.flow import Flow, start
 from litellm import acompletion
-from ..sdk import copilotkit_stream, CopilotKitState
+from ag_ui_crewai.sdk import copilotkit_stream, CopilotKitState
 
 
 class AgenticChatMultimodalFlow(Flow[CopilotKitState]):

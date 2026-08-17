@@ -12,7 +12,7 @@ from crewai.experimental.conversational import (
 from crewai.flow.flow import listen
 from pydantic import BaseModel, ConfigDict
 
-from ..sdk import CopilotKitState
+from ag_ui_crewai.sdk import CopilotKitState
 from .a2ui_dynamic_schema import A2UIDynamicSchemaFlow
 from .a2ui_fixed_schema import A2UIFixedSchemaFlow
 from .a2ui_recovery import A2UIRecoveryFlow

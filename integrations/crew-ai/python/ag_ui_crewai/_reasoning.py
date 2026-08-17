@@ -22,7 +22,7 @@ helpers here:
   emission lifecycle.
 
 This module is a LEAF: it imports only the stdlib and the stdlib-only
-``_responses_events`` vocabulary, so ``sdk`` / ``_frames`` / ``_responses`` can
+``_responses_events`` vocabulary, so ``sdk`` / ``_frames`` / ``endpoint`` can
 import it at module-load time without a circular dependency.
 """
 
@@ -34,6 +34,9 @@ from typing import Any
 from ._responses_events import (
     RESPONSES_OUTPUT_ITEM_DONE,
     RESPONSES_REASONING_TEXT_DELTAS,
+    responses_attr,
+    responses_event_type,
+    responses_item_id,
 )
 
 # crewai's native thinking-chunk event ``type`` discriminator (its Gemini
@@ -143,36 +146,9 @@ def reasoning_from_delta(delta: Any) -> DeltaReasoning:
 # ``include=["reasoning.encrypted_content"]``.
 
 
-def responses_event_type(event: Any) -> str | None:
-    """Return a Responses stream event's ``type`` as a plain string.
-
-    litellm types the field as a ``str``-mixin enum on the events it knows and
-    as a plain string on ``GenericEvent``; normalise both to the wire string.
-    """
-    raw = getattr(event, "type", None)
-    if raw is None:
-        return None
-    return str(getattr(raw, "value", raw))
-
-
-def _responses_field(value: Any, key: str) -> Any:
-    """Read a field from a dict- or object-shaped Responses payload."""
-    if isinstance(value, dict):
-        return value.get(key)
-    return getattr(value, key, None)
-
-
-def _reasoning_item_id(event: Any, *, item: Any = None) -> str | None:
-    """Return the provider identity carried flat or on a completed item."""
-    item_id = getattr(event, "item_id", None)
-    if not item_id and item is not None:
-        item_id = _responses_field(item, "id")
-    return item_id if isinstance(item_id, str) and item_id else None
-
-
-def _require_reasoning_item_id(event: Any, *, item: Any = None) -> str:
+def _require_reasoning_item_id(event: Any) -> str:
     """Return a replayable reasoning id, failing rather than minting one."""
-    item_id = _reasoning_item_id(event, item=item)
+    item_id = responses_item_id(event)
     if item_id is None:
         raise RuntimeError(
             "OpenAI Responses reasoning event is missing its reasoning item id"
@@ -192,7 +168,7 @@ def reasoning_from_responses_event(event: Any) -> DeltaReasoning:
         return DeltaReasoning()
 
     if event_type in RESPONSES_REASONING_TEXT_DELTAS:
-        delta = getattr(event, "delta", None)
+        delta = responses_attr(event, "delta")
         if isinstance(delta, str) and delta:
             return DeltaReasoning(
                 text=delta,
@@ -201,11 +177,11 @@ def reasoning_from_responses_event(event: Any) -> DeltaReasoning:
         return DeltaReasoning()
 
     if event_type == RESPONSES_OUTPUT_ITEM_DONE:
-        item = getattr(event, "item", None)
-        if item is None or _responses_field(item, "type") != "reasoning":
+        item = responses_attr(event, "item")
+        if item is None or responses_attr(item, "type") != "reasoning":
             return DeltaReasoning()
-        item_id = _require_reasoning_item_id(event, item=item)
-        encrypted = _responses_field(item, "encrypted_content")
+        item_id = _require_reasoning_item_id(event)
+        encrypted = responses_attr(item, "encrypted_content")
         if encrypted:
             return DeltaReasoning(
                 encrypted=(str(encrypted),),

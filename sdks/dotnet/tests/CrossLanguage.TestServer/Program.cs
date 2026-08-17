@@ -45,6 +45,7 @@ app.MapSharedState("/shared_state");
 app.MapPredictiveState("/predictive_state_updates");
 app.MapHumanInTheLoop("/human_in_the_loop");
 app.MapParallelToolCalls("/parallel_tool_calls");
+app.MapTokenUsage("/token_usage");
 app.MapProtobufParity();
 
 await app.RunAsync().ConfigureAwait(false);

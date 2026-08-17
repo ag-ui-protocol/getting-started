@@ -22,7 +22,7 @@ from typing import Any, Dict, List
 from crewai.flow.flow import Flow, start
 from litellm import acompletion
 
-from ..sdk import (
+from ag_ui_crewai.sdk import (
     CopilotKitState,
     copilotkit_responses,
     copilotkit_stream,

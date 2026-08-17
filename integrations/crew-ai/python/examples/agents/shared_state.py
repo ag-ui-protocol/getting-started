@@ -8,7 +8,7 @@ from typing import List, Optional
 from litellm import acompletion
 from pydantic import BaseModel, Field
 from crewai.flow.flow import Flow, start, router, listen
-from ..sdk import (
+from ag_ui_crewai.sdk import (
   copilotkit_stream, 
   copilotkit_predict_state,
   CopilotKitState

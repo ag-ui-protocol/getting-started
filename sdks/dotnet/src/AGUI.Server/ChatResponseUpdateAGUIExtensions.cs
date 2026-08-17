@@ -162,6 +162,10 @@ public static class ChatResponseUpdateAGUIExtensions
         // generic input interrupts (from InterruptRequestContent).
         List<AGUIInterrupt>? pendingInterrupts = null;
 
+        // Accumulate provider-reported token usage so the terminal RunFinished can
+        // carry one entry per (provider, model) for the whole run.
+        var usageTracker = new TokenUsageTracker();
+
         // Progressive tool-call argument streaming. MEAI coalesces tool-call arguments and
         // only attaches the typed FunctionCallContent once a call is complete, so without a
         // registered fragment extractor the wire carries one atomic TOOL_CALL_ARGS per call.
@@ -184,6 +188,10 @@ public static class ChatResponseUpdateAGUIExtensions
                 }
                 else if (rawEvent is RunFinishedEvent)
                 {
+                    // The caller supplied the terminal event, so it passes through
+                    // verbatim — including its Usage, which we do not overwrite.
+                    // Any usage accumulated from UsageContent is therefore theirs to
+                    // set; we never mutate a caller-owned event.
                     runFinishedEmitted = true;
                 }
                 else if (!runStartedEmitted)
@@ -510,6 +518,12 @@ public static class ChatResponseUpdateAGUIExtensions
                         });
                         break;
 
+                    case UsageContent usageContent:
+                        // Usage is metadata, not stream content — accumulate it for the
+                        // terminal RunFinished rather than emitting an event of its own.
+                        usageTracker.Add(usageContent.Details, options.UsageProvider, chatResponse.ModelId);
+                        break;
+
                     default:
                         // Check registered interrupt mappers for custom interrupt-producing content types
                         var interrupt = options.InvokeInterruptMappers(content);
@@ -588,14 +602,16 @@ public static class ChatResponseUpdateAGUIExtensions
         if (pendingInterrupts is { Count: > 0 })
         {
             yield return RunFinishedEvent.Create(threadId, runId,
-                new RunFinishedInterruptOutcome { Interrupts = pendingInterrupts });
+                new RunFinishedInterruptOutcome { Interrupts = pendingInterrupts },
+                usageTracker.Build());
             runFinishedEmitted = true;
         }
 
         // Emit RunFinishedEvent automatically if not explicitly provided
         if (!runFinishedEmitted)
         {
-            yield return RunFinishedEvent.Create(threadId, runId, new RunFinishedSuccessOutcome());
+            yield return RunFinishedEvent.Create(threadId, runId, new RunFinishedSuccessOutcome(),
+                usageTracker.Build());
         }
     }
 

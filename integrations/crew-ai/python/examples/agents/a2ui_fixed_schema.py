@@ -25,7 +25,7 @@ from ag_ui_a2ui_toolkit import (
     update_data_model,
 )
 
-from ..sdk import copilotkit_emit_tool_result, copilotkit_stream
+from ag_ui_crewai.sdk import copilotkit_emit_tool_result, copilotkit_stream
 from ._model_turn import (
     append_assistant_message,
     resolve_client_tools,

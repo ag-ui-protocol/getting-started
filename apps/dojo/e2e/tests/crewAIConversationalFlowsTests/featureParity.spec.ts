@@ -1,4 +1,4 @@
-import { expect, type Locator } from "@playwright/test";
+import { expect } from "@playwright/test";
 import * as path from "path";
 import { test } from "../../test-isolation-helper";
 import { A2UIPage } from "../../featurePages/A2UIPage";
@@ -15,6 +15,7 @@ import {
   sendChatMessage,
 } from "../../utils/copilot-actions";
 import { CopilotSelectors } from "../../utils/copilot-selectors";
+import { expectRenderedAfter } from "../../utils/rendering-order";
 
 const integrationId = "crewai-conversational-flows";
 const testImage = path.join(
@@ -37,34 +38,6 @@ const parityFeatures = [
   "a2ui_recovery",
   "a2ui_fixed_schema",
 ] as const;
-
-async function expectRenderedAfter(
-  earlier: Locator,
-  later: Locator,
-): Promise<void> {
-  await expect(earlier).toBeAttached();
-  await expect(later).toBeAttached();
-
-  const laterHandle = await later.elementHandle();
-  expect(laterHandle).not.toBeNull();
-  const followsInDocument = await earlier.evaluate(
-    (earlierElement, laterElement) =>
-      Boolean(
-        earlierElement.compareDocumentPosition(laterElement as Node) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-      ),
-    laterHandle,
-  );
-  expect(followsInDocument).toBe(true);
-
-  const [earlierBox, laterBox] = await Promise.all([
-    earlier.boundingBox(),
-    later.boundingBox(),
-  ]);
-  if (earlierBox && laterBox) {
-    expect(earlierBox.y).toBeLessThan(laterBox.y);
-  }
-}
 
 test.describe("CrewAI Conversational Flows feature parity", () => {
   test.describe.configure({ mode: "serial" });
@@ -113,16 +86,8 @@ test.describe("CrewAI Conversational Flows feature parity", () => {
     await expect(reasoningIndicator).toBeVisible({ timeout: 10000 });
     await expect(answer).toBeVisible({ timeout: 10000 });
 
-    const [userBox, reasoningBox, answerBox] = await Promise.all([
-      userMessage.boundingBox(),
-      reasoningIndicator.boundingBox(),
-      answer.boundingBox(),
-    ]);
-    expect(userBox).not.toBeNull();
-    expect(reasoningBox).not.toBeNull();
-    expect(answerBox).not.toBeNull();
-    expect(userBox!.y).toBeLessThan(reasoningBox!.y);
-    expect(reasoningBox!.y).toBeLessThan(answerBox!.y);
+    await expectRenderedAfter(userMessage, reasoningIndicator);
+    await expectRenderedAfter(reasoningIndicator, answer);
   });
 
   test("multimodal turns preserve the uploaded image", async ({ page }) => {
@@ -262,10 +227,24 @@ test.describe("CrewAI Conversational Flows feature parity", () => {
     const generativeUI = new ToolBaseGenUIPage(page);
 
     await generativeUI.generateHaiku('Generate Haiku for "I will always win"');
-    await generativeUI.checkGeneratedHaiku();
+
+    // The page renders a haiku card twice: once inside the assistant message
+    // and once in the main-column carousel, which already holds a placeholder
+    // card before any turn runs. Only the in-chat one belongs to the turn being
+    // ordered, so resolve it once and use that same locator for both the
+    // readiness wait and the ordering assertion.
+    const inChatHaikuCard = CopilotSelectors.assistantMessages(page)
+      .last()
+      .getByTestId("haiku-card")
+      .last();
+    await expect(inChatHaikuCard).toBeVisible();
+    await expect(
+      inChatHaikuCard.getByTestId("haiku-japanese-line").first(),
+    ).toBeVisible();
+
     await expectRenderedAfter(
       CopilotSelectors.userMessages(page).last(),
-      generativeUI.haikuBlock.last(),
+      inChatHaikuCard,
     );
   });
 

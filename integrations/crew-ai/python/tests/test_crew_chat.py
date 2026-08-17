@@ -862,7 +862,7 @@ def test_protocol_accepts_name_only_and_crew_name_only_wrappers():
     ``_crew_name`` in the protocol — as an earlier round did — wrongly
     rejected the name-only ``CrewChatCrew`` even though it works at
     runtime."""
-    from ag_ui_crewai.examples.crew_chat import CrewChatCrew
+    from agents.crew_chat import CrewChatCrew
 
     name_only = CrewChatCrew()
     # Precondition: name-only shape (has .name, lacks _crew_name).

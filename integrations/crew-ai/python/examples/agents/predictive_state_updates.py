@@ -7,7 +7,7 @@ import uuid
 from typing import Optional
 from litellm import acompletion
 from crewai.flow.flow import Flow, start, router, listen
-from ..sdk import (
+from ag_ui_crewai.sdk import (
   copilotkit_stream, 
   copilotkit_predict_state,
   CopilotKitState

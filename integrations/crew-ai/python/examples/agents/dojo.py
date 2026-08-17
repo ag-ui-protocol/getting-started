@@ -1,24 +1,25 @@
 import os
+
 import uvicorn
 from fastapi import FastAPI
 
-from .endpoint import add_crewai_flow_fastapi_endpoint, add_crewai_crew_fastapi_endpoint
-from .examples.crew_chat import CrewChatCrew
-from .examples.agentic_chat import AgenticChatFlow
-from .examples.backend_tool_rendering import BackendToolRenderingFlow
-from .examples.human_in_the_loop import HumanInTheLoopFlow
-from .examples.tool_based_generative_ui import ToolBasedGenerativeUIFlow
-from .examples.agentic_generative_ui import AgenticGenerativeUIFlow
-from .examples.shared_state import SharedStateFlow
-from .examples.predictive_state_updates import PredictiveStateUpdatesFlow
-from .examples.error_flow import ErrorFlow
-from .examples.interrupt_flow import InterruptFlow
-from .examples.a2ui_dynamic_schema import A2UIDynamicSchemaFlow
-from .examples.a2ui_recovery import A2UIRecoveryFlow
-from .examples.a2ui_fixed_schema import A2UIFixedSchemaFlow
-from .examples.agentic_chat_multimodal import AgenticChatMultimodalFlow
-from .examples.agentic_chat_reasoning import AgenticChatReasoningFlow
-from .examples.conversational import CONVERSATIONAL_FLOW_TYPES
+from ag_ui_crewai.endpoint import add_crewai_flow_fastapi_endpoint, add_crewai_crew_fastapi_endpoint
+from .crew_chat import CrewChatCrew
+from .agentic_chat import AgenticChatFlow
+from .backend_tool_rendering import BackendToolRenderingFlow
+from .human_in_the_loop import HumanInTheLoopFlow
+from .tool_based_generative_ui import ToolBasedGenerativeUIFlow
+from .agentic_generative_ui import AgenticGenerativeUIFlow
+from .shared_state import SharedStateFlow
+from .predictive_state_updates import PredictiveStateUpdatesFlow
+from .error_flow import ErrorFlow
+from .interrupt_flow import InterruptFlow
+from .a2ui_dynamic_schema import A2UIDynamicSchemaFlow
+from .a2ui_recovery import A2UIRecoveryFlow
+from .a2ui_fixed_schema import A2UIFixedSchemaFlow
+from .agentic_chat_multimodal import AgenticChatMultimodalFlow
+from .agentic_chat_reasoning import AgenticChatReasoningFlow
+from .conversational import CONVERSATIONAL_FLOW_TYPES
 
 app = FastAPI(title="CrewAI Dojo Example Server")
 
@@ -126,12 +127,19 @@ for feature, flow_type in CONVERSATIONAL_FLOW_TYPES.items():
         emit_interrupt_outcome=feature == "interrupt",
     )
 
-def main():
-    """Run the uvicorn server."""
+
+def main() -> int:
+    """Serve the dojo. ``agents/__init__.py`` has already opted out of telemetry.
+
+    The uvicorn target stays an import string: under ``reload=True`` this process is
+    only the supervisor, and handing it the string lets the worker that serves traffic
+    be the one that builds the app, once.
+    """
     port = int(os.getenv("PORT", "8000"))
     uvicorn.run(
-        "ag_ui_crewai.dojo:app",
+        "agents.dojo:app",
         host="0.0.0.0",
         port=port,
-        reload=True
+        reload=True,
     )
+    return 0

@@ -28,6 +28,7 @@ from google.genai import types
 from ag_ui_adk.utils.converters import (
     convert_ag_ui_messages_to_adk,
     convert_adk_event_to_ag_ui_message,
+    convert_message_content_to_parts,
     convert_state_to_json_patch,
     convert_json_patch_to_state,
     extract_text_from_content,
@@ -630,6 +631,26 @@ class TestConvertAGUIMessagesToADK:
         event = adk_events[0]
         func_response = event.content.parts[0].function_response
         assert func_response.response == {"result": '{"result": "success", "value": 42}'}
+
+    def test_binary_filename_maps_to_blob_display_name(self):
+        """Test that BinaryInputContent.filename is set as Blob.display_name."""
+        item = BinaryInputContent(
+            data=base64.b64encode(b"hello").decode(),
+            mime_type="application/pdf",
+            filename="report.pdf",
+        )
+        parts = convert_message_content_to_parts([item])
+        assert len(parts) == 1
+        assert parts[0].inline_data.display_name == "report.pdf"
+
+    def test_binary_without_filename_has_no_display_name(self):
+        """Test that Blob.display_name is None when filename is not provided."""
+        item = BinaryInputContent(
+            data=base64.b64encode(b"hello").decode(),
+            mime_type="application/pdf",
+        )
+        parts = convert_message_content_to_parts([item])
+        assert parts[0].inline_data.display_name is None
 
     def test_convert_empty_message_list(self):
         """Test converting an empty message list."""

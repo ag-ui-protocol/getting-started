@@ -28,24 +28,26 @@ def _get_text_value(item: Union[dict, TextInputContent]) -> Optional[str]:
     else:
         return item.get("text")
 
-def _get_binary_attributes(item: Union[dict, BinaryInputContent]) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-    """Get binary attributes (data, mime_type, url, id) from dict or BinaryInputContent."""
+def _get_binary_attributes(item: Union[dict, BinaryInputContent]) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """Get binary attributes (data, mime_type, url, id, filename) from dict or BinaryInputContent."""
     if isinstance(item, BinaryInputContent):
         return (
             item.data,
             item.mime_type,
             item.url,
             item.id,
+            item.filename,
         )
     else:
         return (
             item.get("data"),
             item.get("mimeType") or item.get("mime_type"),
             item.get("url"),
-            item.get("id")
+            item.get("id"),
+            item.get("filename"),
         )
 
-def _to_binary_part(data: Optional[str], mime_type: Optional[str], url: Optional[str], binary_id: Optional[str]) -> Optional[types.Part]:
+def _to_binary_part(data: Optional[str], mime_type: Optional[str], url: Optional[str], binary_id: Optional[str], filename: Optional[str] = None) -> Optional[types.Part]:
     """Create a types.Part from binary data."""
     # currently, only data is supported
     if not data:
@@ -66,12 +68,10 @@ def _to_binary_part(data: Optional[str], mime_type: Optional[str], url: Optional
 
     try:
         decoded = base64.b64decode(data, validate=True)
-        return types.Part(
-            inline_data=types.Blob(
-                mime_type=mime_type,
-                data=decoded,
-            )
-        )
+        blob_kwargs: Dict[str, Any] = {"mime_type": mime_type, "data": decoded}
+        if filename:
+            blob_kwargs["display_name"] = filename
+        return types.Part(inline_data=types.Blob(**blob_kwargs))
     except (binascii.Error, ValueError) as e:
         logger.warning("Failed to base64 decode BinaryInputContent.data: %s", e)
         return None
@@ -190,8 +190,8 @@ def convert_message_content_to_parts(content: Optional[Union[str, List[Any]]]) -
             if part:
                 parts.append(part)
         elif _is_binary_content(item):
-            data, mime_type, url, binary_id = _get_binary_attributes(item)
-            part = _to_binary_part(data, mime_type, url, binary_id)
+            data, mime_type, url, binary_id, filename = _get_binary_attributes(item)
+            part = _to_binary_part(data, mime_type, url, binary_id, filename)
             if part:
                 parts.append(part)
         else:

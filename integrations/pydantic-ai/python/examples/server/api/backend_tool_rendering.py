@@ -45,7 +45,6 @@ agent = Agent(
         """
     ),
 )
-app = agent.to_ag_ui()
 
 
 def get_weather_condition(code: int) -> str:

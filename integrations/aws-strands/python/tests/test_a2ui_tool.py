@@ -31,6 +31,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from ag_ui.core import Context, EventType, RunAgentInput, Tool, UserMessage
+from strands.interrupt import _InterruptState
 from strands.tools.registry import ToolRegistry
 
 from ag_ui_strands.a2ui_tool import (
@@ -471,6 +472,9 @@ def _build_agent(thread_id: str, stream_events: list, config=None) -> StrandsAge
     # test through the legacy (non-replay) path instead of the default
     # `replay_history_into_strands` one.
     mock_inner._session_manager = None
+    # A bare MagicMock auto-vivifies `_interrupt_state.activated` as a truthy
+    # mock, spuriously tripping the "no session_manager" interrupt guard.
+    mock_inner._interrupt_state = _InterruptState()
     mock_inner.messages = []
 
     async def _stream(_msg):

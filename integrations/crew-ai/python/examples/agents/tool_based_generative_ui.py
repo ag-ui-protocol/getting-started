@@ -10,7 +10,7 @@ render the chat card but never run the frontend handler that updates the canvas)
 
 from crewai.flow.flow import Flow, start
 from litellm import acompletion
-from ..sdk import copilotkit_stream, CopilotKitState
+from ag_ui_crewai.sdk import copilotkit_stream, CopilotKitState
 
 
 class ToolBasedGenerativeUIFlow(Flow[CopilotKitState]):

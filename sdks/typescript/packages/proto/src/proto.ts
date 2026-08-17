@@ -268,6 +268,14 @@ export function encode(event: BaseEvent): Uint8Array {
     }
   }
 
+  // Terminal events carry an optional `usage` array. protobuf has no optional
+  // repeated field, so normalize to `[]` when absent — otherwise ts-proto's
+  // `for (const v of message.usage)` iterates `undefined` and throws. Empty
+  // arrays are collapsed back to "no usage" on decode.
+  if (type === EventType.RUN_FINISHED || type === EventType.RUN_ERROR) {
+    rest.usage = Array.isArray(rest.usage) ? rest.usage : [];
+  }
+
   // custom mapping for json patch operations
   if (type === EventType.STATE_DELTA && Array.isArray(rest.delta)) {
     rest.delta = (rest.delta as LooseRecord[]).map((operation) => ({
@@ -355,6 +363,15 @@ export function decode(data: Uint8Array): BaseEvent {
       runFinished.outcome = { type: "success" };
     } else {
       delete runFinished.outcome;
+    }
+  }
+
+  // Terminal events: an empty decoded `usage` array means the producer sent no
+  // usage — collapse it back to an omitted field so legacy events round-trip
+  // cleanly and consumers can rely on `usage === undefined` for "not reported".
+  if (decoded.type === EventType.RUN_FINISHED || decoded.type === EventType.RUN_ERROR) {
+    if (Array.isArray(decoded.usage) && decoded.usage.length === 0) {
+      delete decoded.usage;
     }
   }
 

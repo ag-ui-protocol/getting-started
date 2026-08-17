@@ -362,7 +362,7 @@ const agentFilesMapper: Record<
           path.join(
             __dirname,
             integrationsFolderPath,
-            `/crew-ai/python/ag_ui_crewai/examples/${agentId}.py`,
+            `/crew-ai/python/examples/agents/${agentId}.py`,
           ),
         ],
       }),
@@ -377,12 +377,12 @@ const agentFilesMapper: Record<
           path.join(
             __dirname,
             integrationsFolderPath,
-            "/crew-ai/python/ag_ui_crewai/examples/conversational.py",
+            "/crew-ai/python/examples/agents/conversational.py",
           ),
           path.join(
             __dirname,
             integrationsFolderPath,
-            `/crew-ai/python/ag_ui_crewai/examples/${
+            `/crew-ai/python/examples/agents/${
               agentId === "v1_agentic_chat"
                 ? "agentic_chat"
                 : agentId === "interrupt"

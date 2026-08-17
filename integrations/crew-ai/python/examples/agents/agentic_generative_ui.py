@@ -9,7 +9,7 @@ from litellm import acompletion
 from pydantic import BaseModel
 from typing import Literal, List
 
-from ..sdk import (
+from ag_ui_crewai.sdk import (
   copilotkit_stream,
   CopilotKitState,
   copilotkit_predict_state,

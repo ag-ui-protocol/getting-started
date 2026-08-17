@@ -14,8 +14,6 @@ through ``_run_flow_frame_stream`` and decoding the SSE, where it is
 deterministic.
 """
 
-import contextlib
-import importlib
 import json as _json
 import logging
 import uuid
@@ -997,140 +995,40 @@ async def test_native_thinking_not_double_emitted_under_raw_passthrough():
 
 
 # --------------------------------------------------------------------------
-# OpenAI Responses channel: reasoning summaries never appear on the
-# chat-completions delta, so this is the ONLY channel that can surface an
-# OpenAI thinking trace. These build the same event objects litellm produces
-# (typed events where litellm knows the type, ``GenericEvent`` for the
-# reasoning-summary deltas it does not) so the projection is exercised against
-# real shapes, not hand-rolled stand-ins.
+# OpenAI Responses channel
+# --------------------------------------------------------------------------
+# Reasoning summaries never appear on the chat-completions delta, so this is the
+# ONLY channel that can surface an OpenAI thinking trace. The helpers below build
+# the same event objects litellm produces (typed events where litellm knows the
+# type, ``GenericEvent`` for the reasoning-summary deltas it does not) so the
+# projection is exercised against real shapes, not hand-rolled stand-ins.
 #
-# Those event models are Responses-API additions, so they are NOT present on
-# every litellm this package's declared floor (``litellm>=1.60.2``) permits.
-# Import them DEFENSIVELY: an unguarded module-level import raises at COLLECTION
-# time on such a build and takes down every test in this file, including the
-# chat-completions and native-thinking channels that have nothing to do with the
-# Responses API.
-#
-# What a test that needs an absent model must do is SKIP, never fail: the build
-# genuinely cannot exercise the code. Two layers deliver that, and the second is
-# the one that holds as tests are added:
-#
-# 1. ``requires_responses_types`` skips at COLLECTION time. Cheap and explicit,
-#    but it only protects the tests someone remembered to decorate.
-# 2. Each absent model is bound to an ``_AbsentResponsesType`` PROXY rather than
-#    ``None``. Constructing, subscripting or reading an attribute off it skips the
-#    test that reached it. So a new Responses test needs no decorator and CANNOT
-#    turn a permitted litellm red; binding ``None`` instead made every undecorated
-#    test raise ``TypeError: 'NoneType' object is not callable``.
-#
-# Symbols imported at CALL time rather than through the block below go through
-# ``_responses_symbol``, which skips the same way.
+# These models are all present across this package's declared litellm range, so
+# they are imported plainly: a litellm that re-homes or drops one collapses this
+# module at collection time, on the import above, which is loud enough.
+# ``test_litellm_exposes_the_responses_surface_we_use`` covers the other half of
+# the boundary, the half no import can state: whether litellm can still PARSE the
+# reasoning payloads this channel exists to carry.
 # --------------------------------------------------------------------------
 
 from pydantic import ValidationError  # noqa: E402
 
-_RESPONSES_TYPES_ERROR: ImportError | None = None
-
-
-class _AbsentResponsesType:
-    """Stand-in for a Responses-API model the installed litellm does not expose.
-
-    Any use of it skips the calling test. ``pytest.skip`` raises a
-    ``BaseException``, so a production ``except Exception`` in the path under test
-    cannot swallow the skip into a pass or into some unrelated assertion failure.
-    """
-
-    def __init__(self, name):
-        self._name = name
-
-    def _skip(self, *_args, **_kwargs):
-        pytest.skip(
-            f"installed litellm exposes no {self._name}: {_RESPONSES_TYPES_ERROR}"
-        )
-
-    __call__ = _skip
-    __getitem__ = _skip
-
-    def __getattr__(self, name):
-        # Dunder lookups are INTROSPECTION, not use: pytest's own collection reads
-        # ``__test__`` off every module global. Report those absent instead of
-        # skipping the whole module.
-        if name.startswith("__") and name.endswith("__"):
-            raise AttributeError(name)
-        self._skip()
-
-    def __repr__(self):
-        return f"<absent Responses-API model {self._name}>"
-
-
-try:  # noqa: E402
-    from litellm.types.llms.openai import (
-        FunctionCallArgumentsDeltaEvent,
-        GenericEvent,
-        IncompleteDetails,
-        OutputItemAddedEvent,
-        OutputTextDeltaEvent,
-        ResponseCompletedEvent,
-        ResponseCreatedEvent,
-        ResponseIncompleteEvent,
-        ResponsesAPIResponse,
-    )
-except ImportError as exc:  # pragma: no cover - depends on the installed litellm
-    _RESPONSES_TYPES_ERROR = exc
-    FunctionCallArgumentsDeltaEvent = _AbsentResponsesType(
-        "FunctionCallArgumentsDeltaEvent"
-    )
-    GenericEvent = _AbsentResponsesType("GenericEvent")
-    IncompleteDetails = _AbsentResponsesType("IncompleteDetails")
-    OutputItemAddedEvent = _AbsentResponsesType("OutputItemAddedEvent")
-    OutputTextDeltaEvent = _AbsentResponsesType("OutputTextDeltaEvent")
-    ResponseCompletedEvent = _AbsentResponsesType("ResponseCompletedEvent")
-    ResponseCreatedEvent = _AbsentResponsesType("ResponseCreatedEvent")
-    ResponseIncompleteEvent = _AbsentResponsesType("ResponseIncompleteEvent")
-    ResponsesAPIResponse = _AbsentResponsesType("ResponsesAPIResponse")
-
-requires_responses_types = pytest.mark.skipif(
-    _RESPONSES_TYPES_ERROR is not None,
-    reason=(
-        "installed litellm exposes no Responses-API event models: "
-        f"{_RESPONSES_TYPES_ERROR}"
-    ),
+from litellm.types.llms.openai import (  # noqa: E402
+    FunctionCallArgumentsDeltaEvent,
+    GenericEvent,
+    IncompleteDetails,
+    OutputItemAddedEvent,
+    OutputItemDoneEvent,
+    OutputTextDeltaEvent,
+    ResponseCompletedEvent,
+    ResponseCreatedEvent,
+    ResponseIncompleteEvent,
+    ResponsesAPIResponse,
 )
-
-
-def test_locked_litellm_exposes_the_responses_event_models():
-    """The pinned litellm actually resolves the Responses-API event models.
-
-    UNDECORATED on purpose. ``requires_responses_types`` skips ~70 tests when the
-    models cannot be imported, and CI runs a single ``uv sync --locked`` litellm,
-    so a build that re-homed those models would take that whole block dark on an
-    otherwise green job. This canary turns that silent hole into one red line
-    naming the cause: green on the locked build, red the moment the import — or
-    the production registry lookup — stops resolving on the build under test."""
-    assert _RESPONSES_TYPES_ERROR is None, _RESPONSES_TYPES_ERROR
-    # An import that succeeds but a registry lookup that re-homed would skip just
-    # as silently, so assert the production probe resolved too.
-    from ag_ui_crewai._capabilities import responses_event_modelling
-
-    modelling = responses_event_modelling()
-    assert modelling.resolver_available is True
-    assert modelling.usable is True
-    assert modelling.unmodellable_event_types == ()
-
-
-def _responses_symbol(module_path, name):
-    """Return ``module_path.name``, skipping the calling test if it is absent.
-
-    For Responses-API symbols a single assertion needs, imported where they are
-    used rather than through the guarded block above. An unguarded call-time
-    import is the same red build in a different place.
-    """
-    try:
-        module = importlib.import_module(module_path)
-        return getattr(module, name)
-    except (ImportError, AttributeError) as exc:  # pragma: no cover - build-dependent
-        pytest.skip(f"installed litellm exposes no {module_path}.{name}: {exc}")
-
+from openai.types.responses import (  # noqa: E402
+    ResponseFunctionToolCall,
+    ResponseReasoningItem,
+)
 
 from ag_ui_crewai import _responses as responses_mod  # noqa: E402
 from ag_ui_crewai import sdk as sdk_mod  # noqa: E402
@@ -1138,19 +1036,137 @@ from ag_ui_crewai._reasoning import (  # noqa: E402
     reasoning_from_responses_event,
     responses_event_type,
 )
-from ag_ui_crewai.examples.agentic_chat_reasoning import (  # noqa: E402
+from ag_ui_crewai._responses_events import (  # noqa: E402
+    RESPONSES_OUTPUT_ITEM_DONE,
+    RESPONSES_REASONING_SUMMARY_TEXT_DELTA,
+    RESPONSES_REASONING_TEXT_DELTAS,
+    responses_attr,
+    responses_item_id,
+)
+from agents.agentic_chat_reasoning import (  # noqa: E402
     AgenticChatReasoningFlow,
 )
+
+
+def _parse_responses_chunk(payload):
+    """Parse one raw Responses SSE payload the way litellm's own stream does.
+
+    ``BaseResponsesAPIStreamingIterator._process_chunk`` json-decodes each SSE
+    line and hands the resulting dict to
+    ``OpenAIResponsesAPIConfig.transform_streaming_response``, which looks the
+    event ``type`` up and either gives it a dedicated model or drops it onto the
+    extras-allowing ``GenericEvent``. Driving that hop directly is what lets the
+    canary exercise litellm's REAL parsing without a network call; the OpenAI
+    config only debug-logs ``logging_obj``, so ``None`` is what we pass.
+
+    Every failure mode here is a FAILURE, never a skip: losing the ability to
+    check this boundary is exactly the regression the canary exists to catch.
+    """
+    from importlib.metadata import version
+
+    try:
+        from litellm.llms.openai.responses.transformation import (
+            OpenAIResponsesAPIConfig,
+        )
+    except Exception as exc:  # pragma: no cover - only on an unsupported litellm
+        raise AssertionError(
+            "litellm no longer exposes OpenAIResponsesAPIConfig at "
+            "litellm.llms.openai.responses.transformation, so this canary can no "
+            f"longer drive litellm's own Responses event parsing: {exc!r}"
+        ) from exc
+
+    transform = getattr(
+        OpenAIResponsesAPIConfig(), "transform_streaming_response", None
+    )
+    if not callable(transform):  # pragma: no cover - only on an unsupported litellm
+        raise AssertionError(
+            "OpenAIResponsesAPIConfig no longer exposes a callable "
+            "transform_streaming_response, so this canary can no longer drive "
+            "litellm's own Responses event parsing"
+        )
+
+    try:
+        return transform(model="gpt-5.4", parsed_chunk=payload, logging_obj=None)
+    except Exception as exc:
+        raise AssertionError(
+            f"litellm {version('litellm')} cannot parse a real "
+            f"{payload['type']!r} Responses chunk, so the reasoning trace this "
+            f"channel exists to surface never reaches the bridge: {exc!r}"
+        ) from exc
+
+
+def test_litellm_exposes_the_responses_surface_we_use():
+    """Dependency-boundary canary for the declared litellm range.
+
+    Drives raw Responses SSE payloads through litellm's OWN event parsing and
+    reads the results back through the bridge's accessors, so the range is held
+    to what litellm can still DO rather than to which symbols it still exports.
+    A litellm that cannot parse the reasoning-summary deltas fails here naming
+    the type it choked on, which is precisely why the declared floor exists:
+    1.60.2-1.67 raise ``ValueError("Unknown event type: ...")`` on those deltas
+    instead of carrying them on ``GenericEvent``. No other test would notice,
+    because every other test in this section builds its event objects directly.
+
+    What it does NOT guarantee: the event models imported at module scope above
+    are not covered here. A litellm that re-homes or drops one of those fails at
+    COLLECTION time, on the import, and this test never runs.
+    """
+    import litellm
+
+    assert callable(getattr(litellm, "aresponses", None))
+    assert responses_mod.responses_channel_available() is True
+
+    for delta_type in sorted(RESPONSES_REASONING_TEXT_DELTAS):
+        # A summary delta indexes into the summary array, the raw variant into
+        # content; everything else about the two payloads is identical.
+        is_summary = delta_type == RESPONSES_REASONING_SUMMARY_TEXT_DELTA
+        event = _parse_responses_chunk({
+            "type": delta_type,
+            "sequence_number": 3,
+            "item_id": "rs_canary",
+            "output_index": 0,
+            "summary_index" if is_summary else "content_index": 0,
+            "delta": "weighing the options",
+        })
+        assert responses_event_type(event) == delta_type
+        assert responses_item_id(event) == "rs_canary"
+        assert reasoning_from_responses_event(event) == DeltaReasoning(
+            text="weighing the options", item_id="rs_canary"
+        )
+
+    done = _parse_responses_chunk({
+        "type": RESPONSES_OUTPUT_ITEM_DONE,
+        "sequence_number": 9,
+        "output_index": 0,
+        "item": {
+            "id": "rs_canary",
+            "type": "reasoning",
+            "summary": [{"type": "summary_text", "text": "weighing the options"}],
+            "encrypted_content": "CANARY_BLOB",
+        },
+    })
+    assert responses_event_type(done) == RESPONSES_OUTPUT_ITEM_DONE
+    item = responses_attr(done, "item")
+    assert responses_attr(item, "type") == "reasoning"
+    assert responses_attr(item, "encrypted_content") == "CANARY_BLOB"
+    assert reasoning_from_responses_event(done) == DeltaReasoning(
+        encrypted=("CANARY_BLOB",), item_id="rs_canary"
+    )
 
 
 def _responses_api_response(status="completed", *, created_at=1700000000,
                             incomplete_details=None):
     """A real ``ResponsesAPIResponse``, as litellm hands back on created/completed.
 
-    ``created_at`` is typed ``float`` here exactly as it is on the wire, so a
-    fractional timestamp can be exercised.
+    Built with ``model_construct`` so ``created_at`` carries what the WIRE
+    carries rather than what one litellm build happens to accept. The annotation
+    moved across the supported range: ``float`` on the locked 1.72.0, ``int`` on
+    1.96.2, where a fractional payload is what pydantic rejects. The driver has to
+    absorb a fractional value either way, which is what
+    ``_responses_created_timestamp`` exists for, so the helper must be able to
+    carry one on every build in the range.
     """
-    return ResponsesAPIResponse(
+    return ResponsesAPIResponse.model_construct(
         id="resp_1",
         object="response",
         created_at=created_at,
@@ -1188,10 +1204,9 @@ def _summary_delta(text, *, item_id="rs_1"):
 
 
 class _FakeResponsesStream:
-    """Duck-types litellm's Responses streaming iterator.
+    """Stands in for the async iterable ``aresponses`` returns.
 
-    ``is_responses_stream`` probes for an async-iterable exposing
-    ``_process_chunk``; that is exactly the iterator's public shape.
+    Async-iterability is the whole contract the driver relies on.
     """
 
     def __init__(self, events):
@@ -1204,9 +1219,6 @@ class _FakeResponsesStream:
         if not self._events:
             raise StopAsyncIteration
         return self._events.pop(0)
-
-    def _process_chunk(self, chunk):  # pragma: no cover - probe target only
-        return None
 
 
 def _reasoning_then_text_events():
@@ -1263,23 +1275,38 @@ def _reasoning_item_done(encrypted="BLOB", *, item_id="rs_1"):
 
 
 def _reasoning_item_done_object(encrypted="BLOB", *, item_id="rs_1"):
-    """A completed item with the object shape used by current LiteLLM."""
-    output_item_done_event = _responses_symbol(
-        "litellm.types.llms.openai", "OutputItemDoneEvent"
-    )
-    response_reasoning_item = _responses_symbol(
-        "openai.types.responses", "ResponseReasoningItem"
-    )
-    return output_item_done_event.model_construct(
+    """A completed item with the OBJECT shape recent litellm builds deliver.
+
+    ``OutputItemDoneEvent.item`` is annotated ``dict`` through the locked 1.72.0
+    and ``BaseLiteLLMOpenAIResponseObject`` on 1.96.2, both inside the supported
+    range, so both shapes have to be exercised. ``model_construct`` carries the
+    object shape through the locked build's event model without weakening the
+    test into a hand-written event double.
+    """
+    return OutputItemDoneEvent.model_construct(
         type="response.output_item.done",
         output_index=0,
-        item=response_reasoning_item(
+        item=ResponseReasoningItem(
             id=item_id,
             summary=[],
             type="reasoning",
             encrypted_content=encrypted,
         ),
     )
+
+
+def _reasoning_item_done_mapping(encrypted="BLOB", *, item_id="rs_1"):
+    """The completed reasoning item as a whole-event MAPPING.
+
+    ``responses_event_type`` / ``responses_item_id`` read the EVENT itself
+    through ``responses_attr``, so a mapping-shaped event is inside the shape
+    contract the driver and the reasoning projection share.
+    """
+    return {
+        "type": "response.output_item.done",
+        "output_index": 0,
+        "item": {"id": item_id, "type": "reasoning", "encrypted_content": encrypted},
+    }
 
 
 def _text_delta(text, *, item_id="msg_1"):
@@ -1291,7 +1318,6 @@ def _text_delta(text, *, item_id="msg_1"):
 
 # -- projection ------------------------------------------------------------
 
-@requires_responses_types
 def test_responses_event_type_normalizes_enum_and_string():
     """A typed event's enum ``type`` and a GenericEvent's string both read as the
     wire string, so the projection matches either.
@@ -1315,7 +1341,6 @@ def test_responses_event_type_normalizes_enum_and_string():
     assert responses_event_type(object()) is None
 
 
-@requires_responses_types
 def test_reasoning_from_responses_summary_delta():
     """A reasoning-summary delta keeps the provider reasoning-item identity."""
     r = reasoning_from_responses_event(_summary_delta("because X"))
@@ -1324,7 +1349,25 @@ def test_reasoning_from_responses_summary_delta():
     assert bool(r) is True
 
 
-@requires_responses_types
+def test_reasoning_from_responses_mapping_shaped_summary_delta():
+    """A mapping-shaped delta event projects exactly like the object shape.
+
+    The type gate and the item-id read already tolerate a mapping, so reading the
+    delta text any other way would admit an event the projection then sees as
+    empty.
+    """
+    event = {
+        "type": "response.reasoning_summary_text.delta",
+        "item_id": "rs_1",
+        "output_index": 0,
+        "summary_index": 0,
+        "delta": "because X",
+    }
+    assert reasoning_from_responses_event(event) == DeltaReasoning(
+        text="because X", item_id="rs_1"
+    )
+
+
 def test_reasoning_from_responses_raw_reasoning_text_delta():
     """The raw ``reasoning_text`` variant is projected too."""
     event = GenericEvent(
@@ -1333,7 +1376,6 @@ def test_reasoning_from_responses_raw_reasoning_text_delta():
     assert reasoning_from_responses_event(event).text == "hm"
 
 
-@requires_responses_types
 def test_reasoning_from_responses_encrypted_content():
     """A finished ``reasoning`` output item surfaces its encrypted blob."""
     event = GenericEvent(
@@ -1347,7 +1389,6 @@ def test_reasoning_from_responses_encrypted_content():
     assert r.item_id == "rs_1"
 
 
-@requires_responses_types
 def test_reasoning_from_responses_object_item_keeps_identity_and_encrypted_content():
     """Current LiteLLM exposes completed output items as response objects.
 
@@ -1367,7 +1408,6 @@ def test_reasoning_from_responses_object_item_keeps_identity_and_encrypted_conte
     )
 
 
-@requires_responses_types
 @pytest.mark.parametrize(
     "event_kind",
     ["summary_delta", "completed_item"],
@@ -1387,11 +1427,10 @@ def test_reasoning_from_responses_requires_provider_item_id(event_kind):
             output_index=0,
             item={"type": "reasoning", "encrypted_content": "BLOB"},
         )
-    with pytest.raises(RuntimeError, match="reasoning item id"):
+    with pytest.raises(RuntimeError, match="missing its reasoning item id"):
         reasoning_from_responses_event(event)
 
 
-@requires_responses_types
 def test_reasoning_from_responses_ignores_other_events():
     """Text deltas, non-reasoning finished items and empty deltas are no-ops, so a
     non-reasoning model produces nothing."""
@@ -1412,7 +1451,6 @@ def test_reasoning_from_responses_ignores_other_events():
 
 # -- copilotkit_stream over the Responses channel --------------------------
 
-@requires_responses_types
 async def test_copilotkit_stream_responses_emits_reasoning_then_text():
     """A Responses stream surfaces REASONING_* for its summary deltas, closes the
     reasoning message before the answer text, and returns a chat-shaped
@@ -1459,7 +1497,6 @@ async def test_copilotkit_stream_responses_emits_reasoning_then_text():
     assert result.model == "gpt-5.4"
 
 
-@requires_responses_types
 async def test_copilotkit_stream_responses_tool_call_round_trip():
     """A Responses function call streams as TOOL_CALL_CHUNK under its ``call_id``
     (what a later ``function_call_output`` must reference), closes reasoning
@@ -1530,7 +1567,6 @@ async def test_copilotkit_stream_responses_tool_call_round_trip():
     assert result.choices[0].finish_reason == "tool_calls"
 
 
-@requires_responses_types
 async def test_copilotkit_stream_responses_tool_call_item_as_object():
     """A function call streams even when ``item`` arrives as an OBJECT, not a dict.
 
@@ -1587,7 +1623,6 @@ async def test_copilotkit_stream_responses_tool_call_item_as_object():
     assert result.choices[0].finish_reason == "tool_calls"
 
 
-@requires_responses_types
 async def test_copilotkit_stream_responses_failure_raises():
     """A failed Responses stream raises rather than returning an empty message, so
     the drivers' RUN_ERROR taxonomy reports it."""
@@ -1601,7 +1636,6 @@ async def test_copilotkit_stream_responses_failure_raises():
         await copilotkit_stream(_FakeResponsesStream(events))
 
 
-@requires_responses_types
 async def test_copilotkit_stream_responses_closes_reasoning_on_error():
     """A stream that raises mid-reasoning still closes the reasoning message, so no
     half-open lifecycle reaches the client."""
@@ -1629,135 +1663,34 @@ async def test_copilotkit_stream_responses_closes_reasoning_on_error():
     assert EventType.REASONING_END in types, types
 
 
-async def test_copilotkit_stream_rejects_unknown_response_type():
-    """A response that is neither a ModelResponse, a CustomStreamWrapper nor a
-    Responses stream still raises, so the new branch did not widen the gate."""
-    with pytest.raises(ValueError, match="Invalid response type"):
-        await copilotkit_stream(object())
-
-
-def test_is_responses_stream_rejects_chat_stream():
-    """The chat-completions wrapper must not be routed to the Responses driver."""
-
-    async def _gen():  # pragma: no cover - never iterated
-        yield _chunk("m1", content="x")
-
-    assert responses_mod.is_responses_stream(_FakeStreamWrapper(_gen())) is False
-    assert responses_mod.is_responses_stream(_FakeResponsesStream([])) is True
-
-
-requires_responses_iterator_base = pytest.mark.skipif(
-    responses_mod.ResponsesAPIStreamingIteratorBase is None,
-    reason="litellm exposes no BaseResponsesAPIStreamingIterator to subclass",
+@pytest.mark.parametrize(
+    "response",
+    [object(), "a string", 42],
+    ids=["object", "str", "int"],
 )
-
-
-def _sync_responses_iterator(events=()):
-    """A SYNCHRONOUS Responses iterator, shaped like litellm's own.
-
-    ``SyncResponsesAPIStreamingIterator`` subclasses the SAME
-    ``BaseResponsesAPIStreamingIterator`` the async one does but exposes
-    ``__iter__`` only, so an isinstance-only probe cannot tell the two apart.
-    """
-    base = responses_mod.ResponsesAPIStreamingIteratorBase
-
-    class _SyncResponsesStream(base):  # pylint: disable=too-few-public-methods
-        def __init__(self, items):  # pylint: disable=super-init-not-called
-            self._events = list(items)
-
-        def __iter__(self):
-            return self
-
-        def __next__(self):
-            if not self._events:
-                raise StopIteration
-            return self._events.pop(0)
-
-        def _process_chunk(self, chunk):  # pragma: no cover - probe target only
-            return None
-
-    return _SyncResponsesStream(events)
-
-
-def _async_responses_iterator(events=()):
-    """An ASYNC Responses iterator that subclasses litellm's real base class."""
-    base = responses_mod.ResponsesAPIStreamingIteratorBase
-
-    class _AsyncResponsesStream(base):  # pylint: disable=too-few-public-methods
-        def __init__(self, items):  # pylint: disable=super-init-not-called
-            self._events = list(items)
-
-        def __aiter__(self):
-            return self
-
-        async def __anext__(self):
-            if not self._events:
-                raise StopAsyncIteration
-            return self._events.pop(0)
-
-        def _process_chunk(self, chunk):  # pragma: no cover - probe target only
-            return None
-
-    return _AsyncResponsesStream(events)
-
-
-@requires_responses_iterator_base
-def test_is_responses_stream_rejects_sync_iterator():
-    """A synchronous Responses iterator is NOT usable by the async driver.
-
-    It shares the base class with the async one, so an isinstance-only check
-    would route it into ``_copilotkit_stream_responses`` and die there on a
-    missing ``__aiter__``.
-    """
-    assert responses_mod.is_responses_stream(_sync_responses_iterator()) is False
-
-
-def test_is_responses_stream_rejects_duck_typed_sync_iterator():
-    """The duck-typed branch agrees: ``_process_chunk`` without ``__aiter__`` is
-    not an async Responses stream."""
-
-    class _DuckSync:  # pylint: disable=too-few-public-methods
-        def __iter__(self):  # pragma: no cover - probe target only
-            return iter(())
-
-        def _process_chunk(self, chunk):  # pragma: no cover - probe target only
-            return None
-
-    assert responses_mod.is_responses_stream(_DuckSync()) is False
-
-
-@requires_responses_iterator_base
-def test_is_responses_stream_accepts_async_iterator_subclass():
-    """The async iterator, matched through the base class, is still accepted."""
-    assert responses_mod.is_responses_stream(_async_responses_iterator()) is True
-
-
-@requires_responses_iterator_base
-async def test_copilotkit_stream_rejects_sync_responses_iterator():
-    """A sync Responses stream raises the SAME ``ValueError`` as any other
-    unusable response type, naming the async entrypoint, instead of an
-    ``AttributeError`` from the async driver."""
+async def test_copilotkit_stream_rejects_a_response_it_cannot_consume(response):
+    """Anything that is neither a ``ModelResponse``, a ``CustomStreamWrapper`` nor
+    an async iterable is one clear caller error naming the entrypoint to use, not
+    an ``AttributeError`` from inside a driver."""
     with pytest.raises(ValueError) as excinfo:
-        await copilotkit_stream(_sync_responses_iterator())
+        await copilotkit_stream(response)
     message = str(excinfo.value)
-    assert "synchronous" in message, message
+    assert "Invalid response type" in message, message
     assert "copilotkit_responses" in message, message
 
 
-@requires_responses_types
-@requires_responses_iterator_base
-async def test_copilotkit_stream_routes_async_responses_iterator():
-    """An async Responses iterator still reaches the Responses driver and returns
-    the chat-shaped result."""
+async def test_copilotkit_stream_routes_an_async_iterable_to_the_responses_driver():
+    """``aresponses`` returns an async iterable, and that is the whole contract
+    the dispatch relies on: no isinstance branch, no duck-typed shim."""
     result = await copilotkit_stream(
-        _async_responses_iterator(_reasoning_then_text_events())
+        _FakeResponsesStream(_reasoning_then_text_events())
     )
     assert result.choices[0].message.content == "Answer"
 
 
 async def test_copilotkit_stream_routes_chat_wrapper_to_chat_driver(monkeypatch):
     """A chat-completions ``CustomStreamWrapper`` keeps going to the chat driver:
-    tightening the Responses probe must not steal or reroute it."""
+    the Responses dispatch must not steal or reroute it."""
 
     async def _unreachable(response):  # pragma: no cover - must not be called
         raise AssertionError("chat stream was routed to the Responses driver")
@@ -1886,12 +1819,74 @@ def test_chat_messages_to_responses_input_keeps_empty_reasoning_summary():
     _assert_valid_responses_input(items)
 
 
-def test_chat_messages_to_responses_input_rejects_reasoning_without_provider_id():
-    """A generated or missing id cannot refer back to OpenAI's reasoning item."""
-    with pytest.raises(ValueError, match="reasoning message.*provider item id"):
-        responses_mod.chat_messages_to_responses_input([
-            {"role": "reasoning", "content": "orphaned"},
+def test_chat_messages_to_responses_input_drops_reasoning_without_provider_id():
+    """A missing id cannot refer back to OpenAI's reasoning item, so it is dropped.
+
+    Dropping, not raising: the whole request would otherwise hard-fail over one
+    unreplayable item, the same reason an unpaired tool call is dropped.
+    """
+    items = responses_mod.chat_messages_to_responses_input([
+        {"role": "user", "content": "hi"},
+        {"role": "reasoning", "content": "orphaned"},
+    ])
+
+    assert items == [{"role": "user", "content": "hi"}]
+    _assert_valid_responses_input(items)
+
+
+def test_chat_messages_to_responses_input_drops_chat_channel_reasoning(caplog):
+    """Reasoning minted on the chat-completions channel never reaches OpenAI.
+
+    The reasoning cell lets the user switch provider mid-thread, so an Anthropic
+    turn's reasoning (a uuid4 id this process minted, plus an Anthropic thinking
+    signature) is in the history the next OpenAI turn converts. OpenAI cannot
+    resolve that id and rejects the request, so the item is dropped while the
+    genuine Responses item alongside it still replays in full.
+    """
+    minted_id = str(uuid.uuid4())
+
+    # DEBUG: which message was dropped is per-message detail, deliberately below
+    # WARNING because the whole history is reconverted every turn. The aggregate
+    # count asserted below is what an operator sees at WARNING.
+    with caplog.at_level(logging.DEBUG, logger="ag_ui_crewai._responses"):
+        items = responses_mod.chat_messages_to_responses_input([
+            {"role": "user", "content": "Which option?"},
+            {
+                "role": "reasoning",
+                "id": minted_id,
+                "content": "Thinking as Anthropic.",
+                "encrypted_value": "ANTHROPIC_SIGNATURE",
+            },
+            {"role": "assistant", "content": "Choose A."},
+            {"role": "user", "content": "Why?"},
+            {
+                "role": "reasoning",
+                "id": "rs_openai",
+                "content": "Thinking as OpenAI.",
+                "encrypted_value": "OPENAI_STATE",
+            },
         ])
+
+    assert items == [
+        {"role": "user", "content": "Which option?"},
+        {"role": "assistant", "content": "Choose A."},
+        {"role": "user", "content": "Why?"},
+        {
+            "id": "rs_openai",
+            "type": "reasoning",
+            "summary": [{"type": "summary_text", "text": "Thinking as OpenAI."}],
+            "encrypted_content": "OPENAI_STATE",
+        },
+    ]
+    _assert_valid_responses_input(items)
+    assert any(
+        minted_id in r.getMessage() and "Responses channel" in r.getMessage()
+        for r in caplog.records
+    ), caplog.text
+    assert any(
+        r.levelno == logging.WARNING and "Dropped 1 reasoning message" in r.getMessage()
+        for r in caplog.records
+    ), caplog.text
 
 
 def test_chat_messages_to_responses_input_drops_unresolved_call():
@@ -1951,10 +1946,9 @@ def _assert_valid_responses_input(items):
     """
     from pydantic import TypeAdapter
 
-    response_input_param = _responses_symbol(
-        "litellm.types.llms.openai", "ResponseInputParam"
-    )
-    TypeAdapter(response_input_param).validate_python(items)
+    from litellm.types.llms.openai import ResponseInputParam
+
+    TypeAdapter(ResponseInputParam).validate_python(items)
 
 
 def test_chat_messages_to_responses_input_tool_pair_is_accepted_by_openai_types():
@@ -1985,9 +1979,8 @@ def test_chat_messages_to_responses_input_tool_pair_is_accepted_by_openai_types(
         },
         {"type": "function_call_output", "call_id": "call_abc", "output": "done"},
     ]
-    # Last: the union validation is the one step a litellm without the Responses
-    # types cannot run, and it skips the test when it cannot. Everything this test
-    # can assert on such a build has already been asserted above.
+    # Last, because it is the strongest assertion: the shape is validated against
+    # the openai types litellm re-exports, not against a hand-rolled idea of them.
     _assert_valid_responses_input(items)
 
 
@@ -2019,6 +2012,164 @@ def test_chat_messages_to_responses_input_drops_output_of_a_dropped_call(caplog)
             {"role": "tool", "tool_call_id": "call_nameless", "content": "done"},
         ])
     assert items == [{"role": "user", "content": "hi"}]
+    _assert_valid_responses_input(items)
+
+
+def test_chat_messages_to_responses_input_drops_reasoning_left_trailing_by_a_drop(
+    caplog,
+):
+    """A reasoning item that became TRAILING because of a drop is still dangling.
+
+    Trailing reasoning is normally legal: the output it produced is what this
+    request generates. That allowance must not extend to a reasoning item whose own
+    function_call was just dropped as unpaired, because then nothing is coming for
+    it and the request is the exact hard-fail the drop exists to prevent. The
+    abandoned call here is the last thing in the history, so the reasoning ends up
+    last after the drop.
+    """
+    with caplog.at_level(logging.WARNING, logger="ag_ui_crewai._responses"):
+        items = responses_mod.chat_messages_to_responses_input([
+            {"role": "user", "content": "change it"},
+            {"id": "rs_1", "role": "reasoning", "content": "I should call the tool."},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_abandoned",
+                        "type": "function",
+                        "function": {"name": "change_background", "arguments": "{}"},
+                    }
+                ],
+            },
+        ])
+
+    assert items == [{"role": "user", "content": "change it"}]
+    _assert_valid_responses_input(items)
+    assert any(
+        "dangling reasoning item" in r.getMessage() and "rs_1" in r.getMessage()
+        for r in caplog.records
+    ), caplog.text
+
+
+def test_chat_messages_to_responses_input_keeps_reasoning_pending_this_request():
+    """Trailing reasoning with nothing dropped after it is PENDING, not dangling.
+
+    This is the ordinary "reasoning was the last thing the model produced" history,
+    and dropping it would lose the replay state the round trip exists to carry.
+    """
+    items = responses_mod.chat_messages_to_responses_input([
+        {"role": "user", "content": "hi"},
+        {"id": "rs_1", "role": "reasoning", "content": "Thinking.", "encrypted_value": "B"},
+    ])
+
+    assert items == [
+        {"role": "user", "content": "hi"},
+        {
+            "id": "rs_1",
+            "type": "reasoning",
+            "summary": [{"type": "summary_text", "text": "Thinking."}],
+            "encrypted_content": "B",
+        },
+    ]
+    _assert_valid_responses_input(items)
+
+
+def test_chat_messages_to_responses_input_drops_reasoning_of_a_dropped_call(caplog):
+    """Dropping an unpaired call must take the reasoning that produced it.
+
+    The Responses API requires a reasoning item to be followed by the output it
+    produced, so reasoning left in front of the next user message rejects the
+    whole request: the drop that protects the request would otherwise create the
+    shape it protects against.
+    """
+    with caplog.at_level(logging.WARNING, logger="ag_ui_crewai._responses"):
+        items = responses_mod.chat_messages_to_responses_input([
+            {"role": "user", "content": "make it red"},
+            {"id": "rs_orphaned", "role": "reasoning", "content": "Picking a tool."},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_orphan",
+                        "type": "function",
+                        "function": {"name": "change_background", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "user", "content": "never mind, why?"},
+        ])
+    assert items == [
+        {"role": "user", "content": "make it red"},
+        {"role": "user", "content": "never mind, why?"},
+    ]
+    assert any("rs_orphaned" in r.getMessage() for r in caplog.records), caplog.text
+    _assert_valid_responses_input(items)
+
+
+def test_chat_messages_to_responses_input_drops_a_repeated_reasoning_id(caplog):
+    """A reasoning id that repeats in history is emitted once: a second item for
+    the same id hard-fails the request the way a duplicated call does."""
+    with caplog.at_level(logging.WARNING, logger="ag_ui_crewai._responses"):
+        items = responses_mod.chat_messages_to_responses_input([
+            {"role": "user", "content": "Which option?"},
+            {"id": "rs_dup", "role": "reasoning", "content": "Weighing the options."},
+            {"id": "rs_dup", "role": "reasoning", "content": "Weighing the options."},
+            {"role": "assistant", "content": "Choose A."},
+        ])
+    assert items == [
+        {"role": "user", "content": "Which option?"},
+        {
+            "id": "rs_dup",
+            "type": "reasoning",
+            "summary": [{"type": "summary_text", "text": "Weighing the options."}],
+        },
+        {"role": "assistant", "content": "Choose A."},
+    ]
+    assert any("rs_dup" in r.getMessage() for r in caplog.records), caplog.text
+    _assert_valid_responses_input(items)
+
+
+def test_chat_messages_to_responses_input_keeps_reasoning_whose_output_survives():
+    """The dangling-reasoning drop must not reach reasoning that replays legally:
+    here the call it produced is paired, so it survives and the reasoning with it."""
+    items = responses_mod.chat_messages_to_responses_input([
+        {"role": "user", "content": "make it red"},
+        {"id": "rs_kept", "role": "reasoning", "content": "Calling the tool."},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_ok",
+                    "type": "function",
+                    "function": {
+                        "name": "change_background",
+                        "arguments": '{"b":"red"}',
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_ok", "content": "done"},
+        {"role": "user", "content": "thanks"},
+    ])
+    assert items == [
+        {"role": "user", "content": "make it red"},
+        {
+            "id": "rs_kept",
+            "type": "reasoning",
+            "summary": [{"type": "summary_text", "text": "Calling the tool."}],
+        },
+        {
+            "type": "function_call",
+            "call_id": "call_ok",
+            "name": "change_background",
+            "arguments": '{"b":"red"}',
+        },
+        {"type": "function_call_output", "call_id": "call_ok", "output": "done"},
+        {"role": "user", "content": "thanks"},
+    ]
     _assert_valid_responses_input(items)
 
 
@@ -2320,7 +2471,7 @@ class _ChannelSpy:
         # can exercise the registry -> probe -> degrade chain end to end.
         self.chat_calls = []
         self.responses_calls = []
-        import ag_ui_crewai.examples.agentic_chat_reasoning as demo
+        import agents.agentic_chat_reasoning as demo
 
         async def _fake_acompletion(**kwargs):
             self.chat_calls.append(kwargs)
@@ -2361,7 +2512,6 @@ async def _drive_reasoning_demo(model, *, messages=None):
 
 
 @requires_stream_frames
-@requires_responses_types
 async def test_reasoning_demo_openai_surfaces_a_trace(monkeypatch):
     """Selecting OpenAI streams over the Responses channel and surfaces a real
     thinking trace. This is the reported defect: routed to chat-completions
@@ -2432,7 +2582,7 @@ async def test_reasoning_demo_omits_replayed_reasoning_from_chat_completions(
 async def test_reasoning_demo_degrades_without_the_responses_channel(monkeypatch):
     """With the Responses channel unavailable, OpenAI falls back to
     chat-completions rather than raising."""
-    import ag_ui_crewai.examples.agentic_chat_reasoning as demo
+    import agents.agentic_chat_reasoning as demo
 
     spy = _ChannelSpy(monkeypatch)
     # After the spy: it pins the probe live, and this test owns the dark branch.
@@ -2622,7 +2772,6 @@ class _ResponsesToolCallFlow(Flow):
 
 
 @requires_stream_frames
-@requires_responses_types
 async def test_responses_reasoning_closes_before_tool_call_e2e():
     """The reasoning message CLOSES before the tool call opens. Deleting the
     ``reasoning.close()`` hook on the function-call branch leaves only the
@@ -2656,7 +2805,6 @@ async def test_responses_reasoning_closes_before_tool_call_e2e():
 
 
 @requires_stream_frames
-@requires_responses_types
 async def test_responses_reasoning_only_stream_closes_on_finalize_e2e():
     """A stream carrying reasoning and nothing else still closes its reasoning
     lifecycle, via the driver's ``finally``."""
@@ -2679,23 +2827,13 @@ async def test_responses_reasoning_only_stream_closes_on_finalize_e2e():
     assert "RUN_ERROR" not in types, types
 
 
-# -- one unparseable event: skip the envelope, surface everything else -------
-#
-# litellm validates each stream event against its own typed model, so a single
-# event can fail to parse. Which event it was decides what a skip costs: an
-# envelope event carries no payload this bridge maps, but a payload event
-# carries answer text / tool-call arguments and a terminal event carries the
-# stream's outcome. Parsing is what failed, so the classification cannot read a
-# ``type`` off the object; ``ValidationError.title`` (the model litellm
-# attempted) and litellm's own "Unknown event type: <type>" ``ValueError`` are
-# the signals that remain.
+# -- a malformed event surfaces, bar the two envelope frames nothing reads -----
 
 class _ScriptedEventStream(_FakeResponsesStream):
     """Streams a script of events, RAISING any entry that is an exception.
 
-    That is exactly how litellm surfaces a per-event parse failure: it raises
-    out of ``__anext__`` for the event it could not build, and the rest of the
-    stream is still there to read.
+    That is how litellm surfaces a per-event failure: it raises out of
+    ``__anext__`` for the event it could not build.
     """
 
     async def __anext__(self):
@@ -2707,223 +2845,97 @@ class _ScriptedEventStream(_FakeResponsesStream):
         return entry
 
 
-def _litellm_validation_error(model_name):
-    """The ValidationError litellm raises when a provider omits a field the typed
-    model for that event requires.
-
-    ``title`` is the model litellm attempted, verified against
-    ``OpenAIResponsesAPIConfig.get_event_model_class(...)(**chunk)``: that is the
-    only signal identifying the event once parsing has failed.
-    """
-    return ValidationError.from_exception_data(
-        model_name,
-        [{"type": "missing", "loc": ("response",), "input": {}}],
-    )
-
-
 def _completed_event():
     return ResponseCompletedEvent(
         type="response.completed", response=_responses_api_response()
     )
 
 
-def test_litellm_validation_error_title_is_the_attempted_model():
-    """The signal the classification rests on, asserted against litellm itself:
-    the ValidationError litellm raises for a malformed event is titled after the
-    model it tried to build, so the event can be identified without the object."""
-    config = _responses_symbol(
-        "litellm.llms.openai.responses.transformation", "OpenAIResponsesAPIConfig"
+def _parse_failure(model_name):
+    """A ``ValidationError`` naming the litellm event model that failed to build.
+
+    ``ValidationError.title`` is the model class litellm tried to validate the
+    chunk into, and it is the only thing a failed parse leaves to identify the
+    event by: no event object exists to read a ``type`` off.
+    """
+    return ValidationError.from_exception_data(
+        model_name, [{"type": "missing", "loc": ("response",), "input": {}}]
     )
 
-    for event_type, expected_title in (
-        ("response.created", "ResponseCreatedEvent"),
-        ("response.in_progress", "ResponseInProgressEvent"),
-        ("response.output_text.delta", "OutputTextDeltaEvent"),
-        ("response.failed", "ResponseFailedEvent"),
-    ):
-        model = config.get_event_model_class(event_type=event_type)
-        with pytest.raises(ValidationError) as caught:
-            model(**{"type": event_type})
-        assert caught.value.title == expected_title
 
+@pytest.mark.parametrize(
+    "failure",
+    [
+        _parse_failure("ResponseFailedEvent"),
+        _json.JSONDecodeError("Expecting value", '{"type":', 8),
+        ValueError("Unknown event type: response.output_text.delta"),
+        ConnectionError("socket closed"),
+    ],
+    ids=["validation-error", "truncated-frame", "unknown-event-type", "transport"],
+)
+async def test_responses_stream_surfaces_a_malformed_event_unchanged(failure):
+    """The driver reads the stream and nothing else.
 
-@requires_responses_types
-async def test_responses_stream_survives_unparseable_envelope_events():
-    """An envelope event the client cannot parse is skipped, not fatal: the
-    reasoning trace and the answer still reach the wire. Letting the error
-    propagate loses the whole turn to a RUN_ERROR."""
-    events = [
-        _litellm_validation_error("ResponseCreatedEvent"),
-        _litellm_validation_error("ResponseInProgressEvent"),
-        _summary_delta("Weighing the options."),
-        _text_delta("Ans"),
-        _text_delta("wer"),
-        _completed_event(),
-    ]
-    flow = _FakeFlow()
-    ep.FastAPICrewFlowEventListener()
-    queue = await ep.create_queue(flow)
-    flow_context.set(flow)
-    try:
-        result = await copilotkit_stream(_ScriptedEventStream(events))
-        await _settle_bus()
-        items = _drain(queue)
-    finally:
-        await ep.delete_queue(flow)
-
-    trace = "".join(
-        e.delta for e in items if e.type == EventType.REASONING_MESSAGE_CONTENT
-    )
-    assert trace == "Weighing the options."
-    assert result.choices[0].message.content == "Answer"
-
-    # With response.created skipped, EVERY chunk of the message still carries the
-    # SAME id (resolved once from the output item). A fresh id per chunk would
-    # split one answer into a message per token on the client.
-    text_events = [e for e in items if e.type == EventType.TEXT_MESSAGE_CHUNK]
-    assert len(text_events) == 2
-    assert {e.message_id for e in text_events} == {"msg_1"}
+    A failure litellm raises for one event propagates as itself, so the drivers'
+    exception taxonomy reports it. Classifying failures in order to skip some of
+    them silently drops answer text, tool-call arguments or the stream's outcome,
+    and reports success anyway.
+    """
+    with pytest.raises(type(failure)) as excinfo:
+        await copilotkit_stream(
+            _ScriptedEventStream([_text_delta("partial"), failure, _completed_event()])
+        )
+    # Identity, not just the type: ValidationError and JSONDecodeError are both
+    # ValueErrors, so a type match alone cannot tell "propagated untouched" from
+    # "caught and re-raised as something of the same class".
+    assert excinfo.value is failure
 
 
 @pytest.mark.parametrize(
     "model_name",
-    ["OutputTextDeltaEvent", "FunctionCallArgumentsDeltaEvent", "OutputItemAddedEvent"],
+    ["GenericEvent", "OutputTextDeltaEvent", "FunctionCallArgumentsDeltaEvent"],
+    ids=["reasoning-delta", "text-delta", "tool-call-args-delta"],
 )
-async def test_responses_stream_surfaces_unparseable_payload_event(model_name):
-    """An unparseable PAYLOAD event must not vanish. Skipping one drops answer
-    text or leaves a tool call's arguments truncated to invalid JSON, and the
-    turn still "succeeds", so nothing downstream can tell content was lost."""
-    events = [
-        ResponseCreatedEvent(
-            type="response.created", response=_responses_api_response("in_progress")
-        ),
-        _litellm_validation_error(model_name),
-        _text_delta("only half"),
-        _completed_event(),
-    ]
-    with pytest.raises(RuntimeError, match="failed to parse") as caught:
-        await copilotkit_stream(_ScriptedEventStream(events))
-    assert model_name in str(caught.value)
-    assert isinstance(caught.value.__cause__, ValidationError)
+async def test_responses_stream_surfaces_a_payload_parse_failure(model_name):
+    """A parse failure on an event that CARRIES the turn propagates as itself.
 
-
-async def test_responses_stream_surfaces_unparseable_terminal_failure():
-    """An unparseable TERMINAL failure must surface as an error, not as an empty
-    assistant message: skipping ``response.failed`` leaves a failed stream with
-    no failure recorded, no RUN_ERROR, and zero content."""
-    events = [
-        ResponseCreatedEvent(
-            type="response.created", response=_responses_api_response("in_progress")
-        ),
-        _litellm_validation_error("ResponseFailedEvent"),
-    ]
-    with pytest.raises(RuntimeError, match="failed to parse"):
-        await copilotkit_stream(_ScriptedEventStream(events))
-
-
-async def test_responses_stream_surfaces_unparseable_terminal_completion():
-    """``response.completed`` is terminal too: skipping it means the stream ended
-    for an unknown reason, which is not a clean completion."""
-    events = [
-        _text_delta("Answer"),
-        _litellm_validation_error("ResponseCompletedEvent"),
-    ]
-    with pytest.raises(RuntimeError, match="failed to parse"):
-        await copilotkit_stream(_ScriptedEventStream(events))
-
-
-async def test_responses_stream_handles_unknown_event_type_lookup_error():
-    """litellm 1.63-1.67 raise ``ValueError("Unknown event type: <type>")`` from
-    their event-type lookup (newer builds answer with ``GenericEvent`` instead),
-    so the classification must handle a plain ValueError, not only a
-    ValidationError.
-
-    A type litellm has no model for is a fact about the BUILD, so what it costs
-    still depends on the role that type plays here: a type this bridge never
-    reads costs nothing; a reasoning delta costs a gap in a trace; answer text,
-    tool-call arguments and the outcome cannot be read at all on such a build,
-    which is reported as that build fact (asserted in full by
-    ``test_unmodellable_load_bearing_type_reports_the_build_not_a_corrupt_event``).
+    Reasoning text, answer text and tool-call arguments are the turn. Skipping one
+    of these would hand back a ModelResponse missing content the model actually
+    produced and report it as a clean turn, so the envelope skip must not widen to
+    cover them.
     """
-    unread = [
-        ValueError("Unknown event type: response.audio.delta"),
-        _text_delta("Answer"),
-        _completed_event(),
-    ]
-    result = await copilotkit_stream(_ScriptedEventStream(unread))
-    assert result.choices[0].message.content == "Answer"
-
-    # Case is not part of the signal: the type is captured off the ORIGINAL
-    # message, whatever case litellm wrote the prefix in.
-    shouty = [
-        ValueError("UNKNOWN EVENT TYPE: response.audio.delta"),
-        _text_delta("Answer"),
-        _completed_event(),
-    ]
-    result = await copilotkit_stream(_ScriptedEventStream(shouty))
-    assert result.choices[0].message.content == "Answer"
-
-    for event_type in (
-        "response.output_text.delta",
-        "response.function_call_arguments.delta",
-        "response.failed",
-    ):
-        with pytest.raises(RuntimeError, match="no model for"):
-            await copilotkit_stream(
-                _ScriptedEventStream([ValueError(f"Unknown event type: {event_type}")])
-            )
-
-    # A message that names no type at all cannot be judged, so it is reported
-    # rather than skipped on the assumption that nothing was lost.
-    nameless = ValueError("Unknown event type")
-    with pytest.raises(RuntimeError, match="failed to parse"):
-        await copilotkit_stream(_ScriptedEventStream([nameless]))
-
-    # A future litellm that wraps the type in quotes must still be recognised as
-    # the load-bearing type it is, not silently skipped as an unknown one.
-    with pytest.raises(RuntimeError, match="no model for"):
+    failure = _parse_failure(model_name)
+    with pytest.raises(ValidationError) as excinfo:
         await copilotkit_stream(
-            _ScriptedEventStream(
-                [ValueError("Unknown event type: 'response.output_text.delta'")]
-            )
+            _ScriptedEventStream([_text_delta("partial"), failure, _completed_event()])
         )
+    # Identity, not just the type: ValidationError is itself a ValueError, so a
+    # type match alone cannot tell "propagated untouched" from "caught and
+    # re-raised as something of the same class".
+    assert excinfo.value is failure
 
 
-async def test_responses_stream_gives_up_when_nothing_parses():
-    """A stream where every event fails to parse raises instead of silently
-    returning an empty assistant message."""
-    events = [_litellm_validation_error("ResponseCreatedEvent")] * (
-        responses_mod._MAX_SKIPPED_EVENTS + 2
-    )
-    with pytest.raises(RuntimeError, match="unreadable"):
-        await copilotkit_stream(_ScriptedEventStream(events))
+@pytest.mark.parametrize(
+    "model_name",
+    ["ResponseCompletedEvent", "ResponseIncompleteEvent", "ResponseFailedEvent"],
+    ids=["completed", "incomplete", "failed"],
+)
+async def test_responses_stream_surfaces_a_terminal_parse_failure(model_name):
+    """A parse failure on the TERMINAL event propagates as itself.
 
-
-async def test_responses_stream_propagates_transport_errors():
-    """A transport failure is NOT swallowed by the skip path."""
-
-    class _Broken(_FakeResponsesStream):
-        async def __anext__(self):
-            raise ConnectionError("socket closed")
-
-    with pytest.raises(ConnectionError, match="socket closed"):
-        await copilotkit_stream(_Broken([]))
-
-
-async def test_responses_stream_propagates_non_litellm_value_errors():
-    """``json.JSONDecodeError`` is a ``ValueError`` too, so a truncated SSE frame
-    must propagate untouched rather than be mistaken for an event litellm could
-    not model."""
-    truncated = _json.JSONDecodeError("Expecting value", '{"type":', 8)
-    with pytest.raises(_json.JSONDecodeError):
-        await copilotkit_stream(_ScriptedEventStream([truncated]))
-
-    with pytest.raises(ValueError, match="stream died"):
-        await copilotkit_stream(_ScriptedEventStream([ValueError("stream died")]))
+    The terminal event is the turn's outcome: skipping it would report a stream
+    that failed, or was cut off, as a finished one.
+    """
+    failure = _parse_failure(model_name)
+    with pytest.raises(ValidationError) as excinfo:
+        await copilotkit_stream(
+            _ScriptedEventStream([_text_delta("partial"), failure])
+        )
+    assert excinfo.value is failure
 
 
 async def test_responses_stream_propagates_cancellation():
-    """Cancellation must not be counted as an unparseable event."""
+    """Cancellation is not an event failure and must not be reinterpreted."""
     import asyncio
 
     with pytest.raises(asyncio.CancelledError):
@@ -2931,10 +2943,10 @@ async def test_responses_stream_propagates_cancellation():
 
 
 @requires_stream_frames
-async def test_unparseable_terminal_failure_reaches_the_wire_as_run_error_e2e():
-    """The whole point, end to end: a ``response.failed`` whose payload does not
-    parse reports a RUN_ERROR instead of finishing the run with an empty
-    assistant message and no record of the failure."""
+async def test_malformed_terminal_event_reaches_the_wire_as_run_error_e2e():
+    """End to end: a terminal event that does not parse reports a RUN_ERROR rather
+    than finishing the run with an empty assistant message and no record of the
+    failure."""
 
     class _FailedTerminalFlow(Flow):
         @start()
@@ -2944,7 +2956,7 @@ async def test_unparseable_terminal_failure_reaches_the_wire_as_run_error_e2e():
                     type="response.created",
                     response=_responses_api_response("in_progress"),
                 ),
-                _litellm_validation_error("ResponseFailedEvent"),
+                _parse_failure("ResponseFailedEvent"),
             ]))
             return "done"
 
@@ -2960,388 +2972,223 @@ async def test_unparseable_terminal_failure_reaches_the_wire_as_run_error_e2e():
     assert "RUN_FINISHED" not in types, types
 
 
-# -- what an unparseable event costs comes from the event's ROLE --------------
-#
-# Which event failed decides whether skipping it is free or silently drops
-# content, so the disposition is derived from the role the event plays for this
-# bridge (``_responses_events.EVENT_ROLES``) plus litellm's OWN event-type to
-# model registry, never from a list of model names kept next to the decision.
-# The tests below pin both halves: the role map cannot drift away from the code
-# that reads the events, and the attribution cannot drift away from litellm.
-
-#: Every Responses event type this bridge reads, spelled out here so the table
-#: below is driven by literals rather than by the map it is checking. The
-#: anti-drift test asserts this IS the role map's key set.
-_ALL_READ_EVENT_TYPES = (
-    "response.created",
-    "response.in_progress",
-    "response.reasoning_summary_text.delta",
-    "response.reasoning_text.delta",
-    "response.output_item.added",
-    "response.output_item.done",
-    "response.output_text.delta",
-    "response.function_call_arguments.delta",
-    "response.completed",
-    "response.incomplete",
-    "response.failed",
-    "error",
-)
+#: What ``@copilotkit/aimock``'s Responses emulation puts on the wire for
+#: ``response.created`` and ``response.in_progress`` (``dist/responses.js``,
+#: ``buildResponsePreamble``): six fields, where litellm's models for those two
+#: events require far more. The dojo's reasoning e2e runs against that mock, so
+#: this payload is what CI streams on the FIRST event of every turn.
+_AIMOCK_ENVELOPE = {
+    "id": "resp_1",
+    "object": "response",
+    "created_at": 1730000000,
+    "model": "gpt-5.4",
+    "status": "in_progress",
+    "output": [],
+}
 
 
-def _responses_event_types_referenced_by(func):
-    """The Responses event type strings ``func``'s own source branches on.
+def _aimock_envelope_entry(event_type):
+    """What litellm's own parsing yields for an aimock envelope frame.
 
-    Parses the FUNCTION's source, so the set is what the code does today rather
-    than what a list next to it claims. Both a ``RESPONSES_*`` constant (resolved
-    through the module, and expanded when it holds a set of types) and an inlined
-    literal count, so bypassing the constants does not bypass the check.
+    The exception on a build whose models reject the payload, the parsed event on
+    one that accepts it, so the scripted stream carries whatever the installed
+    litellm really produces rather than a hand-picked outcome.
+    ``_ScriptedEventStream`` raises the former and yields the latter.
     """
-    import ast
-    import inspect
-    import textwrap
-
-    tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
-    module = inspect.getmodule(func)
-    event_types = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if node.value.startswith("response.") or node.value == "error":
-                event_types.add(node.value)
-            continue
-        if not isinstance(node, ast.Name) or not node.id.startswith("RESPONSES_"):
-            continue
-        value = getattr(module, node.id, None)
-        if isinstance(value, str):
-            event_types.add(value)
-        elif isinstance(value, (frozenset, set, tuple, list)):
-            event_types.update(v for v in value if isinstance(v, str))
-    return event_types
-
-
-def test_event_roles_cover_every_type_the_responses_code_handles():
-    """The role map is checked against the code that consumes the events.
-
-    Both directions: a driver branch on a type with no role would leave that
-    event's parse failure unclassified, and a role entry no code reads would be
-    describing a channel that no longer exists. Adding a branch without a role
-    (or the reverse) fails here instead of surfacing as a mis-severity later."""
-    from ag_ui_crewai import _reasoning as reasoning_mod
-    from ag_ui_crewai import _responses_events as vocab
-    from ag_ui_crewai import sdk as sdk_mod
-
-    handled = _responses_event_types_referenced_by(
-        sdk_mod._copilotkit_stream_responses
-    ) | _responses_event_types_referenced_by(
-        reasoning_mod.reasoning_from_responses_event
+    from litellm.llms.openai.responses.transformation import (
+        OpenAIResponsesAPIConfig,
     )
-    assert handled, "the Responses code no longer names its event types by constant"
-    assert set(_ALL_READ_EVENT_TYPES) == set(vocab.EVENT_ROLES)
 
-    without_a_role = sorted(handled - set(vocab.EVENT_ROLES))
-    assert not without_a_role, without_a_role
-
-    # ``response.in_progress`` is the one bookkeeping type no code branches on:
-    # it is listed so an unparseable one is provably skippable.
-    unread = sorted(
-        event_type
-        for event_type, role in vocab.EVENT_ROLES.items()
-        if role != vocab.ENVELOPE and event_type not in handled
-    )
-    assert not unread, unread
-
-
-@requires_responses_types
-def test_parse_failure_attribution_comes_from_litellms_own_registry():
-    """Every read type's role is reachable through the model class LITELLM builds
-    it with, which is the only signal a ``ValidationError`` leaves behind.
-
-    A class litellm uses for SEVERAL read types (its catch-all) carries the most
-    severe of their roles, so a catch-all failure is never treated as cheaper
-    than the worst event it could have been."""
-    from litellm.llms.openai.responses.transformation import OpenAIResponsesAPIConfig
-
-    from ag_ui_crewai import _capabilities as caps
-    from ag_ui_crewai import _responses_events as vocab
-
-    modelling = caps.responses_event_modelling()
-    assert modelling.resolver_available
-
-    served_by = {}
-    for event_type, role in vocab.EVENT_ROLES.items():
-        model = OpenAIResponsesAPIConfig.get_event_model_class(event_type=event_type)
-        served_by.setdefault(model.__name__, []).append(role)
-
-    for model_name, roles in served_by.items():
-        attributed = modelling.model_roles[model_name]
-        assert attributed == max(roles, key=vocab.role_severity), (
-            model_name,
-            roles,
-            attributed,
-        )
-
-
-@requires_responses_types
-@pytest.mark.parametrize("event_type", _ALL_READ_EVENT_TYPES)
-async def test_unparseable_event_fatality_follows_its_role(event_type):
-    """One table for the whole classification: an unparseable event is reported
-    when its role is load-bearing (answer text, a tool call's identity or
-    arguments, replay continuity, or the stream's outcome) and skipped when it
-    is not (stream bookkeeping or one reasoning-summary delta).
-
-    Driven per type through litellm's own model for that type, so the severity
-    comes from the role rather than from which model names someone remembered to
-    list."""
-    from litellm.llms.openai.responses.transformation import OpenAIResponsesAPIConfig
-
-    from ag_ui_crewai import _responses_events as vocab
-
-    model_name = OpenAIResponsesAPIConfig.get_event_model_class(
-        event_type=event_type
-    ).__name__
-    events = [
-        _litellm_validation_error(model_name),
-        _text_delta("Answer"),
-        _completed_event(),
-    ]
-    if vocab.is_load_bearing(vocab.EVENT_ROLES[event_type]):
-        with pytest.raises(RuntimeError, match="failed to parse"):
-            await copilotkit_stream(_ScriptedEventStream(events))
-        return
-    result = await copilotkit_stream(_ScriptedEventStream(events))
-    assert result.choices[0].message.content == "Answer"
-
-
-@requires_responses_types
-async def test_responses_stream_surfaces_an_unparseable_output_item_done():
-    """A completed reasoning item carries replay identity and encrypted state.
-
-    Letting the answer succeed after dropping it creates history that renders
-    correctly once but cannot continue on the next stateless turn.
-    """
-    events = [
-        _summary_delta("Weighing the options."),
-        _litellm_validation_error("OutputItemDoneEvent"),
-        _text_delta("Answer"),
-        _completed_event(),
-    ]
-    with pytest.raises(RuntimeError, match="failed to parse"):
-        await copilotkit_stream(_ScriptedEventStream(events))
-
-
-@requires_responses_types
-@pytest.mark.parametrize(
-    "model_name",
-    [
-        "ContentPartAddedEvent",
-        "ContentPartDoneEvent",
-        "OutputTextAnnotationAddedEvent",
-        "OutputTextDoneEvent",
-        "RefusalDeltaEvent",
-        "RefusalDoneEvent",
-        "WebSearchCallCompletedEvent",
-        "FileSearchCallCompletedEvent",
-        "FunctionCallArgumentsDoneEvent",
-    ],
-)
-async def test_responses_stream_skips_events_litellm_knows_and_this_bridge_never_reads(
-    model_name,
-):
-    """litellm models many events this bridge does not read at all. An unparseable
-    one costs nothing this bridge maps, so killing the turn over it throws away
-    an answer whose content is entirely intact."""
-    events = [
-        _litellm_validation_error(model_name),
-        _text_delta("Answer"),
-        _completed_event(),
-    ]
-    result = await copilotkit_stream(_ScriptedEventStream(events))
-    assert result.choices[0].message.content == "Answer"
-
-
-async def test_unparseable_event_is_reported_when_nothing_can_attribute_it():
-    """With no event-type registry to attribute it to, a parse failure cannot be
-    shown harmless, so it is reported rather than assumed to be."""
-    import ag_ui_crewai._capabilities as caps
-
-    with _litellm_event_registry(None):
-        assert caps.responses_event_modelling().resolver_available is False
-        with pytest.raises(RuntimeError, match="failed to parse"):
-            await copilotkit_stream(
-                _ScriptedEventStream([_litellm_validation_error("ResponseCreatedEvent")])
-            )
-
-
-# -- a litellm build that RAISES for a type it has no model for ---------------
-#
-# litellm 1.63-1.67 (inside this package's declared ``litellm>=1.60.2`` floor)
-# raise ``ValueError("Unknown event type: <type>")`` from their event-type lookup
-# for the reasoning-summary deltas this channel exists to read -- the answer text
-# delta still resolves to ``OutputTextDeltaEvent`` there, so what those builds lose
-# is the reasoning trace, not the stream. Reasoning is a REQUIRED role, so the
-# channel must report UNAVAILABLE and callers must degrade to chat-completions --
-# which still carries the text -- not fail once per turn on a reasoning trace
-# declared as working.
-
-#: What litellm 1.63-1.67 have no model for, per the reproduction: the reasoning
-#: deltas only (the answer text delta still resolves to ``OutputTextDeltaEvent``).
-_RAISING_BUILD_UNKNOWN_TYPES = (
-    "response.reasoning_summary_text.delta",
-    "response.reasoning_text.delta",
-)
-
-
-def _raising_event_registry(unknown_types):
-    """An event-type lookup shaped like litellm 1.63-1.67.
-
-    Those builds have no catch-all: they RAISE whenever there is no dedicated
-    model for the type. Simulated by answering from the installed litellm and
-    raising both for ``unknown_types`` and for anything the installed build
-    serves with its catch-all, since a catch-all answer is exactly the case the
-    older builds turned into a ``ValueError``.
-    """
-    from litellm.llms.openai.responses.transformation import OpenAIResponsesAPIConfig
-
-    unknown = frozenset(unknown_types)
-
-    def get_event_model_class(event_type):
-        model = OpenAIResponsesAPIConfig.get_event_model_class(event_type=event_type)
-        if event_type in unknown or model is GenericEvent:
-            raise ValueError(f"Unknown event type: {event_type}")
-        return model
-
-    return get_event_model_class
-
-
-@contextlib.contextmanager
-def _litellm_event_registry(registry):
-    """Run the block against ``registry`` as litellm's event-type lookup.
-
-    Availability is re-derived through the package's OWN probe
-    (``refresh_responses_channel_probe``) rather than by setting the flags this
-    test wants, so a rule that ignores what litellm can model fails here."""
-    import ag_ui_crewai._capabilities as caps
-
-    original_registry = caps._RESPONSES_EVENT_MODEL_RESOLVER
-    original_snapshot = caps.CAPABILITIES
-    original_responses_snapshot = responses_mod.CAPABILITIES
-    caps._RESPONSES_EVENT_MODEL_RESOLVER = registry
-    caps.refresh_responses_channel_probe()
-    caps.CAPABILITIES = caps._detect()
-    responses_mod.CAPABILITIES = caps.CAPABILITIES
+    payload = {"type": event_type, "response": dict(_AIMOCK_ENVELOPE)}
     try:
-        yield caps
-    finally:
-        caps._RESPONSES_EVENT_MODEL_RESOLVER = original_registry
-        caps.refresh_responses_channel_probe()
-        caps.CAPABILITIES = original_snapshot
-        responses_mod.CAPABILITIES = original_responses_snapshot
-
-
-@requires_responses_types
-def test_responses_channel_unavailable_when_litellm_cannot_model_what_it_reads():
-    """The capability declaration matches reality on a raising build.
-
-    Reporting the channel available there advertises a channel whose every
-    reasoning turn and every text turn dies with a RUN_ERROR, because those are
-    exactly the types such a build has no model for."""
-    with _litellm_event_registry(
-        _raising_event_registry(_RAISING_BUILD_UNKNOWN_TYPES)
-    ) as caps:
-        modelling = caps.responses_event_modelling()
-        assert set(modelling.unmodellable_event_types) == set(
-            _RAISING_BUILD_UNKNOWN_TYPES
+        return OpenAIResponsesAPIConfig().transform_streaming_response(
+            model="gpt-5.4", parsed_chunk=payload, logging_obj=None
         )
-        assert responses_mod.responses_channel_available() is False
-        assert caps.get_capabilities()["reasoning"]["responsesApiChannel"] is False
-
-    # Restored: the installed litellm answers for unknown types, so the channel
-    # is available again and the teardown did not leave a stale probe behind.
-    assert responses_mod.responses_channel_available() is True
+    except Exception as exc:  # noqa: BLE001 - the failure IS the fixture
+        return exc
 
 
-@requires_responses_types
-def test_responses_channel_requires_completed_reasoning_items_for_continuation():
-    """A build that cannot model ``output_item.done`` cannot promise replay."""
-    event_type = "response.output_item.done"
-    with _litellm_event_registry(_raising_event_registry((event_type,))) as caps:
-        modelling = caps.responses_event_modelling()
-        assert event_type in modelling.unmodellable_event_types
-        assert responses_mod.responses_channel_available() is False
+def _aimock_envelope_frames():
+    """The envelope frames as the installed litellm handles aimock's payload."""
+    return [
+        _aimock_envelope_entry("response.created"),
+        _aimock_envelope_entry("response.in_progress"),
+    ]
 
 
-@requires_responses_types
-async def test_copilotkit_responses_refuses_a_build_that_cannot_model_what_it_reads():
-    """A caller that ignores the probe is refused BEFORE the stream opens, naming
-    the types, instead of failing mid-turn once the client has already been shown
-    part of an answer."""
-    with _litellm_event_registry(
-        _raising_event_registry(_RAISING_BUILD_UNKNOWN_TYPES)
-    ):
-        with pytest.raises(RuntimeError, match="no model for") as caught:
-            await responses_mod.copilotkit_responses(
-                model="openai/gpt-5.4",
-                messages=[{"role": "user", "content": "hi"}],
-                reasoning={"effort": "medium", "summary": "auto"},
-            )
-    assert "response.reasoning_summary_text.delta" in str(caught.value)
-    assert "acompletion" in str(caught.value)
+def _unparsable_envelope_frames():
+    """The same two frames as parse failures, whatever the installed litellm does.
+
+    litellm 1.96.2 accepts the aimock payload where 1.70.4 and the locked 1.72.0
+    reject it, so this is what keeps the SKIP itself exercised across the whole
+    declared range rather than only on the builds that happen to fail.
+    """
+    return [
+        _parse_failure("ResponseCreatedEvent"),
+        _parse_failure("ResponseInProgressEvent"),
+    ]
 
 
-@requires_responses_types
-async def test_unmodellable_load_bearing_type_reports_the_build_not_a_corrupt_event():
-    """A caller that opened the stream anyway is told what is actually wrong: this
-    litellm has no model for a type the bridge must read. Reporting it as an event
-    that "failed to parse" blames the provider for a build limitation and hides
-    the one action that fixes it."""
-    with pytest.raises(RuntimeError, match="no model for") as caught:
-        await copilotkit_stream(
-            _ScriptedEventStream(
-                [ValueError("Unknown event type: response.output_text.delta")]
-            )
-        )
-    message = str(caught.value)
-    assert "responses_channel_available" in message
-    assert "chat-completions" in message
+@pytest.mark.parametrize(
+    "envelope",
+    [_aimock_envelope_frames, _unparsable_envelope_frames],
+    ids=["aimock-payload", "parse-failure"],
+)
+async def test_responses_stream_survives_unparsable_envelope_frames(envelope, caplog):
+    """A turn whose envelope frames do not parse still reports the whole turn.
 
-
-@requires_responses_types
-async def test_unmodellable_reasoning_delta_costs_the_trace_not_the_run():
-    """A reasoning delta this build cannot model leaves a gap in a trace; the
-    answer and the outcome are untouched, so the run must survive. (Such a build
-    reports the channel unavailable, so this is the belt-and-braces path for a
-    caller that streamed anyway.)"""
+    With the aimock payload above this is the CI failure itself: on the locked
+    litellm it ended every Responses turn in the dojo on its FIRST event, with no
+    reasoning trace, no answer text and a RUN_ERROR instead. The driver reads
+    ``response.created`` only for the returned model name and created-at, and never
+    reads ``response.in_progress`` at all, so both frames can be dropped with the
+    turn intact.
+    """
     events = [
-        ValueError("Unknown event type: response.reasoning_summary_text.delta"),
+        *envelope(),
+        _summary_delta("Weighing the "),
+        _summary_delta("options."),
         _text_delta("Answer"),
         _completed_event(),
     ]
-    result = await copilotkit_stream(_ScriptedEventStream(events))
+    with caplog.at_level(logging.WARNING, logger="ag_ui_crewai.sdk"):
+        result, items = await _drive_responses(_ScriptedEventStream(events))
+
+    types = [e.type for e in items]
+    assert EventType.REASONING_START in types, types
+    assert EventType.REASONING_MESSAGE_END in types, types
+    assert EventType.REASONING_END in types, types
+    assert Counter(
+        e.delta for e in items if e.type == EventType.REASONING_MESSAGE_CONTENT
+    ) == Counter(["Weighing the ", "options."])
+    assert "".join(
+        e.delta for e in items if e.type == EventType.TEXT_MESSAGE_CHUNK
+    ) == "Answer"
+
     assert result.choices[0].message.content == "Answer"
+    # The terminal event was handled: it is what sets a clean finish reason, and
+    # the model name that ``response.created`` could not supply.
+    assert result.choices[0].finish_reason == "stop"
+    assert result.model == "gpt-5.4"
+
+    # A skip is never silent, and it names the model litellm could not build.
+    if isinstance(events[0], BaseException):
+        skips = [
+            r.getMessage() for r in caplog.records if "skipped" in r.getMessage()
+        ]
+        assert len(skips) == 2, caplog.text
+        assert "ResponseCreatedEvent" in skips[0], skips
+        assert "ResponseInProgressEvent" in skips[1], skips
 
 
-@requires_stream_frames
-@requires_responses_types
-async def test_reasoning_demo_degrades_on_a_build_that_raises_for_unknown_types(
-    monkeypatch,
-):
-    """End to end, the point of the probe: on a litellm that raises for the types
-    this channel reads, the demo streams over chat-completions and the run
-    finishes. Advertising the channel there sends OpenAI down the Responses path
-    and every turn ends in a RUN_ERROR."""
-    with _litellm_event_registry(
-        _raising_event_registry(_RAISING_BUILD_UNKNOWN_TYPES)
-    ):
-        spy = _ChannelSpy(monkeypatch, channel_available=None)
-        payloads = await _drive_reasoning_demo("OpenAI")
+async def test_responses_stream_of_skipped_envelope_frames_alone_still_raises():
+    """Skipped frames recognise nothing, so a stream of only those still raises.
 
-    assert spy.responses_calls == []
-    assert len(spy.chat_calls) == 1
-    types = [p["type"] for p in payloads]
-    assert "RUN_ERROR" not in types, types
-    assert "RUN_FINISHED" in types, types
+    The no-recognised-event guard separates a turn that produced nothing from an
+    object that was never a Responses stream at all. A skip that counted as
+    recognition would turn the second case into a finished, empty assistant turn.
+    """
+    with pytest.raises(ValueError, match="carried no OpenAI"):
+        await copilotkit_stream(
+            _ScriptedEventStream([
+                _parse_failure("ResponseCreatedEvent"),
+                _parse_failure("ResponseInProgressEvent"),
+            ])
+        )
 
 
-@requires_responses_types
+async def test_litellm_iterator_resumes_after_an_envelope_parse_failure():
+    """Dependency-boundary canary: an unread envelope frame costs the turn nothing.
+
+    Skipping a frame is only worth anything if litellm's OWN iterator can be read
+    again afterwards, and whether it can is litellm's internal business, so this
+    drives the real ``ResponsesAPIStreamingIterator`` over a real httpx streaming
+    response instead of assuming it.
+
+    Both ways a build in the declared range can satisfy this pass: 1.70.4 and the
+    locked 1.72.0 reject the envelope payload and keep going (``_process_chunk``
+    raises without marking the iterator finished, and the decoder underneath has
+    already moved past that chunk), while 1.96.2 simply parses it. A build that
+    rejected the payload AND ended the stream on it would leave the driver's skip
+    unable to save the turn, and that is what fails here.
+    """
+    import httpx
+
+    from litellm.llms.openai.responses.transformation import (
+        OpenAIResponsesAPIConfig,
+    )
+    from litellm.responses.streaming_iterator import ResponsesAPIStreamingIterator
+
+    payloads = [
+        {"type": "response.created", "response": dict(_AIMOCK_ENVELOPE)},
+        {"type": "response.in_progress", "response": dict(_AIMOCK_ENVELOPE)},
+        {
+            "type": "response.reasoning_summary_text.delta",
+            "sequence_number": 3,
+            "item_id": "rs_1",
+            "output_index": 0,
+            "summary_index": 0,
+            "delta": "Weighing the options.",
+        },
+        {
+            "type": "response.output_text.delta",
+            "sequence_number": 4,
+            "item_id": "msg_1",
+            "output_index": 1,
+            "content_index": 0,
+            "delta": "Answer",
+        },
+    ]
+
+    async def _sse():
+        for payload in payloads:
+            yield f"data: {_json.dumps(payload)}\n\n".encode()
+        yield b"data: [DONE]\n\n"
+
+    class _Logging:
+        """The little of litellm's logging object its iterator actually reads.
+
+        1.96.2 reads ``model_call_details`` while constructing the iterator and
+        stamps a completion start time per chunk; the locked 1.72.0 reads neither.
+        None of it is what this canary asserts.
+        """
+
+        completion_start_time = None
+        model_call_details: dict = {}
+
+        def _update_completion_start_time(self, **kwargs):
+            pass
+
+        async def async_failure_handler(self, **kwargs):
+            pass
+
+        def failure_handler(self, *args, **kwargs):
+            pass
+
+    iterator = ResponsesAPIStreamingIterator(
+        response=httpx.Response(200, content=_sse()),
+        model="gpt-5.4",
+        responses_api_provider_config=OpenAIResponsesAPIConfig(),
+        logging_obj=_Logging(),
+    )
+
+    delivered = []
+    while True:
+        try:
+            delivered.append(await iterator.__anext__())
+        except StopAsyncIteration:
+            break
+        except ValidationError:
+            continue
+
+    # Whether or not the envelope frames parsed on this build, everything after
+    # them arrived, which is what the skip depends on.
+    assert [responses_event_type(e) for e in delivered][-2:] == [
+        "response.reasoning_summary_text.delta",
+        "response.output_text.delta",
+    ]
+
+
 async def test_responses_message_id_is_resolved_once_per_turn():
     """Every chunk of one answer carries the SAME message id even when neither
     ``response.created`` nor the event itself supplies one. Resolving the id per
@@ -3391,10 +3238,11 @@ async def _drive_responses(stream, *, flow=None):
     return result, items
 
 
-def _function_call_events(*, seeded_arguments="", deltas=(), terminal=None):
+def _function_call_events(*, seeded_arguments="", deltas=(), done=None, terminal=None):
     """A Responses tool-call turn: the added function-call item, then argument
-    deltas. ``seeded_arguments`` populates ``item.arguments`` the way a provider
-    that already knows the whole call would."""
+    deltas, then an optional completed item. ``seeded_arguments`` populates
+    ``item.arguments`` the way a provider that already knows the whole call
+    would."""
     events = [
         ResponseCreatedEvent(
             type="response.created", response=_responses_api_response("in_progress")
@@ -3418,6 +3266,8 @@ def _function_call_events(*, seeded_arguments="", deltas=(), terminal=None):
         )
         for delta in deltas
     )
+    if done is not None:
+        events.append(done)
     events.append(
         terminal
         if terminal is not None
@@ -3426,6 +3276,38 @@ def _function_call_events(*, seeded_arguments="", deltas=(), terminal=None):
         )
     )
     return events
+
+
+def _function_call_item_done(arguments, *, item_id="fc_1", call_id="call_abc"):
+    """The completed ``function_call`` output item, carrying the call's FINAL
+    arguments, with the plain-dict ``item`` of the floor litellm build."""
+    return GenericEvent(
+        type="response.output_item.done",
+        output_index=0,
+        item={
+            "id": item_id,
+            "call_id": call_id,
+            "type": "function_call",
+            "name": "change_background",
+            "arguments": arguments,
+        },
+    )
+
+
+def _function_call_item_done_object(arguments, *, item_id="fc_1", call_id="call_abc"):
+    """The same completed item in the OBJECT shape recent litellm builds deliver
+    (see ``_reasoning_item_done_object`` for why it is ``model_construct``)."""
+    return OutputItemDoneEvent.model_construct(
+        type="response.output_item.done",
+        output_index=0,
+        item=ResponseFunctionToolCall(
+            id=item_id,
+            call_id=call_id,
+            type="function_call",
+            name="change_background",
+            arguments=arguments,
+        ),
+    )
 
 
 # -- predicted-state suppression -------------------------------------------
@@ -3558,6 +3440,49 @@ async def test_responses_seeded_arguments_stream_when_no_delta_follows():
     chunks = [e for e in items if e.type == EventType.TOOL_CALL_CHUNK]
     assert "".join(c.delta or "" for c in chunks) == '{"background":"red"}'
     assert {c.tool_call_id for c in chunks} == {"call_abc"}
+
+
+# -- the completed item's arguments are the authoritative ones ---------------
+
+@pytest.mark.parametrize(
+    "done_item",
+    [_function_call_item_done, _function_call_item_done_object],
+    ids=["dict", "object"],
+)
+async def test_responses_done_item_arguments_reach_the_call(done_item):
+    """A provider that delivers the whole call ONLY on ``output_item.done`` -- the
+    added item carries ``""`` and no argument delta ever streams -- must still
+    produce those arguments. The completed item is the call's authoritative final
+    value; reconstructing from the added item and the deltas alone yields a tool
+    call with EMPTY arguments, on the wire and in the returned ModelResponse, and
+    reports the turn as a clean success with no error and no log."""
+    result, items = await _drive_responses(_FakeResponsesStream(_function_call_events(
+        done=done_item('{"background":"red"}'),
+    )))
+
+    assert result.choices[0].message.tool_calls[0].function.arguments == (
+        '{"background":"red"}'
+    )
+    chunks = [e for e in items if e.type == EventType.TOOL_CALL_CHUNK]
+    assert "".join(c.delta or "" for c in chunks) == '{"background":"red"}'
+    assert {c.tool_call_id for c in chunks} == {"call_abc"}
+
+
+async def test_responses_done_item_does_not_duplicate_streamed_arguments():
+    """Real OpenAI streams the arguments as deltas and THEN sends the completed
+    item repeating the same complete value. Taking it a second time appends the
+    whole arguments twice, on the wire and in the returned ModelResponse, so a
+    delta-driven call keeps exactly what it accumulated."""
+    result, items = await _drive_responses(_FakeResponsesStream(_function_call_events(
+        deltas=('{"background":', '"red"}'),
+        done=_function_call_item_done('{"background":"red"}'),
+    )))
+
+    assert result.choices[0].message.tool_calls[0].function.arguments == (
+        '{"background":"red"}'
+    )
+    chunks = [e for e in items if e.type == EventType.TOOL_CALL_CHUNK]
+    assert "".join(c.delta or "" for c in chunks) == '{"background":"red"}'
 
 
 # -- created_at is a float, ModelResponse.created is a strict int ------------
@@ -3699,7 +3624,6 @@ _DEMO_ACTIONS = [
 
 
 @requires_stream_frames
-@requires_responses_types
 async def test_reasoning_demo_disables_parallel_tool_calls_on_responses(monkeypatch):
     """The Responses branch must pass ``parallel_tool_calls=False`` like the
     chat-completions branch and every other demo, or the default OpenAI path can
@@ -3711,7 +3635,6 @@ async def test_reasoning_demo_disables_parallel_tool_calls_on_responses(monkeypa
 
 
 @requires_stream_frames
-@requires_responses_types
 async def test_reasoning_demo_omits_parallel_tool_calls_without_tools(monkeypatch):
     """With no frontend actions there is nothing to serialise, so the flag is not
     sent at all (mirrors the chat branch's ``False if tools else None``)."""
@@ -3926,9 +3849,271 @@ async def test_responses_reasoning_item_without_summary_still_preserves_identity
 
 
 async def test_responses_conflicting_reasoning_item_ids_fail_loudly():
-    """One open AG-UI reasoning message cannot represent two provider items."""
-    with pytest.raises(RuntimeError, match="reasoning item id"):
+    """One open AG-UI reasoning message cannot represent two provider items.
+
+    Two ids inside ONE item's lifecycle, with no completion boundary between
+    them, is a corrupt stream and still fails loudly. A completed item that is
+    FOLLOWED by another is the ordinary multi-item turn, covered below.
+
+    Matched on "changed", not on the shared "reasoning item id" phrase: the
+    missing-id error carries that phrase too, so the looser pattern would pass on
+    the wrong failure.
+    """
+    with pytest.raises(RuntimeError, match="changed reasoning item id"):
         await _drive_responses([
             _summary_delta("first", item_id="rs_first"),
             _summary_delta("second", item_id="rs_second"),
         ])
+
+
+@pytest.mark.parametrize(
+    "done_event",
+    [_reasoning_item_done, _reasoning_item_done_object],
+    ids=["dict-item", "object-item"],
+)
+async def test_responses_every_reasoning_item_of_a_turn_round_trips(done_event):
+    """A turn with two reasoning items surfaces BOTH, completely.
+
+    ``response.output_item.done`` is what ends an item. Without it the second
+    item's id collides with the first still-open message and the whole run dies;
+    even surviving that, only the first item would reach the client, so the rest
+    of the turn's reasoning could never be replayed into the next turn's Responses
+    input. OpenAI requires every reasoning item to come back with its encrypted
+    content.
+
+    Both item shapes litellm delivers across the supported range are exercised:
+    ``OutputItemDoneEvent.item`` is a plain dict through the locked 1.72.0 and a
+    response object on 1.96.2, so a driver reading only one of them closes on only
+    one.
+    """
+    _, items = await _drive_responses([
+        _summary_delta("first thought", item_id="rs_1"),
+        done_event("BLOB_1", item_id="rs_1"),
+        _summary_delta("second thought", item_id="rs_2"),
+        done_event("BLOB_2", item_id="rs_2"),
+        _text_delta("Answer"),
+        ResponseCompletedEvent(
+            type="response.completed", response=_responses_api_response()
+        ),
+    ])
+
+    starts = [e for e in items if e.type == EventType.REASONING_START]
+    ends = [e for e in items if e.type == EventType.REASONING_END]
+    content = [e for e in items if e.type == EventType.REASONING_MESSAGE_CONTENT]
+    encrypted = [e for e in items if e.type == EventType.REASONING_ENCRYPTED_VALUE]
+    assert [e.message_id for e in starts] == ["rs_1", "rs_2"]
+    assert [e.message_id for e in ends] == ["rs_1", "rs_2"]
+    assert [(e.message_id, e.delta) for e in content] == [
+        ("rs_1", "first thought"),
+        ("rs_2", "second thought"),
+    ]
+    assert [(e.entity_id, e.encrypted_value) for e in encrypted] == [
+        ("rs_1", "BLOB_1"),
+        ("rs_2", "BLOB_2"),
+    ]
+
+
+async def test_responses_mapping_shaped_item_done_closes_its_reasoning_item():
+    """A MAPPING-shaped ``output_item.done`` ends that item like any other shape.
+
+    The type gate and the reasoning projection both read the event through
+    ``responses_attr``, so the projection surfaces this item's encrypted blob and
+    id; a driver that read the same event with a bare ``getattr`` would see no
+    item, skip the close, and leave the message open for the NEXT item's id to
+    collide with.
+    """
+    _, items = await _drive_responses([
+        _summary_delta("first thought", item_id="rs_1"),
+        _reasoning_item_done_mapping("BLOB_1", item_id="rs_1"),
+        _summary_delta("second thought", item_id="rs_2"),
+        _reasoning_item_done_mapping("BLOB_2", item_id="rs_2"),
+        _text_delta("Answer"),
+        ResponseCompletedEvent(
+            type="response.completed", response=_responses_api_response()
+        ),
+    ])
+
+    starts = [e for e in items if e.type == EventType.REASONING_START]
+    ends = [e for e in items if e.type == EventType.REASONING_END]
+    content = [e for e in items if e.type == EventType.REASONING_MESSAGE_CONTENT]
+    encrypted = [e for e in items if e.type == EventType.REASONING_ENCRYPTED_VALUE]
+    assert [e.message_id for e in starts] == ["rs_1", "rs_2"]
+    assert [e.message_id for e in ends] == ["rs_1", "rs_2"]
+    assert [(e.message_id, e.delta) for e in content] == [
+        ("rs_1", "first thought"),
+        ("rs_2", "second thought"),
+    ]
+    assert [(e.entity_id, e.encrypted_value) for e in encrypted] == [
+        ("rs_1", "BLOB_1"),
+        ("rs_2", "BLOB_2"),
+    ]
+
+
+def test_every_reasoning_item_of_a_turn_replays_as_its_own_responses_item():
+    """The other half of the round trip: both messages convert back to items.
+
+    What the driver surfaced above is what the client hands back on the next turn,
+    so a turn that produced two reasoning items sends two back, each keyed by its
+    provider id and carrying its own encrypted content.
+    """
+    items = responses_mod.chat_messages_to_responses_input([
+        {"role": "user", "content": "hi"},
+        {
+            "role": "reasoning",
+            "id": "rs_1",
+            "content": "first thought",
+            "encrypted_value": "BLOB_1",
+        },
+        {
+            "role": "reasoning",
+            "id": "rs_2",
+            "content": "second thought",
+            "encrypted_value": "BLOB_2",
+        },
+        {"role": "assistant", "content": "Answer"},
+    ])
+
+    reasoning_items = [i for i in items if i.get("type") == "reasoning"]
+    assert reasoning_items == [
+        {
+            "id": "rs_1",
+            "type": "reasoning",
+            "summary": [{"type": "summary_text", "text": "first thought"}],
+            "encrypted_content": "BLOB_1",
+        },
+        {
+            "id": "rs_2",
+            "type": "reasoning",
+            "summary": [{"type": "summary_text", "text": "second thought"}],
+            "encrypted_content": "BLOB_2",
+        },
+    ]
+
+
+async def test_responses_completed_message_item_leaves_reasoning_alone():
+    """Only a completed REASONING item ends a reasoning message.
+
+    ``output_item.done`` also fires for the assistant message and for every
+    function call, and closing on those would end a reasoning message that the
+    model has not finished.
+    """
+    _, items = await _drive_responses([
+        _summary_delta("still thinking", item_id="rs_1"),
+        OutputItemDoneEvent(
+            type="response.output_item.done",
+            output_index=1,
+            item={"id": "msg_1", "type": "message", "role": "assistant"},
+        ),
+        _summary_delta(" and thinking", item_id="rs_1"),
+        _reasoning_item_done("BLOB", item_id="rs_1"),
+        ResponseCompletedEvent(
+            type="response.completed", response=_responses_api_response()
+        ),
+    ])
+
+    starts = [e for e in items if e.type == EventType.REASONING_START]
+    content = [e for e in items if e.type == EventType.REASONING_MESSAGE_CONTENT]
+    assert [e.message_id for e in starts] == ["rs_1"]
+    assert [e.delta for e in content] == ["still thinking", " and thinking"]
+
+
+# -- an async iterable that is not a Responses stream ------------------------
+#
+# Dispatch is async-iterability alone, so ANY async iterable reaches this driver.
+# One carrying no Responses event drains to nothing, and reporting that as a
+# finished assistant turn hides the mistake completely.
+
+
+class _PlainAsyncIterable:
+    """An async iterable carrying anything but Responses stream events."""
+
+    def __init__(self, items):
+        self._items = list(items)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._items:
+            raise StopAsyncIteration
+        return self._items.pop(0)
+
+
+@pytest.mark.parametrize(
+    "items",
+    [
+        [{"content": "hello"}, {"content": " world"}],
+        ["hello", "world"],
+        [SimpleNamespace(text="hello")],
+        [],
+    ],
+    ids=["dicts", "strings", "objects", "empty"],
+)
+async def test_responses_driver_rejects_a_stream_it_recognises_nothing_in(items):
+    """A non-Responses async iterable is a caller error, not an empty answer.
+
+    Draining it and returning ``content=""`` with ``finish_reason="stop"`` hands
+    the flow a finished assistant turn that never happened, with nothing raised
+    and nothing logged. A real Responses turn always carries at least one event
+    this driver acts on, so recognising none identifies the object as the wrong
+    one and names the entrypoint that returns the right one.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        await copilotkit_stream(_PlainAsyncIterable(items))
+    assert "copilotkit_responses" in str(excinfo.value), str(excinfo.value)
+
+
+async def test_responses_driver_keeps_a_genuinely_empty_turn_a_clean_stop():
+    """A turn that produced no content is NOT a failure.
+
+    A model can legitimately answer with nothing, and that turn still carries its
+    terminal event. Raising here would report a RUN_ERROR for a run that
+    completed, so the guard keys on what the STREAM carried, not on what the turn
+    produced.
+    """
+    result, _ = await _drive_responses([
+        ResponseCreatedEvent(
+            type="response.created", response=_responses_api_response("in_progress")
+        ),
+        ResponseCompletedEvent(
+            type="response.completed", response=_responses_api_response()
+        ),
+    ])
+
+    assert result.choices[0].message.content == ""
+    assert result.choices[0].message.tool_calls is None
+    assert result.choices[0].finish_reason == "stop"
+
+
+async def test_responses_driver_still_streams_a_normal_turn():
+    """The guard is invisible to a real turn: reasoning, answer text and the
+    terminal event produce the same ModelResponse and the same wire events."""
+    result, items = await _drive_responses(_reasoning_then_text_events())
+
+    assert result.choices[0].message.content == "Answer"
+    assert result.choices[0].finish_reason == "stop"
+    types = [e.type for e in items]
+    assert EventType.REASONING_MESSAGE_CONTENT in types, types
+    assert EventType.TEXT_MESSAGE_CHUNK in types, types
+
+
+async def test_responses_orphan_argument_delta_is_reported(caplog):
+    """Argument deltas for a call the driver never saw opened are the whole turn
+    here, and dropping them silently returns that same empty-but-successful
+    assistant message. This IS a Responses stream, so the loss is a dropped
+    payload rather than a dispatch error, and it is logged instead of raised."""
+    with caplog.at_level(logging.ERROR, logger="ag_ui_crewai.sdk"):
+        result, _ = await _drive_responses([
+            FunctionCallArgumentsDeltaEvent(
+                type="response.function_call_arguments.delta",
+                item_id="fc_never_opened", output_index=0, delta='{"a":1}',
+            ),
+            ResponseCompletedEvent(
+                type="response.completed", response=_responses_api_response()
+            ),
+        ])
+
+    assert result.choices[0].message.tool_calls is None
+    assert any(
+        "fc_never_opened" in r.getMessage() for r in caplog.records
+    ), caplog.text

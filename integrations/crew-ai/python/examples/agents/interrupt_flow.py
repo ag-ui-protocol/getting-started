@@ -22,8 +22,8 @@ from crewai.flow.flow import Flow, listen, start
 from crewai.flow import human_feedback
 from litellm import acompletion
 
-from ..sdk import CopilotKitState, copilotkit_stream
-from .._hitl import agui_feedback_provider
+from ag_ui_crewai.sdk import CopilotKitState, copilotkit_stream
+from ag_ui_crewai._hitl import agui_feedback_provider
 
 MODEL = "openai/gpt-5.4"
 

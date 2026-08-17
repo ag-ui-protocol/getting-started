@@ -23,11 +23,8 @@ from .a2ui_tool import (
   is_auto_injected_a2ui_tool,
   A2UI_STREAM_KEY,
 )
-# from .enterprise import CrewEnterpriseEventListener
 
 from ._capabilities import get_capabilities
-
-# CREW_ENTERPRISE_EVENT_LISTENER = CrewEnterpriseEventListener()
 
 # The Crew chat path was undiscoverable — the four symbols below (the
 # crew-endpoint factory, its input-prep helper, the flow, and the exit

@@ -20,6 +20,26 @@ public sealed class AGUIStreamOptions
     private List<Func<AIContent, IEnumerable<BaseEvent>?>>? _contentMappers;
     private Func<ChatResponseUpdate, IEnumerable<AGUIToolCallArgumentFragment>?>? _toolCallArgumentExtractor;
 
+    internal string? UsageProvider { get; private set; }
+
+    /// <summary>
+    /// Sets the provider label applied to the token usage reported on the terminal
+    /// <see cref="RunFinishedEvent"/> (for example <c>"openai"</c> or <c>"anthropic"</c>).
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ChatResponseUpdate.ModelId"/> supplies the model label automatically, but
+    /// Microsoft.Extensions.AI does not carry the provider name on the update, so the endpoint
+    /// declares it. When unset, usage entries are keyed by model alone and <c>provider</c> is
+    /// omitted from the emitted event.
+    /// </remarks>
+    /// <param name="provider">The provider label, or <see langword="null"/> to omit it.</param>
+    /// <returns>This instance for fluent chaining.</returns>
+    public AGUIStreamOptions WithUsageProvider(string? provider)
+    {
+        UsageProvider = provider;
+        return this;
+    }
+
     /// <summary>
     /// Registers a fallback that maps an <see cref="AIContent"/> to an <see cref="AGUIInterrupt"/>.
     /// When the registered mapper returns a non-null value, the hosting layer emits a
