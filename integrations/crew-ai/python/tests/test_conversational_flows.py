@@ -4,12 +4,15 @@ import asyncio
 import functools
 import importlib
 import threading
+import typing
 from types import SimpleNamespace
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 
 from ag_ui.core import (
     AssistantMessage,
+    DeveloperMessage,
     ImageInputContent,
     InputContentUrlSource,
     SystemMessage,
@@ -345,6 +348,289 @@ def test_hydrate_conversational_flow_supports_mapping_state():
         "value": 3,
         "messages": [],
     }
+
+
+class _RealFlowWithPydanticState(Flow[_DocumentState]):
+    """A REAL crewai Flow, whose ``_state`` is a pydantic private attribute.
+
+    The other hydration tests seed a ``SimpleNamespace``, where every write
+    channel is the same one. On the real thing they are two, and only one of them
+    is what crewai reads.
+    """
+
+    conversational = True
+
+    @start()
+    def go(self):
+        return None
+
+
+def test_hydrate_conversational_flow_writes_state_where_crewai_reads_it():
+    """Seeding must not shadow the private attribute pydantic manages.
+
+    ``object.__setattr__`` lands in the instance ``__dict__``, which wins every
+    later READ, while crewai's own ``self._state = ...`` (its persistence restore,
+    among others) keeps writing the pydantic private store. The flow would then
+    read a state nothing can update again.
+    """
+    from ag_ui_crewai._conversation import (
+        ConversationalTurn,
+        hydrate_conversational_flow,
+    )
+
+    flow = _RealFlowWithPydanticState()
+    turn = ConversationalTurn(message="hello", history=[], current_media=[])
+
+    hydrate_conversational_flow(flow, {"id": "thread-real", "document": "seeded"}, turn)
+
+    assert "_state" not in flow.__dict__, "seeding shadowed the private attribute"
+    assert flow.__pydantic_private__["_state"].document == "seeded"
+    assert flow.state.document == "seeded"
+
+    # crewai's own write channel, which its persistence restore uses.
+    flow._state = _DocumentState(document="restored by crewai")
+
+    assert flow.state.document == "restored by crewai"
+
+
+def test_hydrate_conversational_flow_keeps_the_crewai_conversation_runtime_fields():
+    """The seeding round trip must not reset ``Field(exclude=True)`` fields.
+
+    ``model_dump()`` honours ``exclude=True``, so dumping and revalidating drops
+    every conversational runtime field CrewAI keeps on the state and hands back
+    its default. That is all of them, on every single turn.
+    """
+    from ag_ui_crewai._conversation import (
+        ConversationalTurn,
+        hydrate_conversational_flow,
+    )
+
+    flow = SimpleNamespace(
+        _state=_DocumentState(
+            current_user_message="asked already",
+            last_user_message="asked already",
+            last_intent="book_flight",
+            ended=False,
+            events=[{"type": "route_selected"}],
+            agent_threads={"planner": [{"role": "assistant", "content": "scratch"}]},
+            session_ready=True,
+        )
+    )
+
+    hydrate_conversational_flow(
+        flow,
+        {"id": "thread-runtime"},
+        ConversationalTurn(message="and now this", history=[], current_media=[]),
+    )
+
+    assert flow._state.last_intent == "book_flight"
+    assert flow._state.last_user_message == "asked already"
+    assert flow._state.current_user_message == "asked already"
+    assert flow._state.session_ready is True
+    assert flow._state.events == [{"type": "route_selected"}]
+    assert flow._state.agent_threads == {
+        "planner": [{"role": "assistant", "content": "scratch"}]
+    }
+
+
+class _StateWithoutMessages(BaseModel):
+    """A conversational state that cannot represent a conversation."""
+
+    id: str = ""
+    document: str = ""
+
+
+class _ExtraAllowingState(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str = ""
+
+
+def test_hydrate_conversational_flow_refuses_a_state_that_cannot_hold_messages():
+    """A state with no ``messages`` field must fail, not start with no history.
+
+    pydantic's default ``extra="ignore"`` throws the seeded key away, so the turn
+    runs against an empty conversation and the agent has amnesia every time.
+    """
+    from ag_ui_crewai._conversation import (
+        ConversationalTurn,
+        hydrate_conversational_flow,
+    )
+
+    flow = SimpleNamespace(_state=_StateWithoutMessages())
+    turn = ConversationalTurn(
+        message="and now this",
+        history=[{"role": "user", "content": "asked already"}],
+        current_media=[],
+    )
+
+    with pytest.raises(TypeError, match="messages"):
+        hydrate_conversational_flow(flow, {"id": "thread-no-messages"}, turn)
+
+
+def test_hydrate_conversational_flow_seeds_messages_into_an_extra_allowing_state():
+    """``extra="allow"`` holds the seeded history, so it must NOT be refused."""
+    from ag_ui_crewai._conversation import (
+        ConversationalTurn,
+        hydrate_conversational_flow,
+    )
+
+    flow = SimpleNamespace(_state=_ExtraAllowingState())
+    turn = ConversationalTurn(
+        message="and now this",
+        history=[{"role": "user", "content": "asked already"}],
+        current_media=[],
+    )
+
+    hydrate_conversational_flow(flow, {"id": "thread-extra"}, turn)
+
+    assert flow._state.messages == [{"role": "user", "content": "asked already"}]
+
+
+def test_prepare_conversational_turn_drops_history_roles_crewai_cannot_hold():
+    """A ``developer`` message must not reach CrewAI's conversational history.
+
+    ``ConversationMessage.role`` is a closed literal, so any AG-UI role outside it
+    fails validation and takes the whole turn down with it.
+    """
+    from crewai.experimental.conversational import ConversationMessageRole
+
+    from ag_ui_crewai._conversation import prepare_conversational_turn
+
+    accepted = set(typing.get_args(ConversationMessageRole))
+    messages = [
+        SystemMessage(id="s1", role="system", content="system"),
+        DeveloperMessage(id="d1", role="developer", content="developer"),
+        UserMessage(id="u1", role="user", content="first"),
+        AssistantMessage(id="a1", role="assistant", content="answer"),
+        UserMessage(id="u2", role="user", content="second"),
+    ]
+
+    turn = prepare_conversational_turn(messages)
+
+    assert [message["role"] for message in turn.history] == ["user", "assistant"]
+    assert {message["role"] for message in turn.history} <= accepted
+
+
+def test_prepare_conversational_turn_drops_unheld_roles_without_a_trailing_user_turn():
+    """The no-current-message branch filters by the same rule."""
+    from ag_ui_crewai._conversation import prepare_conversational_turn
+
+    turn = prepare_conversational_turn(
+        [
+            SystemMessage(id="s1", role="system", content="system"),
+            DeveloperMessage(id="d1", role="developer", content="developer"),
+            AssistantMessage(id="a1", role="assistant", content="answer"),
+        ]
+    )
+
+    assert turn.message == ""
+    assert [message["role"] for message in turn.history] == ["assistant"]
+
+
+def test_developer_history_hydrates_a_typed_crewai_conversation_state():
+    """End to end for the crash: a developer message no longer kills the turn.
+
+    A state deriving from CrewAI's own ``ConversationState`` types ``messages`` as
+    ``list[ConversationMessage]``, so the unheld role fails validation right at
+    hydration.
+    """
+    from crewai.experimental.conversational import ConversationState
+
+    from ag_ui_crewai._conversation import (
+        hydrate_conversational_flow,
+        prepare_conversational_turn,
+    )
+
+    class _TypedConversationState(ConversationState):
+        document: str = ""
+
+    turn = prepare_conversational_turn(
+        [
+            DeveloperMessage(id="d1", role="developer", content="developer"),
+            UserMessage(id="u1", role="user", content="first"),
+            AssistantMessage(id="a1", role="assistant", content="answer"),
+            UserMessage(id="u2", role="user", content="second"),
+        ]
+    )
+    flow = SimpleNamespace(_state=_TypedConversationState())
+
+    hydrate_conversational_flow(flow, {"id": "thread-typed"}, turn)
+
+    assert [message.role for message in flow._state.messages] == ["user", "assistant"]
+
+
+class _AstreamOnlyFlow:
+    """A REGULAR flow double: records what ``astream`` was handed."""
+
+    def __init__(self):
+        self.received = None
+
+    def __deepcopy__(self, memo):
+        return self
+
+    def astream(self, inputs=None):
+        self.received = inputs
+        return _EmptyAsyncSession()
+
+
+class _EmptyAsyncSession:
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise StopAsyncIteration
+
+    async def aclose(self):
+        return None
+
+
+async def test_regular_flow_receives_its_inputs_only_through_astream(monkeypatch):
+    """The regular path is seeded by crewai from ``astream(inputs=...)``.
+
+    ``stream_turn`` takes only the new message and the session id, which is the
+    whole reason the conversational path needs a hydration step at all. The regular
+    path must never acquire one.
+    """
+    from ag_ui_crewai import endpoint
+
+    calls = []
+
+    def _spy(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("a regular flow must not be hydrated")
+
+    monkeypatch.setattr(endpoint, "hydrate_conversational_flow", _spy)
+
+    flow = _AstreamOnlyFlow()
+    inputs = {
+        "id": "thread-regular",
+        "messages": [{"role": "user", "content": "hello"}],
+        "document": "incoming",
+    }
+
+    _ = [
+        chunk
+        async for chunk in endpoint._run_flow_frame_stream(
+            flow_copy=flow,
+            encoder=EventEncoder(),
+            input_data=RunAgentInput(
+                thread_id="thread-regular",
+                run_id="run-regular",
+                state={"document": "incoming"},
+                messages=[UserMessage(id="u1", role="user", content="hello")],
+                tools=[],
+                context=[],
+                forwarded_props={},
+            ),
+            inputs=inputs,
+            timeout=30,
+            conversational_turn=None,
+        )
+    ]
+
+    assert calls == []
+    assert flow.received == inputs
 
 
 class _SyncSession:

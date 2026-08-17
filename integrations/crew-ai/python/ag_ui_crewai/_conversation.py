@@ -13,6 +13,7 @@ from typing import Any, Sequence
 
 from pydantic import BaseModel, model_serializer
 
+from ._capabilities import conversational_message_roles
 from ._config import resolve_max_conversation_workers
 from .utils import dump_agui_message
 
@@ -547,19 +548,36 @@ class ConversationalTurn:
     current_media: list[dict[str, Any]]
 
 
+def _seedable_history_roles() -> frozenset[str]:
+    """The roles a seeded conversational history message may carry.
+
+    ``system`` is excluded because CrewAI resolves its OWN system prompt for a
+    conversational turn, which is how this path has always behaved. The rest of the
+    exclusion is that same rule generalised: AG-UI carries roles CrewAI's
+    conversational history cannot hold, and one of them anywhere in the seeded
+    history fails ``ConversationMessage`` validation for the whole turn.
+
+    An allowlist rather than a denylist, so a role AG-UI adds later degrades to
+    being dropped instead of to a crash. The accepted set is probed off the
+    installed crewai (see :func:`~._capabilities.conversational_message_roles`).
+    """
+    return conversational_message_roles() - {"system"}
+
+
 def prepare_conversational_turn(messages: Sequence[Any]) -> ConversationalTurn:
     """Prepare one public ``stream_turn`` invocation from AG-UI history."""
     dumped = [dump_agui_message(message) for message in messages]
     current_index = (
         len(dumped) - 1 if dumped and dumped[-1].get("role") == "user" else None
     )
+    seedable = _seedable_history_roles()
 
     if current_index is None:
-        history = [message for message in dumped if message.get("role") != "system"]
+        history = [message for message in dumped if message.get("role") in seedable]
         return ConversationalTurn(message="", history=history, current_media=[])
 
     history = [
-        message for message in dumped[:current_index] if message.get("role") != "system"
+        message for message in dumped[:current_index] if message.get("role") in seedable
     ]
     content = dumped[current_index].get("content")
     if isinstance(content, str):
@@ -597,6 +615,33 @@ def _seeded_messages(turn: ConversationalTurn) -> list[dict[str, Any]]:
     return seeded
 
 
+def _state_field_values(state: BaseModel) -> dict[str, Any]:
+    """Every value the model currently holds, ``Field(exclude=True)`` included.
+
+    ``model_dump()`` HONOURS ``exclude=True``, so seeding through a dump and a
+    revalidate hands every excluded field back its default. On
+    :class:`~.sdk.CopilotKitState` that is the entire set of fields CrewAI's
+    conversational runtime keeps its per-turn bookkeeping in
+    (``current_user_message``, ``last_intent``, ``events``, ``agent_threads``, ...),
+    reset on every single turn.
+
+    ``__dict__`` is the declared fields as they stand, and pydantic keeps ``extra``
+    values apart from it, so both have to be read.
+    """
+    values = dict(state.__dict__)
+    extra = getattr(state, "__pydantic_extra__", None)
+    if extra:
+        values.update(extra)
+    return values
+
+
+def _state_can_hold_messages(state: BaseModel) -> bool:
+    """Whether a seeded ``messages`` key survives validation onto ``state``."""
+    if "messages" in type(state).model_fields:
+        return True
+    return type(state).model_config.get("extra") == "allow"
+
+
 def hydrate_conversational_flow(
     flow: Any,
     inputs: dict[str, Any],
@@ -629,11 +674,26 @@ def hydrate_conversational_flow(
         state.update(flow_inputs)
         return hydrated
     if isinstance(state, BaseModel):
-        current = state.model_dump()
-        object.__setattr__(
+        if not _state_can_hold_messages(state):
+            # Refused rather than seeded: pydantic's default ``extra="ignore"``
+            # would throw the key away, and the turn would run against an empty
+            # conversation with nothing said about it.
+            raise TypeError(
+                f"Conversational Flow state {type(state).__name__} declares no "
+                "'messages' field, so the conversation history cannot be seeded "
+                "onto it. Declare 'messages' on the state (which "
+                "ag_ui_crewai.sdk.CopilotKitState does), or allow extra fields."
+            )
+        # Through pydantic's OWN channel, not ``object.__setattr__``: ``_state`` is
+        # a private attribute, which pydantic keeps in ``__pydantic_private__``. A
+        # raw write lands in the instance ``__dict__`` instead, where it shadows the
+        # private store on every later READ while crewai's own ``self._state = ...``
+        # (its persistence restore among them) keeps writing the store nothing reads
+        # again.
+        setattr(
             flow,
             "_state",
-            type(state).model_validate({**current, **flow_inputs}),
+            type(state).model_validate({**_state_field_values(state), **flow_inputs}),
         )
         return hydrated
     raise TypeError("Conversational Flow state must be a mapping or Pydantic model")

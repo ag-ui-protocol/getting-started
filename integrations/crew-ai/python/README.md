@@ -93,6 +93,16 @@ immediately before** the current turn, so the model still sees them in order. Ea
 HTTP request finalizes its own CrewAI trace even if the Flow's conversation config
 would normally defer finalization across turns.
 
+Two things follow from hydration writing onto the Flow's own state. The state has
+to be able to hold `messages`, either as a declared field (as `CopilotKitState`
+has) or through `extra="allow"`; one that can do neither is refused with a
+correlated `RUN_ERROR` rather than served a turn with no history at all. And a
+history message whose role CrewAI's conversational `ConversationMessage` cannot
+hold is dropped, because one such role anywhere in the history fails validation for
+the whole turn. `system` is dropped as well, since CrewAI resolves its own system
+prompt for a conversational turn. The accepted role set is read off the installed
+CrewAI, never off a version string.
+
 Conversational mode requires CrewAI's ordered `StreamFrame` transport and a Flow
 that both sets `conversational=True` and exposes `stream_turn`. If any part of
 that contract is unavailable, the endpoint emits a correlated `RUN_ERROR` with
