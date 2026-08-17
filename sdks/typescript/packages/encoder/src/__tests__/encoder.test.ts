@@ -1,5 +1,5 @@
 import { EventEncoder } from "../encoder";
-import { BaseEvent, EventType, TextMessageStartEvent } from "@ag-ui/core";
+import { EventType, TextMessageStartEvent } from "@ag-ui/core";
 import * as proto from "@ag-ui/proto";
 
 describe("Encoder Tests", () => {

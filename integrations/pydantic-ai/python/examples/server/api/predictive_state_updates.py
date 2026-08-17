@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from ag_ui.core import CustomEvent, EventType
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.ag_ui import StateDeps
+from pydantic_ai.ui import StateDeps
 
 
 class DocumentState(BaseModel):
@@ -72,6 +72,3 @@ async def story_instructions(ctx: RunContext[StateDeps[DocumentState]]) -> str:
         {ctx.deps.state.document}
         """
     )
-
-
-app = agent.to_ag_ui(deps=StateDeps(DocumentState()))

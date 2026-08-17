@@ -82,6 +82,22 @@ class TestAguiMessagesToLangchain(unittest.TestCase):
         assert isinstance(result[0], ToolMessage)
         assert result[0].content == "42"
         assert result[0].tool_call_id == "tc1"
+        # A tool result with no error maps to LangChain's default "success" status.
+        assert result[0].status == "success"
+
+    def test_tool_message_error_maps_to_status(self):
+        # A client-reported tool failure must reach the model as an error, not a
+        # silent success -- AG-UI's ToolMessage.error becomes status="error".
+        msg = AGUIToolMessage(
+            id="t1",
+            role="tool",
+            content="Tool failed: invalid id",
+            tool_call_id="tc1",
+            error="invalid id",
+        )
+        result = agui_messages_to_langchain([msg])
+        assert isinstance(result[0], ToolMessage)
+        assert result[0].status == "error"
 
     def test_multimodal_with_url(self):
         msg = AGUIUserMessage(
@@ -215,6 +231,22 @@ class TestLangchainMessagesToAgui(unittest.TestCase):
         assert result[0].role == "tool"
         assert result[0].content == "result"
         assert result[0].tool_call_id == "tc1"
+        # No error status carries no failure signal, so error stays unset.
+        assert result[0].error is None
+
+    def test_tool_message_error_status_maps_to_error(self):
+        # The reverse of #2263: a LangChain tool result with status "error" must set
+        # AG-UI's error so the failure survives the round trip. The value is a fixed
+        # sentinel -- the original text is not recoverable from the flag alone (#2305).
+        msg = ToolMessage(
+            id="t1",
+            content="Tool failed: invalid id",
+            tool_call_id="tc1",
+            status="error",
+        )
+        result = langchain_messages_to_agui([msg])
+        assert result[0].role == "tool"
+        assert result[0].error == "error"
 
     def test_multimodal_human_message(self):
         msg = HumanMessage(

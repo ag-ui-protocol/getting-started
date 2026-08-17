@@ -7160,7 +7160,51 @@
       "runId": "run_Id_1",
       "outcome": {
         "type": "success"
+      },
+      "usage": [
+        {
+          "model": "gpt-5-mini",
+          "inputTokens": 39,
+          "outputTokens": 345,
+          "totalTokens": 384,
+          "reasoningTokens": 128,
+          "cachedInputTokens": 0
+        }
+      ]
+    }
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "usage",
+        "details": {
+          "inputTokenCount": 39,
+          "outputTokenCount": 345,
+          "cachedInputTokenCount": 0,
+          "reasoningTokenCount": 128
+        }
       }
+    ],
+    "responseId": "run_Id_1",
+    "modelId": "gpt-5-mini",
+    "rawRepresentation": {
+      "type": "RUN_FINISHED",
+      "threadId": "thread_Id_1",
+      "runId": "run_Id_1",
+      "outcome": {
+        "type": "success"
+      },
+      "usage": [
+        {
+          "model": "gpt-5-mini",
+          "inputTokens": 39,
+          "outputTokens": 345,
+          "totalTokens": 384,
+          "reasoningTokens": 128,
+          "cachedInputTokens": 0
+        }
+      ]
     }
   }
 ]

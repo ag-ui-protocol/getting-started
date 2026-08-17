@@ -18,7 +18,12 @@
  * return a fixed-layout surface), a2ui_dynamic_schema (valid hotel surface) and
  * a2ui_recovery (recover: invalid→valid; exhaust: always invalid).
  */
-import type { LLMock, ChatMessage } from "@copilotkit/aimock";
+import type {
+  LLMock,
+  ChatMessage,
+  ChatCompletionRequest,
+  ToolDefinition,
+} from "@copilotkit/aimock";
 
 const textOf = (content: ChatMessage["content"] | undefined): string => {
   if (typeof content === "string") return content;
@@ -34,7 +39,7 @@ const userText = (messages: ChatMessage[] = []): string =>
 // Toolkit appends this on a retry (augment_prompt_with_validation_errors).
 const RETRY_MARKER = "Previous attempt was invalid";
 
-const isGemini = (req: any) => /gemini/i.test(String(req?.model ?? ""));
+const isGemini = (req: ChatCompletionRequest) => /gemini/i.test(String(req?.model ?? ""));
 const isRecover = (text: string) => /luxury/i.test(text) && !/different cities/i.test(text);
 const isExhaust = (text: string) => /broken/i.test(text);
 // dynamic_schema hotel prompt ("...comparison of 3 hotels...") — not luxury/broken.
@@ -129,14 +134,14 @@ export function registerA2UIADKFixtures(mockServer: LLMock): void {
   // suffix would depend on test order, sharding and retries rather than on the
   // conversation.
   toolCallCounts.clear();
-  const hasTool = (req: any, name: string) => req.tools?.some((t: any) => t.function.name === name);
-  const wantsA2UI = (req: any) =>
+  const hasTool = (req: ChatCompletionRequest, name: string) => req.tools?.some((t: ToolDefinition) => t.function.name === name);
+  const wantsA2UI = (req: ChatCompletionRequest) =>
     isHotelCreate(userText(req.messages)) || isRecover(userText(req.messages)) || isExhaust(userText(req.messages));
 
   // 0) fixed_schema — backend search_flights tool (user asks about flights).
   mockServer.addFixture({
     match: {
-      predicate: (req: any) =>
+      predicate: (req: ChatCompletionRequest) =>
         isGemini(req) && hasTool(req, "search_flights") && /flights/i.test(userText(req.messages)),
     },
     response: geminiToolCall("search_flights", JSON.stringify({ flights: FLIGHTS })),
@@ -145,7 +150,7 @@ export function registerA2UIADKFixtures(mockServer: LLMock): void {
   // 0b) fixed_schema — backend search_hotels tool (user asks about hotels).
   mockServer.addFixture({
     match: {
-      predicate: (req: any) =>
+      predicate: (req: ChatCompletionRequest) =>
         isGemini(req) && hasTool(req, "search_hotels") && /hotels/i.test(userText(req.messages)),
     },
     response: geminiToolCall("search_hotels", JSON.stringify({ hotels: HOTELS_FIXED })),
@@ -153,26 +158,26 @@ export function registerA2UIADKFixtures(mockServer: LLMock): void {
 
   // 1) Main ADK agent: A2UI prompt → call the generate_a2ui sub-agent tool.
   mockServer.addFixture({
-    match: { predicate: (req: any) => isGemini(req) && hasTool(req, "generate_a2ui") && wantsA2UI(req) },
+    match: { predicate: (req: ChatCompletionRequest) => isGemini(req) && hasTool(req, "generate_a2ui") && wantsA2UI(req) },
     response: geminiToolCall("generate_a2ui", JSON.stringify({ intent: "create" })),
   });
 
   // 2) Sub-agent — dynamic_schema create → valid surface (Gemini-shaped args).
   mockServer.addFixture({
-    match: { predicate: (req: any) => isGemini(req) && hasTool(req, "render_a2ui") && isHotelCreate(allText(req.messages)) },
+    match: { predicate: (req: ChatCompletionRequest) => isGemini(req) && hasTool(req, "render_a2ui") && isHotelCreate(allText(req.messages)) },
     response: geminiToolCall("render_a2ui", renderArgsGemini(true)),
   });
 
   // 3) Sub-agent — EXHAUST ("broken"): always the dangling-ref surface (invalid).
   mockServer.addFixture({
-    match: { predicate: (req: any) => isGemini(req) && hasTool(req, "render_a2ui") && isExhaust(allText(req.messages)) },
+    match: { predicate: (req: ChatCompletionRequest) => isGemini(req) && hasTool(req, "render_a2ui") && isExhaust(allText(req.messages)) },
     response: geminiToolCall("render_a2ui", renderArgsGemini(false)),
   });
 
   // 4) Sub-agent — RECOVER ("luxury"), RETRY (errors fed back) → valid.
   mockServer.addFixture({
     match: {
-      predicate: (req: any) =>
+      predicate: (req: ChatCompletionRequest) =>
         isGemini(req) && hasTool(req, "render_a2ui") && isRecover(allText(req.messages)) && allText(req.messages).includes(RETRY_MARKER),
     },
     response: geminiToolCall("render_a2ui", renderArgsGemini(true)),
@@ -181,7 +186,7 @@ export function registerA2UIADKFixtures(mockServer: LLMock): void {
   // 5) Sub-agent — RECOVER ("luxury"), FIRST attempt (no marker) → invalid.
   mockServer.addFixture({
     match: {
-      predicate: (req: any) =>
+      predicate: (req: ChatCompletionRequest) =>
         isGemini(req) && hasTool(req, "render_a2ui") && isRecover(allText(req.messages)) && !allText(req.messages).includes(RETRY_MARKER),
     },
     response: geminiToolCall("render_a2ui", renderArgsGemini(false)),

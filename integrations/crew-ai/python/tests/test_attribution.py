@@ -1,6 +1,6 @@
 """Tests for hierarchical multi-agent / nested-crew STEP attribution.
 
-Three layers are covered, matching the design's two-pipeline split:
+Four layers are covered:
 
 * the pure :mod:`ag_ui_crewai.attribution` boundary stack + event builders,
   which reconstruct the Flow-method -> Crew -> Agent topology from boundary
@@ -13,25 +13,40 @@ Three layers are covered, matching the design's two-pipeline split:
 * the LEGACY bus-listener path (``endpoint.py``), which crewai 1.x dispatches on
   an unordered ThreadPoolExecutor and therefore CANNOT maintain a stack; it
   stamps FLAT per-method attribution only (flow ownership + a stable per-run
-  step_id shared by the method's start and finish).
+  step_id shared by the method's start and finish);
+* the CONVERSATIONAL route, which shares that same translator: one test drives
+  the shipped conversational wrapper over a REAL nested Crew (network replaced
+  at crewai's ``BaseLLM`` extension point) and asserts the hierarchy survives.
 
 That crew_kickoff_started / agent_execution_started frames reach ``astream`` end
 to end was verified empirically against a real crewai wheel; the end-to-end sink
-gating lives in ``test_streaming.py``. These unit tests drive the translator
-directly with ordered fakes so they are hermetic and do not depend on a live LLM.
+gating lives in ``test_streaming.py``. The translator tests drive it
+directly with ordered fakes; the conversational test drives real crewai objects.
+Neither depends on a live LLM.
 """
 
 import asyncio
+import json
 import time
 from types import SimpleNamespace
 
-from ag_ui.core import EventType
+import pytest
+
+from crewai import Agent, Crew, Process, Task
+from crewai.flow.flow import Flow, start
+from crewai.llms.base_llm import BaseLLM
+
+from ag_ui.core import EventType, RunAgentInput, UserMessage
+from ag_ui.encoder import EventEncoder
 
 from ag_ui_crewai import attribution as attr
 from ag_ui_crewai import endpoint as ep
 from ag_ui_crewai._frames import StreamFrameTranslator
+from ag_ui_crewai._conversation import prepare_conversational_turn
 from ag_ui_crewai.context import flow_context
+from ag_ui_crewai.sdk import CopilotKitState
 from ag_ui_crewai._capabilities import (
+    _conversational_stream_available,
     crewai_event_bus,
     MethodExecutionStartedEvent,
     MethodExecutionFinishedEvent,
@@ -231,19 +246,32 @@ def _attribution(step_event):
     return (step_event.raw_event or {}).get("attribution") if step_event.raw_event else None
 
 
-def _assert_balanced(step_events):
-    """Every STEP_STARTED has exactly one later STEP_FINISHED sharing its
-    attribution step_id (or step_name for legacy un-attributed steps)."""
+def _assert_pairs_balanced(pairs):
+    """``pairs`` is an ordered iterable of ``(is_start, identity)``. Every start
+    must have exactly one later finish sharing its identity.
+
+    Single implementation so the translator tests and the decoded-SSE tests
+    cannot drift apart on what "balanced" means."""
     open_ids = []
-    for e in step_events:
-        payload = _attribution(e)
-        ident = payload["step_id"] if payload else e.step_name
-        if e.type == EventType.STEP_STARTED:
+    for is_start, ident in pairs:
+        if is_start:
             open_ids.append(ident)
         else:
             assert ident in open_ids, f"unbalanced STEP_FINISHED for {ident!r}"
             open_ids.remove(ident)
     assert open_ids == [], f"unclosed STEP_STARTED(s): {open_ids}"
+
+
+def _assert_balanced(step_events):
+    """Every STEP_STARTED has exactly one later STEP_FINISHED sharing its
+    attribution step_id (or step_name for legacy un-attributed steps)."""
+    _assert_pairs_balanced(
+        (
+            e.type == EventType.STEP_STARTED,
+            (_attribution(e) or {}).get("step_id") or e.step_name,
+        )
+        for e in step_events
+    )
 
 
 def test_translator_nested_flow_crew_agent_hierarchy():
@@ -692,3 +720,170 @@ def test_crew_agent_lifecycle_types_is_the_single_source_of_truth():
               "method_execution_started", "method_execution_finished",
               "method_execution_failed"):
         assert t not in CREW_AGENT_LIFECYCLE_TYPES
+
+
+# ==========================================================================
+# Conversational route, real Crew (offline LLM)
+# ==========================================================================
+
+class _OfflineLLM(BaseLLM):
+    """crewai's public custom-LLM extension point, answering without network.
+
+    Only the model call is replaced: the Crew, Agent, Task, agent executor and
+    the crewai event bus all run for real, so the lifecycle frames the
+    translator consumes are the ones a live crew emits."""
+
+    def call(
+        self,
+        messages,
+        tools=None,
+        callbacks=None,
+        available_functions=None,
+        from_task=None,
+        from_agent=None,
+        response_model=None,
+    ):
+        return "Thought: I know the answer.\nFinal Answer: nested crew reply"
+
+
+class _NestedCrewFlow(Flow[CopilotKitState]):
+    """Regular Flow whose method kicks off a real nested Crew."""
+
+    @start()
+    async def chat(self):
+        agent = Agent(
+            role="Researcher",
+            goal="Answer the user briefly.",
+            backstory="A terse researcher.",
+            llm=_OfflineLLM(model="offline-test-model"),
+            verbose=False,
+        )
+        task = Task(
+            description="Answer the user.",
+            expected_output="One sentence.",
+            agent=agent,
+        )
+        crew = Crew(
+            name="research_crew",
+            agents=[agent],
+            tasks=[task],
+            process=Process.sequential,
+            verbose=False,
+        )
+        result = await asyncio.to_thread(crew.kickoff)
+        self.state.messages.append(
+            {"role": "assistant", "content": getattr(result, "raw", None) or str(result)}
+        )
+
+
+@pytest.mark.skipif(
+    not _conversational_stream_available,
+    reason="this crewai build exposes no conversational stream_turn surface",
+)
+async def test_conversational_route_preserves_nested_crew_attribution():
+    """A conversational route shares the regular path's translator, so a Crew
+    invoked from a public turn keeps its Flow -> Crew -> Agent attribution."""
+    # Imported here, not at module scope: the conversational examples pull in
+    # crewai.experimental.conversational, which the floor build does not ship,
+    # and a module-scope import would fail collection of this whole file.
+    # importorskip covers the module itself; the skipif above covers the case
+    # where the module exists but the build has no stream_turn surface.
+    conversational = pytest.importorskip("agents.conversational")
+    _conversational_type = conversational._conversational_type
+
+    # The SAME factory the dojo's conversational routes use, so this drives the
+    # shipped wrapper rather than a lookalike.
+    conversational_flow_type = _conversational_type(_NestedCrewFlow)
+    input_data = RunAgentInput(
+        thread_id="thread-1",
+        run_id="run-1",
+        state={},
+        messages=[UserMessage(id="u1", role="user", content="hello")],
+        tools=[],
+        context=[],
+        forwarded_props={},
+    )
+    chunks = [
+        chunk
+        async for chunk in ep._run_flow_frame_stream(
+            flow_copy=conversational_flow_type(),
+            encoder=EventEncoder(),
+            input_data=input_data,
+            inputs={"id": "thread-1", "messages": []},
+            timeout=30,
+            conversational_turn=prepare_conversational_turn(input_data.messages),
+        )
+    ]
+    events = [
+        json.loads(line.removeprefix("data:").strip())
+        for chunk in chunks
+        for line in chunk.splitlines()
+        if line.startswith("data:")
+    ]
+
+    assert events[0]["type"] == "RUN_STARTED"
+    assert events[-1]["type"] == "RUN_FINISHED"
+
+    def payload(event):
+        return (event.get("rawEvent") or {}).get("attribution")
+
+    # Same invariant every other translator test enforces, via the same helper:
+    # EVERY step opened on this route closes, including the ones outside the
+    # nested subtree asserted below.
+    _assert_pairs_balanced(
+        (
+            event["type"] == "STEP_STARTED",
+            (payload(event) or {}).get("step_id") or event["stepName"],
+        )
+        for event in events
+        if event["type"] in ("STEP_STARTED", "STEP_FINISHED")
+    )
+
+    # The crew did not merely emit lifecycle frames: its answer reached the wire.
+    assert any(
+        message.get("content") == "nested crew reply"
+        for event in events
+        if event["type"] == "MESSAGES_SNAPSHOT"
+        for message in event["messages"]
+    ), "the nested crew's reply never reached the client"
+
+    nested = [
+        (event["type"], event["stepName"], payload(event))
+        for event in events
+        if event["type"] in ("STEP_STARTED", "STEP_FINISHED")
+        and payload(event)
+        and payload(event)["path"][0] == "chat"
+    ]
+    assert [(kind, name) for kind, name, _ in nested] == [
+        ("STEP_STARTED", "chat"),
+        ("STEP_STARTED", "research_crew"),
+        ("STEP_STARTED", "Researcher"),
+        ("STEP_FINISHED", "Researcher"),
+        ("STEP_FINISHED", "research_crew"),
+        ("STEP_FINISHED", "chat"),
+    ]
+
+    starts = {name: attribution for kind, name, attribution in nested if kind == "STEP_STARTED"}
+    method, crew, agent = starts["chat"], starts["research_crew"], starts["Researcher"]
+
+    assert (method["boundary"], method["depth"], method["parent_step_id"]) == (
+        attr.FLOW_METHOD,
+        0,
+        None,
+    )
+    assert (crew["boundary"], crew["depth"], crew["parent_step_id"]) == (
+        attr.CREW,
+        1,
+        method["step_id"],
+    )
+    assert (agent["boundary"], agent["depth"], agent["parent_step_id"]) == (
+        attr.AGENT,
+        2,
+        crew["step_id"],
+    )
+    assert agent["path"] == ["chat", "research_crew", "Researcher"]
+    assert agent["flow_name"] == conversational_flow_type.__name__
+
+    finishes = {name: attribution for kind, name, attribution in nested if kind == "STEP_FINISHED"}
+    for name in ("chat", "research_crew", "Researcher"):
+        assert finishes[name]["step_id"] == starts[name]["step_id"]

@@ -93,6 +93,35 @@ class RunStartedEvent(BaseEvent):
 | `parent_run_id` | `Optional[str]`           | (Optional) Lineage pointer for branching/time travel. If present, refers to a prior run within the same thread |
 | `input`         | `Optional[RunAgentInput]` | (Optional) The exact agent input payload sent to the agent for this run. May omit messages already in history  |
 
+### TokenUsage
+
+`from ag_ui.core import TokenUsage`
+
+A reusable, numeric-only token usage summary carried on terminal run events.
+It intentionally contains **only** provider/model labels and token counts — no
+prompts, completions, messages, or identifiers.
+
+```python
+class TokenUsage(ConfiguredBaseModel):
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    reasoning_tokens: Optional[int] = None
+    cached_input_tokens: Optional[int] = None
+```
+
+| Property              | Type            | Description                                       |
+| --------------------- | --------------- | ------------------------------------------------- |
+| `provider`            | `Optional[str]` | Provider that reported the usage (e.g. `openai`)  |
+| `model`               | `Optional[str]` | Model that produced the usage                     |
+| `input_tokens`        | `Optional[int]` | Prompt/input tokens                               |
+| `output_tokens`       | `Optional[int]` | Completion/output tokens                          |
+| `total_tokens`        | `Optional[int]` | Total tokens for the entry                        |
+| `reasoning_tokens`    | `Optional[int]` | Reasoning tokens, when the model reports them     |
+| `cached_input_tokens` | `Optional[int]` | Cached (prompt-cache read) input tokens           |
+
 ### RunFinishedEvent
 
 `from ag_ui.core import RunFinishedEvent`
@@ -105,13 +134,15 @@ class RunFinishedEvent(BaseEvent):
     thread_id: str
     run_id: str
     result: Optional[Any] = None
+    usage: Optional[List[TokenUsage]] = None
 ```
 
-| Property    | Type            | Description                    |
-| ----------- | --------------- | ------------------------------ |
-| `thread_id` | `str`           | ID of the conversation thread  |
-| `run_id`    | `str`           | ID of the agent run            |
-| `result`    | `Optional[Any]` | Result data from the agent run |
+| Property    | Type                       | Description                                                   |
+| ----------- | -------------------------- | ------------------------------------------------------------- |
+| `thread_id` | `str`                      | ID of the conversation thread                                 |
+| `run_id`    | `str`                      | ID of the agent run                                           |
+| `result`    | `Optional[Any]`            | Result data from the agent run                                |
+| `usage`     | `Optional[List[TokenUsage]]` | Per-(provider, model) token usage for the run, when reported |
 
 ### RunErrorEvent
 
@@ -124,12 +155,14 @@ class RunErrorEvent(BaseEvent):
     type: Literal[EventType.RUN_ERROR]
     message: str
     code: Optional[str] = None
+    usage: Optional[List[TokenUsage]] = None
 ```
 
-| Property  | Type            | Description   |
-| --------- | --------------- | ------------- |
-| `message` | `str`           | Error message |
-| `code`    | `Optional[str]` | Error code    |
+| Property  | Type                         | Description                                          |
+| --------- | ---------------------------- | ---------------------------------------------------- |
+| `message` | `str`                        | Error message                                        |
+| `code`    | `Optional[str]`              | Error code                                           |
+| `usage`   | `Optional[List[TokenUsage]]` | Partial token usage from model calls that completed  |
 
 ### StepStartedEvent
 

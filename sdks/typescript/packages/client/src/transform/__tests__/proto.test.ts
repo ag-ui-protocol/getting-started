@@ -227,8 +227,8 @@ describe("parseProtoStream", () => {
     const event$ = transformHttpEventStream(chunk$);
 
     let receivedEvent = false;
-    let receivedError = false;
-    let errorReceived: any = null;
+    let _receivedError = false;
+    let _errorReceived: unknown = null;
 
     // Set up a subscription with shorter timeout
     const subscription = event$.subscribe({
@@ -236,8 +236,8 @@ describe("parseProtoStream", () => {
         receivedEvent = true;
       },
       error: (err) => {
-        receivedError = true;
-        errorReceived = err;
+        _receivedError = true;
+        _errorReceived = err;
       },
       complete: () => {
         // This is fine if it completes

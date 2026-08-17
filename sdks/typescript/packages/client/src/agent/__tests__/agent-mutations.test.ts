@@ -2,7 +2,6 @@ import { AbstractAgent } from "../agent";
 import { AgentSubscriber } from "../subscriber";
 import {
   BaseEvent,
-  EventType,
   Message,
   RunAgentInput,
   State,
@@ -48,7 +47,7 @@ vi.mock("@/chunks", () => ({
 
 // Create a test agent implementation
 class TestAgent extends AbstractAgent {
-  run(input: RunAgentInput): Observable<BaseEvent> {
+  run(_input: RunAgentInput): Observable<BaseEvent> {
     return of();
   }
 }

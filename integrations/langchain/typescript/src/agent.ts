@@ -10,10 +10,26 @@ import {
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { BaseMessage } from "@langchain/core/messages";
 import { DynamicStructuredTool } from "@langchain/core/tools";
+import { TokenUsage, aggregateTokenUsage } from "@ag-ui/core";
 import { LangChainResponse, streamLangChainResponse } from "./streaming";
 import { convertAGUIToolsToLangChain } from "./tools";
 import { Observable } from "rxjs";
 import { convertAGUIMessagesToLangChain } from "./messages";
+
+/**
+ * Best-effort provider/model identity from a LangChain chat model instance.
+ * `_llmType()` is the stable provider tag (e.g. "openai", "anthropic"); the
+ * model name lives on `.model` (newer) or `.modelName` (older). Used to label
+ * token usage that the streamed chunks left unlabeled.
+ */
+function getModelIdentity(model: any): { provider?: string; model?: string } {
+  const provider = typeof model?._llmType === "function" ? model._llmType() : undefined;
+  const modelName = model?.model ?? model?.modelName;
+  return {
+    provider: typeof provider === "string" ? provider : undefined,
+    model: typeof modelName === "string" ? modelName : undefined,
+  };
+}
 
 /**
  * Parameters passed to chainFn callback
@@ -176,6 +192,10 @@ export class LangChainAgent extends AbstractAgent {
 
           let response: LangChainResponse;
 
+          // Provider/model labels for usage entries whose chunks didn't carry
+          // them. Known only in the direct-model pattern (we hold the model).
+          let modelIdentity: { provider?: string; model?: string } = {};
+
           // Execute based on configuration pattern
           if (isChainFnConfig(this.config)) {
             // Pattern A: User-provided chainFn — expose headers so user code can forward them
@@ -191,6 +211,7 @@ export class LangChainAgent extends AbstractAgent {
           } else {
             // Pattern B: Direct model usage
             const modelConfig = this.config as LangChainAgentModelConfig;
+            modelIdentity = getModelIdentity(modelConfig.model);
             const boundModel = modelConfig.bindToolsOptions
               ? modelConfig.model.bindTools?.(
                   langchainTools,
@@ -219,8 +240,14 @@ export class LangChainAgent extends AbstractAgent {
             );
           }
 
+          // Collect provider-reported token usage as the response streams, then
+          // attach the per-(provider, model) aggregate to the terminal event.
+          const usageEntries: TokenUsage[] = [];
+
           // Stream the response and emit AG-UI events
-          for await (const event of streamLangChainResponse(response)) {
+          for await (const event of streamLangChainResponse(response, (u) =>
+            usageEntries.push(u),
+          )) {
             if (abortController.signal.aborted) {
               break;
             }
@@ -229,10 +256,24 @@ export class LangChainAgent extends AbstractAgent {
 
           // Emit RUN_FINISHED if not aborted
           if (!abortController.signal.aborted) {
+            // Fill provider/model from the configured model when the streamed
+            // chunks didn't include them (LangChain-JS streaming often omits
+            // model_name), so downstream can compare usage per provider/model.
+            const labeled = usageEntries.map((u) => ({
+              ...u,
+              ...(u.provider == null && modelIdentity.provider != null
+                ? { provider: modelIdentity.provider }
+                : {}),
+              ...(u.model == null && modelIdentity.model != null
+                ? { model: modelIdentity.model }
+                : {}),
+            }));
+            const usage = aggregateTokenUsage(labeled);
             const finishedEvent: RunFinishedEvent = {
               type: EventType.RUN_FINISHED,
               threadId: input.threadId,
               runId: input.runId,
+              ...(usage.length > 0 ? { usage } : {}),
             };
             subscriber.next(finishedEvent);
           }

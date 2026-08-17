@@ -2,6 +2,20 @@ import { Block, KnownBlock } from "@slack/types";
 import { SummaryResults } from "playwright-slack-report/dist/src";
 import { readFileSync, existsSync } from "fs";
 
+/**
+ * The subset of playwright-slack-report's per-test summary entry that this
+ * layout reads. Declared locally rather than imported: the fields below are all
+ * this file touches, and typing them keeps the reporter's shape explicit.
+ */
+interface SummaryTest {
+  name: string;
+  status?: string;
+  suiteName?: string;
+  file?: string;
+  error?: { message?: string };
+  errors?: Array<{ message?: string }>;
+}
+
 interface VideoInfo {
   url: string;
   testName: string;
@@ -39,7 +53,7 @@ function getVideosByCategory(): Map<string, VideoInfo[]> {
   return categoryMap;
 }
 
-function getTestDisplayName(test: any): string {
+function getTestDisplayName(test: SummaryTest): string {
   // Create a cleaner test name
   const suiteName =
     test.suiteName ||
@@ -57,7 +71,7 @@ function getTestDisplayName(test: any): string {
   return `${cleanSuite}: ${testName}`;
 }
 
-function categorizeAndCleanError(test: any): {
+function categorizeAndCleanError(test: SummaryTest): {
   category: string;
   cleanError: string;
   action: string;
@@ -177,7 +191,7 @@ export function generateCustomLayout(
     // Categorize failures
     const categorizedFailures = new Map<
       string,
-      Array<{ test: any; cleanError: string; action: string }>
+      Array<{ test: SummaryTest; cleanError: string; action: string }>
     >();
 
     failedTests.forEach((test) => {

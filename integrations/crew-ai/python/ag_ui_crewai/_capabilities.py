@@ -12,6 +12,11 @@ capability table — never as a code-path gate.
 
 Posture: "we support that feature; for this specific one you need crewai >= X."
 
+One deliberate exception: ``litellm`` is a DIRECT dependency whose version this
+package controls, so the OpenAI Responses event vocabulary is covered by a
+declared version RANGE (see ``pyproject.toml``) rather than by probing litellm's
+private event-model registry. crewai capability detection stays probe-based.
+
 This module is a LEAF: it imports only ``crewai`` / ``litellm`` and the stdlib,
 so ``events`` / ``sdk`` / ``endpoint`` / ``crews`` can all import from it at
 module-load time without a circular dependency (mirrors ``_env``).
@@ -210,6 +215,15 @@ def flow_supports_stream_frames(flow: Any) -> bool:
     return _stream_frame_available and hasattr(flow, "astream")
 
 
+def flow_supports_conversational_stream(flow: Any) -> bool:
+    """Return whether ``flow`` exposes CrewAI's public turn stream API."""
+    return (
+        _stream_frame_available
+        and _safe_getattr(flow, "conversational") is True
+        and callable(_safe_getattr(flow, "stream_turn"))
+    )
+
+
 # --------------------------------------------------------------------------
 # crew-chat helper resolution
 # --------------------------------------------------------------------------
@@ -259,10 +273,11 @@ except Exception:  # pragma: no cover - litellm is a declared direct dep
 # --------------------------------------------------------------------------
 # Reasoning resolution
 # --------------------------------------------------------------------------
-# Two channels carry model reasoning: the litellm streaming delta
-# (``reasoning_content`` / ``thinking_blocks`` -- provider-agnostic, always
-# available since litellm is a direct dep) and crewai's native
-# ``LLMThinkingChunkEvent`` (its Gemini provider, crewai >= 1.10.1). The event
+# Three channels carry model reasoning: the litellm chat-completions streaming
+# delta (``reasoning_content`` / ``thinking_blocks`` -- provider-agnostic, always
+# available since litellm is a direct dep), crewai's native
+# ``LLMThinkingChunkEvent`` (its Gemini provider, crewai >= 1.10.1), and the
+# OpenAI Responses API (resolved further down). The thinking event
 # lives at ``crewai.events.types.llm_events`` (1.x) / ``crewai.utilities.events.
 # llm_events`` (0.x) and is NOT re-exported at the events-package root. Resolved
 # here (before ``_detect``) so both the capability snapshot and the frame-path
@@ -276,10 +291,52 @@ LLMThinkingChunkEvent = (
     else None
 )
 _thinking_event_available = LLMThinkingChunkEvent is not None
-_native_reasoning_event_available = _thinking_event_available
-# Reasoning surfacing is available whenever ANY channel is live -- not gated to
-# a single provider. The litellm delta channel is effectively always live.
-_reasoning_available = _litellm_available or _thinking_event_available
+
+# Third channel: the OpenAI Responses API. OpenAI's reasoning models expose their
+# reasoning SUMMARIES only there -- chat-completions carries none, for any of
+# them -- so surfacing an OpenAI trace needs a separate streaming path. The
+# channel resolves off litellm's PUBLIC ``aresponses`` entrypoint; the event
+# vocabulary it streams is covered by this package's declared litellm range (see
+# the ``litellm`` requirement in ``pyproject.toml``), not by probing litellm's
+# private event-model registry.
+_RESPONSES_ENTRYPOINT = (
+    getattr(litellm, "aresponses", None) if _litellm_available else None
+)
+
+
+def responses_entrypoint():
+    """Return litellm's async Responses-API entrypoint, or ``None``.
+
+    Resolved once at import; callers probe the RETURN VALUE rather than a
+    version, so a litellm without the entrypoint degrades to chat-completions.
+    """
+    return _RESPONSES_ENTRYPOINT
+
+
+_responses_api_available = callable(_RESPONSES_ENTRYPOINT)
+
+
+def any_reasoning_channel(
+    *,
+    litellm_available: bool,
+    thinking_event_available: bool,
+    responses_api_available: bool,
+) -> bool:
+    """Whether reasoning can surface at all, given which channels resolved.
+
+    Reasoning is available whenever ANY channel is live, never gated to one
+    provider or one transport: a build with only the native thinking event, or
+    only the Responses API, still surfaces REASONING_*. Kept as one predicate so
+    the declaration cannot drift back to a single-channel gate.
+    """
+    return litellm_available or thinking_event_available or responses_api_available
+
+
+#: ``reasoning.reason`` when the capability is unavailable. Reasoning drops out
+#: only when ALL THREE channels are absent (no litellm delta, no native thinking
+#: event, no Responses API), so the reason names that condition rather than
+#: blaming any single channel.
+NO_REASONING_CHANNEL = "no_reasoning_channel_available"
 
 
 # --------------------------------------------------------------------------
@@ -302,6 +359,19 @@ CHECKPOINT_ENABLING_VERSIONS: dict[str, str] = {
 _CREWAI_MODULE, _ = _first_module(["crewai"])
 _Flow = getattr(_CREWAI_MODULE, "Flow", None) if _CREWAI_MODULE else None
 _Crew = getattr(_CREWAI_MODULE, "Crew", None) if _CREWAI_MODULE else None
+_conversational_stream_available = bool(
+    _stream_frame_available
+    and _Flow is not None
+    and callable(_safe_getattr(_Flow, "stream_turn"))
+)
+
+# ``BaseAgent`` is the base every crewai agent derives from, including a user's
+# own subclass, so it is the wider net for "this attribute is an agent".
+# ``crewai.Agent`` is the fallback for a build that does not expose it.
+_BASE_AGENT_MODULE, _ = _first_module(["crewai.agents.agent_builder.base_agent"])
+_Agent = (
+    getattr(_BASE_AGENT_MODULE, "BaseAgent", None) if _BASE_AGENT_MODULE else None
+) or (getattr(_CREWAI_MODULE, "Agent", None) if _CREWAI_MODULE else None)
 
 
 def _kwarg_in_signature(func: Any, name: str) -> bool:
@@ -561,6 +631,43 @@ def warn_multimodal_files_gap() -> None:
         "'crewai[file-processing]' extra.",
         CAPABILITIES.crewai_version,
     )
+# Memory-isolation resolution
+# --------------------------------------------------------------------------
+# crewai 1.x replaced the 0.x short-term / entity / long-term stores with ONE
+# ``Memory`` object over ONE store, namespaced by a ``root_scope`` string that
+# ``Crew.create_crew_memory`` derives from the CREW NAME. Nothing in that path
+# derives from the AG-UI ``threadId``, so two chats served by the same endpoint
+# read and write the same namespace.
+#
+# The isolation primitive is ``Memory.scope(path)``, which returns a
+# ``MemoryScope`` view whose reads and writes are confined to ``path`` and
+# below. ``Crew._memory`` is typed ``Memory | MemoryScope | MemorySlice``, so a
+# view is a first-class thing to hand a crew, not a hack.
+#
+# Resolved (never version-gated) so a build without the unified memory API
+# degrades to "no isolation, one warning" rather than crashing. The warning is
+# emitted at the CALL SITE (``_memory``) rather than from ``warn_on_gaps``: an
+# operator who never sets ``memory=True`` has no gap to hear about, and an
+# import-time warning for them would be pure noise.
+_MEMORY_MODULE, _MEMORY_MODULE_NAME = _first_module(["crewai.memory.unified_memory"])
+Memory = getattr(_MEMORY_MODULE, "Memory", None) if _MEMORY_MODULE is not None else None
+
+# crewai's own scope-name sanitizer (``crewai.memory.utils``). Used so a
+# bridge-built scope segment is normalised exactly the way crewai normalises the
+# crew-name segment sitting above it. ``_memory`` carries an equivalent fallback
+# for builds that do not expose it.
+_MEMORY_UTILS_MODULE, _ = _first_module(["crewai.memory.utils"])
+sanitize_scope_name = (
+    getattr(_MEMORY_UTILS_MODULE, "sanitize_scope_name", None)
+    if _MEMORY_UTILS_MODULE is not None
+    else None
+)
+
+# Both are required: the type (to recognise a crew's memory) and the view
+# factory (to derive a per-thread namespace from it).
+_memory_scope_available = Memory is not None and callable(
+    getattr(Memory, "scope", None)
+)
 
 
 @dataclass(frozen=True)
@@ -580,11 +687,14 @@ class _Capabilities:
     crew_chat_module: str | None
     crew_chat_available: bool
     litellm_available: bool
-    # Reasoning: available whenever ANY channel is live (litellm delta or the
-    # native thinking event), never gated to a single provider. Surfaced for
-    # the protocol capability table.
+    # Reasoning: available whenever ANY channel is live (litellm delta, the
+    # native thinking event, or the Responses API), never gated to a single
+    # provider. Surfaced for the protocol capability table.
     reasoning_available: bool = False
     native_reasoning_event_available: bool = False
+    # ``responses_api_available`` is the CHANNEL's availability: whether litellm
+    # exposes the ``aresponses`` entrypoint that opens the stream.
+    responses_api_available: bool = False
     stream_frame_available: bool = False
     # Checkpointing: informational; the wiring keys off the resolved
     # symbols / ``flow_supports_checkpointing`` per-flow probe, not these fields.
@@ -602,6 +712,12 @@ class _Capabilities:
     human_feedback_resume_available: bool = False
     human_feedback_request_id_supported: bool = False
     crewai_files_available: bool = False
+    # Per-thread memory isolation: informational. ``_memory`` keys off the
+    # resolved symbols and warns once at the call site, so this is NOT listed in
+    # ``missing`` (which drives import-time warnings that would fire for every
+    # operator, including the majority who never enable crew memory).
+    memory_scope_available: bool = False
+    memory_module: str | None = None
     missing: tuple[str, ...] = field(default_factory=tuple)
 
     def warn_on_gaps(self) -> None:
@@ -636,6 +752,18 @@ class _Capabilities:
                 "completions require it; install litellm (a direct dependency) "
                 "or crewai[litellm].",
                 self.crewai_version,
+            )
+        if self.litellm_available and not self.responses_api_available:
+            # NOT a hard gap: reasoning still surfaces on the chat-completions
+            # channel for every provider that carries it there, and the flow
+            # examples degrade on ``responses_channel_available()``. Named at INFO
+            # so an operator who wanted an OpenAI trace learns why it is absent.
+            _LOGGER.info(
+                "ag-ui-crewai: the installed litellm exposes no 'aresponses' "
+                "entrypoint, so the OpenAI Responses channel reports unavailable "
+                "and callers stay on chat-completions (which carries no OpenAI "
+                "reasoning summaries). Install a litellm inside this package's "
+                "declared range.",
             )
         if not self.stream_frame_available:
             # NOT a hard gap — the legacy bus-listener path still works. Emit
@@ -690,8 +818,15 @@ def _detect() -> _Capabilities:
         crew_chat_module=_CREW_CHAT_MODULE_NAME,
         crew_chat_available=_crew_chat_available,
         litellm_available=_litellm_available,
-        reasoning_available=_reasoning_available,
-        native_reasoning_event_available=_native_reasoning_event_available,
+        # Recomputed from the live probes (not the import-time constant) so the
+        # snapshot always reflects every channel that actually resolved.
+        reasoning_available=any_reasoning_channel(
+            litellm_available=_litellm_available,
+            thinking_event_available=_thinking_event_available,
+            responses_api_available=_responses_api_available,
+        ),
+        native_reasoning_event_available=_thinking_event_available,
+        responses_api_available=_responses_api_available,
         stream_frame_available=_stream_frame_available,
         checkpoint_config_available=_checkpoint_config_available,
         checkpointing_available=_checkpointing_available,
@@ -705,6 +840,8 @@ def _detect() -> _Capabilities:
         human_feedback_resume_available=_human_feedback_resume_available,
         human_feedback_request_id_supported=_human_feedback_request_id_supported,
         crewai_files_available=_crewai_files_available,
+        memory_scope_available=_memory_scope_available,
+        memory_module=_MEMORY_MODULE_NAME,
         missing=tuple(missing),
     )
     caps.warn_on_gaps()
@@ -718,9 +855,9 @@ CAPABILITIES = _detect()
 # --------------------------------------------------------------------------
 # Native-Gemini resolution (informational reasoning fields)
 # --------------------------------------------------------------------------
-# The thinking-chunk event class + availability flags are resolved ONCE above
-# (before ``_detect``). Reasoning is now surfaced provider-agnostically via the
-# litellm channel and the native event, so ``get_capabilities`` no longer gates
+# The thinking-chunk event class + its single availability flag are resolved ONCE
+# above (before ``_detect``). Reasoning is now surfaced provider-agnostically via
+# the litellm channel and the native event, so ``get_capabilities`` no longer gates
 # reasoning on a native-Gemini LLM. The resolver below stays only to populate
 # the informational ``nativeGeminiProvider`` / ``resolvedProvider`` fields: the
 # native ``LLMThinkingChunkEvent`` (verified on the 1.15.7 wheel, emitted only by
@@ -848,40 +985,69 @@ def _is_native_gemini(llm: Any) -> bool:
 def _reasoning_capability(llm: Any = None) -> dict:
     """Build the ``reasoning`` block of the capability declaration.
 
-    Reasoning surfaces as first-class ``REASONING_*`` events, provider-agnostic
-    and on BOTH transports: ``copilotkit_stream`` reads the litellm delta's
-    ``reasoning_content`` / ``thinking_blocks`` for any reasoning-capable model
-    (deepseek-reasoner, Anthropic extended thinking, Bedrock, xAI,
-    gemini-via-litellm, ...), and crewai's native Gemini provider additionally
-    emits ``LLMThinkingChunkEvent`` on the StreamFrame path. It needs NEITHER
-    ``emit_raw_events`` NOR the StreamFrame transport.
+    Reasoning surfaces as first-class ``REASONING_*`` events, provider-agnostic,
+    over three channels. Transport reality differs PER CHANNEL:
+
+    * litellm chat-completions delta (``copilotkit_stream`` reads
+      ``reasoning_content`` / ``thinking_blocks`` for any reasoning-capable model:
+      deepseek-reasoner, Anthropic extended thinking, Bedrock, xAI,
+      gemini-via-litellm, ...) and the OpenAI Responses API
+      (``copilotkit_responses``, the ONLY place OpenAI's reasoning models expose
+      their reasoning summaries): both emit Bridged reasoning events on the event
+      bus, which BOTH transports handle -- the StreamFrame path and the legacy
+      bus-listener path.
+    * crewai's native Gemini ``LLMThinkingChunkEvent``: StreamFrame-ONLY. The
+      only thing that turns it into ``REASONING_*`` is the frame-path scoped sink
+      gate plus the frame translator; the legacy bus-listener path has no handler
+      for it.
+
+    No channel needs ``emit_raw_events``: reasoning is a mapped channel, never RAW
+    passthrough.
 
     ``supported`` describes the bridge capability, not whether a given model will
     actually reason: a non-reasoning model simply emits nothing (graceful
-    no-op). It is therefore True whenever a reasoning channel is live -- the
-    litellm channel is effectively always live (a direct dep).
+    no-op). It is True whenever ANY channel is live -- the litellm channel is
+    effectively always live (a direct dep).
+
+    Every channel field is read from the ONE frozen ``CAPABILITIES`` snapshot, and
+    ``supported`` / ``reason`` are DERIVED from the three fields the block itself
+    publishes, so the block cannot advertise a channel it also reports absent (or
+    claim support with every channel dark).
     ``nativeGeminiProvider`` / ``resolvedProvider`` are informational: the native
     event is an EXTRA source, not a requirement.
     """
     resolved = _resolve_llm(llm)
+    # Provider-agnostic path, on both transports (always live when litellm is
+    # installed, which it is as a direct dependency).
+    litellm_channel = CAPABILITIES.litellm_available
+    # crewai's native Gemini thinking event: an extra, StreamFrame-only source.
+    thinking_event = CAPABILITIES.native_reasoning_event_available
+    # OpenAI Responses API: the only channel that carries OpenAI reasoning
+    # summaries. Capability-probed, not version- or model-name-gated.
+    responses_channel = CAPABILITIES.responses_api_available
+    supported = any_reasoning_channel(
+        litellm_available=litellm_channel,
+        thinking_event_available=thinking_event,
+        responses_api_available=responses_channel,
+    )
     return {
-        "supported": CAPABILITIES.reasoning_available,
-        # Provider-agnostic path (always live when litellm is installed).
-        "litellmChannel": CAPABILITIES.litellm_available,
-        # crewai's native Gemini thinking event: an extra frame-path source.
-        "thinkingEventAvailable": _thinking_event_available,
+        "supported": supported,
+        "litellmChannel": litellm_channel,
+        "thinkingEventAvailable": thinking_event,
+        "responsesApiChannel": responses_channel,
         "nativeGeminiProvider": _is_native_gemini(resolved),
         # A caller object: a raising property here would escape the whole query.
         "resolvedProvider": _safe_getattr(resolved, "provider"),
         # First-class REASONING_* mapping: reasoning does NOT ride RAW passthrough.
         "requiresEmitRawEvents": False,
-        "reason": None if CAPABILITIES.reasoning_available else "litellm_unavailable",
+        "reason": None if supported else NO_REASONING_CHANNEL,
     }
 
 
 def get_capabilities(
     *,
     llm: Any = None,
+    emission_shape: str | None = None,
     emit_raw_events: bool | None = None,
 ) -> dict:
     """Return the CrewAI bridge's capability declaration.
@@ -889,13 +1055,14 @@ def get_capabilities(
     Mirrors the shape of ``ag_ui_langgraph.LangGraphAgent.get_capabilities``
     (``identity`` / ``humanInTheLoop`` / ``state`` / ``transport``) and adds the
     CrewAI-specific blocks the parity lane needs: the resolved wire shape, RAW
-    passthrough, and reasoning.
+    passthrough, reasoning, and Conversational Flow transport.
 
     No field is derived from ``crewai.__version__`` - the version string appears
     only as informational ``crewaiVersion`` metadata (same rule as the rest of this
-    module). Within that, ``transport`` / ``rawEvents`` / ``reasoning`` / ``crewChat``
-    come from runtime probes, while ``humanInTheLoop`` and ``state`` are static
-    declarations of what the bridge implements today.
+    module). Within that, ``transport`` / ``rawEvents`` / ``reasoning`` /
+    ``conversationalFlows`` / ``crewChat`` come from runtime probes, while
+    ``humanInTheLoop`` and ``state`` are static declarations of what the bridge
+    implements today.
 
     ``emission_shape`` / ``emit_raw_events`` default to re-reading the environment,
     so a declaration fetched without arguments can disagree with an endpoint that
@@ -926,9 +1093,32 @@ def get_capabilities(
     # ``_config`` is a leaf (``_env`` + stdlib only), imported locally purely to
     # keep this module's "crewai / litellm / stdlib only" property for every path
     # that never calls ``get_capabilities``.
-    from ._config import DEFAULT_EMIT_RAW_EVENTS, resolve_emit_raw_events
+    from ._config import (
+        DEFAULT_EMIT_RAW_EVENTS,
+        resolve_emission_shape,
+        resolve_emit_raw_events,
+    )
 
     resolved_raw = resolve_emit_raw_events(emit_raw_events)
+    resolved_shape = resolve_emission_shape(emission_shape)
+    text_events = (
+        [EventType.TEXT_MESSAGE_CHUNK.value]
+        if resolved_shape == "chunks"
+        else [
+            EventType.TEXT_MESSAGE_START.value,
+            EventType.TEXT_MESSAGE_CONTENT.value,
+            EventType.TEXT_MESSAGE_END.value,
+        ]
+    )
+    tool_events = (
+        [EventType.TOOL_CALL_CHUNK.value]
+        if resolved_shape == "chunks"
+        else [
+            EventType.TOOL_CALL_START.value,
+            EventType.TOOL_CALL_ARGS.value,
+            EventType.TOOL_CALL_END.value,
+        ]
+    )
     return {
         "identity": {"type": "crewai", "crewaiVersion": CAPABILITIES.crewai_version},
         "humanInTheLoop": {
@@ -955,12 +1145,12 @@ def get_capabilities(
             "streamFrames": CAPABILITIES.stream_frame_available,
         },
         "wireShape": {
-            # This build streams LLM text / tool calls as CHUNK events. MCP tool
-            # executions are the exception: their name, args and result arrive
-            # together, so they already emit canonical TOOL_CALL_* triples.
-            "emissionShape": "chunks",
-            "textMessages": [EventType.TEXT_MESSAGE_CHUNK.value],
-            "toolCalls": [EventType.TOOL_CALL_CHUNK.value],
+            # START/CONTENT/END triples by default; "chunks" is a compatibility
+            # opt-out. MCP tool executions always use triples (name, args and result
+            # arrive together, not streamed), independent of this setting.
+            "emissionShape": resolved_shape,
+            "textMessages": text_events,
+            "toolCalls": tool_events,
             "mcpToolCalls": [
                 EventType.TOOL_CALL_START.value,
                 EventType.TOOL_CALL_ARGS.value,
@@ -977,5 +1167,10 @@ def get_capabilities(
             "default": DEFAULT_EMIT_RAW_EVENTS,
         },
         "reasoning": _reasoning_capability(llm),
+        "conversationalFlows": {
+            "supported": _conversational_stream_available,
+            "entrypoint": "stream_turn",
+            "sessionId": "threadId",
+        },
         "crewChat": {"supported": CAPABILITIES.crew_chat_available},
     }

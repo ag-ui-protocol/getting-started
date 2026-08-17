@@ -21,6 +21,10 @@ export function CodeEditor({ file, onFileChange }: CodeEditorProps) {
   const posthog = usePostHog();
   const [copied, setCopied] = useState(false);
 
+  // NOTE (PNI-272): kept verbatim. Monaco wants "typescript" where the feature
+  // files say "ts". Deriving a local instead would stop mutating the caller's
+  // object, which is a behaviour change; this branch is byte-for-byte as before.
+  // eslint-disable-next-line react-hooks/immutability
   if (file?.language === "ts") file.language = "typescript";
 
   const handleCopy = async () => {

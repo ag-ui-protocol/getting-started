@@ -11,12 +11,6 @@ import {
 import { LegacyRuntimeProtocolEvent } from "../types";
 
 describe("convertToLegacyEvents - Tool Call Sequences", () => {
-  const defaultParams = {
-    threadId: "test-thread",
-    runId: "test-run",
-    agentName: "test-agent",
-  };
-
   it("should handle basic tool call lifecycle (start → args → end)", async () => {
     const mockEvents: BaseEvent[] = [
       {

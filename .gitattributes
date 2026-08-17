@@ -6,6 +6,10 @@
 *.tsx text eol=lf
 *.py text eol=lf
 
+# Generated E2E event-trace goldens. Keep these reviewable as artifacts without
+# letting their size obscure the hand-written test harness in GitHub diffs.
+apps/dojo/e2e/tests/**/*.event-trace.ts linguist-generated=true
+
 # Git LFS
 *.png filter=lfs diff=lfs merge=lfs -text
 *.jpg filter=lfs diff=lfs merge=lfs -text
@@ -19,4 +23,25 @@
 *.ttf filter=lfs diff=lfs merge=lfs -text
 *.otf filter=lfs diff=lfs merge=lfs -text
 *.eot filter=lfs diff=lfs merge=lfs -text
-*.dill filter=lfs diff=lfs merge=lfs -text
+
+# Exemptions from Git LFS.
+#
+# The paths below are served directly out of a repository checkout by build
+# platforms that do not hydrate Git LFS. If these became pointers, the hosts
+# would serve the 130-byte pointer text in place of the asset:
+#
+#   docs/**            -> Mintlify. LFS is an open, unanswered feature request:
+#                         https://github.com/orgs/mintlify/discussions/4092
+#   apps/dojo/public/** -> Render (dojo.ag-ui.com), static assets from the checkout.
+#   apps/dojo/src/**    -> same, Next.js app assets.
+#
+# The Kotlin example's launcher icons are Android Studio template output at
+# 1-8 KB each, well under any size where LFS pays for itself.
+#
+# Only `filter`, `diff` and `merge` are unset. `text` is deliberately left
+# alone: the rules above already mark these extensions `-text`, and unsetting
+# `text` here would also strip eol normalisation from docs/**/*.mdx.
+docs/** !filter !diff !merge
+apps/dojo/public/** !filter !diff !merge
+apps/dojo/src/** !filter !diff !merge
+sdks/community/kotlin/** !filter !diff !merge

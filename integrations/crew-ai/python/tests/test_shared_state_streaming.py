@@ -665,3 +665,112 @@ async def test_terminal_snapshot_serializes_pydantic_state():
     terminal = events[-3]
     assert type(terminal).__name__ == "StateSnapshotEvent"
     assert terminal.snapshot == {"messages": [], "recipe": {"title": "Soup"}}
+
+
+# --------------------------------------------------------------------------
+# StreamFrame path (crewai >= 1.6): the translator must honour the SAME
+# emit_state/predict_state suppression the legacy listener does, and owe the
+# terminal snapshot correctly across the method-failed / finalize edges.
+# Driven by feeding the translator raw lifecycle events directly (as
+# ``endpoint._run_flow_frame_stream`` does); direct-translate uses the live
+# suppression-flag fallback (the flags are set synchronously in the body here).
+# --------------------------------------------------------------------------
+
+from types import SimpleNamespace  # noqa: E402
+from ag_ui_crewai._frames import StreamFrameTranslator  # noqa: E402
+
+
+def _fe(type_, **attrs):  # noqa: A002 - mirror event.type
+    return SimpleNamespace(type=type_, **attrs)
+
+
+def _frame_translator(flow):
+    return StreamFrameTranslator(
+        thread_id="t-1",
+        run_id="r-1",
+        state_provider=lambda: getattr(flow, "state", {}),
+        flow_provider=lambda: flow,
+    )
+
+
+async def test_frame_method_finished_after_emit_suppresses_node_exit():
+    # A method that emit_state's then finishes must have its node-exit
+    # STATE_SNAPSHOT SUPPRESSED (only MESSAGES + STEP_FINISHED), so the rebuild
+    # does not clobber the progressive emit. Direct-translate exercises the live
+    # suppression fallback (no sink stamp).
+    flow = _FakeFlow(state={"messages": [], "v": "real"})
+    tr = _frame_translator(flow)
+    tr.translate(_fe("flow_started"))
+    tr.translate(_fe("method_execution_started", method_name="chat"))
+    token = flow_context.set(flow)
+    try:
+        await copilotkit_emit_state({"v": "emit"})
+    finally:
+        flow_context.reset(token)
+    finished = tr.translate(_fe("method_execution_finished", method_name="chat"))
+    assert _names(finished) == ["MessagesSnapshotEvent", "StepFinishedEvent"]
+
+
+async def test_frame_method_failed_after_emit_owes_terminal_snapshot():
+    # A method emit_state's then FAILS while the flow continues to flow_finished.
+    # The failed method emits no node-exit snapshot, so the terminal snapshot is
+    # the only carrier of the authoritative flow.state, so the fail path must
+    # record the owed terminal, not drop it.
+    flow = _FakeFlow(state={"messages": [], "recipe": {"title": "Pho"}})
+    tr = _frame_translator(flow)
+    tr.translate(_fe("flow_started"))
+    tr.translate(_fe("method_execution_started", method_name="chat"))
+    token = flow_context.set(flow)
+    try:
+        await copilotkit_emit_state({"recipe": "ephemeral"})
+    finally:
+        flow_context.reset(token)
+    tr.translate(_fe("method_execution_failed", method_name="chat"))
+    tail = tr.translate(_fe("flow_finished"))
+    assert _names(tail)[-2:] == ["StateSnapshotEvent", "RunFinishedEvent"]
+    snap = next(e for e in tail if type(e).__name__ == "StateSnapshotEvent")
+    assert snap.snapshot == {"messages": [], "recipe": {"title": "Pho"}}
+
+
+async def test_frame_prior_suppressed_then_later_method_fails_keeps_terminal():
+    # Node A emit_state's and finishes (owed terminal = True). Node B then FAILS
+    # without emitting. B's fail path must NOT clobber A's owed-terminal flag (it
+    # emits no snapshot of its own): OR, not overwrite.
+    flow = _FakeFlow(state={"messages": [], "recipe": {"title": "Laksa"}})
+    tr = _frame_translator(flow)
+    tr.translate(_fe("flow_started"))
+    tr.translate(_fe("method_execution_started", method_name="a"))
+    token = flow_context.set(flow)
+    try:
+        await copilotkit_emit_state({"recipe": "ephemeral"})
+    finally:
+        flow_context.reset(token)
+    tr.translate(_fe("method_execution_finished", method_name="a"))
+    tr.translate(_fe("method_execution_started", method_name="b"))
+    tr.translate(_fe("method_execution_failed", method_name="b"))
+    tail = tr.translate(_fe("flow_finished"))
+    assert _names(tail)[-2:] == ["StateSnapshotEvent", "RunFinishedEvent"]
+    snap = next(e for e in tail if type(e).__name__ == "StateSnapshotEvent")
+    assert snap.snapshot == {"messages": [], "recipe": {"title": "Laksa"}}
+
+
+async def test_frame_finalize_redelivers_state_when_suppressed_without_finish():
+    # A method emit_state's then the stream exhausts via finalize WITHOUT a
+    # method_execution_finished (e.g. an async HITL suspend): the terminal must
+    # still redeliver the authoritative flow.state, else the client is left on
+    # the ephemeral emit payload.
+    flow = _FakeFlow(state={"messages": [], "recipe": {"title": "Ragu"}})
+    tr = _frame_translator(flow)
+    tr.translate(_fe("flow_started"))
+    tr.translate(_fe("method_execution_started", method_name="chat"))
+    token = flow_context.set(flow)
+    try:
+        await copilotkit_emit_state({"recipe": "ephemeral"})
+    finally:
+        flow_context.reset(token)
+    tail = tr.finalize()
+    names = _names(tail)
+    assert "StateSnapshotEvent" in names
+    assert names[-1] == "RunFinishedEvent"
+    snap = next(e for e in tail if type(e).__name__ == "StateSnapshotEvent")
+    assert snap.snapshot == {"messages": [], "recipe": {"title": "Ragu"}}

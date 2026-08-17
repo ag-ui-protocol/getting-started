@@ -64,5 +64,56 @@
         "continuationToken": null
       }
     }
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "usage",
+        "details": {
+          "inputTokenCount": 182,
+          "outputTokenCount": 155,
+          "cachedInputTokenCount": 0,
+          "reasoningTokenCount": 128
+        }
+      }
+    ],
+    "responseId": "run_Id_1",
+    "rawRepresentation": {
+      "type": "RUN_FINISHED",
+      "threadId": "thread_Id_1",
+      "runId": "run_Id_1",
+      "outcome": {
+        "type": "interrupt",
+        "interrupts": [
+          {
+            "id": "ficc_Id_1",
+            "reason": "tool_call",
+            "message": "Approval required for tool call: delete_file",
+            "toolCallId": "call_Id_1",
+            "responseSchema": {
+              "type": "object",
+              "properties": {
+                "approved": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "approved"
+              ]
+            }
+          }
+        ]
+      },
+      "usage": [
+        {
+          "inputTokens": 182,
+          "outputTokens": 155,
+          "totalTokens": 337,
+          "reasoningTokens": 128,
+          "cachedInputTokens": 0
+        }
+      ]
+    }
   }
 ]

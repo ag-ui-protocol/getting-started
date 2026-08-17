@@ -11,8 +11,9 @@ import {
 } from "@ag-ui/client";
 import { Observable, type Subscription } from "rxjs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+// Type-only: erased at compile time, so it never enters the runtime graph.
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 /**
  * MCP Client configuration for HTTP (streamable) transport.
@@ -560,15 +561,30 @@ export class MCPMiddleware extends Middleware {
    * Caveat: for the SSE transport, `requestInit.headers` only applies to
    * the POST channel — the SSE event stream uses `eventSourceInit`. For
    * streamable HTTP (the typical case) it covers all traffic.
+   *
+   * The SSE transport is imported lazily so that `eventsource` — which it
+   * pulls in transitively, and which only some consumers ever need — stays out
+   * of the module graph unless an SSE server is actually configured. Under Bun
+   * a static import of it breaks at load time: `eventsource`'s `bun` export
+   * condition resolves to its ESM build, so the SDK's CJS `require` gets an
+   * async module back and throws.
    */
   private async connect(serverConfig: MCPClientConfig): Promise<Client> {
     const opts = serverConfig.headers
       ? { requestInit: { headers: serverConfig.headers } }
       : undefined;
-    const transport =
-      serverConfig.type === "sse"
-        ? new SSEClientTransport(new URL(serverConfig.url), opts)
-        : new StreamableHTTPClientTransport(new URL(serverConfig.url), opts);
+    let transport: Transport;
+    if (serverConfig.type === "sse") {
+      const { SSEClientTransport } = await import(
+        "@modelcontextprotocol/sdk/client/sse.js"
+      );
+      transport = new SSEClientTransport(new URL(serverConfig.url), opts);
+    } else {
+      transport = new StreamableHTTPClientTransport(
+        new URL(serverConfig.url),
+        opts,
+      );
+    }
     const client = new Client({
       name: "ag-ui-mcp-middleware",
       version: "0.0.1",

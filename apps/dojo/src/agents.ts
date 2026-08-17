@@ -8,6 +8,14 @@ import { ServerStarterAgent } from "@ag-ui/server-starter";
 import { ServerStarterAllFeaturesAgent } from "@ag-ui/server-starter-all-features";
 import { MastraClient } from "@mastra/client-js";
 import { MastraAgent } from "@ag-ui/mastra";
+
+// pnpm may resolve separate @mastra/* installations for dojo vs @ag-ui/mastra,
+// which makes the client/agent types mismatch nominally on private fields. The
+// casts below are deliberate, but target these exact expected types rather than
+// widening to `any`.
+type RemoteAgentsOptions = Parameters<typeof MastraAgent.getRemoteAgents>[0];
+type LocalAgentsOptions = Parameters<typeof MastraAgent.getLocalAgents>[0];
+type MastraAgentOptions = ConstructorParameters<typeof MastraAgent>[0];
 // import { VercelAISDKAgent } from "@ag-ui/vercel-ai-sdk";
 // import { openai } from "@ai-sdk/openai";
 import { LangGraphAgent, LangGraphHttpAgent } from "@ag-ui/langgraph";
@@ -36,6 +44,10 @@ import { Ag2Agent } from "@ag-ui/ag2";
 import { LangroidHttpAgent } from "@ag-ui/langroid";
 import { WatsonxAgent } from "@ag-ui/watsonx";
 import { A2UIMiddleware } from "@ag-ui/a2ui-middleware";
+import {
+  CREWAI_CONVERSATIONAL_AGENT_PATHS,
+  CREWAI_FLOW_AGENT_PATHS,
+} from "./crewai";
 
 const envVars = getEnvVars();
 
@@ -76,6 +88,24 @@ export const CREWAI_A2UI_INJECT_AGENTS: string[] = [
   "a2ui_recovery",
 ];
 
+function createCrewAIIntegrationAgents<const T extends Record<string, string>>(
+  paths: T,
+) {
+  const agents = mapAgents(
+    (path) => new CrewAIAgent({ url: `${envVars.crewAiUrl}/${path}` }),
+    paths,
+  );
+  for (const id of CREWAI_A2UI_INJECT_AGENTS) {
+    (agents as Record<string, AbstractAgent>)[id]?.use(
+      new A2UIMiddleware({
+        injectA2UITool: true,
+        defaultCatalogId: A2UI_DOJO_CATALOG_ID,
+      }),
+    );
+  }
+  return agents;
+}
+
 export const agentsIntegrations = {
   "middleware-starter": async () => ({
     agentic_chat: new MiddlewareStarterAgent(),
@@ -87,6 +117,7 @@ export const agentsIntegrations = {
         new PydanticAIAgent({ url: `${envVars.pydanticAIUrl}/${path}` }),
       {
         agentic_chat: "agentic_chat",
+        agentic_chat_multimodal: "agentic_chat_multimodal",
         agentic_generative_ui: "agentic_generative_ui",
         human_in_the_loop: "human_in_the_loop",
         // TODO: Re-enable this once production builds no longer break
@@ -153,9 +184,8 @@ export const agentsIntegrations = {
     });
 
     return MastraAgent.getRemoteAgents({
-      // Cast needed: pnpm may resolve separate @mastra/client-js installations
-      // for dojo vs @ag-ui/mastra, causing nominal type mismatch on private fields
-      mastraClient: mastraClient as any,
+      mastraClient:
+        mastraClient as unknown as RemoteAgentsOptions["mastraClient"],
       resourceId: "mastra-agent-remote",
       // Surface Observational Memory background work as AG-UI activity events
       // for the `observational_memory` demo only (default OFF for all others).
@@ -181,9 +211,7 @@ export const agentsIntegrations = {
 
   "mastra-agent-local": async () => {
     const base = MastraAgent.getLocalAgents({
-      // Cast needed: pnpm may resolve separate @mastra/core installations
-      // for dojo vs @ag-ui/mastra, causing nominal type mismatch on private fields
-      mastra: mastra as any,
+      mastra: mastra as unknown as LocalAgentsOptions["mastra"],
       resourceId: "mastra-agent-local",
       // Surface Observational Memory background work as AG-UI activity events
       // for the `observational_memory` demo only (default OFF for all others).
@@ -195,7 +223,7 @@ export const agentsIntegrations = {
     // so the runtime's per-request `clone()` preserves it.
     const wrapA2UI = (agent: unknown): AbstractAgent =>
       new MastraAgent({
-        agent: agent as any,
+        agent: agent as unknown as MastraAgentOptions["agent"],
         resourceId: "mastra-agent-local",
         a2ui: a2uiInjectConfig,
       }) as unknown as AbstractAgent;
@@ -203,7 +231,7 @@ export const agentsIntegrations = {
     // bridge never adds generate_a2ui alongside search_flights/search_hotels.
     const wrapA2UIFixed = (agent: unknown): AbstractAgent =>
       new MastraAgent({
-        agent: agent as any,
+        agent: agent as unknown as MastraAgentOptions["agent"],
         resourceId: "mastra-agent-local",
         a2ui: { injectA2UITool: false },
       }) as unknown as AbstractAgent;
@@ -408,38 +436,10 @@ export const agentsIntegrations = {
       },
     ),
 
-  crewai: async () => {
-    const agents = mapAgents(
-      (path) => new CrewAIAgent({ url: `${envVars.crewAiUrl}/${path}` }),
-      {
-        agentic_chat: "agentic_chat",
-        backend_tool_rendering: "backend_tool_rendering",
-        interrupt: "interrupt",
-        human_in_the_loop: "human_in_the_loop",
-        tool_based_generative_ui: "tool_based_generative_ui",
-        agentic_generative_ui: "agentic_generative_ui",
-        shared_state: "shared_state",
-        predictive_state_updates: "predictive_state_updates",
-        crew_chat: "crew_chat",
-        error_flow: "error_flow",
-        a2ui_dynamic_schema: "a2ui_dynamic_schema",
-        a2ui_recovery: "a2ui_recovery",
-        a2ui_fixed_schema: "a2ui_fixed_schema",
-      },
-    );
-    // Auto-inject generate_a2ui for the subagent demos (dynamic + recovery);
-    // a2ui_fixed_schema wires its own backend tools and is deliberately left
-    // out. Excluded from the runtime a2ui config in route.ts (double-apply).
-    for (const id of CREWAI_A2UI_INJECT_AGENTS) {
-      (agents as Record<string, AbstractAgent>)[id]?.use(
-        new A2UIMiddleware({
-          injectA2UITool: true,
-          defaultCatalogId: A2UI_DOJO_CATALOG_ID,
-        }),
-      );
-    }
-    return agents;
-  },
+  crewai: async () => createCrewAIIntegrationAgents(CREWAI_FLOW_AGENT_PATHS),
+
+  "crewai-conversational-flows": async () =>
+    createCrewAIIntegrationAgents(CREWAI_CONVERSATIONAL_AGENT_PATHS),
 
   "agent-spec-langgraph": async () =>
     mapAgents(
@@ -475,6 +475,7 @@ export const agentsIntegrations = {
         new HttpAgent({ url: `${envVars.agentFrameworkPythonUrl}/${path}` }),
       {
         agentic_chat: "agentic_chat",
+        agentic_chat_multimodal: "agentic_chat_multimodal",
         backend_tool_rendering: "backend_tool_rendering",
         human_in_the_loop: "human_in_the_loop",
         agentic_generative_ui: "agentic_generative_ui",
@@ -523,6 +524,15 @@ export const agentsIntegrations = {
         shared_state: "shared_state",
         tool_based_generative_ui: "tool_based_generative_ui",
         predictive_state_updates: "predictive_state_updates",
+        // A2UI: generate_a2ui is auto-injected and handled server-side by the .NET
+        // AGUI.A2UI adapter (subagent + recovery). The dojo runtime attaches the A2UI
+        // painting middleware (no client-side tool injection, since injectsA2UITool is
+        // false for this integration), so these are plain HttpAgents. Fixed-schema needs no
+        // generation tool at all — its search tools return the surface envelope directly.
+        a2ui_fixed_schema: "a2ui_fixed_schema",
+        a2ui_dynamic_schema: "a2ui_dynamic_schema",
+        a2ui_advanced: "a2ui_advanced",
+        a2ui_recovery: "a2ui_recovery",
       },
     ),
 
@@ -643,6 +653,7 @@ export const agentsIntegrations = {
   ag2: async () =>
     mapAgents((path) => new Ag2Agent({ url: `${envVars.ag2Url}/${path}` }), {
       agentic_chat: "agentic_chat",
+      agentic_chat_multimodal: "agentic_chat_multimodal",
       backend_tool_rendering: "backend_tool_rendering",
       human_in_the_loop: "human_in_the_loop",
       agentic_generative_ui: "agentic_generative_ui",

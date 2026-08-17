@@ -77,8 +77,12 @@ async def test_agent_state_wire_map_persists_across_a_tool_using_run(tmp_path):
 
     agent.state.set(AG_UI_WIRE_MAP_STATE_KEY, {"wire-1": "native-xyz"})
 
-    # Consume to completion — models the adapter's frontend-tool halt drain,
-    # which lets the invocation finish so AfterInvocationEvent -> sync_agent runs.
+    # Consume to completion. The adapter itself does NOT run the invocation to
+    # completion on a frontend-tool halt (it stops the loop — see
+    # test_frontend_tool_halt_stops_loop.py); it does not need to, because
+    # MessageAddedEvent drives sync_agent as well as append_message, so agent
+    # state is already durable by the time the halt latches. Consuming fully
+    # here just keeps this test focused on the persistence guarantee.
     async for _ in agent.stream_async("please approve"):
         pass
 

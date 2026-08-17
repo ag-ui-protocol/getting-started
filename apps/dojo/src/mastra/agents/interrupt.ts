@@ -20,7 +20,9 @@ The \`schedule_meeting\` tool pauses execution and shows the user a time picker.
   // Cast: a tool with concrete suspend/resume schemas is not structurally
   // assignable to Mastra's `ToolAction<..., unknown, unknown, ...>` tools map
   // (generic variance). Runtime behavior is unaffected.
-  tools: { schedule_meeting: scheduleMeetingTool as any },
+  tools: {
+    schedule_meeting: scheduleMeetingTool,
+  } as unknown as ConstructorParameters<typeof Agent>[0]["tools"],
   memory: new Memory({
     storage: getStorage(),
   }),

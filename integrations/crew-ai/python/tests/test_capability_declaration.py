@@ -8,28 +8,53 @@ import dataclasses
 import pytest
 from fastapi import FastAPI
 
-from ag_ui_crewai import get_capabilities
+from ag_ui_crewai import _capabilities as capability_module
 from ag_ui_crewai import _capabilities as caps_mod
 from ag_ui_crewai import _config as config_mod
 from ag_ui_crewai import endpoint as ep
+from ag_ui_crewai import get_capabilities
 
 
 # -- shape of the declaration ----------------------------------------------
+
+
+def test_get_capabilities_declares_conversational_flow_transport():
+    conversational = get_capabilities()["conversationalFlows"]
+
+    assert conversational == {
+        "supported": capability_module._conversational_stream_available,
+        "entrypoint": "stream_turn",
+        "sessionId": "threadId",
+    }
+
+
+def test_conversational_capability_requires_public_stream_turn(monkeypatch):
+    monkeypatch.setattr(
+        capability_module,
+        "_conversational_stream_available",
+        False,
+        raising=False,
+    )
+
+    assert get_capabilities()["conversationalFlows"]["supported"] is False
 
 @pytest.fixture(autouse=True)
 def _clean_protocol_env(monkeypatch):
     """Clear the RAW env var: otherwise an exported AGUI_CREWAI_EMIT_RAW_EVENTS makes
     these tests assert the ambient environment rather than the shipped defaults."""
+    monkeypatch.delenv(config_mod.EMISSION_SHAPE_ENV_VAR, raising=False)
     monkeypatch.delenv(config_mod.EMIT_RAW_EVENTS_ENV_VAR, raising=False)
 
 
 def test_get_capabilities_gates_raw_events_on_the_streamframe_transport(monkeypatch):
     """RAW passthrough needs the scoped stream sink, so ``supported`` / ``enabled``
-    track the StreamFrame transport rather than the flag alone."""
-    if caps_mod.LLMThinkingChunkEvent is None:  # pragma: no cover
-        # Skipped up front: a mid-test skip would silently void the rawEvents
-        # assertions that precede it.
-        pytest.skip("installed crewai does not expose LLMThinkingChunkEvent")
+    track the StreamFrame transport rather than the flag alone.
+
+    Nothing here reads crewai's ``LLMThinkingChunkEvent``: the reasoning leg below
+    rests on the litellm channel, which is a direct dependency. It is pinned live
+    in the snapshot swap so the assertion states its own premise instead of
+    inheriting whatever the ambient probes resolved.
+    """
     def _set_stream_frames(available):
         # ``CAPABILITIES`` is a frozen dataclass, so swap the whole cached probe
         # result rather than mutating a field.
@@ -38,7 +63,9 @@ def test_get_capabilities_gates_raw_events_on_the_streamframe_transport(monkeypa
             caps_mod,
             "CAPABILITIES",
             dataclasses.replace(
-                caps_mod.CAPABILITIES, stream_frame_available=available
+                caps_mod.CAPABILITIES,
+                stream_frame_available=available,
+                litellm_available=True,
             ),
         )
 
@@ -122,16 +149,27 @@ def test_reasoning_supported_across_providers():
 def test_reasoning_still_supported_via_litellm_when_thinking_event_absent(monkeypatch):
     """On a crewai without ``LLMThinkingChunkEvent`` reasoning is STILL supported
     through the litellm channel; only the extra native Gemini source is gone. The
-    ``reasoning_available`` flag keys off the litellm channel too, so patch both."""
+    declaration reads one snapshot, so drop the native channel there.
+
+    The Responses channel is pinned DARK as well. Left live it also satisfies
+    ``supported`` on its own, so the assertion would pass without the litellm
+    channel carrying anything and the test would not prove what it is named for."""
     monkeypatch.setattr(caps_mod, "_thinking_event_available", False)
     monkeypatch.setattr(
         caps_mod,
         "CAPABILITIES",
-        dataclasses.replace(caps_mod.CAPABILITIES, reasoning_available=True),
+        dataclasses.replace(
+            caps_mod.CAPABILITIES,
+            native_reasoning_event_available=False,
+            responses_api_available=False,
+            litellm_available=True,
+        ),
     )
     reasoning = caps_mod._reasoning_capability(_FakeNativeGemini())
     assert reasoning["supported"] is True
     assert reasoning["thinkingEventAvailable"] is False
+    assert reasoning["responsesApiChannel"] is False
+    assert reasoning["litellmChannel"] is True
     assert reasoning["reason"] is None
 
 
@@ -363,4 +401,66 @@ def test_endpoint_factories_reject_a_bad_raw_flag_at_registration():
     with pytest.raises(ValueError):
         ep.add_crewai_flow_fastapi_endpoint(
             FastAPI(), _Flow(), "/flow", emit_raw_events="false"
+        )
+
+
+def test_emission_shape_resolution_precedence_and_validation(monkeypatch):
+    """Explicit argument > env var > shipped default (triples); a wrong-typed or
+    unknown value raises rather than silently mis-shaping the wire."""
+    monkeypatch.delenv(config_mod.EMISSION_SHAPE_ENV_VAR, raising=False)
+    assert config_mod.resolve_emission_shape(None) == "triples"
+    assert config_mod.resolve_emission_shape("Chunks") == "chunks"
+
+    monkeypatch.setenv(config_mod.EMISSION_SHAPE_ENV_VAR, "chunks")
+    assert config_mod.resolve_emission_shape(None) == "chunks"
+    # Explicit argument wins over the env var.
+    assert config_mod.resolve_emission_shape("triples") == "triples"
+
+    for bad in ("bogus", 123):
+        with pytest.raises(ValueError):
+            config_mod.resolve_emission_shape(bad)
+
+
+def test_unrecognised_emission_shape_env_is_warned_not_silently_ignored(
+    monkeypatch, caplog
+):
+    import logging
+
+    monkeypatch.setenv(config_mod.EMISSION_SHAPE_ENV_VAR, "tripples")
+    monkeypatch.setattr(config_mod, "_ENV_WARN_SEEN", set())
+    with caplog.at_level(logging.WARNING, logger="ag_ui_crewai._config"):
+        assert config_mod.resolve_emission_shape(None) == "triples"
+    assert any("tripples" in r.getMessage() for r in caplog.records), caplog.text
+
+
+def test_get_capabilities_reports_the_resolved_wire_shape():
+    """The declaration reflects the shape the endpoint will actually emit."""
+    triples = get_capabilities()["wireShape"]
+    assert triples["emissionShape"] == "triples"
+    assert triples["textMessages"] == [
+        "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END"
+    ]
+    assert triples["toolCalls"] == [
+        "TOOL_CALL_START", "TOOL_CALL_ARGS", "TOOL_CALL_END"
+    ]
+    # MCP tool executions are triples regardless of the streaming shape.
+    assert triples["mcpToolCalls"][0] == "TOOL_CALL_START"
+
+    chunks = get_capabilities(emission_shape="chunks")["wireShape"]
+    assert chunks["emissionShape"] == "chunks"
+    assert chunks["textMessages"] == ["TEXT_MESSAGE_CHUNK"]
+    assert chunks["toolCalls"] == ["TOOL_CALL_CHUNK"]
+
+    with pytest.raises(ValueError):
+        get_capabilities(emission_shape="bogus")
+
+
+def test_endpoint_factory_rejects_a_bad_emission_shape_at_registration():
+    class _Flow:
+        def kickoff_async(self, inputs=None):  # pragma: no cover - never called
+            raise AssertionError
+
+    with pytest.raises(ValueError):
+        ep.add_crewai_flow_fastapi_endpoint(
+            FastAPI(), _Flow(), "/flow", emission_shape="bogus"
         )

@@ -24,6 +24,11 @@ import type {
   ToolCallStartEvent,
 } from "@ag-ui/client";
 import { AbstractAgent, EventType } from "@ag-ui/client";
+import {
+  TokenUsage,
+  aggregateTokenUsage,
+  tokenUsageFromAiSdkUsage,
+} from "@ag-ui/core";
 import type { Agent as LocalMastraAgent } from "@mastra/core/agent";
 import { RequestContext } from "@mastra/core/request-context";
 import { randomUUID } from "@ag-ui/client";
@@ -507,7 +512,7 @@ interface MastraAgentStreamOptions {
    * bridge can surface it on `RUN_FINISHED.result` (see makeRunFinishedEvent).
    * traceId is undefined on cores/streams that don't expose one.
    */
-  onRunFinished?: (traceId?: string) => Promise<void>;
+  onRunFinished?: (traceId?: string, usage?: TokenUsage[]) => Promise<void>;
   onToolSuspended: (payload: {
     toolCallId: string;
     toolName: string;
@@ -791,7 +796,7 @@ export class MastraAgent extends AbstractAgent {
           // interrupt outcome when emitInterruptOutcome is on (e.g. a chained
           // interrupt in the resumed stream), so the resumed-run tail is
           // identical for local and remote.
-          const finishResume = async (traceId?: string) => {
+          const finishResume = async (traceId?: string, usage?: TokenUsage[]) => {
             await this.emitWorkingMemorySnapshot(subscriber, input.threadId);
             subscriber.next(
               this.makeRunFinishedEvent(
@@ -799,6 +804,7 @@ export class MastraAgent extends AbstractAgent {
                 input.runId,
                 pendingInterrupts,
                 traceId,
+                usage,
               ),
             );
             subscriber.complete();
@@ -836,7 +842,10 @@ export class MastraAgent extends AbstractAgent {
               );
 
               if (!hadError) {
-                await finishResume(await this.resolveTraceId(response));
+                await finishResume(
+                  await this.resolveTraceId(response),
+                  await this.resolveUsage(response),
+                );
               }
             } else {
               // Remote resume round-trips the suspend state + resume command
@@ -889,7 +898,10 @@ export class MastraAgent extends AbstractAgent {
 
               if (!stopped) {
                 flush();
-                await finishResume(await this.resolveTraceId(response));
+                await finishResume(
+                  await this.resolveTraceId(response),
+                  await this.resolveUsage(response),
+                );
               }
             }
           } catch (error) {
@@ -926,7 +938,7 @@ export class MastraAgent extends AbstractAgent {
             onError: (error) => {
               subscriber.error(error);
             },
-            onRunFinished: async (traceId) => {
+            onRunFinished: async (traceId, usage) => {
               await this.emitWorkingMemorySnapshot(subscriber, input.threadId);
               subscriber.next(
                 this.makeRunFinishedEvent(
@@ -934,6 +946,7 @@ export class MastraAgent extends AbstractAgent {
                   input.runId,
                   pendingInterrupts,
                   traceId,
+                  usage,
                 ),
               );
               subscriber.complete();
@@ -1044,6 +1057,7 @@ export class MastraAgent extends AbstractAgent {
     runId: string,
     interrupts: Interrupt[],
     traceId?: string,
+    usage?: TokenUsage[],
   ): RunFinishedEvent {
     const includeOutcome = this.emitInterruptOutcome && interrupts.length > 0;
     return {
@@ -1059,7 +1073,36 @@ export class MastraAgent extends AbstractAgent {
             } satisfies RunFinishedInterruptOutcome,
           }
         : {}),
+      ...(usage && usage.length > 0 ? { usage } : {}),
     } as RunFinishedEvent;
+  }
+
+  /**
+   * Resolve provider-reported token usage from a Mastra/AI-SDK stream result.
+   * AI-SDK v5 exposes a `usage` promise ({ inputTokens, outputTokens, ... });
+   * we map it into a single per-run TokenUsage entry, labelling provider/model
+   * from the local agent's model when discoverable. Best-effort: any failure
+   * (no usage, remote agent, rejected promise) yields an empty array so the run
+   * still finishes without usage.
+   */
+  private async resolveUsage(response: any): Promise<TokenUsage[]> {
+    try {
+      const raw = await response?.usage;
+      const identity = this.getModelIdentity();
+      const entry = tokenUsageFromAiSdkUsage(raw, identity);
+      return entry ? [entry] : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Best-effort provider/model of the configured local agent (undefined for
+   * remote agents or when the model doesn't expose these). */
+  private getModelIdentity(): { provider?: string; model?: string } {
+    const model = (this.agent as any)?.model;
+    const provider = typeof model?.provider === "string" ? model.provider : undefined;
+    const modelId = typeof model?.modelId === "string" ? model.modelId : undefined;
+    return { provider, model: modelId };
   }
 
   /**
@@ -2761,7 +2804,8 @@ export class MastraAgent extends AbstractAgent {
 
           if (!hadError) {
             const traceId = await this.resolveTraceId(response);
-            await onRunFinished?.(traceId);
+            const usage = await this.resolveUsage(response);
+            await onRunFinished?.(traceId, usage);
           }
         } else {
           throw new Error("Invalid response from local agent");
@@ -2832,7 +2876,8 @@ export class MastraAgent extends AbstractAgent {
           if (!stopped) flush();
           if (!stopped) {
             const traceId = await this.resolveTraceId(response);
-            await onRunFinished?.(traceId);
+            const usage = await this.resolveUsage(response);
+            await onRunFinished?.(traceId, usage);
           }
         } else {
           throw new Error("Invalid response from remote agent");

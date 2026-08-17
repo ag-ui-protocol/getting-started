@@ -275,17 +275,28 @@ function Recipe() {
 
   const newRecipeState = { ...recipe };
   const newChangedKeys = [];
+  // NOTE (PNI-272): this stays a ref, written and read within the same render,
+  // and the `setRecipe` sync below stays in an effect. Converting either to a
+  // render-phase state update loses the Ping entirely whenever the agent's final
+  // recipe change arrives with `isLoading` already false: the retry render sees
+  // the recipe already synchronised and `!isLoading`, clears the changed keys and
+  // commits without ever showing the indicator. The ref writes the value the same
+  // render reads, so the indicator always commits at least once.
   const changedKeysRef = useRef<string[]>([]);
 
+  // Iterating Recipe by dynamic key needs an index-signature view of it. The
+  // casts are repeated per access rather than hoisted: hoisting would read
+  // `agentState.recipe` once per render where this reads it per key, which is
+  // observable if that property is ever accessor- or Proxy-backed.
   for (const key in recipe) {
     if (
       agentState &&
       agentState.recipe &&
-      (agentState.recipe as any)[key] !== undefined &&
-      (agentState.recipe as any)[key] !== null
+      (agentState.recipe as unknown as Record<string, unknown>)[key] !== undefined &&
+      (agentState.recipe as unknown as Record<string, unknown>)[key] !== null
     ) {
-      let agentValue = (agentState.recipe as any)[key];
-      const recipeValue = (recipe as any)[key];
+      let agentValue = (agentState.recipe as unknown as Record<string, unknown>)[key];
+      const recipeValue = (recipe as unknown as Record<string, unknown>)[key];
 
       // Check if agentValue is a string and replace \n with actual newlines
       if (typeof agentValue === "string") {
@@ -293,19 +304,22 @@ function Recipe() {
       }
 
       if (JSON.stringify(agentValue) !== JSON.stringify(recipeValue)) {
-        (newRecipeState as any)[key] = agentValue;
+        (newRecipeState as unknown as Record<string, unknown>)[key] = agentValue;
         newChangedKeys.push(key);
       }
     }
   }
 
   if (newChangedKeys.length > 0) {
+    // eslint-disable-next-line react-hooks/refs -- see the note on the ref above
     changedKeysRef.current = newChangedKeys;
   } else if (!isLoading) {
+    // eslint-disable-next-line react-hooks/refs -- see the note on the ref above
     changedKeysRef.current = [];
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see the note on the ref above
     setRecipe(newRecipeState);
   }, [JSON.stringify(newRecipeState)]);
 
@@ -469,6 +483,7 @@ function Recipe() {
 
       {/* Dietary Preferences */}
       <div className="section-container relative">
+        {/* eslint-disable-next-line react-hooks/refs -- see the note on the ref above */}
         {changedKeysRef.current.includes("special_preferences") && <Ping />}
         <h2 className="section-title">Dietary Preferences</h2>
         <div className="dietary-options">
@@ -489,6 +504,7 @@ function Recipe() {
 
       {/* Ingredients */}
       <div className="section-container relative">
+        {/* eslint-disable-next-line react-hooks/refs -- see the note on the ref above */}
         {changedKeysRef.current.includes("ingredients") && <Ping />}
         <div className="section-header">
           <h2 className="section-title">Ingredients</h2>
@@ -536,6 +552,7 @@ function Recipe() {
 
       {/* Instructions */}
       <div className="section-container relative">
+        {/* eslint-disable-next-line react-hooks/refs -- see the note on the ref above */}
         {changedKeysRef.current.includes("instructions") && <Ping />}
         <div className="section-header">
           <h2 className="section-title">Instructions</h2>

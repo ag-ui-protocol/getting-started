@@ -176,8 +176,8 @@ cd sdks/dotnet/tests/AGUI.CrossLanguage.IntegrationTests
 dotnet test
 ```
 
-`pnpm install` from the repo root once first. Requires .NET 10 SDK, Node 20+,
-pnpm 10+.
+`pnpm install` from the repo root once first. Requires .NET 10 SDK, Node at the
+version in the repository's root `.node-version`, pnpm 10+.
 
 ## ❌ Critical anti-patterns
 

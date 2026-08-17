@@ -1,13 +1,33 @@
 name: Lint Release Workflows
 
-# Runs actionlint + shellcheck against the release / create-pr, release /
-# publish, and canary / publish pipelines and the scripts they call. Keeps
-# these critical, retry-sensitive files from silently regressing on shell or
-# action-syntax bugs.
+# Runs actionlint + shellcheck against the release, canary, and Python CI
+# pipelines and the scripts they call, plus the drift-guards that keep hand-maintained
+# lists in this repo honest. Keeps these critical, retry-sensitive files from silently
+# regressing on shell or action-syntax bugs.
 #
-# Scope is intentionally narrow: only the release workflows and
-# scripts/release/*. Expanding later is cheap; starting narrow avoids
-# drowning unrelated changes in pre-existing lint noise.
+# The actionlint file list below is explicit rather than repo-wide, so that adding
+# a workflow does not drown an unrelated PR in pre-existing lint noise — read that
+# list, not this comment, for the current scope. Everything else under
+# .github/workflows/ is unlinted; widening is a one-line change plus whatever it
+# turns up. shellcheck covers scripts/release/*.sh only.
+#
+# `paths:` below deliberately mirrors that scope rather than watching
+# .github/workflows/** wholesale. Two reasons, both learned from getting it wrong:
+#
+#   1. Triggering on a file nothing here lints spends two runners to re-lint exactly
+#      the same files as before.
+#   2. `reporter: github-check` makes reviewdog create a check run, and on a
+#      pull_request from a FORK the GITHUB_TOKEN is read-only regardless of the
+#      `checks: write` below — so that call fails. Watching `scripts/**` meant any
+#      external contributor touching scripts/ tripped it. Narrow paths make that
+#      rare; it is still reachable if a fork edits one of the ten linted workflows,
+#      which was already true before this workflow grew, and is not fixed here.
+#
+# The cost of mirroring is that the file list lives in three places: these two
+# `paths:` blocks and `actionlint_flags` below. Adding a workflow to the lint scope
+# means adding it to all three. That is deliberate duplication over a fourth
+# generated list — see verify-python-toolchain-pins.sh for why this repo prefers
+# cheap-and-explicit to a workflow analyser.
 
 on:
   push:
@@ -17,6 +37,15 @@ on:
       - ".github/workflows/publish-release.yml"
       - ".github/workflows/canary.yml"
       - ".github/workflows/lint-release-workflows.yml"
+      - ".github/workflows/unit-python-sdk.yml"
+      - ".github/workflows/dojo-e2e.yml"
+      - ".github/workflows/build-python-preview.yml"
+      - ".github/workflows/publish-python-preview.yml"
+      - ".github/workflows/zizmor.yml"
+      - ".github/workflows/test-release-scripts.yml"
+      - ".github/actions/assert-lockfiles-unchanged/action.yml"
+      - ".github/actionlint.yaml"
+      - ".github/python-toolchain.env"
       - "scripts/release/**"
       - "nx.json"
   pull_request:
@@ -25,30 +54,69 @@ on:
       - ".github/workflows/publish-release.yml"
       - ".github/workflows/canary.yml"
       - ".github/workflows/lint-release-workflows.yml"
+      - ".github/workflows/unit-python-sdk.yml"
+      - ".github/workflows/dojo-e2e.yml"
+      - ".github/workflows/build-python-preview.yml"
+      - ".github/workflows/publish-python-preview.yml"
+      - ".github/workflows/zizmor.yml"
+      - ".github/workflows/test-release-scripts.yml"
+      - ".github/actions/assert-lockfiles-unchanged/action.yml"
+      - ".github/actionlint.yaml"
+      - ".github/python-toolchain.env"
       - "scripts/release/**"
       - "nx.json"
 
 permissions:
   contents: read
 
+# Pinned CPython — see .github/python-toolchain.env, which records this value and the
+# green run it came from. The python-toolchain-pins job below fails if this literal
+# disagrees with that file — including this workflow's own copy of it.
+#
+# No UV_VERSION here: this workflow installs no uv, and an unused copy of the pin is
+# only somewhere for it to drift.
+env:
+  PYTHON_VERSION: "3.12"
+
 jobs:
   actionlint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # reviewdog's github-check reporter creates the check run that carries the
+      # annotations; without it, findings are enforced by exit code alone and nothing
+      # visible says why the job failed.
+      checks: write  # create the check run reviewdog reports annotations through
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - name: Run actionlint on release workflows
-        uses: reviewdog/action-actionlint@50842263c20a7c46bd0065b9e624d3c569db061e  # v1.73.0
+        uses: reviewdog/action-actionlint@dbe5299849118fd6f099ba563d263d770955a64a  # v1.73.2
         with:
           reporter: github-check
           level: error
           fail_level: error
+          # This list holds workflow files ONLY. Not .github/actions/**/action.yml:
+          # actionlint 1.7.x has no composite-action mode, so pointed at one it parses
+          # it as a workflow and reports four bogus syntax-check errors ("jobs" section
+          # is missing, unexpected key "runs", ...). The shell inside that action is
+          # covered by the shellcheck job instead, which is why it lives in a .sh file
+          # rather than inline in the YAML.
+          #
+          # Nothing below this line may be a comment — it is a folded block scalar, so
+          # a `#` there is literal text that gets passed to actionlint as an argument.
           actionlint_flags: >-
             .github/workflows/prepare-release.yml
             .github/workflows/publish-release.yml
             .github/workflows/canary.yml
             .github/workflows/lint-release-workflows.yml
+            .github/workflows/unit-python-sdk.yml
+            .github/workflows/dojo-e2e.yml
+            .github/workflows/build-python-preview.yml
+            .github/workflows/publish-python-preview.yml
+            .github/workflows/zizmor.yml
+            .github/workflows/test-release-scripts.yml
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -58,16 +126,51 @@ jobs:
           persist-credentials: false
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - name: Run shellcheck on release scripts
+      - name: Run shellcheck on release scripts and composite actions
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          files=(scripts/release/*.sh)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No shell scripts under scripts/release/"
-            exit 0
+          # .github/actions is here because shell inside a composite action is linted by
+          # nothing otherwise: actionlint 1.7.x cannot parse an action.yml (it reports
+          # "jobs section is missing"), so the only way to cover that shell is to keep
+          # it in a .sh file and point shellcheck at it.
+          #
+          # find + xargs rather than `**` globs or mapfile: globstar and mapfile are
+          # both bash 4+, and this repo is developed on macOS where /bin/bash is 3.2.
+          # A `**` glob there silently matches nothing — a lint job that quietly checks
+          # nothing is worse than no job. This form runs identically in both, which
+          # means it can be verified locally instead of only in CI.
+          find_sh() { find scripts/release .github/actions -name '*.sh' -type f "$@"; }
+          count=$(find_sh | wc -l | tr -d ' ')
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No shell scripts matched — the search is wrong, not the repo."
+            echo "This job would otherwise pass by checking nothing."
+            exit 1
           fi
-          shellcheck --severity=warning "${files[@]}"
+          echo "shellchecking ${count} file(s):"
+          find_sh | sort | sed 's/^/  /'
+          find_sh -print0 | sort -z | xargs -0 shellcheck --severity=warning
+
+  python-toolchain-pins:
+    name: python-toolchain-pins
+    # Verifies every uv / CPython pin under .github/workflows/ still equals the
+    # version recorded in .github/python-toolchain.env, and that no setup-uv
+    # invocation resolves its version some other way.
+    #
+    # This job lives here, not in unit-python-sdk.yml's `lockfiles` job, for a
+    # boring reason: it has to run whenever any pin-carrying workflow changes, and
+    # unit-python-sdk.yml watches three specific .github paths rather than
+    # .github/workflows/**. A pin drifted in zizmor.yml would never have triggered
+    # it. All nine pin-carrying workflows are inside this workflow's lint scope, so
+    # its `paths:` already cover the drift surface exactly — and this is the same
+    # class of invariant as the three sibling jobs below, which all guard a
+    # hand-maintained list against the file it is supposed to mirror.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify workflow pins match .github/python-toolchain.env
+        run: bash scripts/release/verify-python-toolchain-pins.sh
 
   release-allowlist-sync:
     # Verifies nx.json's release.projects matches release.config.json's
@@ -110,6 +213,6 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
       - name: Verify config package names match manifests
         run: bash scripts/release/verify-config-manifest-names.sh

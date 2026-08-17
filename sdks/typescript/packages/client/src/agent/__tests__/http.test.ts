@@ -1,7 +1,7 @@
 import { HttpAgent } from "../http";
-import { runHttpRequest, HttpEvent, HttpEventType } from "@/run/http-request";
+import { runHttpRequest, HttpEventType } from "@/run/http-request";
 import { v4 as uuidv4 } from "uuid";
-import { Observable, of } from "rxjs";
+import { of } from "rxjs";
 import { describe, it, expect, vi, beforeEach, Mock } from "vitest";
 
 // Mock the runHttpRequest module

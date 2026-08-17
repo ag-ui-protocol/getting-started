@@ -114,7 +114,7 @@ class _DoubleInterruptFlow(Flow[_DemoState]):
 # --------------------------------------------------------------------------
 
 def test_hitl_symbols_resolve_on_supported_crewai():
-    # The lock pins crewai 1.15.7, which exposes the whole async-HITL surface.
+    # The lock pins crewai 1.15.11, which exposes the whole async-HITL surface.
     assert caps.HumanFeedbackPending is not None
     assert caps.HumanFeedbackRequestedEvent is not None
     assert caps.FlowPausedEvent is not None
@@ -462,6 +462,42 @@ def test_translator_captures_pause_and_finalizes_interrupt():
     assert tail[0].value["id"] == "req-1"
 
 
+async def test_translator_terminal_snapshot_precedes_interrupt_tail():
+    # A method emit_states then pauses for async HITL (request + pause, no
+    # method_finished). finalize must redeliver the authoritative flow.state as a
+    # terminal STATE_SNAPSHOT BEFORE the interrupt tail (CUSTOM, RUN_FINISHED),
+    # not strand the client on the ephemeral emit payload.
+    from ag_ui_crewai.context import flow_context
+    from ag_ui_crewai.sdk import copilotkit_emit_state
+
+    class _F:
+        state = {"messages": [], "v": "authoritative"}
+
+    flow = _F()
+    tr = StreamFrameTranslator(
+        thread_id="t-1",
+        run_id="r-1",
+        state_provider=lambda: flow.state,
+        flow_provider=lambda: flow,
+    )
+    tr.translate(_flow_started())
+    tr.translate(SimpleNamespace(type="method_execution_started", method_name="propose"))
+    token = flow_context.set(flow)
+    try:
+        await copilotkit_emit_state({"v": "ephemeral"})  # sets the suppression flag
+    finally:
+        flow_context.reset(token)
+    tr.translate(_hf_requested())
+    tr.translate(_flow_paused())
+    tail = tr.finalize()
+    types = [e.type for e in tail]
+    assert EventType.STATE_SNAPSHOT in types, types
+    assert types[-2:] == [EventType.CUSTOM, EventType.RUN_FINISHED], types
+    assert types.index(EventType.STATE_SNAPSHOT) < types.index(EventType.CUSTOM), types
+    snap = next(e for e in tail if e.type == EventType.STATE_SNAPSHOT)
+    assert snap.snapshot == {"messages": [], "v": "authoritative"}
+
+
 def test_translator_no_pause_finalizes_plain_run_finished():
     tr = _translator()
     tr.translate(_flow_started())
@@ -632,6 +668,45 @@ async def test_e2e_kickoff_pause_outcome_opt_in(_isolated_cwd):
     assert interrupt["metadata"]["crewai"]["output"] == {"plan": ["a", "b"]}
 
 
+class _ResumeEmitFlow(Flow[_DemoState]):
+    """Pauses on ``propose``; the RESUMED ``apply`` method calls emit_state, so
+    the resume driver must honour emit-time snapshot-suppression too."""
+
+    @start()
+    @human_feedback(message="Approve?", provider=agui_feedback_provider)
+    def propose(self):
+        return {"plan": ["a"]}
+
+    @listen(propose)
+    async def apply(self, feedback):
+        from ag_ui_crewai.sdk import copilotkit_emit_state
+
+        self.state.result = "authoritative"
+        await copilotkit_emit_state({"result": "emit"})
+
+
+async def test_e2e_resume_emit_state_suppressed_on_resume_driver(_isolated_cwd):
+    # The resume driver must wire flow_provider + emit-time capture too: the
+    # resumed apply's emit_state must survive method-finish (node-exit
+    # STATE_SNAPSHOT suppressed), with the authoritative state redelivered as a
+    # terminal snapshot. Deleting the capture wiring on the resume sink regresses
+    # this (the node-exit rebuild clobbers 'emit' and no terminal is owed).
+    flow = _ResumeEmitFlow()
+    await _run_kickoff(flow, _mk_input("thr-remit"), HITLOptions())
+    resume = [ResumeEntry(interrupt_id="thr-remit", status="resolved", payload="ok")]
+    events = await _run_resume(flow, _mk_input("thr-remit", resume=resume), HITLOptions())
+    types = _types(events)
+    # apply's node-exit STATE_SNAPSHOT is suppressed: none sits between apply's
+    # (the last) MESSAGES_SNAPSHOT and the STEP_FINISHED that follows it.
+    mi = len(types) - 1 - types[::-1].index("MESSAGES_SNAPSHOT")
+    sf = types.index("STEP_FINISHED", mi)
+    assert "STATE_SNAPSHOT" not in types[mi:sf], types
+    # The authoritative state is redelivered as the terminal snapshot.
+    assert types[-2:] == ["STATE_SNAPSHOT", "RUN_FINISHED"], types
+    results = [e.get("snapshot", {}).get("result") for e in events if e.get("type") == "STATE_SNAPSHOT"]
+    assert "emit" in results and results[-1] == "authoritative", results
+
+
 async def test_e2e_resume_completes_run(_isolated_cwd):
     flow = _DemoInterruptFlow()
     # Pause first so a pending state is persisted for this thread.
@@ -697,6 +772,52 @@ async def test_e2e_resume_repause_emits_second_interrupt(_isolated_cwd):
     assert types[-1] == "RUN_FINISHED"
     finished = [e for e in r if e.get("type") == "RUN_FINISHED"][-1]
     assert finished["outcome"]["type"] == "interrupt"
+
+
+async def test_e2e_resume_of_a_regular_flow_ignores_a_conversational_worker(
+    _isolated_cwd,
+):
+    """A paused REGULAR flow must resume while a conversational turn is abandoned.
+
+    The two share nothing but a client-chosen ``threadId``: the conversational
+    refusal exists because two turns of ONE conversation write one conversation's
+    state, and a regular flow's resume is not one of them. Refusing it strands the
+    paused run with no way to complete it, and HITL pause/resume is the one path
+    where that cannot be retried away.
+    """
+    from ag_ui_crewai._conversation import (
+        AbandonmentSignal,
+        acquire_conversation_worker,
+    )
+
+    flow = _DemoInterruptFlow()
+    await _run_kickoff(flow, _mk_input("thr-hitl-busy"), HITLOptions())
+
+    signal = AbandonmentSignal()
+    lease = acquire_conversation_worker(
+        flow_key="some.other.ConversationalFlow",
+        thread_id="thr-hitl-busy",
+        run_id="run-conversational",
+        signal=signal,
+    )
+    signal.abandon()
+    try:
+        resume = [
+            ResumeEntry(
+                interrupt_id="thr-hitl-busy", status="resolved", payload="looks good"
+            )
+        ]
+        events = await _run_resume(
+            flow, _mk_input("thr-hitl-busy", resume=resume), HITLOptions()
+        )
+    finally:
+        lease.release()
+
+    codes = [e.get("code") for e in events]
+    assert "AGUI_CREWAI_CONVERSATION_THREAD_BUSY" not in codes, codes
+    types = _types(events)
+    assert types[0] == "RUN_STARTED"
+    assert types[-1] == "RUN_FINISHED"
 
 
 async def test_e2e_resume_no_pending_errors(_isolated_cwd):
@@ -792,7 +913,7 @@ async def test_e2e_resume_ceiling_is_flow_timeout():
 async def test_e2e_crew_endpoint_rejects_resume():
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from ag_ui_crewai.examples.crew_chat import CrewChatCrew
+    from agents.crew_chat import CrewChatCrew
 
     app = FastAPI()
     ep.add_crewai_crew_fastapi_endpoint(app=app, crew=CrewChatCrew(), path="/crew")

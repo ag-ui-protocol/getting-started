@@ -9,15 +9,18 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def create_model(openai_api: str = "responses"):
+def create_model(openai_api: str = "chat"):
     """Create a Strands model based on MODEL_PROVIDER env var.
 
     Supported providers: openai (default), anthropic, gemini
 
-    ``openai_api`` selects the OpenAI API mode. The default Responses API
-    surfaces reasoning summaries but buffers tool-call argument deltas until
-    the call completes; pass ``"chat"`` for demos that need tool-call ARGUMENTS
-    to stream incrementally (e.g. A2UI progressive surface painting).
+    ``openai_api`` selects the OpenAI API mode. The default Chat Completions
+    API streams tool-call ARGUMENTS incrementally and emits no reasoning
+    summaries, which is what most demos want. Pass ``"responses"`` only for
+    demos that deliberately showcase reasoning (e.g. agentic_chat_reasoning);
+    the Responses API surfaces reasoning summaries but buffers tool-call
+    argument deltas until the call completes, which defeats progressive A2UI
+    surface painting.
     """
     provider = os.getenv("MODEL_PROVIDER", "openai").lower()
 
