@@ -53,6 +53,11 @@ import type {
  * ```
  */
 export type ClaudeAgentAdapterConfig = AgentConfig & Options & {
+  /**
+   * Include role="reasoning" messages in MESSAGES_SNAPSHOT events.
+   * Default: false. Reasoning is always excluded from provider input.
+   */
+  includeReasoningInMessagesSnapshot?: boolean;
   /** Maximum number of idle sessions to keep. Default: 1000 */
   maxSessions?: number;
   /** TTL in ms for idle sessions. Default: 30 minutes */

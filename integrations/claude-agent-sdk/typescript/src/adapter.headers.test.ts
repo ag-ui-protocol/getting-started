@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+const queryMock = vi.hoisted(() => vi.fn());
+
 // Mock workspace packages that aren't built in worktree isolation
 vi.mock("@ag-ui/client", () => {
   class AbstractAgent {
@@ -39,9 +41,20 @@ vi.mock("@ag-ui/core", () => ({}));
 
 // Mock the Claude Agent SDK so we don't need real API credentials
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
-  query: vi.fn(() => {
-    // Return an async iterable that immediately yields a result message
-    return {
+  query: queryMock,
+  createSdkMcpServer: vi.fn(() => ({})),
+}));
+
+// Mock the SDK types import
+vi.mock("@anthropic-ai/sdk/resources/beta/messages/messages", () => ({}));
+
+import { ClaudeAgentAdapter } from "./adapter";
+
+describe("ClaudeAgentAdapter headers property", () => {
+  let debugSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    queryMock.mockImplementation(() => ({
       [Symbol.asyncIterator]: () => ({
         next: vi
           .fn()
@@ -56,20 +69,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
           .mockResolvedValueOnce({ value: undefined, done: true }),
       }),
       interrupt: vi.fn(),
-    };
-  }),
-  createSdkMcpServer: vi.fn(() => ({})),
-}));
-
-// Mock the SDK types import
-vi.mock("@anthropic-ai/sdk/resources/beta/messages/messages", () => ({}));
-
-import { ClaudeAgentAdapter } from "./adapter";
-
-describe("ClaudeAgentAdapter headers property", () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
-
-  beforeEach(() => {
+    }));
     debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
     // Also suppress console.error from adapter error paths
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -210,4 +210,295 @@ describe("ClaudeAgentAdapter headers property", () => {
     adapter.headers = { "x-test": "value" };
     expect(adapter.headers).toEqual({ "x-test": "value" });
   });
+
+  it("includes reasoning in snapshots only when explicitly enabled", async () => {
+    queryMock.mockImplementationOnce(() => ({
+      [Symbol.asyncIterator]: async function* () {
+        yield streamEvent({
+          type: "message_start",
+        });
+        yield streamEvent({
+          type: "content_block_start",
+          content_block: { type: "thinking" },
+        });
+        yield streamEvent({
+          type: "content_block_delta",
+          delta: { type: "thinking_delta", thinking: "private thought" },
+        });
+        yield streamEvent({
+          type: "content_block_delta",
+          delta: { type: "signature_delta", signature: "encrypted-signature" },
+        });
+        yield streamEvent({
+          type: "content_block_stop",
+        });
+      },
+      interrupt: vi.fn(),
+    }));
+
+    const adapter = new ClaudeAgentAdapter({
+      model: "claude-haiku-4-5",
+      includeReasoningInMessagesSnapshot: true,
+    });
+    const events: unknown[] = [];
+    await new Promise<void>((resolve, reject) => {
+      adapter
+        .run({
+          threadId: "reasoning-thread",
+          runId: "reasoning-run",
+          messages: [{ id: "u1", role: "user", content: "hello" }],
+          tools: [],
+          context: [],
+        })
+        .subscribe({
+          next: (event) => events.push(event),
+          error: reject,
+          complete: resolve,
+        });
+    });
+
+    const snapshot = events.find(
+      (event) => (event as { type?: string }).type === "MESSAGES_SNAPSHOT",
+    ) as { messages: Array<{ role: string; content?: string }> } | undefined;
+    expect(snapshot?.messages).toContainEqual({
+      id: expect.any(String),
+      role: "reasoning",
+      content: "private thought",
+      encryptedValue: "encrypted-signature",
+    });
+    expect(events.map((event) => (event as { type: string }).type)).toEqual([
+      "RUN_STARTED",
+      "REASONING_START",
+      "REASONING_MESSAGE_START",
+      "REASONING_MESSAGE_CONTENT",
+      "REASONING_MESSAGE_END",
+      "REASONING_END",
+      "REASONING_ENCRYPTED_VALUE",
+      "MESSAGES_SNAPSHOT",
+      "RUN_FINISHED",
+    ]);
+  });
+
+  it("preserves the default behavior of omitting reasoning from snapshots", async () => {
+    queryMock.mockImplementationOnce(() => ({
+      [Symbol.asyncIterator]: async function* () {
+        yield streamEvent({ type: "message_start" });
+        yield streamEvent({
+          type: "content_block_start",
+          content_block: { type: "thinking" },
+        });
+        yield streamEvent({
+          type: "content_block_delta",
+          delta: { type: "thinking_delta", thinking: "private thought" },
+        });
+        yield streamEvent({ type: "content_block_stop" });
+      },
+      interrupt: vi.fn(),
+    }));
+
+    const adapter = new ClaudeAgentAdapter({ model: "claude-haiku-4-5" });
+    const events: unknown[] = [];
+    await new Promise<void>((resolve, reject) => {
+      adapter
+        .run({
+          threadId: "default-thread",
+          runId: "default-run",
+          messages: [{ id: "u1", role: "user", content: "hello" }],
+          tools: [],
+          context: [],
+        })
+        .subscribe({
+          next: (event) => events.push(event),
+          error: reject,
+          complete: resolve,
+        });
+    });
+
+    const snapshot = events.find(
+      (event) => (event as { type?: string }).type === "MESSAGES_SNAPSHOT",
+    ) as { messages: Array<{ role: string }> } | undefined;
+    expect(snapshot).toBeUndefined();
+  });
+
+  it("filters reasoning messages from the provider prompt", async () => {
+    queryMock.mockImplementationOnce(() => ({
+      [Symbol.asyncIterator]: async function* () {
+        yield {
+          type: "result",
+          result: "test response",
+          is_error: false,
+        };
+      },
+      interrupt: vi.fn(),
+    }));
+
+    const adapter = new ClaudeAgentAdapter({
+      model: "claude-haiku-4-5",
+      includeReasoningInMessagesSnapshot: true,
+    });
+    await new Promise<void>((resolve, reject) => {
+      adapter
+        .run({
+          threadId: "provider-thread",
+          runId: "provider-run",
+          messages: [
+            { id: "u1", role: "user", content: "hello" },
+            { id: "r1", role: "reasoning", content: "do not send me" },
+            { id: "u2", role: "user", content: "continue" },
+          ],
+          tools: [],
+          context: [],
+        })
+        .subscribe({ error: reject, complete: resolve });
+    });
+
+    expect(queryMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ prompt: "continue" }),
+    );
+  });
+
+  it("preserves prior reasoning and orders multiple reasoning blocks", async () => {
+    queryMock.mockImplementationOnce(() => ({
+      [Symbol.asyncIterator]: async function* () {
+        yield streamEvent({ type: "message_start" });
+        yield streamEvent({
+          type: "content_block_start",
+          content_block: { type: "thinking" },
+        });
+        yield streamEvent({
+          type: "content_block_delta",
+          delta: { type: "thinking_delta", thinking: "current first" },
+        });
+        yield streamEvent({ type: "content_block_stop" });
+        yield streamEvent({
+          type: "content_block_start",
+          content_block: { type: "thinking" },
+        });
+        yield streamEvent({
+          type: "content_block_delta",
+          delta: { type: "thinking_delta", thinking: "current second" },
+        });
+        yield streamEvent({ type: "content_block_stop" });
+      },
+      interrupt: vi.fn(),
+    }));
+
+    const adapter = new ClaudeAgentAdapter({
+      model: "claude-haiku-4-5",
+      includeReasoningInMessagesSnapshot: true,
+    });
+    const events: unknown[] = [];
+    await new Promise<void>((resolve, reject) => {
+      adapter
+        .run({
+          threadId: "ordering-thread",
+          runId: "ordering-run",
+          messages: [
+            { id: "u1", role: "user", content: "hello" },
+            { id: "prior-r", role: "reasoning", content: "prior thought" },
+            { id: "u2", role: "user", content: "continue" },
+          ],
+          tools: [],
+          context: [],
+        })
+        .subscribe({
+          next: (event) => events.push(event),
+          error: reject,
+          complete: resolve,
+        });
+    });
+
+    const snapshot = events.find(
+      (event) => (event as { type?: string }).type === "MESSAGES_SNAPSHOT",
+    ) as { messages: Array<{ id: string; role: string; content?: string }> };
+    expect(snapshot.messages).toEqual([
+      { id: "u1", role: "user", content: "hello" },
+      { id: "prior-r", role: "reasoning", content: "prior thought" },
+      { id: "u2", role: "user", content: "continue" },
+      {
+        id: expect.any(String),
+        role: "reasoning",
+        content: "current first",
+      },
+      {
+        id: expect.any(String),
+        role: "reasoning",
+        content: "current second",
+      },
+    ]);
+  });
+
+  it("emits a reasoning snapshot before RUN_ERROR", async () => {
+    queryMock.mockImplementationOnce(() => ({
+      [Symbol.asyncIterator]: async function* () {
+        yield streamEvent({ type: "message_start" });
+        yield streamEvent({
+          type: "content_block_start",
+          content_block: { type: "thinking" },
+        });
+        yield streamEvent({
+          type: "content_block_delta",
+          delta: { type: "thinking_delta", thinking: "partial thought" },
+        });
+        throw new Error("stream failed");
+      },
+      interrupt: vi.fn(),
+    }));
+
+    const adapter = new ClaudeAgentAdapter({
+      model: "claude-haiku-4-5",
+      includeReasoningInMessagesSnapshot: true,
+    });
+    const events: unknown[] = [];
+    await new Promise<void>((resolve, reject) => {
+      adapter
+        .run({
+          threadId: "failure-thread",
+          runId: "failure-run",
+          messages: [{ id: "u1", role: "user", content: "hello" }],
+          tools: [],
+          context: [],
+        })
+        .subscribe({
+          next: (event) => events.push(event),
+          error: reject,
+          complete: resolve,
+        });
+    });
+
+    expect(events.map((event) => (event as { type: string }).type)).toEqual([
+      "RUN_STARTED",
+      "REASONING_START",
+      "REASONING_MESSAGE_START",
+      "REASONING_MESSAGE_CONTENT",
+      "REASONING_MESSAGE_END",
+      "REASONING_END",
+      "MESSAGES_SNAPSHOT",
+      "RUN_ERROR",
+    ]);
+  });
+
+  it("does not forward the adapter-only option to Claude SDK options", () => {
+    const adapter = new ClaudeAgentAdapter({
+      model: "claude-haiku-4-5",
+      includeReasoningInMessagesSnapshot: true,
+    });
+
+    expect(
+      adapter.buildOptions({
+        threadId: "options-thread",
+        runId: "options-run",
+        messages: [],
+        tools: [],
+        context: [],
+      }),
+    ).not.toHaveProperty("includeReasoningInMessagesSnapshot");
+  });
 });
+
+function streamEvent(event: Record<string, unknown>): Record<string, unknown> {
+  return {
+    type: "stream_event",
+    event,
+  };
+}

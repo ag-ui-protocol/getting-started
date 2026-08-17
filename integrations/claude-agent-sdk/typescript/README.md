@@ -38,6 +38,7 @@ events$.subscribe({
 - **Bidirectional state sync** - Shared state management via ag_ui_update_state tool
 - **Context injection** - Context and state injected into prompts for agent awareness
 - **Event cleanup** - Hanging events (tool calls, reasoning blocks) automatically closed on stream end
+- **Optional reasoning snapshots** - Opt in to durable `role="reasoning"` messages in `MESSAGES_SNAPSHOT`
 - **Observable pattern** - RxJS Observable for event streaming
 - **Custom tools via MCP** - Define custom tools using Claude SDK's tool() function
 - **Forwarded props** - Per-run option overrides with security whitelist
@@ -70,6 +71,18 @@ pnpm dev
 ```
 
 Visit **http://localhost:3000** and select **"Claude Agent SDK (Typescript)"**
+
+To include reasoning messages in snapshots for replay, enable it explicitly:
+
+```typescript
+const adapter = new ClaudeAgentAdapter({
+  model: "claude-haiku-4-5",
+  includeReasoningInMessagesSnapshot: true,
+});
+```
+
+This option is disabled by default. Reasoning messages are retained for snapshots
+only and are not sent back to Claude as provider input.
 
 ## Links
 

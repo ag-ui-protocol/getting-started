@@ -153,8 +153,9 @@ export class ClaudeAgentAdapter extends AbstractAgent {
         sessionEntry.active = true;
       }
 
-      const { userMessage } = processMessages(runInput);
-      const options = this.buildOptions(runInput);
+      const providerInput = this.providerInput(runInput);
+      const { userMessage } = processMessages(providerInput);
+      const options = this.buildOptions(providerInput);
 
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       const abortController = this.config.queryTimeoutMs
@@ -187,6 +188,15 @@ export class ClaudeAgentAdapter extends AbstractAgent {
           this.activeQueries.delete(threadId);
         });
     });
+  }
+
+  private providerInput(input: RunAgentInput): RunAgentInput {
+    return {
+      ...input,
+      messages: (input.messages ?? []).filter(
+        (message) => message.role !== "reasoning",
+      ),
+    };
   }
 
   private async translateStream(
@@ -279,6 +289,7 @@ export class ClaudeAgentAdapter extends AbstractAgent {
       initialMessages: _msgs,
       initialState: _state,
       debug: _debug,
+      includeReasoningInMessagesSnapshot: _includeReasoning,
       ...sdkOptions
     } = this.config;
 
@@ -420,6 +431,8 @@ export class ClaudeAgentAdapter extends AbstractAgent {
 
     // ── MESSAGES_SNAPSHOT accumulation ──
     const runMessages: Message[] = [];
+    const includeReasoning =
+      this.config.includeReasoningInMessagesSnapshot === true;
 
     const upsertMessage = (msg: Message) => {
       const idx = runMessages.findIndex((m) => m.id === msg.id);
@@ -508,6 +521,22 @@ export class ClaudeAgentAdapter extends AbstractAgent {
             } else if (deltaType === "thinking_delta") {
               const thinking = delta.thinking as string | undefined;
               if (thinking && reasoningMessageId) {
+                if (includeReasoning) {
+                  const existing = runMessages.find(
+                    (candidate) => candidate.id === reasoningMessageId,
+                  );
+                  upsertMessage({
+                    id: reasoningMessageId,
+                    role: "reasoning",
+                    content:
+                      (existing?.role === "reasoning" ? existing.content : "") +
+                      thinking,
+                    ...(existing?.role === "reasoning" &&
+                    existing.encryptedValue
+                      ? { encryptedValue: existing.encryptedValue }
+                      : {}),
+                  });
+                }
                 subscriber.next({
                   type: EventType.REASONING_MESSAGE_CONTENT,
                   messageId: reasoningMessageId,
@@ -587,6 +616,28 @@ export class ClaudeAgentAdapter extends AbstractAgent {
                   entityId: currentMessageId,
                   encryptedValue: accumulatedSignature,
                 });
+              }
+              if (
+                includeReasoning &&
+                accumulatedSignature &&
+                reasoningMessageId
+              ) {
+                const existing = runMessages.find(
+                  (candidate) => candidate.id === reasoningMessageId,
+                );
+                if (existing?.role === "reasoning") {
+                  upsertMessage({
+                    ...existing,
+                    encryptedValue: accumulatedSignature,
+                  });
+                } else {
+                  upsertMessage({
+                    id: reasoningMessageId,
+                    role: "reasoning",
+                    content: "",
+                    encryptedValue: accumulatedSignature,
+                  });
+                }
               }
 
               accumulatedSignature = "";
@@ -954,21 +1005,21 @@ export class ClaudeAgentAdapter extends AbstractAgent {
         idleEntry.lastUsed = Date.now();
         this.evictSessions();
       }
-    }
-
-    // Emit MESSAGES_SNAPSHOT with input messages + new messages from this run
-    if (runMessages.length > 0) {
-      const allMessages: Message[] = [
-        ...(input.messages ?? []),
-        ...runMessages,
-      ];
-      console.debug(
-        `[ClaudeAdapter] MESSAGES_SNAPSHOT: ${allMessages.length} msgs (${messageCount} SDK messages processed)`,
-      );
-      subscriber.next({
-        type: EventType.MESSAGES_SNAPSHOT,
-        messages: allMessages,
-      });
+      // Emit the snapshot here so failed streams persist reasoning before the
+      // outer translator emits RUN_ERROR.
+      if (runMessages.length > 0) {
+        const allMessages: Message[] = [
+          ...(input.messages ?? []),
+          ...runMessages,
+        ];
+        console.debug(
+          `[ClaudeAdapter] MESSAGES_SNAPSHOT: ${allMessages.length} msgs (${messageCount} SDK messages processed)`,
+        );
+        subscriber.next({
+          type: EventType.MESSAGES_SNAPSHOT,
+          messages: allMessages,
+        });
+      }
     }
   }
 }
