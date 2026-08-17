@@ -35,6 +35,7 @@ const A2A_UI_MIME_TYPE = "application/json+a2ui";
 export class A2AAgent extends AbstractAgent {
   private readonly a2aClient: A2AClient;
   private readonly messageIdMap = new Map<string, string>();
+  private warnedAboutFrontendTools = false;
 
   constructor(config: A2AAgentConfig) {
     const { a2aClient, ...rest } = config;
@@ -55,6 +56,8 @@ export class A2AAgent extends AbstractAgent {
   run(input: RunAgentInput): Observable<BaseEvent> {
     return new Observable<BaseEvent>((subscriber) => {
       const run = async () => {
+        this.warnIfFrontendToolsDropped(input);
+
         const runStarted: RunStartedEvent = {
           type: EventType.RUN_STARTED,
           threadId: input.threadId,
@@ -123,6 +126,44 @@ export class A2AAgent extends AbstractAgent {
 
       return () => {};
     });
+  }
+
+  /**
+   * Warn when the caller registered frontend tools, which this agent cannot
+   * deliver.
+   *
+   * The A2A protocol has no field for client-side tool definitions — its
+   * `Message` carries `parts` plus an untyped `metadata` bag, and nothing on the
+   * server side is specified to read tools out of it. So `input.tools` is
+   * dropped here, the run still succeeds, and the tool is simply never called.
+   * That silent outcome is hard to attribute: the tool is registered correctly
+   * and the same tool works over the plain AG-UI HTTP transport
+   * (CopilotKit/CopilotKit#3242).
+   *
+   * Use `A2AMiddlewareAgent` from `@ag-ui/a2a-middleware` to combine frontend
+   * tools with A2A agents. It keeps the caller's tools on an orchestration
+   * agent — which receives them the ordinary way — and reaches A2A agents
+   * through its own `send_message_to_a2a_agent` tool.
+   *
+   * Warns once per agent instance so a long conversation isn't spammed.
+   */
+  private warnIfFrontendToolsDropped(input: RunAgentInput): void {
+    if (this.warnedAboutFrontendTools || !input.tools?.length) {
+      return;
+    }
+
+    this.warnedAboutFrontendTools = true;
+
+    const names = input.tools.map((tool) => tool.name);
+    const shown = names.slice(0, 5).join(", ");
+    const suffix = names.length > 5 ? `, +${names.length - 5} more` : "";
+
+    console.warn(
+      `A2AAgent: ${names.length} frontend tool(s) will not be available to the A2A agent (${shown}${suffix}). ` +
+        "The A2A protocol has no field for client-side tool definitions, so A2AAgent cannot forward them and the agent will never call these tools. " +
+        "To use frontend tools with A2A agents, use A2AMiddlewareAgent from @ag-ui/a2a-middleware, which keeps your tools on the orchestration agent " +
+        "and reaches A2A agents through its send_message_to_a2a_agent tool.",
+    );
   }
 
   private prepareConversation(input: RunAgentInput): ConvertedA2AMessages {
