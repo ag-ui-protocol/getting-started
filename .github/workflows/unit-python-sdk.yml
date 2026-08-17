@@ -567,8 +567,15 @@ jobs:
         id: cached-uv-dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
-          path: integrations/crew-ai/python/.venv
-          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-crewai-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/crew-ai/python/uv.lock') }}
+          # Two venvs, because examples/ is a separate uv project with its own lock
+          # and its own resolution — see the examples steps below. Both are keyed on
+          # both lockfiles: they share a path dependency (the library is `{ path =
+          # "..", editable = true }` from examples/), so a change to either lock can
+          # change what the other venv should contain.
+          path: |
+            integrations/crew-ai/python/.venv
+            integrations/crew-ai/python/examples/.venv
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-crewai-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/crew-ai/python/uv.lock', 'integrations/crew-ai/python/examples/uv.lock') }}
 
       - name: Install dependencies
         working-directory: integrations/crew-ai/python
@@ -576,6 +583,25 @@ jobs:
 
       - name: Run tests
         working-directory: integrations/crew-ai/python
+        run: uv run --locked python -m pytest tests/ -v
+
+      # The dojo moved out of the library into examples/ (#2396), and its tests moved
+      # with it. They are not demo tests: they pin the two things in the dojo that the
+      # rest of the repo depends on at runtime — the telemetry opt-out at package
+      # import, without which Ctrl-C leaves a server only SIGKILL stops, and the
+      # `0.0.0.0` bind that render.yaml and apps/dojo/scripts/run-dojo-everything.js
+      # both need to reach it in a container. The step above covers tests/ under the
+      # library only, so without these two steps nothing in CI runs them.
+      #
+      # A step in this job rather than a job of its own: it shares this job's
+      # checkout, uv install and cache, and — the reason it matters — the lockfile
+      # assertion below, which measures the whole job and so covers both locks at once.
+      - name: Install examples dependencies
+        working-directory: integrations/crew-ai/python/examples
+        run: uv sync --locked
+
+      - name: Run examples tests
+        working-directory: integrations/crew-ai/python/examples
         run: uv run --locked python -m pytest tests/ -v
 
       - name: Assert no lockfile was rewritten
