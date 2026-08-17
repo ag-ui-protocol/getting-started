@@ -1,16 +1,17 @@
 """Shared State feature.
 
 Recipe assistant that maintains shared state (recipe) across turns.
-Uses ContextVariables and ReplyResult like agentic_generative_ui.
+The frontend sends the current state in `RunAgentInput.state`; AGUIStream
+merges it into the run's variables, tools read and mutate `ctx.variables`,
+and a STATE_SNAPSHOT with the updated recipe is emitted when the run ends.
 """
 
 from enum import StrEnum
 from textwrap import dedent
 
-from autogen import ConversableAgent, LLMConfig
-from autogen.ag_ui import AGUIStream
-from autogen.agentchat import ContextVariables, ReplyResult
-from autogen.tools import tool
+from ag2 import Agent, Context, tool
+from ag2.ag_ui import AGUIStream
+from ag2.config import OpenAIConfig
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
@@ -90,25 +91,21 @@ class RecipeSnapshot(BaseModel):
     )
 
 
-@tool()
-async def get_current_recipe(context_variables: ContextVariables) -> str:
+@tool
+async def get_current_recipe(ctx: Context) -> str:
     """Return the current recipe state as JSON so you can read it before updating.
 
     Call this when you need to see the existing recipe (e.g. ingredients, instructions)
     before making changes or when the user asks to modify the recipe.
     """
-    data = context_variables.data
-    if not data:
+    if not ctx.variables:
         return RecipeSnapshot().model_dump_json(indent=2)
-    snapshot = RecipeSnapshot.model_validate(data)
+    snapshot = RecipeSnapshot.model_validate(ctx.variables)
     return snapshot.model_dump_json(indent=2)
 
 
-@tool()
-async def display_recipe(
-    context_variables: ContextVariables,
-    recipe: Recipe,
-) -> ReplyResult:
+@tool
+async def display_recipe(ctx: Context, recipe: Recipe) -> str:
     """Display the recipe to the user.
 
     Use this to present the full recipe (or an updated version) to the user.
@@ -119,16 +116,13 @@ async def display_recipe(
         recipe: The recipe to display (full snapshot including ingredients and instructions).
     """
     snapshot = RecipeSnapshot(recipe=recipe)
-    context_variables.update(snapshot.model_dump())
-    return ReplyResult(
-        message="Recipe displayed",
-        context_variables=context_variables,
-    )
+    ctx.variables.update(snapshot.model_dump())
+    return "Recipe displayed"
 
 
-agent = ConversableAgent(
+agent = Agent(
     name="recipe_assistant",
-    system_message=dedent("""
+    prompt=dedent("""
         You are a helpful assistant for creating recipes.
 
         IMPORTANT:
@@ -142,9 +136,8 @@ agent = ConversableAgent(
         summarise the changes in one sentence, don't describe the recipe in
         detail or send it as a message to the user.
     """),
-    llm_config=LLMConfig({"model": "gpt-4o-mini", "stream": True}),
-    human_input_mode="NEVER",
-    functions=[get_current_recipe, display_recipe],
+    config=OpenAIConfig(model="gpt-4o-mini"),
+    tools=[get_current_recipe, display_recipe],
 )
 
 stream = AGUIStream(agent)

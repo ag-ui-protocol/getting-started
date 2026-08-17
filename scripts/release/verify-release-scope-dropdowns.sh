@@ -166,14 +166,15 @@ check_notify_case() {
   local ecosystem scope
 
   # ecosystem-per-scope from config: "<scope> <ecosystem>" lines. A scope is
-  # dotnet/python iff ANY of its packages is dotnet/python (matches the
-  # workflow's intent: any package in the scope should page the matching lane on
-  # failure).
+  # dotnet/maven/python iff ANY of its packages is dotnet/maven/python (matches
+  # the workflow's intent: any package in the scope should page the matching lane
+  # on failure).
   local config_eco
   config_eco=$(jq -r '
     .scopes | to_entries[]
     | .key as $s
     | (if any(.value.packages[]; .ecosystem == "dotnet") then "dotnet"
+       elif any(.value.packages[]; .ecosystem == "maven") then "maven"
        elif any(.value.packages[]; .ecosystem == "python") then "python"
        else "typescript" end)
     | "\($s) \(.)"
@@ -186,6 +187,9 @@ check_notify_case() {
   local expected_dotnet
   expected_dotnet=$(printf '%s\n' "$config_eco" \
     | awk '$2 == "dotnet" { print $1 }' | sort -u)
+  local expected_maven
+  expected_maven=$(printf '%s\n' "$config_eco" \
+    | awk '$2 == "maven" { print $1 }' | sort -u)
 
   # ACTUAL static lists from the case. Capture the pattern arm immediately
   # preceding the target assignment, split alternations, and remove glob arms
@@ -216,6 +220,9 @@ check_notify_case() {
   local actual_dotnet
   actual_dotnet=$(extract_case_patterns_for_assignment "NUGET_INTENDED=true" \
     | grep -vx '\*' | sort -u || true)
+  local actual_maven
+  actual_maven=$(extract_case_patterns_for_assignment "MAVEN_INTENDED=true" \
+    | grep -vx '\*' | sort -u || true)
 
   local rc_local=0
 
@@ -241,6 +248,17 @@ check_notify_case() {
     rc_local=1
   fi
 
+  if [ "$actual_maven" != "$expected_maven" ]; then
+    echo "ERROR: publish-release.yml notify-job Maven case is out of sync with release.config.json." >&2
+    echo "" >&2
+    echo "--- diff (expected Maven scopes  vs  case explicit list) ---" >&2
+    diff <(printf '%s\n' "$expected_maven") <(printf '%s\n' "$actual_maven") >&2 || true
+    echo "" >&2
+    echo "Fix: update the explicit Maven-scope alternation in the 'Compute release" >&2
+    echo "intent' step's case to exactly the config maven scopes." >&2
+    rc_local=1
+  fi
+
   # Independently validate the full projection against config, so a scope that
   # is mapped to the WRONG lane (e.g. a typescript scope ending in -py, or a
   # python scope absent from BOTH the list and the -py glob) is caught even if
@@ -251,6 +269,8 @@ check_notify_case() {
     local projected="typescript"
     if printf '%s\n' "$actual_dotnet" | grep -qx "$scope"; then
       projected="dotnet"
+    elif printf '%s\n' "$actual_maven" | grep -qx "$scope"; then
+      projected="maven"
     elif [[ "$scope" == *-py ]] || printf '%s\n' "$actual_explicit" | grep -qx "$scope"; then
       projected="python"
     fi
@@ -330,12 +350,75 @@ check_dotnet_version_sources() {
   return "$rc_local"
 }
 
+# Same reasoning as check_dotnet_version_sources, for Maven: a Maven version
+# lives in a reactor pom.xml, which the workflow's `**/package.json` /
+# `**/pyproject.toml` push globs do not match. Both static lists — the push
+# trigger's paths and the pre-checkout intent classifier's MAVEN_VERSION_SOURCES
+# — must hold exactly the config's Maven versionSource set, or a bump either
+# never starts a release or a failed build never pages.
+check_maven_version_sources() {
+  local file="$1"
+  local rc_local=0
+
+  local expected
+  expected=$(jq -r '
+    .scopes[]
+    | select(any(.packages[]; .ecosystem == "maven"))
+    | .versionSource // empty
+  ' "$CONFIG" | sort -u)
+
+  if [ -z "$expected" ]; then
+    echo "ERROR: release.config.json declares Maven packages but no scope names a versionSource." >&2
+    echo "Fix: give every Maven scope a \"versionSource\" pointing at its reactor pom.xml." >&2
+    return 1
+  fi
+
+  # The push trigger's paths: the only quoted pom.xml list items at this indent.
+  local actual_paths
+  actual_paths=$(grep -oE '^      - "[^"]*pom\.xml"$' "$file" \
+    | sed -E 's/^      - "(.*)"$/\1/' | sort -u)
+
+  # The push classifier's static list, kept on one line for exactly this reason.
+  local actual_classifier
+  actual_classifier=$(grep -oE 'MAVEN_VERSION_SOURCES="[^"]*"' "$file" \
+    | sed -E 's/^MAVEN_VERSION_SOURCES="(.*)"$/\1/' | tr ' ' '\n' | grep -v '^$' | sort -u)
+
+  if [ "$actual_paths" != "$expected" ]; then
+    echo "ERROR: publish-release.yml push paths do not match the Maven versionSource set." >&2
+    echo "" >&2
+    echo "--- diff (expected versionSources  vs  push paths) ---" >&2
+    diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual_paths") >&2 || true
+    echo "" >&2
+    echo "Fix: list every Maven scope's versionSource under on.push.paths, or a version" >&2
+    echo "bump there will never start a release." >&2
+    rc_local=1
+  fi
+
+  if [ "$actual_classifier" != "$expected" ]; then
+    echo "ERROR: publish-release.yml push-intent classifier does not match the Maven versionSource set." >&2
+    echo "" >&2
+    echo "--- diff (expected versionSources  vs  MAVEN_VERSION_SOURCES) ---" >&2
+    diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual_classifier") >&2 || true
+    echo "" >&2
+    echo "Fix: set MAVEN_VERSION_SOURCES in the notify job's 'Compute release intent'" >&2
+    echo "step to every Maven scope's versionSource, or a failed build on a bump there" >&2
+    echo "reads as 'Maven Central was never intended' and the failure page is swallowed." >&2
+    rc_local=1
+  fi
+
+  if [ "$rc_local" -eq 0 ]; then
+    echo "OK: publish-release.yml Maven push paths and push-intent classifier match release.config.json"
+  fi
+  return "$rc_local"
+}
+
 rc=0
 check_workflow "publish-release.yml" "$PUBLISH_WF" || rc=1
 check_workflow "prepare-release.yml" "$PREPARE_WF" || rc=1
 check_workflow "canary.yml" "$CANARY_WF" || rc=1
 check_notify_case "$PUBLISH_WF" || rc=1
 check_dotnet_version_sources "$PUBLISH_WF" || rc=1
+check_maven_version_sources "$PUBLISH_WF" || rc=1
 
 if [ "$rc" -ne 0 ]; then
   exit 1

@@ -2,7 +2,10 @@ import { LLMock, type ChatMessage } from "@copilotkit/aimock";
 import * as path from "node:path";
 import { registerA2UIRecoveryFixtures } from "./a2ui-recovery-fixtures";
 import { registerA2UIADKFixtures } from "./a2ui-adk-fixtures";
-import { registerA2UICrewAIFixtures } from "./a2ui-crewai-fixtures";
+import {
+  crewAIA2UIAnswersToolResultTurn,
+  registerA2UICrewAIFixtures,
+} from "./a2ui-crewai-fixtures";
 import { registerInterruptCrewAIFixtures } from "./interrupt-crewai-fixtures";
 
 // Configurable so parallel worktrees / runs don't collide on one aimock port.
@@ -34,7 +37,7 @@ export async function setupLLMock(): Promise<void> {
   // the generic loadFixtureFile below).
   registerA2UIRecoveryFixtures(mockServer);
 
-  // CrewAI A2UI fixtures (gpt-4o, scoped to CrewAI-unique prompts so
+  // CrewAI A2UI fixtures (openai/gpt-5.4, scoped to CrewAI-unique prompts so
   // they never intercept the LangGraph/ADK demos). Predicate fixtures, before
   // the generic loader.
   registerA2UICrewAIFixtures(mockServer);
@@ -609,6 +612,74 @@ export async function setupLLMock(): Promise<void> {
           arguments: JSON.stringify({ user_message: "Plan a team offsite" }),
         },
       ],
+    },
+  });
+
+  // Backend tool rendering (backend_tool_rendering flow): a "Weather Assistant"
+  // crew agent calls the backend get_weather tool, then produces a final text
+  // summary. Both the tool-call turn and the final-answer turn hit aimock.
+  // Matched on the unique "Weather Assistant" role so they beat the crew_chat
+  // "Your personal goal is" catch-all below (first registered wins). The
+  // final-answer turn is also excluded from the generic tool-result catch-all
+  // further down so this dedicated summary wins over it.
+  // Require the CrewAI agent's backstory phrase alongside the role. sysIncludes is
+  // case-insensitive and other frameworks (e.g. Mastra) also ship a "weather
+  // assistant" backend-tool demo, so matching the role alone would hijack their
+  // requests; this phrase is unique to the CrewAI agent's backstory.
+  const isWeatherAgentCall = (req: { messages: ChatMessage[] }) =>
+    sysIncludes(req.messages, "Weather Assistant") &&
+    sysIncludes(req.messages, "look up the weather before you answer");
+  const isWeatherAgentToolResultTurn = (req: { messages: ChatMessage[] }) =>
+    isWeatherAgentCall(req) && hasToolResult(req);
+  const weatherToolCall = (location: string, id: string) => ({
+    toolCalls: [
+      { name: "get_weather", arguments: JSON.stringify({ location }), id },
+    ],
+  });
+
+  // Tool-call turn, San Francisco.
+  mockServer.addFixture({
+    match: {
+      predicate: (req) => {
+        const lastUser = req.messages.filter((m) => m.role === "user").pop();
+        return (
+          isWeatherAgentCall(req) &&
+          !hasToolResult(req) &&
+          textOf(lastUser?.content).includes("San Francisco")
+        );
+      },
+    },
+    response: weatherToolCall("San Francisco", "call_get_weather_sf"),
+  });
+
+  // Tool-call turn, New York.
+  mockServer.addFixture({
+    match: {
+      predicate: (req) => {
+        const lastUser = req.messages.filter((m) => m.role === "user").pop();
+        return (
+          isWeatherAgentCall(req) &&
+          !hasToolResult(req) &&
+          textOf(lastUser?.content).includes("New York")
+        );
+      },
+    },
+    response: weatherToolCall("New York", "call_get_weather_ny"),
+  });
+
+  // Final-answer turn: after get_weather returns, the crew agent completes with a
+  // short weather summary. One fixture serves both cities (the card data rides
+  // the tool result); the city is echoed from the user request for a natural reply.
+  mockServer.addFixture({
+    match: { predicate: (req) => isWeatherAgentToolResultTurn(req) },
+    response: (req) => {
+      const lastUser = req.messages.filter((m) => m.role === "user").pop();
+      const city = textOf(lastUser?.content).includes("New York")
+        ? "New York"
+        : "San Francisco";
+      return {
+        content: `${city}: sunny and 20°C, 50% humidity, wind around 10, feels like 25°C.`,
+      };
     },
   });
 
@@ -1440,6 +1511,15 @@ export async function setupLLMock(): Promise<void> {
         // dedicated fixture keyed on the crew output string.
         if (hasCrewRunTool(req) && textOf(last.content) === CREW_RUN_OUTPUT)
           return false;
+        // Don't match the backend weather tool-result turn; a dedicated
+        // Weather-Assistant summary fixture answers it.
+        if (isWeatherAgentToolResultTurn(req)) return false;
+        // Don't match a CrewAI A2UI turn that a2ui-crewai-fixtures.ts answers
+        // itself (a surface-action click, or the closing turn over a render
+        // result): a generic acknowledgment would mask the reply under test.
+        // The predicate is scoped to that file's own prompts, so every other
+        // integration's A2UI demo keeps this fallback.
+        if (crewAIA2UIAnswersToolResultTurn(req)) return false;
         return true;
       },
     },

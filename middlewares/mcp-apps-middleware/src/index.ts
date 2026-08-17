@@ -14,7 +14,6 @@ import {
 } from "@ag-ui/client";
 import { Observable, from, switchMap } from "rxjs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { randomUUID, createHash } from "crypto";
 
@@ -100,14 +99,25 @@ export function getServerHash(config: MCPClientConfig): string {
  * headers (e.g. auth) to the underlying HTTP/SSE request. Both transports accept
  * headers via `requestInit`; previously HTTP carried no headers field at all and
  * SSE's headers were never wired through. See #1862.
+ *
+ * The SSE transport is imported lazily so that `eventsource` — which it pulls
+ * in transitively, and which only some consumers ever need — stays out of the
+ * module graph unless an SSE server is actually configured. Under Bun a static
+ * import of it breaks at load time: `eventsource`'s `bun` export condition
+ * resolves to its ESM build, so the SDK's CJS `require` gets an async module
+ * back and throws.
  */
-function buildMCPTransport(config: MCPClientConfig) {
+async function buildMCPTransport(config: MCPClientConfig) {
   const options = config.headers
     ? { requestInit: { headers: config.headers } }
     : undefined;
-  return config.type === "sse"
-    ? new SSEClientTransport(new URL(config.url), options)
-    : new StreamableHTTPClientTransport(new URL(config.url), options);
+  if (config.type === "sse") {
+    const { SSEClientTransport } = await import(
+      "@modelcontextprotocol/sdk/client/sse.js"
+    );
+    return new SSEClientTransport(new URL(config.url), options);
+  }
+  return new StreamableHTTPClientTransport(new URL(config.url), options);
 }
 
 /**
@@ -297,7 +307,7 @@ export class MCPAppsMiddleware extends Middleware {
     method: string,
     params?: Record<string, unknown>,
   ): Promise<unknown> {
-    const transport = buildMCPTransport(serverConfig);
+    const transport = await buildMCPTransport(serverConfig);
 
     const client = new Client(
       { name: "mcp-apps-middleware", version: "1.0.0" },
@@ -468,7 +478,7 @@ export class MCPAppsMiddleware extends Middleware {
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<unknown> {
-    const transport = buildMCPTransport(serverConfig);
+    const transport = await buildMCPTransport(serverConfig);
 
     const client = new Client(
       { name: "mcp-apps-middleware", version: "1.0.0" },
@@ -573,7 +583,7 @@ export class MCPAppsMiddleware extends Middleware {
   private async fetchToolsFromServer(
     serverConfig: MCPClientConfig,
   ): Promise<UIToolInfo[]> {
-    const transport = buildMCPTransport(serverConfig);
+    const transport = await buildMCPTransport(serverConfig);
 
     const client = new Client(
       { name: "mcp-apps-middleware", version: "1.0.0" },

@@ -4,17 +4,27 @@
 
 This demo exercises the **error handling path** in the CrewAI endpoint. The
 backend flow intentionally raises a `RuntimeError` on every request, which
-triggers the `except Exception` handler in `endpoint.py` that emits a
-`RunErrorEvent` via SSE.
+the stream driver in `endpoint.py` turns into a categorised `RunErrorEvent` on
+the SSE stream. That taxonomy has four codes; this demo exercises the generic
+flow-error one.
 
 ## How to Interact
 
-Send any message — the flow will raise immediately and no successful assistant
-response will be generated.
+Send any message. The flow raises immediately, so no successful assistant
+response is generated. The page subscribes to the agent's
+`onRunErrorEvent` and renders the surfaced error code and message above the
+chat, and clears that banner on the next `RUN_STARTED` so it always describes
+the current run. Only protocol-level `RUN_ERROR` is surfaced here; local
+transport failures are out of scope for this demo.
 
 ## Technical Details
 
 - `ErrorFlow` raises `RuntimeError` in its `@start()` method before any LLM call
-- The `event_generator` exception handler catches it and emits `RunErrorEvent`
+- The stream driver in `endpoint.py` catches it and emits a categorised
+  `RunErrorEvent` whose code is `AGUI_CREWAI_FLOW_ERROR_RUNTIMEERROR`
+- The client message is deliberately redacted to
+  `thread=... run=...: CrewAI flow failed; see server logs`. The raised
+  exception text stays server-side, so the banner shows the category and the
+  correlation ids rather than the original `RuntimeError` message
 - This verifies that backend exceptions are properly surfaced to the client
   rather than silently swallowed

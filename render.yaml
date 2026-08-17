@@ -42,7 +42,7 @@ projects:
       buildCommand: uv sync
       startCommand: uv run dev
       autoDeployTrigger: commit
-      rootDir: integrations/crew-ai/python
+      rootDir: integrations/crew-ai/python/examples
     - type: web
       name: ag-ui-dojo-pydantic-ai
       runtime: python

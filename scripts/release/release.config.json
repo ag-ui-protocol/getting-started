@@ -52,6 +52,16 @@
         { "name": "ag-ui-protocol", "path": "sdks/python", "ecosystem": "python", "buildSystem": "uv" }
       ]
     },
+    "sdk-java": {
+      "description": "Java SDK (community, Maven Central — stable releases only; Maven Central has no canary channel)",
+      "sharedVersion": true,
+      "versionSource": "sdks/community/java/ag-ui/pom.xml",
+      "packages": [
+        { "name": "java-core", "path": "sdks/community/java/ag-ui/core", "ecosystem": "maven", "groupId": "com.ag-ui.community" },
+        { "name": "java-client", "path": "sdks/community/java/ag-ui/client", "ecosystem": "maven", "groupId": "com.ag-ui.community" },
+        { "name": "java-server", "path": "sdks/community/java/ag-ui/server", "ecosystem": "maven", "groupId": "com.ag-ui.community" }
+      ]
+    },
     "integration-a2a": {
       "description": "A2A integration (TypeScript)",
       "sharedVersion": false,

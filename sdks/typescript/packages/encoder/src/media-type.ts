@@ -45,7 +45,7 @@ export function preferredMediaTypes(accept?: string, provided?: string[]): strin
  * @private
  */
 
-const simpleMediaTypeRegExp = /^\s*([^\s\/;]+)\/([^;\s]+)\s*(?:;(.*))?$/;
+const simpleMediaTypeRegExp = /^\s*([^\s/;]+)\/([^;\s]+)\s*(?:;(.*))?$/;
 
 /**
  * Media type interface
@@ -215,14 +215,6 @@ function compareSpecs(a: Priority, b: Priority): number {
  */
 function getFullType(spec: MediaType): string {
   return spec.type + "/" + spec.subtype;
-}
-
-/**
- * Check if a spec has any quality.
- * @private
- */
-function isQuality(spec: Priority | MediaType): boolean {
-  return spec.q > 0;
 }
 
 /**

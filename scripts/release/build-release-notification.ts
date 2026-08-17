@@ -28,6 +28,10 @@
  *   NUGET_RESULT     needs.publish-dotnet.result
  *   NUGET_BUILD_RESULT needs.build.result
  *   NUGET_PACKAGES   needs.build.outputs.dotnet_packages (JSON [{name,version,path}])
+ *   MAVEN_INTENDED   notify-job event-derived Maven Central release intent ("true" | ...)
+ *   MAVEN_RESULT     needs.publish-maven.result
+ *   MAVEN_BUILD_RESULT needs.build.result
+ *   MAVEN_PACKAGES   needs.build.outputs.java_packages   (JSON [{name,version,path,groupId}])
  *
  *   NOTE: ag-ui runs ONE shared build job and ONE shared publish job spanning
  *   BOTH lanes. The workflow wires BOTH BUILD_RESULT and PY_BUILD_RESULT to the
@@ -42,6 +46,7 @@
  *   NPM_ORG_URL      npm org page URL
  *   PY_BASE_URL      PyPI project base URL
  *   NUGET_BASE_URL   NuGet package base URL
+ *   MAVEN_BASE_URL   Maven Central artifact base URL
  *
  * Usage: pnpm tsx scripts/release/build-release-notification.ts
  */
@@ -239,12 +244,18 @@ function main(): void {
     nugetResult: resolveJobResultSafe(env("NUGET_RESULT")),
     nugetBuildResult: resolveJobResultSafe(env("NUGET_BUILD_RESULT")),
     nugetPackages: parsePackagesSafe(env("NUGET_PACKAGES")),
+    mavenIntended: env("MAVEN_INTENDED"),
+    mavenResult: resolveJobResultSafe(env("MAVEN_RESULT")),
+    mavenBuildResult: resolveJobResultSafe(env("MAVEN_BUILD_RESULT")),
+    mavenPackages: parsePackagesSafe(env("MAVEN_PACKAGES")),
     scope: env("SCOPE"),
     dryRun: env("DRY_RUN") === "true",
     runUrl: env("RUN_URL"),
     npmOrgUrl: env("NPM_ORG_URL") || "https://www.npmjs.com/org/ag-ui",
     pyBaseUrl: env("PY_BASE_URL") || "https://pypi.org/project",
     nugetBaseUrl: env("NUGET_BASE_URL") || "https://www.nuget.org/packages",
+    mavenBaseUrl:
+      env("MAVEN_BASE_URL") || "https://central.sonatype.com/artifact",
   });
 
   const outputPath = process.env.GITHUB_OUTPUT;

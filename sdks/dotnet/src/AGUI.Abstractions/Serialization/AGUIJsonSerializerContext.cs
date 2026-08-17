@@ -14,6 +14,8 @@ namespace AGUI.Abstractions;
 [JsonSerializable(typeof(RunErrorEvent))]
 [JsonSerializable(typeof(StepStartedEvent))]
 [JsonSerializable(typeof(StepFinishedEvent))]
+[JsonSerializable(typeof(TokenUsage))]
+[JsonSerializable(typeof(IList<TokenUsage>))]
 [JsonSerializable(typeof(AGUIInterrupt))]
 [JsonSerializable(typeof(IList<AGUIInterrupt>))]
 [JsonSerializable(typeof(AGUIResume))]

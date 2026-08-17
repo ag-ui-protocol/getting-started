@@ -95,7 +95,7 @@ const ALL_SERVICES = {
     {
       command: "uv run dev",
       name: "CrewAI",
-      cwd: path.join(integrationsRoot, "crew-ai/python"),
+      cwd: path.join(integrationsRoot, "crew-ai/python/examples"),
       env: { PORT: 8003 },
     },
   ],

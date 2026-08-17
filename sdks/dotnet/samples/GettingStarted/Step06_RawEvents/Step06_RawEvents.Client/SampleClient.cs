@@ -26,7 +26,9 @@ public static class SampleClient
         {
             updates.Add(update);
 
-            // Telemetry events arrive as RawEvent inside ChatResponseUpdate.RawRepresentation.
+            // Provider-specific telemetry arrives as a RawEvent inside RawRepresentation.
+            // The standard token counts do not need this path — they arrive as typed
+            // TokenUsage on RUN_FINISHED.usage and are portable across every AG-UI SDK.
             if (update.RawRepresentation is RawEvent { Source: var source, Event: var payload })
             {
                 await output.WriteLineAsync($"[telemetry:{source}] {payload.GetRawText()}").ConfigureAwait(false);

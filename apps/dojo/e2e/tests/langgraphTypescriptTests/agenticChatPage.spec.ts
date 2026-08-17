@@ -1,5 +1,6 @@
-import { test, expect } from "../../test-isolation-helper";
+import { test, expect } from "../../event-trace-test";
 import { AgenticChatPage } from "../../featurePages/AgenticChatPage";
+import { agenticChatPageEventTrace } from "./agenticChatPage.event-trace";
 import {
   sendChatMessage,
   awaitLLMResponseDone,
@@ -7,6 +8,7 @@ import {
 
 test("[LangGraph] Agentic Chat sends and receives a message", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph-typescript/feature/agentic_chat");
 
@@ -20,10 +22,14 @@ test("[LangGraph] Agentic Chat sends and receives a message", async ({
   await chat.assertAgentReplyVisible(
     /Hello duaa! How can I assist you today\?/,
   );
+  await eventTrace.expectJourney(
+    agenticChatPageEventTrace.sendsAndReceivesMessage,
+  );
 });
 
 test("[LangGraph] Agentic Chat changes background on message and reset", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph-typescript/feature/agentic_chat");
 
@@ -40,21 +46,27 @@ test("[LangGraph] Agentic Chat changes background on message and reset", async (
   const initialBackground = await getBackground();
 
   // 1. Send message to change background to blue
-  await chat.sendMessage("Hi change the background color to blue");
+  await chat.sendMessage("Hi change the background color to blue", {
+    assistantMessagesAdded: 2,
+  });
   await chat.assertUserMessageVisible("Hi change the background color to blue");
 
   await expect.poll(getBackground).not.toBe(initialBackground);
   const backgroundAfterBlue = await getBackground();
 
   // 2. Change to pink
-  await chat.sendMessage("Hi change the background color to pink");
+  await chat.sendMessage("Hi change the background color to pink", {
+    assistantMessagesAdded: 2,
+  });
   await chat.assertUserMessageVisible("Hi change the background color to pink");
 
   await expect.poll(getBackground).not.toBe(backgroundAfterBlue);
+  await eventTrace.expectJourney(agenticChatPageEventTrace.changesBackground);
 });
 
 test("[LangGraph] Agentic Chat retains memory of user messages during a conversation", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph-typescript/feature/agentic_chat");
 
@@ -84,6 +96,7 @@ test("[LangGraph] Agentic Chat retains memory of user messages during a conversa
     "Can you remind me what my favorite fruit is?",
   );
   await chat.assertAgentReplyVisible(/Your favorite fruit is Mango!/);
+  await eventTrace.expectJourney(agenticChatPageEventTrace.retainsMemory);
 });
 // v2 doesn't support regenerating messages yet, so skipping this test for now
 test.skip("[LangGraph Typescript] Agentic Chat regenerates a response", async ({

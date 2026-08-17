@@ -6,11 +6,20 @@ const eslintConfig = [
   ...nextCoreWebVitals,
   ...nextTypescript,
   ...next,
-  ...compat.config({
+  {
     rules: {
       "@typescript-eslint/no-unused-vars": "off",
     },
-  }),
+  },
+  {
+    // The `scripts/` helpers are CommonJS executables run directly via their
+    // shebang, and this package has no `"type": "module"`, so `require()` is
+    // the correct idiom for them rather than something to migrate away from.
+    files: ["scripts/**/*.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
   {
     ignores: [
       "node_modules/**",

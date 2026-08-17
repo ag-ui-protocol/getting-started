@@ -27,6 +27,7 @@ from google.adk.events import Event as ADKEvent
 
 from .config import PredictStateMapping, normalize_predict_state
 from .serialization import serialize_tool_args
+from .utils.converters import _escape_json_pointer_token
 
 import logging
 logger = logging.getLogger(__name__)
@@ -1293,7 +1294,7 @@ class EventTranslator:
         for key, value in state_delta.items():
             patches.append({
                 "op": "add",
-                "path": f"/{key}",
+                "path": f"/{_escape_json_pointer_token(key)}",
                 "value": value
             })
         

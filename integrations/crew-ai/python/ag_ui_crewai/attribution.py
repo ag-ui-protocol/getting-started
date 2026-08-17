@@ -23,7 +23,9 @@ protocol's free-form ``raw_event`` field (serialised ``rawEvent``):
   representation; ``qualified_name`` is a convenience join), and a unique
   ``step_id`` shared by a boundary's start and finish events (so two
   boundaries with the same ``step_name`` are still distinguishable). This
-  is the surface that unblocks a CrewAI ``subgraphs`` feature.
+  is the surface a client needs to render Flow-orchestrated Crews as a
+  tree. CrewAI has no compiled-subgraph primitive, so this is Flow
+  composition, not a LangGraph subgraph analogue.
 
 Threading contract
 ------------------

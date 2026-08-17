@@ -276,6 +276,9 @@ export function convertMessagesToVercelAISDKMessages(
             toolCallId: message.toolCallId,
             toolName: toolName,
             result: message.content,
+            // Carry the AG-UI failure signal onto the AI SDK v4 tool-result flag, so a
+            // client-reported tool failure is not delivered to the model as a success.
+            isError: !!message.error,
           },
         ],
       });

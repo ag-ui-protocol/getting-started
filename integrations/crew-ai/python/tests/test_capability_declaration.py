@@ -8,13 +8,35 @@ import dataclasses
 import pytest
 from fastapi import FastAPI
 
-from ag_ui_crewai import get_capabilities
+from ag_ui_crewai import _capabilities as capability_module
 from ag_ui_crewai import _capabilities as caps_mod
 from ag_ui_crewai import _config as config_mod
 from ag_ui_crewai import endpoint as ep
+from ag_ui_crewai import get_capabilities
 
 
 # -- shape of the declaration ----------------------------------------------
+
+
+def test_get_capabilities_declares_conversational_flow_transport():
+    conversational = get_capabilities()["conversationalFlows"]
+
+    assert conversational == {
+        "supported": capability_module._conversational_stream_available,
+        "entrypoint": "stream_turn",
+        "sessionId": "threadId",
+    }
+
+
+def test_conversational_capability_requires_public_stream_turn(monkeypatch):
+    monkeypatch.setattr(
+        capability_module,
+        "_conversational_stream_available",
+        False,
+        raising=False,
+    )
+
+    assert get_capabilities()["conversationalFlows"]["supported"] is False
 
 @pytest.fixture(autouse=True)
 def _clean_protocol_env(monkeypatch):
@@ -26,11 +48,13 @@ def _clean_protocol_env(monkeypatch):
 
 def test_get_capabilities_gates_raw_events_on_the_streamframe_transport(monkeypatch):
     """RAW passthrough needs the scoped stream sink, so ``supported`` / ``enabled``
-    track the StreamFrame transport rather than the flag alone."""
-    if caps_mod.LLMThinkingChunkEvent is None:  # pragma: no cover
-        # Skipped up front: a mid-test skip would silently void the rawEvents
-        # assertions that precede it.
-        pytest.skip("installed crewai does not expose LLMThinkingChunkEvent")
+    track the StreamFrame transport rather than the flag alone.
+
+    Nothing here reads crewai's ``LLMThinkingChunkEvent``: the reasoning leg below
+    rests on the litellm channel, which is a direct dependency. It is pinned live
+    in the snapshot swap so the assertion states its own premise instead of
+    inheriting whatever the ambient probes resolved.
+    """
     def _set_stream_frames(available):
         # ``CAPABILITIES`` is a frozen dataclass, so swap the whole cached probe
         # result rather than mutating a field.
@@ -39,7 +63,9 @@ def test_get_capabilities_gates_raw_events_on_the_streamframe_transport(monkeypa
             caps_mod,
             "CAPABILITIES",
             dataclasses.replace(
-                caps_mod.CAPABILITIES, stream_frame_available=available
+                caps_mod.CAPABILITIES,
+                stream_frame_available=available,
+                litellm_available=True,
             ),
         )
 
@@ -123,16 +149,27 @@ def test_reasoning_supported_across_providers():
 def test_reasoning_still_supported_via_litellm_when_thinking_event_absent(monkeypatch):
     """On a crewai without ``LLMThinkingChunkEvent`` reasoning is STILL supported
     through the litellm channel; only the extra native Gemini source is gone. The
-    ``reasoning_available`` flag keys off the litellm channel too, so patch both."""
+    declaration reads one snapshot, so drop the native channel there.
+
+    The Responses channel is pinned DARK as well. Left live it also satisfies
+    ``supported`` on its own, so the assertion would pass without the litellm
+    channel carrying anything and the test would not prove what it is named for."""
     monkeypatch.setattr(caps_mod, "_thinking_event_available", False)
     monkeypatch.setattr(
         caps_mod,
         "CAPABILITIES",
-        dataclasses.replace(caps_mod.CAPABILITIES, reasoning_available=True),
+        dataclasses.replace(
+            caps_mod.CAPABILITIES,
+            native_reasoning_event_available=False,
+            responses_api_available=False,
+            litellm_available=True,
+        ),
     )
     reasoning = caps_mod._reasoning_capability(_FakeNativeGemini())
     assert reasoning["supported"] is True
     assert reasoning["thinkingEventAvailable"] is False
+    assert reasoning["responsesApiChannel"] is False
+    assert reasoning["litellmChannel"] is True
     assert reasoning["reason"] is None
 
 

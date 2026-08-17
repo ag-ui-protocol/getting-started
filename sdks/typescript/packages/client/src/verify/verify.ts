@@ -8,14 +8,14 @@ export const verifyEvents =
   (source$: Observable<BaseEvent>): Observable<BaseEvent> => {
     const log = resolveDebugLogger(debugLogger);
     // Declare variables in closure to maintain state across events
-    let activeMessages = new Map<string, boolean>(); // Map of message ID -> active status
-    let activeToolCalls = new Map<string, boolean>(); // Map of tool call ID -> active status
+    const activeMessages = new Map<string, boolean>(); // Map of message ID -> active status
+    const activeToolCalls = new Map<string, boolean>(); // Map of tool call ID -> active status
     let runFinished = false;
     let runError = false; // New flag to track if RUN_ERROR has been sent
     // New flags to track first/last event requirements
     let firstEventReceived = false;
     // Track active steps
-    let activeSteps = new Map<string, boolean>(); // Map of step name -> active status
+    const activeSteps = new Map<string, boolean>(); // Map of step name -> active status
     let activeThinkingStep = false;
     let activeThinkingStepMessage = false;
     let runStarted = false; // Track if a run has started
@@ -39,8 +39,10 @@ export const verifyEvents =
 
         log?.event("VERIFY", "Event:", event, { type: event.type });
 
-        // Check if run has errored
-        if (runError) {
+        // Check if run has errored (but allow a new RUN_STARTED to start a new run, exactly as
+        // RUN_FINISHED does below). A stream can legitimately carry more than one run, a replay of
+        // a stored thread being the common case, and a run that errored is over rather than active.
+        if (runError && eventType !== EventType.RUN_STARTED) {
           return throwError(
             () =>
               new AGUIError(
@@ -70,8 +72,8 @@ export const verifyEvents =
             return throwError(() => new AGUIError(`First event must be 'RUN_STARTED'`));
           }
         } else if (eventType === EventType.RUN_STARTED) {
-          // Allow RUN_STARTED after RUN_FINISHED (new run), but not during an active run
-          if (runStarted && !runFinished) {
+          // Allow RUN_STARTED after RUN_FINISHED or RUN_ERROR (new run), but not during an active run
+          if (runStarted && !runFinished && !runError) {
             return throwError(
               () =>
                 new AGUIError(
@@ -79,9 +81,10 @@ export const verifyEvents =
                 ),
             );
           }
-          // If we're here, it's either the first RUN_STARTED or a new run after RUN_FINISHED
-          if (runFinished) {
-            // This is a new run after the previous one finished, reset state
+          // If we're here, it's either the first RUN_STARTED or a new run after the previous one
+          // ended, whether that end was RUN_FINISHED or RUN_ERROR
+          if (runFinished || runError) {
+            // This is a new run after the previous one ended, reset state
             resetRunState();
           }
         }
@@ -90,7 +93,7 @@ export const verifyEvents =
         switch (eventType) {
           // Text message flow
           case EventType.TEXT_MESSAGE_START: {
-            const messageId = (event as any).messageId;
+            const messageId = event.messageId as string;
 
             // Check if this message is already in progress
             if (activeMessages.has(messageId)) {
@@ -107,7 +110,7 @@ export const verifyEvents =
           }
 
           case EventType.TEXT_MESSAGE_CONTENT: {
-            const messageId = (event as any).messageId;
+            const messageId = event.messageId as string;
 
             // Must be in a message with this ID
             if (!activeMessages.has(messageId)) {
@@ -123,7 +126,7 @@ export const verifyEvents =
           }
 
           case EventType.TEXT_MESSAGE_END: {
-            const messageId = (event as any).messageId;
+            const messageId = event.messageId as string;
 
             // Must be in a message with this ID
             if (!activeMessages.has(messageId)) {
@@ -142,7 +145,7 @@ export const verifyEvents =
 
           // Tool call flow
           case EventType.TOOL_CALL_START: {
-            const toolCallId = (event as any).toolCallId;
+            const toolCallId = event.toolCallId as string;
 
             // Check if this tool call is already in progress
             if (activeToolCalls.has(toolCallId)) {
@@ -159,7 +162,7 @@ export const verifyEvents =
           }
 
           case EventType.TOOL_CALL_ARGS: {
-            const toolCallId = (event as any).toolCallId;
+            const toolCallId = event.toolCallId as string;
 
             // Must be in a tool call with this ID
             if (!activeToolCalls.has(toolCallId)) {
@@ -175,7 +178,7 @@ export const verifyEvents =
           }
 
           case EventType.TOOL_CALL_END: {
-            const toolCallId = (event as any).toolCallId;
+            const toolCallId = event.toolCallId as string;
 
             // Must be in a tool call with this ID
             if (!activeToolCalls.has(toolCallId)) {
@@ -194,7 +197,7 @@ export const verifyEvents =
 
           // Step flow
           case EventType.STEP_STARTED: {
-            const stepName = (event as any).stepName;
+            const stepName = event.stepName as string;
             if (activeSteps.has(stepName)) {
               return throwError(
                 () => new AGUIError(`Step "${stepName}" is already active for 'STEP_STARTED'`),
@@ -205,7 +208,7 @@ export const verifyEvents =
           }
 
           case EventType.STEP_FINISHED: {
-            const stepName = (event as any).stepName;
+            const stepName = event.stepName as string;
             if (!activeSteps.has(stepName)) {
               return throwError(
                 () =>

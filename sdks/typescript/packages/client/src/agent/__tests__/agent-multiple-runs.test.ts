@@ -10,7 +10,7 @@ describe("AbstractAgent multiple runs", () => {
       this.events = events;
     }
 
-    run(input: RunAgentInput): Observable<BaseEvent> {
+    run(_input: RunAgentInput): Observable<BaseEvent> {
       return of(...this.events);
     }
   }

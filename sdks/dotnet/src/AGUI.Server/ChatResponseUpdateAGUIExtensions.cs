@@ -1,10 +1,6 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using AGUI.Abstractions;
 using Microsoft.Extensions.AI;
 
@@ -166,6 +162,21 @@ public static class ChatResponseUpdateAGUIExtensions
         // generic input interrupts (from InterruptRequestContent).
         List<AGUIInterrupt>? pendingInterrupts = null;
 
+        // Accumulate provider-reported token usage so the terminal RunFinished can
+        // carry one entry per (provider, model) for the whole run.
+        var usageTracker = new TokenUsageTracker();
+
+        // Progressive tool-call argument streaming. MEAI coalesces tool-call arguments and
+        // only attaches the typed FunctionCallContent once a call is complete, so without a
+        // registered fragment extractor the wire carries one atomic TOOL_CALL_ARGS per call.
+        // When an extractor is registered, surface the per-chunk fragments as incremental
+        // TOOL_CALL_ARGS events and suppress the duplicate atomic emission. Two views of the
+        // open calls: by provider index (for later fragments + the end-of-stream sweep) and
+        // by call id (for an O(1) close when the coalesced FunctionCallContent arrives).
+        bool streamToolArgs = options.TryGetToolCallArgumentExtractor(out var extractToolArgFragments);
+        Dictionary<int, string> rawToolCallIdsByIndex = streamToolArgs ? new() : null!;
+        Dictionary<string, int> rawToolCallIndexById = streamToolArgs ? new(StringComparer.Ordinal) : null!;
+
         await foreach (var chatResponse in updates.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
             // Check if RawRepresentation contains an AG-UI event - emit it directly.
@@ -177,6 +188,10 @@ public static class ChatResponseUpdateAGUIExtensions
                 }
                 else if (rawEvent is RunFinishedEvent)
                 {
+                    // The caller supplied the terminal event, so it passes through
+                    // verbatim — including its Usage, which we do not overwrite.
+                    // Any usage accumulated from UsageContent is therefore theirs to
+                    // set; we never mutate a caller-owned event.
                     runFinishedEmitted = true;
                 }
                 else if (!runStartedEmitted)
@@ -198,6 +213,62 @@ public static class ChatResponseUpdateAGUIExtensions
 
             // Serialize the raw ChatResponseUpdate once for attaching to emitted events
             var raw = JsonSerializer.SerializeToElement(chatResponse, jsonSerializerOptions.GetTypeInfo(typeof(ChatResponseUpdate)));
+
+            // Surface provider-native streamed tool-call argument fragments incrementally.
+            if (streamToolArgs && extractToolArgFragments(chatResponse) is { } fragments)
+            {
+                foreach (var fragment in fragments)
+                {
+                    var haveIndex = rawToolCallIdsByIndex.TryGetValue(fragment.Index, out var rawToolCallId);
+
+                    // A new first fragment (only first fragments carry the function name) that
+                    // reuses an index still held by a prior, never-coalesced call means the prior
+                    // call at that index ended without its typed FunctionCallContent — e.g. a
+                    // mid-stream provider error on a retried sub-agent turn, where providers
+                    // restart tool-call indexes at 0 (and may even reuse the same id). Close the
+                    // stale call so the next call's fragments are not misattributed to it (and its
+                    // later coalesced FunctionCallContent no longer double-emits).
+                    if (haveIndex && !string.IsNullOrEmpty(fragment.FunctionName))
+                    {
+                        yield return ToolCallEndEvent.Create(rawToolCallId!, raw);
+                        rawToolCallIndexById.Remove(rawToolCallId!);
+                        rawToolCallIdsByIndex.Remove(fragment.Index);
+                        haveIndex = false;
+                    }
+
+                    if (!haveIndex)
+                    {
+                        // The first fragment of a call carries its id and function name;
+                        // later fragments only carry the index plus an arguments delta.
+                        if (string.IsNullOrEmpty(fragment.ToolCallId) || string.IsNullOrEmpty(fragment.FunctionName))
+                        {
+                            continue;
+                        }
+
+                        rawToolCallId = fragment.ToolCallId;
+                        rawToolCallIdsByIndex[fragment.Index] = rawToolCallId;
+                        rawToolCallIndexById[rawToolCallId] = fragment.Index;
+
+                        // Close any open text/reasoning block before emitting tool events.
+                        if (messageTracker.Close(raw) is { } fragTextEndEvt)
+                        {
+                            yield return fragTextEndEvt;
+                        }
+
+                        foreach (var reasonCloseEvt in reasoningTracker.Close())
+                        {
+                            yield return reasonCloseEvt;
+                        }
+
+                        yield return ToolCallStartEvent.Create(rawToolCallId, fragment.FunctionName!, chatResponse.MessageId, raw);
+                    }
+
+                    if (fragment.ArgumentsDelta.Length > 0)
+                    {
+                        yield return ToolCallArgsEvent.Create(rawToolCallId!, fragment.ArgumentsDelta, raw);
+                    }
+                }
+            }
 
             string? effectiveMessageId = null;
             foreach (var content in chatResponse.Contents)
@@ -255,6 +326,48 @@ public static class ChatResponseUpdateAGUIExtensions
                         break;
 
                     case FunctionCallContent fcc:
+
+                        // This call's arguments already streamed incrementally from the raw
+                        // fragments above — only the closing event remains. Release the
+                        // per-call state: providers restart tool-call indexes at 0 each turn,
+                        // so a stale entry would absorb a later round's fragments into this
+                        // finished call.
+                        if (streamToolArgs && rawToolCallIndexById.Remove(fcc.CallId, out var closedIndex))
+                        {
+                            rawToolCallIdsByIndex.Remove(closedIndex);
+
+                            if (messageTracker.Close(raw) is { } rawFccEndEvt)
+                            {
+                                yield return rawFccEndEvt;
+                            }
+
+                            foreach (var reasonRawCloseEvt in reasoningTracker.Close())
+                            {
+                                yield return reasonRawCloseEvt;
+                            }
+
+                            yield return ToolCallEndEvent.Create(fcc.CallId, raw);
+
+                            // Emit the mapped call events the atomic path emits, so a registered
+                            // MapCall mapper is not silently skipped for a tool whose arguments
+                            // streamed as fragments.
+                            if (options.TryGetCallMapping(fcc.Name, out var rawCallMapper))
+                            {
+                                foreach (var mappedEvt in rawCallMapper(fcc))
+                                {
+                                    yield return mappedEvt;
+                                }
+                            }
+
+                            // Preserve result-mapping correlation the atomic path performs.
+                            if (options.TryGetResultMapping(fcc.Name, out _))
+                            {
+                                callIdToToolName ??= new Dictionary<string, string>(StringComparer.Ordinal);
+                                callIdToToolName[fcc.CallId] = fcc.Name;
+                            }
+
+                            break;
+                        }
 
                         // On continuation, suppress re-emitted FCCs (client already has them from turn 1)
                         if (isContinuation)
@@ -405,6 +518,12 @@ public static class ChatResponseUpdateAGUIExtensions
                         });
                         break;
 
+                    case UsageContent usageContent:
+                        // Usage is metadata, not stream content — accumulate it for the
+                        // terminal RunFinished rather than emitting an event of its own.
+                        usageTracker.Add(usageContent.Details, options.UsageProvider, chatResponse.ModelId);
+                        break;
+
                     default:
                         // Check registered interrupt mappers for custom interrupt-producing content types
                         var interrupt = options.InvokeInterruptMappers(content);
@@ -448,6 +567,20 @@ public static class ChatResponseUpdateAGUIExtensions
             }
         }
 
+        // Close any raw-streamed tool call whose coalesced FunctionCallContent never arrived
+        // (stream cut short, or a pipeline that does not re-emit the typed content). Without
+        // this sweep the wire carries Start/Args with no End and consumers stay "in progress".
+        // Sweep in provider index order so the close events are deterministic.
+        if (streamToolArgs && rawToolCallIdsByIndex.Count > 0)
+        {
+            var openIndexes = new List<int>(rawToolCallIdsByIndex.Keys);
+            openIndexes.Sort();
+            foreach (var openIndex in openIndexes)
+            {
+                yield return ToolCallEndEvent.Create(rawToolCallIdsByIndex[openIndex]);
+            }
+        }
+
         // End the last message if there was one
         if (messageTracker.Close() is { } finalEndEvt)
         {
@@ -469,14 +602,16 @@ public static class ChatResponseUpdateAGUIExtensions
         if (pendingInterrupts is { Count: > 0 })
         {
             yield return RunFinishedEvent.Create(threadId, runId,
-                new RunFinishedInterruptOutcome { Interrupts = pendingInterrupts });
+                new RunFinishedInterruptOutcome { Interrupts = pendingInterrupts },
+                usageTracker.Build());
             runFinishedEmitted = true;
         }
 
         // Emit RunFinishedEvent automatically if not explicitly provided
         if (!runFinishedEmitted)
         {
-            yield return RunFinishedEvent.Create(threadId, runId, new RunFinishedSuccessOutcome());
+            yield return RunFinishedEvent.Create(threadId, runId, new RunFinishedSuccessOutcome(),
+                usageTracker.Build());
         }
     }
 
