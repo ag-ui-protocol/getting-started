@@ -345,7 +345,109 @@ public sealed class MixedToolInvocationIntegrationTest : IntegrationTestBase
         Assert.Contains("Amsterdam", text);
     }
 
+    [Fact]
+    public async Task MixedInvocation_DeterministicTwoTurnFlow_ExecutesEachToolOnceWithValidHistory()
+    {
+        var serverCallCount = 0;
+        var clientCallCount = 0;
+        var serverTool = AIFunctionFactory.Create(
+            () =>
+            {
+                serverCallCount++;
+                return "Paris: 18C, rainy";
+            },
+            "get_weather",
+            "Gets weather");
+        var fakeLlm = new FakeChatClientWithCapture();
+        fakeLlm.Enqueue(messages =>
+        {
+            Assert.Equal(0, serverCallCount);
+            return EmitMixedCalls();
+        });
+        fakeLlm.Enqueue(messages =>
+        {
+            Assert.Equal(1, serverCallCount);
+            AssertCompleteMixedHistory(messages);
+            return EmitTextResponse("You are in Tokyo; Paris is rainy.");
+        });
+
+        var factory = Factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IChatClient>();
+                services.AddSingleton<AITool>(serverTool);
+                services.AddChatClient(_ => (IChatClient)fakeLlm)
+                    .UseFunctionInvocation();
+            });
+        });
+
+        var transport = new CapturingAGUITransport(
+            new AGUIHttpTransport(factory.CreateClient(), "/agui"));
+        var aguiClient = new AGUIChatClient(new() { Transport = transport });
+        var clientTool = AIFunctionFactory.Create(
+            () =>
+            {
+                clientCallCount++;
+                return "Tokyo, Japan";
+            },
+            "get_user_location",
+            "Gets location");
+
+        var updates = await CollectUpdates(
+            aguiClient,
+            [new ChatMessage(ChatRole.User, "Where am I and what is the weather in Paris?")],
+            new ChatOptions { Tools = [clientTool] });
+
+        Assert.Equal(1, clientCallCount);
+        Assert.Equal(1, serverCallCount);
+        Assert.Equal(2, transport.Turns.Count);
+        Assert.Contains("Tokyo", ExtractText(updates));
+        Assert.Single(transport.Turns[0].Events.OfType<RunFinishedEvent>());
+        Assert.Empty(transport.Turns[1].Events.OfType<ToolCallStartEvent>());
+    }
+
+    private static void AssertCompleteMixedHistory(IEnumerable<ChatMessage> messages)
+    {
+        var history = messages.ToList();
+        var assistantIndex = history.FindLastIndex(
+            message => message.Role == ChatRole.Assistant
+                && message.Contents.OfType<FunctionCallContent>().Any());
+        Assert.True(assistantIndex >= 0);
+
+        var callIds = history[assistantIndex].Contents
+            .OfType<FunctionCallContent>()
+            .Select(call => call.CallId)
+            .OrderBy(id => id)
+            .ToList();
+        var resultIds = history
+            .Skip(assistantIndex + 1)
+            .TakeWhile(message => message.Role == ChatRole.Tool)
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionResultContent>()
+            .Select(result => result.CallId)
+            .OrderBy(id => id)
+            .ToList();
+
+        Assert.Equal(["call_location", "call_weather"], callIds);
+        Assert.Equal(callIds, resultIds);
+    }
+
 #pragma warning disable CS1998
+    private static async IAsyncEnumerable<ChatResponseUpdate> EmitMixedCalls()
+    {
+        yield return new ChatResponseUpdate
+        {
+            Role = ChatRole.Assistant,
+            Contents =
+            [
+                new FunctionCallContent("call_location", "get_user_location"),
+                new FunctionCallContent("call_weather", "get_weather"),
+            ],
+            FinishReason = ChatFinishReason.ToolCalls,
+        };
+    }
+
     private static async IAsyncEnumerable<ChatResponseUpdate> EmitSingleToolCall(
         string callId, string name, IDictionary<string, object?> arguments,
         [EnumeratorCancellation] CancellationToken ct = default)

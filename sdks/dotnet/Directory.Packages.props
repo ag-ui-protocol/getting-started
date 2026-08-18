@@ -5,9 +5,9 @@
   <ItemGroup>
     <PackageVersion Include="Azure.AI.OpenAI" Version="2.1.0" />
     <PackageVersion Include="Azure.Identity" Version="1.21.0" />
-    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.6.0" />
-    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.6.0" />
-    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.6.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.9.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.9.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.9.0" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
@@ -16,7 +16,7 @@
     <PackageVersion Include="GitHub.Copilot.SDK" Version="1.0.0" />
     <PackageVersion Include="Google.Protobuf" Version="3.35.1" />
     <PackageVersion Include="Grpc.Tools" Version="2.81.1" />
-    <PackageVersion Include="System.Text.Json" Version="10.0.8" />
+    <PackageVersion Include="System.Text.Json" Version="10.0.11" />
     <PackageVersion Include="System.Net.Http.Json" Version="10.0.8" />
     <PackageVersion Include="System.Net.ServerSentEvents" Version="10.0.8" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />

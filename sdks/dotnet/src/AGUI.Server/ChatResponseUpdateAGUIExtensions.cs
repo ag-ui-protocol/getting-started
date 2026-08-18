@@ -479,18 +479,19 @@ public static class ChatResponseUpdateAGUIExtensions
 
                         yield return ToolCallEndEvent.Create(toolCall.CallId, raw);
 
-                        // A client tool is owned and gated by the client, never the server. Always
-                        // surface its call as a plain TOOL_CALL (the run finishes with success) so
-                        // the client executes it — including when the model re-invokes it on a
-                        // continuation (where it arrives wrapped as an approval request).
+                        // Client tools are always represented to FICC as approval-required proxies,
+                        // so unwrap their approval requests back into ordinary AG-UI tool calls.
                         if (clientToolNames.Contains(toolCall.Name))
                         {
                             break;
                         }
 
-                        // In mixed invocation (first turn), don't accumulate interrupts.
-                        // The stream will finish with RUN_FINISHED(success) instead.
-                        if (clientToolNames.Count > 0 && !isContinuation)
+                        // FICC wraps every peer in a mixed batch when one function requires approval.
+                        // A false value identifies a collateral server call: unwrap it so clients can
+                        // preserve the call as informational history without prompting for approval.
+#pragma warning disable MEAI001
+                        if (!ar.RequiresConfirmation)
+#pragma warning restore MEAI001
                         {
                             break;
                         }

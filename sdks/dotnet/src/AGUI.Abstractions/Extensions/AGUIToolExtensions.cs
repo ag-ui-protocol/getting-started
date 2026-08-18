@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
 
 namespace AGUI.Abstractions;
@@ -38,8 +40,9 @@ public static class AGUIToolExtensions
     }
 
     /// <summary>
-    /// Converts a sequence of <see cref="AGUITool"/> instances to <see cref="AITool"/> declarations.
-    /// These are declaration-only and cannot be invoked, as the actual implementation exists on the client side.
+    /// Converts a sequence of <see cref="AGUITool"/> instances to invocable <see cref="AIFunction"/> proxies.
+    /// The actual implementation remains on the client side; the proxies are intended to be wrapped with
+    /// <see cref="ApprovalRequiredAIFunction"/> before they are supplied to a function-invoking chat client.
     /// </summary>
     /// <param name="tools">The AG-UI tool definitions.</param>
     /// <returns>A sequence of <see cref="AITool"/> declarations.</returns>
@@ -57,10 +60,31 @@ public static class AGUIToolExtensions
     {
         foreach (var tool in tools)
         {
-            yield return AIFunctionFactory.CreateDeclaration(
-                name: tool.Name,
-                description: tool.Description,
-                jsonSchema: tool.Parameters);
+            yield return new ClientToolAIFunction(tool);
+        }
+    }
+
+    private sealed class ClientToolAIFunction : AIFunction
+    {
+        private readonly AGUITool _tool;
+
+        internal ClientToolAIFunction(AGUITool tool)
+        {
+            _tool = tool;
+        }
+
+        public override string Name => _tool.Name;
+
+        public override string Description => _tool.Description ?? string.Empty;
+
+        public override System.Text.Json.JsonElement JsonSchema => _tool.Parameters;
+
+        protected override ValueTask<object?> InvokeCoreAsync(
+            AIFunctionArguments arguments,
+            CancellationToken cancellationToken)
+        {
+            return new ValueTask<object?>(Task.FromException<object?>(
+                new InvalidOperationException($"Client tool '{Name}' cannot be invoked on the server without a client-produced result.")));
         }
     }
 }

@@ -13,11 +13,16 @@
       "role": "assistant",
       "contents": [
         {
-          "$type": "functionCall",
-          "name": "get_user_location",
-          "arguments": {},
-          "informationalOnly": false,
-          "callId": "call_Id_1"
+          "$type": "toolApprovalRequest",
+          "toolCall": {
+            "$type": "functionCall",
+            "name": "get_user_location",
+            "arguments": {},
+            "informationalOnly": false,
+            "callId": "call_Id_1"
+          },
+          "requiresConfirmation": true,
+          "requestId": "approval_Id_1"
         },
         {
           "$type": "toolApprovalRequest",
@@ -30,24 +35,26 @@
             "informationalOnly": false,
             "callId": "call_Id_2"
           },
-          "requestId": "approval_Id_1"
+          "requiresConfirmation": false,
+          "requestId": "approval_Id_2"
         }
       ]
     },
     {
-      "role": "tool",
-      "contents": [
-        {
-          "$type": "functionResult",
-          "result": "\u0022Tokyo, Japan\u0022",
-          "callId": "call_Id_1"
-        }
-      ],
-      "messageId": "call_Id_1"
-    },
-    {
       "role": "user",
       "contents": [
+        {
+          "$type": "toolApprovalResponse",
+          "approved": true,
+          "toolCall": {
+            "$type": "functionCall",
+            "name": "get_user_location",
+            "arguments": {},
+            "informationalOnly": false,
+            "callId": "call_Id_1"
+          },
+          "requestId": "approval_Id_1"
+        },
         {
           "$type": "toolApprovalResponse",
           "approved": true,
@@ -60,7 +67,7 @@
             "informationalOnly": false,
             "callId": "call_Id_2"
           },
-          "requestId": "approval_Id_1"
+          "requestId": "approval_Id_2"
         }
       ]
     }
@@ -70,7 +77,7 @@
       {
         "type": "ApprovalRequiredAIFunction",
         "name": "get_user_location",
-        "description": ""
+        "description": "Gets the user\u0027s current city via GPS."
       },
       {
         "type": "ReflectionAIFunction",

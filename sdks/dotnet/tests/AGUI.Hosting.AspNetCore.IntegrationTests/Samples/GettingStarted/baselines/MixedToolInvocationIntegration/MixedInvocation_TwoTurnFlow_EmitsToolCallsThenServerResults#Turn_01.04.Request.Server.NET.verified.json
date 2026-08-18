@@ -13,7 +13,7 @@
   "options": {
     "tools": [
       {
-        "type": "DefaultAIFunctionDeclaration",
+        "type": "ApprovalRequiredAIFunction",
         "name": "get_user_location",
         "description": "Gets the user\u0027s current city via GPS."
       },

@@ -128,6 +128,7 @@
             "informationalOnly": false,
             "callId": "call_J9ZwcVNQnJfAP0dNAIcHb1C9"
           },
+          "requiresConfirmation": true,
           "requestId": "ficc_call_J9ZwcVNQnJfAP0dNAIcHb1C9"
         }
       ],

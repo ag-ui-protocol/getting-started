@@ -13,24 +13,35 @@
       "role": "assistant",
       "contents": [
         {
-          "$type": "functionCall",
-          "name": "GetUserLocation",
-          "arguments": {},
-          "informationalOnly": false,
-          "callId": "call_Id_1"
+          "$type": "toolApprovalRequest",
+          "toolCall": {
+            "$type": "functionCall",
+            "name": "GetUserLocation",
+            "arguments": {},
+            "informationalOnly": false,
+            "callId": "call_Id_1"
+          },
+          "requiresConfirmation": true,
+          "requestId": "approval_Id_1"
         }
       ]
     },
     {
-      "role": "tool",
+      "role": "user",
       "contents": [
         {
-          "$type": "functionResult",
-          "result": "\u0022Amsterdam, Netherlands (52.37\u00B0N, 4.90\u00B0E)\u0022",
-          "callId": "call_Id_1"
+          "$type": "toolApprovalResponse",
+          "approved": true,
+          "toolCall": {
+            "$type": "functionCall",
+            "name": "GetUserLocation",
+            "arguments": {},
+            "informationalOnly": false,
+            "callId": "call_Id_1"
+          },
+          "requestId": "approval_Id_1"
         }
-      ],
-      "messageId": "call_Id_1"
+      ]
     }
   ],
   "options": {
@@ -38,7 +49,7 @@
       {
         "type": "ApprovalRequiredAIFunction",
         "name": "GetUserLocation",
-        "description": ""
+        "description": "Get the user\u0027s current location from GPS."
       }
     ]
   }
