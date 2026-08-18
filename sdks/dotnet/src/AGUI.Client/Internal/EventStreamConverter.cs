@@ -964,6 +964,27 @@ internal static class EventStreamConverter
                         };
                     }
 
+                    // Surface token usage as MEAI UsageContent so callers of the IChatClient
+                    // abstraction can read it via ChatResponse.Usage rather than having to
+                    // inspect RawRepresentation. One update per entry, each carrying its own
+                    // ModelId, so per-model attribution survives the conversion. `provider`
+                    // has no MEAI equivalent and stays available on RawRepresentation.
+                    if (runFinishedEvt.Usage is { Count: > 0 } usageEntries)
+                    {
+                        foreach (var entry in usageEntries)
+                        {
+                            yield return new ChatResponseUpdate
+                            {
+                                Role = ChatRole.Assistant,
+                                ConversationId = conversationId,
+                                ResponseId = responseId,
+                                ModelId = entry.Model,
+                                Contents = [new UsageContent(ToUsageDetails(entry))],
+                                RawRepresentation = runFinishedEvt,
+                            };
+                        }
+                    }
+
                     break;
 
                 case RunErrorEvent errorEvent:
@@ -1250,4 +1271,16 @@ internal static class EventStreamConverter
                 $"Cannot send '{eventType}': subagentRunId '{subagentRunId}' does not match the {entityKind} '{entityId}' opener's subagent '{owner}'.");
         }
     }
+    // Inverse of the AGUI.Server mapping. Every AG-UI count has a first-class MEAI
+    // equivalent, and null stays null on both sides so a count the provider never
+    // reported is not reported as zero.
+    private static UsageDetails ToUsageDetails(TokenUsage usage) =>
+        new()
+        {
+            InputTokenCount = usage.InputTokens,
+            OutputTokenCount = usage.OutputTokens,
+            TotalTokenCount = usage.TotalTokens,
+            ReasoningTokenCount = usage.ReasoningTokens,
+            CachedInputTokenCount = usage.CachedInputTokens,
+        };
 }

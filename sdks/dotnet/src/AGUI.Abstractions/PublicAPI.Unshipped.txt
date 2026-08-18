@@ -900,3 +900,25 @@ AGUI.Abstractions.AGUIInterrupt.SubagentRunId.set -> void
 AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedOutcome>
 AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedSuccessOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedSuccessOutcome>
 AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedSuspendedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedSuspendedOutcome>
+AGUI.Abstractions.TokenUsage
+AGUI.Abstractions.TokenUsage.TokenUsage() -> void
+AGUI.Abstractions.TokenUsage.Provider.get -> string?
+AGUI.Abstractions.TokenUsage.Provider.set -> void
+AGUI.Abstractions.TokenUsage.Model.get -> string?
+AGUI.Abstractions.TokenUsage.Model.set -> void
+AGUI.Abstractions.TokenUsage.InputTokens.get -> long?
+AGUI.Abstractions.TokenUsage.InputTokens.set -> void
+AGUI.Abstractions.TokenUsage.OutputTokens.get -> long?
+AGUI.Abstractions.TokenUsage.OutputTokens.set -> void
+AGUI.Abstractions.TokenUsage.TotalTokens.get -> long?
+AGUI.Abstractions.TokenUsage.TotalTokens.set -> void
+AGUI.Abstractions.TokenUsage.ReasoningTokens.get -> long?
+AGUI.Abstractions.TokenUsage.ReasoningTokens.set -> void
+AGUI.Abstractions.TokenUsage.CachedInputTokens.get -> long?
+AGUI.Abstractions.TokenUsage.CachedInputTokens.set -> void
+AGUI.Abstractions.RunFinishedEvent.Usage.get -> System.Collections.Generic.IList<AGUI.Abstractions.TokenUsage!>?
+AGUI.Abstractions.RunFinishedEvent.Usage.set -> void
+AGUI.Abstractions.RunErrorEvent.Usage.get -> System.Collections.Generic.IList<AGUI.Abstractions.TokenUsage!>?
+AGUI.Abstractions.RunErrorEvent.Usage.set -> void
+AGUI.Abstractions.AGUIJsonSerializerContext.TokenUsage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TokenUsage>
+AGUI.Abstractions.AGUIJsonSerializerContext.IListTokenUsage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.TokenUsage>>

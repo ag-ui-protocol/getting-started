@@ -1,0 +1,67 @@
+diff --git a/dist/responses.js b/dist/responses.js
+index 0a9817d6c0a328769077e2baa61760c6cc9a2bca..140342048f16b23ae649bf10eba24017aa5b8ca7 100644
+--- a/dist/responses.js
++++ b/dist/responses.js
+@@ -174,5 +174,20 @@ function buildTextStreamEvents(content, model, chunkSize, reasoning, webSearches
+ 			model: overrides?.model ?? model,
+ 			status: responsesStatus(overrides?.finishReason, "completed"),
++			error: null,
++			incomplete_details: null,
++			instructions: null,
++			metadata: {},
++			parallel_tool_calls: true,
++			temperature: null,
++			tool_choice: "auto",
++			tools: [],
++			top_p: null,
++			max_output_tokens: null,
++			previous_response_id: null,
++			reasoning: null,
++			text: null,
++			truncation: "disabled",
++			user: null,
+ 			output: [...prefixOutputItems, msgItem],
+ 			usage: responsesUsage(overrides)
+ 		}
+@@ -239,5 +254,20 @@ function buildToolCallStreamEvents(toolCalls, model, chunkSize, reasoning, webSe
+ 			model: overrides?.model ?? model,
+ 			status: responsesStatus(overrides?.finishReason, "completed"),
++			error: null,
++			incomplete_details: null,
++			instructions: null,
++			metadata: {},
++			parallel_tool_calls: true,
++			temperature: null,
++			tool_choice: "auto",
++			tools: [],
++			top_p: null,
++			max_output_tokens: null,
++			previous_response_id: null,
++			reasoning: null,
++			text: null,
++			truncation: "disabled",
++			user: null,
+ 			output: [...prefixOutputItems, ...fcOutputItems],
+ 			usage: responsesUsage(overrides)
+ 		}
+@@ -635,5 +665,20 @@ function buildContentWithToolCallsStreamEvents(content, toolCalls, model, chunkS
+ 			model: overrides?.model ?? model,
+ 			status: responsesStatus(overrides?.finishReason, "completed"),
++			error: null,
++			incomplete_details: null,
++			instructions: null,
++			metadata: {},
++			parallel_tool_calls: true,
++			temperature: null,
++			tool_choice: "auto",
++			tools: [],
++			top_p: null,
++			max_output_tokens: null,
++			previous_response_id: null,
++			reasoning: null,
++			text: null,
++			truncation: "disabled",
++			user: null,
+ 			output: [...prefixOutputItems, ...orderedOutputItems],
+ 			usage: responsesUsage(overrides)
+ 		}

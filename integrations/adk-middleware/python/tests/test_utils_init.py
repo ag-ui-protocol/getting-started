@@ -63,7 +63,7 @@ class TestUtilsInit:
         patches = convert_state_to_json_patch(state_delta)
 
         assert len(patches) == 1
-        assert patches[0]["op"] == "replace"
+        assert patches[0]["op"] == "add"
         assert patches[0]["path"] == "/test_key"
         assert patches[0]["value"] == "test_value"
 

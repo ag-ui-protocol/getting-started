@@ -38,7 +38,10 @@ const result = await agent.runAgent({
 
 ## To run the example server in the dojo
 
+The dojo server is a separate project alongside the Python package, so run it from a
+checkout of this repository.
+
 ```bash
-cd integrations/crew-ai/python
-poetry install && poetry run dev
+cd integrations/crew-ai/python/examples
+uv sync && uv run dev
 ```

@@ -39,6 +39,29 @@ RunFinishedOutcome = Annotated[
 ]
 
 
+class TokenUsage(ConfiguredBaseModel):
+    """
+    Numeric-only, per-(provider, model) token usage summary.
+
+    Deliberately carries no content-bearing or identifying fields (no prompts,
+    completions, messages, thread/run/user IDs) — only provider/model labels and
+    numeric token counts.
+    """
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    # Counts are non-negative integers in every binding. Pydantic already rejects
+    # a fractional value for an `int` field, but an explicit bound is needed for
+    # the negative case: without it Python could emit a value the TypeScript
+    # schema refuses to parse, and because TS consumers validate every incoming
+    # event and raise on failure, that would surface as a dead run at the
+    # consumer rather than an actionable error at the producer.
+    input_tokens: Optional[int] = Field(default=None, ge=0)
+    output_tokens: Optional[int] = Field(default=None, ge=0)
+    total_tokens: Optional[int] = Field(default=None, ge=0)
+    reasoning_tokens: Optional[int] = Field(default=None, ge=0)
+    cached_input_tokens: Optional[int] = Field(default=None, ge=0)
+
+
 class EventType(str, Enum):
     """
     The type of event.
@@ -307,6 +330,10 @@ class RunFinishedEvent(BaseEvent):
     run_id: str
     result: Optional[Any] = None
     outcome: Optional[RunFinishedOutcome] = None
+    # Optional per-(provider, model) token usage for the completed run. A list
+    # so runs invoking multiple models keep them separate for downstream
+    # display; consumers needing only totals can sum across entries.
+    usage: Optional[List[TokenUsage]] = None
 
 
 class RunErrorEvent(BaseEvent):
@@ -316,6 +343,9 @@ class RunErrorEvent(BaseEvent):
     type: Literal[EventType.RUN_ERROR] = EventType.RUN_ERROR  # pyright: ignore[reportIncompatibleVariableOverride]
     message: str
     code: Optional[str] = None
+    # Optional partial usage for a run that failed after one or more model calls
+    # completed. Same numeric-only shape as RUN_FINISHED.
+    usage: Optional[List[TokenUsage]] = None
 
 
 class StepStartedEvent(BaseEvent):

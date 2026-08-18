@@ -3,10 +3,12 @@ Streaming and state helpers (copilotkit_stream and related utilities) for the Cr
 """
 
 import copy
+import inspect
 import logging
 import uuid
 from dataclasses import dataclass
 from typing import (
+  AsyncIterator,
   List,
   Any,
   Optional,
@@ -29,7 +31,7 @@ from crewai.flow.flow import FlowState
 # The event bus moved from ``crewai.utilities.events`` (0.x) to
 # ``crewai.events`` (1.x); ``_capabilities`` resolves whichever exists.
 from ._capabilities import crewai_event_bus
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from ag_ui.core import EventType, Message
 from .context import flow_context
 from .events import (
@@ -45,7 +47,31 @@ from .events import (
   BridgedReasoningEndEvent,
   BridgedReasoningEncryptedValueEvent,
 )
-from ._reasoning import reasoning_from_delta
+from ._reasoning import (
+  DeltaReasoning,
+  reasoning_from_delta,
+  reasoning_from_responses_event,
+)
+from ._responses import (
+  copilotkit_responses,
+  responses_channel_available,
+)
+from ._responses_events import (
+  RESPONSES_COMPLETED,
+  RESPONSES_CREATED,
+  RESPONSES_ERROR,
+  RESPONSES_FAILED,
+  RESPONSES_FUNCTION_CALL_ARGS_DELTA,
+  RESPONSES_INCOMPLETE,
+  RESPONSES_OUTPUT_ITEM_ADDED,
+  RESPONSES_OUTPUT_ITEM_DONE,
+  RESPONSES_OUTPUT_TEXT_DELTA,
+  RESPONSES_RECOGNISED,
+  RESPONSES_TERMINAL,
+  responses_attr,
+  responses_event_type,
+  responses_item_id,
+)
 from .utils import yield_control, convert_litellm_multimodal_to_agui
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,6 +84,16 @@ class CopilotKitState(FlowState):
     """CopilotKit state"""
     messages: List[Any] = Field(default_factory=list)
     copilotkit: CopilotKitProperties = Field(default_factory=CopilotKitProperties)
+    # CrewAI's experimental conversational runtime writes these fields while a
+    # turn is being routed. Exclude them from AG-UI state snapshots so enabling
+    # the runtime contract does not change regular Flow wire state.
+    current_user_message: Optional[str] = Field(default=None, exclude=True)
+    last_user_message: Optional[str] = Field(default=None, exclude=True)
+    last_intent: Optional[str] = Field(default=None, exclude=True)
+    ended: bool = Field(default=False, exclude=True)
+    events: List[Any] = Field(default_factory=list, exclude=True)
+    agent_threads: Dict[str, List[Any]] = Field(default_factory=dict, exclude=True)
+    session_ready: bool = Field(default=False, exclude=True)
 
 class PredictStateConfig(TypedDict):
     """
@@ -293,6 +329,138 @@ async def copilotkit_emit_state(state: Any) -> Literal[True]:
 
     return True
 
+class _ReasoningChannel:
+    """The REASONING_* lifecycle for one streamed assistant turn.
+
+    Both streaming drivers project their provider payload onto
+    :class:`DeltaReasoning` and hand it here, so the lifecycle is defined once:
+    a reasoning message opens lazily on the first reasoning payload and closes
+    on the first answer token, the first tool call, or the end of the stream. A
+    model that interleaves thinking with tool calls therefore gets one reasoning
+    message per thinking block.
+    """
+
+    def __init__(self, flow: Any):
+        self._flow = flow
+        self.message_id: Optional[str] = None
+        self.open = False
+        # Whether a reasoning message has already opened and closed this turn.
+        self.closed_once = False
+
+    async def emit(self, reasoning: DeltaReasoning) -> None:
+        """Emit one reasoning payload, opening the message if needed.
+
+        A payload carrying reasoning TEXT always opens a message when none is
+        open, so a genuine later thinking block still surfaces in full.
+
+        An id-less encrypted-only payload may open the FIRST message of a turn
+        (an Anthropic ``redacted_thinking`` block is entirely encrypted), but is
+        dropped after a prior block closes to avoid an empty second trace. A
+        Responses payload is different: its provider ID either attaches late
+        continuation state to that closed item or identifies a new empty item
+        that must remain replayable.
+        """
+        if not reasoning:
+            return
+        if (
+            self.open
+            and reasoning.item_id is not None
+            and reasoning.item_id != self.message_id
+        ):
+            raise RuntimeError(
+                "OpenAI Responses changed reasoning item id while one reasoning "
+                f"message was open: {self.message_id!r} -> {reasoning.item_id!r}"
+            )
+        if not self.open:
+            if self.closed_once and not reasoning.text:
+                if reasoning.item_id is None:
+                    _LOGGER.debug(
+                        "Dropping an encrypted-only reasoning blob that arrived "
+                        "after its reasoning message closed"
+                    )
+                    return
+                if reasoning.item_id == self.message_id:
+                    # Responses may deliver the completed item after answer/tool
+                    # output already closed its visible summary. Attach opaque
+                    # continuation state to that provider-owned message without
+                    # inventing a second empty lifecycle.
+                    for value in reasoning.encrypted:
+                        crewai_event_bus.emit(
+                            self._flow,
+                            BridgedReasoningEncryptedValueEvent(
+                                type=EventType.REASONING_ENCRYPTED_VALUE,
+                                subtype="message",
+                                entity_id=self.message_id,
+                                encrypted_value=value,
+                            ),
+                        )
+                    if reasoning.encrypted:
+                        await yield_control()
+                    return
+            self.message_id = reasoning.item_id or str(uuid.uuid4())
+            crewai_event_bus.emit(
+                self._flow,
+                BridgedReasoningStartEvent(
+                    type=EventType.REASONING_START,
+                    message_id=self.message_id,
+                ),
+            )
+            crewai_event_bus.emit(
+                self._flow,
+                BridgedReasoningMessageStartEvent(
+                    type=EventType.REASONING_MESSAGE_START,
+                    message_id=self.message_id,
+                    role="reasoning",
+                ),
+            )
+            self.open = True
+        if reasoning.text:
+            crewai_event_bus.emit(
+                self._flow,
+                BridgedReasoningMessageContentEvent(
+                    type=EventType.REASONING_MESSAGE_CONTENT,
+                    message_id=self.message_id,
+                    delta=reasoning.text,
+                ),
+            )
+        for value in reasoning.encrypted:
+            crewai_event_bus.emit(
+                self._flow,
+                BridgedReasoningEncryptedValueEvent(
+                    type=EventType.REASONING_ENCRYPTED_VALUE,
+                    subtype="message",
+                    entity_id=self.message_id,
+                    encrypted_value=value,
+                ),
+            )
+        await yield_control()
+
+    def close(self) -> None:
+        """Close an open reasoning message. A no-op when nothing is open.
+
+        Retains the last message ID so late Responses continuation state can
+        still attach to the provider-owned item after its visible lifecycle ends.
+        """
+        if not self.open:
+            return
+        crewai_event_bus.emit(
+            self._flow,
+            BridgedReasoningMessageEndEvent(
+                type=EventType.REASONING_MESSAGE_END,
+                message_id=self.message_id,
+            ),
+        )
+        crewai_event_bus.emit(
+            self._flow,
+            BridgedReasoningEndEvent(
+                type=EventType.REASONING_END,
+                message_id=self.message_id,
+            ),
+        )
+        self.open = False
+        self.closed_once = True
+
+
 async def copilotkit_stream(response):
     """
     Stream litellm responses token by token to CopilotKit.
@@ -307,14 +475,33 @@ async def copilotkit_stream(response):
         )
     )
     ```
+
+    Also consumes an OpenAI Responses-API stream opened by
+    ``copilotkit_responses``, and returns the same chat-shaped
+    ``ModelResponse`` either way so a flow node's code is identical on both
+    channels. That stream must be the ASYNC one ``aresponses`` returns; anything
+    else raises the ``ValueError`` below, naming the entrypoint to use.
+
+    Raises
+    ------
+    ValueError
+        For any response this helper cannot consume, so an unusable response is
+        one clear caller error rather than a failure deep inside a driver. An
+        async iterable that is not a Responses stream passes the dispatch below
+        (async-iterability is the whole contract) and is caught by the Responses
+        driver once it has yielded nothing that driver recognises.
     """
     if isinstance(response, ModelResponse):
         return _copilotkit_stream_response(response)
     if isinstance(response, CustomStreamWrapper):
         return await _copilotkit_stream_custom_stream_wrapper(response)
+    if hasattr(response, "__aiter__"):
+        return await _copilotkit_stream_responses(response)
     raise ValueError(
-        f"Invalid response type {type(response)!r}; "
-        f"expected {ModelResponse.__name__} or {CustomStreamWrapper.__name__}"
+        f"Invalid response type {type(response)!r}; expected "
+        f"{ModelResponse.__name__}, {CustomStreamWrapper.__name__} or the async "
+        f"Responses-API stream returned by 'await copilotkit_responses(...)' "
+        f"(litellm's async 'aresponses' entrypoint)"
     )
 
 
@@ -338,29 +525,7 @@ async def _copilotkit_stream_custom_stream_wrapper(response: CustomStreamWrapper
     # delta.thinking_blocks) precede the answer; open a reasoning message on the
     # first reasoning delta and close it once the model emits answer text or a
     # tool call (or the stream ends).
-    reasoning_message_id: Optional[str] = None
-    reasoning_open = False
-
-    def _close_reasoning():
-        nonlocal reasoning_open, reasoning_message_id
-        if not reasoning_open:
-            return
-        crewai_event_bus.emit(
-            flow,
-            BridgedReasoningMessageEndEvent(
-                type=EventType.REASONING_MESSAGE_END,
-                message_id=reasoning_message_id,
-            ),
-        )
-        crewai_event_bus.emit(
-            flow,
-            BridgedReasoningEndEvent(
-                type=EventType.REASONING_END,
-                message_id=reasoning_message_id,
-            ),
-        )
-        reasoning_open = False
-        reasoning_message_id = None
+    reasoning = _ReasoningChannel(flow)
 
     try:
       async for chunk in response:
@@ -377,53 +542,14 @@ async def _copilotkit_stream_custom_stream_wrapper(response: CustomStreamWrapper
         delta = choice["delta"]
 
         # Stream reasoning tokens (provider-agnostic via litellm normalisation).
-        reasoning = reasoning_from_delta(delta)
-        if reasoning:
-            if not reasoning_open:
-                reasoning_message_id = str(uuid.uuid4())
-                crewai_event_bus.emit(
-                    flow,
-                    BridgedReasoningStartEvent(
-                        type=EventType.REASONING_START,
-                        message_id=reasoning_message_id,
-                    ),
-                )
-                crewai_event_bus.emit(
-                    flow,
-                    BridgedReasoningMessageStartEvent(
-                        type=EventType.REASONING_MESSAGE_START,
-                        message_id=reasoning_message_id,
-                        role="reasoning",
-                    ),
-                )
-                reasoning_open = True
-            if reasoning.text:
-                crewai_event_bus.emit(
-                    flow,
-                    BridgedReasoningMessageContentEvent(
-                        type=EventType.REASONING_MESSAGE_CONTENT,
-                        message_id=reasoning_message_id,
-                        delta=reasoning.text,
-                    ),
-                )
-            for value in reasoning.encrypted:
-                crewai_event_bus.emit(
-                    flow,
-                    BridgedReasoningEncryptedValueEvent(
-                        type=EventType.REASONING_ENCRYPTED_VALUE,
-                        subtype="message",
-                        entity_id=reasoning_message_id,
-                        encrypted_value=value,
-                    ),
-                )
-            await yield_control()
+        await reasoning.emit(reasoning_from_delta(delta))
 
         text_content = delta["content"] or None
 
         # Stream text messages
         if text_content is not None:
             # Reasoning is done once the answer starts.
-            _close_reasoning()
+            reasoning.close()
             # add to the current text message
             content += text_content
             crewai_event_bus.emit(
@@ -442,7 +568,7 @@ async def _copilotkit_stream_custom_stream_wrapper(response: CustomStreamWrapper
         tool_calls = delta["tool_calls"] or None
         if tool_calls is not None:
             # Reasoning is done once the model calls a tool.
-            _close_reasoning()
+            reasoning.close()
             for tool_call in tool_calls:
                 delta_id = getattr(tool_call, "id", None)
                 delta_name = tool_call.function["name"]
@@ -551,7 +677,7 @@ async def _copilotkit_stream_custom_stream_wrapper(response: CustomStreamWrapper
         # Close a reasoning message left open by a stream that carried only
         # reasoning, ended before any answer text / tool call, or raised
         # mid-reasoning.
-        _close_reasoning()
+        reasoning.close()
 
     incomplete = [
         e for e in tool_calls_by_index.values()
@@ -598,6 +724,482 @@ async def _copilotkit_stream_custom_stream_wrapper(response: CustomStreamWrapper
         ]
     )
 
+
+#: litellm's event models for ``response.created`` and ``response.in_progress``,
+#: named the way ``pydantic.ValidationError`` reports the model it could not
+#: build (``.title``). A failed parse yields no event to read a ``type`` off, so
+#: the model class is the only thing identifying what was lost.
+_SKIPPABLE_ENVELOPE_EVENT_MODELS = frozenset(
+    {"ResponseCreatedEvent", "ResponseInProgressEvent"}
+)
+
+
+async def _responses_events(response: Any) -> AsyncIterator[Any]:
+    """Iterate a Responses stream, skipping ONLY the frames nothing reads.
+
+    A provider emulation may send an envelope frame with fewer fields than
+    litellm's model for it requires, and litellm raises on the event rather than
+    the stream: with nothing catching it, a turn ends on its FIRST event. These
+    two frames are the only ones whose loss cannot corrupt the turn. The driver
+    reads ``response.created`` for the returned model name and created-at, both
+    of which have defaults, and never reads ``response.in_progress`` at all.
+
+    Every other parse failure propagates as itself. Silently losing answer text,
+    tool-call arguments, reasoning or the terminal outcome would report a broken
+    turn as a clean one, which is worse than ending it.
+
+    Reading the stream again after a skip holds across the declared litellm range,
+    and ``test_litellm_iterator_resumes_after_an_envelope_parse_failure`` is what
+    holds it there: 1.70.4 and the locked 1.72.0 raise out of ``_process_chunk``
+    without marking the iterator finished, having already advanced past that
+    chunk, while 1.96.2 parses these frames and never reaches this branch at all.
+    """
+    events = response.__aiter__()
+    while True:
+        try:
+            event = await events.__anext__()
+        except StopAsyncIteration:
+            return
+        except ValidationError as exc:
+            if exc.title not in _SKIPPABLE_ENVELOPE_EVENT_MODELS:
+                raise
+            _LOGGER.warning(
+                "ag-ui-crewai skipped an OpenAI Responses envelope frame the "
+                "installed litellm could not parse (%s, %d validation errors): "
+                "this driver reads no field of it that has no default, so the "
+                "turn is unaffected. Every other event surfaces as itself.",
+                exc.title,
+                len(exc.errors()),
+            )
+            continue
+        yield event
+
+
+async def _copilotkit_stream_responses(response):
+    """Stream an OpenAI Responses-API call to CopilotKit.
+
+    The behavioural twin of ``_copilotkit_stream_custom_stream_wrapper`` for the
+    Responses channel: it emits the SAME ``Bridged*`` events (so both transports
+    carry them unchanged) and returns the SAME chat-shaped ``ModelResponse``, so
+    a flow node reads ``response.choices[0].message`` either way.
+
+    The channel exists because OpenAI's reasoning models stream their reasoning
+    summaries here and NOWHERE on chat-completions. Event ``type`` values are
+    read as strings so a litellm build that predates an event type still delivers
+    it via ``GenericEvent``, and every field is read off the event and its
+    payloads shape-agnostically (``responses_attr``) because litellm delivers
+    them as plain dicts on older builds in the supported range and as response
+    objects on newer ones. Reading a field any other way would let a branch body
+    disagree with the type gate about what an event is.
+    """
+    flow = flow_context.get(None)
+
+    message_id: Optional[str] = None
+    content = ""
+    created = 0
+    model = ""
+    failure: Optional[str] = None
+    # Whether the stream carried anything this driver acts on. Dispatch here is
+    # async-iterability alone, so an object that is not a Responses stream reaches
+    # this loop, matches no branch, and would otherwise be returned as a finished
+    # assistant turn with no content, nothing raised and nothing logged.
+    recognised = False
+    # Set when the turn ends on ``response.incomplete``: the assistant message
+    # was CUT OFF, and reporting a clean "stop" would make a truncated turn
+    # indistinguishable from a finished one.
+    truncated_finish_reason: Optional[str] = None
+    # Function calls keyed by the Responses ``item_id``, which every argument
+    # delta for that call carries. Insertion order is the provider's order.
+    calls_by_item: Dict[str, Dict[str, Any]] = {}
+
+    reasoning = _ReasoningChannel(flow)
+
+    def _message_id_for(event: Any) -> Optional[str]:
+        """The assistant message id for this turn, resolved once then reused.
+
+        Reads whichever id this event shape actually carries (see
+        ``responses_item_id``), falling back to a uuid when it carries none, so
+        the streamed message has ONE stable id across the turn either way.
+        ``response.created`` normally wins because the caller records its
+        ``response.id`` before any output item arrives.
+        """
+        nonlocal message_id
+        if message_id is None:
+            message_id = responses_item_id(event) or str(uuid.uuid4())
+        return message_id
+
+    events = _responses_events(response)
+    try:
+        async for event in events:
+            event_type = responses_event_type(event)
+            if event_type is None:
+                continue
+            if event_type in RESPONSES_RECOGNISED:
+                recognised = True
+
+            # Reasoning summaries + the encrypted reasoning blob.
+            await reasoning.emit(reasoning_from_responses_event(event))
+
+            if event_type == RESPONSES_OUTPUT_ITEM_DONE:
+                # A completed reasoning item ends that item's lifecycle. Without
+                # this, a turn whose model emits a SECOND reasoning item with no
+                # answer text or tool call between the two hits the open
+                # message's id guard and the whole run dies; and only the first
+                # item reaches the client, so the rest of the turn's reasoning
+                # never round-trips into the next turn's Responses input.
+                item = responses_attr(event, "item")
+                item_type = responses_attr(item, "type")
+                if item_type == "reasoning":
+                    reasoning.close()
+                    continue
+                if item_type == "function_call":
+                    # The completed item carries that call's FINAL arguments, and
+                    # they are the only complete value a provider that streams no
+                    # argument delta ever sends: ignoring them puts the call on the
+                    # wire and in the ModelResponse with EMPTY arguments, reported
+                    # as a clean turn. They are authoritative only while nothing
+                    # streamed -- real OpenAI streams the deltas and then repeats
+                    # the whole value here, so a delta-driven call must keep what it
+                    # accumulated rather than append the arguments a second time.
+                    entry = calls_by_item.get(responses_attr(item, "id"))
+                    final_arguments = responses_attr(item, "arguments")
+                    if entry is None:
+                        # No `output_item.added` opened this call, so nothing put it
+                        # on the wire or into the ModelResponse. Logged rather than
+                        # recovered here: emitting a tool call at completion time
+                        # would put TOOL_CALL_CHUNK after content the shaper has
+                        # already closed. Matches the ERROR the added branch logs for
+                        # an unusable item.
+                        _LOGGER.error(
+                            "ag-ui-crewai dropped a completed Responses function_call "
+                            "item that was never opened by an output_item.added: %r",
+                            item,
+                        )
+                    if (
+                        entry is not None
+                        and not entry["streamed"]
+                        and isinstance(final_arguments, str)
+                        and final_arguments
+                    ):
+                        entry["arguments"] = final_arguments
+                        # Still provisional: nothing reached the wire, so a delta
+                        # arriving after this REPLACES it instead of appending. The
+                        # post-loop flush is what puts it on the wire.
+                        entry["provisional"] = True
+                continue
+
+            if event_type == RESPONSES_CREATED:
+                # ``response.id`` is the stable id for this turn; use it as the
+                # assistant message id (parity with the chat path's chunk id).
+                created_response = responses_attr(event, "response")
+                if message_id is None:
+                    message_id = responses_attr(created_response, "id")
+                model = responses_attr(created_response, "model") or model
+                created = _responses_created_timestamp(
+                    responses_attr(created_response, "created_at"), created
+                )
+                continue
+
+            if event_type == RESPONSES_OUTPUT_ITEM_ADDED:
+                # ``item`` is a dict on some builds and a
+                # ``BaseLiteLLMOpenAIResponseObject`` on real OpenAI, so read it
+                # shape-agnostically -- gating on ``dict`` alone dropped every
+                # function call the model made against a live Responses stream.
+                item = responses_attr(event, "item")
+                if item is None or responses_attr(item, "type") != "function_call":
+                    continue
+                item_id = responses_attr(item, "id")
+                # ``call_id`` is what a later ``function_call_output`` must
+                # reference, so it is the tool call's identity on the wire.
+                call_id = responses_attr(item, "call_id") or item_id
+                name = responses_attr(item, "name")
+                if not item_id or not call_id or not name:
+                    _LOGGER.error(
+                        "ag-ui-crewai dropped a Responses function_call item with "
+                        "no id, call_id or name: %r",
+                        item,
+                    )
+                    continue
+                # Reasoning is done once the model calls a tool.
+                reasoning.close()
+                # A predicted tool that actually streams suppresses the node-exit
+                # STATE_SNAPSHOT, which would otherwise rebuild from flow.state and
+                # clobber the predicted state the client is already rendering.
+                _mark_predicted_tool_streamed(flow, name)
+                seeded_arguments = responses_attr(item, "arguments") or ""
+                calls_by_item[item_id] = {
+                    "id": call_id,
+                    "name": name,
+                    # ``item.arguments`` on the ADDED item is a complete-value
+                    # snapshot, not a prefix: OpenAI sends "" here and streams the
+                    # arguments as deltas. So it is provisional -- the first delta
+                    # REPLACES it instead of appending, which is what stops a
+                    # provider that populates both from counting them twice. It is
+                    # not put on the wire yet either; a call that never receives a
+                    # delta flushes its arguments after the loop.
+                    "arguments": seeded_arguments,
+                    "provisional": bool(seeded_arguments),
+                    "streamed": False,
+                }
+                crewai_event_bus.emit(
+                    flow,
+                    BridgedToolCallChunkEvent(
+                        type=EventType.TOOL_CALL_CHUNK,
+                        tool_call_id=call_id,
+                        tool_call_name=name,
+                        parent_message_id=_message_id_for(event),
+                        delta=None,
+                    ),
+                )
+                await yield_control()
+                continue
+
+            if event_type == RESPONSES_OUTPUT_TEXT_DELTA:
+                delta = responses_attr(event, "delta")
+                if not isinstance(delta, str) or not delta:
+                    continue
+                # Reasoning is done once the answer starts.
+                reasoning.close()
+                content += delta
+                crewai_event_bus.emit(
+                    flow,
+                    BridgedTextMessageChunkEvent(
+                        type=EventType.TEXT_MESSAGE_CHUNK,
+                        message_id=_message_id_for(event),
+                        role="assistant",
+                        delta=delta,
+                    ),
+                )
+                await yield_control()
+                continue
+
+            if event_type == RESPONSES_FUNCTION_CALL_ARGS_DELTA:
+                delta = responses_attr(event, "delta")
+                item_id = responses_attr(event, "item_id")
+                entry = calls_by_item.get(item_id)
+                if entry is None:
+                    # Arguments for a call whose ``output_item.added`` never
+                    # arrived or was itself dropped. Nothing can carry them, and a
+                    # turn made only of these would otherwise report a clean empty
+                    # assistant message.
+                    _LOGGER.error(
+                        "ag-ui-crewai dropped Responses function_call arguments "
+                        "for an item it never saw opened (item_id=%r)",
+                        item_id,
+                    )
+                    continue
+                if not isinstance(delta, str) or not delta:
+                    continue
+                if entry["provisional"]:
+                    # The added item already carried the whole call and the
+                    # provider is streaming it as well: the deltas are
+                    # authoritative, and nothing seeded reached the wire.
+                    entry["arguments"] = ""
+                    entry["provisional"] = False
+                entry["arguments"] += delta
+                entry["streamed"] = True
+                crewai_event_bus.emit(
+                    flow,
+                    BridgedToolCallChunkEvent(
+                        type=EventType.TOOL_CALL_CHUNK,
+                        tool_call_id=entry["id"],
+                        tool_call_name=entry["name"],
+                        parent_message_id=message_id,
+                        delta=delta,
+                    ),
+                )
+                await yield_control()
+                continue
+
+            if event_type in RESPONSES_TERMINAL:
+                if event_type in (RESPONSES_ERROR, RESPONSES_FAILED):
+                    failure = _responses_failure_message(event)
+                if event_type in (RESPONSES_COMPLETED, RESPONSES_INCOMPLETE):
+                    terminal = responses_attr(event, "response")
+                    model = responses_attr(terminal, "model") or model
+                    created = _responses_created_timestamp(
+                        responses_attr(terminal, "created_at"), created
+                    )
+                if event_type == RESPONSES_INCOMPLETE:
+                    truncated_finish_reason = _responses_incomplete_finish_reason(event)
+                break
+    finally:
+        # Close a reasoning message left open by a stream that carried only
+        # reasoning, ended before any answer text / tool call, or raised
+        # mid-reasoning.
+        reasoning.close()
+        # The terminal-event ``break`` above leaves the wrapper and litellm's
+        # iterator suspended, so close both rather than waiting for the garbage
+        # collector to drop the open response.
+        await events.aclose()
+        await _release_responses_stream(response)
+
+    if failure is not None:
+        # Surfaced as a RUN_ERROR by the drivers' exception taxonomy rather than
+        # returned as a silently empty message.
+        raise RuntimeError(f"OpenAI Responses stream failed: {failure}")
+
+    if not recognised:
+        # A Responses turn always carries at least one recognised event (a
+        # terminal one at minimum), so recognising none means this was never a
+        # Responses stream. Raised rather than logged: the caller passed the wrong
+        # object, and the drivers' exception taxonomy turns that into a RUN_ERROR
+        # instead of a finished assistant turn that never happened. A turn that
+        # legitimately produced nothing still carries its terminal event, so it is
+        # unaffected.
+        raise ValueError(
+            "The async stream passed to copilotkit_stream carried no OpenAI "
+            "Responses event this bridge recognises, so it has no assistant turn "
+            "to report; expected the stream returned by 'await "
+            "copilotkit_responses(...)' (litellm's async 'aresponses' entrypoint)"
+        )
+
+    # A call whose arguments arrived complete on its output item and never streamed
+    # a delta: put them on the wire now, so the streamed TOOL_CALL_ARGS still match
+    # the returned ModelResponse (the chat driver's invariant). This holds while
+    # the flush reaches the shaper before any answer text; a provider that emitted
+    # the complete-args item and THEN streamed text would have this tool call
+    # already closed by the shaper (see _frames.py) and this flush dropped (logged
+    # at ERROR). Real OpenAI does not order it that way, so it is not reachable
+    # today -- but the match is conditional on that ordering, not absolute.
+    for entry in calls_by_item.values():
+        if entry["streamed"] or not entry["arguments"]:
+            continue
+        crewai_event_bus.emit(
+            flow,
+            BridgedToolCallChunkEvent(
+                type=EventType.TOOL_CALL_CHUNK,
+                tool_call_id=entry["id"],
+                tool_call_name=entry["name"],
+                parent_message_id=message_id,
+                delta=entry["arguments"],
+            ),
+        )
+        await yield_control()
+
+    tool_calls = [
+        ChatCompletionMessageToolCall(
+            function=LiteLLMFunction(
+                arguments=entry["arguments"],
+                name=entry["name"],
+            ),
+            id=entry["id"],
+            type="function",
+        )
+        for entry in calls_by_item.values()
+    ]
+    return ModelResponse(
+        id=message_id,
+        created=created,
+        model=model,
+        object='chat.completion',
+        choices=[
+            Choices(
+                # Truncation outranks ``tool_calls``: a cut-off turn's arguments are
+                # partial, so reporting a clean tool call would misdescribe it.
+                finish_reason=truncated_finish_reason
+                or ("tool_calls" if tool_calls else "stop"),
+                index=0,
+                message=LiteLLMMessage(
+                    content=content,
+                    role='assistant',
+                    tool_calls=tool_calls or None,
+                    function_call=None
+                )
+            )
+        ]
+    )
+
+
+def _responses_created_timestamp(value: Any, current: int) -> int:
+    """Project a Responses ``created_at`` onto ``ModelResponse.created``.
+
+    ``ResponsesAPIResponse.created_at`` is typed ``float`` while
+    ``ModelResponse.created`` is a strict ``int``: pydantic coerces an integral
+    float but REJECTS a fractional one, and it would raise only at the end, after
+    the whole turn had already streamed to the client. Truncate to whole seconds,
+    and keep the previous value for anything non-numeric.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return current
+    try:
+        return int(value)
+    except (ValueError, OverflowError):  # NaN / infinity
+        return current
+
+
+#: ``incomplete_details.reason`` onto the chat-completions ``finish_reason``
+#: vocabulary, so a truncated turn reads the same on both channels.
+_RESPONSES_INCOMPLETE_FINISH_REASONS = {
+    "max_output_tokens": "length",
+    "content_filter": "content_filter",
+}
+
+
+def _responses_incomplete_finish_reason(event: Any) -> str:
+    """The chat ``finish_reason`` for a ``response.incomplete`` terminal event.
+
+    A truncated turn must not read as a clean ``stop``: the assistant message is
+    partial and any tool-call arguments in it are likely unparseable. Also logs
+    the reason, which is otherwise lost entirely.
+    """
+    details = responses_attr(responses_attr(event, "response"), "incomplete_details")
+    reason = responses_attr(details, "reason")
+    finish_reason = _RESPONSES_INCOMPLETE_FINISH_REASONS.get(reason, "length")
+    _LOGGER.warning(
+        "The OpenAI Responses turn ended incomplete (reason=%r): the assistant "
+        "message is truncated and is reported with finish_reason=%r",
+        reason,
+        finish_reason,
+    )
+    return finish_reason
+
+
+async def _release_responses_stream(response: Any) -> None:
+    """Release a Responses stream the driver stopped reading.
+
+    The driver breaks on the terminal event instead of draining to
+    ``StopAsyncIteration``, so litellm's iterator is never asked to clean up, and
+    that is the happy path for every run. That iterator exposes no closer of its
+    own and holds the live httpx response, so probe it first and fall back to the
+    response object it carries.
+
+    Every closer is feature-detected, never assumed, and one that raises must not
+    mask a turn that already streamed.
+    """
+    for candidate in (response, getattr(response, "response", None)):
+        if candidate is None:
+            continue
+        for name in ("aclose", "close"):
+            closer = getattr(candidate, name, None)
+            if not callable(closer):
+                continue
+            try:
+                outcome = closer()
+                if inspect.isawaitable(outcome):
+                    await outcome
+            except Exception:  # noqa: BLE001 - releasing must never void the turn
+                _LOGGER.debug(
+                    "Could not release the Responses stream via %s()",
+                    name,
+                    exc_info=True,
+                )
+                continue
+            return
+
+
+def _responses_failure_message(event: Any) -> str:
+    """Best-effort human-readable reason from a failed/error Responses event."""
+    message = responses_attr(event, "message")
+    if isinstance(message, str) and message:
+        return message
+    error = responses_attr(responses_attr(event, "response"), "error")
+    error_message = responses_attr(error, "message")
+    if isinstance(error_message, str) and error_message:
+        return error_message
+    return responses_event_type(event) or "unknown error"
+
+
 def _copilotkit_stream_response(response: ModelResponse):
     return response
 
@@ -606,11 +1208,19 @@ message_adapter = TypeAdapter(Message)
 
 def litellm_messages_to_ag_ui_messages(messages: List[LiteLLMMessage]) -> List[Message]:
     """
-    Converts a list of LiteLLM messages to a list of ag_ui messages.
+    Converts CrewAI/LiteLLM state messages for an AG-UI ``MESSAGES_SNAPSHOT``.
+
+    Reasoning is intentionally omitted. This adapter streams reasoning directly
+    and does not persist the current turn's complete reasoning set in CrewAI
+    state, so claiming the partial state is authoritative would make the client
+    replace (and lose) its complete client-owned reasoning history.
     """
     ag_ui_messages: List[Message] = []
     for message in messages:
         message_dict = message.model_dump() if not isinstance(message, Mapping) else message
+
+        if message_dict.get("role") == "reasoning":
+            continue
 
         # whitelist the fields we want to keep
         whitelist = ["content", "role", "tool_calls", "id", "name", "tool_call_id"]

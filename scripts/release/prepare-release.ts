@@ -368,10 +368,25 @@ function writePyVersion(pyprojectPath: string, newVersion: string): void {
  * Packages with no uv.lock (poetry-managed, or unlocked) are skipped. A missing
  * ``uv`` is fatal rather than skipped -- silently shipping a stale lock is the
  * exact failure this exists to prevent.
+ *
+ * Returns the absolute path of the lock it rewrote, or ``null`` when there was
+ * nothing to re-lock. **The caller must report that path**: rewriting the file
+ * on disk is only half the job, because the release workflow stages exactly the
+ * paths this script names in its ``files`` output --
+ *
+ *     for f in $FILES; do git add "$f"; done
+ *
+ * -- and nothing else. A lock that is regenerated but not reported is left
+ * unstaged in the runner's working tree and discarded when the job ends, so the
+ * release PR carries the pyproject bump alone and the ``uv lock --check`` gate
+ * added alongside this function rejects it. That is not hypothetical: it is why
+ * crew-ai 0.3.0 (#2366) and aws-strands 0.2.5 (#2374) both needed a hand-pushed
+ * "sync uv.lock" commit before their release PRs could go green.
  */
-function relockPythonPackage(pyprojectPath: string): void {
+function relockPythonPackage(pyprojectPath: string): string | null {
   const pkgDir = path.dirname(pyprojectPath);
-  if (!fs.existsSync(path.join(pkgDir, "uv.lock"))) return;
+  const lockPath = path.join(pkgDir, "uv.lock");
+  if (!fs.existsSync(lockPath)) return null;
 
   try {
     // stdout belongs to this script's JSON summary -- discard uv's so the
@@ -390,6 +405,8 @@ function relockPythonPackage(pyprojectPath: string): void {
     }
     throw error;
   }
+
+  return lockPath;
 }
 
 function readDotnetVersion(propsPath: string): string {
@@ -612,7 +629,10 @@ function writeVersionFile(
     return writeMavenVersion(filePath, newVersion);
   } else {
     writePyVersion(filePath, newVersion);
-    relockPythonPackage(filePath);
+    // The re-locked uv.lock is a second modified file and must be reported, or
+    // the release workflow never stages it -- see relockPythonPackage.
+    const lockPath = relockPythonPackage(filePath);
+    if (lockPath) return [filePath, lockPath];
   }
   return [filePath];
 }

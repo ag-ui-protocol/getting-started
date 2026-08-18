@@ -59,6 +59,13 @@ jobs:
         with:
           version: 10.33.4
 
+      # Mirrors the `test:crewai-config` package script; run via npx (no install)
+      # to match the generate step below. Guards the CrewAI Flows + Conversational
+      # Flows dojo config that ships with this column.
+      - name: Validate CrewAI dojo config (Flows + Conversational Flows)
+        working-directory: apps/dojo
+        run: npx tsx --test src/crewai.test.ts
+
       - name: Validate agentFilesMapper and regenerate files.json
         working-directory: apps/dojo
         run: pnpm generate-content-json
@@ -80,6 +87,37 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
+
+  event-trace-unit:
+    name: dojo / event-trace-unit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+        with:
+          version: 10.33.4
+
+      - name: Install event trace test dependencies
+        working-directory: apps/dojo/e2e
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Run event trace unit tests
+        working-directory: apps/dojo/e2e
+        run: pnpm test:event-trace-unit
+
+      - name: Type-check event trace harness
+        working-directory: apps/dojo/e2e
+        run: pnpm check:event-trace-types
 
   dojo:
     name: dojo / ${{ matrix.suite }}
@@ -104,6 +142,10 @@ jobs:
             wait_on: http://localhost:9999,tcp:localhost:8002
           - suite: crew-ai
             test_path: tests/crewAITests
+            services: ["dojo", "crew-ai"]
+            wait_on: http://localhost:9999,tcp:localhost:8003
+          - suite: crewai-conversational-flows
+            test_path: tests/crewAIConversationalFlowsTests
             services: ["dojo", "crew-ai"]
             wait_on: http://localhost:9999,tcp:localhost:8003
           - suite: langroid
@@ -189,7 +231,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: true
           persist-credentials: false
@@ -207,12 +249,12 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: ".node-version"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 10.33.4
 
@@ -269,7 +311,7 @@ jobs:
       # wanted), so this pin is what keeps the interpreter and resolver stable
       # across e2e runs.
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}

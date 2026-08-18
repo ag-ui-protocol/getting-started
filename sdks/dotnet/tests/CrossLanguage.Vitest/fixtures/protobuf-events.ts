@@ -46,6 +46,35 @@ export const protobufFixtures: ProtobufFixture[] = [
     } as unknown as BaseEvent,
   },
   {
+    // Token usage is scalar-only (labels + int64 counts) with no Struct payload,
+    // so both encoders must agree byte-for-byte. Two entries prove per-(provider,
+    // model) grouping survives, and the second omits most counts to prove
+    // "not reported" stays absent rather than becoming 0.
+    name: "RUN_FINISHED (with usage)",
+    byteParity: "strict",
+    event: {
+      type: EventType.RUN_FINISHED,
+      threadId: "thread-1",
+      runId: "run-1",
+      outcome: { type: "success" },
+      usage: [
+        {
+          provider: "openai",
+          model: "gpt-4o",
+          inputTokens: 11,
+          outputTokens: 22,
+          totalTokens: 33,
+          reasoningTokens: 44,
+          cachedInputTokens: 55,
+        },
+        // Explicit zeros (providers really do report `cachedInputTokens: 0`) alongside
+        // omitted counts, so this also pins that both encoders keep "reported zero"
+        // distinguishable from "not reported" on the wire.
+        { provider: "anthropic", model: "claude-opus-4", inputTokens: 1, cachedInputTokens: 0 },
+      ],
+    } as unknown as BaseEvent,
+  },
+  {
     name: "RUN_ERROR",
     byteParity: "strict",
     event: {
@@ -53,6 +82,16 @@ export const protobufFixtures: ProtobufFixture[] = [
       message: "boom",
       code: "E42",
     } as BaseEvent,
+  },
+  {
+    name: "RUN_ERROR (with partial usage)",
+    byteParity: "strict",
+    event: {
+      type: EventType.RUN_ERROR,
+      message: "boom",
+      code: "E42",
+      usage: [{ provider: "openai", model: "gpt-4o", inputTokens: 120 }],
+    } as unknown as BaseEvent,
   },
   {
     name: "STEP_STARTED",

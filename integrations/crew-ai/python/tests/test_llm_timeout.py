@@ -87,6 +87,52 @@ def test_llm_timeout_disabled_for_non_positive(monkeypatch):
     assert _llm_timeout_seconds() is None
 
 
+def test_the_provider_default_the_docs_quote_is_what_the_clients_ship():
+    """Disabling the knob hands the bound to the provider client, so its default
+    is part of the documented behaviour.
+
+    The README and ``_config`` both quote 600s, and derive from it that disabling
+    the knob leaves a read bound that MEETS the 600s flow ceiling rather than
+    staying under it. A client that changed its default makes that arithmetic
+    wrong with nothing else failing, so it is pinned here.
+    """
+    from ag_ui_crewai._config import (
+        DEFAULT_FLOW_TIMEOUT_SECONDS,
+        PROVIDER_DEFAULT_TIMEOUT_SECONDS,
+    )
+
+    from openai._constants import DEFAULT_TIMEOUT as OPENAI_DEFAULT_TIMEOUT
+
+    assert OPENAI_DEFAULT_TIMEOUT.read == PROVIDER_DEFAULT_TIMEOUT_SECONDS
+    # litellm's own completion path: an absent timeout becomes 600 there too.
+    import inspect
+
+    import litellm
+
+    assert (
+        'timeout = timeout or kwargs.get("request_timeout", 600) or 600'
+        in inspect.getsource(litellm.completion)
+    )
+    # The reason the disabled case warns at all.
+    assert PROVIDER_DEFAULT_TIMEOUT_SECONDS >= DEFAULT_FLOW_TIMEOUT_SECONDS
+
+
+def test_a_disabled_timeout_warns_that_the_client_default_meets_the_ceiling(
+    monkeypatch, caplog
+):
+    """The one case the ceiling check used to skip is the one that needed it."""
+    import logging
+
+    from ag_ui_crewai._config import resolve_provider_timeout_seconds
+
+    monkeypatch.setenv("AGUI_CREWAI_LLM_TIMEOUT_SECONDS", "0")
+    with caplog.at_level(logging.WARNING, logger="ag_ui_crewai._config"):
+        assert resolve_provider_timeout_seconds() is None
+
+    assert "is not shorter than the" in caplog.text
+    assert "since the timeout is disabled" in caplog.text
+
+
 def test_llm_timeout_bad_value_falls_back_to_default(monkeypatch):
     monkeypatch.setenv("AGUI_CREWAI_LLM_TIMEOUT_SECONDS", "not-a-number")
     value = _llm_timeout_seconds()

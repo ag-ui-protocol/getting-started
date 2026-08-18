@@ -49,6 +49,7 @@ from ag_ui.core.events import (
     SubagentFinishedSuccessOutcome,
     SubagentFinishedSuspendedOutcome,
     SubagentErrorEvent,
+    TokenUsage,
     Event
 )
 
@@ -147,6 +148,7 @@ __all__ = [
     "ReasoningMessageRole",
     "RunFinishedOutcome",
     "RunFinishedSuccessOutcome",
+    "TokenUsage",
     "RunFinishedInterruptOutcome",
     "SubagentStartedEvent",
     "SubagentFinishedEvent",

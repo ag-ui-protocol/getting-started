@@ -57,6 +57,9 @@
     "carries subagent support. The remaining overrides are unrelated and stay."
   ],
   "pnpm": {
+    "patchedDependencies": {
+      "@copilotkit/aimock@1.37.4": "patches/@copilotkit__aimock@1.37.4.patch"
+    },
     "overrides": {
       "@ag-ui/client": "workspace:*",
       "@ag-ui/core": "workspace:*",

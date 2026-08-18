@@ -28,6 +28,7 @@ from google.genai import types
 from ag_ui_adk.utils.converters import (
     convert_ag_ui_messages_to_adk,
     convert_adk_event_to_ag_ui_message,
+    convert_message_content_to_parts,
     convert_state_to_json_patch,
     convert_json_patch_to_state,
     extract_text_from_content,
@@ -631,6 +632,26 @@ class TestConvertAGUIMessagesToADK:
         func_response = event.content.parts[0].function_response
         assert func_response.response == {"result": '{"result": "success", "value": 42}'}
 
+    def test_binary_filename_maps_to_blob_display_name(self):
+        """Test that BinaryInputContent.filename is set as Blob.display_name."""
+        item = BinaryInputContent(
+            data=base64.b64encode(b"hello").decode(),
+            mime_type="application/pdf",
+            filename="report.pdf",
+        )
+        parts = convert_message_content_to_parts([item])
+        assert len(parts) == 1
+        assert parts[0].inline_data.display_name == "report.pdf"
+
+    def test_binary_without_filename_has_no_display_name(self):
+        """Test that Blob.display_name is None when filename is not provided."""
+        item = BinaryInputContent(
+            data=base64.b64encode(b"hello").decode(),
+            mime_type="application/pdf",
+        )
+        parts = convert_message_content_to_parts([item])
+        assert parts[0].inline_data.display_name is None
+
     def test_convert_empty_message_list(self):
         """Test converting an empty message list."""
         adk_events = convert_ag_ui_messages_to_adk([])
@@ -945,15 +966,15 @@ class TestStateConversionFunctions:
 
         # Check each patch
         user_patch = next(p for p in patches if p["path"] == "/user_name")
-        assert user_patch["op"] == "replace"
+        assert user_patch["op"] == "add"
         assert user_patch["value"] == "John"
 
         status_patch = next(p for p in patches if p["path"] == "/status")
-        assert status_patch["op"] == "replace"
+        assert status_patch["op"] == "add"
         assert status_patch["value"] == "active"
 
         count_patch = next(p for p in patches if p["path"] == "/count")
-        assert count_patch["op"] == "replace"
+        assert count_patch["op"] == "add"
         assert count_patch["value"] == 42
 
     def test_convert_state_to_json_patch_with_none_values(self):
@@ -969,7 +990,7 @@ class TestStateConversionFunctions:
         assert len(patches) == 3
 
         keep_patch = next(p for p in patches if p["path"] == "/keep_this")
-        assert keep_patch["op"] == "replace"
+        assert keep_patch["op"] == "add"
         assert keep_patch["value"] == "value"
 
         remove_patch = next(p for p in patches if p["path"] == "/remove_this")
@@ -983,6 +1004,20 @@ class TestStateConversionFunctions:
         """Test converting empty state delta."""
         patches = convert_state_to_json_patch({})
         assert patches == []
+
+    def test_convert_state_to_json_patch_escapes_json_pointer_tokens(self):
+        """Test escaping slashes and tildes in top-level state keys."""
+        patches = convert_state_to_json_patch({
+            "user/name": "Eslam",
+            "config~version": 2,
+            "obsolete/key": None,
+        })
+
+        assert patches == [
+            {"op": "add", "path": "/user~1name", "value": "Eslam"},
+            {"op": "add", "path": "/config~0version", "value": 2},
+            {"op": "remove", "path": "/obsolete~1key"},
+        ]
 
     def test_convert_json_patch_to_state_basic(self):
         """Test converting JSON patch operations to state delta."""
@@ -1032,6 +1067,26 @@ class TestStateConversionFunctions:
         state_delta = convert_json_patch_to_state([])
         assert state_delta == {}
 
+    def test_convert_json_patch_to_state_decodes_json_pointer_tokens(self):
+        """Test decoding escaped top-level state keys."""
+        patches = [
+            {"op": "add", "path": "/user~1name", "value": "Eslam"},
+            {"op": "replace", "path": "/config~0version", "value": 2},
+            {"op": "remove", "path": "/obsolete~1key"},
+        ]
+
+        assert convert_json_patch_to_state(patches) == {
+            "user/name": "Eslam",
+            "config~version": 2,
+            "obsolete/key": None,
+        }
+
+    def test_convert_json_patch_to_state_removes_one_leading_slash(self):
+        """Test that only the JSON Pointer root separator is removed."""
+        patches = [{"op": "add", "path": "//key", "value": "value"}]
+
+        assert convert_json_patch_to_state(patches) == {"/key": "value"}
+
     def test_convert_json_patch_to_state_malformed_patches(self):
         """Test converting malformed patches."""
         patches = [
@@ -1054,7 +1109,9 @@ class TestStateConversionFunctions:
             "name": "Test",
             "active": True,
             "count": 100,
-            "remove_me": None
+            "remove_me": None,
+            "user/name": "Eslam",
+            "config~version": 2,
         }
 
         patches = convert_state_to_json_patch(original_state)

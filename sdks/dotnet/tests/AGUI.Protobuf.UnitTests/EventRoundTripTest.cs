@@ -112,6 +112,113 @@ public sealed class EventRoundTripTest
     }
 
     [Fact]
+    public void RunFinished_WithUsage_RoundTrips()
+    {
+        var result = RoundTrip(new RunFinishedEvent
+        {
+            ThreadId = "thread-1",
+            RunId = "run-1",
+            Outcome = new RunFinishedSuccessOutcome(),
+            Usage =
+            [
+                new TokenUsage
+                {
+                    Provider = "openai",
+                    Model = "gpt-4o",
+                    InputTokens = 11,
+                    OutputTokens = 22,
+                    TotalTokens = 33,
+                    ReasoningTokens = 44,
+                    CachedInputTokens = 55
+                },
+                new TokenUsage { Provider = "anthropic", Model = "claude-opus-4", InputTokens = 1 }
+            ],
+        });
+
+        Assert.Equal(2, result.Usage!.Count);
+
+        var first = result.Usage[0];
+        Assert.Equal("openai", first.Provider);
+        Assert.Equal("gpt-4o", first.Model);
+        Assert.Equal(11, first.InputTokens);
+        Assert.Equal(22, first.OutputTokens);
+        Assert.Equal(33, first.TotalTokens);
+        Assert.Equal(44, first.ReasoningTokens);
+        Assert.Equal(55, first.CachedInputTokens);
+
+        var second = result.Usage[1];
+        Assert.Equal("anthropic", second.Provider);
+        Assert.Equal(1, second.InputTokens);
+        // Counts the producer never reported must stay null, not collapse to 0.
+        Assert.Null(second.OutputTokens);
+        Assert.Null(second.TotalTokens);
+    }
+
+    [Fact]
+    public void RunError_WithUsage_RoundTrips()
+    {
+        var result = RoundTrip(new RunErrorEvent
+        {
+            Message = "boom",
+            Code = "E42",
+            Usage = [new TokenUsage { Provider = "openai", InputTokens = 120 }],
+        });
+
+        Assert.Equal("boom", result.Message);
+        var entry = Assert.Single(result.Usage!);
+        Assert.Equal("openai", entry.Provider);
+        Assert.Equal(120, entry.InputTokens);
+        Assert.Null(entry.Model);
+    }
+
+    [Fact]
+    public void RunFinished_UsageZeroCounts_SurviveAsZeroNotNull()
+    {
+        // Providers do report explicit zeros (e.g. cachedInputTokens: 0 when nothing
+        // was cached). The proto fields are `optional`, so a set-to-zero count must
+        // round-trip as 0 rather than collapsing to "not reported".
+        var result = RoundTrip(new RunFinishedEvent
+        {
+            ThreadId = "thread-1",
+            RunId = "run-1",
+            Usage = [new TokenUsage { InputTokens = 0, CachedInputTokens = 0, ReasoningTokens = 0 }],
+        });
+
+        var entry = Assert.Single(result.Usage!);
+        Assert.Equal(0, entry.InputTokens);
+        Assert.Equal(0, entry.CachedInputTokens);
+        Assert.Equal(0, entry.ReasoningTokens);
+        // Never set at all — must stay null, proving zero and absent are distinguishable.
+        Assert.Null(entry.OutputTokens);
+        Assert.Null(entry.TotalTokens);
+    }
+
+    [Fact]
+    public void RunFinished_EmptyUsage_EncodesIdenticallyToAbsentUsage()
+    {
+        var absent = new RunFinishedEvent { ThreadId = "thread-1", RunId = "run-1", Usage = null };
+        var empty = new RunFinishedEvent { ThreadId = "thread-1", RunId = "run-1", Usage = [] };
+
+        Assert.Equal(AGUIProtobuf.Encode(absent), AGUIProtobuf.Encode(empty));
+    }
+
+    [Fact]
+    public void RunFinished_NoUsage_DecodesToNullNotEmptyList()
+    {
+        var result = RoundTrip(new RunFinishedEvent { ThreadId = "thread-1", RunId = "run-1" });
+
+        Assert.Null(result.Usage);
+    }
+
+    [Fact]
+    public void RunError_NoUsage_DecodesToNullNotEmptyList()
+    {
+        var result = RoundTrip(new RunErrorEvent { Message = "boom" });
+
+        Assert.Null(result.Usage);
+    }
+
+    [Fact]
     public void StepStarted_RoundTrips()
     {
         var result = RoundTrip(new StepStartedEvent { StepName = "step-1" });

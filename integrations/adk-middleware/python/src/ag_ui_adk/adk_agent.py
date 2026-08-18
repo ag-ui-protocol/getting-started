@@ -1190,9 +1190,27 @@ class ADKAgent:
         unseen_messages = await self._get_unseen_messages(input)
 
         if not unseen_messages:
-            # No unseen messages – fall through to normal execution handling
-            async for event in self._start_new_execution(input):
-                yield event
+            # Nothing new to act on. Terminate cleanly rather than starting an execution:
+            # with no unseen message there is nothing to pass as `new_message`, and
+            # `_start_new_execution` would recover one by reverse-scanning `input.messages`
+            # for the latest user message (see `_convert_latest_message`) — re-answering a
+            # question that was already answered, and appending a duplicate user event to
+            # the session. Clients re-send their whole history on every run, so "everything
+            # already processed" is the normal steady state, not a request for a turn.
+            logger.info(
+                "No unseen messages for thread %s; emitting an empty terminal pair.",
+                input.thread_id,
+            )
+            yield RunStartedEvent(
+                type=EventType.RUN_STARTED,
+                thread_id=input.thread_id,
+                run_id=input.run_id,
+            )
+            yield RunFinishedEvent(
+                type=EventType.RUN_FINISHED,
+                thread_id=input.thread_id,
+                run_id=input.run_id,
+            )
             return
 
         index = 0
@@ -1223,6 +1241,15 @@ class ADKAgent:
                     break
 
         logger.debug(f"[RUN_LOOP] Starting message loop for thread={input.thread_id}, total_unseen={total_unseen}, starting_index={index}")
+
+        # Every path out of this loop must leave the client with a terminal event. The
+        # loop can skip every batch (orphaned tool results, assistant-only batches, a
+        # non-tool batch whose following tool batch is skipped), in which case nothing
+        # below dispatches and the generator would otherwise yield nothing at all.
+        # Tracked on the yield rather than on the call so the post-loop check means
+        # literally "this run emitted nothing", independent of whether a dispatcher
+        # can ever complete without yielding.
+        emitted_any = False
 
         while index < total_unseen:
             current = unseen_messages[index]
@@ -1304,6 +1331,7 @@ class ADKAgent:
                     trailing_messages=trailing_messages if trailing_messages else None,
                     include_message_batch=not skip_tool_message_batch,
                 ):
+                    emitted_any = True
                     yield event
                 skip_tool_message_batch = False
             else:
@@ -1370,8 +1398,33 @@ class ADKAgent:
 
                 logger.debug(f"[RUN_LOOP] Calling _start_new_execution with message_batch of {len(message_batch)} messages")
                 async for event in self._start_new_execution(input, message_batch=message_batch):
+                    emitted_any = True
                     yield event
-    
+
+        if not emitted_any:
+            # Every batch was skipped, so there is no new work to run — but the AG-UI
+            # protocol still requires this run to terminate. Emit a bare terminal pair
+            # rather than falling through to _start_new_execution(input): that path
+            # re-answers the latest message in input.messages (via
+            # _convert_latest_message), which would turn a no-op request into a
+            # duplicate agent turn.
+            logger.info(
+                "All message batches were skipped for thread %s (%d unseen message(s)); "
+                "emitting an empty terminal pair so the run does not hang the client.",
+                input.thread_id,
+                total_unseen,
+            )
+            yield RunStartedEvent(
+                type=EventType.RUN_STARTED,
+                thread_id=input.thread_id,
+                run_id=input.run_id,
+            )
+            yield RunFinishedEvent(
+                type=EventType.RUN_FINISHED,
+                thread_id=input.thread_id,
+                run_id=input.run_id,
+            )
+
     async def _ensure_session_exists(self, app_name: str, user_id: str, thread_id: str, initial_state: dict) -> Tuple[Any, str]:
         """Ensure a session exists, creating it if necessary via session manager.
 

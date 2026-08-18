@@ -107,10 +107,13 @@ var evt = new RunFinishedEvent
 | `RunId` | `runId` | `string` | Agent run ID |
 | `Result` | `result` | `JsonElement?` | Optional run result |
 | `Outcome` | `outcome` | `RunFinishedOutcome?` | Optional typed outcome |
+| `Usage` | `usage` | `IList<TokenUsage>?` | Optional token usage for the run |
 
 `RunFinishedOutcome` is a polymorphic value with `type: "success"` or
 `type: "interrupt"`. `RunFinishedInterruptOutcome` carries `interrupts`, an
 `IList<AGUIInterrupt>`.
+
+`Usage` is described under [TokenUsage](#tokenusage).
 
 ### RunErrorEvent
 
@@ -129,6 +132,53 @@ var evt = new RunErrorEvent
 | `Type` | `type` | `"RUN_ERROR"` | Event discriminator |
 | `Message` | `message` | `string` | Error message |
 | `Code` | `code` | `string?` | Optional error code |
+| `Usage` | `usage` | `IList<TokenUsage>?` | Optional partial usage accrued before the failure |
+
+### TokenUsage
+
+Provider-reported token usage, carried by both terminal run events. One entry per
+`(provider, model)` pair, so a run that invokes several models keeps them separate;
+consumers that only need totals can sum across the entries.
+
+```csharp
+var evt = new RunFinishedEvent
+{
+    ThreadId = "thread-1",
+    RunId = "run-1",
+    Outcome = new RunFinishedSuccessOutcome(),
+    Usage =
+    [
+        new TokenUsage
+        {
+            Provider = "openai",
+            Model = "gpt-4o",
+            InputTokens = 658,
+            OutputTokens = 188,
+            TotalTokens = 846
+        }
+    ]
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Provider` | `provider` | `string?` | Provider that served the request |
+| `Model` | `model` | `string?` | Model that served the request |
+| `InputTokens` | `inputTokens` | `long?` | Input tokens, including cached input tokens |
+| `OutputTokens` | `outputTokens` | `long?` | Output tokens, including reasoning tokens |
+| `TotalTokens` | `totalTokens` | `long?` | Total tokens billed |
+| `ReasoningTokens` | `reasoningTokens` | `long?` | Output tokens spent on internal reasoning |
+| `CachedInputTokens` | `cachedInputTokens` | `long?` | Input tokens served from cache |
+
+Every field is optional. A null count means the provider did not report it, which is
+distinct from a reported zero — so `usage` never fabricates a count the provider
+withheld. The type is numeric-only by design: it carries no prompts, completions,
+messages, tool arguments, or thread/run/user identifiers.
+
+When hosting with `AGUI.Server`, usage reported by Microsoft.Extensions.AI as
+`UsageContent` is accumulated automatically and attached to the terminal event.
+`ModelId` supplies the model label; set the provider label with
+`AGUIStreamOptions.WithUsageProvider("openai")`.
 
 ### StepStartedEvent
 

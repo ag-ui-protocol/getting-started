@@ -54,6 +54,12 @@ export class FakeLocalAgent {
   // v-next). Left undefined by default so it doesn't affect tests that don't
   // opt into it. May be a plain string or a Promise (mirrors the real API).
   traceId: string | Promise<string> | undefined;
+  // AI-SDK-style usage exposed on the stream response (a value or a promise).
+  // Undefined by default so existing tests are unaffected.
+  usage: any;
+  // AI-SDK-style model instance (`{ provider, modelId }`) used by the bridge to
+  // label token usage. Undefined by default.
+  model: any;
   /** Messages passed to the most recent stream() call (post-diff-filter). */
   lastStreamMessages: any[] | null = null;
   /** Options passed to the most recent stream() call. */
@@ -67,12 +73,16 @@ export class FakeLocalAgent {
       streamChunks?: any[];
       resumeChunks?: any[];
       traceId?: string | Promise<string>;
+      usage?: any;
+      model?: any;
     } = {},
   ) {
     this.memory = opts.memory ?? new FakeMemory();
     this.streamChunks = opts.streamChunks ?? [];
     this.resumeChunks = opts.resumeChunks;
     this.traceId = opts.traceId;
+    this.usage = opts.usage;
+    this.model = opts.model;
   }
 
   async getMemory(_opts?: any) {
@@ -85,6 +95,7 @@ export class FakeLocalAgent {
     const chunks = this.streamChunks;
     return {
       ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      ...(this.usage !== undefined ? { usage: this.usage } : {}),
       fullStream: (async function* () {
         for (const chunk of chunks) {
           yield chunk;
@@ -101,6 +112,9 @@ export class FakeLocalAgent {
       // be exercised. Additive; undefined by default so existing tests are
       // unaffected.
       ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      // A resumed run makes its own model calls and reports its own usage, so
+      // mirror stream()'s usage exposure here too.
+      ...(this.usage !== undefined ? { usage: this.usage } : {}),
       fullStream: (async function* () {
         for (const chunk of chunks) {
           yield chunk;
@@ -220,6 +234,8 @@ export function makeLocalMastraAgent(
     resumeChunks?: any[];
     emitInterruptOutcome?: boolean;
     observationalMemory?: boolean;
+    usage?: any;
+    model?: any;
   } = {},
 ) {
   return new MastraAgent({
