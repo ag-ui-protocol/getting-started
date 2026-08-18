@@ -22,6 +22,7 @@ from crewai.flow.flow import Flow, listen, start
 from crewai.flow import human_feedback
 from litellm import acompletion
 
+from ag_ui_crewai._config import resolve_provider_timeout_seconds
 from ag_ui_crewai.sdk import CopilotKitState, copilotkit_stream
 from ag_ui_crewai._hitl import agui_feedback_provider
 
@@ -75,6 +76,7 @@ class InterruptFlow(Flow[AgentState]):
     async def understand_request(self):
         """Work out the meeting to book from the conversation so far."""
         response = await acompletion(
+            timeout=resolve_provider_timeout_seconds(),
             model=MODEL,
             messages=[
                 {"role": "system", "content": EXTRACT_PROMPT},
@@ -125,6 +127,7 @@ class InterruptFlow(Flow[AgentState]):
 
         response = await copilotkit_stream(
             await acompletion(
+                timeout=resolve_provider_timeout_seconds(),
                 model=MODEL,
                 messages=[
                     {"role": "system", "content": CONFIRM_PROMPT},

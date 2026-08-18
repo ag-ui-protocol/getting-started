@@ -410,6 +410,126 @@ describe("verifyEvents multiple runs", () => {
     expect(events[1].type).toBe(EventType.RUN_ERROR);
   });
 
+  // Test: A new run may start after a previous one errored
+  it("should allow a new RUN_STARTED after RUN_ERROR", async () => {
+    const source$ = new Subject<BaseEvent>();
+
+    const promise = firstValueFrom(
+      verifyEvents(false)(source$).pipe(
+        toArray(),
+        catchError((err) => {
+          throw err;
+        }),
+      ),
+    );
+
+    // First run errors
+    source$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test-thread-1",
+      runId: "test-run-1",
+    } as RunStartedEvent);
+    source$.next({
+      type: EventType.RUN_ERROR,
+      message: "Agent unreachable",
+    } as RunErrorEvent);
+
+    // Second run starts and succeeds
+    source$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test-thread-1",
+      runId: "test-run-2",
+    } as RunStartedEvent);
+    source$.next({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: "msg-1",
+    } as TextMessageStartEvent);
+    source$.next({
+      type: EventType.TEXT_MESSAGE_END,
+      messageId: "msg-1",
+    } as TextMessageEndEvent);
+    source$.next(runFinished("test-thread-1", "test-run-2"));
+
+    source$.complete();
+
+    const result = await promise;
+
+    expect(result.length).toBe(6);
+    expect(result[1].type).toBe(EventType.RUN_ERROR);
+    expect((result[2] as RunStartedEvent).runId).toBe("test-run-2");
+    expect(result[5].type).toBe(EventType.RUN_FINISHED);
+  });
+
+  // Test: Replaying a stored thread whose middle run errored
+  it("should replay a thread containing an errored run without dropping later runs", async () => {
+    const source$ = new Subject<BaseEvent>();
+
+    const promise = firstValueFrom(
+      verifyEvents(false)(source$).pipe(
+        toArray(),
+        catchError((err) => {
+          throw err;
+        }),
+      ),
+    );
+
+    // Run 1 succeeded
+    source$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test-thread-1",
+      runId: "test-run-1",
+    } as RunStartedEvent);
+    source$.next({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: "msg-1",
+    } as TextMessageStartEvent);
+    source$.next({
+      type: EventType.TEXT_MESSAGE_END,
+      messageId: "msg-1",
+    } as TextMessageEndEvent);
+    source$.next(runFinished("test-thread-1", "test-run-1"));
+
+    // Run 2 errored, mid-message, which is what a dropped connection looks like
+    source$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test-thread-1",
+      runId: "test-run-2",
+    } as RunStartedEvent);
+    source$.next({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: "msg-2",
+    } as TextMessageStartEvent);
+    source$.next({
+      type: EventType.RUN_ERROR,
+      message: "Agent restarted",
+    } as RunErrorEvent);
+
+    // Run 3 succeeded, and reuses the message ID left open by the errored run
+    source$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test-thread-1",
+      runId: "test-run-3",
+    } as RunStartedEvent);
+    source$.next({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: "msg-2",
+    } as TextMessageStartEvent);
+    source$.next({
+      type: EventType.TEXT_MESSAGE_END,
+      messageId: "msg-2",
+    } as TextMessageEndEvent);
+    source$.next(runFinished("test-thread-1", "test-run-3"));
+
+    source$.complete();
+
+    const result = await promise;
+
+    // Every event in the thread is delivered, not just those up to the failure
+    expect(result.length).toBe(11);
+    expect((result[7] as RunStartedEvent).runId).toBe("test-run-3");
+    expect(result[10].type).toBe(EventType.RUN_FINISHED);
+  });
+
   // Test: Complex scenario with mixed events across runs
   it("should handle complex scenario with multiple runs and various event types", async () => {
     const source$ = new Subject<BaseEvent>();

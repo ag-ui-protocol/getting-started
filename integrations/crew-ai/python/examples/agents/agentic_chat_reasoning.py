@@ -22,6 +22,7 @@ from typing import Any, Dict, List
 from crewai.flow.flow import Flow, start
 from litellm import acompletion
 
+from ag_ui_crewai._config import resolve_provider_timeout_seconds
 from ag_ui_crewai.sdk import (
     CopilotKitState,
     copilotkit_responses,
@@ -78,6 +79,7 @@ class AgenticChatReasoningFlow(Flow[AgentState]):
 
         if selected_model == "OpenAI" and responses_channel_available():
             stream = await copilotkit_responses(
+                timeout=resolve_provider_timeout_seconds(),
                 model=OPENAI_MODEL,
                 messages=messages,
                 tools=tools or None,
@@ -103,6 +105,7 @@ class AgenticChatReasoningFlow(Flow[AgentState]):
                 if message.get("role") != "reasoning"
             ]
             stream = await acompletion(
+                timeout=resolve_provider_timeout_seconds(),
                 messages=chat_messages,
                 tools=tools or None,
                 parallel_tool_calls=False if tools else None,

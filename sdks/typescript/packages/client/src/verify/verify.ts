@@ -39,8 +39,10 @@ export const verifyEvents =
 
         log?.event("VERIFY", "Event:", event, { type: event.type });
 
-        // Check if run has errored
-        if (runError) {
+        // Check if run has errored (but allow a new RUN_STARTED to start a new run, exactly as
+        // RUN_FINISHED does below). A stream can legitimately carry more than one run, a replay of
+        // a stored thread being the common case, and a run that errored is over rather than active.
+        if (runError && eventType !== EventType.RUN_STARTED) {
           return throwError(
             () =>
               new AGUIError(
@@ -70,8 +72,8 @@ export const verifyEvents =
             return throwError(() => new AGUIError(`First event must be 'RUN_STARTED'`));
           }
         } else if (eventType === EventType.RUN_STARTED) {
-          // Allow RUN_STARTED after RUN_FINISHED (new run), but not during an active run
-          if (runStarted && !runFinished) {
+          // Allow RUN_STARTED after RUN_FINISHED or RUN_ERROR (new run), but not during an active run
+          if (runStarted && !runFinished && !runError) {
             return throwError(
               () =>
                 new AGUIError(
@@ -79,9 +81,10 @@ export const verifyEvents =
                 ),
             );
           }
-          // If we're here, it's either the first RUN_STARTED or a new run after RUN_FINISHED
-          if (runFinished) {
-            // This is a new run after the previous one finished, reset state
+          // If we're here, it's either the first RUN_STARTED or a new run after the previous one
+          // ended, whether that end was RUN_FINISHED or RUN_ERROR
+          if (runFinished || runError) {
+            // This is a new run after the previous one ended, reset state
             resetRunState();
           }
         }

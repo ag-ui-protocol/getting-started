@@ -13,6 +13,7 @@ load_dotenv()
 
 from .api import (
     agentic_chat,
+    agentic_chat_multimodal,
     agentic_generative_ui,
     backend_tool_rendering,
     human_in_the_loop,
@@ -25,6 +26,11 @@ app.mount(
     "/agentic_chat",
     agentic_chat.agentic_chat_app,
     "Agentic Chat",
+)
+app.mount(
+    "/agentic_chat_multimodal",
+    agentic_chat_multimodal.agentic_chat_multimodal_app,
+    "Agentic Chat Multimodal",
 )
 app.mount(
     "/backend_tool_rendering",

@@ -4,6 +4,7 @@ A simple agentic chat flow.
 
 from crewai.flow.flow import Flow, start
 from litellm import acompletion
+from ag_ui_crewai._config import resolve_provider_timeout_seconds
 from ag_ui_crewai.sdk import copilotkit_stream, CopilotKitState
 
 class AgenticChatFlow(Flow[CopilotKitState]):
@@ -17,7 +18,7 @@ class AgenticChatFlow(Flow[CopilotKitState]):
         #    copilotkit_stream and set stream=True.
         response = await copilotkit_stream(
             await acompletion(
-
+                timeout=resolve_provider_timeout_seconds(),
                 # 1.1 Specify the model to use
                 model="openai/gpt-5.4",
                 messages=[

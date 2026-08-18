@@ -8,6 +8,7 @@ model at the conversation.
 
 from crewai.flow.flow import Flow, start
 from litellm import acompletion
+from ag_ui_crewai._config import resolve_provider_timeout_seconds
 from ag_ui_crewai.sdk import copilotkit_stream, CopilotKitState
 
 
@@ -23,6 +24,7 @@ class AgenticChatMultimodalFlow(Flow[CopilotKitState]):
 
         response = await copilotkit_stream(
             await acompletion(
+                timeout=resolve_provider_timeout_seconds(),
                 model="openai/gpt-5.4",
                 messages=[
                     {"role": "system", "content": system_prompt},

@@ -25,6 +25,7 @@ from ag_ui_a2ui_toolkit import (
     update_data_model,
 )
 
+from ag_ui_crewai._config import resolve_provider_timeout_seconds
 from ag_ui_crewai.sdk import copilotkit_emit_tool_result, copilotkit_stream
 from ._model_turn import (
     append_assistant_message,
@@ -184,6 +185,7 @@ class A2UIFixedSchemaFlow(Flow):
         for _ in range(MAX_MODEL_TURNS):
             response = await copilotkit_stream(
                 await acompletion(
+                    timeout=resolve_provider_timeout_seconds(),
                     model=MODEL,
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},

@@ -32,7 +32,6 @@ from strands import Agent as StrandsAgentCore
 from strands import ToolContext, tool
 from strands.agent.state import AgentState
 from strands.interrupt import Interrupt as StrandsInterrupt
-from strands.interrupt import _InterruptState
 from strands.models.model import Model as StrandsModel
 from strands.session import FileSessionManager
 from strands.types.session import SessionAgent, SessionMessage
@@ -48,6 +47,7 @@ from ag_ui_strands.session_reconcile import (
     AG_UI_TOOL_CALL_MAP_STATE_KEY,
     AG_UI_WIRE_MAP_STATE_KEY,
 )
+from tests.interrupt_state_stub import InterruptStateStub
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -122,7 +122,7 @@ class _MockStrandsCore:
         # ``session_manager=None`` explicitly to exercise the guard itself.
         self.session_manager = MagicMock() if session_manager is _UNSET else session_manager
         self._terminal_events = terminal_events or []
-        self._interrupt_state = _InterruptState()
+        self._interrupt_state = InterruptStateStub()
         if interrupts:
             for itr in interrupts:
                 self._interrupt_state.interrupts[itr.id] = itr

@@ -6,6 +6,7 @@ import json
 import uuid
 from typing import Optional
 from litellm import acompletion
+from ag_ui_crewai._config import resolve_provider_timeout_seconds
 from crewai.flow.flow import Flow, start, router, listen
 from ag_ui_crewai.sdk import (
   copilotkit_stream, 
@@ -85,7 +86,7 @@ class PredictiveStateUpdatesFlow(Flow[AgentState]):
         #    copilotkit_stream and set stream=True.
         response = await copilotkit_stream(
             await acompletion(
-
+                timeout=resolve_provider_timeout_seconds(),
                 # 2.1 Specify the model to use
                 model="openai/gpt-5.4",
                 messages=[

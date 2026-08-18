@@ -1,6 +1,6 @@
 """Backend Tool Rendering example using AG2 with AG-UI protocol.
 
-Exposes a ConversableAgent with a get_weather tool via AGUIStream.
+Exposes an Agent with a get_weather tool via AGUIStream.
 The frontend renders tool calls and results (e.g. weather card).
 See: https://docs.ag2.ai/latest/docs/user-guide/ag-ui/
 """
@@ -10,8 +10,9 @@ import os
 
 import httpx
 from fastapi import FastAPI
-from autogen import ConversableAgent, LLMConfig
-from autogen.ag_ui import AGUIStream
+from ag2 import Agent, tool
+from ag2.ag_ui import AGUIStream
+from ag2.config import OpenAIConfig
 
 
 def get_weather_condition(code: int) -> str:
@@ -60,6 +61,7 @@ def _mock_weather(location: str) -> str:
     })
 
 
+@tool
 async def get_weather(location: str) -> str:
     """Get current weather for a location.
 
@@ -94,7 +96,7 @@ async def get_weather(location: str) -> str:
             f"wind_speed_10m,wind_gusts_10m,weather_code"
         )
         weather_response = await client.get(weather_url)
-        weather_data = await weather_response.json()
+        weather_data = weather_response.json()
         current = weather_data["current"]
 
         return json.dumps({
@@ -108,9 +110,9 @@ async def get_weather(location: str) -> str:
         })
 
 
-agent = ConversableAgent(
+agent = Agent(
     name="weather_bot",
-    system_message="""You are a helpful weather assistant that provides accurate weather information.
+    prompt="""You are a helpful weather assistant that provides accurate weather information.
 
 Your primary function is to help users get weather details for specific locations. When responding:
 - Always ask for a location if none is provided
@@ -120,9 +122,8 @@ Your primary function is to help users get weather details for specific location
 - Keep responses concise but informative
 
 Use the get_weather tool to fetch current weather data.""",
-    llm_config=LLMConfig({"model": "gpt-4o-mini", "stream": True}),
-    human_input_mode="NEVER",
-    functions=[get_weather],
+    config=OpenAIConfig(model="gpt-4o-mini"),
+    tools=[get_weather],
 )
 
 stream = AGUIStream(agent)

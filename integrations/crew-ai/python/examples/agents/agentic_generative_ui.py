@@ -9,6 +9,7 @@ from litellm import acompletion
 from pydantic import BaseModel
 from typing import Literal, List
 
+from ag_ui_crewai._config import resolve_provider_timeout_seconds
 from ag_ui_crewai.sdk import (
   copilotkit_stream,
   CopilotKitState,
@@ -107,7 +108,7 @@ class AgenticGenerativeUIFlow(Flow[AgentState]):
         #    copilotkit_stream and set stream=True.
         response = await copilotkit_stream(
             await acompletion(
-
+                timeout=resolve_provider_timeout_seconds(),
                 # 2.1 Specify the model to use
                 model="openai/gpt-5.4",
                 messages=[

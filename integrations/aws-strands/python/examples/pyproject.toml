@@ -11,7 +11,7 @@ python = "<3.15,>=3.10"
 ag-ui-protocol = "^0.1.10"
 fastapi = "^0.115.12"
 uvicorn = "^0.34.3"
-strands-agents = {extras = ["openai", "anthropic", "gemini"], version = "^1.15.0"}
+strands-agents = {extras = ["openai", "anthropic", "gemini"], version = "^1.31.0"}
 strands-agents-tools = "^0.2.14"
 ag_ui_strands = {path = "..", develop = true}
 

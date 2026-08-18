@@ -7,6 +7,9 @@
   "scripts": {
     "postinstall": "playwright install --with-deps",
     "test": "playwright test",
+    "check:event-trace-types": "tsc -p tsconfig.event-trace.json",
+    "test:event-trace-unit": "tsx --test lib/event-trace-*.test.ts",
+    "event-trace:update": "tsx scripts/update-event-traces.ts",
     "test:ui": "playwright test --ui",
     "report": "playwright show-report"
   },
@@ -14,7 +17,10 @@
     "@playwright/test": "^1.43.1",
     "@slack/types": "^2.14.0",
     "@types/node": "^22.15.28",
-    "playwright-slack-report": "^1.1.93"
+    "playwright-slack-report": "^1.1.93",
+    "prettier": "3.6.2",
+    "tsx": "^4.23.12",
+    "typescript": "5.8.3"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",

@@ -13,6 +13,7 @@ import uuid
 
 from litellm import acompletion
 
+from ag_ui_crewai._config import resolve_provider_timeout_seconds
 from ag_ui_crewai.sdk import copilotkit_stream
 from ag_ui_crewai.a2ui_tool import apply_a2ui_plan_to_tools, plan_a2ui_injection
 from ._model_turn import (
@@ -140,8 +141,11 @@ async def run_a2ui_subagent_turn(state) -> None:
         # prior surface (hard failure) and a second create would be designed
         # blind to the first. Planning is local (no I/O), so this is cheap; None
         # still means "no injection".
+        # A model DICT, not the bare id: the render sub-agent's completion is
+        # built from these kwargs, and a bare id carries no timeout - leaving the
+        # sub-agent and its recovery retries unbounded.
         plan = plan_a2ui_injection(
-            model=MODEL,
+            model={"model": MODEL, "timeout": resolve_provider_timeout_seconds()},
             state=state,
             existing_tool_names=existing_names,
             config=A2UI_CONFIG,
@@ -163,6 +167,7 @@ async def run_a2ui_subagent_turn(state) -> None:
 
         response = await copilotkit_stream(
             await acompletion(
+                timeout=resolve_provider_timeout_seconds(),
                 model=MODEL,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},

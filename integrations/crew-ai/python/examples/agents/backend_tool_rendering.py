@@ -15,7 +15,11 @@ from crewai import Agent, Crew, Process, Task
 from crewai.flow.flow import Flow, start
 from crewai.tools import tool
 
+from ag_ui_crewai._config import resolve_agent_execution_ceiling_seconds
 from ag_ui_crewai.sdk import CopilotKitState, copilotkit_exit
+from ._crewai_llm import bounded_llm
+
+MODEL = "openai/gpt-5.4"
 
 
 @tool("get_weather")
@@ -59,6 +63,20 @@ class BackendToolRenderingFlow(Flow[CopilotKitState]):
     @start()
     async def chat(self):
         user_message = _latest_user_message(self.state.messages)
+        if not user_message:
+            # Nothing was asked, so there is nothing to look up. A crew kickoff
+            # here is a billed provider round trip (and, on the conversational
+            # path, an unkillable worker thread) spent on an empty prompt.
+            # Truthiness rather than ``strip()``: the helper returns whatever the
+            # message carried, and a multimodal ``content`` is a list.
+            self.state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": "Ask me about the weather somewhere.",
+                }
+            )
+            await copilotkit_exit()
+            return
 
         agent = Agent(
             role="Weather Assistant",
@@ -68,7 +86,13 @@ class BackendToolRenderingFlow(Flow[CopilotKitState]):
                 "get_weather tool to look up the weather before you answer."
             ),
             tools=[get_weather],
-            llm="openai/gpt-5.4",
+            # The kickoff below is synchronous, so on the conversational path it
+            # runs on a thread the request loop cannot kill. Both bounds shrink
+            # that window without closing it: the LLM carries the per-read
+            # timeout, and the ceiling drops the task-retry factor crewai
+            # multiplies it by. Neither caps wall clock (see ``_crewai_llm``).
+            llm=bounded_llm(MODEL),
+            max_execution_time=resolve_agent_execution_ceiling_seconds(),
             verbose=False,
         )
         task = Task(

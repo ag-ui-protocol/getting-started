@@ -6,6 +6,10 @@
 *.tsx text eol=lf
 *.py text eol=lf
 
+# Generated E2E event-trace goldens. Keep these reviewable as artifacts without
+# letting their size obscure the hand-written test harness in GitHub diffs.
+apps/dojo/e2e/tests/**/*.event-trace.ts linguist-generated=true
+
 # Git LFS
 *.png filter=lfs diff=lfs merge=lfs -text
 *.jpg filter=lfs diff=lfs merge=lfs -text
