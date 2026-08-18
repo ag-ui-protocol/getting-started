@@ -13,7 +13,7 @@
   "options": {
     "tools": [
       {
-        "type": "ApprovalRequiredAIFunction",
+        "type": "DefaultAIFunctionDeclaration",
         "name": "GetUserLocation",
         "description": "Get the user\u0027s current location from GPS."
       }
