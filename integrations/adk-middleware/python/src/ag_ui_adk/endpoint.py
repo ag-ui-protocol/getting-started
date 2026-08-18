@@ -3,6 +3,7 @@
 """FastAPI endpoint for ADK middleware."""
 
 import logging
+import struct
 import uuid
 import warnings
 from collections.abc import Sequence
@@ -16,7 +17,7 @@ from ag_ui.core import (
     RunErrorEvent,
     ToolMessage,
 )
-from ag_ui.encoder import EventEncoder
+from ag_ui.encoder import EventEncoder, AGUI_MEDIA_TYPE
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -194,21 +195,33 @@ async def _sse_stream(agent: "ADKAgent", input_data: RunAgentInput):
 async def _legacy_stream(
     agent: "ADKAgent", input_data: RunAgentInput, encoder: EventEncoder
 ):
-    """Yield encoded byte-strings for a non-SSE ``StreamingResponse`` consumer.
+    """Yield encoded events for a non-SSE ``StreamingResponse`` consumer.
 
-    Re-engages the pre-PR ``EventEncoder.encode(...)`` path so any client that
-    negotiates a non-``text/event-stream`` content type (e.g. a future binary
-    framing under ``application/vnd.ag-ui.event+proto``) keeps working. Today
-    the Python ``EventEncoder`` is a no-op SSE/JSON encoder, but the API
-    surface and the runtime branch are preserved so that adding a binary
-    encoder later doesn't require a separate endpoint change.
+    Used for the AG-UI **binary protocol** (``application/vnd.ag-ui.event+proto``)
+    negotiated via the ``Accept`` header. Each event is protobuf-encoded by
+    ``EventEncoder`` and framed with a **4-byte big-endian length prefix**
+    (``struct.pack(">I", len(data)) + data``) — the framing the client's
+    ``parseProtoStream`` expects (``getUint32(0, /*big-endian*/ false)``). The
+    ``EventEncoder.encode`` output is the bare protobuf message (matching the TS
+    ``@ag-ui/proto`` ``encode``), so the length prefix lives here in the
+    transport layer.
+
+    For any other negotiated content type the encoder falls back to SSE strings,
+    which are yielded unframed.
     """
+    is_proto = encoder.get_content_type() == AGUI_MEDIA_TYPE
+
+    def _frame(encoded):
+        # Length-prefix binary frames; pass SSE strings through untouched.
+        if is_proto and isinstance(encoded, (bytes, bytearray)):
+            return struct.pack(">I", len(encoded)) + bytes(encoded)
+        return encoded
+
     try:
         async for event in agent.run(input_data):
             try:
                 encoded = encoder.encode(event)
-                logger.debug(f"HTTP Response: {encoded}")
-                yield encoded
+                yield _frame(encoded)
             except Exception as encoding_error:
                 logger.error(
                     f"❌ Event encoding error: {encoding_error}", exc_info=True
@@ -218,12 +231,11 @@ async def _legacy_stream(
                     code="ENCODING_ERROR",
                 )
                 try:
-                    yield encoder.encode(error_event)
+                    yield _frame(encoder.encode(error_event))
                 except Exception:
-                    logger.error(
-                        "Failed to encode error event, yielding basic SSE error"
-                    )
-                    yield 'data: {"error": "Event encoding failed"}\n\n'
+                    logger.error("Failed to encode error event")
+                    if not is_proto:
+                        yield 'data: {"error": "Event encoding failed"}\n\n'
                 return
     except Exception as agent_error:
         logger.error(f"❌ ADKAgent error: {agent_error}", exc_info=True)
@@ -232,10 +244,11 @@ async def _legacy_stream(
                 message=f"Agent execution failed: {str(agent_error)}",
                 code="AGENT_ERROR",
             )
-            yield encoder.encode(error_event)
+            yield _frame(encoder.encode(error_event))
         except Exception:
-            logger.error("Failed to encode agent error event, yielding basic SSE error")
-            yield 'data: {"error": "Agent execution failed"}\n\n'
+            logger.error("Failed to encode agent error event")
+            if not is_proto:
+                yield 'data: {"error": "Agent execution failed"}\n\n'
 
 
 class AgentStateRequest(BaseModel):
@@ -451,10 +464,14 @@ def add_adk_fastapi_endpoint(
             agent = await _resolve_agent(
                 default_agent, request, synthetic_input, agent_resolver
             )
-            caps = agent.get_capabilities()
-            if caps is None:
+            caps = agent.get_capabilities() or {}
+            # Advertise the transports this endpoint serves: SSE always, and the
+            # AG-UI binary protocol (protobuf over HTTP) negotiated via Accept.
+            caps.setdefault("transport", {})
+            caps["transport"].setdefault("streaming", True)
+            caps["transport"]["httpBinary"] = True
+            if not caps.get("transport") and len(caps) == 0:
                 logger.debug("Capabilities endpoint called but no capabilities configured on agent")
-                return JSONResponse(content={})
             return JSONResponse(content=caps)
         except Exception as e:
             logger.error(f"Error in capabilities endpoint: {e}", exc_info=True)

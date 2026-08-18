@@ -13,6 +13,14 @@ dependencies = [
     "pydantic>=2.11.2",
 ]
 
+[project.optional-dependencies]
+# Binary protocol (protobuf over HTTP, media type application/vnd.ag-ui.event+proto).
+# Only needed to encode/decode the binary transport; the default SSE path has no
+# protobuf dependency. Install with: pip install "ag-ui-protocol[proto]"
+proto = [
+    "protobuf>=6.33.5,<7",
+]
+
 [tool.ag-ui.scripts]
 test = "python -m unittest discover tests"
 
