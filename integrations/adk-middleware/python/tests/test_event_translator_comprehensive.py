@@ -954,13 +954,15 @@ class TestEventTranslatorComprehensive:
             "key-with-dashes": "value1",
             "key_with_underscores": "value2",
             "key.with.dots": "value3",
-            "key with spaces": "value4"
+            "key with spaces": "value4",
+            "user/name": "value5",
+            "config~version": "value6",
         }
 
         event = translator._create_state_delta_event(state_delta, "thread_1", "run_1")
 
         assert isinstance(event, StateDeltaEvent)
-        assert len(event.delta) == 4
+        assert len(event.delta) == 6
 
         # Check that all keys are properly escaped in paths
         patches = event.delta
@@ -969,6 +971,8 @@ class TestEventTranslatorComprehensive:
         assert "/key_with_underscores" in paths
         assert "/key.with.dots" in paths
         assert "/key with spaces" in paths
+        assert "/user~1name" in paths
+        assert "/config~0version" in paths
 
     @pytest.mark.asyncio
     async def test_force_close_streaming_message_with_open_stream(self, translator):
@@ -1657,6 +1661,77 @@ class TestThoughtHandling:
         # Should NOT have encrypted value event
         encrypted_events = [e for e in events if isinstance(e, ReasoningEncryptedValueEvent)]
         assert len(encrypted_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_function_call_thought_signature_emits_tool_call_encrypted_value(
+        self, translator, mock_adk_event
+    ):
+        """A thought_signature on a function_call part emits REASONING_ENCRYPTED_VALUE
+        with subtype='tool-call'.
+
+        Gemini attaches the thought signature to the function_call part (not to the
+        thought-text part), so this is the path that surfaces encrypted reasoning for
+        tool calls.
+        """
+        from ag_ui.core import ReasoningEncryptedValueEvent
+        import base64
+
+        fc = MagicMock()
+        fc.id = "tool_call_1"
+        fc.name = "get_weather"
+        fc.args = {"city": "Valencia"}
+
+        part = MagicMock()
+        part.text = None  # function-call parts carry no text
+        part.thought = None
+        part.function_call = fc
+        part.thought_signature = b"\x10\x20\x30"
+
+        mock_content = MagicMock()
+        mock_content.parts = [part]
+        mock_adk_event.content = mock_content
+        mock_adk_event.get_function_calls = MagicMock(return_value=[fc])
+        mock_adk_event.get_function_responses = MagicMock(return_value=[])
+
+        events = []
+        async for event in translator.translate(mock_adk_event, "thread_1", "run_1"):
+            events.append(event)
+
+        encrypted = [e for e in events if isinstance(e, ReasoningEncryptedValueEvent)]
+        assert len(encrypted) == 1
+        assert encrypted[0].subtype == "tool-call"
+        assert encrypted[0].entity_id == "tool_call_1"
+        assert encrypted[0].encrypted_value == base64.b64encode(b"\x10\x20\x30").decode("ascii")
+
+    @pytest.mark.asyncio
+    async def test_function_call_without_signature_no_encrypted_value(
+        self, translator, mock_adk_event
+    ):
+        """A function_call part without a thought_signature emits no encrypted value."""
+        from ag_ui.core import ReasoningEncryptedValueEvent
+
+        fc = MagicMock()
+        fc.id = "tool_call_2"
+        fc.name = "get_weather"
+        fc.args = {"city": "Bilbao"}
+
+        part = MagicMock()
+        part.text = None
+        part.thought = None
+        part.function_call = fc
+        part.thought_signature = None
+
+        mock_content = MagicMock()
+        mock_content.parts = [part]
+        mock_adk_event.content = mock_content
+        mock_adk_event.get_function_calls = MagicMock(return_value=[fc])
+        mock_adk_event.get_function_responses = MagicMock(return_value=[])
+
+        events = []
+        async for event in translator.translate(mock_adk_event, "thread_1", "run_1"):
+            events.append(event)
+
+        assert [e for e in events if isinstance(e, ReasoningEncryptedValueEvent)] == []
 
     @pytest.mark.asyncio
     async def test_streaming_none_mode_partial_false_thought_emits_reasoning(self, translator, mock_adk_event):

@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using AGUIDojoServer.AgenticUI;
 using AGUIDojoServer.BackendToolRendering;
@@ -18,4 +19,6 @@ namespace AGUIDojoServer;
 [JsonSerializable(typeof(List<JsonPatchOperation>))]
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(DocumentState))]
+[JsonSerializable(typeof(JsonArray))]
+[JsonSerializable(typeof(JsonObject))]
 internal sealed partial class AGUIDojoServerSerializerContext : JsonSerializerContext;

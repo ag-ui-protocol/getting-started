@@ -236,12 +236,8 @@ const agentFilesMapper: Record<
     tool_based_generative_ui: [
       path.join(__dirname, "../src/mastra/agents/tool-based-generative-ui.ts"),
     ],
-    a2ui_dynamic_schema: [
-      path.join(__dirname, "../src/mastra/agents/a2ui.ts"),
-    ],
-    a2ui_recovery: [
-      path.join(__dirname, "../src/mastra/agents/a2ui.ts"),
-    ],
+    a2ui_dynamic_schema: [path.join(__dirname, "../src/mastra/agents/a2ui.ts")],
+    a2ui_recovery: [path.join(__dirname, "../src/mastra/agents/a2ui.ts")],
     a2ui_fixed_schema: [
       path.join(__dirname, "../src/mastra/agents/a2ui-fixed.ts"),
     ],
@@ -366,7 +362,33 @@ const agentFilesMapper: Record<
           path.join(
             __dirname,
             integrationsFolderPath,
-            `/crew-ai/python/ag_ui_crewai/examples/${agentId}.py`,
+            `/crew-ai/python/examples/agents/${agentId}.py`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
+  "crewai-conversational-flows": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            "/crew-ai/python/examples/agents/conversational.py",
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/crew-ai/python/examples/agents/${
+              agentId === "v1_agentic_chat"
+                ? "agentic_chat"
+                : agentId === "interrupt"
+                  ? "interrupt_flow"
+                  : agentId
+            }.py`,
           ),
         ],
       }),
@@ -539,6 +561,73 @@ const agentFilesMapper: Record<
             __dirname,
             integrationsFolderPath,
             `/claude-agent-sdk/typescript/examples/${agentId}.ts`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
+  // claude-managed-agents serves every feature from one server per language,
+  // driven by the shared agent specs.
+  "claude-managed-agents-dotnet": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/dotnet/examples/AGUIDojoServer/AgentSpecs.cs`,
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/dotnet/examples/AGUIDojoServer/ExampleAgents.cs`,
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/dotnet/examples/AGUIDojoServer/Program.cs`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
+  "claude-managed-agents-python": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/python/examples/agents.py`,
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/python/examples/server.py`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
+  "claude-managed-agents-typescript": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/typescript/examples/agents.ts`,
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/typescript/examples/server.ts`,
           ),
         ],
       }),

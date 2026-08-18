@@ -122,7 +122,15 @@ export const ToolCallStartEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.TOOL_CALL_START),
   toolCallId: z.string(),
   toolCallName: z.string(),
-  parentMessageId: z.string().optional(),
+  // Accept `null` and treat it as omitted, so producers that serialize optional
+  // fields as JSON `null` (e.g. the .NET Microsoft Agent Framework adapter,
+  // whose System.Text.Json emits `"parentMessageId": null`) still validate
+  // instead of aborting the run on the first tool call.
+  parentMessageId: z
+    .string()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? undefined),
 });
 
 export const ToolCallArgsEventSchema = BaseEventSchema.extend({
@@ -148,7 +156,12 @@ export const ToolCallChunkEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.TOOL_CALL_CHUNK),
   toolCallId: z.string().optional(),
   toolCallName: z.string().optional(),
-  parentMessageId: z.string().optional(),
+  // Accept `null` as omitted — same cross-language quirk as TOOL_CALL_START.
+  parentMessageId: z
+    .string()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? undefined),
   delta: z.string().optional(),
 });
 
@@ -235,6 +248,27 @@ export const RunFinishedOutcomeSchema = z.discriminatedUnion("type", [
   RunFinishedInterruptOutcomeSchema,
 ]);
 
+// Reusable, numeric-only token usage summary. Deliberately carries no
+// content-bearing or identifying fields (no prompts, completions, messages,
+// thread/run/user IDs) — only provider/model labels and numeric token counts.
+// Unknown keys are stripped on parse, so content cannot ride along.
+export const TokenUsageSchema = z.object({
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  // Counts are non-negative integers in every representation: proto `int64`,
+  // C# `long?`, Python `int`. Constraining them here keeps TypeScript from
+  // admitting values the other bindings cannot encode — `proto.encode` parses
+  // against this schema and then writes via an int64 writer that throws on a
+  // non-integer, so an unconstrained `z.number()` turns a bad producer value
+  // into a mid-stream crash on the protobuf transport instead of a validation
+  // error at the source.
+  inputTokens: z.number().int().nonnegative().optional(),
+  outputTokens: z.number().int().nonnegative().optional(),
+  totalTokens: z.number().int().nonnegative().optional(),
+  reasoningTokens: z.number().int().nonnegative().optional(),
+  cachedInputTokens: z.number().int().nonnegative().optional(),
+});
+
 export const RunFinishedEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.RUN_FINISHED),
   threadId: z.string(),
@@ -243,13 +277,24 @@ export const RunFinishedEventSchema = BaseEventSchema.extend({
   // Accept `null` and treat it as omitted, so producers like the Pydantic-based
   // Python SDK that serialize via `model_dump()` (without `exclude_none=True`)
   // and emit `"outcome": null` for the legacy no-outcome case still validate.
-  outcome: RunFinishedOutcomeSchema.nullable().optional().transform((v) => v ?? undefined),
+  outcome: RunFinishedOutcomeSchema.nullable()
+    .optional()
+    .transform((v) => v ?? undefined),
+  // Optional per-(provider, model) token usage for the completed run. An array
+  // so runs that invoke multiple models keep them separate for downstream
+  // display; consumers that only need totals can sum across entries. Must be
+  // declared here (not relied upon via passthrough) so it survives the
+  // `EventSchemas` discriminated-union parse.
+  usage: z.array(TokenUsageSchema).optional(),
 });
 
 export const RunErrorEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.RUN_ERROR),
   message: z.string(),
   code: z.string().optional(),
+  // Optional partial usage for a run that failed after one or more model calls
+  // completed. Same numeric-only shape as RUN_FINISHED.
+  usage: z.array(TokenUsageSchema).optional(),
 });
 
 export const StepStartedEventSchema = BaseEventSchema.extend({
@@ -454,6 +499,7 @@ export type RawEvent = z.infer<typeof RawEventSchema>;
 export type CustomEvent = z.infer<typeof CustomEventSchema>;
 export type RunStartedEvent = z.infer<typeof RunStartedEventSchema>;
 export type RunFinishedEvent = z.infer<typeof RunFinishedEventSchema>;
+export type TokenUsage = z.infer<typeof TokenUsageSchema>;
 export type RunFinishedOutcome = z.infer<typeof RunFinishedOutcomeSchema>;
 export type RunFinishedSuccessOutcome = z.infer<typeof RunFinishedSuccessOutcomeSchema>;
 export type RunFinishedInterruptOutcome = z.infer<typeof RunFinishedInterruptOutcomeSchema>;

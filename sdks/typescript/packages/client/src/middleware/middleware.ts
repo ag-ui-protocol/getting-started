@@ -14,6 +14,10 @@ export type MiddlewareFunction = (
 export interface EventWithState {
   event: BaseEvent;
   messages: Message[];
+  // DEFERRED (PNI-272): tightening this to `unknown` is a breaking change for
+  // consumers of a published package, not a lint repair. Left for a deliberate
+  // API decision.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   state: any;
 }
 

@@ -35,7 +35,7 @@ jobs:
         working-directory: sdks/dotnet
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           # Step08_Multimodal integration test reads ag-ui-logo.png, which is
           # stored via Git LFS. Without the real bytes the snapshot diff fails.
@@ -43,7 +43,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9  # v4.3.1
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
         with:
           # global.json pins the 10.0 SDK; the 8.0/9.0 runtimes are needed
           # because the unit-test projects multi-target net8.0/net9.0/net10.0.
@@ -62,6 +62,8 @@ jobs:
           dotnet build src/AGUI.Protobuf/AGUI.Protobuf.csproj -c Release
           dotnet build src/AGUI.Client/AGUI.Client.csproj -c Release
           dotnet build src/AGUI.Server/AGUI.Server.csproj -c Release
+          dotnet build src/AGUI.A2UI.Toolkit/AGUI.A2UI.Toolkit.csproj -c Release
+          dotnet build src/AGUI.A2UI/AGUI.A2UI.csproj -c Release
 
       # Run the self-contained test projects directly rather than the whole
       # AGUI.slnx: the AGUIDojoServer sample references a sibling agent-framework
@@ -73,6 +75,7 @@ jobs:
           dotnet test tests/AGUI.Formatting.UnitTests -c Release -p:SignAssembly=false
           dotnet test tests/AGUI.Protobuf.UnitTests -c Release -p:SignAssembly=false
           dotnet test tests/AGUI.Server.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.A2UI.UnitTests -c Release -p:SignAssembly=false
 
       - name: Run integration tests
         run: dotnet test tests/AGUI.Hosting.AspNetCore.IntegrationTests -c Release -p:SignAssembly=false
@@ -83,7 +86,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           lfs: true
           persist-credentials: false
@@ -101,7 +104,7 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9  # v4.3.1
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
         with:
           dotnet-version: |
             8.0.x
@@ -109,9 +112,9 @@ jobs:
             10.0.x
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: "22"
+          node-version-file: ".node-version"
 
       - name: Install protoc
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # v3.0.0
@@ -120,12 +123,12 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
         with:
           version: 10.33.4
 
       - name: Setup pnpm cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}

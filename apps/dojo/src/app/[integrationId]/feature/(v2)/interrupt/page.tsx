@@ -93,9 +93,16 @@ const ChatContent = () => {
       // The adapter JSON-stringifies the interrupt value, so parse it.
       const raw = event.value ?? {};
       const parsed = (typeof raw === "string" ? JSON.parse(raw) : raw) as {
+        // Mastra suspends a tool and carries the payload under `suspendPayload`.
         suspendPayload?: SuspendPayload;
+        // CrewAI suspends the FLOW, so the value is the AG-UI Interrupt shape and
+        // the paused method's output sits under `metadata.crewai.output`.
+        metadata?: { crewai?: { output?: SuspendPayload } };
       };
-      const payload = parsed.suspendPayload ?? {};
+
+      // Same picker either way: both frameworks pause to ask for a meeting time,
+      // and both take the same resume payload back through `resolve(...)`.
+      const payload = parsed.suspendPayload ?? parsed.metadata?.crewai?.output ?? {};
       return (
         <TimePickerCard
           topic={payload.topic ?? "a call"}

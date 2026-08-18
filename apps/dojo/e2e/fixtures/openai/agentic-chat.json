@@ -10,7 +10,8 @@
         "toolCalls": [
           {
             "name": "change_background",
-            "arguments": "{\"background\":\"blue\"}"
+            "arguments": "{\"background\":\"blue\"}",
+            "id": "call_change_background_1"
           }
         ]
       }
@@ -21,7 +22,8 @@
         "toolCalls": [
           {
             "name": "change_background",
-            "arguments": "{\"background\":\"pink\"}"
+            "arguments": "{\"background\":\"pink\"}",
+            "id": "call_change_background_2"
           }
         ]
       }

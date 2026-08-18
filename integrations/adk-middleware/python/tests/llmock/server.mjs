@@ -63,14 +63,40 @@ const lastUserText = (req) => {
 // Helper: add a fixture that fires when the request contains `toolName`
 // and the last message is a user message.  Returns a functionCall with
 // the given arguments.
+//
+// The `id` is supplied deliberately. aimock's Gemini serializer used to fall back
+// to a generated id (`id: tc.id || generateToolCallId()`); that fallback was
+// dropped before 1.23.1, which emitted no id at all, and 1.24.1 restored emission
+// but only for an id the fixture supplies. Without an id, ADK's
+// `populate_client_function_call_id()` mints a fresh UUID per SSE event, so the
+// partial and final events disagree — the exact failure `_extract_lro_id_remap`
+// and test_lro_sse_id_remap.py exist to work around, and which the remap only
+// covers for LRO calls. Pinning restores a stable id and is deterministic,
+// which is better than the old random fallback.
 const addToolCallFixture = (toolName, args) => {
+  // Counter, not a constant id: a stable id would collide when the same tool is
+  // invoked twice in one session, and several things key state by tool-call id —
+  // this middleware's own `_processed_message_ids` (session_manager.py) drops a
+  // ToolMessage whose id it has already seen, and `pending_tool_calls` collapses
+  // duplicates. The suffix counts how many times this server has served the
+  // tool, so ids are unique per invocation and stable for a given request
+  // sequence (not globally fixed). Loosely mirrors aimock's own
+  // `call_gemini_${name}_${i}`, though that index is positional within a single
+  // request rather than a session counter.
+  let calls = 0;
   mock.addFixture({
     match: {
       predicate: (req) => hasTool(req, toolName) && lastIsUser(req),
     },
-    response: {
-      toolCalls: [{ name: toolName, arguments: JSON.stringify(args) }],
-    },
+    response: () => ({
+      toolCalls: [
+        {
+          name: toolName,
+          arguments: JSON.stringify(args),
+          id: `call_${toolName}_${++calls}`,
+        },
+      ],
+    }),
   });
 };
 
@@ -188,27 +214,41 @@ mock.prependFixture({
   response: { content: "Done! I've completed that for you." },
 });
 
-// Universal catch-all: matches any request not handled above
+// Universal catch-all: matches any request not handled above.
+//
+// The diagnostic lives in the RESPONSE FACTORY, not in the predicate. Since
+// aimock 1.34.0 the matcher evaluates every candidate's `match.predicate`
+// before selecting a winner, so a side effect inside a predicate fires on
+// every request. That matters more here than in the dojo: conftest.py starts
+// this server with stderr=PIPE and never drains it, and Node's writes to a
+// pipe are synchronous on Linux — a per-request log would fill the 64 KiB
+// buffer and block the event loop mid-run. A response factory runs only when
+// this fixture is actually served, i.e. only on a genuine miss.
 mock.addFixture({
+  // endpoint: "chat" is load-bearing. A *function* response skips aimock's
+  // per-endpoint response-shape gate (router.js), so an unscoped catch-all
+  // becomes eligible for image/speech/transcription/video requests it could
+  // never match before, turning their honest 404 into a mis-attributed 500.
   match: {
-    predicate: (req) => {
-      const lastUser = req.messages.filter((m) => m.role === "user").pop();
-      const userText =
-        typeof lastUser?.content === "string"
-          ? lastUser.content
-          : Array.isArray(lastUser?.content)
-            ? lastUser.content
-                .filter((p) => p.type === "text")
-                .map((p) => p.text)
-                .join("")
-            : "(no user msg)";
-      console.error(
-        `[llmock CATCH-ALL] model=${req.model} lastUser="${String(userText).slice(0, 80)}" msgs=${req.messages.length}`,
-      );
-      return true;
-    },
+    endpoint: "chat",
+    predicate: () => true,
   },
-  response: { content: "I understand. How can I help you with that?" },
+  response: (req) => {
+    const lastUser = req.messages.filter((m) => m.role === "user").pop();
+    const userText =
+      typeof lastUser?.content === "string"
+        ? lastUser.content
+        : Array.isArray(lastUser?.content)
+          ? lastUser.content
+              .filter((p) => p.type === "text")
+              .map((p) => p.text)
+              .join("")
+          : "(no user msg)";
+    console.error(
+      `[llmock CATCH-ALL] model=${req.model} lastUser="${String(userText).slice(0, 80)}" msgs=${req.messages.length}`,
+    );
+    return { content: "I understand. How can I help you with that?" };
+  },
 });
 
 const url = await mock.start();

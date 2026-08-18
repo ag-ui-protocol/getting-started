@@ -89,6 +89,34 @@ type RunStartedEvent = BaseEvent & {
 | `parentRunId` | `string` (optional)        | (Optional) Lineage pointer for branching/time travel. If present, refers to a prior run within the same thread |
 | `input`       | `RunAgentInput` (optional) | (Optional) The exact agent input payload sent to the agent for this run. May omit messages already in history  |
 
+### TokenUsage
+
+A reusable, numeric-only token usage summary carried on terminal run events.
+It intentionally contains **only** provider/model labels and token counts — no
+prompts, completions, messages, or identifiers.
+
+```typescript
+type TokenUsage = {
+  provider?: string
+  model?: string
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  reasoningTokens?: number
+  cachedInputTokens?: number
+}
+```
+
+| Property            | Type                | Description                                    |
+| ------------------- | ------------------- | ---------------------------------------------- |
+| `provider`          | `string` (optional) | Provider that reported the usage (e.g. `openai`) |
+| `model`             | `string` (optional) | Model that produced the usage                  |
+| `inputTokens`       | `number` (optional) | Prompt/input tokens                            |
+| `outputTokens`      | `number` (optional) | Completion/output tokens                       |
+| `totalTokens`       | `number` (optional) | Total tokens for the entry                     |
+| `reasoningTokens`   | `number` (optional) | Reasoning tokens, when the model reports them  |
+| `cachedInputTokens` | `number` (optional) | Cached (prompt-cache read) input tokens        |
+
 ### RunFinishedEvent
 
 Signals the successful completion of an agent run.
@@ -99,14 +127,16 @@ type RunFinishedEvent = BaseEvent & {
   threadId: string
   runId: string
   result?: any
+  usage?: TokenUsage[]
 }
 ```
 
-| Property   | Type             | Description                    |
-| ---------- | ---------------- | ------------------------------ |
-| `threadId` | `string`         | ID of the conversation thread  |
-| `runId`    | `string`         | ID of the agent run            |
-| `result`   | `any` (optional) | Result data from the agent run |
+| Property   | Type                       | Description                                                         |
+| ---------- | -------------------------- | ------------------------------------------------------------------- |
+| `threadId` | `string`                   | ID of the conversation thread                                       |
+| `runId`    | `string`                   | ID of the agent run                                                 |
+| `result`   | `any` (optional)           | Result data from the agent run                                      |
+| `usage`    | `TokenUsage[]` (optional)  | Per-(provider, model) token usage for the run, when reported        |
 
 ### RunErrorEvent
 
@@ -117,13 +147,15 @@ type RunErrorEvent = BaseEvent & {
   type: EventType.RUN_ERROR
   message: string
   code?: string
+  usage?: TokenUsage[]
 }
 ```
 
-| Property  | Type                | Description   |
-| --------- | ------------------- | ------------- |
-| `message` | `string`            | Error message |
-| `code`    | `string` (optional) | Error code    |
+| Property  | Type                      | Description                                              |
+| --------- | ------------------------- | -------------------------------------------------------- |
+| `message` | `string`                  | Error message                                            |
+| `code`    | `string` (optional)       | Error code                                               |
+| `usage`   | `TokenUsage[]` (optional) | Partial token usage from model calls that completed      |
 
 ### StepStartedEvent
 

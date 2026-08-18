@@ -28,24 +28,26 @@ def _get_text_value(item: Union[dict, TextInputContent]) -> Optional[str]:
     else:
         return item.get("text")
 
-def _get_binary_attributes(item: Union[dict, BinaryInputContent]) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-    """Get binary attributes (data, mime_type, url, id) from dict or BinaryInputContent."""
+def _get_binary_attributes(item: Union[dict, BinaryInputContent]) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """Get binary attributes (data, mime_type, url, id, filename) from dict or BinaryInputContent."""
     if isinstance(item, BinaryInputContent):
         return (
             item.data,
             item.mime_type,
             item.url,
             item.id,
+            item.filename,
         )
     else:
         return (
             item.get("data"),
             item.get("mimeType") or item.get("mime_type"),
             item.get("url"),
-            item.get("id")
+            item.get("id"),
+            item.get("filename"),
         )
 
-def _to_binary_part(data: Optional[str], mime_type: Optional[str], url: Optional[str], binary_id: Optional[str]) -> Optional[types.Part]:
+def _to_binary_part(data: Optional[str], mime_type: Optional[str], url: Optional[str], binary_id: Optional[str], filename: Optional[str] = None) -> Optional[types.Part]:
     """Create a types.Part from binary data."""
     # currently, only data is supported
     if not data:
@@ -66,12 +68,10 @@ def _to_binary_part(data: Optional[str], mime_type: Optional[str], url: Optional
 
     try:
         decoded = base64.b64decode(data, validate=True)
-        return types.Part(
-            inline_data=types.Blob(
-                mime_type=mime_type,
-                data=decoded,
-            )
-        )
+        blob_kwargs: Dict[str, Any] = {"mime_type": mime_type, "data": decoded}
+        if filename:
+            blob_kwargs["display_name"] = filename
+        return types.Part(inline_data=types.Blob(**blob_kwargs))
     except (binascii.Error, ValueError) as e:
         logger.warning("Failed to base64 decode BinaryInputContent.data: %s", e)
         return None
@@ -190,8 +190,8 @@ def convert_message_content_to_parts(content: Optional[Union[str, List[Any]]]) -
             if part:
                 parts.append(part)
         elif _is_binary_content(item):
-            data, mime_type, url, binary_id = _get_binary_attributes(item)
-            part = _to_binary_part(data, mime_type, url, binary_id)
+            data, mime_type, url, binary_id, filename = _get_binary_attributes(item)
+            part = _to_binary_part(data, mime_type, url, binary_id, filename)
             if part:
                 parts.append(part)
         else:
@@ -364,6 +364,16 @@ def convert_adk_event_to_ag_ui_message(event: ADKEvent) -> Optional[Message]:
     return None
 
 
+def _escape_json_pointer_token(value: str) -> str:
+    """Encode a single JSON Pointer token according to RFC 6901."""
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def _unescape_json_pointer_token(value: str) -> str:
+    """Decode a single JSON Pointer token according to RFC 6901."""
+    return value.replace("~1", "/").replace("~0", "~")
+
+
 def convert_state_to_json_patch(state_delta: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Convert a state delta to JSON Patch format (RFC 6902).
     
@@ -376,19 +386,20 @@ def convert_state_to_json_patch(state_delta: Dict[str, Any]) -> List[Dict[str, A
     patches = []
     
     for key, value in state_delta.items():
+        path = f"/{_escape_json_pointer_token(key)}"
+
         # Determine operation type
         if value is None:
             # Remove operation
             patches.append({
                 "op": "remove",
-                "path": f"/{key}"
+                "path": path
             })
         else:
-            # Add/replace operation
-            # We use "replace" as it works for both existing and new keys
+            # Add works for both new and existing object members.
             patches.append({
-                "op": "replace",
-                "path": f"/{key}",
+                "op": "add",
+                "path": path,
                 "value": value
             })
     
@@ -410,8 +421,9 @@ def convert_json_patch_to_state(patches: List[Dict[str, Any]]) -> Dict[str, Any]
         op = patch.get("op")
         path = patch.get("path", "")
         
-        # Extract key from path (remove leading slash)
-        key = path.lstrip("/")
+        # Remove exactly one leading slash, then decode the JSON Pointer token.
+        encoded_key = path.removeprefix("/")
+        key = _unescape_json_pointer_token(encoded_key)
         
         if op == "remove":
             state_delta[key] = None

@@ -479,6 +479,18 @@ displayed to users.
 | ---------- | ------------------------ |
 | `messages` | Array of message objects |
 
+`activity` and `reasoning` messages are all-or-nothing inside a
+`MessagesSnapshot`. If the snapshot carries any message of that role, it is the
+complete set for that role: entries it repeats replace the client's copies, and
+ones it leaves out are removed. If it carries none, the snapshot says nothing
+about that role and the client keeps the messages it already has.
+
+Both roles are client-side by default, so leaving them out is safe. Activity
+messages never travel back to the agent — they are stripped from `RunAgentInput`
+— and reasoning usually exists only as streamed `Reasoning` events. A backend
+that tracks neither simply omits them from the snapshot, and nothing the client
+holds is lost.
+
 ## Activity Events
 
 Activity Events expose structured, in-progress activity updates that occur

@@ -23,6 +23,39 @@ event stream and request payload.
   types are registered in the source-generated `AGUIJsonSerializerContext`.
 </Note>
 
+## SDK packages
+
+The .NET SDK is split into small packages so protocol types, wire formats,
+client code, and server code can be adopted independently.
+
+| Package | Use it for |
+| --- | --- |
+| `AGUI.Abstractions` | Protocol events, messages, tools, capabilities, interrupts, and JSON serialization. |
+| `AGUI.Formatting` | Event-stream formatter abstractions and Server-Sent Events support. |
+| `AGUI.Protobuf` | Protobuf event-stream formatting and binary protocol support. |
+| `AGUI.Client` | HTTP client and `IChatClient` implementation for consuming AG-UI endpoints. |
+| `AGUI.Server` | Framework-agnostic adapter from `ChatResponseUpdate` streams to AG-UI events. |
+
+## Wire formats and parity
+
+JSON over Server-Sent Events is the full-fidelity event stream.
+`AGUI.Formatting` defines the event-stream formatter contract and SSE support.
+`AGUI.Protobuf` adds binary event-stream formatting for the protocol subset
+supported by the shared proto schema.
+
+Protocol parity starts in `AGUI.Abstractions`. When the TypeScript reference SDK
+adds or changes a wire type, the matching .NET event, message, tool, or
+capability type should update alongside `AGUIJsonSerializerContext` and the
+compatibility fixtures. Public API tracking files should update whenever a
+protocol change adds or changes .NET types.
+
+```bash
+cd sdks/dotnet
+dotnet test tests/AGUI.Abstractions.UnitTests/
+dotnet test tests/AGUI.Formatting.UnitTests/
+dotnet test tests/AGUI.Protobuf.UnitTests/
+```
+
 ## Types
 
 Core data structures that represent the building blocks of the protocol:
@@ -87,4 +120,3 @@ Events power communication between agents and frontends:
 >
   Complete documentation of all event types in `AGUI.Abstractions`
 </Card>
-

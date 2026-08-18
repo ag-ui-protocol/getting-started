@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "mastra:dev": "mastra dev",
     "generate-content-json": "npx tsx scripts/generate-content-json.ts",
+    "test:crewai-config": "tsx --test src/crewai.test.ts",
     "run-everything": "./scripts/prep-dojo-everything.js && ./scripts/run-dojo-everything.js",
     "local-install": "bash scripts/local-install.sh"
   },
@@ -23,6 +24,7 @@
     "@ag-ui/agno": "workspace:*",
     "@ag-ui/aws-strands": "workspace:*",
     "@ag-ui/claude-agent-sdk": "workspace:*",
+    "@ag-ui/claude-managed-agents": "workspace:*",
     "@ag-ui/crewai": "workspace:*",
     "@ag-ui/langchain": "workspace:*",
     "@ag-ui/langgraph": "workspace:*",
@@ -98,7 +100,7 @@
     "@ag-ui/proto": "workspace:*"
   },
   "devDependencies": {
-    "@copilotkit/aimock": "^1.9.0",
+    "@copilotkit/aimock": "1.37.4",
     "@shadcn/ui": "^0.0.4",
     "@tailwindcss/postcss": "^4",
     "@tailwindcss/typography": "^0.5.16",

@@ -59,7 +59,7 @@ class TestAgent extends AbstractAgent {
     this.eventsToEmit = events;
   }
 
-  run(input: RunAgentInput): Observable<BaseEvent> {
+  run(_input: RunAgentInput): Observable<BaseEvent> {
     return of(...this.eventsToEmit);
   }
 }
@@ -1525,7 +1525,7 @@ describe("AgentSubscriber", () => {
           [],
           {},
           (sub, messages, state) =>
-            (sub as { onRunInitialized: Function }).onRunInitialized({ messages, state }),
+            (sub as { onRunInitialized: (arg: unknown) => void }).onRunInitialized({ messages, state }),
         );
 
         expect(result).toBeDefined();
@@ -1543,7 +1543,7 @@ describe("AgentSubscriber", () => {
 
         const mutableState = { counter: 0 };
         const subscriber: AgentSubscriber = {
-          onRunInitialized: vi.fn().mockImplementation(({ state }) => {
+          onRunInitialized: vi.fn().mockImplementation(({ _state }) => {
             // In a browser (no process), isDev is false, so inputs should NOT be frozen.
             // If the guard is missing, this would throw ReferenceError before we get here.
             return undefined;
@@ -1555,7 +1555,7 @@ describe("AgentSubscriber", () => {
           [],
           mutableState,
           (sub, messages, state) =>
-            (sub as { onRunInitialized: Function }).onRunInitialized({ messages, state }),
+            (sub as { onRunInitialized: (arg: unknown) => void }).onRunInitialized({ messages, state }),
         );
 
         // If we reach here, no ReferenceError was thrown — the guard works.

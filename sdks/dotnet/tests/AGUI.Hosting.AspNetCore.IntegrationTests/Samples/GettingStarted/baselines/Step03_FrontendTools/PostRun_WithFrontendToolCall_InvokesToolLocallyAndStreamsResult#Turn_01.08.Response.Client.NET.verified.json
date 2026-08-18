@@ -63,7 +63,48 @@
       "runId": "run_Id_1",
       "outcome": {
         "type": "success"
+      },
+      "usage": [
+        {
+          "inputTokens": 131,
+          "outputTokens": 85,
+          "totalTokens": 216,
+          "reasoningTokens": 64,
+          "cachedInputTokens": 0
+        }
+      ]
+    }
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "usage",
+        "details": {
+          "inputTokenCount": 131,
+          "outputTokenCount": 85,
+          "cachedInputTokenCount": 0,
+          "reasoningTokenCount": 64
+        }
       }
+    ],
+    "responseId": "run_Id_1",
+    "rawRepresentation": {
+      "type": "RUN_FINISHED",
+      "threadId": "thread_Id_1",
+      "runId": "run_Id_1",
+      "outcome": {
+        "type": "success"
+      },
+      "usage": [
+        {
+          "inputTokens": 131,
+          "outputTokens": 85,
+          "totalTokens": 216,
+          "reasoningTokens": 64,
+          "cachedInputTokens": 0
+        }
+      ]
     }
   },
   {
@@ -19107,7 +19148,48 @@
       "runId": "run_Id_2",
       "outcome": {
         "type": "success"
+      },
+      "usage": [
+        {
+          "inputTokens": 166,
+          "outputTokens": 937,
+          "totalTokens": 1103,
+          "reasoningTokens": 384,
+          "cachedInputTokens": 0
+        }
+      ]
+    }
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "usage",
+        "details": {
+          "inputTokenCount": 166,
+          "outputTokenCount": 937,
+          "cachedInputTokenCount": 0,
+          "reasoningTokenCount": 384
+        }
       }
+    ],
+    "responseId": "run_Id_2",
+    "rawRepresentation": {
+      "type": "RUN_FINISHED",
+      "threadId": "thread_Id_1",
+      "runId": "run_Id_2",
+      "outcome": {
+        "type": "success"
+      },
+      "usage": [
+        {
+          "inputTokens": 166,
+          "outputTokens": 937,
+          "totalTokens": 1103,
+          "reasoningTokens": 384,
+          "cachedInputTokens": 0
+        }
+      ]
     }
   }
 ]

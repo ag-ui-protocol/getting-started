@@ -88,6 +88,39 @@ public sealed class RunEventsCompatibilityTest
     }
 
     [Fact]
+    public void RunFinishedEvent_WithUsage_DeserializesFromTypeScriptPayload()
+    {
+        var evt = FixtureLoader.DeserializeAsBaseEvent(_fixtures[8]);
+
+        var typed = Assert.IsType<RunFinishedEvent>(evt);
+        Assert.Equal(2, typed.Usage!.Count);
+
+        Assert.Equal("openai", typed.Usage[0].Provider);
+        Assert.Equal("gpt-4o", typed.Usage[0].Model);
+        Assert.Equal(11, typed.Usage[0].InputTokens);
+        Assert.Equal(22, typed.Usage[0].OutputTokens);
+        Assert.Equal(33, typed.Usage[0].TotalTokens);
+        Assert.Equal(44, typed.Usage[0].ReasoningTokens);
+        Assert.Equal(55, typed.Usage[0].CachedInputTokens);
+
+        Assert.Equal("anthropic", typed.Usage[1].Provider);
+        Assert.Equal(1, typed.Usage[1].InputTokens);
+        Assert.Null(typed.Usage[1].OutputTokens);
+    }
+
+    [Fact]
+    public void RunErrorEvent_WithUsage_DeserializesFromTypeScriptPayload()
+    {
+        var evt = FixtureLoader.DeserializeAsBaseEvent(_fixtures[9]);
+
+        var typed = Assert.IsType<RunErrorEvent>(evt);
+        Assert.Equal("API request failed", typed.Message);
+        var entry = Assert.Single(typed.Usage!);
+        Assert.Equal("openai", entry.Provider);
+        Assert.Equal(120, entry.InputTokens);
+    }
+
+    [Fact]
     public void AllRunEvents_RoundTrip_ProduceSameJson()
     {
         foreach (var fixture in _fixtures)

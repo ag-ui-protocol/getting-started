@@ -14,7 +14,6 @@ import {
 } from "@ag-ui/client";
 import { Observable, from, switchMap } from "rxjs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { randomUUID, createHash } from "crypto";
 
@@ -59,6 +58,11 @@ interface UIToolInfo {
 export interface MCPClientConfigHTTP {
   type: "http";
   url: string;
+  /**
+   * Optional HTTP headers sent with every request to the MCP server, e.g. an
+   * `Authorization` bearer token for OAuth/header-protected servers.
+   */
+  headers?: Record<string, string>;
   serverId?: string;
 }
 
@@ -85,9 +89,35 @@ export function getServerHash(config: MCPClientConfig): string {
   const serialized = JSON.stringify({
     type: config.type,
     url: config.url,
-    headers: config.type === "sse" ? (config as MCPClientConfigSSE).headers : undefined,
+    headers: config.headers,
   });
   return createHash("md5").update(serialized).digest("hex");
+}
+
+/**
+ * Build the MCP client transport for a server config, forwarding any configured
+ * headers (e.g. auth) to the underlying HTTP/SSE request. Both transports accept
+ * headers via `requestInit`; previously HTTP carried no headers field at all and
+ * SSE's headers were never wired through. See #1862.
+ *
+ * The SSE transport is imported lazily so that `eventsource` — which it pulls
+ * in transitively, and which only some consumers ever need — stays out of the
+ * module graph unless an SSE server is actually configured. Under Bun a static
+ * import of it breaks at load time: `eventsource`'s `bun` export condition
+ * resolves to its ESM build, so the SDK's CJS `require` gets an async module
+ * back and throws.
+ */
+async function buildMCPTransport(config: MCPClientConfig) {
+  const options = config.headers
+    ? { requestInit: { headers: config.headers } }
+    : undefined;
+  if (config.type === "sse") {
+    const { SSEClientTransport } = await import(
+      "@modelcontextprotocol/sdk/client/sse.js"
+    );
+    return new SSEClientTransport(new URL(config.url), options);
+  }
+  return new StreamableHTTPClientTransport(new URL(config.url), options);
 }
 
 /**
@@ -165,18 +195,16 @@ export class MCPAppsMiddleware extends Middleware {
 
   run(input: RunAgentInput, next: AbstractAgent): Observable<BaseEvent> {
     // Check for proxied MCP request mode
-    const proxiedRequest = input.forwardedProps
-      ?.__proxiedMCPRequest as ProxiedMCPRequest | undefined;
+    const proxiedRequest = input.forwardedProps?.__proxiedMCPRequest as
+      | ProxiedMCPRequest
+      | undefined;
     if (proxiedRequest) {
       return this.handleProxiedMCPRequest(input.runId, proxiedRequest);
     }
 
     // If no MCP servers configured, pass through using runNextWithState
     if (!this.config.mcpServers?.length) {
-      return this.processStream(
-        this.runNextWithState(input, next),
-        new Map()
-      );
+      return this.processStream(this.runNextWithState(input, next), new Map());
     }
 
     // Fetch UI tools from MCP servers and inject them
@@ -197,9 +225,9 @@ export class MCPAppsMiddleware extends Middleware {
         // Use runNextWithState to get state with each event
         return this.processStream(
           this.runNextWithState(enhancedInput, next),
-          uiToolsMap
+          uiToolsMap,
         );
-      })
+      }),
     );
   }
 
@@ -209,7 +237,7 @@ export class MCPAppsMiddleware extends Middleware {
    */
   private handleProxiedMCPRequest(
     runId: string,
-    request: ProxiedMCPRequest
+    request: ProxiedMCPRequest,
   ): Observable<BaseEvent> {
     return new Observable<BaseEvent>((subscriber) => {
       // Look up server config - prefer serverId, fallback to serverHash
@@ -235,7 +263,9 @@ export class MCPAppsMiddleware extends Middleware {
           type: EventType.RUN_FINISHED,
           runId,
           threadId: runId,
-          result: { error: `Unknown server: ${request.serverId || request.serverHash}` },
+          result: {
+            error: `Unknown server: ${request.serverId || request.serverHash}`,
+          },
         };
         subscriber.next(runFinishedEvent);
         subscriber.complete();
@@ -275,15 +305,9 @@ export class MCPAppsMiddleware extends Middleware {
   private async executeMCPRequest(
     serverConfig: MCPClientConfig,
     method: string,
-    params?: Record<string, unknown>
+    params?: Record<string, unknown>,
   ): Promise<unknown> {
-    let transport;
-
-    if (serverConfig.type === "sse") {
-      transport = new SSEClientTransport(new URL(serverConfig.url));
-    } else {
-      transport = new StreamableHTTPClientTransport(new URL(serverConfig.url));
-    }
+    const transport = await buildMCPTransport(serverConfig);
 
     const client = new Client(
       { name: "mcp-apps-middleware", version: "1.0.0" },
@@ -295,7 +319,7 @@ export class MCPAppsMiddleware extends Middleware {
             },
           },
         },
-      }
+      },
     );
 
     try {
@@ -306,7 +330,7 @@ export class MCPAppsMiddleware extends Middleware {
       switch (method) {
         case "tools/call":
           return await client.callTool(
-            params as { name: string; arguments?: Record<string, unknown> }
+            params as { name: string; arguments?: Record<string, unknown> },
           );
         case "resources/read":
           return await client.readResource(params as { uri: string });
@@ -320,9 +344,7 @@ export class MCPAppsMiddleware extends Middleware {
         case "ping":
           return await client.ping();
         default:
-          throw new Error(
-            `MCP method not allowed for UI proxy: ${method}`
-          );
+          throw new Error(`MCP method not allowed for UI proxy: ${method}`);
       }
     } finally {
       await client.close();
@@ -336,7 +358,7 @@ export class MCPAppsMiddleware extends Middleware {
    */
   private processStream(
     source: Observable<EventWithState>,
-    uiToolsMap: Map<string, UIToolInfo>
+    uiToolsMap: Map<string, UIToolInfo>,
   ): Observable<BaseEvent> {
     return new Observable<BaseEvent>((subscriber) => {
       let heldRunFinished: EventWithState | null = null;
@@ -375,12 +397,12 @@ export class MCPAppsMiddleware extends Middleware {
             try {
               // Find tool calls that don't have a corresponding result message
               const pendingToolCalls = this.findPendingToolCalls(
-                heldRunFinished.messages
+                heldRunFinished.messages,
               );
 
               // Filter for UI tool calls (tools we injected from MCP servers)
               const pendingUIToolCalls = pendingToolCalls.filter((tc) =>
-                uiToolsMap.has(tc.function.name)
+                uiToolsMap.has(tc.function.name),
               );
 
               // Execute pending UI tool calls and emit results
@@ -391,7 +413,7 @@ export class MCPAppsMiddleware extends Middleware {
                   const mcpResult = await this.executeToolCall(
                     toolInfo.serverConfig,
                     toolCall.function.name,
-                    args
+                    args,
                   );
 
                   // Emit tool result event
@@ -421,7 +443,7 @@ export class MCPAppsMiddleware extends Middleware {
                 } catch (error) {
                   console.error(
                     `Failed to execute UI tool call ${toolCall.function.name}:`,
-                    error
+                    error,
                   );
                   // Emit error result
                   const errorResult: ToolCallResultEvent = {
@@ -454,15 +476,9 @@ export class MCPAppsMiddleware extends Middleware {
   private async executeToolCall(
     serverConfig: MCPClientConfig,
     toolName: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
   ): Promise<unknown> {
-    let transport;
-
-    if (serverConfig.type === "sse") {
-      transport = new SSEClientTransport(new URL(serverConfig.url));
-    } else {
-      transport = new StreamableHTTPClientTransport(new URL(serverConfig.url));
-    }
+    const transport = await buildMCPTransport(serverConfig);
 
     const client = new Client(
       { name: "mcp-apps-middleware", version: "1.0.0" },
@@ -474,7 +490,7 @@ export class MCPAppsMiddleware extends Middleware {
             },
           },
         },
-      }
+      },
     );
 
     try {
@@ -503,7 +519,7 @@ export class MCPAppsMiddleware extends Middleware {
             c &&
             typeof c === "object" &&
             c.type === "text" &&
-            typeof c.text === "string"
+            typeof c.text === "string",
         )
         .map((c) => c.text)
         .join("\n");
@@ -553,7 +569,7 @@ export class MCPAppsMiddleware extends Middleware {
       } catch (error) {
         console.error(
           `Failed to fetch tools from MCP server ${serverConfig.url}:`,
-          error
+          error,
         );
       }
     }
@@ -565,15 +581,9 @@ export class MCPAppsMiddleware extends Middleware {
    * Connect to a single MCP server and fetch its UI-enabled tools
    */
   private async fetchToolsFromServer(
-    serverConfig: MCPClientConfig
+    serverConfig: MCPClientConfig,
   ): Promise<UIToolInfo[]> {
-    let transport;
-
-    if (serverConfig.type === "sse") {
-      transport = new SSEClientTransport(new URL(serverConfig.url));
-    } else {
-      transport = new StreamableHTTPClientTransport(new URL(serverConfig.url));
-    }
+    const transport = await buildMCPTransport(serverConfig);
 
     const client = new Client(
       { name: "mcp-apps-middleware", version: "1.0.0" },
@@ -586,7 +596,7 @@ export class MCPAppsMiddleware extends Middleware {
             },
           },
         },
-      }
+      },
     );
 
     try {
@@ -596,13 +606,11 @@ export class MCPAppsMiddleware extends Middleware {
       const response = await client.listTools();
 
       // Filter for tools with UI resources and convert to AG-UI format with server config
-      const uiTools = response.tools
-        .filter(hasUIResource)
-        .map((mcpTool) => ({
-          tool: convertMCPToolToAGUITool(mcpTool),
-          serverConfig,
-          resourceUri: mcpTool._meta!["ui/resourceUri"] as string,
-        }));
+      const uiTools = response.tools.filter(hasUIResource).map((mcpTool) => ({
+        tool: convertMCPToolToAGUITool(mcpTool),
+        serverConfig,
+        resourceUri: mcpTool._meta!["ui/resourceUri"] as string,
+      }));
 
       return uiTools;
     } finally {

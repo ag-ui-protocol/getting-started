@@ -80,3 +80,22 @@ event and as `AdditionalProperties["agui_thread_id"]`.
 
 For the protocol types carried over the wire, see the
 [.NET event reference](/sdk/dotnet/abstractions/events).
+
+## Client verification
+
+Client tests protect the conversion between `Microsoft.Extensions.AI` and
+AG-UI. They verify that `ChatMessage` history becomes AG-UI messages,
+`ChatOptions.Tools` becomes AG-UI tools, caller-supplied AG-UI context,
+forwarded properties, and resume payloads are preserved, and `RUN_ERROR`
+events become MEAI `ErrorContent` updates.
+
+They also protect the stateless conversation contract: thread and run
+identifiers are preserved through AG-UI fields, returned updates clear
+`ConversationId`, and server-side tool calls are marked informational so the
+.NET client does not execute them locally.
+
+```bash
+cd sdks/dotnet
+dotnet test tests/AGUI.Client.UnitTests/
+dotnet test tests/AGUI.CrossLanguage.IntegrationTests/
+```

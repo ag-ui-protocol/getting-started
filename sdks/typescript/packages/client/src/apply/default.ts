@@ -11,7 +11,6 @@ import {
   type AssistantMessage,
   type BaseEvent,
   type CustomEvent,
-  DeveloperMessage,
   EventType,
   type Message,
   type MessagesSnapshotEvent,
@@ -31,7 +30,6 @@ import {
   type StateSnapshotEvent,
   type StepFinishedEvent,
   type StepStartedEvent,
-  SystemMessage,
   type TextMessageContentEvent,
   type TextMessageEndEvent,
   type TextMessageStartEvent,
@@ -40,12 +38,11 @@ import {
   type ToolCallResultEvent,
   type ToolCallStartEvent,
   type ToolMessage,
-  UserMessage,
 } from "@ag-ui/core";
 import jsonpatch from "fast-json-patch";
 import { EMPTY, of } from "rxjs";
 import type { Observable } from "rxjs";
-import { concatMap, defaultIfEmpty, mergeAll, mergeMap } from "rxjs/operators";
+import { concatMap, defaultIfEmpty, mergeAll } from "rxjs/operators";
 import untruncateJson from "untruncate-json";
 import { structuredClone_ } from "../utils";
 import { type DebugLoggerInput, resolveDebugLogger } from "@/debug-logger";
@@ -293,6 +290,39 @@ export const defaultApplyEvents = (
           if (mutation.stopPropagation !== true) {
             const { toolCallId, toolCallName, parentMessageId } = event as ToolCallStartEvent;
 
+            // Applying a start event must be idempotent. The same start can
+            // reach this reducer twice — a tool call already carried in
+            // `agent.messages` from an earlier run and then replayed by the
+            // backend (the HITL path does this when the run re-syncs after
+            // `respond()`), or one stream re-delivered over two transports.
+            // Appending unconditionally would leave the assistant message
+            // holding the id twice, and the second copy stays empty because
+            // TOOL_CALL_ARGS resolves to the first match. That malformed
+            // message is then what travels back to the provider on the next
+            // turn. Resolve the existing entry the same way TOOL_CALL_ARGS
+            // does, and do it before resolveOrCreateAssistantMessage so a
+            // replay can't append a stray empty assistant message either.
+            const ownerMessage = messages.find((m) =>
+              (m as AssistantMessage).toolCalls?.some((tc) => tc.id === toolCallId),
+            ) as AssistantMessage | undefined;
+            const existingToolCall = ownerMessage?.toolCalls?.find((tc) => tc.id === toolCallId);
+
+            if (existingToolCall) {
+              // Update the existing entry instead of pushing a second one, and
+              // leave `arguments` untouched — a start event carries none, so
+              // the copy already in state holds the only streamed args.
+              if (existingToolCall.function.name !== toolCallName) {
+                console.warn(
+                  `TOOL_CALL_START: tool call '${toolCallId}' already exists with name ` +
+                    `'${existingToolCall.function.name}' — updating it to '${toolCallName}'`,
+                );
+                existingToolCall.function.name = toolCallName;
+                applyMutation({ messages });
+              }
+
+              return emitUpdates();
+            }
+
             const targetMessage = resolveOrCreateAssistantMessage(
               messages,
               parentMessageId,
@@ -350,7 +380,10 @@ export const defaultApplyEvents = (
               try {
                 // Parse from toolCallBuffer only (before current delta is applied)
                 partialToolCallArgs = untruncateJson(toolCallBuffer);
-              } catch (error) {}
+              } catch (_error) {
+                // Streaming args are mid-flight and frequently unparseable;
+                // fall through with the last good partial object.
+              }
 
               return subscriber.onToolCallArgsEvent?.({
                 event: event as ToolCallArgsEvent,
@@ -407,7 +440,10 @@ export const defaultApplyEvents = (
               let toolCallArgs = {};
               try {
                 toolCallArgs = JSON.parse(toolCallArgsString);
-              } catch (error) {}
+              } catch (_error) {
+                // A malformed final payload must not abort the run; downstream
+                // sees the empty object.
+              }
               return subscriber.onToolCallEndEvent?.({
                 event: event as ToolCallEndEvent,
                 messages,
@@ -595,8 +631,17 @@ export const defaultApplyEvents = (
             // snapshot.
             const snapshotMap = new Map(newMessages.map((m) => [m.id, m]));
 
-            // `activity` messages are always client-only — backends never include
-            // them in MESSAGES_SNAPSHOT — so they are always preserved.
+            // `activity` messages are only sometimes client-only. They never
+            // travel back to the backend — `prepareRunAgentInput` strips them
+            // from RunAgentInput — so a backend that does not track them cannot
+            // put them in the snapshot, and the local copies must be preserved.
+            // But a backend that does track them re-delivers the whole set it
+            // owns. Since a MESSAGES_SNAPSHOT is a snapshot of every message,
+            // once it carries any activity the backend is declaring the complete
+            // activity set, and one it leaves out has been removed — preserving
+            // it would make the local copy undeletable. So when the snapshot
+            // itself carries activity, treat it as the source of truth for
+            // activity messages and apply the normal replace semantics.
             //
             // `reasoning` messages are only sometimes client-only. Most backends
             // never include reasoning in the snapshot (it exists purely as
@@ -609,9 +654,11 @@ export const defaultApplyEvents = (
             // copy would render the same reasoning twice. So when the snapshot
             // itself carries reasoning, treat it as the source of truth for
             // reasoning messages too and apply the normal replace semantics.
+            const snapshotHasActivity = newMessages.some((m) => m.role === "activity");
             const snapshotHasReasoning = newMessages.some((m) => m.role === "reasoning");
             const isPreservedClientOnly = (m: Message) =>
-              m.role === "activity" || (m.role === "reasoning" && !snapshotHasReasoning);
+              (m.role === "activity" && !snapshotHasActivity) ||
+              (m.role === "reasoning" && !snapshotHasReasoning);
 
             // Step 1 + 2: Keep preserved client-only messages as-is, keep
             // messages present in the snapshot (replaced with snapshot version),
@@ -1172,6 +1219,6 @@ export const defaultApplyEvents = (
     mergeAll(),
     // Only use defaultIfEmpty when there are subscribers to avoid emitting empty updates
     // when patches fail and there are no subscribers (like in state patching test)
-    subscribers.length > 0 ? defaultIfEmpty({} as AgentStateMutation) : (stream: any) => stream,
+    subscribers.length > 0 ? defaultIfEmpty({} as AgentStateMutation) : <T>(stream: T) => stream,
   );
 };

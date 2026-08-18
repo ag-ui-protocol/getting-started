@@ -6,7 +6,8 @@
         "toolCalls": [
           {
             "name": "get_weather",
-            "arguments": "{\"location\":\"San Francisco\"}"
+            "arguments": "{\"location\":\"San Francisco\"}",
+            "id": "call_get_weather_1"
           }
         ]
       }
@@ -17,7 +18,8 @@
         "toolCalls": [
           {
             "name": "get_weather",
-            "arguments": "{\"location\":\"New York\"}"
+            "arguments": "{\"location\":\"New York\"}",
+            "id": "call_get_weather_2"
           }
         ]
       }
@@ -28,7 +30,8 @@
         "toolCalls": [
           {
             "name": "get_weather",
-            "arguments": "{\"location\":\"San Francisco\"}"
+            "arguments": "{\"location\":\"San Francisco\"}",
+            "id": "call_get_weather_3"
           }
         ]
       }

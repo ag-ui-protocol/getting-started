@@ -3410,6 +3410,16 @@
     "runId": "run_Id_1",
     "outcome": {
       "type": "success"
-    }
+    },
+    "usage": [
+      {
+        "model": "gpt-5-mini",
+        "inputTokens": 39,
+        "outputTokens": 345,
+        "totalTokens": 384,
+        "reasoningTokens": 128,
+        "cachedInputTokens": 0
+      }
+    ]
   }
 ]

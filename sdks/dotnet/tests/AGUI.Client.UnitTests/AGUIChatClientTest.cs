@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AGUI.Abstractions;
@@ -141,6 +142,140 @@ public sealed class AGUIChatClientTest
         await DrainAsync(client.GetStreamingResponseAsync(history, options));
 
         Assert.Equal(3, transport.LastInput!.Messages.Count);
+    }
+
+    // https://github.com/ag-ui-protocol/ag-ui/issues/2151
+    // A caller-supplied RunAgentInput (via RawRepresentationFactory) must forward
+    // Context and ForwardedProperties onto the request actually sent, alongside
+    // the already-forwarded Messages/Tools/State/ParentRunId.
+    [Fact]
+    public async Task GetStreamingResponse_RawRepresentationFactory_ForwardsContextAndForwardedProperties()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var forwardedProperties = JsonDocument.Parse("{\"tenant\":\"acme\"}").RootElement.Clone();
+
+        var options = new ChatOptions
+        {
+            RawRepresentationFactory = _ => new RunAgentInput
+            {
+                Context = new List<AGUIContext>
+                {
+                    new() { Description = "userId", Value = "u-123" },
+                },
+                ForwardedProperties = forwardedProperties,
+            },
+        };
+
+        var history = new List<ChatMessage> { new(ChatRole.User, "Hello") };
+        await DrainAsync(client.GetStreamingResponseAsync(history, options));
+
+        var sent = transport.LastInput!;
+
+        Assert.NotNull(sent.Context);
+        var context = Assert.Single(sent.Context!);
+        Assert.Equal("userId", context.Description);
+        Assert.Equal("u-123", context.Value);
+
+        Assert.Equal(JsonValueKind.Object, sent.ForwardedProperties.ValueKind);
+        Assert.Equal("acme", sent.ForwardedProperties.GetProperty("tenant").GetString());
+    }
+
+    // A caller-supplied Resume (via RawRepresentationFactory) must be forwarded too,
+    // like the other RunAgentInput fields (#2177 review follow-up).
+    [Fact]
+    public async Task GetStreamingResponse_RawRepresentationFactory_ForwardsResume()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var options = new ChatOptions
+        {
+            RawRepresentationFactory = _ => new RunAgentInput
+            {
+                Resume = new List<AGUIResume>
+                {
+                    new() { InterruptId = "caller-interrupt", Status = ResumeStatus.Resolved },
+                },
+            },
+        };
+
+        var history = new List<ChatMessage> { new(ChatRole.User, "Hello") };
+        await DrainAsync(client.GetStreamingResponseAsync(history, options));
+
+        var resume = transport.LastInput!.Resume;
+        Assert.NotNull(resume);
+        var entry = Assert.Single(resume!);
+        Assert.Equal("caller-interrupt", entry.InterruptId);
+    }
+
+    // A caller-supplied Resume takes precedence over the approval-response
+    // translation (the callerSuppliedResume guard yields to it) (#2177).
+    [Fact]
+    public async Task GetStreamingResponse_CallerResume_TakesPrecedenceOverApprovalResponses()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var options = new ChatOptions
+        {
+            RawRepresentationFactory = _ => new RunAgentInput
+            {
+                Resume = new List<AGUIResume>
+                {
+                    new() { InterruptId = "caller-interrupt", Status = ResumeStatus.Resolved },
+                },
+            },
+        };
+
+        var toolCall = new FunctionCallContent("call-1", "someTool", new Dictionary<string, object?>());
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.User, [new ToolApprovalResponseContent("req-approval", approved: true, toolCall)]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history, options));
+
+        // The caller's Resume wins; the approval response is not translated over it.
+        var resume = transport.LastInput!.Resume;
+        Assert.NotNull(resume);
+        var entry = Assert.Single(resume!);
+        Assert.Equal("caller-interrupt", entry.InterruptId);
+    }
+
+    // A caller-supplied Resume takes precedence over the interrupt-response translation
+    // too, matching the approval path. Previously the interrupt block appended
+    // unconditionally, so a caller Resume dropped approvals but kept interrupts (#2177).
+    [Fact]
+    public async Task GetStreamingResponse_CallerResume_TakesPrecedenceOverInterruptResponses()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var options = new ChatOptions
+        {
+            RawRepresentationFactory = _ => new RunAgentInput
+            {
+                Resume = new List<AGUIResume>
+                {
+                    new() { InterruptId = "caller-interrupt", Status = ResumeStatus.Resolved },
+                },
+            },
+        };
+
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.User, [new InterruptResponseContent("req-interrupt")]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history, options));
+
+        // The caller's Resume wins; the interrupt response is not appended over it.
+        var resume = transport.LastInput!.Resume;
+        Assert.NotNull(resume);
+        var entry = Assert.Single(resume!);
+        Assert.Equal("caller-interrupt", entry.InterruptId);
     }
 
     // https://github.com/microsoft/agent-framework/issues/5587
@@ -288,6 +423,107 @@ public sealed class AGUIChatClientTest
 
             await Task.CompletedTask.ConfigureAwait(false);
         }
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_SurfacesRunFinishedUsageAsUsageContent()
+    {
+        var transport = new StaticTransport(
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new TextMessageStartEvent { MessageId = "m1", Role = "assistant" },
+            new TextMessageContentEvent { MessageId = "m1", Delta = "hi" },
+            new TextMessageEndEvent { MessageId = "m1" },
+            new RunFinishedEvent
+            {
+                ThreadId = "t1",
+                RunId = "r1",
+                Usage =
+                [
+                    new TokenUsage
+                    {
+                        Provider = "openai",
+                        Model = "gpt-4o",
+                        InputTokens = 11,
+                        OutputTokens = 22,
+                        TotalTokens = 33,
+                        ReasoningTokens = 44,
+                        CachedInputTokens = 55
+                    }
+                ]
+            });
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var u in client.GetStreamingResponseAsync(
+            new[] { new ChatMessage(ChatRole.User, "hi") }))
+        {
+            updates.Add(u);
+        }
+
+        // ToChatResponse aggregates UsageContent across updates — this is how a caller of
+        // the IChatClient abstraction actually reads usage.
+        var usage = updates.ToChatResponse().Usage;
+        Assert.NotNull(usage);
+        Assert.Equal(11, usage.InputTokenCount);
+        Assert.Equal(22, usage.OutputTokenCount);
+        Assert.Equal(33, usage.TotalTokenCount);
+        Assert.Equal(44, usage.ReasoningTokenCount);
+        Assert.Equal(55, usage.CachedInputTokenCount);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_UsageContentCarriesModelId()
+    {
+        var transport = new StaticTransport(
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new RunFinishedEvent
+            {
+                ThreadId = "t1",
+                RunId = "r1",
+                Usage =
+                [
+                    new TokenUsage { Model = "gpt-4o", InputTokens = 10 },
+                    new TokenUsage { Model = "gpt-4o-mini", InputTokens = 5 }
+                ]
+            });
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var u in client.GetStreamingResponseAsync(
+            new[] { new ChatMessage(ChatRole.User, "hi") }))
+        {
+            updates.Add(u);
+        }
+
+        // Per-model attribution must survive: one UsageContent per entry, each labelled.
+        var usageUpdates = updates
+            .Where(u => u.Contents.OfType<UsageContent>().Any())
+            .ToList();
+
+        Assert.Equal(2, usageUpdates.Count);
+        Assert.Equal("gpt-4o", usageUpdates[0].ModelId);
+        Assert.Equal(10, usageUpdates[0].Contents.OfType<UsageContent>().Single().Details.InputTokenCount);
+        Assert.Equal("gpt-4o-mini", usageUpdates[1].ModelId);
+        Assert.Equal(5, usageUpdates[1].Contents.OfType<UsageContent>().Single().Details.InputTokenCount);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_NoUsage_EmitsNoUsageContent()
+    {
+        var transport = new StaticTransport(
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" });
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var u in client.GetStreamingResponseAsync(
+            new[] { new ChatMessage(ChatRole.User, "hi") }))
+        {
+            updates.Add(u);
+        }
+
+        Assert.DoesNotContain(updates, u => u.Contents.OfType<UsageContent>().Any());
+        Assert.Null(updates.ToChatResponse().Usage);
     }
 
     private sealed class CapturingTransport(params BaseEvent[] middleEvents) : IAGUITransport

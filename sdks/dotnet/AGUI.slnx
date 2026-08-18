@@ -1,6 +1,8 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/AGUI.Abstractions/AGUI.Abstractions.csproj" />
+    <Project Path="src/AGUI.A2UI/AGUI.A2UI.csproj" />
+    <Project Path="src/AGUI.A2UI.Toolkit/AGUI.A2UI.Toolkit.csproj" />
     <Project Path="src/AGUI.Client/AGUI.Client.csproj" />
     <Project Path="src/AGUI.Formatting/AGUI.Formatting.csproj" />
     <Project Path="src/AGUI.Server/AGUI.Server.csproj" />
@@ -8,6 +10,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/AGUI.Abstractions.UnitTests/AGUI.Abstractions.UnitTests.csproj" />
+    <Project Path="tests/AGUI.A2UI.UnitTests/AGUI.A2UI.UnitTests.csproj" />
     <Project Path="tests/AGUI.Client.UnitTests/AGUI.Client.UnitTests.csproj" />
     <Project Path="tests/AGUI.Formatting.UnitTests/AGUI.Formatting.UnitTests.csproj" />
     <Project Path="tests/AGUI.Server.UnitTests/AGUI.Server.UnitTests.csproj" />

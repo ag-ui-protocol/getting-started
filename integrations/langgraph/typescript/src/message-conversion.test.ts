@@ -78,6 +78,23 @@ describe("Message Conversion - All Types", () => {
       expect(result[0].type).toBe("tool");
       expect(result[0].content).toBe("42");
       expect(result[0].tool_call_id).toBe("tc1");
+      // A tool result with no error maps to LangChain's default "success" status.
+      expect(result[0].status).toBe("success");
+    });
+
+    it("should map a tool message error onto LangChain's status flag", () => {
+      // A client-reported tool failure must reach the model as an error, not a
+      // silent success — AG-UI's ToolMessage.error becomes status: "error".
+      const msg: Message = {
+        id: "t1",
+        role: "tool",
+        content: "Tool failed: invalid id",
+        toolCallId: "tc1",
+        error: "invalid id",
+      };
+      const result: any[] = aguiMessagesToLangChain([msg]);
+      expect(result[0].type).toBe("tool");
+      expect(result[0].status).toBe("error");
     });
 
     it("should throw for unsupported role", () => {
@@ -162,6 +179,24 @@ describe("Message Conversion - All Types", () => {
       const result: any[] = langchainMessagesToAgui([msg]);
       expect(result[0].role).toBe("tool");
       expect(result[0].toolCallId).toBe("tc1");
+      // No status / "success" carries no failure signal, so error stays unset.
+      expect(result[0].error).toBeUndefined();
+    });
+
+    it("should map a tool message error status onto AG-UI's error field", () => {
+      // The reverse of #2263: a LangChain tool result with status "error" must set
+      // AG-UI's error so the failure survives the round trip. The value is a fixed
+      // sentinel — the original text is not recoverable from the flag alone (#2305).
+      const msg = {
+        id: "t1",
+        type: "tool",
+        content: "Tool failed: invalid id",
+        tool_call_id: "tc1",
+        status: "error",
+      } as any as LangGraphMessage;
+      const result: any[] = langchainMessagesToAgui([msg]);
+      expect(result[0].role).toBe("tool");
+      expect(result[0].error).toBe("error");
     });
 
     it("should handle generic (ChatMessage) type as assistant", () => {

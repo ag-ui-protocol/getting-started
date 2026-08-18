@@ -77,7 +77,7 @@ api_key = os.getenv("OPENAI_API_KEY")
 # If using api_key authentication remove the credential parameter
 # Explicitly pass deployment_name to align with .NET behavior and support both env var names
 chat_client = OpenAIChatClient(
-    model_id=deployment_name or os.getenv("OPENAI_CHAT_MODEL_ID", "gpt-4o"),
+    model=deployment_name or os.getenv("OPENAI_CHAT_MODEL_ID", "gpt-4o"),
     api_key=api_key,
 )
 # TODO: Uncomment this to authenticate with Azure
@@ -89,6 +89,9 @@ chat_client = OpenAIChatClient(
 
 # Agentic Chat - simple_agent
 add_agent_framework_fastapi_endpoint(app, simple_agent(chat_client), "/agentic_chat")
+
+# Agentic Chat Multimodal - simple_agent with a vision-capable model
+add_agent_framework_fastapi_endpoint(app, simple_agent(chat_client), "/agentic_chat_multimodal")
 
 # Backend Tool Rendering - weather_agent
 add_agent_framework_fastapi_endpoint(app, weather_agent(chat_client), "/backend_tool_rendering")

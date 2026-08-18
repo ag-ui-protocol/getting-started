@@ -49,3 +49,7 @@ node_modules
 
 # VS Code
 *.lscache
+
+# actionlint linter binary (dev tool, do not commit)
+/actionlint
+.idea/

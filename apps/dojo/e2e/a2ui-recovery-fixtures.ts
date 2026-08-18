@@ -20,7 +20,12 @@
  * Wire by calling `registerA2UIRecoveryFixtures(mockServer)` from aimock-setup.ts
  * BEFORE the generic fixture loader (predicate fixtures must come first).
  */
-import type { LLMock, ChatMessage } from "@copilotkit/aimock";
+import type {
+  LLMock,
+  ChatMessage,
+  ChatCompletionRequest,
+  ToolDefinition,
+} from "@copilotkit/aimock";
 
 const textOf = (content: ChatMessage["content"] | undefined): string => {
   if (typeof content === "string") return content;
@@ -72,12 +77,12 @@ const renderArgs = (valid: boolean) =>
   JSON.stringify({ surfaceId: "hotel-comparison", components: valid ? [ROOT, CARD] : [ROOT], data: { items: HOTELS } });
 
 export function registerA2UIRecoveryFixtures(mockServer: LLMock): void {
-  const hasTool = (req: any, name: string) => req.tools?.some((t: any) => t.function.name === name);
+  const hasTool = (req: ChatCompletionRequest, name: string) => req.tools?.some((t: ToolDefinition) => t.function.name === name);
 
   // 1) Main agent: recovery prompt → call the generate_a2ui sub-agent tool.
   mockServer.addFixture({
     match: {
-      predicate: (req: any) =>
+      predicate: (req: ChatCompletionRequest) =>
         hasTool(req, "generate_a2ui") && (isRecover(userText(req.messages)) || isExhaust(userText(req.messages))),
     },
     response: { toolCalls: [{ name: "generate_a2ui", arguments: JSON.stringify({ intent: "create" }) }] },
@@ -86,14 +91,14 @@ export function registerA2UIRecoveryFixtures(mockServer: LLMock): void {
   // 2) Sub-agent — EXHAUSTION demo ("broken hotels"): always the dangling-ref surface.
   //    Checked before the recover fixtures so a "broken" retry stays invalid.
   mockServer.addFixture({
-    match: { predicate: (req: any) => hasTool(req, "render_a2ui") && isExhaust(allText(req.messages)) },
+    match: { predicate: (req: ChatCompletionRequest) => hasTool(req, "render_a2ui") && isExhaust(allText(req.messages)) },
     response: { toolCalls: [{ name: "render_a2ui", arguments: renderArgs(false) }] },
   });
 
   // 3) Sub-agent — RECOVER demo ("luxury hotels"), RETRY (errors fed back) → valid.
   mockServer.addFixture({
     match: {
-      predicate: (req: any) =>
+      predicate: (req: ChatCompletionRequest) =>
         hasTool(req, "render_a2ui") && isRecover(allText(req.messages)) && allText(req.messages).includes(RETRY_MARKER),
     },
     response: { toolCalls: [{ name: "render_a2ui", arguments: renderArgs(true) }] },
@@ -102,7 +107,7 @@ export function registerA2UIRecoveryFixtures(mockServer: LLMock): void {
   // 4) Sub-agent — RECOVER demo ("luxury hotels"), FIRST attempt (no marker) → invalid.
   mockServer.addFixture({
     match: {
-      predicate: (req: any) =>
+      predicate: (req: ChatCompletionRequest) =>
         hasTool(req, "render_a2ui") && isRecover(allText(req.messages)) && !allText(req.messages).includes(RETRY_MARKER),
     },
     response: { toolCalls: [{ name: "render_a2ui", arguments: renderArgs(false) }] },

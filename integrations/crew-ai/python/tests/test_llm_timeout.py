@@ -1,5 +1,5 @@
 """
-Regression tests for Defect A follow-up: ensure LiteLLM streaming calls in
+Regression tests ensuring LiteLLM streaming calls in
 ``crews.py`` are made with an explicit read timeout so a half-open TCP stream
 cannot hang the request forever.
 
@@ -25,7 +25,7 @@ def _patch_instance_state(flow, state):
     Flow.state is a class-level descriptor, so a naive attribute assignment
     goes through the descriptor's ``__set__``. Rather than mutate the shared
     class (which is unsafe under ``pytest-xdist`` and other parallel test
-    runners — finding #9), we rebind the instance's ``__class__`` to a
+    runners), we rebind the instance's ``__class__`` to a
     freshly-minted subclass that declares ``state`` as a plain property
     reading from ``flow._state``. The subclass is per-instance, so two
     parallel tests patching two different ``flow`` instances cannot race on
@@ -54,15 +54,15 @@ def test_default_llm_timeout_is_set(monkeypatch):
     """With no env var, the default is a finite positive number in a
     sane range. Pinning against a literal (not the same constant we
     import) so a silent regression that swaps ``_DEFAULT_LLM_TIMEOUT_SECONDS``
-    to ``None`` or a bogus value is caught (finding #24 — the previous
+    to ``None`` or a bogus value is caught (the previous
     ``value == _DEFAULT_LLM_TIMEOUT_SECONDS`` compared the import to
     itself, a tautology).
     """
     monkeypatch.delenv("AGUI_CREWAI_LLM_TIMEOUT_SECONDS", raising=False)
     value = _llm_timeout_seconds()
     # Must be a finite positive float. ``isinstance(value, float)`` already
-    # rules out ``None`` (R5 LOW #21: dropped the redundant separate
-    # ``is not None`` assertion — same guarantee from the type check).
+    # rules out ``None`` (the redundant separate ``is not None``
+    # assertion was dropped — same guarantee from the type check).
     assert isinstance(value, float)
     assert value > 0.0
     # Anchor against a fixed range rather than the module constant so a
@@ -87,6 +87,52 @@ def test_llm_timeout_disabled_for_non_positive(monkeypatch):
     assert _llm_timeout_seconds() is None
 
 
+def test_the_provider_default_the_docs_quote_is_what_the_clients_ship():
+    """Disabling the knob hands the bound to the provider client, so its default
+    is part of the documented behaviour.
+
+    The README and ``_config`` both quote 600s, and derive from it that disabling
+    the knob leaves a read bound that MEETS the 600s flow ceiling rather than
+    staying under it. A client that changed its default makes that arithmetic
+    wrong with nothing else failing, so it is pinned here.
+    """
+    from ag_ui_crewai._config import (
+        DEFAULT_FLOW_TIMEOUT_SECONDS,
+        PROVIDER_DEFAULT_TIMEOUT_SECONDS,
+    )
+
+    from openai._constants import DEFAULT_TIMEOUT as OPENAI_DEFAULT_TIMEOUT
+
+    assert OPENAI_DEFAULT_TIMEOUT.read == PROVIDER_DEFAULT_TIMEOUT_SECONDS
+    # litellm's own completion path: an absent timeout becomes 600 there too.
+    import inspect
+
+    import litellm
+
+    assert (
+        'timeout = timeout or kwargs.get("request_timeout", 600) or 600'
+        in inspect.getsource(litellm.completion)
+    )
+    # The reason the disabled case warns at all.
+    assert PROVIDER_DEFAULT_TIMEOUT_SECONDS >= DEFAULT_FLOW_TIMEOUT_SECONDS
+
+
+def test_a_disabled_timeout_warns_that_the_client_default_meets_the_ceiling(
+    monkeypatch, caplog
+):
+    """The one case the ceiling check used to skip is the one that needed it."""
+    import logging
+
+    from ag_ui_crewai._config import resolve_provider_timeout_seconds
+
+    monkeypatch.setenv("AGUI_CREWAI_LLM_TIMEOUT_SECONDS", "0")
+    with caplog.at_level(logging.WARNING, logger="ag_ui_crewai._config"):
+        assert resolve_provider_timeout_seconds() is None
+
+    assert "is not shorter than the" in caplog.text
+    assert "since the timeout is disabled" in caplog.text
+
+
 def test_llm_timeout_bad_value_falls_back_to_default(monkeypatch):
     monkeypatch.setenv("AGUI_CREWAI_LLM_TIMEOUT_SECONDS", "not-a-number")
     value = _llm_timeout_seconds()
@@ -95,7 +141,7 @@ def test_llm_timeout_bad_value_falls_back_to_default(monkeypatch):
 
 
 def test_llm_timeout_nan_falls_back_to_default(monkeypatch):
-    """R5 HIGH #1: ``float('nan') > 0`` is False, which would silently
+    """``float('nan') > 0`` is False, which would silently
     disable the LLM read timeout. A NaN env var must fall back to the
     default, mirroring the NaN guard in ``endpoint._flow_timeout_seconds``.
     """
@@ -108,7 +154,7 @@ def test_llm_timeout_nan_falls_back_to_default(monkeypatch):
 
 
 def test_llm_timeout_infinity_falls_back_to_default(monkeypatch):
-    """R5 HIGH #1 (defence in depth): ``float('inf')`` IS greater than 0
+    """Defence in depth: ``float('inf')`` IS greater than 0
     but would disable any practical ceiling. ``math.isfinite`` rejects it;
     pin the behaviour so a regression to a naïve ``value > 0`` check is
     caught.
@@ -168,7 +214,7 @@ async def test_acompletion_called_with_timeout_kwarg():
     assert "timeout" in kwargs, f"acompletion call missing timeout kwarg: {kwargs}"
     # With the default env, the timeout is the module default — lock the
     # value in so a regression that silently disables the default (None) is
-    # caught loudly. This is finding #4: reject the "None or >0" tautology.
+    # caught loudly, rejecting the "None or >0" tautology.
     assert kwargs["timeout"] == _DEFAULT_LLM_TIMEOUT_SECONDS
 
 

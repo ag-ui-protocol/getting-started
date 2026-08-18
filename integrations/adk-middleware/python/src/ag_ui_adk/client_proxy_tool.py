@@ -61,11 +61,12 @@ _GENAI_REJECTED_SCHEMA_KEYS = frozenset({
 def _clean_schema_for_genai(schema: Any) -> Any:
     """Recursively clean a JSON Schema dict for google.genai.types.Schema.
 
-    Three transformations:
+    Transformations:
     1. Strip ``$``-prefixed keys (``$schema``, ``$id``, ``$ref``, ``$defs``,
        ``$comment``) — these are JSON Schema infrastructure, never in genai.
-    2. Map ``examples`` → ``example`` (first element only) and
-       ``const`` → ``enum`` (single-value list), preserving useful context.
+    2. Map ``examples`` → ``example`` (first element only), ``const`` →
+       ``enum`` (single-value list), and ``oneOf`` → ``anyOf`` (genai accepts
+       ``anyOf`` but not ``oneOf``), preserving useful structure.
     3. Filter remaining keys to only those accepted by ``types.Schema``,
        using an allowlist derived from ``types.Schema.model_fields``.
     """
@@ -86,6 +87,16 @@ def _clean_schema_for_genai(schema: Any) -> Any:
             # Map const -> enum (single-value list, stringified for genai)
             if k == "const":
                 result["enum"] = [v if isinstance(v, str) else json.dumps(v)]
+                continue
+            # Map oneOf -> anyOf. genai.types.Schema accepts ``anyOf`` but not
+            # ``oneOf``, so an unmapped ``oneOf`` would be dropped by the
+            # allowlist below — silently erasing the structure of discriminated
+            # unions (zod ``discriminatedUnion`` serializes to ``oneOf`` via
+            # zod-to-json-schema, used by CopilotKit / AG-UI frontend tools).
+            # For tool-argument schemas the distinction is immaterial: the model
+            # emits exactly one branch either way.
+            if k == "oneOf":
+                result["anyOf"] = _clean_schema_for_genai(v)
                 continue
             # Only keep keys that genai.types.Schema accepts
             if k not in _ALLOWED_SCHEMA_KEYS:

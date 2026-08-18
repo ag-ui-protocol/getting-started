@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Subject, firstValueFrom } from "rxjs";
-import { take, toArray } from "rxjs/operators";
+import { take } from "rxjs/operators";
 import { parseSSEStream } from "../sse";
 import { transformHttpEventStream } from "../http";
-import { createDebugLogger, DebugLogger } from "@/debug-logger";
+import { createDebugLogger } from "@/debug-logger";
 import { HttpEvent, HttpEventType } from "../../run/http-request";
 import { EventType } from "@ag-ui/core";
 

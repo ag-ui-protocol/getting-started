@@ -321,8 +321,7 @@ export function rawEventRun(input: RunAgentInput): BaseEvent[] {
 
 /**
  * Server starts the run normally then emits RUN_ERROR. The C# client
- * surfaces this as an InvalidOperationException with the error message
- * (per ProtocolRuleTest.RunError_ThrowsInvalidOperationException).
+ * surfaces this as ErrorContent with the event's message and error code.
  */
 export function runErrorScenario(input: RunAgentInput): BaseEvent[] {
   const events: BaseEvent[] = [runStarted(input)];
@@ -503,6 +502,44 @@ export function activitySnapshotRun(input: RunAgentInput): BaseEvent[] {
   return events;
 }
 
+
+/**
+ * Server reports per-(provider, model) token usage on the terminal event, the
+ * way a TypeScript producer (LangGraph, LangChain, Mastra) does. Covers the
+ * direction the .NET SDK cannot exercise on its own: a TypeScript server's
+ * usage reaching a C# AGUIChatClient and surfacing as MEAI UsageContent.
+ *
+ * Two entries with different models, and a deliberate mix of reported zero,
+ * reported non-zero, and omitted counts.
+ */
+export function tokenUsageRun(input: RunAgentInput): BaseEvent[] {
+  const events: BaseEvent[] = [runStarted(input)];
+
+  events.push(...textMessage(`msg-${input.runId}`, "Usage reported."));
+  events.push({
+    type: EventType.RUN_FINISHED,
+    threadId: input.threadId,
+    runId: input.runId,
+    usage: [
+      {
+        provider: "openai",
+        model: "gpt-4o",
+        inputTokens: 11,
+        outputTokens: 22,
+        totalTokens: 33,
+        reasoningTokens: 7,
+        cachedInputTokens: 0,
+      },
+      {
+        provider: "anthropic",
+        model: "claude-opus-4",
+        inputTokens: 5,
+      },
+    ],
+  } as RunFinishedEvent);
+
+  return events;
+}
 
 export type FakeAgent = (input: RunAgentInput) => BaseEvent[];
 
