@@ -5,6 +5,19 @@
     {
       "role": "user",
       "content": "Please delete the file report-draft.txt"
+    },
+    {
+      "role": "assistant",
+      "toolCalls": [
+        {
+          "id": "call_Id_1",
+          "type": "function",
+          "function": {
+            "name": "delete_file",
+            "arguments": "{\u0022filename\u0022:\u0022report-draft.txt\u0022}"
+          }
+        }
+      ]
     }
   ],
   "resume": [

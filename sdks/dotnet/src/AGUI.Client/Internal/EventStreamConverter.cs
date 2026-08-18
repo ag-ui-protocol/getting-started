@@ -12,6 +12,7 @@ internal static class EventStreamConverter
     internal static async IAsyncEnumerable<ChatResponseUpdate> AsChatResponseUpdates(
         IAsyncEnumerable<BaseEvent> events,
         JsonSerializerOptions jsonSerializerOptions,
+        ISet<string>? clientToolNames = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         string? conversationId = null;
@@ -101,7 +102,9 @@ internal static class EventStreamConverter
                     if (runFinishedEvt.Outcome is RunFinishedInterruptOutcome interruptOutcome)
                     {
                         // Flush buffered tool calls, converting interrupted ones to ToolApprovalRequestContent
-                        foreach (var toolUpdate in toolCallBuilder.FlushWithInterrupts(interruptOutcome))
+                        foreach (var toolUpdate in toolCallBuilder.FlushWithInterrupts(
+                            interruptOutcome,
+                            clientToolNames))
                         {
                             yield return toolUpdate;
                         }

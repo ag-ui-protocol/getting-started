@@ -26,12 +26,6 @@
           }
         }
       ]
-    },
-    {
-      "role": "tool",
-      "content": "\u0022Tokyo, Japan\u0022",
-      "toolCallId": "call_Id_1",
-      "id": "call_Id_1"
     }
   ],
   "tools": [
@@ -41,6 +35,35 @@
       "parameters": {
         "type": "object",
         "properties": {}
+      }
+    }
+  ],
+  "resume": [
+    {
+      "interruptId": "approval_Id_1",
+      "status": "resolved",
+      "payload": {
+        "approved": true,
+        "toolCall": {
+          "callId": "call_Id_1",
+          "name": "get_user_location",
+          "arguments": {}
+        },
+        "result": "\u0022Tokyo, Japan\u0022"
+      }
+    },
+    {
+      "interruptId": "approval_Id_2",
+      "status": "resolved",
+      "payload": {
+        "approved": true,
+        "toolCall": {
+          "callId": "call_Id_2",
+          "name": "get_weather",
+          "arguments": {
+            "city": "Paris"
+          }
+        }
       }
     }
   ]

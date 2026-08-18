@@ -244,6 +244,224 @@ public sealed class AGUIChatClientTest
         Assert.Equal("caller-interrupt", entry.InterruptId);
     }
 
+    [Fact]
+    public async Task GetStreamingResponse_ApprovalFilteringPreservesPeerToolCalls()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+        var peerCall = new FunctionCallContent("peer-call", "server_tool");
+        var approvalCall = new FunctionCallContent("approval-call", "protected_tool");
+        var approval = new ToolApprovalRequestContent("approval-request", approvalCall);
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.Assistant, [peerCall, approval]),
+            new(ChatRole.User, [approval.CreateResponse(approved: true)]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history));
+
+        var assistant = Assert.Single(transport.LastInput!.Messages.OfType<AGUIAssistantMessage>());
+        Assert.Collection(
+            assistant.ToolCalls!,
+            toolCall =>
+            {
+                Assert.Equal("peer-call", toolCall.Id);
+                Assert.Equal("server_tool", toolCall.Function.Name);
+            },
+            toolCall =>
+            {
+                Assert.Equal("approval-call", toolCall.Id);
+                Assert.Equal("protected_tool", toolCall.Function.Name);
+            });
+        Assert.Equal("approval-request", Assert.Single(transport.LastInput.Resume!).InterruptId);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_MissingPeerApprovalResponseThrows()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+        var first = new ToolApprovalRequestContent(
+            "approval-1",
+            new FunctionCallContent("call-1", "first_tool"));
+        var second = new ToolApprovalRequestContent(
+            "approval-2",
+            new FunctionCallContent("call-2", "second_tool"));
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.Assistant, [first, second]),
+            new(ChatRole.Tool, [new FunctionResultContent("call-2", "already-complete")]),
+            new(ChatRole.User, [first.CreateResponse(approved: true)]),
+        };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => DrainAsync(client.GetStreamingResponseAsync(history))).ConfigureAwait(true);
+
+        Assert.Contains("approval-2", exception.Message);
+        Assert.Null(transport.LastInput);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_CompletedMixedTurnDoesNotCreateResume()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+        var options = new ChatOptions
+        {
+            Tools = [AIFunctionFactory.Create(() => "client-result", "client_tool")],
+        };
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.User, "first turn"),
+            new(ChatRole.Assistant,
+            [
+                new FunctionCallContent("client-call", "client_tool"),
+                new FunctionCallContent("server-call", "server_tool"),
+            ]),
+            new(ChatRole.Tool, [new FunctionResultContent("client-call", "client-result")]),
+            new(ChatRole.Assistant, "finished"),
+            new(ChatRole.User, "new turn"),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history, options));
+
+        Assert.Null(transport.LastInput!.Resume);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_MixedResumeSerializesStructuredClientResult()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+        var options = new ChatOptions
+        {
+            Tools = [AIFunctionFactory.Create(() => "unused", "client_tool")],
+        };
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.Assistant,
+            [
+                new FunctionCallContent("client-call", "client_tool"),
+                new FunctionCallContent("server-call", "server_tool"),
+            ]),
+            new(ChatRole.Tool,
+            [
+                new FunctionResultContent(
+                    "client-call",
+                    new Dictionary<string, object?> { ["city"] = "Tokyo" }),
+            ]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history, options));
+
+        var clientResume = Assert.Single(
+            transport.LastInput!.Resume!,
+            resume => resume.InterruptId == "approval_client-call");
+        var payload = clientResume.Payload!.Value.Deserialize(
+            AGUIJsonSerializerContext.Default.AGUIToolApprovalResumePayload)!;
+        using var result = JsonDocument.Parse(payload.Result!);
+        Assert.Equal("Tokyo", result.RootElement.GetProperty("city").GetString());
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_MixedResumeUsesConfiguredSerializerForCustomResult()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new()
+        {
+            Transport = transport,
+            JsonSerializerOptions = new JsonSerializerOptions
+            {
+                TypeInfoResolver = AGUIChatClientTestJsonContext.Default,
+            },
+        });
+        var options = new ChatOptions
+        {
+            Tools = [AIFunctionFactory.Create(() => "unused", "client_tool")],
+        };
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.Assistant,
+            [
+                new FunctionCallContent("client-call", "client_tool"),
+                new FunctionCallContent("server-call", "server_tool"),
+            ]),
+            new(ChatRole.Tool,
+            [
+                new FunctionResultContent(
+                    "client-call",
+                    new CustomToolResult { City = "Tokyo" }),
+            ]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history, options));
+
+        var clientResume = Assert.Single(
+            transport.LastInput!.Resume!,
+            resume => resume.InterruptId == "approval_client-call");
+        var payload = clientResume.Payload!.Value.Deserialize(
+            AGUIJsonSerializerContext.Default.AGUIToolApprovalResumePayload)!;
+        using var result = JsonDocument.Parse(payload.Result!);
+        Assert.Equal("Tokyo", result.RootElement.GetProperty("City").GetString());
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_MixedResumePreservesNullClientResult()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+        var options = new ChatOptions
+        {
+            Tools = [AIFunctionFactory.Create(() => "unused", "client_tool")],
+        };
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.Assistant,
+            [
+                new FunctionCallContent("client-call", "client_tool"),
+                new FunctionCallContent("server-call", "server_tool"),
+            ]),
+            new(ChatRole.Tool, [new FunctionResultContent("client-call", result: null)]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history, options));
+
+        var clientResume = Assert.Single(
+            transport.LastInput!.Resume!,
+            resume => resume.InterruptId == "approval_client-call");
+        var payload = clientResume.Payload!.Value.Deserialize(
+            AGUIJsonSerializerContext.Default.AGUIToolApprovalResumePayload)!;
+        Assert.Null(payload.Result);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_CompletedServerPeerDoesNotCreateResume()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+        var options = new ChatOptions
+        {
+            Tools = [AIFunctionFactory.Create(() => "unused", "client_tool")],
+        };
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.Assistant,
+            [
+                new FunctionCallContent("client-call", "client_tool"),
+                new FunctionCallContent("server-call", "server_tool"),
+            ]),
+            new(ChatRole.Tool,
+            [
+                new FunctionResultContent("client-call", "client-result"),
+                new FunctionResultContent("server-call", "server-result"),
+            ]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history, options));
+
+        Assert.Null(transport.LastInput!.Resume);
+    }
+
     // A caller-supplied Resume takes precedence over the interrupt-response translation
     // too, matching the approval path. Previously the interrupt block appended
     // unconditionally, so a caller Resume dropped approvals but kept interrupts (#2177).

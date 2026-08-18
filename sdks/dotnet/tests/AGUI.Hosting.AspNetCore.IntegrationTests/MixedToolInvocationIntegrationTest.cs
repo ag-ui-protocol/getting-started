@@ -345,7 +345,224 @@ public sealed class MixedToolInvocationIntegrationTest : IntegrationTestBase
         Assert.Contains("Amsterdam", text);
     }
 
+    [Fact]
+    public async Task MixedInvocation_NormalServerTool_ExecutesBothToolsExactlyOnce()
+    {
+        var serverCallCount = 0;
+        var clientCallCount = 0;
+        var serverTool = AIFunctionFactory.Create(
+            () =>
+            {
+                serverCallCount++;
+                return "Paris: 18C, rainy";
+            },
+            "get_weather");
+        var fakeLlm = new FakeChatClientWithCapture();
+        fakeLlm.Enqueue(_ => EmitMixedCalls());
+        fakeLlm.Enqueue(messages =>
+        {
+            AssertCompleteMixedHistory(messages, "get_weather");
+            return EmitTextResponse("Tokyo and rainy Paris.");
+        });
+        var factory = CreateMixedToolFactory(fakeLlm, serverTool);
+        var aguiClient = new AGUIChatClient(new()
+        {
+            Transport = new AGUIHttpTransport(factory.CreateClient(), "/agui"),
+        });
+        var clientTool = AIFunctionFactory.Create(
+            () =>
+            {
+                clientCallCount++;
+                return "Tokyo, Japan";
+            },
+            "get_user_location");
+
+        var response = await aguiClient.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "Where am I and what is the weather in Paris?")],
+            new ChatOptions { Tools = [clientTool] });
+
+        Assert.Equal(1, clientCallCount);
+        Assert.Equal(1, serverCallCount);
+        Assert.Contains("Tokyo", response.Text);
+    }
+
+    [Fact]
+    public async Task MixedInvocation_GenuineServerApproval_WaitsForCombinedContinuation()
+    {
+        var serverCallCount = 0;
+        var normalServerCallCount = 0;
+        var clientCallCount = 0;
+        var serverTool = new ApprovalRequiredAIFunction(AIFunctionFactory.Create(
+            () =>
+            {
+                serverCallCount++;
+                return "deleted";
+            },
+            "delete_file"));
+        var normalServerTool = AIFunctionFactory.Create(
+            () =>
+            {
+                normalServerCallCount++;
+                return "rainy";
+            },
+            "get_weather");
+        List<ChatMessage>? providerMessages = null;
+        var fakeLlm = new FakeChatClientWithCapture();
+        fakeLlm.Enqueue(_ => EmitMixedApprovalCalls());
+        fakeLlm.Enqueue(messages =>
+        {
+            providerMessages = messages.Select(message => message.Clone()).ToList();
+            return EmitTextResponse("Location found and file deleted.");
+        });
+        var factory = CreateMixedToolFactory(fakeLlm, serverTool, normalServerTool);
+        var aguiClient = new AGUIChatClient(new()
+        {
+            Transport = new AGUIHttpTransport(factory.CreateClient(), "/agui"),
+        });
+        var clientTool = AIFunctionFactory.Create(
+            () =>
+            {
+                clientCallCount++;
+                return "Tokyo, Japan";
+            },
+            "get_user_location");
+        var options = new ChatOptions { Tools = [clientTool] };
+        var userMessage = new ChatMessage(
+            ChatRole.User,
+            "Find my location and delete report.txt.");
+
+        var turn1 = await aguiClient.GetResponseAsync([userMessage], options);
+
+        Assert.Equal(0, clientCallCount);
+        Assert.Equal(0, serverCallCount);
+        Assert.Equal(0, normalServerCallCount);
+        var approvals = turn1.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<ToolApprovalRequestContent>()
+            .ToList();
+        Assert.Equal(3, approvals.Count);
+#pragma warning disable MEAI001
+        var clientApproval = Assert.Single(
+            approvals,
+            approval => !approval.RequiresConfirmation
+                && approval.ToolCall is FunctionCallContent { Name: "get_user_location" });
+        var normalServerApproval = Assert.Single(
+            approvals,
+            approval => !approval.RequiresConfirmation
+                && approval.ToolCall is FunctionCallContent { Name: "get_weather" });
+        var serverApproval = Assert.Single(approvals, approval => approval.RequiresConfirmation);
+#pragma warning restore MEAI001
+        Assert.Equal(
+            "get_user_location",
+            Assert.IsType<FunctionCallContent>(clientApproval.ToolCall).Name);
+        Assert.Equal(
+            "delete_file",
+            Assert.IsType<FunctionCallContent>(serverApproval.ToolCall).Name);
+        Assert.True(
+            Assert.IsType<FunctionCallContent>(normalServerApproval.ToolCall).InformationalOnly);
+
+        var clientCall = Assert.IsType<FunctionCallContent>(clientApproval.ToolCall);
+        var clientResult = await clientTool.InvokeAsync(new AIFunctionArguments(clientCall.Arguments));
+        var clientResponse = clientApproval.CreateResponse(approved: true);
+        clientResponse.AdditionalProperties = new AdditionalPropertiesDictionary
+        {
+            ["result"] = clientResult?.ToString(),
+        };
+
+        var approvalResponses = new AIContent[]
+        {
+            clientResponse,
+            serverApproval.CreateResponse(approved: true),
+            normalServerApproval.CreateResponse(approved: true),
+        };
+
+        var turn2Messages = new List<ChatMessage> { userMessage };
+        turn2Messages.AddRange(turn1.Messages);
+        turn2Messages.Add(new ChatMessage(
+            ChatRole.User,
+            approvalResponses));
+
+        var turn2 = await aguiClient.GetResponseAsync(turn2Messages, options);
+
+        Assert.Equal(1, clientCallCount);
+        Assert.Equal(1, serverCallCount);
+        Assert.Equal(1, normalServerCallCount);
+        AssertCompleteMixedHistory(providerMessages!, "delete_file", "get_weather");
+        Assert.Contains("file deleted", turn2.Text);
+    }
+
+    private WebApplicationFactory<Program> CreateMixedToolFactory(
+        IChatClient fakeLlm,
+        params AITool[] serverTools) =>
+        Factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IChatClient>();
+                foreach (var serverTool in serverTools)
+                {
+                    services.AddSingleton(serverTool);
+                }
+                services.AddChatClient(_ => fakeLlm)
+                    .UseFunctionInvocation();
+            });
+        });
+
+    private static void AssertCompleteMixedHistory(
+        IEnumerable<ChatMessage> messages,
+        params string[] serverToolNames)
+    {
+        var history = messages.ToList();
+        var assistantIndex = history.FindLastIndex(
+            message => message.Role == ChatRole.Assistant
+                && message.Contents.OfType<FunctionCallContent>().Any());
+        Assert.True(assistantIndex >= 0);
+
+        var calls = history[assistantIndex].Contents.OfType<FunctionCallContent>().ToList();
+        var results = history.Skip(assistantIndex + 1)
+            .TakeWhile(message => message.Role == ChatRole.Tool)
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionResultContent>()
+            .ToList();
+
+        Assert.Equal(
+            new[] { "get_user_location" }.Concat(serverToolNames),
+            calls.Select(call => call.Name));
+        Assert.Equal(
+            calls.Select(call => call.CallId).OrderBy(id => id),
+            results.Select(result => result.CallId).OrderBy(id => id));
+    }
+
 #pragma warning disable CS1998
+    private static async IAsyncEnumerable<ChatResponseUpdate> EmitMixedCalls()
+    {
+        yield return new ChatResponseUpdate
+        {
+            Role = ChatRole.Assistant,
+            Contents =
+            [
+                new FunctionCallContent("call_location", "get_user_location"),
+                new FunctionCallContent("call_server", "get_weather"),
+            ],
+            FinishReason = ChatFinishReason.ToolCalls,
+        };
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> EmitMixedApprovalCalls()
+    {
+        yield return new ChatResponseUpdate
+        {
+            Role = ChatRole.Assistant,
+            Contents =
+            [
+                new FunctionCallContent("call_location", "get_user_location"),
+                new FunctionCallContent("call_server", "delete_file"),
+                new FunctionCallContent("call_normal_server", "get_weather"),
+            ],
+            FinishReason = ChatFinishReason.ToolCalls,
+        };
+    }
+
     private static async IAsyncEnumerable<ChatResponseUpdate> EmitSingleToolCall(
         string callId, string name, IDictionary<string, object?> arguments,
         [EnumeratorCancellation] CancellationToken ct = default)

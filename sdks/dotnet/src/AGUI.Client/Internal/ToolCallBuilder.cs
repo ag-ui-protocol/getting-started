@@ -105,7 +105,8 @@ internal sealed class ToolCallBuilder
     }
 
     public IReadOnlyList<ChatResponseUpdate> FlushWithInterrupts(
-        RunFinishedInterruptOutcome interruptOutcome)
+        RunFinishedInterruptOutcome interruptOutcome,
+        ISet<string>? clientToolNames)
     {
         if (_buffer.Count == 0)
         {
@@ -122,6 +123,7 @@ internal sealed class ToolCallBuilder
                 interruptById[interrupt.ToolCallId] = interrupt;
             }
         }
+        var hasToolApprovalInterrupt = interruptById.Count > 0;
 
         var updates = new List<ChatResponseUpdate>(_buffer.Count);
         foreach (var update in _buffer)
@@ -135,6 +137,32 @@ internal sealed class ToolCallBuilder
                     interrupt.Id, fcc)
                 {
                     RawRepresentation = interrupt,
+                };
+
+                updates.Add(new ChatResponseUpdate(ChatRole.Assistant, [approvalRequest])
+                {
+                    ConversationId = update.ConversationId,
+                    ResponseId = update.ResponseId,
+                    CreatedAt = update.CreatedAt,
+                    RawRepresentation = update.RawRepresentation
+                });
+            }
+            else if (update.Contents.Count == 1
+                && update.Contents[0] is FunctionCallContent peerCall
+                && hasToolApprovalInterrupt)
+            {
+                if (clientToolNames?.Contains(peerCall.Name) is not true)
+                {
+                    peerCall.InformationalOnly = true;
+                }
+
+                var approvalRequest = new ToolApprovalRequestContent(
+                    $"approval_{peerCall.CallId}", peerCall)
+                {
+#pragma warning disable MEAI001
+                    RequiresConfirmation = false,
+#pragma warning restore MEAI001
+                    RawRepresentation = update.RawRepresentation,
                 };
 
                 updates.Add(new ChatResponseUpdate(ChatRole.Assistant, [approvalRequest])
