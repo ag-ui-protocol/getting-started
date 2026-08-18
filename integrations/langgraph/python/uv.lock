@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10, <3.15"
 
 [[package]]
@@ -59,7 +59,7 @@ dev = [
 
 [[package]]
 name = "ag-ui-protocol"
-version = "0.1.19"
+version = "0.1.20"
 source = { directory = "../../../sdks/python" }
 dependencies = [
     { name = "pydantic" },
