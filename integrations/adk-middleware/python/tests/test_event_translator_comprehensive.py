@@ -954,13 +954,15 @@ class TestEventTranslatorComprehensive:
             "key-with-dashes": "value1",
             "key_with_underscores": "value2",
             "key.with.dots": "value3",
-            "key with spaces": "value4"
+            "key with spaces": "value4",
+            "user/name": "value5",
+            "config~version": "value6",
         }
 
         event = translator._create_state_delta_event(state_delta, "thread_1", "run_1")
 
         assert isinstance(event, StateDeltaEvent)
-        assert len(event.delta) == 4
+        assert len(event.delta) == 6
 
         # Check that all keys are properly escaped in paths
         patches = event.delta
@@ -969,6 +971,8 @@ class TestEventTranslatorComprehensive:
         assert "/key_with_underscores" in paths
         assert "/key.with.dots" in paths
         assert "/key with spaces" in paths
+        assert "/user~1name" in paths
+        assert "/config~0version" in paths
 
     @pytest.mark.asyncio
     async def test_force_close_streaming_message_with_open_stream(self, translator):

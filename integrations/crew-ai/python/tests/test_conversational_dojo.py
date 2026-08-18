@@ -26,7 +26,7 @@ EXPECTED_CONVERSATIONAL_FEATURES = {
 
 def _conversational_examples():
     try:
-        return importlib.import_module("ag_ui_crewai.examples.conversational")
+        return importlib.import_module("agents.conversational")
     except ModuleNotFoundError:
         pytest.fail("conversational dojo examples are not implemented")
 
@@ -114,7 +114,7 @@ def test_dojo_registers_every_regular_flow_route():
     """The regular Flow surface is the canonical one, so pin it against the live
     app. `apps/dojo/src/crewai.test.ts` mirrors this set on the TypeScript side;
     renaming a route has to update both or one of the two fails."""
-    dojo = importlib.import_module("ag_ui_crewai.dojo")
+    dojo = importlib.import_module("agents.dojo")
     paths = {route.path for route in dojo.app.routes}
 
     assert {f"/{feature}" for feature in EXPECTED_REGULAR_ROUTES}.issubset(paths)
@@ -122,7 +122,7 @@ def test_dojo_registers_every_regular_flow_route():
 
 
 def test_dojo_registers_a_conversational_route_for_every_feature():
-    dojo = importlib.import_module("ag_ui_crewai.dojo")
+    dojo = importlib.import_module("agents.dojo")
     paths = {route.path for route in dojo.app.routes}
 
     assert {
@@ -144,7 +144,7 @@ def test_conversational_examples_keep_litellm_compatible_message_dicts():
 
 
 def test_hitl_tool_contract_respects_the_requested_step_count():
-    hitl = importlib.import_module("ag_ui_crewai.examples.human_in_the_loop")
+    hitl = importlib.import_module("agents.human_in_the_loop")
     function = hitl.DEFINE_TASK_TOOL["function"]
     contract = " ".join(
         [
@@ -162,7 +162,7 @@ async def test_hitl_flow_sends_rejection_and_terse_revision_semantics(
     monkeypatch,
     conversational,
 ):
-    hitl = importlib.import_module("ag_ui_crewai.examples.human_in_the_loop")
+    hitl = importlib.import_module("agents.human_in_the_loop")
     examples = _conversational_examples()
     flow_type = (
         examples.CONVERSATIONAL_FLOW_TYPES["human_in_the_loop"]

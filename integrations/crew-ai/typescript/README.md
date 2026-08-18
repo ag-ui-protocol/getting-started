@@ -38,10 +38,10 @@ const result = await agent.runAgent({
 
 ## To run the example server in the dojo
 
-The dojo server is development-only and is not shipped in the published
-`ag-ui-crewai` package, so run it from a checkout of this repository.
+The dojo server is a separate project alongside the Python package, so run it from a
+checkout of this repository.
 
 ```bash
-cd integrations/crew-ai/python
-uv sync && uv run python -m ag_ui_crewai
+cd integrations/crew-ai/python/examples
+uv sync && uv run dev
 ```

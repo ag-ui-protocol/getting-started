@@ -22,7 +22,7 @@ on:
       - "**/pyproject.toml"
       # ...but not the examples/ apps. Their locks are deliberately out of scope for
       # the lockfiles job (prep-dojo-everything.js relocks them on purpose), so an
-      # examples-only lockfile change would spin up all nine test lanes to verify
+      # examples-only lockfile change would spin up every test lane to verify
       # nothing. Negation must follow the two globs above to override them.
       - "!examples/**"
       - ".github/python-toolchain.env"
@@ -45,7 +45,7 @@ on:
       - "**/pyproject.toml"
       # ...but not the examples/ apps. Their locks are deliberately out of scope for
       # the lockfiles job (prep-dojo-everything.js relocks them on purpose), so an
-      # examples-only lockfile change would spin up all nine test lanes to verify
+      # examples-only lockfile change would spin up every test lane to verify
       # nothing. Negation must follow the two globs above to override them.
       - "!examples/**"
       - ".github/python-toolchain.env"
@@ -586,6 +586,147 @@ jobs:
         # !cancelled() rather than always(), because always() also fires on
         # cancellation, and concurrency cancels supersede runs constantly here — each
         # one would otherwise spend a step re-checking a job nobody is waiting on.
+        #
+        # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
+        # when an earlier step failed, including `Checkout code` — and this step is a
+        # local `uses:`, so with no repo on disk it dies with "Can't find 'action.yml'
+        # under .../assert-lockfiles-unchanged". That lands AFTER the real error and
+        # reads as though the guard itself is broken, which is precisely the misleading
+        # signal action.yml's header argues against.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
+
+  # Both ends of the DECLARED litellm range, run against the full crewai suite.
+  #
+  # crewai capabilities are probed at runtime; litellm alone is version-ranged,
+  # because it is a direct dependency whose version this package controls and the
+  # alternative was probing litellm's private event-model registry to decide
+  # whether the OpenAI Responses channel is usable (see the litellm note in
+  # integrations/crew-ai/python/pyproject.toml). A declared range is only honest if
+  # both ends are exercised, which is what this matrix is for: the lockfile pins a
+  # single litellm well inside the range, so the `crewai-python` job above tests
+  # neither end.
+  #
+  # The two legs are deliberately NOT equally binding:
+  #   - floor is PINNED and BLOCKING: it is the exact version this package promises
+  #     to support. Pinned means litellm itself, not the whole graph, since its own
+  #     transitive ranges still resolve at install time.
+  #   - ceiling is UNPINNED and INFORMATIONAL (continue-on-error, same precedent as
+  #     the adk-middleware 2.x leg above). Its input moves whenever litellm
+  #     publishes, so making it blocking would let an upstream release turn every
+  #     Python PR in this repo red for a reason no author here can fix. It still
+  #     reports loudly, which is what "covers the upper boundary" has to mean for a
+  #     target that drifts.
+  # Note that neither leg gates a merge until its rendered job name is added to the
+  # branch's required status checks; "blocking" above describes the intent this
+  # workflow encodes, not a setting it can apply on its own.
+  #
+  # Neither leg caches a venv: each mutates the environment after `uv sync`, so a
+  # cached venv would be a hit or a miss depending on which leg wrote it last.
+  crewai-python-litellm-boundaries:
+    name: crewai-python-litellm-${{ matrix.bound }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Both ends report independently: one red boundary must not hide the other's
+      # result, which is the whole point of testing two.
+      fail-fast: false
+      matrix:
+        include:
+          # The floor declared in pyproject.toml, pinned exactly. Below it either
+          # litellm raises on the OpenAI Responses reasoning-summary delta types
+          # this bridge reads (<= 1.67), or its openai pin cannot co-exist with the
+          # one crewai requires (1.68.0 - 1.70.2). pyproject.toml carries the full
+          # measurement.
+          - bound: floor
+            spec: "litellm==1.70.4"
+            informational: false
+          # The newest litellm inside the declared major, resolved at install time.
+          - bound: ceiling
+            spec: "litellm>=1.70.4,<2"
+            informational: true
+
+    steps:
+      - name: Checkout code
+        # id so the lockfile assertion below can gate on this step's outcome — see
+        # the comment there for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: integrations/crew-ai/python
+        run: uv sync --locked
+
+      - name: Force litellm ${{ matrix.bound }}
+        working-directory: integrations/crew-ai/python
+        # --upgrade-package so the ceiling leg actually moves off the locked
+        # version instead of reporting the already-satisfied requirement as done.
+        # `uv pip` never writes uv.lock, which is what keeps the guard step below a
+        # real assertion rather than a formality.
+        #
+        # The resolved version is ASSERTED, not just printed: a spec that silently
+        # resolved to the locked litellm would otherwise report green while testing
+        # the same version the crewai-python job already covers, which is exactly
+        # the blind spot this matrix exists to remove.
+        run: |
+          set -euo pipefail
+          # Read the locked version BEFORE forcing anything. Hand-copying it into
+          # this file would leave the ceiling guard silently toothless the next
+          # time the lockfile is bumped past it.
+          locked=$(uv run --frozen python -c "import importlib.metadata as m; print(m.version('litellm'))")
+          uv pip install --upgrade-package litellm "$LITELLM_SPEC"
+          resolved=$(uv run --no-sync python -c "import importlib.metadata as m; print(m.version('litellm'))")
+          echo "litellm locked=$locked resolved=$resolved"
+          if [ "$BOUND" = "floor" ]; then
+            expected="${LITELLM_SPEC#litellm==}"
+            if [ "$resolved" != "$expected" ]; then
+              echo "::error::floor leg expected litellm $expected but resolved $resolved"
+              exit 1
+            fi
+          elif [ "$resolved" = "$locked" ]; then
+            # A warning, NOT a failure. The ceiling leg is declared non-gating, and
+            # this condition is reached by a routine lockfile bump rather than by
+            # anything wrong with the change under test. Failing here would make the
+            # leg block merges, which is exactly what the job header rules out.
+            echo "::warning title=ceiling leg is covering nothing::It resolved the locked litellm ($locked). Raise the lockfile or the declared upper bound so this leg tests something the crewai-python job does not."
+          fi
+        env:
+          LITELLM_SPEC: ${{ matrix.spec }}
+          BOUND: ${{ matrix.bound }}
+
+      - name: Run tests (litellm ${{ matrix.bound }})
+        id: boundary-tests
+        # Only the drifting ceiling leg is allowed to fail; see the job header.
+        continue-on-error: ${{ matrix.informational }}
+        working-directory: integrations/crew-ai/python
+        run: uv run --no-sync python -m pytest tests/ -v
+
+      - name: Report ${{ matrix.bound }} result
+        if: ${{ !cancelled() && matrix.informational && steps.boundary-tests.outcome == 'failure' }}
+        run: |
+          echo "::warning title=crewai suite is red on the newest litellm 1.x::Informational leg, does not block merges. See the job summary."
+          {
+            echo "### crewai-python: suite is red against the newest litellm 1.x"
+            echo
+            echo "This leg resolves \`$LITELLM_SPEC\` at install time, so a litellm release can turn it red with no change in this repo. It does not block merges."
+            echo
+            echo "Either fix the incompatibility, or lower the declared upper bound in \`integrations/crew-ai/python/pyproject.toml\` so the range stays honest."
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          LITELLM_SPEC: ${{ matrix.spec }}
+
+      - name: Assert no lockfile was rewritten
+        # Must run when the tests FAIL: a job that rewrote a lockfile and then failed
+        # its tests would otherwise skip this step and report only the test failure,
+        # losing the signal this guard exists to produce.
         #
         # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
         # when an earlier step failed, including `Checkout code` — and this step is a

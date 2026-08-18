@@ -7,8 +7,8 @@ from zoneinfo import ZoneInfo
 
 from pydantic_ai import Agent
 
+
 agent = Agent('openai:gpt-4o-mini')
-app = agent.to_ag_ui()
 
 
 @agent.tool_plain

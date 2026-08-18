@@ -117,6 +117,7 @@ export const agentsIntegrations = {
         new PydanticAIAgent({ url: `${envVars.pydanticAIUrl}/${path}` }),
       {
         agentic_chat: "agentic_chat",
+        agentic_chat_multimodal: "agentic_chat_multimodal",
         agentic_generative_ui: "agentic_generative_ui",
         human_in_the_loop: "human_in_the_loop",
         // TODO: Re-enable this once production builds no longer break
@@ -474,6 +475,7 @@ export const agentsIntegrations = {
         new HttpAgent({ url: `${envVars.agentFrameworkPythonUrl}/${path}` }),
       {
         agentic_chat: "agentic_chat",
+        agentic_chat_multimodal: "agentic_chat_multimodal",
         backend_tool_rendering: "backend_tool_rendering",
         human_in_the_loop: "human_in_the_loop",
         agentic_generative_ui: "agentic_generative_ui",
@@ -651,6 +653,7 @@ export const agentsIntegrations = {
   ag2: async () =>
     mapAgents((path) => new Ag2Agent({ url: `${envVars.ag2Url}/${path}` }), {
       agentic_chat: "agentic_chat",
+      agentic_chat_multimodal: "agentic_chat_multimodal",
       backend_tool_rendering: "backend_tool_rendering",
       human_in_the_loop: "human_in_the_loop",
       agentic_generative_ui: "agentic_generative_ui",

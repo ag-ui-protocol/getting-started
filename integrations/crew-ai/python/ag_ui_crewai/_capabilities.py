@@ -12,10 +12,14 @@ capability table — never as a code-path gate.
 
 Posture: "we support that feature; for this specific one you need crewai >= X."
 
-This module is a LEAF: it imports only ``crewai`` / ``litellm``, the stdlib and
-the stdlib-only ``_responses_events`` vocabulary, so ``events`` / ``sdk`` /
-``endpoint`` / ``crews`` can all import from it at module-load time without a
-circular dependency (mirrors ``_env``).
+One deliberate exception: ``litellm`` is a DIRECT dependency whose version this
+package controls, so the OpenAI Responses event vocabulary is covered by a
+declared version RANGE (see ``pyproject.toml``) rather than by probing litellm's
+private event-model registry. crewai capability detection stays probe-based.
+
+This module is a LEAF: it imports only ``crewai`` / ``litellm`` and the stdlib,
+so ``events`` / ``sdk`` / ``endpoint`` / ``crews`` can all import from it at
+module-load time without a circular dependency (mirrors ``_env``).
 """
 
 from __future__ import annotations
@@ -25,15 +29,9 @@ import importlib.util
 import inspect
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping, Tuple
+from typing import Any
 
 from ag_ui.core import EventType
-
-from ._responses_events import (
-    EVENT_ROLES,
-    REQUIRED_ROLES,
-    role_severity,
-)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -296,268 +294,26 @@ _thinking_event_available = LLMThinkingChunkEvent is not None
 
 # Third channel: the OpenAI Responses API. OpenAI's reasoning models expose their
 # reasoning SUMMARIES only there -- chat-completions carries none, for any of
-# them -- so surfacing an OpenAI trace needs a separate streaming path.
-# Availability rests on TWO capability probes (never a litellm version and never a
-# model name): the ``aresponses`` entrypoint below, and the event-modelling probe
-# further down. A build failing either one reports the channel unsupported and
-# callers stay on chat-completions.
-#
-# ``ResponsesAPIStreamingIteratorBase`` below is resolved INDEPENDENTLY and is
-# deliberately NOT part of that decision: ``_responses.is_responses_stream``
-# prefers it for an isinstance check and duck-types the iterator when it is
-# absent, so a litellm that relocates the class still streams. It does share the
-# ``_litellm_available`` guard, because resolving it imports a litellm SUBMODULE
-# (see ``_resolve_responses_iterator_base`` for why that matters). Note the base
-# is shared by litellm's SYNC and async iterators, so that predicate gates on
-# async-iterability first (the bridge's drivers are async-only).
+# them -- so surfacing an OpenAI trace needs a separate streaming path. The
+# channel resolves off litellm's PUBLIC ``aresponses`` entrypoint; the event
+# vocabulary it streams is covered by this package's declared litellm range (see
+# the ``litellm`` requirement in ``pyproject.toml``), not by probing litellm's
+# private event-model registry.
 _RESPONSES_ENTRYPOINT = (
     getattr(litellm, "aresponses", None) if _litellm_available else None
 )
-
-
-def _resolve_responses_iterator_base() -> Any:
-    """Resolve litellm's Responses-API streaming-iterator base class, or ``None``.
-
-    The only probe in this module that imports a litellm SUBMODULE, so it is the
-    only one that can undo the tolerated litellm failure above. Two guards:
-
-    * Skipped entirely when litellm did not import. Importing
-      ``litellm.responses.streaming_iterator`` re-executes litellm's top level,
-      so probing it after ``_litellm_available`` went False would re-raise
-      whatever broke it and turn the degraded mode the probe above deliberately
-      allows into a hard failure of ``import ag_ui_crewai``.
-    * Any other failure is caught HERE rather than by loosening
-      ``_first_module``, whose narrow ``except (ImportError, ModuleNotFoundError)``
-      is load-bearing for the crewai probes: a genuinely broken
-      ``crewai.events`` must surface instead of reading as "install
-      crewai>=1.0". Nothing is lost by tolerating it, because a ``None`` base is
-      an already-supported state -- ``_responses.is_responses_stream`` duck-types
-      the iterator when the class is absent -- and losing an isinstance
-      shortcut is never worth failing an import over. Logged, not swallowed.
-    """
-    if not _litellm_available:
-        return None
-    try:
-        module, _ = _first_module(["litellm.responses.streaming_iterator"])
-    except Exception:  # noqa: BLE001 - an optional probe must not fail the import
-        _LOGGER.warning(
-            "ag-ui-crewai could not probe litellm.responses.streaming_iterator; "
-            "the Responses-API stream check falls back to duck-typing.",
-            exc_info=True,
-        )
-        return None
-    if module is None:
-        return None
-    return getattr(module, "BaseResponsesAPIStreamingIterator", None)
-
-
-ResponsesAPIStreamingIteratorBase = _resolve_responses_iterator_base()
 
 
 def responses_entrypoint():
     """Return litellm's async Responses-API entrypoint, or ``None``.
 
     Resolved once at import; callers probe the RETURN VALUE rather than a
-    version, so an older litellm degrades to the chat-completions channel.
+    version, so a litellm without the entrypoint degrades to chat-completions.
     """
     return _RESPONSES_ENTRYPOINT
 
 
-# --------------------------------------------------------------------------
-# Responses event-modelling resolution
-# --------------------------------------------------------------------------
-# litellm builds every Responses stream event by looking its ``type`` up in its
-# own event-type -> pydantic-model registry. What a build does with a type it has
-# NO model for is the difference that decides whether this channel is usable:
-#
-# * litellm 1.63-1.67 (inside this package's declared ``litellm>=1.60.2`` floor)
-#   RAISE ``ValueError("Unknown event type: <type>")`` out of the stream iterator
-#   for the reasoning-summary deltas this channel exists to read -- they are
-#   exactly the types those builds have no model for. (The answer text delta
-#   still models there, so what is lost is the reasoning trace, not the stream.)
-#   Reasoning is a REQUIRED role, so the honest declaration is "channel
-#   unavailable" and the honest behaviour is for callers to degrade to
-#   chat-completions -- which still carries the text -- not to die once per turn
-#   on a reasoning trace we advertised.
-# * Newer builds return their extras-allowing catch-all model instead, so an
-#   unknown type still arrives with its payload intact and the channel works.
-#
-# Which one the installed build does is a RUNTIME PROBE: ask the registry for a
-# type nothing can possibly have a model for and see whether it answers or
-# raises. The registry is also what attributes a parse failure back to an event
-# type (``model_roles`` below), which is what keeps that decision off a
-# hand-maintained list of model names.
-_RESPONSES_EVENT_MODEL_RESOLVERS = [
-    # (module, holder class or None, attribute). One home today: the lookup lives
-    # only on ``OpenAIResponsesAPIConfig``. The list stays a list so a build that
-    # re-homes it can be added here, but a base-class fallback was dropped -- it
-    # never carried this method (``hasattr`` is False on 1.63, 1.72 and 1.80), so
-    # it only hid that this is a single point of failure.
-    ("litellm.llms.openai.responses.transformation", "OpenAIResponsesAPIConfig",
-     "get_event_model_class"),
-]
-
-
-def _resolve_responses_event_model_resolver() -> Any:
-    """Resolve litellm's Responses event-type -> model lookup, or ``None``.
-
-    Resolved by trying each known home in turn, exactly like every other symbol
-    here: a litellm that re-homes it degrades to ``None`` (see
-    ``probe_responses_event_modelling`` for what that costs) rather than raising.
-    """
-    # Every candidate home is a litellm SUBMODULE, so importing one re-executes
-    # litellm's top level. Skipped entirely when litellm did not import, and any
-    # other failure tolerated HERE, for the same reason as
-    # ``_resolve_responses_iterator_base``: turning the degraded mode the litellm
-    # probe deliberately allows into a hard import failure is never worth an
-    # optional lookup. A ``None`` resolver is an already-supported state.
-    if not _litellm_available:
-        return None
-    for module_name, holder_name, attr in _RESPONSES_EVENT_MODEL_RESOLVERS:
-        try:
-            module, _ = _first_module([module_name])
-        except Exception:  # noqa: BLE001 - an optional probe must not fail the import
-            _LOGGER.warning(
-                "ag-ui-crewai could not probe %s for the Responses event-model "
-                "lookup; the channel stays available (see "
-                "probe_responses_event_modelling), but a parse failure can no "
-                "longer be attributed to an event role and is reported rather "
-                "than assumed harmless.",
-                module_name,
-                exc_info=True,
-            )
-            return None
-        if module is None:
-            continue
-        holder = getattr(module, holder_name, None) if holder_name else module
-        if holder is None:
-            continue
-        resolver = _safe_getattr(holder, attr)
-        if callable(resolver):
-            return resolver
-    return None
-
-
-def _resolve_event_model(resolver: Any, event_type: str) -> Any:
-    """The model class ``resolver`` gives for ``event_type``, or ``None``.
-
-    ``None`` means this build cannot model the type: either the registry raised
-    (the 1.63-1.67 behaviour) or it answered with nothing usable.
-    """
-    try:
-        model = resolver(event_type=event_type)
-    except TypeError:
-        # A build whose lookup takes the type positionally.
-        try:
-            model = resolver(event_type)
-        except Exception:  # noqa: BLE001 - any failure means "cannot model it"
-            return None
-    except Exception:  # noqa: BLE001 - ValueError on 1.63-1.67, and anything else
-        return None
-    return model if isinstance(model, type) else None
-
-
-@dataclass(frozen=True)
-class ResponsesEventModelling:
-    """What the installed litellm can MODEL of the Responses event vocabulary.
-
-    ``unmodellable_event_types``
-        The types in ``REQUIRED_ROLES`` this build can neither model nor serve
-        with a catch-all. Non-empty means the channel cannot be read.
-    ``model_roles``
-        Model class NAME -> the role of the event type litellm builds with it.
-        This is what attributes a ``ValidationError`` (whose only identifying
-        signal is the model it attempted) back to a role. A class that serves
-        several read types -- the catch-all -- carries the most severe of their
-        roles, so a catch-all failure is never treated as cheaper than the
-        worst event it could have been.
-    ``resolver_available``
-        Whether the registry could be resolved at all. Without it nothing can be
-        attributed, and an unattributable parse failure is reported rather than
-        assumed harmless.
-    """
-
-    resolver_available: bool
-    unmodellable_event_types: Tuple[str, ...]
-    model_roles: Mapping[str, str]
-
-    @property
-    def usable(self) -> bool:
-        """Whether every event type the channel needs can be modelled."""
-        return not self.unmodellable_event_types
-
-
-def probe_responses_event_modelling(resolver: Any) -> ResponsesEventModelling:
-    """Probe what ``resolver``'s litellm can model of the event vocabulary.
-
-    Pure: it only performs registry lookups (no network, no model construction),
-    and everything it reports is derived from ``_responses_events.EVENT_ROLES``
-    plus litellm's own answers. A missing resolver reports the channel usable:
-    losing an internal lookup symbol is not evidence that the public streaming
-    behaviour changed, and refusing the channel over it would break the feature
-    on a future build for no reason.
-    """
-    if resolver is None:
-        return ResponsesEventModelling(
-            resolver_available=False,
-            unmodellable_event_types=(),
-            model_roles={},
-        )
-
-    model_roles: Dict[str, str] = {}
-    unmodellable: list[str] = []
-    for event_type, role in EVENT_ROLES.items():
-        model = _resolve_event_model(resolver, event_type)
-        if model is None:
-            if role in REQUIRED_ROLES:
-                unmodellable.append(event_type)
-            continue
-        name = getattr(model, "__name__", None)
-        if not name:
-            continue
-        if role_severity(role) > role_severity(model_roles.get(name)):
-            model_roles[name] = role
-    return ResponsesEventModelling(
-        resolver_available=True,
-        unmodellable_event_types=tuple(sorted(unmodellable)),
-        model_roles=model_roles,
-    )
-
-
-def _responses_channel_usable(modelling: ResponsesEventModelling) -> bool:
-    """The channel-availability rule, in ONE place.
-
-    Both probes must pass: litellm has to expose the entrypoint that opens the
-    stream, and it has to be able to model the events the stream carries.
-    """
-    return callable(_RESPONSES_ENTRYPOINT) and modelling.usable
-
-
-_RESPONSES_EVENT_MODEL_RESOLVER = _resolve_responses_event_model_resolver()
-_RESPONSES_EVENT_MODELLING = probe_responses_event_modelling(
-    _RESPONSES_EVENT_MODEL_RESOLVER
-)
-_responses_api_available = _responses_channel_usable(_RESPONSES_EVENT_MODELLING)
-
-
-def responses_event_modelling() -> ResponsesEventModelling:
-    """The current Responses event-modelling probe result."""
-    return _RESPONSES_EVENT_MODELLING
-
-
-def refresh_responses_channel_probe() -> None:
-    """Re-run the Responses probes from the currently resolved litellm symbols.
-
-    The import-time run is the production path. This exists so a caller that
-    substitutes the resolver (a test standing in a litellm build that raises for
-    unknown event types) re-derives availability through the SAME rule the import
-    path uses, instead of restating it.
-    """
-    global _RESPONSES_EVENT_MODELLING, _responses_api_available
-    _RESPONSES_EVENT_MODELLING = probe_responses_event_modelling(
-        _RESPONSES_EVENT_MODEL_RESOLVER
-    )
-    _responses_api_available = _responses_channel_usable(_RESPONSES_EVENT_MODELLING)
+_responses_api_available = callable(_RESPONSES_ENTRYPOINT)
 
 
 def any_reasoning_channel(
@@ -936,12 +692,9 @@ class _Capabilities:
     # provider. Surfaced for the protocol capability table.
     reasoning_available: bool = False
     native_reasoning_event_available: bool = False
-    # ``responses_api_available`` is the CHANNEL's availability: litellm exposes
-    # the entrypoint AND can model every event type the channel needs.
-    # ``responses_unmodellable_event_types`` names the types a build cannot model
-    # (empty on every build that can), so the INFO note below can say which ones.
+    # ``responses_api_available`` is the CHANNEL's availability: whether litellm
+    # exposes the ``aresponses`` entrypoint that opens the stream.
     responses_api_available: bool = False
-    responses_unmodellable_event_types: tuple[str, ...] = ()
     stream_frame_available: bool = False
     # Checkpointing: informational; the wiring keys off the resolved
     # symbols / ``flow_supports_checkpointing`` per-flow probe, not these fields.
@@ -1000,19 +753,17 @@ class _Capabilities:
                 "or crewai[litellm].",
                 self.crewai_version,
             )
-        if self.responses_unmodellable_event_types:
+        if self.litellm_available and not self.responses_api_available:
             # NOT a hard gap: reasoning still surfaces on the chat-completions
             # channel for every provider that carries it there, and the flow
-            # examples degrade on the probe. Named at INFO so an operator who
-            # wanted an OpenAI trace learns WHY the channel reports unavailable.
+            # examples degrade on ``responses_channel_available()``. Named at INFO
+            # so an operator who wanted an OpenAI trace learns why it is absent.
             _LOGGER.info(
-                "ag-ui-crewai: the installed litellm cannot model these OpenAI "
-                "Responses stream event types (%s), so the Responses channel "
-                "reports unavailable and callers stay on chat-completions "
-                "(which carries no OpenAI reasoning summaries). Upgrade litellm "
-                "to a build that maps an unknown event type onto its generic "
-                "event model instead of raising.",
-                ", ".join(self.responses_unmodellable_event_types),
+                "ag-ui-crewai: the installed litellm exposes no 'aresponses' "
+                "entrypoint, so the OpenAI Responses channel reports unavailable "
+                "and callers stay on chat-completions (which carries no OpenAI "
+                "reasoning summaries). Install a litellm inside this package's "
+                "declared range.",
             )
         if not self.stream_frame_available:
             # NOT a hard gap — the legacy bus-listener path still works. Emit
@@ -1076,9 +827,6 @@ def _detect() -> _Capabilities:
         ),
         native_reasoning_event_available=_thinking_event_available,
         responses_api_available=_responses_api_available,
-        responses_unmodellable_event_types=(
-            _RESPONSES_EVENT_MODELLING.unmodellable_event_types
-        ),
         stream_frame_available=_stream_frame_available,
         checkpoint_config_available=_checkpoint_config_available,
         checkpointing_available=_checkpointing_available,

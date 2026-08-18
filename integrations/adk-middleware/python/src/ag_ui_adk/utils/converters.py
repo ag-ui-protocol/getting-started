@@ -364,6 +364,16 @@ def convert_adk_event_to_ag_ui_message(event: ADKEvent) -> Optional[Message]:
     return None
 
 
+def _escape_json_pointer_token(value: str) -> str:
+    """Encode a single JSON Pointer token according to RFC 6901."""
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def _unescape_json_pointer_token(value: str) -> str:
+    """Decode a single JSON Pointer token according to RFC 6901."""
+    return value.replace("~1", "/").replace("~0", "~")
+
+
 def convert_state_to_json_patch(state_delta: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Convert a state delta to JSON Patch format (RFC 6902).
     
@@ -376,19 +386,20 @@ def convert_state_to_json_patch(state_delta: Dict[str, Any]) -> List[Dict[str, A
     patches = []
     
     for key, value in state_delta.items():
+        path = f"/{_escape_json_pointer_token(key)}"
+
         # Determine operation type
         if value is None:
             # Remove operation
             patches.append({
                 "op": "remove",
-                "path": f"/{key}"
+                "path": path
             })
         else:
-            # Add/replace operation
-            # We use "replace" as it works for both existing and new keys
+            # Add works for both new and existing object members.
             patches.append({
-                "op": "replace",
-                "path": f"/{key}",
+                "op": "add",
+                "path": path,
                 "value": value
             })
     
@@ -410,8 +421,9 @@ def convert_json_patch_to_state(patches: List[Dict[str, Any]]) -> Dict[str, Any]
         op = patch.get("op")
         path = patch.get("path", "")
         
-        # Extract key from path (remove leading slash)
-        key = path.lstrip("/")
+        # Remove exactly one leading slash, then decode the JSON Pointer token.
+        encoded_key = path.removeprefix("/")
+        key = _unescape_json_pointer_token(encoded_key)
         
         if op == "remove":
             state_delta[key] = None

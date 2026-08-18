@@ -40,11 +40,9 @@ projects:
         sync: false
       region: virginia
       buildCommand: uv sync
-      # No `dev` console script exists for this dojo, and the target must stay the
-      # package. Rationale in integrations/crew-ai/python/pyproject.toml.
-      startCommand: uv run python -m ag_ui_crewai
+      startCommand: uv run dev
       autoDeployTrigger: commit
-      rootDir: integrations/crew-ai/python
+      rootDir: integrations/crew-ai/python/examples
     - type: web
       name: ag-ui-dojo-pydantic-ai
       runtime: python

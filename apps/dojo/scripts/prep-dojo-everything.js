@@ -72,7 +72,7 @@ const ALL_TARGETS = {
   "crew-ai": {
     command: "uv sync",
     name: "CrewAI",
-    cwd: path.join(integrationsRoot, "crew-ai/python"),
+    cwd: path.join(integrationsRoot, "crew-ai/python/examples"),
   },
   'langroid': {
     command: 'uv sync',

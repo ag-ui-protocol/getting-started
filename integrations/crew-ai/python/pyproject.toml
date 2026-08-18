@@ -23,6 +23,37 @@ requires-python = ">=3.10,<3.14"
 # optional ``crewai[litellm]`` extra at 1.0.0 — declaring it here resolves
 # our imports regardless of which crewai extras are installed (CPK-7718 #6).
 #
+# The litellm bound is a DECLARED SUPPORTED RANGE, deliberately unlike the
+# crewai capability detection in ``_capabilities.py``: litellm is a direct
+# dependency whose version this package controls, and the only alternative was
+# probing litellm's PRIVATE event-model registry, which is fragile regardless.
+#
+# Two independent facts set the 1.70.4 floor. Both were measured against real
+# installs, not read off a changelog:
+#   - 1.60.2-1.67 raise ``ValueError("Unknown event type: ...")`` from litellm's
+#     event-type lookup for the OpenAI Responses reasoning-summary deltas the
+#     bridge reads, so the trace this channel exists to surface cannot be parsed
+#     at all. 1.68.0 is the first build that maps an unknown event type onto its
+#     extras-allowing ``GenericEvent`` instead.
+#   - 1.68.0 through 1.70.2 pin ``openai<1.76``, which cannot co-exist with the
+#     ``openai>=2.30`` crewai 1.15 requires: forcing one of those builds
+#     downgrades openai and ``import crewai`` then dies on a missing
+#     ``ChatCompletionMessageFunctionToolCall``. 1.70.1 and 1.70.3 were never
+#     published to PyPI. 1.70.4 is therefore the lowest build that both parses the
+#     reasoning deltas and resolves alongside plain ``crewai``.
+#
+# This floor describes what THIS package supports, not what crewai prefers:
+# ``crewai[litellm]`` declares ``litellm>=1.84.0,<2`` of its own, so a consumer who
+# installs that extra resolves well above this floor (still inside the range). The
+# floor matters for the consumers who do not, since litellm is declared directly
+# here precisely so the bridge's own imports resolve without the extra.
+#
+# ``<2`` guards against the next major. Both ends of the range run the full suite
+# in CI (the crewai-python-litellm-floor / -ceiling matrix legs in
+# .github/workflows/unit-python-sdk.yml). The floor leg is pinned and gating; the
+# ceiling leg resolves the newest 1.x at install time and reports without gating,
+# because its input moves whenever litellm publishes.
+#
 # ``crewai-tools`` is NOT a runtime dependency (CPK-7721 review #6): the bridge
 # imports nothing from it (``grep -rn crewai_tools ag_ui_crewai/ tests/`` is
 # empty), yet as a hard dep it drags in ~37 transitive packages (pymupdf,
@@ -38,7 +69,11 @@ dependencies = [
     "fastapi>=0.115.12,<0.116.0",
     "uvicorn>=0.34.3,<0.35.0",
     "crewai>=1.0,<2",
-    "litellm>=1.60.2",
+    "litellm>=1.70.4,<2",
+    # Imported directly at sdk.py:33, _conversation.py:12 and _responses.py:33,
+    # so it is declared rather than left to arrive through fastapi or crewai.
+    # v2 for ``TypeAdapter`` and ``model_dump_json``.
+    "pydantic>=2.0,<3",
     # A2UI subagent tool: the framework-agnostic recovery loop, validation,
     # prompt assembly and op builders live here; ``a2ui_tool.py`` is only the
     # CrewAI glue over it. Floor matches the aws-strands adapter.
@@ -56,40 +91,37 @@ dev = [
     "pytest-asyncio>=0.24,<0.25",
     # Dev-only; <0.29 guards against a breaking httpx 0.x minor.
     "httpx>=0.27,<0.29",
-    # tests/test_packaging.py asserts against the real wheel and sdist, and builds
-    # them with `uv build --no-build-isolation` so the run needs neither network nor
-    # a warm uv cache. That takes the backend from here, which also means a hatchling
-    # upgrade arrives as a reviewable uv.lock change instead of a silent shift in
-    # what gets published. Mirrors build-system.requires below.
-    "hatchling>=1.27,<2",
+    # tests/test_packaging.py builds the real wheel and sdist with
+    # `uv build --no-build-isolation`, so the run needs neither network nor a warm uv
+    # cache and takes the backend from here. Exact, and identical to
+    # build-system.requires below: a publish builds isolated and resolves the backend
+    # fresh, so two overlapping ranges can still land on different hatchling versions,
+    # and hatchling changes artifact selection in minor releases.
+    # `test_the_guard_and_a_publish_agree_on_hatchling` fails if these drift apart.
+    "hatchling==1.32.0",
     # tomllib is 3.11+ and requires-python still admits 3.10.
     "tomli>=2.0; python_version < '3.11'",
+    "crewai-agui-dojo",
+    # The Responses tests build real ``openai.types.responses`` items rather than
+    # hand-rolled doubles. openai already arrives transitively through litellm and
+    # crewai, but a test-suite import is a direct use and is declared as one; the
+    # floor is crewai 1.15's own requirement.
+    "openai>=2.30,<3",
 ]
+
+[tool.uv.sources]
+crewai-agui-dojo = { path = "examples", editable = true }
 
 [build-system]
-requires = ["hatchling"]
+# Exact, and identical to the dev group's hatchling above. A publish builds isolated
+# and resolves this fresh; the guard builds against the installed one. Only equality
+# makes those the same backend.
+requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
-# Shared across wheel and sdist so the exclude list is not repeated per target.
-#
-# CANONICAL RATIONALE for how the dojo is launched. ``render.yaml`` and
-# ``apps/dojo/scripts/run-dojo-everything.js`` point here rather than repeat it.
-#
-# The dojo server, its launcher and its demo flows are development-only, so they
-# stay out of both artifacts and nothing shipped may reference them: an entry point
-# declared in ``[project.scripts]`` survives the exclude and would install a ``dev``
-# command that raises ModuleNotFoundError. ``tests/test_packaging.py`` enforces the
-# split. Run the dojo from a source checkout with ``uv run python -m ag_ui_crewai``.
-#
-# That target must be the PACKAGE, not the module: ``-m ag_ui_crewai.dojo`` has no
-# ``__main__`` guard, so it builds the app and exits 0 having served nothing.
-# ``ag_ui_crewai/__main__.py`` owns the uvicorn call.
-[tool.hatch.build]
-exclude = [
-    "ag_ui_crewai/dojo.py",
-    "ag_ui_crewai/__main__.py",
-    "ag_ui_crewai/examples/**",
-]
+# No exclude list. Everything in the package is library code that ships. The dojo
+# server and its demo flows live in ``examples/``, a separate project, which is why
+# this package declares no scripts and has nothing to strip.
 
 [tool.hatch.build.targets.wheel]
 packages = ["ag_ui_crewai"]
@@ -102,11 +134,14 @@ packages = ["ag_ui_crewai"]
 # and ``.gitignore`` into every sdist whatever this list says. The other three stay
 # listed as a statement of intent, and the guard catches it if that stops holding.
 [tool.hatch.build.targets.sdist]
+# Anchored with a leading slash. Unanchored, these match at any depth, and since the
+# examples project arrived one level down that pulled its README and pyproject into the
+# tarball. tests/test_packaging.py caught it.
 include = [
-    "ag_ui_crewai",
-    "README.md",
-    "LICENSE",
-    "pyproject.toml",
+    "/ag_ui_crewai",
+    "/README.md",
+    "/LICENSE",
+    "/pyproject.toml",
 ]
 
 [tool.pytest.ini_options]
