@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 export type TraceEvent = {
   type: string;
   [field: string]: unknown;
@@ -19,6 +21,7 @@ const GENERATED_ID_FIELDS = new Set([
   "checkpointId",
   "messageId",
   "parentMessageId",
+  "parentToolCallId",
   "parentRunId",
   "runId",
   "threadId",
@@ -29,6 +32,7 @@ const GENERATED_ID_FIELDS = new Set([
   "originalAIMessageId",
   "original_ai_message_id",
   "parent_message_id",
+  "parent_tool_call_id",
   "parent_run_id",
   "run_id",
   "requestId",
@@ -39,9 +43,16 @@ const GENERATED_ID_FIELDS = new Set([
 const STRUCTURED_ID_FIELDS = new Set([
   "checkpoint_ns",
   "langgraph_checkpoint_ns",
+  "subagentRunId",
+  "subagent_run_id",
 ]);
 
-const GENERATED_ID_ARRAY_FIELDS = new Set(["parentIds", "parent_ids"]);
+const GENERATED_ID_ARRAY_FIELDS = new Set([
+  "interruptIds",
+  "interrupt_ids",
+  "parentIds",
+  "parent_ids",
+]);
 const LANGCHAIN_MESSAGE_TYPES = new Set([
   "ai",
   "human",
@@ -93,6 +104,7 @@ const APP_CONTEXT_PREFIX = "App Context:\n";
 
 const UUID_PATTERN =
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+const GENERATED_MODEL_ID_PATTERN = /^(?:call[_-]|chatcmpl-|msg-)/;
 
 export function isTraceEvent(value: unknown): value is TraceEvent {
   return (
@@ -173,16 +185,22 @@ export function parseEventTraceSse(body: string): TraceEvent[] {
 
 function isGeneratedIdentityField(
   key: string,
+  value: string,
   path: readonly string[],
   container: object,
 ) {
   if (GENERATED_ID_FIELDS.has(key)) return true;
   if (key !== "id") return false;
 
+  if (path.includes("rawEvent") && GENERATED_MODEL_ID_PATTERN.test(value)) {
+    return true;
+  }
+
   if (
     path.some(
       (segment) =>
         segment === "messages" ||
+        segment === "interceptedToolCalls" ||
         segment === "toolCalls" ||
         segment === "tool_calls",
     )
@@ -193,7 +211,7 @@ function isGeneratedIdentityField(
   const parent = path.at(-1);
   if (
     path.includes("rawEvent") &&
-    (parent === "chunk" || parent === "output")
+    (parent === "chunk" || parent === "output" || parent === "rawEvent")
   ) {
     return true;
   }
@@ -250,7 +268,10 @@ function normalizeForwardedHeaders(
   );
 }
 
-function normalizeAppContextContent(value: string) {
+function normalizeAppContextContent(
+  value: string,
+  normalizeIdentity: (value: string) => string,
+) {
   if (!value.startsWith(APP_CONTEXT_PREFIX)) return value;
 
   let context: unknown;
@@ -264,18 +285,111 @@ function normalizeAppContextContent(value: string) {
   }
 
   if (!isPlainRecord(context)) return value;
+  let normalized = false;
+  if (typeof context.thread_id === "string") {
+    context.thread_id = normalizeIdentity(context.thread_id);
+    normalized = true;
+  }
+
   const headers = context.copilotkit_forwarded_headers;
   // Neither the presence nor the shape of this key is ours to assume: it is
   // absent until an `x-` header arrives, and a caller can put any JSON value
-  // there. So this guard is what keeps `Object.entries(undefined)` from throwing
-  // on an everyday payload, and what keeps `Object.entries`/`Object.fromEntries`
-  // from reshaping a primitive or array bag into `{}` or `{"0": ...}`. Leave the
-  // whole content string untouched rather than re-serializing it, so a payload
-  // this rewrite does not understand survives byte-for-byte.
-  if (!isPlainRecord(headers)) return value;
+  // there. This guard keeps Object.entries from throwing or reshaping a
+  // primitive/array bag. If no recognized App Context field was normalized,
+  // return the original string byte-for-byte.
+  if (isPlainRecord(headers)) {
+    context.copilotkit_forwarded_headers = normalizeForwardedHeaders(headers);
+    normalized = true;
+  }
 
-  context.copilotkit_forwarded_headers = normalizeForwardedHeaders(headers);
+  if (!normalized) return value;
   return `${APP_CONTEXT_PREFIX}${JSON.stringify(context, null, 2)}`;
+}
+
+function mirroredModelChunk(event: TraceEvent | undefined) {
+  if (event?.type !== "STATE_SNAPSHOT") return undefined;
+  const rawEvent = Reflect.get(event, "rawEvent");
+  if (typeof rawEvent !== "object" || rawEvent === null) return undefined;
+
+  const streamMode = Reflect.get(rawEvent, "event");
+  const data = Reflect.get(rawEvent, "data");
+  let chunk: unknown;
+  if (streamMode === "messages" && Array.isArray(data)) {
+    chunk = data[0];
+  } else if (streamMode === "events" && typeof data === "object" && data) {
+    if (Reflect.get(data, "event") !== "on_chat_model_stream") {
+      return undefined;
+    }
+    const eventData = Reflect.get(data, "data");
+    if (typeof eventData === "object" && eventData) {
+      chunk = Reflect.get(eventData, "chunk");
+    }
+  }
+
+  if (typeof chunk !== "object" || chunk === null) return undefined;
+  const chunkId = Reflect.get(chunk, "id");
+  return typeof chunkId === "string"
+    ? { streamMode, chunkId, chunk }
+    : undefined;
+}
+
+function stabilizeMirroredModelChunks(events: TraceEvent[]) {
+  const mirrors = events.map(mirroredModelChunk);
+  const redundantMessageIndexes = new Set<number>();
+  const consumedEventIndexes = new Set<number>();
+
+  for (let index = 0; index < events.length; index += 1) {
+    const messageMirror = mirrors[index];
+    if (messageMirror?.streamMode !== "messages") continue;
+
+    const matchingEventIndex = mirrors.findIndex(
+      (eventMirror, candidateIndex) =>
+        candidateIndex !== index &&
+        !consumedEventIndexes.has(candidateIndex) &&
+        eventMirror?.streamMode === "events" &&
+        eventMirror.chunkId === messageMirror.chunkId &&
+        isDeepStrictEqual(eventMirror.chunk, messageMirror.chunk) &&
+        isDeepStrictEqual(
+          Reflect.get(events[candidateIndex], "snapshot"),
+          Reflect.get(events[index], "snapshot"),
+        ),
+    );
+
+    if (matchingEventIndex !== -1) {
+      redundantMessageIndexes.add(index);
+      consumedEventIndexes.add(matchingEventIndex);
+    }
+  }
+
+  const deduplicated = events.filter(
+    (_, index) => !redundantMessageIndexes.has(index),
+  );
+  const stabilized: TraceEvent[] = [];
+
+  for (let index = 0; index < deduplicated.length; index += 1) {
+    const first = mirroredModelChunk(deduplicated[index]);
+    const second = mirroredModelChunk(deduplicated[index + 1]);
+
+    const isMirrorPair =
+      first !== undefined &&
+      second !== undefined &&
+      first.streamMode !== second.streamMode &&
+      first.chunkId === second.chunkId;
+
+    if (
+      isMirrorPair &&
+      first.streamMode === "events" &&
+      second.streamMode === "messages"
+    ) {
+      stabilized.push(deduplicated[index + 1], deduplicated[index]);
+      index += 1;
+      continue;
+    }
+
+    stabilized.push(deduplicated[index]);
+  }
+
+  return stabilized;
 }
 
 /**
@@ -314,6 +428,21 @@ export function normalizeEventTrace(
         if (key === "timestamp" && path.length === 0) return [];
         if (TRACING_ENV_METADATA_PATTERN.test(key)) return [];
         if (AUTH_ENV_METADATA_KEYS.has(key)) return [];
+        if (
+          key === "lc_versions" &&
+          path.at(-1) === "metadata" &&
+          path.includes("rawEvent")
+        ) {
+          return [];
+        }
+        if (
+          key === "created_at" &&
+          path.at(-1) === "response_metadata" &&
+          (path.includes("rawEvent") ||
+            typeof Reflect.get(value, "model_provider") === "string")
+        ) {
+          return [];
+        }
 
         const nextPath = [...path, key];
         let normalized: unknown;
@@ -327,12 +456,12 @@ export function normalizeEventTrace(
           normalized = normalizeValue(child, nextPath);
         } else if (STRUCTURED_ID_FIELDS.has(key)) {
           normalized = normalizeStructuredIdentity(child);
-        } else if (isGeneratedIdentityField(key, path, value)) {
+        } else if (isGeneratedIdentityField(key, child, path, value)) {
           normalized = normalizeIdentity(child);
         } else if (ENVIRONMENT_VALUE_TOKENS.has(key)) {
           normalized = ENVIRONMENT_VALUE_TOKENS.get(key);
         } else if (key === "content") {
-          normalized = normalizeAppContextContent(child);
+          normalized = normalizeAppContextContent(child, normalizeIdentity);
         } else {
           normalized = child;
         }
@@ -342,7 +471,7 @@ export function normalizeEventTrace(
     );
   };
 
-  return events.map((event) => {
+  return stabilizeMirroredModelChunks([...events]).map((event) => {
     const normalized = normalizeValue(event, []);
     if (!isTraceEvent(normalized)) {
       throw new Error("Normalized AG-UI event lost its type");

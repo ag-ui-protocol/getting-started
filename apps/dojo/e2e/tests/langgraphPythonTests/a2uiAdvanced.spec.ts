@@ -1,8 +1,10 @@
-import { test, expect } from "../../test-isolation-helper";
+import { test, expect } from "../../event-trace-test";
 import { A2UIPage } from "../../featurePages/A2UIPage";
+import { a2uiAdvancedEventTrace } from "./a2uiAdvanced.event-trace";
 
 test("[LangGraph Python] A2UI Advanced renders surface with hotel comparison", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph/feature/a2ui_advanced");
 
@@ -18,10 +20,14 @@ test("[LangGraph Python] A2UI Advanced renders surface with hotel comparison", a
     "Holiday Inn",
     "Boutique Loft",
   ]);
+  await eventTrace.expectJourney(
+    a2uiAdvancedEventTrace.a2uiAdvancedRendersSurfaceWithHotelComparison,
+  );
 });
 
 test("[LangGraph Python] A2UI Advanced renders team directory surface", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph/feature/a2ui_advanced");
 
@@ -38,4 +44,7 @@ test("[LangGraph Python] A2UI Advanced renders team directory surface", async ({
     "Carol Davis",
     "Dan Wilson",
   ]);
+  await eventTrace.expectJourney(
+    a2uiAdvancedEventTrace.a2uiAdvancedRendersTeamDirectorySurface,
+  );
 });

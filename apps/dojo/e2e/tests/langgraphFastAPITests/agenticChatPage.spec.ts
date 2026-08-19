@@ -1,8 +1,10 @@
-import { test, expect } from "../../test-isolation-helper";
+import { test, expect } from "../../event-trace-test";
 import { AgenticChatPage } from "../../featurePages/AgenticChatPage";
+import { agenticChatPageEventTrace } from "./agenticChatPage.event-trace";
 
 test("[LangGraph FastAPI] Agentic Chat sends and receives a message", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph-fastapi/feature/agentic_chat");
 
@@ -16,10 +18,14 @@ test("[LangGraph FastAPI] Agentic Chat sends and receives a message", async ({
   await chat.assertAgentReplyVisible(
     /Hello|Hi|Hey|Greetings|nice to meet|welcome/i,
   );
+  await eventTrace.expectJourney(
+    agenticChatPageEventTrace.agenticChatSendsAndReceivesAMessage,
+  );
 });
 
 test("[LangGraph FastAPI] Agentic Chat changes background on message and reset", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph-fastapi/feature/agentic_chat");
 
@@ -55,10 +61,14 @@ test("[LangGraph FastAPI] Agentic Chat changes background on message and reset",
   const backgroundAfterPink = await getBackground();
   // Verify it also differs from initial (not a reset)
   expect(backgroundAfterPink).not.toBe(initialBackground);
+  await eventTrace.expectJourney(
+    agenticChatPageEventTrace.agenticChatChangesBackgroundOnMessageAndReset,
+  );
 });
 
 test("[LangGraph FastAPI] Agentic Chat retains memory of user messages during a conversation", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph-fastapi/feature/agentic_chat");
 
@@ -90,6 +100,9 @@ test("[LangGraph FastAPI] Agentic Chat retains memory of user messages during a 
     "Can you remind me what my favorite fruit is?",
   );
   await chat.assertAgentReplyVisible(new RegExp(favFruit, "i"));
+  await eventTrace.expectJourney(
+    agenticChatPageEventTrace.agenticChatRetainsMemoryOfUserMessagesDuringAConversation,
+  );
 });
 
 // Skip: CopilotChat v2 does not wire up onRegenerate to assistant messages,

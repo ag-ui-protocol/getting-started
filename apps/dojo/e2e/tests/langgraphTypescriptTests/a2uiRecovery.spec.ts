@@ -1,5 +1,6 @@
-import { test, expect } from "../../test-isolation-helper";
+import { test, expect } from "../../event-trace-test";
 import { A2UIPage } from "../../featurePages/A2UIPage";
+import { a2uiRecoveryEventTrace } from "./a2uiRecovery.event-trace";
 
 // OSS-162 A2UI error-recovery showcase. The aimock fixtures
 // (apps/dojo/e2e/a2ui-recovery-fixtures.ts) drive the sub-agent's render_a2ui:
@@ -9,6 +10,7 @@ import { A2UIPage } from "../../featurePages/A2UIPage";
 
 test("[LangGraph TS] A2UI recovery — invalid render recovers to a valid surface", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph-typescript/feature/a2ui_recovery");
 
@@ -19,11 +21,19 @@ test("[LangGraph TS] A2UI recovery — invalid render recovers to a valid surfac
   // The faulty first attempt is suppressed (no wipe); the regenerated valid
   // surface paints.
   await a2ui.assertSurfaceWithIdVisible("hotel-comparison");
-  await a2ui.assertSurfaceContainsAll(["The Ritz", "Holiday Inn", "Boutique Loft"]);
+  await a2ui.assertSurfaceContainsAll([
+    "The Ritz",
+    "Holiday Inn",
+    "Boutique Loft",
+  ]);
+  await eventTrace.expectJourney(
+    a2uiRecoveryEventTrace.a2uiRecoveryInvalidRenderRecoversToAValidSurface,
+  );
 });
 
 test("[LangGraph TS] A2UI recovery — exhaustion never paints a faulty surface, chat stays usable", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph-typescript/feature/a2ui_recovery");
 
@@ -38,10 +48,14 @@ test("[LangGraph TS] A2UI recovery — exhaustion never paints a faulty surface,
 
   // Conversation remains usable after the hard failure.
   await a2ui.sendMessage("Thanks anyway.");
+  await eventTrace.expectJourney(
+    a2uiRecoveryEventTrace.a2uiRecoveryExhaustionNeverPaintsAFaultySurfaceChatStaysUsable,
+  );
 });
 
 test("[LangGraph TS] A2UI recovery — exhaustion shows the hard-failure UI", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph-typescript/feature/a2ui_recovery");
 
@@ -56,10 +70,13 @@ test("[LangGraph TS] A2UI recovery — exhaustion shows the hard-failure UI", as
   // recovery-renderer.tsx — until @copilotkit/react-core publishes the built-in). Target
   // the title specifically: the panel also has a "Something went wrong…" subtitle, so a
   // broad /went wrong/ regex would match two elements and trip Playwright strict mode.
-  await expect(
-    page.getByText("Couldn't generate the UI").first(),
-  ).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Couldn't generate the UI").first()).toBeVisible({
+    timeout: 30_000,
+  });
 
   // Conversation remains usable after the hard failure.
   await a2ui.sendMessage("Thanks anyway.");
+  await eventTrace.expectJourney(
+    a2uiRecoveryEventTrace.a2uiRecoveryExhaustionShowsTheHardFailureUI,
+  );
 });

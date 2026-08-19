@@ -8,6 +8,33 @@ function logStamp(...args) {
   console.log(getTimestamp(), ...args);
 }
 
+function errorText(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  return error.message || error.stack || "";
+}
+
+function eventTraceMismatchText(result) {
+  const candidates = [result.error, ...(result.errors || [])]
+    .flatMap((error) => {
+      if (!error || typeof error === "string") return [errorText(error)];
+      return [error.message, error.stack].filter(Boolean);
+    })
+    .filter((text) => text?.includes("Event trace mismatch:"));
+
+  const mismatch = candidates.toSorted(
+    (left, right) => right.length - left.length,
+  )[0];
+  if (!mismatch) return undefined;
+
+  const withoutName = mismatch.replace(/^EventTraceAssertionError:\s*/, "");
+  const endMarker = "Full traces are attached to the Playwright test result.";
+  const end = withoutName.indexOf(endMarker);
+  return end === -1
+    ? withoutName
+    : withoutName.slice(0, end + endMarker.length);
+}
+
 class CleanReporter {
   onBegin(config, suite) {
     console.log(`\n🎭 Running ${suite.allTests().length} tests...\n`);
@@ -41,8 +68,9 @@ class CleanReporter {
     // Extract the most relevant error info
     const error = result.error || result.errors?.[0];
     if (error) {
-      let errorMsg = error.message || "Unknown error";
-      const isEventTraceMismatch = errorMsg.startsWith("Event trace mismatch:");
+      const semanticEventTraceMismatch = eventTraceMismatchText(result);
+      let errorMsg = errorText(error) || "Unknown error";
+      const isEventTraceMismatch = semanticEventTraceMismatch !== undefined;
 
       // Clean up common error patterns to make them more readable
       if (errorMsg.includes("None of the expected patterns matched")) {
@@ -63,7 +91,7 @@ class CleanReporter {
       }
 
       if (isEventTraceMismatch) {
-        const semanticDiff = errorMsg
+        const semanticDiff = semanticEventTraceMismatch
           .split("\n")
           .map((line) => `   ${line}`)
           .join("\n");

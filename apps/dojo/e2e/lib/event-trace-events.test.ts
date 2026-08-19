@@ -90,6 +90,50 @@ test("normalizes generated identities while retaining their relationships", () =
   ]);
 });
 
+test("normalizes subagent run identities while preserving their namespace and references", () => {
+  const subagentRunId = "tools:fdecf438-f47b-2e18-3753-b24a141985c2";
+  const parentToolCallId = "call_7ctR-vROo_NGnX-w";
+
+  assert.deepEqual(
+    normalizeEventTrace([
+      {
+        type: "TOOL_CALL_START",
+        toolCallId: parentToolCallId,
+        toolCallName: "task",
+      },
+      {
+        type: "SUBAGENT_STARTED",
+        subagentRunId,
+        subagentId: "research-agent",
+        parentToolCallId,
+      },
+      {
+        type: "SUBAGENT_FINISHED",
+        subagentRunId,
+        outcome: { interruptIds: ["generated-interrupt"] },
+      },
+    ]),
+    [
+      {
+        type: "TOOL_CALL_START",
+        toolCallId: "id-1",
+        toolCallName: "task",
+      },
+      {
+        type: "SUBAGENT_STARTED",
+        subagentRunId: "tools:id-2",
+        subagentId: "research-agent",
+        parentToolCallId: "id-1",
+      },
+      {
+        type: "SUBAGENT_FINISHED",
+        subagentRunId: "tools:id-2",
+        outcome: { interruptIds: ["id-3"] },
+      },
+    ],
+  );
+});
+
 test("normalizes LangGraph and model identities only in captured test traces", () => {
   const runId = "019fff57-a2dc-76a8-9006-130a727563d9";
   const threadId = "cbf4e664-85d5-48fe-9c3e-f9f6e47102d1";
@@ -105,9 +149,22 @@ test("normalizes LangGraph and model identities only in captured test traces", (
       type: "STATE_SNAPSHOT",
       snapshot: {
         timestamp: "application-owned-timestamp",
-        copilotkit: { originalAIMessageId: "message-generated-at-runtime" },
+        messages: [
+          {
+            id: "generated-message",
+            response_metadata: {
+              created_at: 1_786_714_996,
+              model_provider: "openai",
+            },
+          },
+        ],
+        copilotkit: {
+          originalAIMessageId: "message-generated-at-runtime",
+          interceptedToolCalls: [{ id: "call_intercepted", name: "lookup" }],
+        },
       },
       rawEvent: {
+        id: "a68f556f0c36f00a4bb3c6bb7d75225f",
         data: {
           run_id: runId,
           chunk: { id: "chatcmpl-generated-at-runtime", content: "hello" },
@@ -123,6 +180,14 @@ test("normalizes LangGraph and model identities only in captured test traces", (
             graph_id: "semantic-agent-id",
             langgraph_checkpoint_ns: `agent:${checkpointId}:tools`,
             checkpoint_ns: checkpointId,
+          },
+          model_chunk: {
+            content: [{ type: "reasoning", id: "msg-generated" }],
+            response_metadata: {
+              created_at: 1_786_713_411,
+              model_provider: "openai",
+            },
+            tool_call_chunks: [{ id: "call_generated", name: "lookup" }],
           },
         },
       },
@@ -152,24 +217,39 @@ test("normalizes LangGraph and model identities only in captured test traces", (
       type: "STATE_SNAPSHOT",
       snapshot: {
         timestamp: "application-owned-timestamp",
-        copilotkit: { originalAIMessageId: "id-1" },
+        messages: [
+          {
+            id: "id-1",
+            response_metadata: { model_provider: "openai" },
+          },
+        ],
+        copilotkit: {
+          originalAIMessageId: "id-2",
+          interceptedToolCalls: [{ id: "id-3", name: "lookup" }],
+        },
       },
       rawEvent: {
+        id: "id-4",
         data: {
-          run_id: "id-2",
-          chunk: { id: "id-3", content: "hello" },
-          output: { id: "id-3", content: "hello" },
+          run_id: "id-5",
+          chunk: { id: "id-6", content: "hello" },
+          output: { id: "id-6", content: "hello" },
           metadata: {
-            thread_id: "id-4",
-            run_id: "id-2",
-            langgraph_request_id: "id-5",
-            parent_ids: ["id-2", "id-5"],
+            thread_id: "id-7",
+            run_id: "id-5",
+            langgraph_request_id: "id-8",
+            parent_ids: ["id-5", "id-8"],
             langgraph_api_url: "<langgraph-api-url>",
             langgraph_version: "<langgraph-version>",
             langgraph_api_version: "<langgraph-api-version>",
             graph_id: "semantic-agent-id",
-            langgraph_checkpoint_ns: "agent:id-6:tools",
-            checkpoint_ns: "id-6",
+            langgraph_checkpoint_ns: "agent:id-9:tools",
+            checkpoint_ns: "id-9",
+          },
+          model_chunk: {
+            content: [{ type: "reasoning", id: "id-10" }],
+            response_metadata: { model_provider: "openai" },
+            tool_call_chunks: [{ id: "id-11", name: "lookup" }],
           },
         },
       },
@@ -179,13 +259,13 @@ test("normalizes LangGraph and model identities only in captured test traces", (
       rawEvent: {
         data: [
           {
-            id: "id-3",
+            id: "id-6",
             type: "ai",
             content: "hello",
             response_metadata: { model_provider: "openai" },
           },
           {
-            id: "id-7",
+            id: "id-12",
             type: "system",
             content:
               'App Context:\n{\n  "copilotkit_forwarded_headers": {\n    "x-forwarded-for": "<forwarded-for>",\n    "x-forwarded-host": "<forwarded-host>",\n    "x-forwarded-port": "<forwarded-port>",\n    "x-forwarded-proto": "<forwarded-proto>"\n  }\n}',
@@ -194,6 +274,177 @@ test("normalizes LangGraph and model identities only in captured test traces", (
       },
     },
   ]);
+});
+
+test("orders adjacent LangGraph model-stream mirrors by their shared chunk identity", () => {
+  const messageMirror = {
+    type: "STATE_SNAPSHOT",
+    rawEvent: {
+      event: "messages",
+      data: [
+        { id: "msg-generated-chunk", content: "hello" },
+        { node: "agent" },
+      ],
+    },
+  };
+  const eventMirror = {
+    type: "STATE_SNAPSHOT",
+    rawEvent: {
+      event: "events",
+      data: {
+        event: "on_chat_model_stream",
+        data: { chunk: { id: "msg-generated-chunk", content: "hello" } },
+      },
+    },
+  };
+
+  assert.deepEqual(
+    normalizeEventTrace([eventMirror, messageMirror]),
+    normalizeEventTrace([messageMirror, eventMirror]),
+  );
+});
+
+test("collapses an exact LangGraph messages/events state mirror to the events representation", () => {
+  const snapshot = { messages: [{ id: "message-id", role: "assistant" }] };
+  const chunk = {
+    id: "chunk-id",
+    content: "",
+    tool_call_chunks: [{ id: "tool-call-id", name: "lookup", args: "" }],
+  };
+  const messageMirror = {
+    type: "STATE_SNAPSHOT",
+    snapshot,
+    rawEvent: {
+      event: "messages",
+      data: [chunk, { langgraph_node: "agent" }],
+    },
+  };
+  const eventMirror = {
+    type: "STATE_SNAPSHOT",
+    snapshot,
+    rawEvent: {
+      event: "events",
+      data: {
+        event: "on_chat_model_stream",
+        data: { chunk },
+        metadata: { langgraph_node: "agent" },
+      },
+    },
+  };
+
+  assert.deepEqual(
+    normalizeEventTrace([messageMirror, eventMirror]),
+    normalizeEventTrace([eventMirror]),
+  );
+});
+
+test("collapses an exact LangGraph mirror when another event separates it", () => {
+  const snapshot = { messages: [{ id: "message-id", role: "assistant" }] };
+  const chunk = { id: "chunk-id", content: "hello" };
+  const messageMirror = {
+    type: "STATE_SNAPSHOT",
+    snapshot,
+    rawEvent: {
+      event: "messages",
+      data: [chunk, { langgraph_node: "agent" }],
+    },
+  };
+  const eventMirror = {
+    type: "STATE_SNAPSHOT",
+    snapshot,
+    rawEvent: {
+      event: "events",
+      data: {
+        event: "on_chat_model_stream",
+        data: { chunk },
+        metadata: { langgraph_node: "agent" },
+      },
+    },
+  };
+  const separator = { type: "STEP_FINISHED", stepName: "model" };
+
+  assert.deepEqual(
+    normalizeEventTrace([messageMirror, separator, eventMirror]),
+    normalizeEventTrace([separator, eventMirror]),
+  );
+});
+
+test("collapses LangGraph messages/events mirrors one-to-one", () => {
+  const snapshot = { messages: [{ id: "message-id", role: "assistant" }] };
+  const chunk = { id: "chunk-id", content: "hello" };
+  const messageMirror = {
+    type: "STATE_SNAPSHOT",
+    snapshot,
+    rawEvent: {
+      event: "messages",
+      data: [chunk, { langgraph_node: "agent" }],
+    },
+  };
+  const eventMirror = {
+    type: "STATE_SNAPSHOT",
+    snapshot,
+    rawEvent: {
+      event: "events",
+      data: {
+        event: "on_chat_model_stream",
+        data: { chunk },
+        metadata: { langgraph_node: "agent" },
+      },
+    },
+  };
+
+  assert.equal(
+    normalizeEventTrace([eventMirror, messageMirror, messageMirror]).length,
+    2,
+  );
+});
+
+test("preserves repeated snapshots unless both snapshot and mirrored model chunk match", () => {
+  const snapshot = { count: 1 };
+  const messageMirror = {
+    type: "STATE_SNAPSHOT",
+    snapshot,
+    rawEvent: {
+      event: "messages",
+      data: [{ id: "chunk-id", content: "first" }, {}],
+    },
+  };
+  const eventWithDifferentChunk = {
+    type: "STATE_SNAPSHOT",
+    snapshot,
+    rawEvent: {
+      event: "events",
+      data: {
+        event: "on_chat_model_stream",
+        data: { chunk: { id: "chunk-id", content: "second" } },
+      },
+    },
+  };
+  const eventWithDifferentSnapshot = {
+    type: "STATE_SNAPSHOT",
+    snapshot: { count: 2 },
+    rawEvent: {
+      event: "events",
+      data: {
+        event: "on_chat_model_stream",
+        data: { chunk: { id: "chunk-id", content: "first" } },
+      },
+    },
+  };
+  const ordinaryRepeat = {
+    type: "STATE_SNAPSHOT",
+    snapshot,
+  };
+
+  assert.equal(
+    normalizeEventTrace([messageMirror, eventWithDifferentChunk]).length,
+    2,
+  );
+  assert.equal(
+    normalizeEventTrace([messageMirror, eventWithDifferentSnapshot]).length,
+    2,
+  );
+  assert.equal(normalizeEventTrace([ordinaryRepeat, ordinaryRepeat]).length, 2);
 });
 
 test("retains the complete SSE response when a data frame is malformed", () => {
@@ -242,6 +493,32 @@ test("drops auth-context metadata, whose presence varies by langgraph version", 
     },
   ]);
   assert.deepStrictEqual(normalized, bare);
+});
+
+test("drops LangChain version metadata from raw events", () => {
+  const normalized = normalizeEventTrace([
+    {
+      type: "STATE_SNAPSHOT",
+      snapshot: { lc_versions: { application: "keep-me" } },
+      rawEvent: {
+        metadata: {
+          graph_id: "agentic_chat",
+          lc_versions: {
+            "langchain-core": "1.5.3",
+            langchain: "1.3.14",
+          },
+        },
+      },
+    },
+  ]);
+
+  assert.deepEqual(normalized, [
+    {
+      type: "STATE_SNAPSHOT",
+      snapshot: { lc_versions: { application: "keep-me" } },
+      rawEvent: { metadata: { graph_id: "agentic_chat" } },
+    },
+  ]);
 });
 
 test("drops LangSmith tracing env metadata, whose presence varies by environment", () => {
@@ -302,6 +579,30 @@ const CONTROL_BAG = {
 const CONTROL_REWRITTEN = {
   copilotkit_forwarded_headers: { "x-forwarded-for": "<forwarded-for>" },
 };
+
+test("normalizes an App Context thread identity with the surrounding trace", () => {
+  const threadId = "8d5cef11-4b0e-4db8-931d-eb2772fc9d7e";
+  const normalized = normalizeEventTrace([
+    {
+      type: "RUN_STARTED",
+      threadId,
+      runId: "run-a",
+    },
+    ...appContextTrace({ thread_id: threadId, application_id: threadId }),
+  ]);
+
+  assert.deepStrictEqual(normalized, [
+    {
+      type: "RUN_STARTED",
+      threadId: "id-1",
+      runId: "id-2",
+    },
+    ...appContextTrace({
+      thread_id: "id-1",
+      application_id: threadId,
+    }),
+  ]);
+});
 
 test("normalizes forwarded headers whatever casing reached the agent", () => {
   // The producer selects forwarded headers by matching the `x-` prefix

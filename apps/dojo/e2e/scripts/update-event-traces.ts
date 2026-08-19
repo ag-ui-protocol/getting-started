@@ -33,6 +33,26 @@ type CliOptions = {
   reason: string;
 };
 
+const lanes = [
+  {
+    id: "typescript",
+    testDirectory: "langgraphTypescriptTests",
+    playwrightSuite: "langgraph-typescript",
+  },
+  {
+    id: "python",
+    testDirectory: "langgraphPythonTests",
+    playwrightSuite: "langgraph-python",
+  },
+  {
+    id: "fastapi",
+    testDirectory: "langgraphFastAPITests",
+    playwrightSuite: "langgraph-fastapi",
+  },
+] as const;
+
+type Lane = (typeof lanes)[number];
+
 const e2eRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const testsRoot = join(e2eRoot, "tests");
 const stagingDirectory = join(e2eRoot, ".event-trace-update");
@@ -90,34 +110,40 @@ async function exists(path: string) {
   }
 }
 
-function laneTarget(lane: "typescript" | "python", options: CliOptions) {
-  const directory =
-    lane === "typescript" ? "langgraphTypescriptTests" : "langgraphPythonTests";
+function laneTarget(lane: Lane, options: CliOptions) {
   return options.all
-    ? join("tests", directory)
-    : join("tests", directory, `${options.spec}.spec.ts`);
+    ? join("tests", lane.testDirectory)
+    : join("tests", lane.testDirectory, `${options.spec}.spec.ts`);
 }
 
-function runLane(lane: "typescript" | "python", target: string) {
+function runLane(lane: Lane, target: string) {
   const executable = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   const result = spawnSync(
     executable,
-    ["exec", "playwright", "test", target, "--retries=0"],
+    [
+      "exec",
+      "playwright",
+      "test",
+      target,
+      "--retries=0",
+      "--workers=1",
+      "--timeout=120000",
+    ],
     {
       cwd: e2eRoot,
       stdio: "inherit",
       env: {
         ...process.env,
-        EVENT_TRACE_UPDATE_LANE: lane,
+        EVENT_TRACE_UPDATE_LANE: lane.id,
         EVENT_TRACE_UPDATE_STAGING_DIR: stagingDirectory,
-        PLAYWRIGHT_SUITE: `langgraph-${lane}`,
+        PLAYWRIGHT_SUITE: lane.playwrightSuite,
       },
     },
   );
 
   if (result.status !== 0) {
     throw new Error(
-      `${lane} Event trace update lane failed; no golden files were written`,
+      `${lane.id} Event trace update lane failed; no golden files were written`,
     );
   }
 }
@@ -228,15 +254,15 @@ async function main() {
   const options = parseOptions(process.argv.slice(2));
   if (!process.env.BASE_URL) {
     throw new Error(
-      "BASE_URL is required; start Dojo and both selected LangGraph backends first",
+      "BASE_URL is required; start Dojo and the selected LangGraph backends first",
     );
   }
 
   await rm(stagingDirectory, { recursive: true, force: true });
   await mkdir(stagingDirectory, { recursive: true });
 
-  const ranLanes: Array<"typescript" | "python"> = [];
-  for (const lane of ["typescript", "python"] as const) {
+  const ranLanes: Lane[] = [];
+  for (const lane of lanes) {
     const target = laneTarget(lane, options);
     if (!(await exists(join(e2eRoot, target)))) continue;
     ranLanes.push(lane);
@@ -255,9 +281,9 @@ async function main() {
     throw new Error("The selected tests produced no Event trace candidates");
   }
   for (const lane of ranLanes) {
-    if (!candidates.some((candidate) => candidate.lane === lane)) {
+    if (!candidates.some((candidate) => candidate.lane === lane.id)) {
       throw new Error(
-        `${lane} completed without leaving event trace candidates; no golden files were written`,
+        `${lane.id} completed without leaving event trace candidates; no golden files were written`,
       );
     }
   }

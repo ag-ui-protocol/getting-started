@@ -1,4 +1,4 @@
-import { test, expect } from "../../test-isolation-helper";
+import { test, expect } from "../../event-trace-test";
 import {
   sendChatMessage,
   awaitLLMResponseDone,
@@ -8,6 +8,7 @@ import {
   SUBAGENT_REJECTED_REPLY,
   SUPERVISOR_RELAY,
 } from "../../deepagents-subagents-fixtures";
+import { deepagentsSubagentsPageEventTrace } from "./deepagentsSubagentsPage.event-trace";
 
 // PNI-276: end-to-end coverage for subagent rendering. These tests cover what
 // is SPECIFIC to subagents rather than re-testing chat: grouping, the interrupt
@@ -23,6 +24,7 @@ import {
 test.describe("Deepagents Subagents Feature", () => {
   test("[LangGraph FastAPI] groups the subagent's work, approves its answer, and finishes cleanly", async ({
     page,
+    eventTrace,
   }) => {
     await page.goto("/langgraph-fastapi/feature/deepagents_subagents");
 
@@ -60,10 +62,14 @@ test.describe("Deepagents Subagents Feature", () => {
     // renders inside its group with its tag, not collapsed into the parent.
     await expect(group).toContainText(SUBAGENT_FINAL_ANSWER);
     await expect(page.getByTestId("subagent-tag").first()).toBeVisible();
+    await eventTrace.expectJourney(
+      deepagentsSubagentsPageEventTrace.approvesSubagentAnswer,
+    );
   });
 
   test("[LangGraph FastAPI] rejecting the approval produces a visibly different, still-clean finish", async ({
     page,
+    eventTrace,
   }) => {
     await page.goto("/langgraph-fastapi/feature/deepagents_subagents");
 
@@ -86,5 +92,8 @@ test.describe("Deepagents Subagents Feature", () => {
     await expect(page.getByTestId("subagent-done").first()).toBeVisible();
     await expect(page.getByTestId("subagent-error")).toHaveCount(0);
     await expect(page.getByTestId("subagent-activity")).toHaveCount(0);
+    await eventTrace.expectJourney(
+      deepagentsSubagentsPageEventTrace.rejectsSubagentAnswer,
+    );
   });
 });

@@ -1,8 +1,10 @@
-import { test, expect } from "../../test-isolation-helper";
+import { test, expect } from "../../event-trace-test";
 import { A2UIPage } from "../../featurePages/A2UIPage";
+import { a2uiDynamicSchemaEventTrace } from "./a2uiDynamicSchema.event-trace";
 
 test("[LangGraph TypeScript] A2UI Dynamic Schema renders hotel comparison surface", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph-typescript/feature/a2ui_dynamic_schema");
 
@@ -25,10 +27,14 @@ test("[LangGraph TypeScript] A2UI Dynamic Schema renders hotel comparison surfac
   // Verify star ratings rendered (HotelCard renders numeric rating values)
   const surface = a2ui.surface("hotel-comparison");
   await expect(surface.getByText("4.8").first()).toBeVisible();
+  await eventTrace.expectJourney(
+    a2uiDynamicSchemaEventTrace.a2uiDynamicSchemaRendersHotelComparisonSurface,
+  );
 });
 
 test("[LangGraph TypeScript] A2UI Dynamic Schema renders product comparison surface", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph-typescript/feature/a2ui_dynamic_schema");
 
@@ -47,10 +53,14 @@ test("[LangGraph TypeScript] A2UI Dynamic Schema renders product comparison surf
     "$549",
     "$429",
   ]);
+  await eventTrace.expectJourney(
+    a2uiDynamicSchemaEventTrace.a2uiDynamicSchemaRendersProductComparisonSurface,
+  );
 });
 
 test("[LangGraph TypeScript] A2UI Dynamic Schema renders team roster surface", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph-typescript/feature/a2ui_dynamic_schema");
 
@@ -69,4 +79,7 @@ test("[LangGraph TypeScript] A2UI Dynamic Schema renders team roster surface", a
     "Engineering Lead",
     "Product Designer",
   ]);
+  await eventTrace.expectJourney(
+    a2uiDynamicSchemaEventTrace.a2uiDynamicSchemaRendersTeamRosterSurface,
+  );
 });
