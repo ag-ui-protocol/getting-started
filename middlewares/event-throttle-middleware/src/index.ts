@@ -83,13 +83,28 @@ function mergeChunkMetadata(
   return { ...previous, ...next };
 }
 
+/**
+ * The owner segment of a coalescence key. Chunks are only merged within one
+ * subagent lane: coalescing across owners would erase the ownership
+ * contradiction the client verifier exists to reject (same entity id, two
+ * owners) and silently merge their metadata. Absent attribution is a distinct
+ * lane from an explicit empty-string id, hence the marker prefix rather than
+ * `?? ""`. An untagged continuation therefore does not coalesce into its
+ * tagged opener — it still coalesces with its untagged neighbours, and the
+ * chunk transform resolves its owner from the opener downstream.
+ */
+function ownerSegment(event: BaseEvent): string {
+  const owner = (event as { subagentRunId?: string }).subagentRunId;
+  return owner === undefined ? "unowned" : `owner:${owner}`;
+}
+
 /** Return the coalescence key for a chunk event, or null if not coalescable. */
 function chunkKey(
   event: BaseEvent,
 ): string | null {
-  if (isTextChunk(event)) return event.messageId ? `text:${event.messageId}` : null;
-  if (isToolCallChunk(event)) return event.toolCallId ? `tool:${event.toolCallId}` : null;
-  if (isReasoningChunk(event)) return event.messageId ? `reasoning:${event.messageId}` : null;
+  if (isTextChunk(event)) return event.messageId ? `text:${ownerSegment(event)}:${event.messageId}` : null;
+  if (isToolCallChunk(event)) return event.toolCallId ? `tool:${ownerSegment(event)}:${event.toolCallId}` : null;
+  if (isReasoningChunk(event)) return event.messageId ? `reasoning:${ownerSegment(event)}:${event.messageId}` : null;
   return null;
 }
 

@@ -346,11 +346,17 @@ export const transformChunks =
             // `*_END` instead: `finalize` discards the events it creates, so the
             // last message of a stream would lose it.
             if (textMessageResult.length === 0 && messageChunkEvent.metadata !== undefined) {
+              // Attribution follows the same rule as the delta path above: the
+              // incoming chunk's tag first, the opener's owner as fallback —
+              // a metadata-only continuation is still the lane's event.
+              const metadataOwner =
+                messageChunkEvent.subagentRunId ?? textMessageFields!.subagentRunId;
               textMessageResult.push({
                 type: EventType.TEXT_MESSAGE_CONTENT,
                 messageId: textMessageFields!.messageId,
                 delta: "",
                 metadata: messageChunkEvent.metadata,
+                ...(metadataOwner !== undefined && { subagentRunId: metadataOwner }),
               } as TextMessageContentEvent);
             }
             return textMessageResult;
@@ -436,11 +442,15 @@ export const transformChunks =
 
             // Same as the text case above.
             if (toolMessageResult.length === 0 && toolCallChunkEvent.metadata !== undefined) {
+              // Same attribution rule as the args path above.
+              const metadataOwner =
+                toolCallChunkEvent.subagentRunId ?? toolCallFields!.subagentRunId;
               toolMessageResult.push({
                 type: EventType.TOOL_CALL_ARGS,
                 toolCallId: toolCallFields!.toolCallId,
                 delta: "",
                 metadata: toolCallChunkEvent.metadata,
+                ...(metadataOwner !== undefined && { subagentRunId: metadataOwner }),
               } as ToolCallArgsEvent);
             }
             return toolMessageResult;
@@ -524,11 +534,15 @@ export const transformChunks =
 
             // Same as the text case above.
             if (reasoningMessageResult.length === 0 && reasoningChunkEvent.metadata !== undefined) {
+              // Same attribution rule as the content path above.
+              const metadataOwner =
+                reasoningChunkEvent.subagentRunId ?? reasoningMessageFields!.subagentRunId;
               reasoningMessageResult.push({
                 type: EventType.REASONING_MESSAGE_CONTENT,
                 messageId: reasoningMessageFields!.messageId,
                 delta: "",
                 metadata: reasoningChunkEvent.metadata,
+                ...(metadataOwner !== undefined && { subagentRunId: metadataOwner }),
               } as ReasoningMessageContentEvent);
             }
             return reasoningMessageResult;

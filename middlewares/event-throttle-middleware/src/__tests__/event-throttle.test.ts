@@ -606,6 +606,106 @@ describe("EventThrottleMiddleware", () => {
   });
 });
 
+describe("subagent lanes never coalesce together", () => {
+  const taggedChunk = (messageId: string, delta: string, owner?: string, metadata?: unknown) =>
+    ev({
+      type: EventType.TEXT_MESSAGE_CHUNK,
+      messageId,
+      delta,
+      ...(owner !== undefined && { subagentRunId: owner }),
+      ...(metadata !== undefined && { metadata }),
+    });
+
+  // Reusing one entity id across owners is protocol-invalid; the client
+  // verifier exists to reject it. Coalescing across owners would erase the
+  // contradiction before the verifier ever sees it — and silently merge the
+  // two lanes' deltas and metadata into whichever owner came first.
+  it("preserves an ownership contradiction instead of merging it away", async () => {
+    const mw = new EventThrottleMiddleware({ intervalMs: 5000 });
+    const { agent, events, done } = setup(mw);
+
+    agent.subject.next(runStarted());
+    agent.subject.next(taggedChunk("m1", "A", "s1", { fromS1: true }));
+    agent.subject.next(taggedChunk("m1", "B", "s2", { fromS2: true }));
+    agent.subject.next(runFinished());
+    agent.subject.complete();
+
+    await done;
+
+    const chunks = events.filter((e) => e.type === EventType.TEXT_MESSAGE_CHUNK);
+    expect(chunks).toHaveLength(2);
+    expect((chunks[0] as any).subagentRunId).toBe("s1");
+    expect((chunks[0] as any).delta).toBe("A");
+    expect((chunks[0] as any).metadata).toEqual({ fromS1: true });
+    expect((chunks[1] as any).subagentRunId).toBe("s2");
+    expect((chunks[1] as any).delta).toBe("B");
+    expect((chunks[1] as any).metadata).toEqual({ fromS2: true });
+  });
+
+  it("still coalesces within one owner's lane", async () => {
+    const mw = new EventThrottleMiddleware({ intervalMs: 5000 });
+    const { agent, events, done } = setup(mw);
+
+    agent.subject.next(runStarted());
+    agent.subject.next(taggedChunk("m1", "A", "s1"));
+    agent.subject.next(taggedChunk("m1", "B", "s1", { finishReason: "stop" }));
+    agent.subject.next(runFinished());
+    agent.subject.complete();
+
+    await done;
+
+    const chunks = events.filter((e) => e.type === EventType.TEXT_MESSAGE_CHUNK);
+    expect(chunks).toHaveLength(1);
+    expect((chunks[0] as any).delta).toBe("AB");
+    expect((chunks[0] as any).subagentRunId).toBe("s1");
+    expect((chunks[0] as any).metadata).toEqual({ finishReason: "stop" });
+  });
+
+  it("does not merge an untagged chunk into a tagged opener", async () => {
+    // An untagged continuation is VALID (the opener owns it), but merging it
+    // into the tagged chunk would bake the opener's owner onto content the
+    // producer left untagged. It stays separate here; the chunk transform
+    // resolves its owner from the opener downstream.
+    const mw = new EventThrottleMiddleware({ intervalMs: 5000 });
+    const { agent, events, done } = setup(mw);
+
+    agent.subject.next(runStarted());
+    agent.subject.next(taggedChunk("m1", "A", "s1"));
+    agent.subject.next(taggedChunk("m1", "B"));
+    agent.subject.next(taggedChunk("m1", "C"));
+    agent.subject.next(runFinished());
+    agent.subject.complete();
+
+    await done;
+
+    const chunks = events.filter((e) => e.type === EventType.TEXT_MESSAGE_CHUNK);
+    expect(chunks).toHaveLength(2);
+    expect((chunks[0] as any).subagentRunId).toBe("s1");
+    expect((chunks[0] as any).delta).toBe("A");
+    // The two untagged continuations coalesce with each other.
+    expect((chunks[1] as any).subagentRunId).toBeUndefined();
+    expect((chunks[1] as any).delta).toBe("BC");
+  });
+
+  it("keeps an explicit empty-string owner distinct from absent attribution", async () => {
+    const mw = new EventThrottleMiddleware({ intervalMs: 5000 });
+    const { agent, events, done } = setup(mw);
+
+    agent.subject.next(runStarted());
+    agent.subject.next(taggedChunk("m1", "A", ""));
+    agent.subject.next(taggedChunk("m1", "B"));
+    agent.subject.next(runFinished());
+    agent.subject.complete();
+
+    await done;
+
+    const chunks = events.filter((e) => e.type === EventType.TEXT_MESSAGE_CHUNK);
+    expect(chunks).toHaveLength(2);
+    expect((chunks[0] as any).subagentRunId).toBe("");
+    expect((chunks[1] as any).subagentRunId).toBeUndefined();
+  });
+});
+
 describe("metadata across coalesced chunks", () => {
   // Coalescing keeps the first chunk's fields and concatenates deltas, which is
   // right for role/name/toolCallName — they only appear on the first chunk.
