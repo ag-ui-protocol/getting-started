@@ -20,6 +20,36 @@ class ConfiguredBaseModel(BaseModel):
     )
 
 
+Metadata = Dict[str, Any]
+
+AGUI_METADATA_KEY = "ag-ui"
+"""
+The key reserved for AG-UI's own use inside a metadata object. Every other key
+is user space.
+
+Reservation is by convention: nothing rejects a write to this key at runtime,
+because metadata is open by key and validating its shape would contradict that.
+"""
+
+
+class MetadataMixin(ConfiguredBaseModel):
+    """
+    Adds an optional metadata object.
+
+    Open by key — any JSON value is allowed under a key, including ``None``. A
+    ``None`` value under a key is meaningful data and is preserved.
+
+    The object itself is absent or a mapping, never ``None``. ``EventEncoder``
+    serializes with ``exclude_none=True``, so an absent object is omitted from
+    the wire rather than emitted as ``null``. Parsing is more forgiving than
+    that: an explicit ``null`` is read back as absent, which is what makes a
+    plain ``model_dump_json()`` — without ``exclude_none=True`` — round-trip.
+    The TypeScript schema does the same, for the same reason.
+    """
+
+    metadata: Optional[Metadata] = None
+
+
 class FunctionCall(ConfiguredBaseModel):
     """
     Name and arguments of a function call.
@@ -28,9 +58,13 @@ class FunctionCall(ConfiguredBaseModel):
     arguments: str
 
 
-class ToolCall(ConfiguredBaseModel):
+class ToolCall(MetadataMixin):
     """
     A tool call, modelled after OpenAI tool calls.
+
+    Carries its own metadata rather than folding into the assistant message that
+    owns it: several tool calls can share one parent, so merging them all into it
+    would make the result depend on their relative order.
     """
     id: str
     type: Literal["function"] = "function"  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -38,7 +72,7 @@ class ToolCall(ConfiguredBaseModel):
     encrypted_value: Optional[str] = None
 
 
-class BaseMessage(ConfiguredBaseModel):
+class BaseMessage(MetadataMixin):
     """
     A base message, modelled after OpenAI messages.
     """
@@ -190,7 +224,7 @@ class UserMessage(BaseMessage):
     content: Union[str, List[InputContent]]
 
 
-class ToolMessage(ConfiguredBaseModel):
+class ToolMessage(MetadataMixin):
     """
     A tool result message.
     """
@@ -203,7 +237,7 @@ class ToolMessage(ConfiguredBaseModel):
     subagent_run_id: Optional[str] = None
 
 
-class ActivityMessage(ConfiguredBaseModel):
+class ActivityMessage(MetadataMixin):
     """
     An activity progress message emitted between chat messages.
     """
@@ -215,7 +249,7 @@ class ActivityMessage(ConfiguredBaseModel):
     subagent_run_id: Optional[str] = None
 
 
-class ReasoningMessage(ConfiguredBaseModel):
+class ReasoningMessage(MetadataMixin):
     """
     A reasoning message containing the agent's internal reasoning process.
     """

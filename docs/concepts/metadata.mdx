@@ -1,0 +1,220 @@
+---
+title: "Metadata"
+description: "Attaching extra information to events, messages and tool calls"
+---
+
+Metadata is the sanctioned way to attach extra information to the protocol —
+token usage, a trace id, a finish reason, anything your application needs to
+carry alongside the conversation.
+
+Before it existed, producers hung undeclared properties off events and hoped
+consumers passed them through. That is why unknown properties reaching
+subscribers is removed in 1.0: metadata replaces it with something declared and
+typed that consumers are required to carry.
+
+## Where it lives
+
+Three places, all optional:
+
+| Carries `metadata` | Notes                                                                          |
+| ------------------ | ------------------------------------------------------------------------------ |
+| Every event        | Declared once on the base event, so all event types have it                    |
+| Every message      | All seven roles: developer, system, assistant, user, tool, activity, reasoning |
+| Every tool call    | A tool call is not a message — see [Tool calls](#tool-calls)                   |
+
+## Shape
+
+The object is **open by key**. Any JSON value is allowed under a key, including
+`null`. There is no schema for what you put in it.
+
+```typescript
+{
+  type: EventType.TEXT_MESSAGE_END,
+  messageId: "msg_123",
+  metadata: {
+    "ag-ui": { usage: { input: 1200, output: 340 } },
+    finishReason: "stop",
+    traceId: "abc-123",
+    retries: 0,
+    labels: ["experimental"]
+  }
+}
+```
+
+The object itself is either **absent or an object — never `null`**. An empty
+object is valid and means "nothing to say", which is the same as omitting it.
+
+<Note>
+  Producers must not emit `"metadata": null`. Consumers are more forgiving and
+  read it as absent, because some serializers emit `null` for any unset optional
+  field — Pydantic's `model_dump_json()` does this without `exclude_none=True`.
+  Note the asymmetry: a `null` **value under a key** is meaningful data and is
+  always preserved. Only a `null` standing in for the whole object is ignored.
+</Note>
+
+## The reserved key
+
+The `ag-ui` key is reserved for AG-UI's own use. Every other key is yours.
+
+Nothing rejects a write to `ag-ui` at runtime — enforcing it would contradict
+the open-by-key rule — but treat it as off limits, since AG-UI may put its own
+values there in future versions.
+
+## Merging into messages
+
+A message is assembled from a sequence of events, and the interesting values are
+only known at the end: a provider does not know its token usage until it has
+finished generating. So consumers **merge each event's metadata into the message
+that event builds**, as the sequence arrives.
+
+This describes clients that assemble messages from the stream, such as the
+TypeScript client. The .NET client does not assemble AG-UI messages — see the
+SDK notes below.
+
+The rule is last write wins, key by key:
+
+```typescript
+// TEXT_MESSAGE_START    metadata: { source: "openai", stage: "start" }
+// TEXT_MESSAGE_CONTENT  metadata: { stage: "content" }
+// TEXT_MESSAGE_END      metadata: { stage: "end", usage: { output: 340 } }
+
+message.metadata
+// { source: "openai", stage: "end", usage: { output: 340 } }
+```
+
+`source` survived because nothing later set it. `stage` ended on the last value
+written. `usage` arrived only at the end, which is the whole point.
+
+### Values are replaced, never blended
+
+Merging never recurses. A key holding an array or an object is replaced whole:
+
+```typescript
+// earlier: { tags: ["a", "b", "c"] }
+// later:   { tags: ["z"] }
+// result:  { tags: ["z"] }        not ["a", "b", "c", "z"]
+```
+
+This holds under `ag-ui` too. If you need to add to a nested structure, send the
+complete new value.
+
+### What does not merge
+
+Metadata on an event that does not build a message stays on that event and never
+reaches one:
+
+- `RUN_STARTED`, `RUN_FINISHED`, `RUN_ERROR`
+- `STEP_STARTED`, `STEP_FINISHED`
+- `STATE_SNAPSHOT`, `STATE_DELTA`
+- `RAW`, `CUSTOM`
+- `REASONING_START`, `REASONING_END`, `REASONING_ENCRYPTED_VALUE`
+
+`MESSAGES_SNAPSHOT` is a special case: the messages inside it carry their own
+metadata and arrive with it already attached, so the event's own metadata is not
+merged into any of them.
+
+<Tip>
+  Putting run-level totals on `RUN_FINISHED` is fine and often right — just read
+  them from the event rather than expecting them on a message. If you want them
+  on a specific message, send them on that message's `*_END` event.
+</Tip>
+
+## Tool calls
+
+Tool call events — `TOOL_CALL_START`, `TOOL_CALL_ARGS`, `TOOL_CALL_END` — merge
+into the **tool call**, not into the assistant message that owns it.
+
+```typescript
+assistantMessage.toolCalls[0].metadata
+// { provider: "anthropic", latencyMs: 84 }
+```
+
+The reason is that several tool calls can share one parent assistant message.
+Folding all of their metadata into that parent would make the result depend on
+the order the calls happened to interleave — and stream transforms are allowed
+to change that order. Giving each tool call its own metadata removes the shared
+destination, so the outcome is the same however the stream is processed.
+
+`TOOL_CALL_RESULT` is different: it creates a tool message, so its metadata
+merges into that message like any other message-building event.
+
+## Transports
+
+Over JSON — which is what SSE carries, and what every SDK reads and writes —
+metadata is a plain object, and every value shape round-trips exactly: nulls,
+arrays, nested objects, strings and numbers.
+
+The binary protobuf format carries it as a `google.protobuf.Struct`, whose value
+type has a real null case, so a `null` under a key is preserved rather than
+approximated and an absent object stays distinguishable from an empty one. Two
+caveats apply there, and neither is specific to metadata:
+
+- **Not every event has a protobuf representation.** The wire format covers a
+  subset of the event types — the tool result, activity, reasoning and
+  deprecated thinking events have no protobuf message, so they cannot cross that
+  transport at all, with or without metadata. The .NET encoder rejects them
+  outright; the TypeScript encoder produces an empty payload that decoding then
+  rejects. Either way the event does not arrive, so do not rely on the binary
+  transport for those events.
+- **Numbers are IEEE-754 doubles.** `google.protobuf.Value` models every number
+  as a double, so integers beyond 2^53 lose precision on the round trip. This is
+  a property of the format and applies to `state` and every other dynamic
+  payload equally.
+
+Byte-for-byte output is not guaranteed between encoders: `Struct` is a
+`map<string, Value>`, and protobuf map entry ordering is not canonical. What is
+guaranteed is that both sides decode to the same value. In practice the
+TypeScript and .NET encoders do emit identical bytes for every fixture in the
+cross-language suite, which is asserted there, but do not depend on it.
+
+## SDK reference
+
+<Note>
+  Metadata is open by key in every SDK, so the type is deliberately permissive.
+  It is your responsibility to keep the contents JSON-serializable — a function
+  or a `bigint` will be accepted at the type level and then fail when encoded.
+</Note>
+
+**TypeScript** — `metadata?: Record<string, any>` on events, messages and tool
+calls. `mergeMetadata(existing, incoming)` is exported from `@ag-ui/core` if you
+are assembling messages yourself, along with `AGUI_METADATA_KEY` for the
+reserved key.
+
+**Python** — `metadata: Optional[Dict[str, Any]]`. `EventEncoder` serializes
+with `exclude_none=True`, so an absent object is omitted rather than emitted as
+`null`. `Metadata` and `AGUI_METADATA_KEY` are exported from `ag_ui.core`.
+
+**.NET** — `JsonElement? Metadata` on `BaseEvent`, `AGUIMessage` and
+`AGUIToolCall`, with `AGUIMetadata.ReservedKey` for the reserved key.
+
+It is a **wire-level field**. It round-trips faithfully through JSON and
+protobuf, so a server reading `RunAgentInput` or a client decoding the stream
+sees it intact, and `AGUIMessage.Metadata` carries it on messages inside a
+`MESSAGES_SNAPSHOT`. It is deliberately not surfaced on
+`Microsoft.Extensions.AI`'s `ChatMessage`, matching how `encryptedValue` and
+`AGUIToolMessage.Error` already behave.
+
+If you consume the stream through `AGUIChatClient`, note what that means in
+practice: `EventStreamConverter` emits no `ChatResponseUpdate` for
+`TEXT_MESSAGE_START`, `TEXT_MESSAGE_END`, `TOOL_CALL_START` or `TOOL_CALL_ARGS`,
+so metadata on those events — including usage placed on `TEXT_MESSAGE_END` as
+recommended above — does not reach a `RawRepresentation` either. Read it from
+the raw event stream rather than from the high-level chat client.
+
+## Compaction
+
+`compactEvents` in the TypeScript client squashes a run of streaming events into
+fewer events for storage or replay, deliberately reordering them so each
+stream's events stay together.
+
+Metadata adds no new order sensitivity of its own: every merge destination is
+unique — each message has its own, and each tool call carries its own rather
+than folding into a parent it may share — so two events that merge into the same
+target are never reordered relative to each other.
+
+Compaction's reordering is not semantics-preserving in general, though, and that
+predates metadata. An event that interrupts a stream is emitted after it, so a
+`MESSAGES_SNAPSHOT` arriving mid-message is replayed after that message's own
+events and overwrites what they produced — the appended content just as much as
+the merged metadata. If you rely on exact replay equivalence, avoid interleaving
+snapshots with an open stream.

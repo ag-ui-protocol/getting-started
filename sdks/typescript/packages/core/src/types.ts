@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OptionalMetadataSchema } from "./metadata";
 
 export const FunctionCallSchema = z.object({
   name: z.string(),
@@ -10,6 +11,12 @@ export const ToolCallSchema = z.object({
   type: z.literal("function"),
   function: FunctionCallSchema,
   encryptedValue: z.string().optional(),
+  // A tool call is not a message, so it carries its own metadata rather than
+  // folding into the assistant message that owns it. Several tool calls can
+  // share one parent, and merging them all into it would make the result depend
+  // on their relative order — which stream transforms like `compactEvents` are
+  // free to change.
+  metadata: OptionalMetadataSchema,
 });
 
 export const BaseMessageSchema = z.object({
@@ -19,6 +26,7 @@ export const BaseMessageSchema = z.object({
   name: z.string().optional(),
   encryptedValue: z.string().optional(),
   subagentRunId: z.string().optional(),
+  metadata: OptionalMetadataSchema,
 });
 
 export const TextInputContentSchema = z.object({
@@ -136,6 +144,8 @@ export const UserMessageSchema = BaseMessageSchema.extend({
   content: z.union([z.string(), z.array(InputContentSchema)]),
 });
 
+// The three schemas below stand alone rather than extending BaseMessageSchema,
+// so each declares `metadata` itself.
 export const ToolMessageSchema = z.object({
   id: z.string(),
   content: z.string(),
@@ -144,6 +154,7 @@ export const ToolMessageSchema = z.object({
   error: z.string().optional(),
   encryptedValue: z.string().optional(),
   subagentRunId: z.string().optional(),
+  metadata: OptionalMetadataSchema,
 });
 
 export const ActivityMessageSchema = z.object({
@@ -152,6 +163,7 @@ export const ActivityMessageSchema = z.object({
   activityType: z.string(),
   content: z.record(z.any()),
   subagentRunId: z.string().optional(),
+  metadata: OptionalMetadataSchema,
 });
 
 export const ReasoningMessageSchema = z.object({
@@ -160,6 +172,7 @@ export const ReasoningMessageSchema = z.object({
   content: z.string(),
   encryptedValue: z.string().optional(),
   subagentRunId: z.string().optional(),
+  metadata: OptionalMetadataSchema,
 });
 
 export const MessageSchema = z.discriminatedUnion("role", [

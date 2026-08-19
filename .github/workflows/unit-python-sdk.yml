@@ -470,6 +470,77 @@ jobs:
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         uses: ./.github/actions/assert-lockfiles-unchanged
 
+  # The locked lane above installs whatever uv.lock resolves, which is well above
+  # the floor pyproject.toml declares. That leaves the declared minimum asserted by
+  # nothing, and a floor nobody runs is a support claim nobody has checked.
+  #
+  # This lane installs the floor itself. It reads the version out of the manifest
+  # rather than repeating it, so raising the declared minimum moves this lane with
+  # it and the two cannot drift apart.
+  aws-strands-python-declared-floor:
+    name: aws-strands-python-declared-floor
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        # id so the lockfile assertion below can gate on this step's outcome. See
+        # that step for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Read the declared strands-agents floor
+        id: floor
+        working-directory: integrations/aws-strands/python
+        run: |
+          set -euo pipefail
+          floor=$(grep -oE '"strands-agents>=[0-9]+(\.[0-9]+)*"' pyproject.toml \
+            | grep -oE '[0-9]+(\.[0-9]+)*')
+          if [ -z "$floor" ]; then
+            echo "::error::No \`strands-agents>=\` floor found in pyproject.toml." \
+                 "This lane exists to test that floor, so it must not pass without one."
+            exit 1
+          fi
+          echo "version=$floor" >> "$GITHUB_OUTPUT"
+          echo "Declared floor: strands-agents==$floor"
+
+      - name: Install dependencies
+        working-directory: integrations/aws-strands/python
+        run: uv sync --locked
+
+      - name: Downgrade to the declared floor
+        working-directory: integrations/aws-strands/python
+        # The floor reaches the shell through the environment, not through template
+        # expansion. The value is read out of a file in the repository, so on a fork
+        # PR it is attacker-controllable, and expanding it inline would splice that
+        # content into the script itself.
+        env:
+          STRANDS_FLOOR: ${{ steps.floor.outputs.version }}
+        run: |
+          set -euo pipefail
+          uv pip install "strands-agents==${STRANDS_FLOOR}"
+          uv run --no-sync python -c \
+            "import importlib.metadata as m; print('strands-agents', m.version('strands-agents'))"
+
+      - name: Run tests at the declared floor
+        working-directory: integrations/aws-strands/python
+        run: uv run --no-sync python -m pytest tests/ -v
+
+      - name: Assert no lockfile was rewritten
+        # Same reasoning as the locked lane: this must run even when the tests fail,
+        # or a run that rewrote a lockfile and then went red would report only the
+        # test failure and lose this signal.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
+
+
   langroid-python:
     runs-on: ubuntu-latest
 

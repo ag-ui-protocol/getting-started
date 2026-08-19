@@ -922,3 +922,11 @@ AGUI.Abstractions.RunErrorEvent.Usage.get -> System.Collections.Generic.IList<AG
 AGUI.Abstractions.RunErrorEvent.Usage.set -> void
 AGUI.Abstractions.AGUIJsonSerializerContext.TokenUsage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TokenUsage>
 AGUI.Abstractions.AGUIJsonSerializerContext.IListTokenUsage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.TokenUsage>>
+AGUI.Abstractions.AGUIMetadata
+const AGUI.Abstractions.AGUIMetadata.ReservedKey = "ag-ui" -> string!
+AGUI.Abstractions.BaseEvent.Metadata.get -> System.Text.Json.JsonElement?
+AGUI.Abstractions.BaseEvent.Metadata.set -> void
+AGUI.Abstractions.AGUIMessage.Metadata.get -> System.Text.Json.JsonElement?
+AGUI.Abstractions.AGUIMessage.Metadata.set -> void
+AGUI.Abstractions.AGUIToolCall.Metadata.get -> System.Text.Json.JsonElement?
+AGUI.Abstractions.AGUIToolCall.Metadata.set -> void

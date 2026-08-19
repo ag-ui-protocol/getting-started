@@ -64,15 +64,27 @@ var input = new RunAgentInput
 ## Message Types
 
 Messages form a closed hierarchy rooted at `AGUIMessage`. The base type carries
-only the fields shared by every role: `Id` and `Role`. Role-specific properties
-such as `content`, `name`, `encryptedValue`, `toolCalls`, and `toolCallId` are
-declared on the sealed role classes.
+only the fields shared by every role: `Id`, `Role` and `Metadata`. Role-specific
+properties such as `content`, `name`, `encryptedValue`, `toolCalls`, and
+`toolCallId` are declared on the sealed role classes.
+
+<Note>
+  `Metadata` (`JsonElement?`, JSON field `metadata`) is carried by every message
+  role and by `AGUIToolCall`, and is omitted from the tables below for brevity.
+  It is open by key — any JSON value is allowed under a key, including `null` —
+  and the object itself may be absent but is never `null`.
+  `AGUIMetadata.ReservedKey` (`"ag-ui"`) is reserved for AG-UI's own use.
+  Metadata accumulates as a message is built from its events, and tool call
+  events accumulate onto the tool call itself; see
+  [Metadata](/concepts/metadata) for the merge rules.
+</Note>
 
 ```csharp
 public abstract class AGUIMessage
 {
     public string? Id { get; set; } // "id"
     public abstract string Role { get; } // "role"
+    public JsonElement? Metadata { get; set; } // "metadata"
 }
 ```
 

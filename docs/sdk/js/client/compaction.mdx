@@ -67,6 +67,25 @@ Tool call compaction works analogously for `TOOL_CALL_ARGS` chunks.
 - Preparing snapshots for analytics or export
 - Reducing noise in tests or debugging output
 
+## Metadata
+
+Collapsing a run of delta events also folds their
+[metadata](/concepts/metadata), key by key with the last write winning, so a
+compacted stream produces the same metadata as the original. Metadata that
+arrives after the first delta — from later deltas and from a replayed start
+alike — rides the collapsed event in arrival order, because compaction emits
+the start ahead of it.
+
+Compaction reorders events so each stream's events stay together, and that
+reordering is not semantics-preserving in general. Two parallel tool calls
+whose ends arrive in the opposite order to their starts end up swapped in the
+assistant message's `toolCalls` array, each still carrying its own metadata.
+More significantly, an event that interrupts a stream is emitted after it, so a
+`MESSAGES_SNAPSHOT` arriving mid-message is replayed after that message's own
+events and overwrites what they produced — the appended content as much as the
+merged metadata. Avoid interleaving snapshots with an open stream if you rely
+on exact replay equivalence.
+
 ## Notes & limitations
 
 - This utility focuses on message and tool‑call streams. It does not modify

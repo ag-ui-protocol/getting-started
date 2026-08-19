@@ -49,6 +49,16 @@ type RunAgentInput = {
 The SDK includes several message types that represent different kinds of
 messages in the system.
 
+<Note>
+  Every message type carries an optional `metadata` object
+  (`Record<string, any>`), and so does `ToolCall`. Both are omitted from the
+  per-type tables below for brevity.
+  It is open by key — any JSON value is allowed under a key, including `null` —
+  and the object itself may be absent but is never `null`. The `ag-ui` key is
+  reserved for AG-UI's own use. Metadata accumulates as a message is built from
+  its events; see [Metadata](/concepts/metadata) for the merge rules.
+</Note>
+
 ### Role
 
 Represents the possible roles a message sender can have.

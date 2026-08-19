@@ -17,7 +17,7 @@
     "paths": {
       "@/*": ["./src/*"]
     },
-    "types": ["node"],
+    "types": ["node", "vitest/globals"],
     "stripInternal": true
   },
   "include": ["src/**/*"],

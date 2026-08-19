@@ -1,6 +1,9 @@
 // Export all base types and schemas
 export * from "./types";
 
+// Export metadata schema, merge primitive and the reserved key
+export * from "./metadata";
+
 // Export all capability-related types and schemas
 export {
   SubAgentInfoSchema,

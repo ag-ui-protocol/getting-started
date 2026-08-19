@@ -13,7 +13,7 @@
     "start": "nx run-many -t start",
     "lint": "nx run-many -t lint",
     "format": "prettier --write \"**/*.{ts,tsx,md,mdx}\"",
-    "check-types": "nx run-many -t check-types",
+    "check-types": "node ./scripts/check-types.mjs",
     "test": "nx run-many -t test",
     "test:coverage": "nx run-many -t test:coverage",
     "test:watch": "nx run-many -t test && nx watch --all -- nx run-many -t test",

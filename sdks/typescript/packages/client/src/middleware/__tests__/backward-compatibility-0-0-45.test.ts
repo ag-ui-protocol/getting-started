@@ -211,7 +211,7 @@ describe("BackwardCompatibility_0_0_45 (browser environment)", () => {
       const events: BaseEvent[] = [{ type: THINKING_START as EventType, title: "Processing..." }];
       const agent = new MockAgent(events);
 
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation();
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const result = await lastValueFrom(
         middleware.run(
           {

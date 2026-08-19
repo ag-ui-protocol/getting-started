@@ -52,6 +52,7 @@ public abstract class BaseEvent
     public abstract string Type { get; } // "type"
     public long? Timestamp { get; set; } // "timestamp"
     public JsonElement? RawEvent { get; set; } // "rawEvent"
+    public JsonElement? Metadata { get; set; } // "metadata"
 }
 ```
 
@@ -60,6 +61,13 @@ public abstract class BaseEvent
 | `Type` | `type` | `string` | Event discriminator |
 | `Timestamp` | `timestamp` | `long?` | Optional event timestamp |
 | `RawEvent` | `rawEvent` | `JsonElement?` | Optional original event data |
+| `Metadata`  | `metadata`  | `JsonElement?` | Optional extra information, open by key |
+
+`Metadata` is open by key: any JSON value is allowed under a key, including
+`null`. The object may be absent, but a present one is never `null` — an
+explicit `null` is read back as absent, and an absent object is omitted from the
+wire rather than serialized as `null`. `AGUIMetadata.ReservedKey` (`"ag-ui"`) is
+reserved for AG-UI's own use.
 
 ## Lifecycle Events
 

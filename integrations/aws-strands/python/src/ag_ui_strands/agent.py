@@ -1698,6 +1698,10 @@ class StrandsAgent:
             # ``{"result": ...}`` stream event). Used after the loop to detect a
             # native interrupt pause (``stop_reason == "interrupt"``).
             terminal_result = None
+            # ``force_stop`` is an abnormal terminal signal. Keep consuming the
+            # stream so Strands can unwind and raise its underlying exception,
+            # then translate the failure into AG-UI's terminal error event.
+            force_stop_error: str | None = None
             pending_interrupt_outcome: RunFinishedInterruptOutcome | None = None
 
             # Reasoning/thinking state tracking
@@ -2032,16 +2036,54 @@ class StrandsAgent:
                     # Skip lifecycle events
                     if event.get("init_event_loop") or event.get("start_event_loop"):
                         continue
-                    if event.get("complete") or event.get("force_stop"):
-                        logger.debug(
-                            f"Breaking event stream: received complete or force_stop event (thread_id={input_data.thread_id}, complete={event.get('complete')}, force_stop={event.get('force_stop')})"
+                    # ``force_stop`` means Strands caught an exception mid-cycle.
+                    # It is a failed run, not assistant-authored content or a
+                    # successful finish. Continue once more so Strands can raise
+                    # the underlying exception and unwind the generator cleanly.
+                    if event.get("force_stop"):
+                        raw_reason = str(event.get("force_stop_reason", "")).strip()
+                        force_stop_error = (
+                            raw_reason or "The Strands agent stopped unexpectedly."
                         )
-                        # Generator will end naturally, no need to break
+                        logger.error(
+                            "Agent stream force-stopped (thread_id=%s, reason=%s)",
+                            input_data.thread_id,
+                            force_stop_error,
+                        )
+                        continue
+
+                    # Legacy terminator from pre-typed-events Strands.
+                    if event.get("complete"):
+                        logger.debug(
+                            f"Breaking event stream: complete received (thread_id={input_data.thread_id})"
+                        )
                         break
 
-                    # The terminal result is handled after the stream so the
-                    # live interrupt-state fallback remains available.
+                    # Modern Strands emits AgentResultEvent last. Consume the
+                    # generator to exhaustion after handling it so its cleanup
+                    # and trace finalizers run before AG-UI reports completion.
                     if "result" in event:
+                        result = event["result"]
+                        if result is not None:
+                            stop_reason = getattr(result, "stop_reason", None)
+                            logger.info(
+                                "agent_result: thread_id=%s stop_reason=%s",
+                                input_data.thread_id,
+                                stop_reason,
+                            )
+                            # Surface non-normal stops to the client as a CustomEvent
+                            # so a UI can render a hint (truncated / filtered / etc.).
+                            # end_turn and tool_use are the normal stops — no event.
+                            if stop_reason in (
+                                "max_tokens",
+                                "guardrail_intervened",
+                                "content_filtered",
+                            ):
+                                yield CustomEvent(
+                                    type=EventType.CUSTOM,
+                                    name="AgentStopped",
+                                    value={"stop_reason": stop_reason},
+                                )
                         continue  # never yield the raw result event
 
                     # Handle text streaming
@@ -3082,6 +3124,16 @@ class StrandsAgent:
                             tool_call_id=_fe_tool_use_id,
                         )
                     deferred_frontend_tool_ends = []
+            except Exception:
+                if force_stop_error is None:
+                    raise
+                # Strands normally raises immediately after ForceStopEvent.
+                # Keep it from bypassing message cleanup below, but preserve its
+                # traceback in case a distinct hook/finalizer failure occurred.
+                logger.exception(
+                    "Strands stream raised after force_stop (thread_id=%s)",
+                    input_data.thread_id,
+                )
             finally:
                 # Properly close the async generator to avoid context detachment errors
                 # The generator should complete naturally when we consume all events,
@@ -3160,6 +3212,14 @@ class StrandsAgent:
                         type=EventType.MESSAGES_SNAPSHOT,
                         messages=list(snapshot_messages),
                     )
+
+            if force_stop_error is not None:
+                yield RunErrorEvent(
+                    type=EventType.RUN_ERROR,
+                    message=force_stop_error,
+                    code="STRANDS_FORCE_STOP",
+                )
+                return
 
             # Streaming can create a mixed checkpoint that was not observable
             # during preflight. Do not advertise or finish it unless the same

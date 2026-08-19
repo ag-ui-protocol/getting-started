@@ -18,6 +18,7 @@ internal static class ProtoMessageMapper
         {
             Id = message.Id ?? string.Empty,
             Role = message.Role,
+            Metadata = ProtoValueConverter.ToStructOrNull(message.Metadata),
         };
 
         // Set once from the base rather than per role: attribution applies to every
@@ -116,16 +117,17 @@ internal static class ProtoMessageMapper
         // Applied here rather than inside each role branch below: the branches return
         // six different concrete types, so a per-branch assignment is six chances to
         // forget one and silently reparent that role's messages to the parent.
-        var message = FromProtoByRole(proto);
+        var message = FromProtoCore(proto);
         if (proto.HasSubagentRunId)
         {
             message.SubagentRunId = proto.SubagentRunId;
         }
 
+        message.Metadata = ProtoValueConverter.StructToJsonElementOrNull(proto.Metadata);
         return message;
     }
 
-    private static AGUIMessage FromProtoByRole(Proto.Message proto)
+    private static AGUIMessage FromProtoCore(Proto.Message proto)
     {
         var id = string.IsNullOrEmpty(proto.Id) ? null : proto.Id;
 
@@ -223,6 +225,7 @@ internal static class ProtoMessageMapper
         {
             Id = toolCall.Id,
             Type = toolCall.Type,
+            Metadata = ProtoValueConverter.ToStructOrNull(toolCall.Metadata),
             Function = new Proto.ToolCall.Types.Function
             {
                 Name = toolCall.Function.Name,
@@ -242,6 +245,7 @@ internal static class ProtoMessageMapper
                 Name = proto.Function?.Name ?? string.Empty,
                 Arguments = proto.Function?.Arguments ?? string.Empty,
             },
+            Metadata = ProtoValueConverter.StructToJsonElementOrNull(proto.Metadata),
         };
     }
 

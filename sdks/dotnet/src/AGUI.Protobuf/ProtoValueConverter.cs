@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json;
 using Google.Protobuf.WellKnownTypes;
 namespace AGUI.Protobuf;
@@ -75,6 +76,59 @@ internal static class ProtoValueConverter
         }
 
         return ToJsonElement(value);
+    }
+
+    /// <summary>
+    /// Converts a metadata object to the protobuf <c>Struct</c> the wire format
+    /// declares for it.
+    /// </summary>
+    /// <remarks>
+    /// An absent object, and a <see cref="JsonValueKind.Null"/> standing in for
+    /// one, both map to null — the same null-as-absent rule the TypeScript and
+    /// Python schemas apply.
+    ///
+    /// Anything else is a protocol violation: metadata is an object, and the
+    /// TypeScript and Python schemas reject a non-object at the parse boundary.
+    /// .NET types it as <see cref="JsonElement"/> and so cannot, but silently
+    /// dropping it here would make the value survive JSON and vanish over
+    /// protobuf — transport-dependent data loss. Fail loudly instead, the way
+    /// <c>ProtoEventMapper</c> already does for events the wire format cannot
+    /// represent.
+    /// </remarks>
+    /// <exception cref="NotSupportedException">
+    /// The metadata is present and is neither an object nor null.
+    /// </exception>
+    public static Struct? ToStructOrNull(JsonElement? element)
+    {
+        if (element is not { } value
+            || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        if (value.ValueKind is not JsonValueKind.Object)
+        {
+            throw new NotSupportedException(
+                $"Metadata must be a JSON object, but was '{value.ValueKind}'. "
+                + "An absent or null metadata object is allowed; any other value is not "
+                + "representable in the AG-UI protobuf wire format.");
+        }
+
+        return ToValue(value).StructValue;
+    }
+
+    /// <summary>
+    /// Converts a protobuf <c>Struct</c> back to a metadata object, or null
+    /// when the field was absent.
+    /// </summary>
+    public static JsonElement? StructToJsonElementOrNull(Struct? structValue)
+    {
+        if (structValue is null)
+        {
+            return null;
+        }
+
+        return ToJsonElement(new Value { StructValue = structValue });
     }
 
     public static void WriteValue(Utf8JsonWriter writer, Value value)
