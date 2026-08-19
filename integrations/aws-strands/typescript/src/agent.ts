@@ -4,10 +4,11 @@
  * Translates Strands streaming events into the AG-UI event protocol.
  */
 
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 
 import {
   Agent as StrandsAgentCore,
+  BeforeToolCallEvent,
   InterruptResponseContent,
   Message as StrandsMessage,
   SessionManager,
@@ -27,6 +28,7 @@ import {
   type AssistantMessage as AguiAssistantMessage,
   type BaseEvent,
   type Interrupt as AguiInterrupt,
+  InterruptSchema as AguiInterruptSchema,
   type Message as AguiMessage,
   type ResumeEntry,
   type RunAgentInput,
@@ -44,7 +46,7 @@ import {
   type ToolCallContext,
   type ToolResultContext,
 } from "./config";
-import { syncProxyTools } from "./client-proxy-tool";
+import { isProxyTool, syncProxyTools } from "./client-proxy-tool";
 import {
   planA2UIInjection,
   isAutoInjectedA2UITool,
@@ -204,6 +206,21 @@ function _coerceId(value: unknown): string {
 /** Extract a human-readable message from an unknown error. */
 function _errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Return native Strands interrupt IDs across SDK versions and test doubles.
+ *
+ * Strands' current InterruptState serializes `interrupts` as a Record, while
+ * older mocks used a Map. Supporting both keeps cold-start validation aligned
+ * with the state that SessionManager actually restores.
+ */
+function _nativeInterruptIds(interrupts: unknown): Set<string> {
+  if (interrupts instanceof Map) return new Set(interrupts.keys());
+  if (interrupts && typeof interrupts === "object") {
+    return new Set(Object.keys(interrupts));
+  }
+  return new Set();
 }
 
 /**
@@ -437,6 +454,13 @@ export interface StrandsAgentOptions {
    * orchestrator.
    */
   plugins?: Plugin[];
+  /**
+   * Optional external map for per-thread agent persistence. When provided,
+   * the adapter uses this map instead of an internal one — allowing agent
+   * instances (and their interrupt state) to survive across adapter
+   * re-instantiations (e.g. request-scoped wrappers in serverless runtimes).
+   */
+  agentsByThread?: Map<string, StrandsAgentCore>;
 }
 
 /** AWS Strands Agent wrapper for AG-UI integration. */
@@ -459,7 +483,7 @@ export class StrandsAgent {
    */
   private readonly _plugins: Plugin[];
 
-  private readonly _agentsByThread = new Map<string, StrandsAgentCore>();
+  private readonly _agentsByThread: Map<string, StrandsAgentCore>;
   private readonly _proxyToolNamesByThread = new Map<string, Set<string>>();
   /**
    * Guards first-time thread initialization. The sessionManagerProvider call
@@ -475,9 +499,11 @@ export class StrandsAgent {
    * TypeScript-only: the Python adapter has no equivalent guard.
    */
   private readonly _activeRunsByThread = new Set<string>();
-  /** Outstanding Strands interrupt IDs per thread, used to validate
-   * incoming `RunAgentInput.resume[]` (interrupts.mdx rule 4). */
-  private readonly _pendingInterruptsByThread = new Map<string, Set<string>>();
+  /** Outstanding AG-UI interrupt objects per thread, used to validate
+   * incoming `RunAgentInput.resume[]` (interrupts.mdx rules 3-7). */
+  private readonly _pendingInterruptsByThread = new Map<string, Map<string, AguiInterrupt>>();
+  /** Fingerprint of last successfully-processed resume per thread (idempotency). */
+  private readonly _lastResumeFingerprint = new Map<string, string>();
   /**
    * When non-null, the adapter bypasses per-thread cloning and invokes
    * the orchestrator directly. See `StrandsAgentOptions.agent`.
@@ -490,7 +516,9 @@ export class StrandsAgent {
   private readonly _log: Logger;
 
   constructor(options: StrandsAgentOptions) {
-    const { agent, name, description = "", config = {}, plugins } = options;
+    const { agent, name, description = "", config = {}, plugins, agentsByThread } = options;
+
+    this._agentsByThread = agentsByThread ?? new Map();
 
     // Detect a multi-agent orchestrator. Graph / Swarm expose `nodes` + `edges`
     // (Graph) or `nodes` + invoke semantics (Swarm) and have no `.model`
@@ -551,45 +579,383 @@ export class StrandsAgent {
     }
   }
 
+  /**
+   * Ensure a Strands agent exists for the given thread. Creates one if needed
+   * (including session manager initialization). Returns the agent or an error
+   * event to yield. Called from `run()`'s resume-validation gate on a cold
+   * start with a session provider (so SessionManager can restore
+   * `_interruptState` before validation runs), and again from
+   * `_runSingleAgent` for the actual run — the second call is a cache hit.
+   */
+  private async _ensureAgent(
+    inputData: RunAgentInput,
+    threadId: string,
+  ): Promise<{ agent: StrandsAgentCore } | { error: BaseEvent }> {
+    let strandsAgent = this._agentsByThread.get(threadId);
+    if (strandsAgent) return { agent: strandsAgent };
+
+    // Build seed outside the lock (may do async fetches for multimodal).
+    let seedMessages: AgentConfig["messages"] | undefined;
+    if (!this.config.sessionManagerProvider) {
+      try {
+        seedMessages = await buildStrandsSeed(
+          inputData.messages ?? [],
+          this._log,
+        );
+      } catch (e) {
+        this._log.error(
+          `${LOG_PREFIX} buildStrandsSeed failed for thread ${threadId}: ${_errorMessage(e)}`,
+          e,
+        );
+        return { error: _runError("Failed to build conversation seed: " + _errorMessage(e), "SEED_BUILD_ERROR") };
+      }
+    }
+
+    const release = await this._threadInitLock.acquire();
+    try {
+      strandsAgent = this._agentsByThread.get(threadId);
+      if (strandsAgent) return { agent: strandsAgent };
+
+      let sessionManager: SessionManager | null | undefined;
+      if (this.config.sessionManagerProvider) {
+        try {
+          sessionManager = (await maybeAwait(
+            this.config.sessionManagerProvider(inputData),
+          )) as SessionManager | null | undefined;
+        } catch (e) {
+          const msg = _errorMessage(e);
+          this._log.error(`${LOG_PREFIX} sessionManagerProvider failed: ${msg}`, e);
+          return { error: _runError(`Failed to initialize session manager: ${msg}`, "SESSION_MANAGER_ERROR") };
+        }
+        if (
+          sessionManager != null &&
+          !(sessionManager instanceof SessionManager) &&
+          typeof (sessionManager as { initAgent?: unknown }).initAgent !== "function"
+        ) {
+          const actual = (sessionManager as object)?.constructor?.name ?? typeof sessionManager;
+          this._log.error(`${LOG_PREFIX} sessionManagerProvider returned ${actual}; expected a SessionManager instance.`);
+          return { error: _runError(`sessionManagerProvider returned ${actual}; expected a SessionManager instance`, "SESSION_MANAGER_INVALID_TYPE") };
+        }
+        if (!sessionManager) {
+          this._log.warn(
+            `${LOG_PREFIX} sessionManagerProvider returned null/undefined for threadId=${threadId}; agent will run without session persistence`,
+          );
+        }
+      }
+      const effectiveSeed = sessionManager ? undefined : seedMessages;
+      strandsAgent = new StrandsAgentCore(
+        this._buildThreadAgentConfig(sessionManager ?? undefined, effectiveSeed),
+      );
+      // Register interruptOnCall hooks on the per-thread agent.
+      const behaviors = this.config.toolBehaviors;
+      if (behaviors) {
+        for (const [toolName, behavior] of Object.entries(behaviors)) {
+          if (behavior.interruptOnCall) {
+            strandsAgent.addHook(BeforeToolCallEvent, (event) => {
+              if (event.toolUse?.name === toolName) {
+                if (isProxyTool(event.tool)) {
+                  this._log.warn(
+                    `${LOG_PREFIX} interruptOnCall is ignored for client-provided tool "${toolName}"; gate execution in the client.`,
+                  );
+                  return;
+                }
+                const response = event.interrupt({
+                  name: `ag_ui:tool_call:${toolName}`,
+                  reason: { tool_call: true, tool_name: toolName, tool_input: event.toolUse!.input ?? {}, tool_use_id: event.toolUse!.toolUseId },
+                });
+                if (
+                  response == null ||
+                  typeof response !== "object" ||
+                  (response as Record<string, unknown>).approved !== true
+                ) {
+                  event.cancel = `User denied approval for '${toolName}'.`;
+                }
+              }
+            });
+          }
+        }
+      }
+      // SessionManager restores snapshots from its InitializedEvent hook. Run
+      // initialization now, before `run()` validates a cold-start resume;
+      // `stream()` otherwise initializes too late, after validation has
+      // rejected the restored interrupt IDs as unknown.
+      if (sessionManager) {
+        try {
+          const initialize = (
+            strandsAgent as unknown as { initialize?: () => Promise<void> }
+          ).initialize;
+          if (typeof initialize === "function") {
+            await initialize.call(strandsAgent);
+          }
+        } catch (e) {
+          const msg = _errorMessage(e);
+          this._log.error(
+            `${LOG_PREFIX} failed to initialize session manager for thread ${threadId}: ${msg}`,
+            e,
+          );
+          return {
+            error: _runError(
+              `Failed to initialize session manager: ${msg}`,
+              "SESSION_MANAGER_ERROR",
+            ),
+          };
+        }
+      }
+      this._agentsByThread.set(threadId, strandsAgent);
+      return { agent: strandsAgent };
+    } finally {
+      release();
+    }
+  }
+
   /** Run the Strands agent and yield AG-UI events. */
   async *run(inputData: RunAgentInput): AsyncGenerator<BaseEvent, void, void> {
     const threadId = inputData.threadId || "default";
     const hasResume =
       Array.isArray(inputData.resume) && inputData.resume.length > 0;
 
-    // interrupts.mdx rule 4: any resume[] entry referencing an unknown
-    // interruptId MUST produce RUN_ERROR. Known IDs flow through to
-    // `InterruptResponseContent[]`. Gated above `_runRaw` so subclasses
-    // that override only `_runRaw` still inherit the check.
+    // Computed during validation; stored only after successful processing.
+    let fingerprint: string | undefined;
+
+    // interrupts.mdx rules 2-7: validate resume entries against pending
+    // interrupts. Gated above `_runRaw` so subclasses that override only
+    // `_runRaw` still inherit the checks.
     if (hasResume) {
-      const pending = this._pendingInterruptsByThread.get(threadId);
-      const unknown = inputData
-        .resume!.map((entry) => entry.interruptId)
-        .filter((id) => !pending?.has(id));
-      if (unknown.length > 0) {
+      let pending = this._pendingInterruptsByThread.get(threadId);
+
+      // Rule 5: idempotency — detect replayed resumes
+      fingerprint = resumeFingerprint(inputData.resume!);
+
+      // Cold-restart fallback: if this process has nothing cached in memory
+      // for this threadId, restore the per-thread agent first (so a
+      // SessionManager-backed appState can be read), then check whether the
+      // fingerprint/pending-interrupt bookkeeping was persisted there by a
+      // prior process (see loadPersistedInterruptBookkeeping doc above).
+      // Also covers cold-restart resume validation (comment 1): the agent
+      // must be restored before deciding whether to skip validation.
+      let nativePendingIds: Set<string> | undefined;
+      if (
+        !pending &&
+        !this._lastResumeFingerprint.has(threadId) &&
+        this.config.sessionManagerProvider
+      ) {
+        const restored = await this._ensureAgent(inputData, threadId);
+        if ("error" in restored) {
+          yield _runStarted(inputData);
+          yield restored.error;
+          return;
+        }
+        const interruptState = (
+          restored.agent as unknown as {
+            _interruptState?: { activated?: boolean; interrupts?: unknown };
+          }
+        )._interruptState;
+        if (interruptState?.activated) {
+          nativePendingIds = _nativeInterruptIds(interruptState.interrupts);
+        }
+        const { pending: persistedPending, fingerprint: persistedFingerprint } =
+          loadPersistedInterruptBookkeeping(restored.agent);
+        if (persistedPending) {
+          this._pendingInterruptsByThread.set(threadId, persistedPending);
+        }
+        if (persistedFingerprint) {
+          this._lastResumeFingerprint.set(threadId, persistedFingerprint);
+        }
+        // Re-check the AG-UI-side map too: _ensureAgent may have raced with
+        // another call that populated it while we awaited.
+        pending = this._pendingInterruptsByThread.get(threadId);
+      }
+
+      if (this._lastResumeFingerprint.get(threadId) === fingerprint) {
+        yield _runStarted(inputData);
+        yield { type: EventType.RUN_FINISHED, threadId: inputData.threadId, runId: inputData.runId, outcome: { type: "success" } };
+        return;
+      }
+
+      if (!pending && !nativePendingIds) {
         yield _runStarted(inputData);
         yield _runError(
-          `This agent did not issue any interrupts to resume: ${unknown
-            .slice(0, 4)
-            .join(", ")}. ` +
-            "Resume entries must reference an outstanding interruptId.",
-          "UNKNOWN_INTERRUPT",
+          "No pending interrupts for this thread.",
+          "UNKNOWN_INTERRUPT_ID",
         );
         return;
       }
+
+      if (!pending && nativePendingIds) {
+        // Best-effort validation against the restored native interrupt IDs
+        // only (rules 2/3) — used when persisted AG-UI bookkeeping wasn't
+        // available (e.g. no sessionManagerProvider configured) but
+        // Strands' own native interrupt state was still restored.
+        const unknown = inputData
+          .resume!.map((entry) => entry.interruptId)
+          .filter((id) => !nativePendingIds!.has(id));
+        if (unknown.length > 0) {
+          yield _runStarted(inputData);
+          yield _runError(
+            `This agent did not issue any interrupts to resume: ${unknown
+              .slice(0, 4)
+              .join(", ")}. ` +
+              "Resume entries must reference an outstanding interruptId.",
+            "UNKNOWN_INTERRUPT_ID",
+          );
+          return;
+        }
+        const resumedIds = new Set(inputData.resume!.map((e) => e.interruptId));
+        const missing = [...nativePendingIds].filter((id) => !resumedIds.has(id));
+        if (missing.length > 0) {
+          yield _runStarted(inputData);
+          yield _runError(
+            `Partial resume: missing interrupt IDs: ${missing.join(", ")}. All open interrupts must be addressed.`,
+            "PARTIAL_RESUME",
+          );
+          return;
+        }
+      }
+
+      if (pending) {
+        // Rule 2: reject unknown interrupt IDs
+        const unknown = inputData
+          .resume!.map((entry) => entry.interruptId)
+          .filter((id) => !pending.has(id));
+        if (unknown.length > 0) {
+          yield _runStarted(inputData);
+          yield _runError(
+            `This agent did not issue any interrupts to resume: ${unknown
+              .slice(0, 4)
+              .join(", ")}. ` +
+              "Resume entries must reference an outstanding interruptId.",
+            "UNKNOWN_INTERRUPT_ID",
+          );
+          return;
+        }
+
+        // Rule 3: all open interrupts must be addressed
+        const resumedIds = new Set(inputData.resume!.map((e) => e.interruptId));
+        const missing = [...pending.keys()].filter((id) => !resumedIds.has(id));
+        if (missing.length > 0) {
+          yield _runStarted(inputData);
+          yield _runError(
+            `Partial resume: missing interrupt IDs: ${missing.join(", ")}. All open interrupts must be addressed.`,
+            "PARTIAL_RESUME",
+          );
+          return;
+        }
+
+        // Rule 7: expiresAt enforcement
+        for (const entry of inputData.resume!) {
+          const interrupt = pending.get(entry.interruptId)!;
+          if (interrupt.expiresAt && new Date() > new Date(interrupt.expiresAt)) {
+            yield _runStarted(inputData);
+            yield _runError(
+              `Interrupt '${entry.interruptId}' has expired.`,
+              "INTERRUPT_EXPIRED",
+            );
+            return;
+          }
+
+          // Rule 6: basic payload validation against responseSchema
+          if (entry.status === "resolved" && interrupt.responseSchema) {
+            const schema = interrupt.responseSchema as Record<string, unknown>;
+            if (schema.type === "object") {
+              if (typeof entry.payload !== "object" || entry.payload == null) {
+                yield _runStarted(inputData);
+                yield _runError(
+                  `Invalid payload for interrupt '${entry.interruptId}': expected an object.`,
+                  "INVALID_PAYLOAD",
+                );
+                return;
+              }
+              const required = schema.required as string[] | undefined;
+              if (Array.isArray(required)) {
+                const missingKeys = required.filter(
+                  (k) => !(k in (entry.payload as Record<string, unknown>)),
+                );
+                if (missingKeys.length > 0) {
+                  yield _runStarted(inputData);
+                  yield _runError(
+                    `Invalid payload for interrupt '${entry.interruptId}': missing required keys ${JSON.stringify(missingKeys)}.`,
+                    "INVALID_PAYLOAD",
+                  );
+                  return;
+                }
+              }
+              const typeError = validateObjectPayloadPropertyTypes(
+                schema,
+                entry.payload as Record<string, unknown>,
+              );
+              if (typeError) {
+                yield _runStarted(inputData);
+                yield _runError(
+                  `Invalid payload for interrupt '${entry.interruptId}': ${typeError}`,
+                  "INVALID_PAYLOAD",
+                );
+                return;
+              }
+            }
+          }
+        }
+      }
+
+      // fingerprint is stored after successful processing (below).
     } else {
-      // Non-resume run on this thread: any previously recorded interrupt
-      // IDs are stale (the client moved on instead of resuming). Drop them
-      // so a later replay/race cannot pass the resume[] gate above with a
-      // dead interruptId.
-      this._pendingInterruptsByThread.delete(threadId);
+      // Rule 4: pending interrupts block new input without resume.
+      // Per spec, clients must address all pending interrupts via resume[].
+      // To abandon interrupts, send resume with all entries status: "cancelled".
+      // Check both in-memory tracking AND the Strands agent's _interruptState
+      // (which SessionManager may have restored).
+      let hasPending = this._pendingInterruptsByThread.has(threadId);
+      if (!hasPending) {
+        const cached = this._agentsByThread.get(threadId);
+        if (cached) {
+          const is = (cached as { _interruptState?: { activated: boolean } })._interruptState;
+          if (is?.activated) hasPending = true;
+        } else if (this.config.sessionManagerProvider) {
+          // A cold process has no cached agent yet, but SessionManager may
+          // restore a native pending interrupt for this thread. Restore it
+          // before deciding whether new input may proceed (Rule 4).
+          const restored = await this._ensureAgent(inputData, threadId);
+          if ("error" in restored) {
+            yield _runStarted(inputData);
+            yield restored.error;
+            return;
+          }
+          const interruptState = (
+            restored.agent as { _interruptState?: { activated?: boolean } }
+          )._interruptState;
+          hasPending = interruptState?.activated === true;
+        }
+      }
+      if (hasPending) {
+        yield _runStarted(inputData);
+        yield _runError(
+          "Thread has pending interrupts. Include resume[] to address them.",
+          "PENDING_INTERRUPTS",
+        );
+        return;
+      }
     }
+    // Run the agent. Track whether an error was emitted so we only store
+    // the idempotency fingerprint after successful processing.
+    let hadError = false;
     const source = this._runRaw(inputData);
+    const tracked = (async function* () {
+      for await (const ev of source) {
+        if ((ev as { type: string }).type === EventType.RUN_ERROR) hadError = true;
+        yield ev;
+      }
+    })();
     if (this.config.emitChunkEvents) {
-      yield* collapseToChunkEvents(source);
-      return;
+      yield* collapseToChunkEvents(tracked);
+    } else {
+      yield* tracked;
     }
-    yield* source;
+    if (!hadError && fingerprint) {
+      this._lastResumeFingerprint.set(threadId, fingerprint);
+      const strandsAgent = this._agentsByThread.get(threadId);
+      if (strandsAgent) {
+        persistInterruptBookkeeping(strandsAgent, null, fingerprint, this._log);
+      }
+    }
   }
 
   protected async *_runRaw(
@@ -626,100 +992,13 @@ export class StrandsAgent {
   ): AsyncGenerator<BaseEvent, void, void> {
     yield _runStarted(inputData);
 
-    // Get or create agent instance for this thread. When a
-    // sessionManagerProvider is configured, the SessionManager handles
-    // conversation persistence; otherwise state is held in-memory per thread.
-    let strandsAgent = this._agentsByThread.get(threadId);
-    if (!strandsAgent) {
-      // Build the message-history seed BEFORE acquiring the global thread
-      // init lock. The seed helper may make async fetches for URL-based
-      // multimodal attachments; doing that inside the lock would serialise
-      // cold-cache initialisations for every OTHER thread behind one slow
-      // replay request. Skipped entirely when a SessionManager will own
-      // persistence.
-      let seedMessages: AgentConfig["messages"] | undefined;
-      if (!this.config.sessionManagerProvider) {
-        try {
-          seedMessages = await buildStrandsSeed(
-            inputData.messages ?? [],
-            this._log,
-          );
-        } catch (e) {
-          this._log.error(
-            `${LOG_PREFIX} buildStrandsSeed failed for thread ${threadId}: ${_errorMessage(e)}`,
-            e,
-          );
-          yield _runError(
-            "Failed to build conversation seed: " + _errorMessage(e),
-            "SEED_BUILD_ERROR",
-          );
-          return;
-        }
-      }
-
-      const release = await this._threadInitLock.acquire();
-      try {
-        // Double-check inside the lock: another coroutine may have completed
-        // initialization while we were waiting.
-        strandsAgent = this._agentsByThread.get(threadId);
-        if (!strandsAgent) {
-          let sessionManager: SessionManager | null | undefined;
-          if (this.config.sessionManagerProvider) {
-            try {
-              sessionManager = (await maybeAwait(
-                this.config.sessionManagerProvider(inputData),
-              )) as SessionManager | null | undefined;
-            } catch (e) {
-              const msg = _errorMessage(e);
-              this._log.error(
-                `${LOG_PREFIX} sessionManagerProvider failed: ${msg}`,
-                e,
-              );
-              yield _runError(
-                `Failed to initialize session manager: ${msg}`,
-                "SESSION_MANAGER_ERROR",
-              );
-              return;
-            }
-            if (
-              sessionManager != null &&
-              !(sessionManager instanceof SessionManager)
-            ) {
-              const actual =
-                (sessionManager as object)?.constructor?.name ??
-                typeof sessionManager;
-              this._log.error(
-                `${LOG_PREFIX} sessionManagerProvider returned ${actual}; expected a SessionManager instance.`,
-              );
-              yield _runError(
-                `sessionManagerProvider returned ${actual}; expected a SessionManager instance`,
-                "SESSION_MANAGER_INVALID_TYPE",
-              );
-              return;
-            }
-            if (!sessionManager) {
-              this._log.warn(
-                `${LOG_PREFIX} sessionManagerProvider returned null/undefined for threadId=${threadId}; ` +
-                  "agent will run without session persistence",
-              );
-            }
-          }
-          // If a SessionManager materialised, skip the pre-computed seed —
-          // the session owns persistence and seeding on top would duplicate
-          // turns.
-          const effectiveSeed = sessionManager ? undefined : seedMessages;
-          strandsAgent = new StrandsAgentCore(
-            this._buildThreadAgentConfig(
-              sessionManager ?? undefined,
-              effectiveSeed,
-            ),
-          );
-          this._agentsByThread.set(threadId, strandsAgent);
-        }
-      } finally {
-        release();
-      }
+    // Get or create agent instance for this thread.
+    const agentResult = await this._ensureAgent(inputData, threadId);
+    if ("error" in agentResult) {
+      yield agentResult.error;
+      return;
     }
+    const strandsAgent = agentResult.agent;
 
     // Sync proxy tools from client-defined tools.
     if (inputData.tools && inputData.tools.length > 0) {
@@ -999,6 +1278,36 @@ export class StrandsAgent {
       // filtered unknown IDs by this point.
       const resumeEntries = resolveResumeEntries(inputData);
       if (resumeEntries.length > 0) {
+        // Collect toolCallIds from resumed interrupts for Rule 8 suppression
+        const priorPending = this._pendingInterruptsByThread.get(threadId);
+        if (priorPending) {
+          for (const entry of resumeEntries) {
+            const interrupt = priorPending.get(entry.interruptId);
+            if (interrupt?.toolCallId) {
+              pendingToolResultIds.add(interrupt.toolCallId);
+            }
+          }
+          // Handle cancelled tool-bound interrupts: emit ToolCallResult immediately
+          for (const entry of resumeEntries) {
+            if (entry.status === "cancelled") {
+              const interrupt = priorPending.get(entry.interruptId);
+              if (interrupt?.toolCallId) {
+                yield {
+                  type: EventType.TOOL_CALL_RESULT,
+                  messageId: randomUUID(),
+                  toolCallId: interrupt.toolCallId,
+                  content: "Tool call cancelled by user.",
+                };
+              }
+            }
+          }
+          // Note: even when ALL entries are cancelled, we still forward the
+          // denial responses to Strands via stream() below rather than
+          // short-circuiting here. This ensures native interrupt-state
+          // cleanup, hooks, snapshots, and session persistence all run
+          // through Strands' normal completion path instead of being
+          // bypassed by a synthetic RUN_FINISHED.
+        }
         invokeArgs = resumeEntries.map(
           (entry) =>
             new InterruptResponseContent({
@@ -1007,6 +1316,7 @@ export class StrandsAgent {
             }),
         );
         this._pendingInterruptsByThread.delete(threadId);
+        persistInterruptBookkeeping(strandsAgent, null, null, this._log);
       }
       if (replayHistory && resumeEntries.length === 0) {
         const nativeHistory = await _buildStrandsHistory(
@@ -1792,7 +2102,25 @@ export class StrandsAgent {
           if (kind === "toolStreamEvent") {
             const stream = event as unknown as { data?: unknown };
             const data = stream.data;
-            if (data && typeof data === "object" && "state" in data) {
+            const tseToolName = currentToolUse?.name ?? "";
+            const tseToolUseId = currentToolUse?.toolUseId;
+            const tseBehavior = tseToolName ? this.config.toolBehaviors?.[tseToolName] : undefined;
+
+            if (tseToolUseId && tseBehavior?.toolStreamEventHandler) {
+              try {
+                for await (const ev of tseBehavior.toolStreamEventHandler({
+                  toolUseId: tseToolUseId,
+                  toolName: tseToolName,
+                  streamData: data,
+                })) {
+                  if (ev != null) yield ev;
+                }
+              } catch (e) {
+                this._log.warn(
+                  `${LOG_PREFIX} toolStreamEventHandler failed for ${tseToolName}: ${_errorMessage(e)}`,
+                );
+              }
+            } else if (data && typeof data === "object" && "state" in data) {
               yield {
                 type: EventType.STATE_SNAPSHOT,
                 snapshot: (data as { state: Record<string, unknown> }).state,
@@ -1932,20 +2260,41 @@ export class StrandsAgent {
 
       // Interrupt-variant RUN_FINISHED. The STATE_SNAPSHOT +
       // MESSAGES_SNAPSHOT above precede this per interrupts.mdx §"State at
-      // the interrupt boundary". IDs are recorded on
+      // the interrupt boundary". Full interrupt objects are recorded on
       // `_pendingInterruptsByThread` for the `run()` resume gate.
       if (finalAgentResult?.stopReason === "interrupt") {
         const strandsInterrupts = finalAgentResult.interrupts ?? [];
         if (strandsInterrupts.length > 0) {
-          const interruptIds = strandsInterrupts.map((i) => i.id);
-          this._pendingInterruptsByThread.set(threadId, new Set(interruptIds));
+          const aguiInterrupts = strandsInterrupts.map(strandsInterruptToAgui);
+          const interruptMap = new Map<string, AguiInterrupt>();
+          for (const i of aguiInterrupts) interruptMap.set(i.id, i);
+          this._pendingInterruptsByThread.set(threadId, interruptMap);
+          this._lastResumeFingerprint.delete(threadId);
+          persistInterruptBookkeeping(strandsAgent, interruptMap, null, this._log);
+          // Strands' default SessionManager saves at the completed-invocation
+          // boundary. An interrupt exits the native loop before that durable
+          // snapshot is guaranteed, so explicitly checkpoint the restored
+          // native interrupt state and our appState bookkeeping before telling
+          // the client it may resume after a process restart.
+          try {
+            await strandsAgent.sessionManager?.saveSnapshot({
+              target: strandsAgent,
+              isLatest: true,
+            });
+          } catch (e) {
+            // Persistence is a durability enhancement. A broken backing store
+            // must not turn a successfully-raised interrupt into a failed run.
+            this._log.warn(
+              `${LOG_PREFIX} Failed to persist interrupt snapshot: ${_errorMessage(e)}`,
+            );
+          }
           yield {
             type: EventType.RUN_FINISHED,
             threadId: inputData.threadId,
             runId: inputData.runId,
             outcome: {
               type: "interrupt",
-              interrupts: strandsInterrupts.map(strandsInterruptToAgui),
+              interrupts: aguiInterrupts,
             },
           };
           return;
@@ -2386,7 +2735,9 @@ export class StrandsAgent {
     if (t.systemPrompt !== undefined) cfg.systemPrompt = t.systemPrompt;
     if (t.name !== undefined) cfg.name = t.name;
     if (t.description !== undefined) cfg.description = t.description;
-    if (t.id !== undefined) cfg.id = t.id;
+    // Always set a stable id so SessionManager can locate snapshots after
+    // the in-memory agent cache is cleared (stateless resume / restart).
+    cfg.id = t.id ?? this.name;
     if (t.appState !== undefined) cfg.appState = t.appState;
     if (t.modelState !== undefined) cfg.modelState = t.modelState;
     if (t.traceAttributes !== undefined)
@@ -2451,24 +2802,169 @@ function toResumeResponse(entry: ResumeEntry): unknown {
   return entry.payload as unknown;
 }
 
+// ---------------------------------------------------------------------------
+// Interrupt bookkeeping persistence
+// ---------------------------------------------------------------------------
+//
+// `_pendingInterruptsByThread` and `_lastResumeFingerprint` are the
+// adapter's own bookkeeping (idempotency fingerprint + AG-UI-specific
+// interrupt metadata like responseSchema/expiresAt) layered on top of
+// Strands' native `_interruptState`. Strands' own SessionManager already
+// persists/restores `_interruptState`, but this adapter-only bookkeeping
+// lived purely in an in-process Map, so a process restart lost it: rules
+// 6/7 (payload-schema validation, expiresAt enforcement) would silently
+// degrade, and a replayed resume request would no longer be recognized as
+// a duplicate and could re-invoke the model/tool.
+//
+// To survive a restart, this bookkeeping is now mirrored into
+// `strandsAgent.appState` under a single namespaced key — the same
+// per-thread, SessionManager-persisted key-value store available on every
+// Strands `Agent`. On every read, if nothing is cached in-process for this
+// threadId, fall back to what's persisted in appState.
+
+const INTERRUPT_BOOKKEEPING_STATE_KEY = "ag_ui_interrupt_bookkeeping";
+
+interface PersistedInterruptBookkeeping {
+  lastResumeFingerprint: string | null;
+  pendingInterrupts: Record<string, unknown>;
+}
+
+/**
+ * Read the persisted (fingerprint, pending-interrupts) pair from
+ * `strandsAgent.appState`, if present and well-formed.
+ *
+ * Defensive by design: a test double (e.g. a bare stub standing in for the
+ * Strands agent) may not have a real `appState`, or `appState.get(...)`
+ * could return something unexpected — every layer of the expected shape is
+ * checked explicitly before trusting it. Anything that doesn't match is
+ * treated as "nothing persisted" rather than thrown.
+ */
+function loadPersistedInterruptBookkeeping(
+  strandsAgent: unknown,
+): { pending: Map<string, AguiInterrupt> | null; fingerprint: string | null } {
+  try {
+    const appState = (strandsAgent as { appState?: unknown })?.appState as
+      | { get?: (key: string) => unknown }
+      | undefined;
+    if (!appState || typeof appState.get !== "function") {
+      return { pending: null, fingerprint: null };
+    }
+    const raw = appState.get(INTERRUPT_BOOKKEEPING_STATE_KEY);
+    if (!raw || typeof raw !== "object") {
+      return { pending: null, fingerprint: null };
+    }
+    const data = raw as Partial<PersistedInterruptBookkeeping>;
+
+    const fingerprint =
+      typeof data.lastResumeFingerprint === "string"
+        ? data.lastResumeFingerprint
+        : null;
+
+    let pending: Map<string, AguiInterrupt> | null = null;
+    if (data.pendingInterrupts && typeof data.pendingInterrupts === "object") {
+      pending = new Map();
+      for (const [id, value] of Object.entries(data.pendingInterrupts)) {
+        const parsed = AguiInterruptSchema.safeParse(value);
+        if (parsed.success) {
+          pending.set(id, parsed.data);
+        }
+      }
+    }
+    return { pending, fingerprint };
+  } catch {
+    return { pending: null, fingerprint: null };
+  }
+}
+
+/**
+ * Write the (fingerprint, pending-interrupts) pair to `strandsAgent.appState`
+ * so it survives a process restart via whatever SessionManager is wired up.
+ * Best-effort: a test double without a real `appState.set(...)` must never
+ * break the run over bookkeeping that's a durability nice-to-have, not a
+ * correctness requirement for the current process.
+ */
+function persistInterruptBookkeeping(
+  strandsAgent: unknown,
+  pending: Map<string, AguiInterrupt> | null,
+  fingerprint: string | null,
+  log?: Logger,
+): void {
+  try {
+    const appState = (strandsAgent as { appState?: unknown })?.appState as
+      | { set?: (key: string, value: unknown) => void }
+      | undefined;
+    if (!appState || typeof appState.set !== "function") {
+      return;
+    }
+    const pendingInterrupts: Record<string, unknown> = {};
+    if (pending) {
+      for (const [id, interrupt] of pending) {
+        pendingInterrupts[id] = interrupt;
+      }
+    }
+    const payload: PersistedInterruptBookkeeping = {
+      lastResumeFingerprint: fingerprint,
+      pendingInterrupts,
+    };
+    appState.set(INTERRUPT_BOOKKEEPING_STATE_KEY, payload);
+  } catch (e) {
+    log?.warn(
+      `${LOG_PREFIX} Failed to persist interrupt bookkeeping to strandsAgent.appState: ${_errorMessage(e)}`,
+    );
+  }
+}
+
 /** Strands `Interrupt` → AG-UI `Interrupt`. */
 function strandsInterruptToAgui(interrupt: StrandsInterrupt): AguiInterrupt {
   const reasonRaw = interrupt.reason;
-  const reason =
-    typeof reasonRaw === "string" && reasonRaw.length > 0
-      ? reasonRaw
-      : "confirmation";
+  // Only interrupts raised by our own interruptOnCall hook (identified by
+  // the "ag_ui:tool_call:" name prefix it always uses) are tool-call
+  // approvals with the {tool_call, tool_name, tool_input, tool_use_id}
+  // reason shape. Any other interrupt — e.g. one a user's own tool or hook
+  // raises directly via event.interrupt() for a generic human-in-the-loop
+  // purpose — must stay generic: preserve its native name/reason payload
+  // rather than guessing tool-approval semantics out of an unrelated
+  // object.
+  const isToolApproval =
+    typeof interrupt.name === "string" &&
+    interrupt.name.startsWith("ag_ui:tool_call:");
+
+  if (!isToolApproval) {
+    const out: AguiInterrupt = {
+      id: interrupt.id,
+      reason: interrupt.name ?? "interrupt",
+    };
+    if (reasonRaw !== undefined && reasonRaw !== null) {
+      out.metadata = { reason: reasonRaw };
+    }
+    return out;
+  }
+
+  const reason = "tool_call";
   const out: AguiInterrupt = { id: interrupt.id, reason };
-  if (typeof reasonRaw === "string" && reasonRaw.length > 0) {
-    out.message = reasonRaw;
-  } else if (reasonRaw != null) {
-    try {
-      out.message = JSON.stringify(reasonRaw);
-    } catch {
-      // non-serializable reason; leave message unset
+  if (typeof reasonRaw === "object" && reasonRaw != null) {
+    const tn = (reasonRaw as Record<string, unknown>).tool_name;
+    if (typeof tn === "string") {
+      out.message = `Approve call to ${tn}?`;
     }
   }
-  out.metadata = { strandsName: interrupt.name };
+  // Extract toolCallId from reason object if available
+  if (typeof reasonRaw === "object" && reasonRaw != null) {
+    const toolUseId = (reasonRaw as Record<string, unknown>).tool_use_id;
+    if (typeof toolUseId === "string") out.toolCallId = toolUseId;
+  }
+  out.responseSchema = {
+    type: "object",
+    properties: { approved: { type: "boolean" } },
+    required: ["approved"],
+  };
+  const meta: Record<string, unknown> = { strandsName: interrupt.name };
+  if (typeof reasonRaw === "object" && reasonRaw != null) {
+    const r = reasonRaw as Record<string, unknown>;
+    if (r.tool_name) meta.tool_name = r.tool_name;
+    if (r.tool_input) meta.tool_input = r.tool_input;
+  }
+  out.metadata = meta;
   return out;
 }
 
@@ -2793,4 +3289,99 @@ export async function convertMessagesForStrandsSeed(
 
   flushToolResults();
   return out;
+}
+
+/** Recursively sort object keys for deterministic JSON serialization. */
+function _sortKeys(val: unknown): unknown {
+  if (val === null || typeof val !== "object") return val;
+  if (Array.isArray(val)) return val.map(_sortKeys);
+  return Object.keys(val as Record<string, unknown>)
+    .sort()
+    .reduce(
+      (acc, k) => {
+        acc[k] = _sortKeys((val as Record<string, unknown>)[k]);
+        return acc;
+      },
+      {} as Record<string, unknown>,
+    );
+}
+
+/**
+ * Canonicalize resume entries before hashing so a semantically identical
+ * resume[] replay is recognized regardless of the client's entry ordering.
+ */
+function resumeFingerprint(entries: ResumeEntry[]): string {
+  const canonicalEntries = entries
+    .map(
+      (entry) =>
+        [entry.interruptId, entry.status, _sortKeys(entry.payload)] as const,
+    )
+    .sort((left, right) =>
+      JSON.stringify(left).localeCompare(JSON.stringify(right)),
+    );
+
+  return createHash("md5")
+    .update(JSON.stringify(canonicalEntries))
+    .digest("hex");
+}
+
+/**
+ * Deliberately small JSON Schema validator for object-property primitive
+ * types. Required-field validation is handled by the caller; this only
+ * validates fields that the client supplied. It keeps the adapter dependency
+ * free while ensuring an approval schema rejects e.g. { approved: "true" }.
+ */
+function validateObjectPayloadPropertyTypes(
+  schema: Record<string, unknown>,
+  payload: Record<string, unknown>,
+): string | undefined {
+  const properties = schema.properties;
+  if (
+    !properties ||
+    typeof properties !== "object" ||
+    Array.isArray(properties)
+  ) {
+    return undefined;
+  }
+
+  for (const [field, fieldSchema] of Object.entries(
+    properties as Record<string, unknown>,
+  )) {
+    if (!(field in payload) || !fieldSchema || typeof fieldSchema !== "object") {
+      continue;
+    }
+    const type = (fieldSchema as { type?: unknown }).type;
+    if (typeof type !== "string" || jsonSchemaTypeMatches(payload[field], type)) {
+      continue;
+    }
+    return `field '${field}' must be ${jsonSchemaTypeDescription(type)}.`;
+  }
+
+  return undefined;
+}
+
+function jsonSchemaTypeMatches(value: unknown, type: string): boolean {
+  switch (type) {
+    case "boolean":
+      return typeof value === "boolean";
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "integer":
+      return typeof value === "number" && Number.isInteger(value);
+    case "object":
+      return value !== null && typeof value === "object" && !Array.isArray(value);
+    case "array":
+      return Array.isArray(value);
+    case "null":
+      return value === null;
+    default:
+      // Unsupported JSON Schema constructs remain the caller's responsibility.
+      return true;
+  }
+}
+
+function jsonSchemaTypeDescription(type: string): string {
+  return type === "object" || type === "array" ? `an ${type}` : `a ${type}`;
 }

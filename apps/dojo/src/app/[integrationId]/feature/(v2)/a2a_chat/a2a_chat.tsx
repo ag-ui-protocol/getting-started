@@ -49,21 +49,45 @@ interface Table {
   seats: Seat[];
 }
 
-const MaybeMessageToA2A = ({ status, args }: { status: string; args: { agentName: string; task: string }; result?: string }) => {
+/**
+ * `useRenderTool` passes `parameters` (not `args`) to its render callback, and
+ * types them as Partial while the call is still streaming in.
+ */
+interface A2AToolRenderProps {
+  status: string;
+  parameters: { agentName?: string; task?: string };
+  result?: string;
+}
+
+const MaybeMessageToA2A = ({ status, parameters }: A2AToolRenderProps) => {
   switch (status) {
     case "executing":
     case "complete":
-      return <Message from={"Agent"} to={args.agentName} message={args.task} color="green" />;
+      return (
+        <Message
+          from={"Agent"}
+          to={parameters.agentName ?? ""}
+          message={parameters.task ?? ""}
+          color="green"
+        />
+      );
     case "inProgress":
     default:
       return null;
   }
 };
 
-const MaybeMessageFromA2A = ({ status, args, result }: { status: string; args: { agentName: string; task: string }; result?: string }) => {
+const MaybeMessageFromA2A = ({ status, parameters, result }: A2AToolRenderProps) => {
   switch (status) {
     case "complete":
-      return <Message from={args.agentName} to={"Agent"} message={result || ""} color="blue" />;
+      return (
+        <Message
+          from={parameters.agentName ?? ""}
+          to={"Agent"}
+          message={result || ""}
+          color="blue"
+        />
+      );
     case "executing":
     case "inProgress":
     default:
@@ -138,7 +162,7 @@ const Chat = ({ onNotification }: { onNotification?: () => void }) => {
       agentName: z.string().describe("The name of the A2A agent to send the message to"),
       task: z.string().describe("The message to send to the A2A agent"),
     }),
-    render: (props: any) => {
+    render: (props) => {
       return (
         <>
           <MaybeMessageToA2A {...props} />
@@ -181,7 +205,7 @@ const Chat = ({ onNotification }: { onNotification?: () => void }) => {
             ),
           }),
         ).describe(`A JSON encoded array of tables. This is an example of the format: [{ "name": "Table 1", "seats": [{ "seatNumber": 1, "status": "available" }, { "seatNumber": 2, "status": "occupied", "name": "Alice" }] }, { "name": "Table 2", "seats": [{ "seatNumber": 1, "status": "available" }, { "seatNumber": 2, "status": "available" }] }, { "name": "Table 3", "seats": [{ "seatNumber": 1, "status": "occupied", "name": "Bob" }, { "seatNumber": 2, "status": "available" }] }]`),
-      }) as any,
+      }) as unknown as Parameters<typeof useHumanInTheLoop>[0]["parameters"],
 
       render({ args, respond }: { args: { tables?: Table[] }; respond?: (result: unknown) => Promise<void> }) {
         const availableSeats =

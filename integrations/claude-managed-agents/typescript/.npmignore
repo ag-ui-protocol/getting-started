@@ -1,0 +1,12 @@
+.nx
+.DS_Store
+.git
+.gitignore
+.idea
+.vscode
+.env
+__tests__
+src
+tsdown.config.ts
+tsconfig.json
+vitest.config.ts

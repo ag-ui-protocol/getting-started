@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { AbstractAgent } from "@/agent";
-import { BaseEvent, EventType, Message, RunAgentInput } from "@ag-ui/core";
+import { BaseEvent, EventType, RunAgentInput } from "@ag-ui/core";
 import { Observable, of, from } from "rxjs";
 import { BackwardCompatibility_0_0_45 } from "../backward-compatibility-0-0-45";
 import { describe } from "vitest";
@@ -211,7 +211,7 @@ describe("BackwardCompatibility_0_0_45 (browser environment)", () => {
       const events: BaseEvent[] = [{ type: THINKING_START as EventType, title: "Processing..." }];
       const agent = new MockAgent(events);
 
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation();
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const result = await lastValueFrom(
         middleware.run(
           {
@@ -272,7 +272,7 @@ describe("BackwardCompatibility_0_0_45 (auto insertion)", () => {
     }
 
     const agent = new LegacyThinkingAgent();
-    const { newMessages } = await agent.runAgent({
+    await agent.runAgent({
       runId: "run-1",
       tools: [],
       context: [],

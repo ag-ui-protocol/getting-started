@@ -47,6 +47,9 @@ export function convertAGUIMessageToLangChain(message: Message): BaseMessage {
     return new ToolMessage({
       content: message.content,
       tool_call_id: message.toolCallId,
+      // Carry the AG-UI failure signal onto LangChain's tool-result status, so a
+      // client-reported tool failure is not delivered to the model as a success.
+      status: message.error ? "error" : "success",
     });
   }
 

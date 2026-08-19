@@ -15,8 +15,6 @@ import {
   ToolCallStartEvent,
   ToolCallArgsEvent,
   ToolCallEndEvent,
-  StepStartedEvent,
-  StepFinishedEvent,
 } from "@ag-ui/core";
 
 describe("verifyEvents lifecycle", () => {
@@ -138,7 +136,6 @@ describe("verifyEvents lifecycle", () => {
   // Test: RUN_ERROR is allowed after RUN_FINISHED
   it("should allow RUN_ERROR after RUN_FINISHED", async () => {
     const source$ = new Subject<BaseEvent>();
-    const events: BaseEvent[] = [];
 
     // Set up subscription and collect events
     const promise = firstValueFrom(

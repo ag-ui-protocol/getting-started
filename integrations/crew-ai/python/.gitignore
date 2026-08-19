@@ -24,6 +24,9 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+# Build backends and their dependencies get fetched into the project dir often
+# enough that stray wheels here would otherwise show up as untracked.
+*.whl
 MANIFEST
 
 # PyInstaller
@@ -214,3 +217,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Mutation-suite backups. Written before a guard is neutralized and removed
+# after it is restored, so one on disk means a run was killed mid-mutation. The
+# next test run repairs the package from it and refuses to continue.
+*.mutation-backup

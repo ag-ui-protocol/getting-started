@@ -454,6 +454,7 @@ public sealed class AGUIChatClient : DelegatingChatClient
                             InterruptId = ir.RequestId,
                             Status = ResumeStatus.Resolved,
                             Payload = ir.Payload,
+                            Metadata = ir.Metadata,
                         });
                     }
 

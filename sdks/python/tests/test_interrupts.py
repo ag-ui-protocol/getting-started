@@ -75,6 +75,102 @@ class ResumeEntryTest(unittest.TestCase):
         self.assertEqual(r.status, "cancelled")
 
 
+class ResumeEntryMetadataTest(unittest.TestCase):
+    """
+    Metadata on a resume entry follows the same conventions as everywhere else:
+    open by key, any JSON value including None under a key, the object itself
+    absent or a mapping but never null on the wire.
+    """
+
+    # Every JSON shape the protocol promises survives a round trip.
+    VALUE_SHAPES = {
+        "nullValue": None,
+        "string": "afterModel-review",
+        "number": 42,
+        "float": 1.5,
+        "boolean": True,
+        "emptyArray": [],
+        "array": [1, "two", None, {"nested": True}],
+        "emptyObject": {},
+        "nested": {"signature": {"alg": "ed25519", "hash": "abc"}, "tags": ["a", "b"]},
+    }
+
+    def test_absent_by_default(self):
+        r = ResumeEntry(interrupt_id="int-1", status="resolved")
+        self.assertIsNone(r.metadata)
+
+    def test_json_round_trip_of_every_value_shape(self):
+        r = ResumeEntry(interrupt_id="int-1", status="resolved", metadata=self.VALUE_SHAPES)
+        restored = ResumeEntry.model_validate_json(r.model_dump_json(by_alias=True))
+        self.assertEqual(restored.metadata, self.VALUE_SHAPES)
+
+    def test_empty_object_round_trips_distinct_from_absent(self):
+        r = ResumeEntry(interrupt_id="int-1", status="resolved", metadata={})
+        restored = ResumeEntry.model_validate_json(r.model_dump_json(by_alias=True))
+        self.assertEqual(restored.metadata, {})
+
+    def test_explicit_null_reads_back_as_absent(self):
+        r = ResumeEntry.model_validate(
+            {"interruptId": "int-1", "status": "resolved", "metadata": None}
+        )
+        self.assertIsNone(r.metadata)
+
+    def test_plain_model_dump_json_round_trips(self):
+        # No exclude_none here — this is the shape integrations commonly emit.
+        original = ResumeEntry(interrupt_id="int-1", status="cancelled")
+        restored = ResumeEntry.model_validate_json(original.model_dump_json(by_alias=True))
+        self.assertIsNone(restored.metadata)
+
+    def test_absent_metadata_serializes_without_the_key(self):
+        r = ResumeEntry(interrupt_id="int-1", status="resolved", payload={"approved": True})
+        dumped = r.model_dump(by_alias=True, exclude_none=True)
+        self.assertNotIn("metadata", dumped)
+
+    def test_exclude_none_preserves_null_values_under_keys(self):
+        # exclude_none must only drop the unset object itself, never recurse
+        # into metadata values — a None under a key is data.
+        r = ResumeEntry(
+            interrupt_id="int-1",
+            status="resolved",
+            metadata={"source": "ui", "nullValue": None},
+        )
+        dumped = r.model_dump(by_alias=True, exclude_none=True)
+        self.assertEqual(dumped["metadata"], {"source": "ui", "nullValue": None})
+
+    def test_carried_on_cancelled_entries_too(self):
+        r = ResumeEntry(interrupt_id="int-1", status="cancelled", metadata={"reason": "timeout"})
+        self.assertEqual(r.metadata, {"reason": "timeout"})
+
+    def test_reaches_the_agent_through_run_agent_input(self):
+        i = RunAgentInput.model_validate(
+            {
+                "threadId": "t-1",
+                "runId": "r-1",
+                "state": {},
+                "messages": [],
+                "tools": [],
+                "context": [],
+                "forwardedProps": {},
+                "resume": [
+                    {
+                        "interruptId": "generic-1",
+                        "status": "resolved",
+                        "payload": {"approved": True},
+                        "metadata": {
+                            "ag-ui": {},
+                            "definitionId": "review-plan",
+                            "key": "afterModel-review",
+                        },
+                    }
+                ],
+            }
+        )
+        self.assertEqual(
+            i.resume[0].metadata,
+            {"ag-ui": {}, "definitionId": "review-plan", "key": "afterModel-review"},
+        )
+
+
 class RunAgentInputResumeTest(unittest.TestCase):
     def _base_input(self, **overrides):
         base = dict(

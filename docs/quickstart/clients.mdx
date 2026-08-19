@@ -11,6 +11,14 @@ leverage AG-UI's event-driven protocol**. This approach creates a direct
 interface between your users and AI agents, demonstrating direct access to the
 AG-UI protocol.
 
+A client does not have to be a web application. AG-UI describes an event stream
+rather than a rendering target, so anything that can consume those events and
+present them to a user is a client: a web app, the terminal client built below, a
+mobile app, or a chat platform such as Slack or Microsoft Teams. The
+[Channels SDK](https://github.com/CopilotKit/channels-sdk) is one chat-platform
+implementation, with [OpenTag](https://github.com/CopilotKit/OpenTag) as a
+worked example.
+
 ## When to use a client implementation
 
 Building your own client is useful if you want to explore/hack on the AG-UI

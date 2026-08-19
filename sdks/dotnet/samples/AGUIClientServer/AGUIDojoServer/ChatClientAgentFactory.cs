@@ -1,16 +1,18 @@
+using System.ClientModel;
 using System.ComponentModel;
 using System.Text.Json;
+using AGUI.A2UI;
 using AGUI.Abstractions;
 using AGUI.Server;
+using AGUIDojoServer.A2UI;
 using AGUIDojoServer.AgenticUI;
 using AGUIDojoServer.BackendToolRendering;
 using AGUIDojoServer.PredictiveStateUpdates;
 using AGUIDojoServer.SharedState;
-using System.ClientModel;
 using Azure.AI.OpenAI;
 using Azure.Identity;
-using OpenAI;
 using Microsoft.Extensions.AI;
+using OpenAI;
 using ChatClient = OpenAI.Chat.ChatClient;
 
 namespace AGUIDojoServer;
@@ -282,6 +284,108 @@ internal static class ChatClientAgentFactory
         });
         return options;
     }
+
+    // ---- A2UI (agent-generated UI) -----------------------------------------------------
+
+    /// <summary>
+    /// The shared A2UI planner prompt. Kept as a system prompt (passed via MapDojoEndpoint)
+    /// rather than baked into the client, matching the other feature endpoints.
+    /// </summary>
+    public const string A2UIPlannerSystemPrompt = A2UICompositionGuides.PlannerInstructions;
+
+    /// <summary>The system prompt for the fixed-schema demo.</summary>
+    public const string A2UIFixedSchemaSystemPrompt = """
+        You are a helpful travel assistant that can search for flights and hotels.
+        When the user asks about flights, use the search_flights tool.
+        When the user asks about hotels, use the search_hotels tool.
+        IMPORTANT: After calling a tool, do NOT repeat or summarize the data in your text
+        response. The tool renders a rich UI automatically. Just say something brief like
+        "Here are your results" or ask if they'd like to book.
+        """;
+
+    /// <summary>
+    /// Fixed-schema demo: the author owns the card layout (in code); the agent only supplies the
+    /// data via the search tools, whose return value is an A2UI operations envelope the middleware
+    /// paints. No generate_a2ui / subagent / recovery.
+    /// </summary>
+    public static IChatClient CreateA2UIFixedSchema() => CreateBaseChatClient();
+
+    /// <summary>The fixed-schema server tools (search_flights, search_hotels).</summary>
+    public static IList<AITool> CreateA2UIFixedSchemaTools() =>
+        [A2UIFixedSchemaTools.CreateSearchFlightsTool(), A2UIFixedSchemaTools.CreateSearchHotelsTool()];
+
+    // Builds an A2UI-enabled chat client: the planner (with function invocation for any server
+    // tools) wrapped by A2UIChatClient, which auto-injects generate_a2ui and drives a raw render
+    // subagent through the recovery loop.
+    private static IChatClient CreateA2UIChatClient(A2UIChatClientOptions options)
+    {
+        // The subagent must be raw (no function invocation): A2UIChatClient reads the forced
+        // render_a2ui call's arguments directly rather than letting it be invoked.
+        IChatClient subagent = s_chatClient!.AsIChatClient();
+
+        // Reuse the same OpenAI fragment extractor the endpoint registers for the wire tap, so
+        // the adapter can learn the streamed render_a2ui call id before the call coalesces and
+        // still balance a mid-stream failure.
+        A2UIChatClientOptions resolved = new()
+        {
+            // Backend opt-in — the `config` half of the `forwarded ?? config` rule (ADK
+            // `a2ui["inject_a2ui_tool"]`, AWS Strands / Mastra / CrewAI `a2ui.injectA2UITool`),
+            // which exists precisely for a host that does not forward the runtime flag. The dojo
+            // forwards `injectA2UITool` only for langgraph* / mastra-agent-local, so these demos
+            // opt in server-side. A client-sent `false` still wins.
+            InjectA2UITool = options.InjectA2UITool ?? true,
+            ToolParams = options.ToolParams,
+            StreamingToolCallArgumentExtractor = OpenAIStreamingToolArguments.Extract,
+        };
+
+        return s_chatClient!.AsIChatClient()
+            .AsBuilder()
+            .UseA2UI(subagent, resolved)
+            .UseFunctionInvocation()
+            .Build();
+    }
+
+    /// <summary>Dynamic-schema demo: a subagent designs the UI via generate_a2ui against the dojo catalog.</summary>
+    public static IChatClient CreateA2UIDynamicSchema() => CreateA2UIChatClient(new A2UIChatClientOptions
+    {
+        ToolParams = new A2UIToolParams
+        {
+            DefaultCatalogId = A2UICompositionGuides.DynamicCatalogId,
+            Guidelines = new A2UIGuidelines { CompositionGuide = A2UICompositionGuides.DynamicSchema },
+        },
+    });
+
+    /// <summary>
+    /// Error-recovery demo: a catalog id is supplied but no validation <c>Catalog</c>, so
+    /// structural validation (missing root, dangling child refs, duplicate ids) drives the
+    /// validate-and-regenerate loop. <c>MaxAttempts</c> is set explicitly to demonstrate the knob
+    /// (it already defaults to <see cref="A2UIConstants.MaxA2UIAttempts"/>).
+    /// </summary>
+    public static IChatClient CreateA2UIRecovery() => CreateA2UIChatClient(new A2UIChatClientOptions
+    {
+        ToolParams = new A2UIToolParams
+        {
+            DefaultCatalogId = A2UICompositionGuides.DynamicCatalogId,
+            Guidelines = new A2UIGuidelines { CompositionGuide = A2UICompositionGuides.Recovery },
+            Recovery = new A2UIRecoveryConfig { MaxAttempts = A2UIConstants.MaxA2UIAttempts },
+        },
+    });
+
+    /// <summary>
+    /// Zero-config / advanced demo: no backend catalog or guide. The catalog schema arrives on
+    /// the forwarded <c>RunAgentInput</c> and A2UIChatClient reads it — the easy-devex path.
+    /// Injection itself comes from the backend opt-in in <see cref="CreateA2UIChatClient"/>: the
+    /// dojo forwards <c>injectA2UITool</c> only for langgraph* / mastra-agent-local, so it never
+    /// arrives for <c>ag-ui-dotnet</c>.
+    /// </summary>
+    public static IChatClient CreateA2UIAdvanced() => CreateA2UIChatClient(new A2UIChatClientOptions());
+
+    /// <summary>
+    /// Stream options for the A2UI endpoints: surface OpenAI's per-chunk tool-call argument
+    /// fragments as incremental TOOL_CALL_ARGS so render_a2ui surfaces paint progressively.
+    /// </summary>
+    public static AGUIStreamOptions CreateA2UIStreamOptions() =>
+        new AGUIStreamOptions().MapStreamingToolCallArguments(OpenAIStreamingToolArguments.Extract);
 
     [Description("Get the weather for a given location.")]
     private static WeatherInfo GetWeather([Description("The location to get the weather for.")] string location) => new()

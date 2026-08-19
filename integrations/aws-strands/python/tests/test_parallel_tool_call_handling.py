@@ -38,7 +38,11 @@ from ag_ui.core import (
 )
 from strands.tools.registry import ToolRegistry
 
-from ag_ui_strands.agent import StrandsAgent, _build_strands_history
+from ag_ui_strands.agent import (
+    StrandsAgent,
+    _build_strands_history,
+    _normalize_tool_turns,
+)
 from ag_ui_strands.config import StrandsAgentConfig, ToolBehavior
 
 
@@ -141,6 +145,144 @@ def test_strands_history_bundles_parallel_tool_results():
         "tooluse_2",
         "tooluse_3",
     }
+
+
+def test_strands_history_reorders_out_of_order_tool_results():
+    """Tool results that arrive in a different order than their toolUse blocks
+    must be re-ordered to match, so Bedrock's positional pairing holds."""
+    messages = [
+        UserMessage(id="u1", role="user", content="hi"),
+        AssistantMessage(
+            id="a1",
+            role="assistant",
+            content="",
+            tool_calls=[
+                ToolCall(id="tooluse_1", type="function",
+                         function=FunctionCall(name="my_tool", arguments="{}")),
+                ToolCall(id="tooluse_2", type="function",
+                         function=FunctionCall(name="my_tool", arguments="{}")),
+                ToolCall(id="tooluse_3", type="function",
+                         function=FunctionCall(name="my_tool", arguments="{}")),
+            ],
+        ),
+        # Results arrive out of order: 3, 1, 2
+        ToolMessage(id="t3", role="tool", tool_call_id="tooluse_3", content='{"ok":3}'),
+        ToolMessage(id="t1", role="tool", tool_call_id="tooluse_1", content='{"ok":1}'),
+        ToolMessage(id="t2", role="tool", tool_call_id="tooluse_2", content='{"ok":2}'),
+    ]
+
+    native = _build_strands_history(messages)
+
+    assert len(native) == 3
+    assert native[1]["role"] == "assistant"
+    assert native[2]["role"] == "user"
+    tool_use_ids = [b["toolUse"]["toolUseId"] for b in native[1]["content"]]
+    result_ids = [b["toolResult"]["toolUseId"] for b in native[2]["content"]]
+    # toolResult order must follow the toolUse order, not arrival order.
+    assert result_ids == tool_use_ids == ["tooluse_1", "tooluse_2", "tooluse_3"]
+
+
+def test_strands_history_keeps_tooluse_and_results_adjacent():
+    """A non-tool message wedged between a toolUse turn and its results must be
+    moved out so the assistant(toolUse) message is immediately followed by the
+    user(toolResult) message, as Bedrock requires."""
+    messages = [
+        UserMessage(id="u1", role="user", content="hi"),
+        AssistantMessage(
+            id="a1",
+            role="assistant",
+            content="",
+            tool_calls=[
+                ToolCall(id="tooluse_1", type="function",
+                         function=FunctionCall(name="my_tool", arguments="{}")),
+                ToolCall(id="tooluse_2", type="function",
+                         function=FunctionCall(name="my_tool", arguments="{}")),
+            ],
+        ),
+        # A stray user message wedged between the toolUse turn and its results.
+        UserMessage(id="uX", role="user", content="wait, interrupting"),
+        ToolMessage(id="t1", role="tool", tool_call_id="tooluse_1", content='{"ok":1}'),
+        ToolMessage(id="t2", role="tool", tool_call_id="tooluse_2", content='{"ok":2}'),
+    ]
+
+    native = _build_strands_history(messages)
+
+    # Find the assistant(toolUse) message; its immediate successor must be the
+    # user(toolResult) message, with the wedged text pushed afterwards.
+    tooluse_idx = next(
+        i for i, m in enumerate(native)
+        if m["role"] == "assistant" and all("toolUse" in b for b in m["content"])
+    )
+    following = native[tooluse_idx + 1]
+    assert following["role"] == "user"
+    assert all("toolResult" in b for b in following["content"])
+    result_ids = [b["toolResult"]["toolUseId"] for b in following["content"]]
+    assert result_ids == ["tooluse_1", "tooluse_2"]
+
+
+# ---------------------------------------------------------------------------
+# _normalize_tool_turns regression tests (Fix #4)
+# ---------------------------------------------------------------------------
+
+
+def _assistant_tooluse(*ids):
+    return {"role": "assistant", "content": [{"toolUse": {"toolUseId": i}} for i in ids]}
+
+
+def _user_toolresult(*ids):
+    return {
+        "role": "user",
+        "content": [{"toolResult": {"toolUseId": i, "content": []}} for i in ids],
+    }
+
+
+def test_normalize_tool_turns_handles_many_turns_without_recursion():
+    """A previously-recursive implementation raised RecursionError past ~1000
+    tool turns; the iterative version must handle far more."""
+    msgs = []
+    for t in range(5000):
+        tid = f"t{t}"
+        msgs.append(_assistant_tooluse(tid))
+        msgs.append(_user_toolresult(tid))
+
+    out = _normalize_tool_turns(msgs)
+
+    # Each turn collapses to an assistant(toolUse)+user(toolResult) pair.
+    assert len(out) == 10000
+    assert out[0]["role"] == "assistant"
+    assert out[1]["role"] == "user"
+
+
+def test_normalize_tool_turns_deduplicates_repeated_tooluse_id():
+    """A repeated toolUseId must not emit a duplicate toolResult — Bedrock
+    rejects two result blocks with the same id."""
+    msgs = [
+        _assistant_tooluse("a", "b", "a"),  # "a" appears twice
+        _user_toolresult("a", "b"),
+    ]
+
+    out = _normalize_tool_turns(msgs)
+
+    user_msg = next(m for m in out if m["role"] == "user")
+    result_ids = [b["toolResult"]["toolUseId"] for b in user_msg["content"]]
+    assert result_ids == ["a", "b"]  # no duplicate "a"
+
+
+def test_normalize_tool_turns_preserves_messages_that_follow_results():
+    """Messages that legitimately follow a completed toolUse/toolResult pair
+    must be preserved in place, not reordered or dropped."""
+    trailing = {"role": "assistant", "content": [{"text": "all done"}]}
+    msgs = [
+        _assistant_tooluse("a"),
+        _user_toolresult("a"),
+        trailing,
+    ]
+
+    out = _normalize_tool_turns(msgs)
+
+    assert out[0]["role"] == "assistant" and "toolUse" in out[0]["content"][0]
+    assert out[1]["role"] == "user"
+    assert out[2] == trailing  # preserved, in place
 
 
 # ---------------------------------------------------------------------------
@@ -340,4 +482,59 @@ class TestNoBackendResultLeakAfterHalt:
         )
         assert len(result_events) == 1, (
             f"Expected exactly 1 result event, got {len(result_events)}: {result_ids}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Fix #3 – Deferred hand-off flush order
+# ---------------------------------------------------------------------------
+
+class TestDeferredFrontendEndFlushOrder:
+    """When a turn mixes a frontend tool call with a backend tool result, the
+    frontend TOOL_CALL_END (which hands control to the client) must be emitted
+    *after* the backend TOOL_CALL_RESULT, so the client only starts executing
+    the frontend tool once backend work has reached it.
+    """
+
+    THREAD = "flush-order-thread"
+    TOOLS = [Tool(name="frontend_a", description="a", parameters={})]
+    STREAM = [
+        # Frontend tool call + its completion: buffers the END, sets pending_halt.
+        {"current_tool_use": {"name": "frontend_a", "toolUseId": "fe-1", "input": {}}},
+        {"event": {"contentBlockStop": {}}},
+        # Backend result for this turn arrives in a user message.
+        {
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "toolResult": {
+                            "toolUseId": "be-1",
+                            "content": [{"text": '{"ok": 1}'}],
+                        }
+                    }
+                ],
+            }
+        },
+    ]
+
+    async def test_backend_result_precedes_frontend_end(self):
+        agent = _build_agent(self.THREAD, self.STREAM)
+        events = await _collect(agent, _run_input(self.THREAD, tools=self.TOOLS))
+
+        types = [e.type for e in events]
+
+        # The frontend tool's ToolCallEnd is buffered and flushed last; the wire
+        # id is a freshly generated one (not the native toolUseId), so match by
+        # event type rather than id. The backend TOOL_CALL_RESULT must precede it.
+        assert EventType.TOOL_CALL_RESULT in types, "backend TOOL_CALL_RESULT not emitted"
+        assert EventType.TOOL_CALL_END in types, "frontend TOOL_CALL_END not emitted"
+
+        result_idx = types.index(EventType.TOOL_CALL_RESULT)
+        # The deferred frontend end is the last TOOL_CALL_END in the stream.
+        end_idx = max(i for i, t in enumerate(types) if t == EventType.TOOL_CALL_END)
+
+        assert result_idx < end_idx, (
+            "backend TOOL_CALL_RESULT must be emitted before the frontend "
+            f"TOOL_CALL_END (got result at {result_idx}, end at {end_idx})"
         )

@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Text.Json;
 using AGUI.Abstractions;
 using Microsoft.Extensions.AI;
@@ -20,6 +18,27 @@ public sealed class AGUIStreamOptions
     private readonly Dictionary<string, Func<FunctionCallContent, IEnumerable<BaseEvent>>> _callMappings = new(StringComparer.Ordinal);
     private List<Func<AIContent, AGUIInterrupt?>>? _interruptMappers;
     private List<Func<AIContent, IEnumerable<BaseEvent>?>>? _contentMappers;
+    private Func<ChatResponseUpdate, IEnumerable<AGUIToolCallArgumentFragment>?>? _toolCallArgumentExtractor;
+
+    internal string? UsageProvider { get; private set; }
+
+    /// <summary>
+    /// Sets the provider label applied to the token usage reported on the terminal
+    /// <see cref="RunFinishedEvent"/> (for example <c>"openai"</c> or <c>"anthropic"</c>).
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ChatResponseUpdate.ModelId"/> supplies the model label automatically, but
+    /// Microsoft.Extensions.AI does not carry the provider name on the update, so the endpoint
+    /// declares it. When unset, usage entries are keyed by model alone and <c>provider</c> is
+    /// omitted from the emitted event.
+    /// </remarks>
+    /// <param name="provider">The provider label, or <see langword="null"/> to omit it.</param>
+    /// <returns>This instance for fluent chaining.</returns>
+    public AGUIStreamOptions WithUsageProvider(string? provider)
+    {
+        UsageProvider = provider;
+        return this;
+    }
 
     /// <summary>
     /// Registers a fallback that maps an <see cref="AIContent"/> to an <see cref="AGUIInterrupt"/>.
@@ -116,6 +135,37 @@ public sealed class AGUIStreamOptions
         ArgumentNullException.ThrowIfNull(mapper);
         _callMappings[toolName] = mapper;
         return this;
+    }
+
+    /// <summary>
+    /// Registers an extractor that reads provider-native streamed tool-call argument fragments
+    /// off a <see cref="ChatResponseUpdate"/> (typically from its raw representation), so the
+    /// conversion emits incremental <see cref="AGUI.Abstractions.ToolCallArgsEvent"/>s instead of
+    /// one atomic event per call. Enables progressive tool-call argument streaming (e.g. for
+    /// generative-UI consumers) without coupling this library to any provider SDK.
+    /// </summary>
+    /// <remarks>
+    /// Return <see langword="null"/> (or an empty sequence) for updates that carry no fragments.
+    /// When registered and a call's fragments have streamed, the conversion suppresses the
+    /// duplicate atomic argument emission and closes the call when its coalesced
+    /// <see cref="FunctionCallContent"/> arrives (or via an end-of-stream sweep). Only one
+    /// extractor is used; the last registration wins.
+    /// </remarks>
+    /// <param name="extractor">A callback that returns the fragments in an update, or <see langword="null"/>.</param>
+    /// <returns>This instance for fluent chaining.</returns>
+    public AGUIStreamOptions MapStreamingToolCallArguments(
+        Func<ChatResponseUpdate, IEnumerable<AGUIToolCallArgumentFragment>?> extractor)
+    {
+        ArgumentNullException.ThrowIfNull(extractor);
+        _toolCallArgumentExtractor = extractor;
+        return this;
+    }
+
+    internal bool TryGetToolCallArgumentExtractor(
+        out Func<ChatResponseUpdate, IEnumerable<AGUIToolCallArgumentFragment>?> extractor)
+    {
+        extractor = _toolCallArgumentExtractor!;
+        return _toolCallArgumentExtractor is not null;
     }
 
     internal AGUIInterrupt? InvokeInterruptMappers(AIContent content)

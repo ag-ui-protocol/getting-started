@@ -119,11 +119,45 @@ class TestConvertAguiContentToStrands:
 
         result = convert_agui_content_to_strands(content)
 
-        assert len(result) == 1
-        assert "document" in result[0]
-        assert result[0]["document"]["format"] == "pdf"
-        assert result[0]["document"]["name"] == "document"
-        assert result[0]["document"]["source"]["bytes"] == raw_bytes
+        # A sentinel text block is prepended so Bedrock doesn't reject the
+        # message (it rejects document-only content); the document is second.
+        assert len(result) == 2
+        assert result[0] == {"text": " "}
+        assert "document" in result[1]
+        assert result[1]["document"]["format"] == "pdf"
+        assert result[1]["document"]["name"] == "document"
+        assert result[1]["document"]["source"]["bytes"] == raw_bytes
+
+    def test_document_only_gets_text_prefix(self):
+        """Bedrock rejects a message with only document blocks; a sentinel text
+        block must be prepended so the request is valid."""
+        raw_bytes = b"fake-pdf-content"
+        b64_value = base64.b64encode(raw_bytes).decode()
+        source = InputContentDataSource(value=b64_value, mime_type="application/pdf")
+        content = [DocumentInputContent(source=source)]
+
+        result = convert_agui_content_to_strands(content)
+
+        assert result[0] == {"text": " "}, "sentinel text block must be first"
+        assert len(result) == 2
+        assert "document" in result[1]
+
+    def test_document_with_text_no_extra_prefix(self):
+        """When the caller already includes a text block alongside a document,
+        no sentinel block should be inserted."""
+        raw_bytes = b"fake-pdf-content"
+        b64_value = base64.b64encode(raw_bytes).decode()
+        source = InputContentDataSource(value=b64_value, mime_type="application/pdf")
+        content = [
+            TextInputContent(text="Here is the file:"),
+            DocumentInputContent(source=source),
+        ]
+
+        result = convert_agui_content_to_strands(content)
+
+        assert result[0] == {"text": "Here is the file:"}
+        assert len(result) == 2
+        assert "document" in result[1]
 
     def test_video_with_data_source(self):
         raw_bytes = b"fake-video-content"
@@ -438,3 +472,69 @@ class TestAgentMultimodalIntegration:
         last_user = mock_strands.messages[-1]
         assert last_user["role"] == "user"
         assert last_user["content"] == [{"text": "Just a plain string"}]
+
+
+# ---------------------------------------------------------------------------
+# _build_snapshot_messages unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildSnapshotMessages:
+    """Unit tests for _build_snapshot_messages in agent.py.
+
+    Focuses on the multimodal content preservation path: list content must
+    pass through as-is instead of being coerced to a string.
+    """
+
+    def _make_msg(self, role, content):
+        msg = MagicMock()
+        msg.role = role
+        msg.content = content
+        msg.id = "msg-1"
+        msg.tool_calls = None
+        msg.tool_call_id = None
+        return msg
+
+    def test_string_content_preserved(self):
+        from ag_ui_strands.agent import _build_snapshot_messages
+
+        msg = self._make_msg("user", "hello")
+        result = _build_snapshot_messages([msg])
+
+        assert len(result) == 1
+        assert result[0].content == "hello"
+
+    def test_list_content_preserved_as_list(self):
+        """List content (multimodal) must not be stringified — it should reach
+        the MessagesSnapshotEvent intact so the frontend can render images."""
+        from ag_ui_strands.agent import _build_snapshot_messages
+
+        list_content = [
+            TextInputContent(type="text", text="look at this"),
+            ImageInputContent(
+                type="image",
+                source=InputContentDataSource(
+                    type="data",
+                    value=base64.b64encode(b"img").decode(),
+                    mime_type="image/png",
+                ),
+            ),
+        ]
+        msg = self._make_msg("user", list_content)
+        result = _build_snapshot_messages([msg])
+
+        assert len(result) == 1
+        assert isinstance(result[0].content, list), (
+            "_build_snapshot_messages coerced list content to string"
+        )
+        assert result[0].content == list_content
+
+    def test_unexpected_type_coerced_to_string(self):
+        """Non-str/non-list content (e.g. an int) falls back to _coerce_text."""
+        from ag_ui_strands.agent import _build_snapshot_messages
+
+        msg = self._make_msg("user", 42)
+        result = _build_snapshot_messages([msg])
+
+        assert len(result) == 1
+        assert isinstance(result[0].content, str)

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace AGUI.Abstractions;
@@ -15,4 +16,29 @@ public abstract class AGUIMessage
 
     [JsonPropertyName("role")]
     public abstract string Role { get; }
+
+    /// <summary>
+    /// Extra information attached to this message, open by key.
+    /// </summary>
+    /// <remarks>
+    /// Shared by every role, so it lives on the base. Any JSON value is allowed
+    /// under a key, including <c>null</c>. The object itself is absent or an
+    /// object, never <c>null</c>.
+    ///
+    /// The <c>ag-ui</c> key is reserved for AG-UI's own use; see <see
+    /// cref="AGUIMetadata.ReservedKey"/>.
+    ///
+    /// This is a wire-level field by design, and is deliberately not surfaced on
+    /// <c>Microsoft.Extensions.AI</c>'s <c>ChatMessage</c>. Review has asked for
+    /// that more than once; it is declined for consistency, because no
+    /// message-level AG-UI field is surfaced there today —
+    /// <c>AGUIMessage.EncryptedValue</c>, <c>AGUIToolCall.EncryptedValue</c> and
+    /// <c>AGUIToolMessage.Error</c> are all dropped by
+    /// <c>AGUIChatMessageExtensions</c> in the same way. Surfacing metadata
+    /// alone would make it the exception. Giving the .NET client a message
+    /// reducer of its own is separate work.
+    /// </remarks>
+    [JsonPropertyName("metadata")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Metadata { get; set; }
 }

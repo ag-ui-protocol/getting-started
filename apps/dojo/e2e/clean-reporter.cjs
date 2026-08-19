@@ -1,7 +1,7 @@
 function getTimestamp() {
-  return (process.env.CI || process.env.VERBOSE)
-    ? new Date().toLocaleTimeString('en-US', { hour12: false })
-    : '';
+  return process.env.CI || process.env.VERBOSE
+    ? new Date().toLocaleTimeString("en-US", { hour12: false })
+    : "";
 }
 
 function logStamp(...args) {
@@ -42,6 +42,7 @@ class CleanReporter {
     const error = result.error || result.errors?.[0];
     if (error) {
       let errorMsg = error.message || "Unknown error";
+      const isEventTraceMismatch = errorMsg.startsWith("Event trace mismatch:");
 
       // Clean up common error patterns to make them more readable
       if (errorMsg.includes("None of the expected patterns matched")) {
@@ -61,14 +62,23 @@ class CleanReporter {
         errorMsg = "Expected content not generated (count was 0)";
       }
 
-      // Show just the key error info
-      console.log(`💥   ERROR: ${errorMsg.split("\n")[0]}`);
+      if (isEventTraceMismatch) {
+        const semanticDiff = errorMsg
+          .split("\n")
+          .map((line) => `   ${line}`)
+          .join("\n");
+        console.log(`💥   ERROR:\n${semanticDiff}`);
+      } else {
+        // Show just the key error info
+        console.log(`💥   ERROR: ${errorMsg.split("\n")[0]}`);
+      }
 
       // If it's an AI/API issue, make it clear
       if (
-        errorMsg.includes("AI") ||
-        errorMsg.includes("patterns") ||
-        errorMsg.includes("timeout")
+        !isEventTraceMismatch &&
+        (errorMsg.includes("AI") ||
+          errorMsg.includes("patterns") ||
+          errorMsg.includes("timeout"))
       ) {
         console.log(`   HINT: Likely cause: AI service down or API key issue`);
       }
@@ -87,7 +97,9 @@ class CleanReporter {
       "[Assistant]",
     ];
     const stdout = (result.stdout || [])
-      .map((chunk) => (typeof chunk === "string" ? chunk : chunk.toString("utf-8")))
+      .map((chunk) =>
+        typeof chunk === "string" ? chunk : chunk.toString("utf-8"),
+      )
       .join("");
     const diagnosticLines = stdout
       .split("\n")
@@ -109,7 +121,7 @@ class CleanReporter {
 
     if (!process.env.CI) {
       console.log(
-        `Run 'pnpm exec playwright show-report' for detailed HTML report`
+        `Run 'pnpm exec playwright show-report' for detailed HTML report`,
       );
     }
 

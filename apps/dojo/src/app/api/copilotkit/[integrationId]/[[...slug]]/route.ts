@@ -11,6 +11,7 @@ import {
   agentsIntegrations,
   ADK_A2UI_INJECT_AGENTS,
   STRANDS_A2UI_INJECT_AGENTS,
+  CREWAI_A2UI_INJECT_AGENTS,
 } from "@/agents";
 import { IntegrationId } from "@/menu";
 import { getPostHogClient } from "@/lib/posthog-server";
@@ -69,7 +70,10 @@ async function getHandler(integrationId: string) {
       : integrationId === "aws-strands" ||
           integrationId === "aws-strands-typescript"
         ? STRANDS_A2UI_INJECT_AGENTS
-        : [];
+        : integrationId === "crewai" ||
+            integrationId === "crewai-conversational-flows"
+          ? CREWAI_A2UI_INJECT_AGENTS
+          : [];
   const a2uiAgents = allA2UIAgents.filter(
     (id) => !perAgentInjectIds.includes(id),
   );
@@ -104,7 +108,8 @@ export async function POST(request: NextRequest, context: RouteParams) {
   if (!handler) {
     return new Response("Integration not found", { status: 404 });
   }
-  const distinctId = request.headers.get("x-posthog-distinct-id") || "anonymous";
+  const distinctId =
+    request.headers.get("x-posthog-distinct-id") || "anonymous";
   const posthog = getPostHogClient();
   posthog?.capture({
     distinctId,

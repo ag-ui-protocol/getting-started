@@ -110,6 +110,15 @@
           }
         }
       ]
-    }
+    },
+    "usage": [
+      {
+        "inputTokens": 182,
+        "outputTokens": 155,
+        "totalTokens": 337,
+        "reasoningTokens": 128,
+        "cachedInputTokens": 0
+      }
+    ]
   }
 ]

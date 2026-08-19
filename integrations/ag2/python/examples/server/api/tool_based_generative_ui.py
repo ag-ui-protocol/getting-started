@@ -1,17 +1,18 @@
 """Tool Based Generative UI feature.
 
-No special handling is required for this feature.
+The `generate_haiku` tool is defined by the frontend and arrives in
+`RunAgentInput.tools`; AGUIStream forwards it to the agent automatically,
+so no special handling is required for this feature.
 """
 
 from fastapi import FastAPI
-from autogen import ConversableAgent, LLMConfig
-from autogen.ag_ui import AGUIStream
+from ag2 import Agent
+from ag2.ag_ui import AGUIStream
+from ag2.config import OpenAIConfig
 
-
-agent = ConversableAgent(
+agent = Agent(
     name="haiku_bot",
-    llm_config=LLMConfig({"model": "gpt-4o-mini", "stream": True}),
-    human_input_mode="NEVER",
+    config=OpenAIConfig(model="gpt-4o-mini"),
 )
 
 stream = AGUIStream(agent)

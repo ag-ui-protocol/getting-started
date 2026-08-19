@@ -338,7 +338,48 @@
       "runId": "run_Id_1",
       "outcome": {
         "type": "success"
+      },
+      "usage": [
+        {
+          "inputTokens": 7,
+          "outputTokens": 83,
+          "totalTokens": 90,
+          "reasoningTokens": 64,
+          "cachedInputTokens": 0
+        }
+      ]
+    }
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "usage",
+        "details": {
+          "inputTokenCount": 7,
+          "outputTokenCount": 83,
+          "cachedInputTokenCount": 0,
+          "reasoningTokenCount": 64
+        }
       }
+    ],
+    "responseId": "run_Id_1",
+    "rawRepresentation": {
+      "type": "RUN_FINISHED",
+      "threadId": "thread_Id_1",
+      "runId": "run_Id_1",
+      "outcome": {
+        "type": "success"
+      },
+      "usage": [
+        {
+          "inputTokens": 7,
+          "outputTokens": 83,
+          "totalTokens": 90,
+          "reasoningTokens": 64,
+          "cachedInputTokens": 0
+        }
+      ]
     }
   }
 ]

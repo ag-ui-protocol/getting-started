@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { HttpAgent } from "@ag-ui/client";
-import { EventType, type BaseEvent } from "@ag-ui/core";
+import { EventType, type BaseEvent, type TokenUsage } from "@ag-ui/core";
 import { startStepServer, type StepServerHandle } from "../../helpers/step-server";
 
 interface TextDeltaEvent extends BaseEvent {
@@ -71,5 +71,49 @@ describe("TS HttpAgent -> C# Step06_RawEvents.Server", () => {
     expect(raw).toBeDefined();
     expect(raw.source).toBeTypeOf("string");
     expect(raw.event).toBeDefined();
+  });
+
+  it("reports token usage on RUN_FINISHED, separate from the raw telemetry", async () => {
+    const agent = new HttpAgent({
+      url: `${server.baseUrl}/`,
+      threadId: "step06-usage",
+      agentId: "step06-usage-cross-language",
+    });
+    agent.messages = [
+      { id: "u1", role: "user", content: "Tell me about ag-ui raw events" },
+    ];
+
+    const events: BaseEvent[] = [];
+    await agent.runAgent({}, { onEvent: ({ event }) => void events.push(event) });
+
+    // The C# server accumulates MEAI UsageContent and attaches it to the terminal
+    // event. Asserting here — after a real socket, real SSE framing, and the TS
+    // client's zod parse — proves the field survives the language boundary, not
+    // just the .NET serializer.
+    const finished = events.find(
+      (e) => e.type === EventType.RUN_FINISHED,
+    ) as BaseEvent & { usage?: TokenUsage[] };
+
+    expect(finished.usage).toHaveLength(1);
+    expect(finished.usage![0]).toMatchObject({
+      model: "fake-model",
+      inputTokens: 9,
+      outputTokens: 12,
+      totalTokens: 21,
+    });
+
+    // Provider-specific counts stay off the typed field and ride the RAW event
+    // instead — the split this sample exists to demonstrate.
+    expect(finished.usage![0]).not.toHaveProperty("additionalCounts");
+
+    const rawUsage = events.find(
+      (e) =>
+        e.type === EventType.RAW &&
+        (e as BaseEvent & { source?: string }).source === "usage",
+    ) as BaseEvent & { event?: { additionalCounts?: Record<string, number> } };
+
+    expect(rawUsage.event?.additionalCounts).toMatchObject({
+      "OutputTokenDetails.AcceptedPredictionTokenCount": 3,
+    });
   });
 });

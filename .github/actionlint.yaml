@@ -1,0 +1,6 @@
+# Runner labels actionlint cannot know about. Without this, every workflow using a
+# Depot runner is an `unknown label` error — which matters now that
+# lint-release-workflows.yml lints dojo-e2e.yml at `fail_level: error`.
+self-hosted-runner:
+  labels:
+    - depot-ubuntu-24.04

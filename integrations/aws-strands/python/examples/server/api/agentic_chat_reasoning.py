@@ -21,8 +21,11 @@ env_path = Path(__file__).parent.parent.parent / '.env'
 
 load_dotenv(dotenv_path=env_path)
 
-# Create model from MODEL_PROVIDER env var (default: openai)
-model = create_model()
+# Create model from MODEL_PROVIDER env var (default: openai).
+# This demo is specifically about reasoning, so it opts into the OpenAI
+# Responses API, which is what surfaces reasoning summaries. Every other
+# demo uses the factory default (Chat Completions, no reasoning).
+model = create_model(openai_api="responses")
 
 strands_agent = Agent(
     model=model,

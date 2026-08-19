@@ -19,6 +19,8 @@ AGUI.Abstractions.InterruptRequestContent.ToolCallId.get -> string?
 AGUI.Abstractions.InterruptRequestContent.ToolCallId.set -> void
 AGUI.Abstractions.InterruptResponseContent
 AGUI.Abstractions.InterruptResponseContent.InterruptResponseContent(string! requestId) -> void
+AGUI.Abstractions.InterruptResponseContent.Metadata.get -> System.Text.Json.JsonElement?
+AGUI.Abstractions.InterruptResponseContent.Metadata.set -> void
 AGUI.Abstractions.InterruptResponseContent.Payload.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.InterruptResponseContent.Payload.set -> void
 static AGUI.Abstractions.AGUIChatMessageExtensions.AsChatMessages(this System.Collections.Generic.IEnumerable<AGUI.Abstractions.AGUIMessage!>! aguiMessages) -> System.Collections.Generic.IEnumerable<Microsoft.Extensions.AI.ChatMessage!>!
@@ -81,6 +83,8 @@ AGUI.Abstractions.AGUIResume
 AGUI.Abstractions.AGUIResume.AGUIResume() -> void
 AGUI.Abstractions.AGUIResume.InterruptId.get -> string!
 AGUI.Abstractions.AGUIResume.InterruptId.set -> void
+AGUI.Abstractions.AGUIResume.Metadata.get -> System.Text.Json.JsonElement?
+AGUI.Abstractions.AGUIResume.Metadata.set -> void
 AGUI.Abstractions.AGUIResume.Payload.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.AGUIResume.Payload.set -> void
 AGUI.Abstractions.AGUIResume.Status.get -> string!
@@ -792,3 +796,33 @@ static AGUI.Abstractions.AGUIJsonUtilities.RegisterInterruptContentTypes(System.
 AGUI.Abstractions.RunFinishedOutcomeTypes
 const AGUI.Abstractions.RunFinishedOutcomeTypes.Interrupt = "interrupt" -> string!
 const AGUI.Abstractions.RunFinishedOutcomeTypes.Success = "success" -> string!
+AGUI.Abstractions.TokenUsage
+AGUI.Abstractions.TokenUsage.TokenUsage() -> void
+AGUI.Abstractions.TokenUsage.Provider.get -> string?
+AGUI.Abstractions.TokenUsage.Provider.set -> void
+AGUI.Abstractions.TokenUsage.Model.get -> string?
+AGUI.Abstractions.TokenUsage.Model.set -> void
+AGUI.Abstractions.TokenUsage.InputTokens.get -> long?
+AGUI.Abstractions.TokenUsage.InputTokens.set -> void
+AGUI.Abstractions.TokenUsage.OutputTokens.get -> long?
+AGUI.Abstractions.TokenUsage.OutputTokens.set -> void
+AGUI.Abstractions.TokenUsage.TotalTokens.get -> long?
+AGUI.Abstractions.TokenUsage.TotalTokens.set -> void
+AGUI.Abstractions.TokenUsage.ReasoningTokens.get -> long?
+AGUI.Abstractions.TokenUsage.ReasoningTokens.set -> void
+AGUI.Abstractions.TokenUsage.CachedInputTokens.get -> long?
+AGUI.Abstractions.TokenUsage.CachedInputTokens.set -> void
+AGUI.Abstractions.RunFinishedEvent.Usage.get -> System.Collections.Generic.IList<AGUI.Abstractions.TokenUsage!>?
+AGUI.Abstractions.RunFinishedEvent.Usage.set -> void
+AGUI.Abstractions.RunErrorEvent.Usage.get -> System.Collections.Generic.IList<AGUI.Abstractions.TokenUsage!>?
+AGUI.Abstractions.RunErrorEvent.Usage.set -> void
+AGUI.Abstractions.AGUIJsonSerializerContext.TokenUsage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TokenUsage>
+AGUI.Abstractions.AGUIJsonSerializerContext.IListTokenUsage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.TokenUsage>>
+AGUI.Abstractions.AGUIMetadata
+const AGUI.Abstractions.AGUIMetadata.ReservedKey = "ag-ui" -> string!
+AGUI.Abstractions.BaseEvent.Metadata.get -> System.Text.Json.JsonElement?
+AGUI.Abstractions.BaseEvent.Metadata.set -> void
+AGUI.Abstractions.AGUIMessage.Metadata.get -> System.Text.Json.JsonElement?
+AGUI.Abstractions.AGUIMessage.Metadata.set -> void
+AGUI.Abstractions.AGUIToolCall.Metadata.get -> System.Text.Json.JsonElement?
+AGUI.Abstractions.AGUIToolCall.Metadata.set -> void

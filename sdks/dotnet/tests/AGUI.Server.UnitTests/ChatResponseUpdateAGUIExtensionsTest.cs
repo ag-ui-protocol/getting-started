@@ -238,6 +238,151 @@ public sealed class ChatResponseUpdateAGUIExtensionsTest
 
     #endregion
 
+    #region Reasoning
+
+    [Fact]
+    public async Task ReasoningThenText_SharingProviderMessageId_EmitDistinctMessageIds()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("thinking")]
+            },
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("") { ProtectedData = "signed-blob" }]
+            },
+            new ChatResponseUpdate(ChatRole.Assistant, "visible answer")
+            {
+                MessageId = "msg-1"
+            });
+
+        var events = await CollectEvents(updates);
+
+        var reasoningStartId = events.OfType<ReasoningStartEvent>().Single().MessageId;
+        var reasoningMessageStartId = events.OfType<ReasoningMessageStartEvent>().Single().MessageId;
+        var textMessageId = events.OfType<TextMessageStartEvent>().Single().MessageId;
+        Assert.NotEqual(reasoningStartId, textMessageId);
+        Assert.NotEqual(reasoningMessageStartId, textMessageId);
+        Assert.Equal(reasoningMessageStartId, events.OfType<ReasoningMessageContentEvent>().Single().MessageId);
+        Assert.Equal(reasoningMessageStartId, events.OfType<ReasoningMessageEndEvent>().Single().MessageId);
+        Assert.Equal(reasoningMessageStartId, events.OfType<ReasoningEncryptedValueEvent>().Single().EntityId);
+    }
+
+    [Fact]
+    public async Task ReasoningDeltas_AcrossUpdates_ShareOneReasoningMessageId()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("first ")]
+            },
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("second")]
+            });
+
+        var events = await CollectEvents(updates);
+
+        var reasoningMessageId = events.OfType<ReasoningMessageStartEvent>().Single().MessageId;
+        Assert.All(
+            events.OfType<ReasoningMessageContentEvent>(),
+            e => Assert.Equal(reasoningMessageId, e.MessageId));
+    }
+
+    [Fact]
+    public async Task ReasoningBlocks_SeparatedByText_GetDistinctReasoningMessageIds()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("first block")]
+            },
+            new ChatResponseUpdate(ChatRole.Assistant, "interlude")
+            {
+                MessageId = "msg-1"
+            },
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("second block")]
+            });
+
+        var events = await CollectEvents(updates);
+
+        var reasoningIds = events.OfType<ReasoningMessageStartEvent>().Select(e => e.MessageId).ToList();
+        Assert.Equal(2, reasoningIds.Count);
+        Assert.NotEqual(reasoningIds[0], reasoningIds[1]);
+    }
+
+    [Fact]
+    public async Task ProtectedData_ArrivingWhileReasoningMessageOpen_BindsEntityIdToReasoningMessage()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("thinking")]
+            },
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("") { ProtectedData = "signed-blob" }]
+            });
+
+        var events = await CollectEvents(updates);
+
+        var reasoningMessageId = events.OfType<ReasoningMessageStartEvent>().Single().MessageId;
+        var encrypted = events.OfType<ReasoningEncryptedValueEvent>().Single();
+        Assert.Equal(reasoningMessageId, encrypted.EntityId);
+    }
+
+    [Fact]
+    public async Task ProtectedData_ArrivingBeforeReasoningMessageOpens_BindsEntityIdToReasoningMessage()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("") { ProtectedData = "signed-blob" }]
+            },
+            new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                MessageId = "msg-1",
+                Contents = [new TextReasoningContent("thinking")]
+            },
+            new ChatResponseUpdate(ChatRole.Assistant, "hello")
+            {
+                MessageId = "msg-1"
+            });
+
+        var events = await CollectEvents(updates);
+
+        var encryptedEntityId = events.OfType<ReasoningEncryptedValueEvent>().Single().EntityId;
+        var reasoningMessageId = events.OfType<ReasoningMessageStartEvent>().Single().MessageId;
+        var textMessageId = events.OfType<TextMessageStartEvent>().Single().MessageId;
+
+        Assert.Equal(reasoningMessageId, encryptedEntityId);
+        Assert.NotEqual(textMessageId, encryptedEntityId);
+    }
+
+    #endregion
+
     #region Role Mapping
 
     [Theory]
@@ -1374,6 +1519,195 @@ public sealed class ChatResponseUpdateAGUIExtensionsTest
         var resultEvent = events.OfType<ToolCallResultEvent>().Single();
         Assert.Equal("call-1", resultEvent.ToolCallId);
         Assert.Equal(resultEvent.ToolCallId, resultEvent.MessageId);
+    }
+
+    #endregion
+
+    #region Token Usage
+
+    [Fact]
+    public async Task UsageContent_SurfacedOnRunFinished()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate(ChatRole.Assistant, "Hello"),
+            new ChatResponseUpdate
+            {
+                ModelId = "gpt-4o",
+                Contents =
+                [
+                    new UsageContent(new UsageDetails
+                    {
+                        InputTokenCount = 11,
+                        OutputTokenCount = 22,
+                        TotalTokenCount = 33,
+                        ReasoningTokenCount = 44,
+                        CachedInputTokenCount = 55,
+                    })
+                ]
+            });
+
+        var events = await CollectEvents(updates);
+
+        var finished = Assert.IsType<RunFinishedEvent>(events[^1]);
+        var entry = Assert.Single(finished.Usage!);
+        Assert.Equal("gpt-4o", entry.Model);
+        Assert.Equal(11, entry.InputTokens);
+        Assert.Equal(22, entry.OutputTokens);
+        Assert.Equal(33, entry.TotalTokens);
+        Assert.Equal(44, entry.ReasoningTokens);
+        Assert.Equal(55, entry.CachedInputTokens);
+    }
+
+    [Fact]
+    public async Task NoUsageContent_LeavesRunFinishedUsageNull()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate(ChatRole.Assistant, "Hello"));
+
+        var events = await CollectEvents(updates);
+
+        var finished = Assert.IsType<RunFinishedEvent>(events[^1]);
+        Assert.Null(finished.Usage);
+    }
+
+    [Fact]
+    public async Task UsageContent_UnreportedCountsStayNull()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                ModelId = "gpt-4o",
+                Contents = [new UsageContent(new UsageDetails { InputTokenCount = 7 })]
+            });
+
+        var events = await CollectEvents(updates);
+
+        var finished = Assert.IsType<RunFinishedEvent>(events[^1]);
+        var entry = Assert.Single(finished.Usage!);
+        Assert.Equal(7, entry.InputTokens);
+        Assert.Null(entry.OutputTokens);
+        Assert.Null(entry.TotalTokens);
+        Assert.Null(entry.ReasoningTokens);
+        Assert.Null(entry.CachedInputTokens);
+    }
+
+    [Fact]
+    public async Task MultipleUsageContents_AggregatedPerModel()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                ModelId = "gpt-4o",
+                Contents = [new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 1 })]
+            },
+            new ChatResponseUpdate
+            {
+                ModelId = "gpt-4o",
+                Contents = [new UsageContent(new UsageDetails { InputTokenCount = 5, OutputTokenCount = 2 })]
+            });
+
+        var events = await CollectEvents(updates);
+
+        var finished = Assert.IsType<RunFinishedEvent>(events[^1]);
+        var entry = Assert.Single(finished.Usage!);
+        Assert.Equal("gpt-4o", entry.Model);
+        Assert.Equal(15, entry.InputTokens);
+        Assert.Equal(3, entry.OutputTokens);
+    }
+
+    [Fact]
+    public async Task CallerSuppliedRunFinished_PassesThroughWithoutAccumulatedUsage()
+    {
+        // A caller that emits its own terminal event owns it entirely; the converter
+        // never mutates it, so accumulated usage is not grafted on. Pinned so the
+        // behaviour is a deliberate boundary rather than an accident.
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                ModelId = "gpt-4o",
+                Contents = [new UsageContent(new UsageDetails { InputTokenCount = 7 })]
+            },
+            new ChatResponseUpdate
+            {
+                RawRepresentation = new RunFinishedEvent { ThreadId = ThreadId, RunId = RunId }
+            });
+
+        var events = await CollectEvents(updates);
+
+        var finished = Assert.IsType<RunFinishedEvent>(events[^1]);
+        Assert.Null(finished.Usage);
+    }
+
+    [Fact]
+    public async Task UsageContent_BlankModelId_OmitsModelLabel()
+    {
+        // Providers that don't echo a model id leave ModelId empty rather than null.
+        // An empty label is noise on the wire and would not match what the TypeScript
+        // producers emit, so it must be omitted entirely.
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                ModelId = "",
+                Contents = [new UsageContent(new UsageDetails { InputTokenCount = 7 })]
+            });
+
+        var events = await CollectEvents(updates);
+
+        var finished = Assert.IsType<RunFinishedEvent>(events[^1]);
+        var entry = Assert.Single(finished.Usage!);
+        Assert.Null(entry.Model);
+        Assert.Equal(7, entry.InputTokens);
+    }
+
+    [Fact]
+    public async Task UsageProvider_LabelsUsageEntries()
+    {
+        // M.E.AI carries the model on the update but not the provider, so the
+        // endpoint declares it. Without this the entry can only be keyed by model,
+        // which would not match what the TypeScript producers emit.
+        var options = new AGUIStreamOptions().WithUsageProvider("openai");
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                ModelId = "gpt-4o",
+                Contents = [new UsageContent(new UsageDetails { InputTokenCount = 10 })]
+            });
+
+        var events = new List<BaseEvent>();
+        await foreach (var evt in updates.AsAGUIEventStreamAsync(BuildContext(options)).ConfigureAwait(false))
+        {
+            events.Add(evt);
+        }
+
+        var finished = Assert.IsType<RunFinishedEvent>(events[^1]);
+        var entry = Assert.Single(finished.Usage!);
+        Assert.Equal("openai", entry.Provider);
+        Assert.Equal("gpt-4o", entry.Model);
+    }
+
+    [Fact]
+    public async Task UsageContents_FromDifferentModels_KeptSeparate()
+    {
+        var updates = ToAsyncEnumerable(
+            new ChatResponseUpdate
+            {
+                ModelId = "gpt-4o",
+                Contents = [new UsageContent(new UsageDetails { InputTokenCount = 10 })]
+            },
+            new ChatResponseUpdate
+            {
+                ModelId = "gpt-4o-mini",
+                Contents = [new UsageContent(new UsageDetails { InputTokenCount = 5 })]
+            });
+
+        var events = await CollectEvents(updates);
+
+        var finished = Assert.IsType<RunFinishedEvent>(events[^1]);
+        Assert.Equal(2, finished.Usage!.Count);
+        Assert.Equal("gpt-4o", finished.Usage[0].Model);
+        Assert.Equal(10, finished.Usage[0].InputTokens);
+        Assert.Equal("gpt-4o-mini", finished.Usage[1].Model);
+        Assert.Equal(5, finished.Usage[1].InputTokens);
     }
 
     #endregion

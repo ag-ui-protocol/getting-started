@@ -5,9 +5,14 @@ import {
 } from "@copilotkit/runtime/v2";
 import { handle } from "hono/vercel";
 
+type RuntimeAgents = NonNullable<
+  ConstructorParameters<typeof CopilotRuntime>[0]["agents"]
+>;
+
 const runtime = new CopilotRuntime({
   agents: {
-    default: null as any,
+    // The dojo resolves agents per request, so there is no static default.
+    default: null as unknown as RuntimeAgents[keyof RuntimeAgents],
   },
   runner: new InMemoryAgentRunner(),
 });

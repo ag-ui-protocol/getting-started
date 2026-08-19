@@ -6,11 +6,27 @@ import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock
 import pytest
+from ag_ui_adk.session_manager import SessionManager
 
 from ag_ui.core import RunAgentInput, UserMessage
 from ag_ui_adk import ADKAgent
 from google.adk.agents import Agent
 from google.genai import types
+
+
+
+@pytest.fixture(autouse=True)
+def _isolate_session_manager():
+    """Reset the SessionManager singleton around every test in this module.
+
+    Several tests here drive the agent on the same `test_app:mock_test` thread with the
+    same message id (`msg_1`). The singleton's processed-id map is not reset between
+    them, so a later test's only message arrives already marked as seen and its run has
+    nothing unseen to dispatch — the test then passes for the wrong reason.
+    """
+    SessionManager.reset_instance()
+    yield
+    SessionManager.reset_instance()
 
 
 async def test_message_events(llmock_server=None):

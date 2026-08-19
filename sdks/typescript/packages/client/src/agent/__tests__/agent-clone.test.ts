@@ -21,7 +21,7 @@ class CloneableTestAgent extends AbstractAgent {
     });
   }
 
-  protected run(_: RunAgentInput): Observable<BaseEvent> {
+  run(_: RunAgentInput): Observable<BaseEvent> {
     return EMPTY as Observable<BaseEvent>;
   }
 }

@@ -34,7 +34,7 @@ export const runHttpRequest = (
             if (contentType.includes("application/json")) {
               try { payload = JSON.parse(text); } catch {/* keep raw text */}
             }
-            const err: any = new Error(
+            const err: Error & { status?: number; payload?: unknown } = new Error(
               `HTTP ${response.status}: ${typeof payload === "string" ? payload : JSON.stringify(payload)}`
             );
             err.status = response.status;

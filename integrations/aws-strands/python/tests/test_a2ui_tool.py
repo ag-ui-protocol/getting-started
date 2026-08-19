@@ -44,6 +44,7 @@ from ag_ui_strands.a2ui_tool import (
 )
 from ag_ui_strands.agent import StrandsAgent
 from ag_ui_strands.config import StrandsAgentConfig
+from tests.interrupt_state_stub import InterruptStateStub
 
 GENERATE_A2UI_TOOL_NAME = "generate_a2ui"
 RENDER_A2UI_TOOL_NAME = "render_a2ui"
@@ -467,10 +468,13 @@ def _build_agent(thread_id: str, stream_events: list, config=None) -> StrandsAge
     mock_inner.tool_registry = ToolRegistry()
     mock_inner.session_manager = None
     # Without this a bare MagicMock auto-creates a truthy `_session_manager`,
-    # flipping `_has_strands_session_manager` True and silently routing every
+    # making `_get_strands_session_manager` return it and silently routing every
     # test through the legacy (non-replay) path instead of the default
     # `replay_history_into_strands` one.
     mock_inner._session_manager = None
+    # A bare MagicMock auto-vivifies `_interrupt_state.activated` as a truthy
+    # mock, spuriously tripping the "no session_manager" interrupt guard.
+    mock_inner._interrupt_state = InterruptStateStub()
     mock_inner.messages = []
 
     async def _stream(_msg):

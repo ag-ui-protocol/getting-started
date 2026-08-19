@@ -160,6 +160,27 @@ internal static class EventStreamConverter
                         };
                     }
 
+                    // Surface token usage as MEAI UsageContent so callers of the IChatClient
+                    // abstraction can read it via ChatResponse.Usage rather than having to
+                    // inspect RawRepresentation. One update per entry, each carrying its own
+                    // ModelId, so per-model attribution survives the conversion. `provider`
+                    // has no MEAI equivalent and stays available on RawRepresentation.
+                    if (runFinishedEvt.Usage is { Count: > 0 } usageEntries)
+                    {
+                        foreach (var entry in usageEntries)
+                        {
+                            yield return new ChatResponseUpdate
+                            {
+                                Role = ChatRole.Assistant,
+                                ConversationId = conversationId,
+                                ResponseId = responseId,
+                                ModelId = entry.Model,
+                                Contents = [new UsageContent(ToUsageDetails(entry))],
+                                RawRepresentation = runFinishedEvt,
+                            };
+                        }
+                    }
+
                     break;
 
                 case RunErrorEvent errorEvent:
@@ -173,6 +194,14 @@ internal static class EventStreamConverter
                     };
                     break;
 
+                // These four events update builder state and yield no
+                // ChatResponseUpdate, so anything carried only on them — metadata
+                // included — does not reach an AGUIChatClient consumer, not even
+                // through RawRepresentation. That is deliberate: metadata is a
+                // wire-level field in .NET, consistent with every other
+                // message-level AG-UI field (see AGUIMessage.Metadata). Consumers
+                // needing it read the raw event stream instead. Documented in
+                // docs/concepts/metadata.mdx.
                 case TextMessageStartEvent textStart:
                     textMessageBuilder.AddTextStart(textStart);
                     break;
@@ -361,4 +390,17 @@ internal static class EventStreamConverter
             }
         }
     }
+
+    // Inverse of the AGUI.Server mapping. Every AG-UI count has a first-class MEAI
+    // equivalent, and null stays null on both sides so a count the provider never
+    // reported is not reported as zero.
+    private static UsageDetails ToUsageDetails(TokenUsage usage) =>
+        new()
+        {
+            InputTokenCount = usage.InputTokens,
+            OutputTokenCount = usage.OutputTokens,
+            TotalTokenCount = usage.TotalTokens,
+            ReasoningTokenCount = usage.ReasoningTokens,
+            CachedInputTokenCount = usage.CachedInputTokens,
+        };
 }
