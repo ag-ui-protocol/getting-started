@@ -202,7 +202,72 @@ class TestEmptyToolNameNeverSurfaces(unittest.TestCase):
         self.assertEqual(starts[0].tool_call_name, "real_tool")
 
 
+class TestAtomicArgsInFirstChunk(unittest.TestCase):
+    """Some providers (e.g. GLM) emit name + complete args in the same first
+    chunk instead of streaming arg deltas later. The start handler must emit
+    TOOL_CALL_ARGS in that case, otherwise START is followed immediately by
+    END and the client never sees the invocation arguments (#2463)."""
+
+    def test_name_and_complete_args_in_first_chunk_emits_tool_call_args(self):
+        events = [
+            _event(
+                "on_chat_model_stream",
+                data={"chunk": _ai_chunk(
+                    name="get_weather",
+                    args='{"location":"Chengdu","date":"tomorrow"}',
+                    tool_call_id="tc-glm",
+                )},
+            ),
+            _stream_end(),
+            _tool_end(
+                "get_weather",
+                "tc-glm",
+                content="Sunny",
+                input_args={"location": "Chengdu", "date": "tomorrow"},
+            ),
+        ]
+        dispatched = asyncio.run(_run_stream(events))
+
+        starts, args_payloads, ends, results = _filter_tool_events(dispatched, "tc-glm")
+
+        self.assertEqual(starts, 1)
+        self.assertEqual(ends, 1)
+        self.assertEqual(results, 1)
+        self.assertEqual(
+            "".join(args_payloads),
+            '{"location":"Chengdu","date":"tomorrow"}',
+            "Complete first-chunk args must surface as TOOL_CALL_ARGS",
+        )
+
+    def test_dict_args_in_first_chunk_are_json_serialized(self):
+        events = [
+            _event(
+                "on_chat_model_stream",
+                data={"chunk": _ai_chunk(
+                    name="get_weather",
+                    args={"location": "Chengdu", "date": "tomorrow"},
+                    tool_call_id="tc-glm-dict",
+                )},
+            ),
+            _stream_end(),
+            _tool_end(
+                "get_weather",
+                "tc-glm-dict",
+                content="Sunny",
+                input_args={"location": "Chengdu", "date": "tomorrow"},
+            ),
+        ]
+        dispatched = asyncio.run(_run_stream(events))
+
+        _, args_payloads, _, _ = _filter_tool_events(dispatched, "tc-glm-dict")
+        accumulated = "".join(args_payloads)
+        self.assertNotEqual(accumulated, "", "Dict args in the start chunk must emit TOOL_CALL_ARGS")
+        parsed = json.loads(accumulated)
+        self.assertEqual(parsed, {"location": "Chengdu", "date": "tomorrow"})
+
+
 class TestConcatenatedJsonInSingleToolUseArgs(unittest.TestCase):
+
     """When the LLM emits a single tool_use whose args field accumulates
     concatenated JSON like ``{"a":1}{"a":2}{"a":3}`` (intent: parallel
     calls collapsed into one), pin the current behaviour. The user-visible
