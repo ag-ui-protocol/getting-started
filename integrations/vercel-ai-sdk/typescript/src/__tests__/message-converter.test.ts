@@ -280,4 +280,140 @@ describe("convertMessagesToVercelAISDKMessages", () => {
       },
     ]);
   });
+
+  it("preserves whitespace in text-only user parts verbatim", () => {
+    const result = convertMessagesToVercelAISDKMessages([
+      {
+        id: "u1",
+        role: "user",
+        content: [
+          { type: "text", text: "  indented code\n" },
+          { type: "text", text: "   " },
+        ],
+      },
+    ]);
+    expect(result).toEqual([{ role: "user", content: "  indented code\n\n   " }]);
+  });
+
+  it("marks a failed tool result as error-text output", () => {
+    const result = convertMessagesToVercelAISDKMessages([
+      {
+        id: "t1",
+        role: "tool",
+        toolCallId: "tc1",
+        content: "connection refused",
+        error: "connection refused",
+      },
+    ]);
+    expect(result).toEqual([
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "tc1",
+            toolName: "unknown",
+            output: { type: "error-text", value: "connection refused" },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("attaches a reasoning message (with signature) to the following assistant message", () => {
+    const result = convertMessagesToVercelAISDKMessages([
+      { id: "r1", role: "reasoning", content: "thinking hard", encryptedValue: "sig-abc" },
+      { id: "a1", role: "assistant", content: "the answer" },
+    ]);
+    expect(result).toEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "reasoning",
+            text: "thinking hard",
+            providerOptions: { anthropic: { signature: "sig-abc" } },
+          },
+          { type: "text", text: "the answer" },
+        ],
+      },
+    ]);
+  });
+
+  it("attaches a reasoning message without signature as a plain reasoning part", () => {
+    const result = convertMessagesToVercelAISDKMessages([
+      { id: "r1", role: "reasoning", content: "brief thought" },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          { id: "tc1", type: "function", function: { name: "get_weather", arguments: "{}" } },
+        ],
+      },
+    ]);
+    expect(result).toEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "brief thought" },
+          { type: "tool-call", toolCallId: "tc1", toolName: "get_weather", input: {} },
+        ],
+      },
+    ]);
+  });
+
+  it("drops buffered reasoning when a non-assistant message follows", () => {
+    const result = convertMessagesToVercelAISDKMessages([
+      { id: "r1", role: "reasoning", content: "stale thought" },
+      { id: "u1", role: "user", content: "actually, nevermind" },
+      { id: "a1", role: "assistant", content: "ok" },
+    ]);
+    expect(result).toEqual([
+      { role: "user", content: "actually, nevermind" },
+      { role: "assistant", content: [{ type: "text", text: "ok" }] },
+    ]);
+  });
+
+  it("routes non-image legacy binary data to a file part with its mediaType", () => {
+    const result = convertMessagesToVercelAISDKMessages([
+      {
+        id: "u1",
+        role: "user",
+        content: [{ type: "binary", mimeType: "application/pdf", data: "QUJD" }],
+      },
+    ]);
+    expect(result).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "file",
+            data: "data:application/pdf;base64,QUJD",
+            mediaType: "application/pdf",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("routes non-image legacy binary url to a file part keeping its mediaType", () => {
+    const result = convertMessagesToVercelAISDKMessages([
+      {
+        id: "u1",
+        role: "user",
+        content: [
+          { type: "binary", mimeType: "application/pdf", url: "https://example.com/doc.pdf" },
+        ],
+      },
+    ]);
+    expect(result).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "file", data: "https://example.com/doc.pdf", mediaType: "application/pdf" },
+        ],
+      },
+    ]);
+  });
 });

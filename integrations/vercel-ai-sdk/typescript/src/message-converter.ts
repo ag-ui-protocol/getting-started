@@ -38,10 +38,11 @@ function toUserContent(content: Message["content"]): string | UserPart[] {
 
   if (!hasNonText) {
     type TextInput = Extract<InputContent, { type: "text" }>;
+    // Text is user-provided; pass it through verbatim (no trimming or
+    // dropping of whitespace-only parts), matching the mixed-content branch.
     return content
       .filter((part): part is TextInput => part.type === "text")
-      .map((part) => part.text.trim())
-      .filter(Boolean)
+      .map((part) => part.text)
       .join("\n");
   }
 
@@ -64,17 +65,23 @@ function toUserContent(content: Message["content"]): string | UserPart[] {
         });
         break;
       case "binary": {
-        if (part.url) {
-          parts.push({ type: "image", image: part.url });
-        } else if (part.data && part.mimeType) {
-          parts.push({
-            type: "image",
-            image: `data:${part.mimeType};base64,${part.data}`,
-          });
-        } else {
+        const source = part.url
+          ? part.url
+          : part.data && part.mimeType
+            ? `data:${part.mimeType};base64,${part.data}`
+            : undefined;
+        if (!source) {
           console.warn(
             "[convertMessagesToVercelAISDKMessages] Dropping BinaryInputContent: no url or data provided",
           );
+          break;
+        }
+        // Route by mimeType: only image/* becomes an image part; PDFs, audio,
+        // video etc. are file parts carrying their real mediaType.
+        if (!part.mimeType || part.mimeType.startsWith("image/")) {
+          parts.push({ type: "image", image: source });
+        } else {
+          parts.push({ type: "file", data: source, mediaType: part.mimeType });
         }
         break;
       }
@@ -96,20 +103,33 @@ function lookupToolName(messages: Message[], toolCallId: string): string {
   return "unknown";
 }
 
+// The assistant content parts union from the AI SDK (TextPart | FilePart |
+// ReasoningPart | ToolCallPart | ...), without re-declaring the shapes here.
+type AssistantParts = Exclude<Extract<ModelMessage, { role: "assistant" }>["content"], string>;
+
 export function convertMessagesToVercelAISDKMessages(messages: Message[]): ModelMessage[] {
   const result: ModelMessage[] = [];
+  // AG-UI persists reasoning as standalone messages preceding their assistant
+  // message. Buffer them and fold them into that assistant message as AI SDK
+  // reasoning parts — for Anthropic extended thinking, the signed thinking
+  // block (encryptedValue) must be replayed with the assistant turn or
+  // tool-use continuations are rejected.
+  let pendingReasoning: AssistantParts = [];
 
   for (const message of messages) {
     switch (message.role) {
       case "developer":
       case "system":
+        pendingReasoning = [];
         result.push({ role: "system", content: message.content });
         break;
       case "user":
+        pendingReasoning = [];
         result.push({ role: "user", content: toUserContent(message.content) });
         break;
       case "assistant": {
-        const parts: Array<TextPart | ToolCallPart> = [];
+        const parts: AssistantParts = [...pendingReasoning];
+        pendingReasoning = [];
         if (message.content) {
           parts.push({ type: "text", text: message.content });
         }
@@ -128,6 +148,7 @@ export function convertMessagesToVercelAISDKMessages(messages: Message[]): Model
         break;
       }
       case "tool":
+        pendingReasoning = [];
         result.push({
           role: "tool",
           content: [
@@ -135,13 +156,28 @@ export function convertMessagesToVercelAISDKMessages(messages: Message[]): Model
               type: "tool-result",
               toolCallId: message.toolCallId,
               toolName: lookupToolName(messages, message.toolCallId),
-              output: { type: "text", value: message.content },
+              // Preserve failure signaling: providers map error-text to their
+              // native is_error flag, so the model can distinguish a failed
+              // or denied call from a tool that returned this text.
+              output:
+                message.error !== undefined
+                  ? { type: "error-text", value: message.content }
+                  : { type: "text", value: message.content },
             },
           ],
         });
         break;
       case "activity":
+        pendingReasoning = [];
+        break;
       case "reasoning":
+        pendingReasoning.push({
+          type: "reasoning",
+          text: message.content ?? "",
+          ...(message.encryptedValue
+            ? { providerOptions: { anthropic: { signature: message.encryptedValue } } }
+            : {}),
+        });
         break;
     }
   }
