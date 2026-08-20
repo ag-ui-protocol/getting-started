@@ -1,0 +1,5 @@
+{
+  "keyword": "type",
+  "instanceLocation": "/outcome/interruptIds/0",
+  "keywordLocation": "#/$defs/SubagentFinishedSuspendedOutcome/properties/interruptIds/items/type"
+}

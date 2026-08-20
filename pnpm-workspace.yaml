@@ -1,5 +1,6 @@
 packages:
   - apps/*
+  - spec
   - middlewares/*
   - sdks/typescript/packages/*
   - sdks/dotnet/tests/CrossLanguage.Vitest

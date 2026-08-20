@@ -1,0 +1,25 @@
+{
+  "id": "1",
+  "role": "user",
+  "content": [
+    {
+      "type": "text",
+      "text": "look at this"
+    },
+    {
+      "type": "image",
+      "source": {
+        "type": "data",
+        "value": "aGk=",
+        "mimeType": "image/png"
+      }
+    },
+    {
+      "type": "document",
+      "source": {
+        "type": "url",
+        "value": "https://example.com/a.pdf"
+      }
+    }
+  ]
+}

@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ag-ui.com/spec/draft/json-patch.json",
+  "title": "JSON Patch (RFC 6902)",
+  "description": "A JSON Patch document as defined by RFC 6902, referenced by STATE_DELTA.delta and ACTIVITY_DELTA.patch. Kept in its own file because it is an external standard rather than an AG-UI definition: a reader can check it against RFC 6902 instead of against AG-UI prose.",
+  "$ref": "#/$defs/JsonPatch",
+  "$defs": {
+    "JsonPatch": {
+      "$anchor": "JsonPatch",
+      "type": "array",
+      "description": "An ordered sequence of operations applied to a target document. An empty array is a valid no-op patch. Whether the operations actually apply to the document they target is a runtime question RFC 6902 leaves to the applier; structural validity here says nothing about it.",
+      "items": {
+        "$ref": "#/$defs/JsonPatchOperation"
+      }
+    },
+    "JsonPatchOperation": {
+      "$anchor": "JsonPatchOperation",
+      "description": "A single RFC 6902 operation. Exactly one of the six operation shapes must match, discriminated by op. Members that the operation does not define are deliberately permitted: RFC 6902 section 4 requires them to be ignored rather than rejected, so a remove carrying a leftover value is a valid patch. Two of the RFC's rules are relations between values rather than shapes, so no static schema can express them and neither is checked here: a move whose from is a proper prefix of its path (section 4.4), and any operation whose pointer does not resolve in the target document. Both are the applier's to reject.",
+      "oneOf": [
+        { "$ref": "#/$defs/AddOperation" },
+        { "$ref": "#/$defs/RemoveOperation" },
+        { "$ref": "#/$defs/ReplaceOperation" },
+        { "$ref": "#/$defs/MoveOperation" },
+        { "$ref": "#/$defs/CopyOperation" },
+        { "$ref": "#/$defs/TestOperation" }
+      ]
+    },
+    "AddOperation": {
+      "$anchor": "AddOperation",
+      "type": "object",
+      "description": "Inserts value at path. RFC 6902 section 4.1.",
+      "properties": {
+        "op": {
+          "const": "add",
+          "description": "Discriminator for the add operation."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where to insert the value."
+        },
+        "value": {
+          "description": "The value to insert. Any JSON value, including null, which is a legitimate thing to add."
+        }
+      },
+      "required": ["op", "path", "value"]
+    },
+    "RemoveOperation": {
+      "$anchor": "RemoveOperation",
+      "type": "object",
+      "description": "Removes the value at path. RFC 6902 section 4.2.",
+      "properties": {
+        "op": {
+          "const": "remove",
+          "description": "Discriminator for the remove operation."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "What to remove."
+        }
+      },
+      "required": ["op", "path"]
+    },
+    "ReplaceOperation": {
+      "$anchor": "ReplaceOperation",
+      "type": "object",
+      "description": "Replaces the value at path. RFC 6902 section 4.3.",
+      "properties": {
+        "op": {
+          "const": "replace",
+          "description": "Discriminator for the replace operation."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "What to replace."
+        },
+        "value": {
+          "description": "The replacement. Any JSON value, including null."
+        }
+      },
+      "required": ["op", "path", "value"]
+    },
+    "MoveOperation": {
+      "$anchor": "MoveOperation",
+      "type": "object",
+      "description": "Moves the value at from to path. RFC 6902 section 4.4.",
+      "properties": {
+        "op": {
+          "const": "move",
+          "description": "Discriminator for the move operation."
+        },
+        "from": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where the value is moved from."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where the value is moved to."
+        }
+      },
+      "required": ["op", "from", "path"]
+    },
+    "CopyOperation": {
+      "$anchor": "CopyOperation",
+      "type": "object",
+      "description": "Copies the value at from to path. RFC 6902 section 4.5.",
+      "properties": {
+        "op": {
+          "const": "copy",
+          "description": "Discriminator for the copy operation."
+        },
+        "from": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where the value is copied from."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where the value is copied to."
+        }
+      },
+      "required": ["op", "from", "path"]
+    },
+    "TestOperation": {
+      "$anchor": "TestOperation",
+      "type": "object",
+      "description": "Asserts that the value at path equals value. RFC 6902 section 4.6.",
+      "properties": {
+        "op": {
+          "const": "test",
+          "description": "Discriminator for the test operation."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "What to compare."
+        },
+        "value": {
+          "description": "The value the target must equal. Any JSON value, including null."
+        }
+      },
+      "required": ["op", "path", "value"]
+    },
+    "JsonPointer": {
+      "$anchor": "JsonPointer",
+      "type": "string",
+      "description": "A JSON Pointer as defined by RFC 6901. Either the empty string, meaning the whole document, or a sequence of slash-prefixed reference tokens in which a tilde is escaped as ~0 and a slash as ~1. A value with no leading slash, or a tilde followed by anything other than 0 or 1, is not a JSON Pointer.",
+      "pattern": "^(/([^/~]|~[01])*)*$"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "type": "SUBAGENT_ERROR",
+  "subagentRunId": "s1",
+  "message": "boom",
+  "code": null
+}

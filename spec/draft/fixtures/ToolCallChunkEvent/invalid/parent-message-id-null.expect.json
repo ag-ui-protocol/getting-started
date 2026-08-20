@@ -1,0 +1,5 @@
+{
+  "keyword": "type",
+  "instanceLocation": "/parentMessageId",
+  "keywordLocation": "#/properties/parentMessageId/type"
+}

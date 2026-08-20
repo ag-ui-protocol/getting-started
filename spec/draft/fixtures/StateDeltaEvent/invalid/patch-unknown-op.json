@@ -1,0 +1,10 @@
+{
+  "type": "STATE_DELTA",
+  "delta": [
+    {
+      "op": "increment",
+      "path": "/n",
+      "value": 1
+    }
+  ]
+}

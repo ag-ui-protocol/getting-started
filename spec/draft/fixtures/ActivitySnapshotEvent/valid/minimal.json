@@ -1,0 +1,8 @@
+{
+  "type": "ACTIVITY_SNAPSHOT",
+  "messageId": "a1",
+  "activityType": "search",
+  "content": {
+    "query": "q"
+  }
+}

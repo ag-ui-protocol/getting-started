@@ -1,0 +1,14 @@
+{
+  "type": "RUN_FINISHED",
+  "threadId": "t1",
+  "runId": "r1",
+  "outcome": {
+    "type": "success",
+    "interrupts": [
+      {
+        "id": "i1",
+        "reason": "tool_approval"
+      }
+    ]
+  }
+}

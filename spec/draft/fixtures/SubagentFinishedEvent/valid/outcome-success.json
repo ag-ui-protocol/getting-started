@@ -1,0 +1,7 @@
+{
+  "type": "SUBAGENT_FINISHED",
+  "subagentRunId": "s1",
+  "outcome": {
+    "type": "success"
+  }
+}

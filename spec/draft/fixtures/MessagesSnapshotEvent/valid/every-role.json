@@ -1,0 +1,54 @@
+{
+  "type": "MESSAGES_SNAPSHOT",
+  "messages": [
+    {
+      "id": "1",
+      "role": "developer",
+      "content": "be brief"
+    },
+    {
+      "id": "2",
+      "role": "system",
+      "content": "you are an agent"
+    },
+    {
+      "id": "3",
+      "role": "user",
+      "content": "hello"
+    },
+    {
+      "id": "4",
+      "role": "assistant",
+      "content": "hi",
+      "toolCalls": [
+        {
+          "id": "c1",
+          "type": "function",
+          "function": {
+            "name": "search",
+            "arguments": "{\"q\":\"x\"}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "role": "tool",
+      "content": "3 results",
+      "toolCallId": "c1"
+    },
+    {
+      "id": "6",
+      "role": "activity",
+      "activityType": "search",
+      "content": {
+        "hits": 3
+      }
+    },
+    {
+      "id": "7",
+      "role": "reasoning",
+      "content": "weighing options"
+    }
+  ]
+}

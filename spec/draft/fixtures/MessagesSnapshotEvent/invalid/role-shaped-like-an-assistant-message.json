@@ -1,0 +1,9 @@
+{
+  "type": "MESSAGES_SNAPSHOT",
+  "messages": [
+    {
+      "id": "1",
+      "role": "narrator"
+    }
+  ]
+}

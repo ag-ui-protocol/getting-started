@@ -1,0 +1,10 @@
+{
+  "type": "TEXT_MESSAGE_CONTENT",
+  "messageId": "m1",
+  "delta": "hi",
+  "metadata": {
+    "ag-ui": {
+      "origin": "middleware"
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "keyword": "not",
+  "instanceLocation": "/outcome/interrupts",
+  "keywordLocation": "#/$defs/RunFinishedSuccessOutcome/properties/interrupts/not"
+}

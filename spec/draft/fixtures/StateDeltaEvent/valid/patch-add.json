@@ -1,0 +1,12 @@
+{
+  "type": "STATE_DELTA",
+  "delta": [
+    {
+      "op": "add",
+      "path": "/items/-",
+      "value": {
+        "id": 1
+      }
+    }
+  ]
+}

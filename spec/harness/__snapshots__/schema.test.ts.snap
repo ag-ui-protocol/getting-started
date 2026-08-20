@@ -1,0 +1,1634 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`constraints > matches the recorded constraints in json-patch.json 1`] = `
+{
+  "#": {
+    "$ref": "#/$defs/JsonPatch",
+  },
+  "#/$defs/AddOperation": {
+    "required": [
+      "op",
+      "path",
+      "value",
+    ],
+    "type": "object",
+  },
+  "#/$defs/AddOperation/properties/op": {
+    "const": "add",
+  },
+  "#/$defs/AddOperation/properties/path": {
+    "$ref": "#/$defs/JsonPointer",
+  },
+  "#/$defs/CopyOperation": {
+    "required": [
+      "op",
+      "from",
+      "path",
+    ],
+    "type": "object",
+  },
+  "#/$defs/CopyOperation/properties/from": {
+    "$ref": "#/$defs/JsonPointer",
+  },
+  "#/$defs/CopyOperation/properties/op": {
+    "const": "copy",
+  },
+  "#/$defs/CopyOperation/properties/path": {
+    "$ref": "#/$defs/JsonPointer",
+  },
+  "#/$defs/JsonPatch": {
+    "type": "array",
+  },
+  "#/$defs/JsonPatch/items": {
+    "$ref": "#/$defs/JsonPatchOperation",
+  },
+  "#/$defs/JsonPatchOperation/oneOf/0": {
+    "$ref": "#/$defs/AddOperation",
+  },
+  "#/$defs/JsonPatchOperation/oneOf/1": {
+    "$ref": "#/$defs/RemoveOperation",
+  },
+  "#/$defs/JsonPatchOperation/oneOf/2": {
+    "$ref": "#/$defs/ReplaceOperation",
+  },
+  "#/$defs/JsonPatchOperation/oneOf/3": {
+    "$ref": "#/$defs/MoveOperation",
+  },
+  "#/$defs/JsonPatchOperation/oneOf/4": {
+    "$ref": "#/$defs/CopyOperation",
+  },
+  "#/$defs/JsonPatchOperation/oneOf/5": {
+    "$ref": "#/$defs/TestOperation",
+  },
+  "#/$defs/JsonPointer": {
+    "pattern": "^(/([^/~]|~[01])*)*$",
+    "type": "string",
+  },
+  "#/$defs/MoveOperation": {
+    "required": [
+      "op",
+      "from",
+      "path",
+    ],
+    "type": "object",
+  },
+  "#/$defs/MoveOperation/properties/from": {
+    "$ref": "#/$defs/JsonPointer",
+  },
+  "#/$defs/MoveOperation/properties/op": {
+    "const": "move",
+  },
+  "#/$defs/MoveOperation/properties/path": {
+    "$ref": "#/$defs/JsonPointer",
+  },
+  "#/$defs/RemoveOperation": {
+    "required": [
+      "op",
+      "path",
+    ],
+    "type": "object",
+  },
+  "#/$defs/RemoveOperation/properties/op": {
+    "const": "remove",
+  },
+  "#/$defs/RemoveOperation/properties/path": {
+    "$ref": "#/$defs/JsonPointer",
+  },
+  "#/$defs/ReplaceOperation": {
+    "required": [
+      "op",
+      "path",
+      "value",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ReplaceOperation/properties/op": {
+    "const": "replace",
+  },
+  "#/$defs/ReplaceOperation/properties/path": {
+    "$ref": "#/$defs/JsonPointer",
+  },
+  "#/$defs/TestOperation": {
+    "required": [
+      "op",
+      "path",
+      "value",
+    ],
+    "type": "object",
+  },
+  "#/$defs/TestOperation/properties/op": {
+    "const": "test",
+  },
+  "#/$defs/TestOperation/properties/path": {
+    "$ref": "#/$defs/JsonPointer",
+  },
+}
+`;
+
+exports[`constraints > matches the recorded constraints in schema.json 1`] = `
+{
+  "#": {
+    "$ref": "#/$defs/Event",
+  },
+  "#/$defs/ActivityDeltaEvent": {
+    "required": [
+      "type",
+      "messageId",
+      "activityType",
+      "patch",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ActivityDeltaEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ActivityDeltaEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ActivityDeltaEvent/properties/activityType": {
+    "type": "string",
+  },
+  "#/$defs/ActivityDeltaEvent/properties/messageId": {
+    "type": "string",
+  },
+  "#/$defs/ActivityDeltaEvent/properties/patch": {
+    "$ref": "json-patch.json#/$defs/JsonPatch",
+  },
+  "#/$defs/ActivityDeltaEvent/properties/type": {
+    "const": "ACTIVITY_DELTA",
+  },
+  "#/$defs/ActivityMessage": {
+    "required": [
+      "id",
+      "role",
+      "activityType",
+      "content",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ActivityMessage/allOf/0": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ActivityMessage/properties/activityType": {
+    "type": "string",
+  },
+  "#/$defs/ActivityMessage/properties/content": {
+    "additionalProperties": true,
+    "type": "object",
+  },
+  "#/$defs/ActivityMessage/properties/id": {
+    "type": "string",
+  },
+  "#/$defs/ActivityMessage/properties/metadata": {
+    "$ref": "#/$defs/Metadata",
+  },
+  "#/$defs/ActivityMessage/properties/role": {
+    "const": "activity",
+  },
+  "#/$defs/ActivitySnapshotEvent": {
+    "required": [
+      "type",
+      "messageId",
+      "activityType",
+      "content",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ActivitySnapshotEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ActivitySnapshotEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ActivitySnapshotEvent/properties/activityType": {
+    "type": "string",
+  },
+  "#/$defs/ActivitySnapshotEvent/properties/content": {
+    "additionalProperties": true,
+    "type": "object",
+  },
+  "#/$defs/ActivitySnapshotEvent/properties/messageId": {
+    "type": "string",
+  },
+  "#/$defs/ActivitySnapshotEvent/properties/replace": {
+    "default": true,
+    "type": "boolean",
+  },
+  "#/$defs/ActivitySnapshotEvent/properties/type": {
+    "const": "ACTIVITY_SNAPSHOT",
+  },
+  "#/$defs/AssistantMessage": {
+    "required": [
+      "id",
+      "role",
+    ],
+    "type": "object",
+  },
+  "#/$defs/AssistantMessage/allOf/0": {
+    "$ref": "#/$defs/BaseMessage",
+  },
+  "#/$defs/AssistantMessage/properties/content": {
+    "type": "string",
+  },
+  "#/$defs/AssistantMessage/properties/role": {
+    "const": "assistant",
+  },
+  "#/$defs/AssistantMessage/properties/toolCalls": {
+    "type": "array",
+  },
+  "#/$defs/AssistantMessage/properties/toolCalls/items": {
+    "$ref": "#/$defs/ToolCall",
+  },
+  "#/$defs/Attributable": {
+    "type": "object",
+  },
+  "#/$defs/Attributable/properties/subagentRunId": {
+    "$ref": "#/$defs/SubagentRunId",
+  },
+  "#/$defs/AudioInputContent": {
+    "required": [
+      "type",
+      "source",
+    ],
+    "type": "object",
+  },
+  "#/$defs/AudioInputContent/properties/source": {
+    "$ref": "#/$defs/InputContentSource",
+  },
+  "#/$defs/AudioInputContent/properties/type": {
+    "const": "audio",
+  },
+  "#/$defs/BaseEvent": {
+    "required": [
+      "type",
+    ],
+    "type": "object",
+  },
+  "#/$defs/BaseEvent/properties/metadata": {
+    "$ref": "#/$defs/Metadata",
+  },
+  "#/$defs/BaseEvent/properties/timestamp": {
+    "maximum": 9007199254740991,
+    "minimum": -9007199254740991,
+    "type": "integer",
+  },
+  "#/$defs/BaseEvent/properties/type": {
+    "$ref": "#/$defs/EventType",
+  },
+  "#/$defs/BaseMessage": {
+    "required": [
+      "id",
+      "role",
+    ],
+    "type": "object",
+  },
+  "#/$defs/BaseMessage/allOf/0": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/BaseMessage/properties/encryptedValue": {
+    "type": "string",
+  },
+  "#/$defs/BaseMessage/properties/id": {
+    "type": "string",
+  },
+  "#/$defs/BaseMessage/properties/metadata": {
+    "$ref": "#/$defs/Metadata",
+  },
+  "#/$defs/BaseMessage/properties/name": {
+    "type": "string",
+  },
+  "#/$defs/BaseMessage/properties/role": {
+    "type": "string",
+  },
+  "#/$defs/Context": {
+    "required": [
+      "description",
+      "value",
+    ],
+    "type": "object",
+  },
+  "#/$defs/Context/properties/description": {
+    "type": "string",
+  },
+  "#/$defs/Context/properties/value": {
+    "type": "string",
+  },
+  "#/$defs/CustomEvent": {
+    "required": [
+      "type",
+      "name",
+      "value",
+    ],
+    "type": "object",
+  },
+  "#/$defs/CustomEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/CustomEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/CustomEvent/properties/name": {
+    "type": "string",
+  },
+  "#/$defs/CustomEvent/properties/type": {
+    "const": "CUSTOM",
+  },
+  "#/$defs/DeveloperMessage": {
+    "required": [
+      "id",
+      "role",
+      "content",
+    ],
+    "type": "object",
+  },
+  "#/$defs/DeveloperMessage/allOf/0": {
+    "$ref": "#/$defs/BaseMessage",
+  },
+  "#/$defs/DeveloperMessage/properties/content": {
+    "type": "string",
+  },
+  "#/$defs/DeveloperMessage/properties/role": {
+    "const": "developer",
+  },
+  "#/$defs/DocumentInputContent": {
+    "required": [
+      "type",
+      "source",
+    ],
+    "type": "object",
+  },
+  "#/$defs/DocumentInputContent/properties/source": {
+    "$ref": "#/$defs/InputContentSource",
+  },
+  "#/$defs/DocumentInputContent/properties/type": {
+    "const": "document",
+  },
+  "#/$defs/Event/oneOf/0": {
+    "$ref": "#/$defs/TextMessageStartEvent",
+  },
+  "#/$defs/Event/oneOf/1": {
+    "$ref": "#/$defs/TextMessageContentEvent",
+  },
+  "#/$defs/Event/oneOf/10": {
+    "$ref": "#/$defs/StateDeltaEvent",
+  },
+  "#/$defs/Event/oneOf/11": {
+    "$ref": "#/$defs/MessagesSnapshotEvent",
+  },
+  "#/$defs/Event/oneOf/12": {
+    "$ref": "#/$defs/ActivitySnapshotEvent",
+  },
+  "#/$defs/Event/oneOf/13": {
+    "$ref": "#/$defs/ActivityDeltaEvent",
+  },
+  "#/$defs/Event/oneOf/14": {
+    "$ref": "#/$defs/RawEvent",
+  },
+  "#/$defs/Event/oneOf/15": {
+    "$ref": "#/$defs/CustomEvent",
+  },
+  "#/$defs/Event/oneOf/16": {
+    "$ref": "#/$defs/RunStartedEvent",
+  },
+  "#/$defs/Event/oneOf/17": {
+    "$ref": "#/$defs/RunFinishedEvent",
+  },
+  "#/$defs/Event/oneOf/18": {
+    "$ref": "#/$defs/RunErrorEvent",
+  },
+  "#/$defs/Event/oneOf/19": {
+    "$ref": "#/$defs/StepStartedEvent",
+  },
+  "#/$defs/Event/oneOf/2": {
+    "$ref": "#/$defs/TextMessageEndEvent",
+  },
+  "#/$defs/Event/oneOf/20": {
+    "$ref": "#/$defs/StepFinishedEvent",
+  },
+  "#/$defs/Event/oneOf/21": {
+    "$ref": "#/$defs/ReasoningStartEvent",
+  },
+  "#/$defs/Event/oneOf/22": {
+    "$ref": "#/$defs/ReasoningMessageStartEvent",
+  },
+  "#/$defs/Event/oneOf/23": {
+    "$ref": "#/$defs/ReasoningMessageContentEvent",
+  },
+  "#/$defs/Event/oneOf/24": {
+    "$ref": "#/$defs/ReasoningMessageEndEvent",
+  },
+  "#/$defs/Event/oneOf/25": {
+    "$ref": "#/$defs/ReasoningMessageChunkEvent",
+  },
+  "#/$defs/Event/oneOf/26": {
+    "$ref": "#/$defs/ReasoningEndEvent",
+  },
+  "#/$defs/Event/oneOf/27": {
+    "$ref": "#/$defs/ReasoningEncryptedValueEvent",
+  },
+  "#/$defs/Event/oneOf/28": {
+    "$ref": "#/$defs/SubagentStartedEvent",
+  },
+  "#/$defs/Event/oneOf/29": {
+    "$ref": "#/$defs/SubagentFinishedEvent",
+  },
+  "#/$defs/Event/oneOf/3": {
+    "$ref": "#/$defs/TextMessageChunkEvent",
+  },
+  "#/$defs/Event/oneOf/30": {
+    "$ref": "#/$defs/SubagentErrorEvent",
+  },
+  "#/$defs/Event/oneOf/4": {
+    "$ref": "#/$defs/ToolCallStartEvent",
+  },
+  "#/$defs/Event/oneOf/5": {
+    "$ref": "#/$defs/ToolCallArgsEvent",
+  },
+  "#/$defs/Event/oneOf/6": {
+    "$ref": "#/$defs/ToolCallEndEvent",
+  },
+  "#/$defs/Event/oneOf/7": {
+    "$ref": "#/$defs/ToolCallChunkEvent",
+  },
+  "#/$defs/Event/oneOf/8": {
+    "$ref": "#/$defs/ToolCallResultEvent",
+  },
+  "#/$defs/Event/oneOf/9": {
+    "$ref": "#/$defs/StateSnapshotEvent",
+  },
+  "#/$defs/EventType": {
+    "enum": [
+      "TEXT_MESSAGE_START",
+      "TEXT_MESSAGE_CONTENT",
+      "TEXT_MESSAGE_END",
+      "TEXT_MESSAGE_CHUNK",
+      "TOOL_CALL_START",
+      "TOOL_CALL_ARGS",
+      "TOOL_CALL_END",
+      "TOOL_CALL_CHUNK",
+      "TOOL_CALL_RESULT",
+      "STATE_SNAPSHOT",
+      "STATE_DELTA",
+      "MESSAGES_SNAPSHOT",
+      "ACTIVITY_SNAPSHOT",
+      "ACTIVITY_DELTA",
+      "RAW",
+      "CUSTOM",
+      "RUN_STARTED",
+      "RUN_FINISHED",
+      "RUN_ERROR",
+      "STEP_STARTED",
+      "STEP_FINISHED",
+      "REASONING_START",
+      "REASONING_MESSAGE_START",
+      "REASONING_MESSAGE_CONTENT",
+      "REASONING_MESSAGE_END",
+      "REASONING_MESSAGE_CHUNK",
+      "REASONING_END",
+      "REASONING_ENCRYPTED_VALUE",
+      "SUBAGENT_STARTED",
+      "SUBAGENT_FINISHED",
+      "SUBAGENT_ERROR",
+    ],
+    "type": "string",
+  },
+  "#/$defs/FunctionCall": {
+    "required": [
+      "name",
+      "arguments",
+    ],
+    "type": "object",
+  },
+  "#/$defs/FunctionCall/properties/arguments": {
+    "type": "string",
+  },
+  "#/$defs/FunctionCall/properties/name": {
+    "type": "string",
+  },
+  "#/$defs/ImageInputContent": {
+    "required": [
+      "type",
+      "source",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ImageInputContent/properties/source": {
+    "$ref": "#/$defs/InputContentSource",
+  },
+  "#/$defs/ImageInputContent/properties/type": {
+    "const": "image",
+  },
+  "#/$defs/InputContent/oneOf/0": {
+    "$ref": "#/$defs/TextInputContent",
+  },
+  "#/$defs/InputContent/oneOf/1": {
+    "$ref": "#/$defs/ImageInputContent",
+  },
+  "#/$defs/InputContent/oneOf/2": {
+    "$ref": "#/$defs/AudioInputContent",
+  },
+  "#/$defs/InputContent/oneOf/3": {
+    "$ref": "#/$defs/VideoInputContent",
+  },
+  "#/$defs/InputContent/oneOf/4": {
+    "$ref": "#/$defs/DocumentInputContent",
+  },
+  "#/$defs/InputContentDataSource": {
+    "required": [
+      "type",
+      "value",
+      "mimeType",
+    ],
+    "type": "object",
+  },
+  "#/$defs/InputContentDataSource/properties/mimeType": {
+    "type": "string",
+  },
+  "#/$defs/InputContentDataSource/properties/type": {
+    "const": "data",
+  },
+  "#/$defs/InputContentDataSource/properties/value": {
+    "contentEncoding": "base64",
+    "type": "string",
+  },
+  "#/$defs/InputContentSource/oneOf/0": {
+    "$ref": "#/$defs/InputContentDataSource",
+  },
+  "#/$defs/InputContentSource/oneOf/1": {
+    "$ref": "#/$defs/InputContentUrlSource",
+  },
+  "#/$defs/InputContentUrlSource": {
+    "required": [
+      "type",
+      "value",
+    ],
+    "type": "object",
+  },
+  "#/$defs/InputContentUrlSource/properties/mimeType": {
+    "type": "string",
+  },
+  "#/$defs/InputContentUrlSource/properties/type": {
+    "const": "url",
+  },
+  "#/$defs/InputContentUrlSource/properties/value": {
+    "type": "string",
+  },
+  "#/$defs/Interrupt": {
+    "required": [
+      "id",
+      "reason",
+    ],
+    "type": "object",
+  },
+  "#/$defs/Interrupt/allOf/0": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/Interrupt/properties/expiresAt": {
+    "type": "string",
+  },
+  "#/$defs/Interrupt/properties/id": {
+    "type": "string",
+  },
+  "#/$defs/Interrupt/properties/message": {
+    "type": "string",
+  },
+  "#/$defs/Interrupt/properties/metadata": {
+    "$ref": "#/$defs/Metadata",
+  },
+  "#/$defs/Interrupt/properties/reason": {
+    "type": "string",
+  },
+  "#/$defs/Interrupt/properties/responseSchema": {
+    "additionalProperties": true,
+    "type": "object",
+  },
+  "#/$defs/Interrupt/properties/toolCallId": {
+    "type": "string",
+  },
+  "#/$defs/Message/oneOf/0": {
+    "$ref": "#/$defs/DeveloperMessage",
+  },
+  "#/$defs/Message/oneOf/1": {
+    "$ref": "#/$defs/SystemMessage",
+  },
+  "#/$defs/Message/oneOf/2": {
+    "$ref": "#/$defs/AssistantMessage",
+  },
+  "#/$defs/Message/oneOf/3": {
+    "$ref": "#/$defs/UserMessage",
+  },
+  "#/$defs/Message/oneOf/4": {
+    "$ref": "#/$defs/ToolMessage",
+  },
+  "#/$defs/Message/oneOf/5": {
+    "$ref": "#/$defs/ActivityMessage",
+  },
+  "#/$defs/Message/oneOf/6": {
+    "$ref": "#/$defs/ReasoningMessage",
+  },
+  "#/$defs/MessagesSnapshotEvent": {
+    "required": [
+      "type",
+      "messages",
+    ],
+    "type": "object",
+  },
+  "#/$defs/MessagesSnapshotEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/MessagesSnapshotEvent/properties/messages": {
+    "type": "array",
+  },
+  "#/$defs/MessagesSnapshotEvent/properties/messages/items": {
+    "$ref": "#/$defs/Message",
+  },
+  "#/$defs/MessagesSnapshotEvent/properties/type": {
+    "const": "MESSAGES_SNAPSHOT",
+  },
+  "#/$defs/Metadata": {
+    "additionalProperties": true,
+    "type": "object",
+  },
+  "#/$defs/RawEvent": {
+    "required": [
+      "type",
+      "event",
+    ],
+    "type": "object",
+  },
+  "#/$defs/RawEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/RawEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/RawEvent/properties/source": {
+    "type": "string",
+  },
+  "#/$defs/RawEvent/properties/type": {
+    "const": "RAW",
+  },
+  "#/$defs/ReasoningEncryptedValueEvent": {
+    "required": [
+      "type",
+      "subtype",
+      "entityId",
+      "encryptedValue",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ReasoningEncryptedValueEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ReasoningEncryptedValueEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ReasoningEncryptedValueEvent/properties/encryptedValue": {
+    "type": "string",
+  },
+  "#/$defs/ReasoningEncryptedValueEvent/properties/entityId": {
+    "type": "string",
+  },
+  "#/$defs/ReasoningEncryptedValueEvent/properties/subtype": {
+    "$ref": "#/$defs/ReasoningEncryptedValueSubtype",
+  },
+  "#/$defs/ReasoningEncryptedValueEvent/properties/type": {
+    "const": "REASONING_ENCRYPTED_VALUE",
+  },
+  "#/$defs/ReasoningEncryptedValueSubtype": {
+    "enum": [
+      "tool-call",
+      "message",
+    ],
+    "type": "string",
+  },
+  "#/$defs/ReasoningEndEvent": {
+    "required": [
+      "type",
+      "messageId",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ReasoningEndEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ReasoningEndEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ReasoningEndEvent/properties/messageId": {
+    "type": "string",
+  },
+  "#/$defs/ReasoningEndEvent/properties/type": {
+    "const": "REASONING_END",
+  },
+  "#/$defs/ReasoningMessage": {
+    "required": [
+      "id",
+      "role",
+      "content",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ReasoningMessage/allOf/0": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ReasoningMessage/properties/content": {
+    "type": "string",
+  },
+  "#/$defs/ReasoningMessage/properties/encryptedValue": {
+    "type": "string",
+  },
+  "#/$defs/ReasoningMessage/properties/id": {
+    "type": "string",
+  },
+  "#/$defs/ReasoningMessage/properties/metadata": {
+    "$ref": "#/$defs/Metadata",
+  },
+  "#/$defs/ReasoningMessage/properties/role": {
+    "const": "reasoning",
+  },
+  "#/$defs/ReasoningMessageChunkEvent": {
+    "required": [
+      "type",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ReasoningMessageChunkEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ReasoningMessageChunkEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ReasoningMessageChunkEvent/properties/delta": {
+    "type": "string",
+  },
+  "#/$defs/ReasoningMessageChunkEvent/properties/messageId": {
+    "type": "string",
+  },
+  "#/$defs/ReasoningMessageChunkEvent/properties/type": {
+    "const": "REASONING_MESSAGE_CHUNK",
+  },
+  "#/$defs/ReasoningMessageContentEvent": {
+    "required": [
+      "type",
+      "messageId",
+      "delta",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ReasoningMessageContentEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ReasoningMessageContentEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ReasoningMessageContentEvent/properties/delta": {
+    "type": "string",
+  },
+  "#/$defs/ReasoningMessageContentEvent/properties/messageId": {
+    "type": "string",
+  },
+  "#/$defs/ReasoningMessageContentEvent/properties/type": {
+    "const": "REASONING_MESSAGE_CONTENT",
+  },
+  "#/$defs/ReasoningMessageEndEvent": {
+    "required": [
+      "type",
+      "messageId",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ReasoningMessageEndEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ReasoningMessageEndEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ReasoningMessageEndEvent/properties/messageId": {
+    "type": "string",
+  },
+  "#/$defs/ReasoningMessageEndEvent/properties/type": {
+    "const": "REASONING_MESSAGE_END",
+  },
+  "#/$defs/ReasoningMessageStartEvent": {
+    "required": [
+      "type",
+      "messageId",
+      "role",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ReasoningMessageStartEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ReasoningMessageStartEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ReasoningMessageStartEvent/properties/messageId": {
+    "type": "string",
+  },
+  "#/$defs/ReasoningMessageStartEvent/properties/role": {
+    "const": "reasoning",
+  },
+  "#/$defs/ReasoningMessageStartEvent/properties/type": {
+    "const": "REASONING_MESSAGE_START",
+  },
+  "#/$defs/ReasoningStartEvent": {
+    "required": [
+      "type",
+      "messageId",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ReasoningStartEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ReasoningStartEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ReasoningStartEvent/properties/messageId": {
+    "type": "string",
+  },
+  "#/$defs/ReasoningStartEvent/properties/type": {
+    "const": "REASONING_START",
+  },
+  "#/$defs/ResumeEntry": {
+    "required": [
+      "interruptId",
+      "status",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ResumeEntry/properties/interruptId": {
+    "type": "string",
+  },
+  "#/$defs/ResumeEntry/properties/metadata": {
+    "$ref": "#/$defs/Metadata",
+  },
+  "#/$defs/ResumeEntry/properties/status": {
+    "enum": [
+      "resolved",
+      "cancelled",
+    ],
+    "type": "string",
+  },
+  "#/$defs/Role": {
+    "enum": [
+      "developer",
+      "system",
+      "assistant",
+      "user",
+      "tool",
+      "activity",
+      "reasoning",
+    ],
+    "type": "string",
+  },
+  "#/$defs/RunAgentInput": {
+    "required": [
+      "threadId",
+      "runId",
+      "messages",
+    ],
+    "type": "object",
+  },
+  "#/$defs/RunAgentInput/properties/context": {
+    "type": "array",
+  },
+  "#/$defs/RunAgentInput/properties/context/items": {
+    "$ref": "#/$defs/Context",
+  },
+  "#/$defs/RunAgentInput/properties/messages": {
+    "type": "array",
+  },
+  "#/$defs/RunAgentInput/properties/messages/items": {
+    "$ref": "#/$defs/Message",
+  },
+  "#/$defs/RunAgentInput/properties/parentRunId": {
+    "type": "string",
+  },
+  "#/$defs/RunAgentInput/properties/resume": {
+    "type": "array",
+  },
+  "#/$defs/RunAgentInput/properties/resume/items": {
+    "$ref": "#/$defs/ResumeEntry",
+  },
+  "#/$defs/RunAgentInput/properties/runId": {
+    "type": "string",
+  },
+  "#/$defs/RunAgentInput/properties/state": {
+    "$ref": "#/$defs/State",
+  },
+  "#/$defs/RunAgentInput/properties/threadId": {
+    "type": "string",
+  },
+  "#/$defs/RunAgentInput/properties/tools": {
+    "type": "array",
+  },
+  "#/$defs/RunAgentInput/properties/tools/items": {
+    "$ref": "#/$defs/Tool",
+  },
+  "#/$defs/RunErrorEvent": {
+    "required": [
+      "type",
+      "message",
+    ],
+    "type": "object",
+  },
+  "#/$defs/RunErrorEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/RunErrorEvent/properties/code": {
+    "type": "string",
+  },
+  "#/$defs/RunErrorEvent/properties/message": {
+    "type": "string",
+  },
+  "#/$defs/RunErrorEvent/properties/type": {
+    "const": "RUN_ERROR",
+  },
+  "#/$defs/RunErrorEvent/properties/usage": {
+    "type": "array",
+  },
+  "#/$defs/RunErrorEvent/properties/usage/items": {
+    "$ref": "#/$defs/TokenUsage",
+  },
+  "#/$defs/RunFinishedEvent": {
+    "required": [
+      "type",
+      "threadId",
+      "runId",
+    ],
+    "type": "object",
+  },
+  "#/$defs/RunFinishedEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/RunFinishedEvent/properties/outcome": {
+    "$ref": "#/$defs/RunFinishedOutcome",
+  },
+  "#/$defs/RunFinishedEvent/properties/runId": {
+    "type": "string",
+  },
+  "#/$defs/RunFinishedEvent/properties/threadId": {
+    "type": "string",
+  },
+  "#/$defs/RunFinishedEvent/properties/type": {
+    "const": "RUN_FINISHED",
+  },
+  "#/$defs/RunFinishedEvent/properties/usage": {
+    "type": "array",
+  },
+  "#/$defs/RunFinishedEvent/properties/usage/items": {
+    "$ref": "#/$defs/TokenUsage",
+  },
+  "#/$defs/RunFinishedInterruptOutcome": {
+    "required": [
+      "type",
+      "interrupts",
+    ],
+    "type": "object",
+  },
+  "#/$defs/RunFinishedInterruptOutcome/properties/interrupts": {
+    "minItems": 1,
+    "type": "array",
+  },
+  "#/$defs/RunFinishedInterruptOutcome/properties/interrupts/items": {
+    "$ref": "#/$defs/Interrupt",
+  },
+  "#/$defs/RunFinishedInterruptOutcome/properties/type": {
+    "const": "interrupt",
+  },
+  "#/$defs/RunFinishedOutcome/oneOf/0": {
+    "$ref": "#/$defs/RunFinishedSuccessOutcome",
+  },
+  "#/$defs/RunFinishedOutcome/oneOf/1": {
+    "$ref": "#/$defs/RunFinishedInterruptOutcome",
+  },
+  "#/$defs/RunFinishedSuccessOutcome": {
+    "required": [
+      "type",
+    ],
+    "type": "object",
+  },
+  "#/$defs/RunFinishedSuccessOutcome/properties/interrupts": {
+    "not": {},
+  },
+  "#/$defs/RunFinishedSuccessOutcome/properties/type": {
+    "const": "success",
+  },
+  "#/$defs/RunStartedEvent": {
+    "required": [
+      "type",
+      "threadId",
+      "runId",
+    ],
+    "type": "object",
+  },
+  "#/$defs/RunStartedEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/RunStartedEvent/properties/input": {
+    "$ref": "#/$defs/RunAgentInput",
+  },
+  "#/$defs/RunStartedEvent/properties/parentRunId": {
+    "type": "string",
+  },
+  "#/$defs/RunStartedEvent/properties/runId": {
+    "type": "string",
+  },
+  "#/$defs/RunStartedEvent/properties/threadId": {
+    "type": "string",
+  },
+  "#/$defs/RunStartedEvent/properties/type": {
+    "const": "RUN_STARTED",
+  },
+  "#/$defs/StateDeltaEvent": {
+    "required": [
+      "type",
+      "delta",
+    ],
+    "type": "object",
+  },
+  "#/$defs/StateDeltaEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/StateDeltaEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/StateDeltaEvent/properties/delta": {
+    "$ref": "json-patch.json#/$defs/JsonPatch",
+  },
+  "#/$defs/StateDeltaEvent/properties/type": {
+    "const": "STATE_DELTA",
+  },
+  "#/$defs/StateSnapshotEvent": {
+    "required": [
+      "type",
+      "snapshot",
+    ],
+    "type": "object",
+  },
+  "#/$defs/StateSnapshotEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/StateSnapshotEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/StateSnapshotEvent/properties/snapshot": {
+    "$ref": "#/$defs/State",
+  },
+  "#/$defs/StateSnapshotEvent/properties/type": {
+    "const": "STATE_SNAPSHOT",
+  },
+  "#/$defs/StepFinishedEvent": {
+    "required": [
+      "type",
+      "stepName",
+    ],
+    "type": "object",
+  },
+  "#/$defs/StepFinishedEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/StepFinishedEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/StepFinishedEvent/properties/stepName": {
+    "type": "string",
+  },
+  "#/$defs/StepFinishedEvent/properties/type": {
+    "const": "STEP_FINISHED",
+  },
+  "#/$defs/StepStartedEvent": {
+    "required": [
+      "type",
+      "stepName",
+    ],
+    "type": "object",
+  },
+  "#/$defs/StepStartedEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/StepStartedEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/StepStartedEvent/properties/stepName": {
+    "type": "string",
+  },
+  "#/$defs/StepStartedEvent/properties/type": {
+    "const": "STEP_STARTED",
+  },
+  "#/$defs/SubagentErrorEvent": {
+    "required": [
+      "type",
+      "subagentRunId",
+      "message",
+    ],
+    "type": "object",
+  },
+  "#/$defs/SubagentErrorEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/SubagentErrorEvent/properties/code": {
+    "type": "string",
+  },
+  "#/$defs/SubagentErrorEvent/properties/message": {
+    "type": "string",
+  },
+  "#/$defs/SubagentErrorEvent/properties/subagentRunId": {
+    "$ref": "#/$defs/SubagentRunId",
+  },
+  "#/$defs/SubagentErrorEvent/properties/type": {
+    "const": "SUBAGENT_ERROR",
+  },
+  "#/$defs/SubagentFinishedEvent": {
+    "required": [
+      "type",
+      "subagentRunId",
+    ],
+    "type": "object",
+  },
+  "#/$defs/SubagentFinishedEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/SubagentFinishedEvent/properties/outcome": {
+    "$ref": "#/$defs/SubagentFinishedOutcome",
+  },
+  "#/$defs/SubagentFinishedEvent/properties/subagentRunId": {
+    "$ref": "#/$defs/SubagentRunId",
+  },
+  "#/$defs/SubagentFinishedEvent/properties/type": {
+    "const": "SUBAGENT_FINISHED",
+  },
+  "#/$defs/SubagentFinishedOutcome/oneOf/0": {
+    "$ref": "#/$defs/SubagentFinishedSuccessOutcome",
+  },
+  "#/$defs/SubagentFinishedOutcome/oneOf/1": {
+    "$ref": "#/$defs/SubagentFinishedSuspendedOutcome",
+  },
+  "#/$defs/SubagentFinishedSuccessOutcome": {
+    "required": [
+      "type",
+    ],
+    "type": "object",
+  },
+  "#/$defs/SubagentFinishedSuccessOutcome/properties/interruptIds": {
+    "not": {},
+  },
+  "#/$defs/SubagentFinishedSuccessOutcome/properties/type": {
+    "const": "success",
+  },
+  "#/$defs/SubagentFinishedSuspendedOutcome": {
+    "required": [
+      "type",
+    ],
+    "type": "object",
+  },
+  "#/$defs/SubagentFinishedSuspendedOutcome/properties/interruptIds": {
+    "type": "array",
+  },
+  "#/$defs/SubagentFinishedSuspendedOutcome/properties/interruptIds/items": {
+    "type": "string",
+  },
+  "#/$defs/SubagentFinishedSuspendedOutcome/properties/type": {
+    "const": "suspended",
+  },
+  "#/$defs/SubagentRunId": {
+    "type": "string",
+  },
+  "#/$defs/SubagentStartedEvent": {
+    "required": [
+      "type",
+      "subagentRunId",
+      "name",
+    ],
+    "type": "object",
+  },
+  "#/$defs/SubagentStartedEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/SubagentStartedEvent/properties/description": {
+    "type": "string",
+  },
+  "#/$defs/SubagentStartedEvent/properties/name": {
+    "type": "string",
+  },
+  "#/$defs/SubagentStartedEvent/properties/parentMessageId": {
+    "type": "string",
+  },
+  "#/$defs/SubagentStartedEvent/properties/parentSubagentRunId": {
+    "$ref": "#/$defs/SubagentRunId",
+  },
+  "#/$defs/SubagentStartedEvent/properties/parentToolCallId": {
+    "type": "string",
+  },
+  "#/$defs/SubagentStartedEvent/properties/subagentRunId": {
+    "$ref": "#/$defs/SubagentRunId",
+  },
+  "#/$defs/SubagentStartedEvent/properties/type": {
+    "const": "SUBAGENT_STARTED",
+  },
+  "#/$defs/SystemMessage": {
+    "required": [
+      "id",
+      "role",
+      "content",
+    ],
+    "type": "object",
+  },
+  "#/$defs/SystemMessage/allOf/0": {
+    "$ref": "#/$defs/BaseMessage",
+  },
+  "#/$defs/SystemMessage/properties/content": {
+    "type": "string",
+  },
+  "#/$defs/SystemMessage/properties/role": {
+    "const": "system",
+  },
+  "#/$defs/TextInputContent": {
+    "required": [
+      "type",
+      "text",
+    ],
+    "type": "object",
+  },
+  "#/$defs/TextInputContent/properties/text": {
+    "type": "string",
+  },
+  "#/$defs/TextInputContent/properties/type": {
+    "const": "text",
+  },
+  "#/$defs/TextMessageChunkEvent": {
+    "required": [
+      "type",
+    ],
+    "type": "object",
+  },
+  "#/$defs/TextMessageChunkEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/TextMessageChunkEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/TextMessageChunkEvent/properties/delta": {
+    "type": "string",
+  },
+  "#/$defs/TextMessageChunkEvent/properties/messageId": {
+    "type": "string",
+  },
+  "#/$defs/TextMessageChunkEvent/properties/name": {
+    "type": "string",
+  },
+  "#/$defs/TextMessageChunkEvent/properties/role": {
+    "$ref": "#/$defs/TextMessageRole",
+  },
+  "#/$defs/TextMessageChunkEvent/properties/type": {
+    "const": "TEXT_MESSAGE_CHUNK",
+  },
+  "#/$defs/TextMessageContentEvent": {
+    "required": [
+      "type",
+      "messageId",
+      "delta",
+    ],
+    "type": "object",
+  },
+  "#/$defs/TextMessageContentEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/TextMessageContentEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/TextMessageContentEvent/properties/delta": {
+    "type": "string",
+  },
+  "#/$defs/TextMessageContentEvent/properties/messageId": {
+    "type": "string",
+  },
+  "#/$defs/TextMessageContentEvent/properties/type": {
+    "const": "TEXT_MESSAGE_CONTENT",
+  },
+  "#/$defs/TextMessageEndEvent": {
+    "required": [
+      "type",
+      "messageId",
+    ],
+    "type": "object",
+  },
+  "#/$defs/TextMessageEndEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/TextMessageEndEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/TextMessageEndEvent/properties/messageId": {
+    "type": "string",
+  },
+  "#/$defs/TextMessageEndEvent/properties/type": {
+    "const": "TEXT_MESSAGE_END",
+  },
+  "#/$defs/TextMessageRole": {
+    "enum": [
+      "developer",
+      "system",
+      "assistant",
+      "user",
+    ],
+    "type": "string",
+  },
+  "#/$defs/TextMessageStartEvent": {
+    "required": [
+      "type",
+      "messageId",
+    ],
+    "type": "object",
+  },
+  "#/$defs/TextMessageStartEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/TextMessageStartEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/TextMessageStartEvent/properties/messageId": {
+    "type": "string",
+  },
+  "#/$defs/TextMessageStartEvent/properties/name": {
+    "type": "string",
+  },
+  "#/$defs/TextMessageStartEvent/properties/role": {
+    "$ref": "#/$defs/TextMessageRole",
+    "default": "assistant",
+  },
+  "#/$defs/TextMessageStartEvent/properties/type": {
+    "const": "TEXT_MESSAGE_START",
+  },
+  "#/$defs/TokenUsage": {
+    "type": "object",
+  },
+  "#/$defs/TokenUsage/properties/cachedInputTokens": {
+    "maximum": 9007199254740991,
+    "minimum": 0,
+    "type": "integer",
+  },
+  "#/$defs/TokenUsage/properties/inputTokens": {
+    "maximum": 9007199254740991,
+    "minimum": 0,
+    "type": "integer",
+  },
+  "#/$defs/TokenUsage/properties/model": {
+    "type": "string",
+  },
+  "#/$defs/TokenUsage/properties/outputTokens": {
+    "maximum": 9007199254740991,
+    "minimum": 0,
+    "type": "integer",
+  },
+  "#/$defs/TokenUsage/properties/provider": {
+    "type": "string",
+  },
+  "#/$defs/TokenUsage/properties/reasoningTokens": {
+    "maximum": 9007199254740991,
+    "minimum": 0,
+    "type": "integer",
+  },
+  "#/$defs/TokenUsage/properties/totalTokens": {
+    "maximum": 9007199254740991,
+    "minimum": 0,
+    "type": "integer",
+  },
+  "#/$defs/Tool": {
+    "required": [
+      "name",
+      "description",
+    ],
+    "type": "object",
+  },
+  "#/$defs/Tool/properties/description": {
+    "type": "string",
+  },
+  "#/$defs/Tool/properties/metadata": {
+    "$ref": "#/$defs/Metadata",
+  },
+  "#/$defs/Tool/properties/name": {
+    "type": "string",
+  },
+  "#/$defs/ToolCall": {
+    "required": [
+      "id",
+      "type",
+      "function",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ToolCall/properties/encryptedValue": {
+    "type": "string",
+  },
+  "#/$defs/ToolCall/properties/function": {
+    "$ref": "#/$defs/FunctionCall",
+  },
+  "#/$defs/ToolCall/properties/id": {
+    "type": "string",
+  },
+  "#/$defs/ToolCall/properties/metadata": {
+    "$ref": "#/$defs/Metadata",
+  },
+  "#/$defs/ToolCall/properties/type": {
+    "const": "function",
+  },
+  "#/$defs/ToolCallArgsEvent": {
+    "required": [
+      "type",
+      "toolCallId",
+      "delta",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ToolCallArgsEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ToolCallArgsEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ToolCallArgsEvent/properties/delta": {
+    "type": "string",
+  },
+  "#/$defs/ToolCallArgsEvent/properties/toolCallId": {
+    "type": "string",
+  },
+  "#/$defs/ToolCallArgsEvent/properties/type": {
+    "const": "TOOL_CALL_ARGS",
+  },
+  "#/$defs/ToolCallChunkEvent": {
+    "required": [
+      "type",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ToolCallChunkEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ToolCallChunkEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ToolCallChunkEvent/properties/delta": {
+    "type": "string",
+  },
+  "#/$defs/ToolCallChunkEvent/properties/parentMessageId": {
+    "type": "string",
+  },
+  "#/$defs/ToolCallChunkEvent/properties/toolCallId": {
+    "type": "string",
+  },
+  "#/$defs/ToolCallChunkEvent/properties/toolCallName": {
+    "type": "string",
+  },
+  "#/$defs/ToolCallChunkEvent/properties/type": {
+    "const": "TOOL_CALL_CHUNK",
+  },
+  "#/$defs/ToolCallEndEvent": {
+    "required": [
+      "type",
+      "toolCallId",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ToolCallEndEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ToolCallEndEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ToolCallEndEvent/properties/toolCallId": {
+    "type": "string",
+  },
+  "#/$defs/ToolCallEndEvent/properties/type": {
+    "const": "TOOL_CALL_END",
+  },
+  "#/$defs/ToolCallResultEvent": {
+    "required": [
+      "type",
+      "messageId",
+      "toolCallId",
+      "content",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ToolCallResultEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ToolCallResultEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ToolCallResultEvent/properties/content": {
+    "type": "string",
+  },
+  "#/$defs/ToolCallResultEvent/properties/messageId": {
+    "type": "string",
+  },
+  "#/$defs/ToolCallResultEvent/properties/role": {
+    "const": "tool",
+  },
+  "#/$defs/ToolCallResultEvent/properties/toolCallId": {
+    "type": "string",
+  },
+  "#/$defs/ToolCallResultEvent/properties/type": {
+    "const": "TOOL_CALL_RESULT",
+  },
+  "#/$defs/ToolCallStartEvent": {
+    "required": [
+      "type",
+      "toolCallId",
+      "toolCallName",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ToolCallStartEvent/allOf/0": {
+    "$ref": "#/$defs/BaseEvent",
+  },
+  "#/$defs/ToolCallStartEvent/allOf/1": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ToolCallStartEvent/properties/parentMessageId": {
+    "type": "string",
+  },
+  "#/$defs/ToolCallStartEvent/properties/toolCallId": {
+    "type": "string",
+  },
+  "#/$defs/ToolCallStartEvent/properties/toolCallName": {
+    "type": "string",
+  },
+  "#/$defs/ToolCallStartEvent/properties/type": {
+    "const": "TOOL_CALL_START",
+  },
+  "#/$defs/ToolMessage": {
+    "required": [
+      "id",
+      "role",
+      "content",
+      "toolCallId",
+    ],
+    "type": "object",
+  },
+  "#/$defs/ToolMessage/allOf/0": {
+    "$ref": "#/$defs/Attributable",
+  },
+  "#/$defs/ToolMessage/properties/content": {
+    "type": "string",
+  },
+  "#/$defs/ToolMessage/properties/encryptedValue": {
+    "type": "string",
+  },
+  "#/$defs/ToolMessage/properties/error": {
+    "type": "string",
+  },
+  "#/$defs/ToolMessage/properties/id": {
+    "type": "string",
+  },
+  "#/$defs/ToolMessage/properties/metadata": {
+    "$ref": "#/$defs/Metadata",
+  },
+  "#/$defs/ToolMessage/properties/role": {
+    "const": "tool",
+  },
+  "#/$defs/ToolMessage/properties/toolCallId": {
+    "type": "string",
+  },
+  "#/$defs/UserMessage": {
+    "required": [
+      "id",
+      "role",
+      "content",
+    ],
+    "type": "object",
+  },
+  "#/$defs/UserMessage/allOf/0": {
+    "$ref": "#/$defs/BaseMessage",
+  },
+  "#/$defs/UserMessage/properties/content/oneOf/0": {
+    "type": "string",
+  },
+  "#/$defs/UserMessage/properties/content/oneOf/1": {
+    "type": "array",
+  },
+  "#/$defs/UserMessage/properties/content/oneOf/1/items": {
+    "$ref": "#/$defs/InputContent",
+  },
+  "#/$defs/UserMessage/properties/role": {
+    "const": "user",
+  },
+  "#/$defs/VideoInputContent": {
+    "required": [
+      "type",
+      "source",
+    ],
+    "type": "object",
+  },
+  "#/$defs/VideoInputContent/properties/source": {
+    "$ref": "#/$defs/InputContentSource",
+  },
+  "#/$defs/VideoInputContent/properties/type": {
+    "const": "video",
+  },
+}
+`;
