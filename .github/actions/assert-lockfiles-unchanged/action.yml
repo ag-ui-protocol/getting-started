@@ -1,0 +1,34 @@
+name: Assert lockfiles unchanged
+description: >-
+  Fails the job if any step modified a committed lockfile. This is the direct check
+  that CI never silently repairs lockfile drift instead of reporting it.
+
+# Why this is an outcome check rather than a rule about which commands ran:
+# an earlier version of this change had a CI script that read the shell inside every
+# `run:` block looking for a uv command that might rewrite a lockfile. Three review
+# rounds found new shell shapes that slipped past its regexes — `$(uv sync)`,
+# `$((1<<n))` read as a heredoc opener, `shell: python` bodies scanned as bash — so
+# that approach was abandoned in favour of measuring the thing itself. A lockfile
+# that changed during the job is the property it was trying to infer, and git
+# answers that directly.
+#
+# Run this LAST in a job. `uv sync --locked` refuses to rewrite in the first place,
+# so on a healthy job this asserts what already holds; it earns its keep when a step
+# is added that syncs without `--locked`.
+#
+# NOT used by jobs that sync the `examples/` apps: five of those lockfiles are
+# knowingly stale and dojo-e2e rewrites them on purpose. See the `lockfiles` job
+# comment in .github/workflows/unit-python-sdk.yml.
+
+# The check itself lives in assert-lockfiles-unchanged.sh rather than in a `run:`
+# block below. Shell embedded in a composite action is linted by nothing in this repo:
+# the shellcheck job globs scripts/release/*.sh, and actionlint 1.7.x has no
+# composite-action mode — pointed at an action.yml it parses it as a workflow and
+# reports "jobs section is missing". As a .sh file it is covered by the shellcheck job.
+
+runs:
+  using: composite
+  steps:
+    - name: Assert no committed lockfile was modified
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/assert-lockfiles-unchanged.sh"

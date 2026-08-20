@@ -5,6 +5,7 @@ import asyncio
 import copy
 import logging
 import re
+import threading
 import time
 import uuid
 from typing import Any
@@ -27,6 +28,7 @@ from ._capabilities import (
     BaseEventListener,
     crewai_event_bus,
     flow_supports_stream_frames,
+    flow_supports_conversational_stream,
     flow_supports_human_feedback,
     supported_checkpoint_kwargs,
     add_stream_sink,
@@ -47,6 +49,9 @@ from ._frames import (
 )
 from ._config import (
     DEFAULT_EMISSION_SHAPE,
+    DEFAULT_FLOW_TIMEOUT_SECONDS,
+    FLOW_TIMEOUT_ENV_VAR,
+    MAX_CONVERSATION_WORKERS_ENV_VAR,
     resolve_emission_shape,
     resolve_emit_raw_events,
 )
@@ -113,8 +118,31 @@ from .sdk import (
   reset_node_snapshot_suppression,
 )
 from .crews import ChatWithCrewFlow, CrewBaseInstance
+from . import _conversation
+from ._conversation import (
+    AbandonmentSignal,
+    ConversationCapacityExceeded,
+    ConversationThreadBusy,
+    ConversationalTurn,
+    SyncStreamSessionAdapter,
+    abandoned_conversational_run_for_thread,
+    acquire_conversation_worker,
+    conversation_worker_stats,
+    conversational_flow_key,
+    conversational_thread_busy_detail,
+    hydrate_conversational_flow,
+    force_per_turn_trace_finalization,
+    overlay_conversational_persistence,
+    prepare_conversational_turn,
+    report_conversational_abandonment,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+# Resolved off the module rather than imported by name: the abort signal belongs
+# to the worker that raises it, so if it is renamed there the drain below loses
+# one log distinction instead of failing this module's import.
+_WORKER_ABORTED_EXC = getattr(_conversation, "ConversationWorkerAborted", None)
 
 # Explicit ``__all__`` so ``from .endpoint import *`` only exposes the public
 # surface (the FastAPI helpers + ``crewai_prepare_inputs``). Private helpers
@@ -253,14 +281,25 @@ def _legacy_method_step_id(queue_key: object, method_name: str) -> str:
 # environment variable; defaults to 10 minutes. Deployments with legitimately
 # long-running crews should set the env var explicitly or use a non-positive
 # value to disable the ceiling.
-_DEFAULT_FLOW_TIMEOUT_SECONDS = 600.0
+#
+# Both the NAME and the default come from ``_config``, which also reads this
+# ceiling to size the agent execution ceiling and to warn when a provider read can
+# outlast it. Either one spelled twice would drift the moment one moved.
+_DEFAULT_FLOW_TIMEOUT_SECONDS = DEFAULT_FLOW_TIMEOUT_SECONDS
 
-# When we see a FlowFinishedEvent the listener puts ``None`` on the queue
-# *before* kickoff_async has actually returned. Give the task a short grace
-# period to complete cleanly before we force-cancel it in _cancel_and_join.
-# This grace window is drawn from the SHARED ``_cancel_join_timeout_seconds``
-# teardown budget: total upper bound on teardown from entry to
-# ``_cancel_and_join`` is one ceiling window, not ``grace + join``.
+# One grace length, two independent uses.
+#
+# Legacy path: when we see a FlowFinishedEvent the listener puts ``None`` on the
+# queue *before* kickoff_async has actually returned, so the task gets this long
+# to complete cleanly before ``_cancel_and_join`` force-cancels it. There the
+# window is drawn from the SHARED ``_cancel_join_timeout_seconds`` teardown
+# budget: the upper bound from teardown entry to the end of ``_cancel_and_join``
+# is one ceiling window, not ``grace + join``.
+#
+# StreamFrame path: ``_drain_frames_after_finish`` uses this value RAW as its own
+# post-RUN_FINISHED drain budget. Nothing is shared there: that path has no
+# ``_cancel_and_join``, and the ``aclose()`` that follows an exhausted grace
+# carries no ceiling of its own.
 _CANCEL_GRACE_SECONDS = 1.0
 
 # If a cancelled task refuses to terminate within this window, log a warning
@@ -269,15 +308,15 @@ _CANCEL_GRACE_SECONDS = 1.0
 # operators can tune it under disconnect-heavy load.
 _CANCEL_JOIN_TIMEOUT_SECONDS = 10.0
 
-# Caps on the happy-path drain: an ``_DRAIN_MAX_PASSES`` loop with an
-# ``asyncio.sleep(0)`` between passes and a wall-clock ``_DRAIN_BUDGET_SECONDS``
-# ceiling that short-circuits the loop when the budget is exhausted mid-pass.
-# Kept at module scope alongside the other tuning constants so operators
-# grepping for tunables find them all in one place.
-
-# Cap on both RAW buffers in ``_run_flow_frame_stream``. At the cap the oldest entry
-# is evicted (and logged) so the buffer self-heals: crewai raises some events that
-# never produce a frame, and refusing new entries would wedge it for the whole run.
+# Cap on both bounded RAW buffers in ``_run_flow_frame_stream`` (``raw_events``,
+# whose entries a frame always claims, is not one of them). They shed differently
+# and deliberately: ``foreign_events`` is keyed and unordered, so at the cap it
+# evicts the OLDEST entry, which is the one least likely to still have a frame
+# coming; ``pending_raw`` is an ordered pre-RUN_STARTED hold that is flushed in
+# arrival order, so at the cap it drops the NEWEST arrival and keeps the prefix it
+# can still emit in order. Both log the loss. Either way the buffer self-heals:
+# crewai raises some events that never produce a frame, and refusing every new
+# entry instead would wedge the buffer for the whole run.
 _FOREIGN_EVENT_BUFFER_MAX = 512
 
 # One-shot guard for the "emit_raw_events on the legacy transport" warning. A module
@@ -290,6 +329,12 @@ _LEGACY_RAW_WARNING_EMITTED = False
 # crewai 1.0-1.5. Warn once so a missing tool card there is diagnosable.
 _LEGACY_BACKEND_TOOL_WARNING_EMITTED = False
 
+# Caps shared by both post-sentinel queue drains (``_run_flow_event_stream`` and
+# ``_run_flow_resume_stream``): up to ``_DRAIN_MAX_PASSES`` passes with an
+# ``asyncio.sleep(0)`` between them, under a wall-clock ``_DRAIN_BUDGET_SECONDS``
+# ceiling that short-circuits the loop when the budget runs out mid-pass. The
+# StreamFrame path's own tail drain is separate: see
+# ``_drain_frames_after_finish``, which is bounded by ``_CANCEL_GRACE_SECONDS``.
 _DRAIN_MAX_PASSES = 10
 _DRAIN_BUDGET_SECONDS = 0.050
 
@@ -358,7 +403,7 @@ def _flow_timeout_seconds() -> float | None:
     otherwise silently disable the ceiling.
     """
     return _parse_env_float(
-        "AGUI_CREWAI_FLOW_TIMEOUT_SECONDS",
+        FLOW_TIMEOUT_ENV_VAR,
         _DEFAULT_FLOW_TIMEOUT_SECONDS,
         allow_disable=True,
     )
@@ -1338,6 +1383,59 @@ def _run_error_extras(input_data: RunAgentInput) -> dict:
     }
 
 
+# The one sentence for "why is this still running and what caps it". Both
+# conversational refusals carry it: neither the code nor the detail sentence says
+# what an operator can change, and the answer is the same for both.
+_TURN_BOUND_ADVICE = (
+    "an abandoned turn is released only when its own work ends, which nothing in "
+    "the bridge can cut short; shorten it with Agent(max_execution_time=...) on "
+    "the flow's agents, which trims crewai's retry factor rather than capping the "
+    "wall clock"
+)
+
+
+def _conversation_pool_state() -> str:
+    """Pool occupancy plus the oldest abandoned turn's age, for a refusal message.
+
+    ``active=held/size`` carries the pool SIZE, which is why neither refusal has to
+    quote the env var as a stand-in for a number.
+
+    ``oldest-abandoned-age`` is the PROCESS-wide oldest, which on the thread-busy
+    path is not necessarily this conversation's holder; labelled as such rather
+    than presented as the holder's own age.
+    """
+    stats = conversation_worker_stats()
+    oldest = stats.oldest_abandoned_age_seconds
+    return (
+        f"active={stats.active}/{stats.max_workers} "
+        f"abandoned={stats.abandoned_active} oldest-abandoned-age="
+        + ("none" if oldest is None else f"{oldest:.0f}s")
+    )
+
+
+def _conversation_thread_busy_error(
+    input_data: RunAgentInput,
+    detail: str,
+) -> RunErrorEvent:
+    """The one wire shape for "another turn still owns this conversation".
+
+    Shared by the kickoff and resume drivers so a client cannot tell the two
+    refusals apart by their payload; only ``detail`` differs.
+    """
+    return RunErrorEvent(
+        message=(
+            f"thread={input_data.thread_id} run={input_data.run_id}: "
+            f"CrewAI conversational thread is busy ({detail}); "
+            f"{_conversation_pool_state()}. Retry this message once it ends: "
+            f"{_TURN_BOUND_ADVICE}. Raising "
+            f"{MAX_CONVERSATION_WORKERS_ENV_VAR} does not lift this refusal, "
+            f"which is per-conversation rather than a capacity limit."
+        ),
+        code="AGUI_CREWAI_CONVERSATION_THREAD_BUSY",
+        **_run_error_extras(input_data),
+    )
+
+
 async def _run_flow_event_stream(
     *,
     flow_copy: object,
@@ -1877,9 +1975,9 @@ async def _aclose_stream_session(
     """Best-effort ``aclose()`` teardown for a crewai ``AsyncStreamSession``.
 
     ``aclose()`` replaces the legacy ``_cancel_and_join`` machinery on the
-    StreamFrame path — it cancels the background kickoff task crewai spawns
-    inside ``astream`` and closes the frame iterator. The OBSERVABLE behavior
-    (client-disconnect tears the run down, no leaked kickoff) must not regress.
+    StreamFrame path. CrewAI's async session cancels its kickoff task; the
+    conversational sync adapter requests cooperative cancellation and logs
+    when a blocked upstream operation must return before its worker can stop.
 
     Mirrors the ``_cancel_and_join`` uncancel dance: on Python 3.11+ a bare
     ``await session.aclose()`` in a ``finally`` reached via outer cancellation
@@ -1921,8 +2019,100 @@ async def _aclose_stream_session(
         )
 
 
-async def _drain_frames_after_finish(aiter: Any) -> None:
+async def _aclose_frame_iterator(
+    aiter: object,
+    *,
+    thread_id: str | None,
+    run_id: str | None,
+) -> None:
+    """Close the frame iterator the driver opened, if it is still suspended.
+
+    Closing the SESSION is not the same thing. The iterator is a separate async
+    generator, and on the two paths that leave it suspended -- a client that goes
+    away while the driver is parked at a ``yield``, and the ceiling firing at the
+    top of the loop before a read -- nothing throws into it. Its ``finally`` is
+    what drops the conversational adapter's loop and queue, which keep every
+    undelivered frame reachable, so leaving it suspended defers that release to
+    asyncio's async-generator finalizer whenever the collector reaches it.
+
+    A no-op on an iterator that already exhausted or unwound.
+    """
+    aclose = getattr(aiter, "aclose", None)
+    if not callable(aclose):
+        return
+    # The same conditional uncancel as ``_aclose_stream_session``, for the same
+    # reason and with the same "only a level that is ours" restraint: this runs in
+    # a ``finally`` reached via an outer cancel, and reaching it THROUGH a session
+    # close that re-raised is the case that leaves a level pending here. Measured
+    # on the interpreters to hand: ``uncancel()`` clears ``Task._must_cancel`` when
+    # it reaches zero on 3.13.14 and 3.14.4 but not on 3.12.0, so this rescues the
+    # await below on the newer ones and is inert on the older.
+    current = asyncio.current_task()
+    uncancel = getattr(current, "uncancel", None)
+    cancelling = getattr(current, "cancelling", None)
+    if callable(uncancel) and callable(cancelling) and cancelling() > 0:
+        uncancel()
+    try:
+        await aclose()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        _LOGGER.debug(
+            "CrewAI frame iterator aclose failed thread=%s run=%s cause=%s",
+            thread_id,
+            run_id,
+            type(exc).__name__,
+        )
+
+
+def _close_orphaned_sync_session(
+    session: object,
+    *,
+    thread_id: str | None,
+    run_id: str | None,
+) -> None:
+    """Close a conversational ``StreamSession`` no adapter ever took over.
+
+    ``stream_turn`` hands back a live session before the adapter that owns its
+    teardown exists, so a raising adapter constructor leaves the driver's own
+    ``session`` local ``None``: the teardown ``aclose()`` would close nothing and
+    crewai's session (and the thread behind it) would run with nobody to end it.
+    """
+    if session is None:
+        return
+    close = getattr(session, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        _LOGGER.warning(
+            "ag-ui-crewai could not close an unadopted conversational "
+            "StreamSession thread=%s run=%s cause=%s",
+            thread_id,
+            run_id,
+            type(exc).__name__,
+        )
+
+
+async def _drain_frames_after_finish(
+    aiter: Any,
+    *,
+    thread_id: str | None = None,
+    run_id: str | None = None,
+) -> bool:
     """Drain the terminal tail of a frame stream after RUN_FINISHED.
+
+    Returns True only when the stream reached natural exhaustion. False means a
+    producer is still running with nobody left to read it, which on the
+    conversational path is the difference between a completed turn and an
+    abandoned worker.
+
+    Three distinct conditions produce that False and the return value cannot tell
+    them apart, so each is logged: a healthy-but-slow tail that outlived the grace
+    (DEBUG, routine on a successful conversational turn), an upstream error, and a
+    worker that aborted its turn instead of finishing it (both WARNING, since the
+    tail's real outcome is discarded here and can never reach the wire).
 
     crewai enqueues its end sentinel only AFTER ``kickoff_async`` fully returns —
     result recorded, trace batch finalized — see ``create_async_frame_generator``
@@ -1945,24 +2135,47 @@ async def _drain_frames_after_finish(aiter: Any) -> None:
     force-cancels the tail (today's behavior, but only after the grace). Trailing
     frames are DISCARDED: emitting any wire event after RUN_FINISHED would violate
     the AG-UI run lifecycle, and a late upstream error can no longer become a
-    RUN_ERROR, so it is swallowed here rather than surfaced.
+    RUN_ERROR, so it is kept off the wire and logged instead.
     """
+    def _slow_tail() -> bool:
+        """Log the grace expiry and report non-exhaustion."""
+        _LOGGER.debug(
+            "CrewAI post-RUN_FINISHED drain left a slow tail running thread=%s "
+            "run=%s grace=%gs",
+            thread_id,
+            run_id,
+            _CANCEL_GRACE_SECONDS,
+        )
+        return False
+
     grace_deadline = time.monotonic() + _CANCEL_GRACE_SECONDS
     while True:
         remaining = grace_deadline - time.monotonic()
         if remaining <= 0:
-            return
+            return _slow_tail()
         try:
             await asyncio.wait_for(aiter.__anext__(), timeout=remaining)
         except StopAsyncIteration:
             # Run task reached its end sentinel: finalization completed.
-            return
+            return True
         except (asyncio.TimeoutError, TimeoutError):
             # Grace window elapsed; fall back to the aclose() cancel.
-            return
-        except Exception:  # pylint: disable=broad-exception-caught
-            # Post-terminal: a late error cannot become a RUN_ERROR now.
-            return
+            return _slow_tail()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            # Post-terminal: a late error cannot become a RUN_ERROR now, so this
+            # log is the only record of it.
+            aborted = _WORKER_ABORTED_EXC is not None and isinstance(
+                exc, _WORKER_ABORTED_EXC
+            )
+            _LOGGER.warning(
+                "CrewAI post-RUN_FINISHED drain ended on %s thread=%s run=%s "
+                "cause=%s; the tail's outcome is discarded",
+                "an aborted conversational worker" if aborted else "an upstream error",
+                thread_id,
+                run_id,
+                type(exc).__name__,
+            )
+            return False
         # A trailing frame arrived before exhaustion — discard it (no
         # post-RUN_FINISHED wire events) and keep draining.
 
@@ -1978,12 +2191,43 @@ async def _run_flow_frame_stream(
     hitl_options: HITLOptions | None = None,
     emit_raw_events: bool = False,
     emission_shape: str = DEFAULT_EMISSION_SHAPE,
+    conversational_turn: ConversationalTurn | None = None,
 ):
-    """StreamFrame-path driver: drive ``flow.astream`` and yield encoded AG-UI
-    events.
+    """StreamFrame-path driver: drive one flow turn and yield encoded AG-UI events.
 
-    The behavior-preserving replacement for ``_run_flow_event_stream`` on crewai
-    >= 1.6. Instead of a process-global bus listener enqueuing onto a per-flow
+    Two transports, one translation seam. Without ``conversational_turn`` the
+    driver opens ``flow.astream`` and iterates crewai's own async session. With
+    one, crewai offers no async turn API, so the driver calls the public
+    ``flow.stream_turn(message, session_id=threadId)`` and wraps the SYNCHRONOUS
+    ``StreamSession`` it returns in a ``SyncStreamSessionAdapter``, which pumps it
+    from a worker thread. Everything below the transport (translator, RUN_ERROR
+    taxonomy, ceiling, raw-event parking, teardown) is shared.
+
+    The conversational transport is what the containment machinery exists for,
+    because Python cannot kill that worker thread:
+
+    * a worker-pool LEASE is acquired before the flow is touched at all
+      (``acquire_conversation_worker``), since crewai spawns its thread on the
+      first frame read and a refusal after that point refuses nothing. It is keyed
+      by (flow, threadId): the registry is process-wide, one process serves many
+      endpoints, and the id is the client's, so keying on the id alone would let
+      one flow's abandoned turn refuse another's. The adapter takes ownership of
+      the lease and releases it when the worker really ends, not when the request
+      does; every path that fails before the adapter exists gives the slot back
+      itself;
+    * one ``AbandonmentSignal`` per run is handed to every layer that can still
+      publish or persist after this generator unwinds (the worker, the raw-event
+      sink, the persistence overlay). It is set in the ``finally`` unless the run
+      reached a terminal event or the stream exhausted, so a turn that FINISHED
+      is never abandoned: it still owes its persistence writes and its tail;
+    * a second, broader ``request_torn_down`` event gates the request-owned
+      buffers alone. Once the generator has unwound, terminal or not, nothing may
+      park into them again. Abandonment cannot serve that purpose, precisely
+      because a completed turn's tail keeps emitting and is never abandoned.
+
+    The astream path is the behavior-preserving replacement for
+    ``_run_flow_event_stream`` on crewai >= 1.6. Instead of a process-global bus
+    listener enqueuing onto a per-flow
     ``asyncio.Queue`` (keyed by a uuid stamped on the Flow), we consume the
     ordered ``StreamFrame`` envelopes crewai's scoped stream sink produces and
     map them through the single ``StreamFrameTranslator`` seam.
@@ -1991,9 +2235,11 @@ async def _run_flow_frame_stream(
     Every must-survive behavior of the legacy path is preserved by REUSING the
     same helpers:
 
-    * the four-code RUN_ERROR taxonomy (``AGUI_CREWAI_FLOW_TIMEOUT`` /
-      ``AGUI_CREWAI_UPSTREAM_TIMEOUT`` / ``AGUI_CREWAI_FLOW_ERROR_<Class>``) via
-      ``_CeilingExceeded`` / ``_format_timeout_message`` / ``_sanitize_exception_code``;
+    * the five-code RUN_ERROR taxonomy (``AGUI_CREWAI_FLOW_TIMEOUT`` /
+      ``AGUI_CREWAI_UPSTREAM_TIMEOUT`` / ``AGUI_CREWAI_FLOW_ERROR_<Class>`` /
+      ``AGUI_CREWAI_CONVERSATION_CAPACITY`` /
+      ``AGUI_CREWAI_CONVERSATION_THREAD_BUSY``) via ``_CeilingExceeded`` /
+      ``_format_timeout_message`` / ``_sanitize_exception_code``;
     * the wall-clock ceiling + env knobs (``timeout`` is ``_flow_timeout_seconds()``);
     * ``_stamp_correlation_ids`` on every emitted event and
       ``_run_error_extras`` (camelCase wire aliases) on every RUN_ERROR;
@@ -2031,6 +2277,24 @@ async def _run_flow_frame_stream(
         hitl_options=hitl_options,
         emission_shape=emission_shape,
     )
+    # ``stream_turn`` records the current user message inside CrewAI, after the
+    # run has opened. Its first normal MESSAGES_SNAPSHOT therefore arrives only
+    # when the first flow method finishes. Reasoning/text can stream before that
+    # snapshot and would be anchored above the user's prompt in AG-UI. Establish
+    # the request conversation immediately after RUN_STARTED so all streamed
+    # activity for this turn is rendered beneath the current user message.
+    current_turn_snapshot_pending = conversational_turn is not None
+    # ONE signal per run, handed to every layer that could still publish or
+    # persist after this generator unwinds: the sync worker, the raw-event sink
+    # below, and the conversational persistence overlay. Set in the ``finally``
+    # unless the stream reached natural exhaustion.
+    abandonment = AbandonmentSignal()
+    # A second, BROADER condition, for the request-owned buffers alone: the
+    # generator has unwound, terminal or not. A completed turn is deliberately
+    # never abandoned (it still owes its persistence writes and its thread), so
+    # abandonment cannot tell its tail to stop parking.
+    request_torn_down = threading.Event()
+    stream_exhausted = False
 
     def _closing_reasoning_frames():
         """Encoded REASONING_* END events for any reasoning left open at error.
@@ -2062,6 +2326,14 @@ async def _run_flow_frame_stream(
     # starts, and a RAW first event makes @ag-ui/client's verifyEvents throw
     # "First event must be 'RUN_STARTED'".
     pending_raw: list[Any] = []
+    conversational_user_id: str | None = None
+    conversational_user_id_applied = False
+    if conversational_turn is not None and input_data.messages:
+        latest_input_message = dump_agui_message(input_data.messages[-1])
+        if latest_input_message.get("role") == "user":
+            candidate_id = latest_input_message.get("id")
+            if isinstance(candidate_id, str):
+                conversational_user_id = candidate_id
 
     def _hold_pending_raw(raw_mirror: Any) -> None:
         """Park a RAW mirror until the run has opened, logging an overflow drop."""
@@ -2086,6 +2358,56 @@ async def _run_flow_frame_stream(
         return encoder.encode(raw_mirror)
 
     def _sink(source: Any, event: Any) -> None:
+        nonlocal conversational_user_id_applied
+        if request_torn_down.is_set() or abandonment.abandoned:
+            # Resetting our sink token unregisters us from the REQUEST context
+            # only. The conversational worker copied the context at thread start,
+            # so it keeps calling this sink for the rest of its turn -- parking
+            # into buffers this generator will never read again. Gate on the
+            # teardown signal rather than the token, or those buffers grow
+            # unbounded; and on teardown rather than abandonment alone, because a
+            # turn that finished normally keeps running its tail and is never
+            # marked abandoned.
+            return
+        # CrewAI's conversational runtime reconstructs the pending user turn as
+        # a ConversationMessage, whose schema has no ``id`` field. Preserve the
+        # AG-UI request id at the synchronous message-added boundary; otherwise
+        # every method-finish MESSAGES_SNAPSHOT invents a fresh id and re-anchors
+        # the user prompt below any reasoning that already streamed.
+        if (
+            conversational_user_id is not None
+            and not conversational_user_id_applied
+            and source is flow_copy
+            and getattr(event, "type", None) == "conversation_message_added"
+            and getattr(event, "role", None) == "user"
+        ):
+            state = getattr(source, "state", None)
+            messages = (
+                getattr(state, "messages", None)
+                if state is not None and not isinstance(state, dict)
+                else (state or {}).get("messages")
+            )
+            message_index = getattr(event, "message_index", None)
+            if (
+                isinstance(messages, list)
+                and isinstance(message_index, int)
+                and 0 <= message_index < len(messages)
+            ):
+                stored_message = messages[message_index]
+                if isinstance(stored_message, dict):
+                    stabilized_message = dict(stored_message)
+                else:
+                    dump_message = getattr(stored_message, "model_dump", None)
+                    stabilized_message = (
+                        dump_message(exclude_none=True)
+                        if callable(dump_message)
+                        else None
+                    )
+                if isinstance(stabilized_message, dict):
+                    stabilized_message["id"] = conversational_user_id
+                    messages[message_index] = stabilized_message
+                    conversational_user_id_applied = True
+
         # source is flow_copy isolates the outer run: its own lifecycle/method
         # events and our Bridged* events carry flow_copy as source, while a
         # nested crew.kickoff's own flow's lifecycle/method events leak here
@@ -2122,6 +2444,10 @@ async def _run_flow_frame_stream(
             if len(foreign_events) >= _FOREIGN_EVENT_BUFFER_MAX:
                 evicted = next(iter(foreign_events), None)
                 if evicted is None:
+                    # Only reachable with the cap at 0 (at any positive cap a full
+                    # buffer is by definition non-empty), which is a test override
+                    # rather than a shipped configuration. Kept so a zero cap
+                    # degrades RAW to off instead of raising on ``del ...[None]``.
                     log_raw_loss(
                         "ag-ui-crewai RAW passthrough is disabled by a buffer cap of "
                         "%d thread=%s run=%s",
@@ -2146,6 +2472,7 @@ async def _run_flow_frame_stream(
     # ``finally`` — mirroring the legacy path's token-then-finally discipline.
     sink_token = None
     session = None
+    aiter = None
     try:
         try:
             # Register the sink and open the stream INSIDE the ``try`` so a
@@ -2158,22 +2485,76 @@ async def _run_flow_frame_stream(
             # already be in scope to reach the flow's emits. Guarded so a partial
             # install (no sink API) degrades rather than crashing.
             sink_token = add_stream_sink(_sink) if callable(add_stream_sink) else None
-            # ``astream`` returns an AsyncStreamSession; iterating it spawns
-            # crewai's background kickoff task and streams ordered frames.
-            # Filter against astream's own signature so an unsupported kwarg
-            # degrades cleanly instead of raising.
-            _ckpt = supported_checkpoint_kwargs(
-                flow_copy.astream, checkpoint_kwargs or {}  # type: ignore[attr-defined]
-            )
-            if checkpoint_kwargs and not _ckpt:
-                # Checkpointing enabled but this flow's astream does not accept
-                # it: warn so the no-op is visible.
-                _LOGGER.warning(
-                    "ag-ui-crewai: checkpointing is enabled but flow.astream "
-                    "does not accept from_checkpoint; nothing will be persisted "
-                    "for this run."
+            if conversational_turn is None:
+                # ``astream`` returns an AsyncStreamSession; iterating it spawns
+                # crewai's background kickoff task and streams ordered frames.
+                # Filter against astream's own signature so an unsupported kwarg
+                # degrades cleanly instead of raising.
+                _ckpt = supported_checkpoint_kwargs(
+                    flow_copy.astream, checkpoint_kwargs or {}  # type: ignore[attr-defined]
                 )
-            session = flow_copy.astream(inputs=inputs, **_ckpt)  # type: ignore[attr-defined]
+                if checkpoint_kwargs and not _ckpt:
+                    # Checkpointing enabled but this flow's astream does not accept
+                    # it: warn so the no-op is visible.
+                    _LOGGER.warning(
+                        "ag-ui-crewai: checkpointing is enabled but flow.astream "
+                        "does not accept from_checkpoint; nothing will be persisted "
+                        "for this run."
+                    )
+                session = flow_copy.astream(  # type: ignore[attr-defined]
+                    inputs=inputs,
+                    **_ckpt,
+                )
+            else:
+                # Reserve the worker slot FIRST, before the flow is touched at
+                # all: CrewAI spawns its own thread on the first frame read, and
+                # once spawned neither it nor ours can be killed. A rejection
+                # here costs one RUN_ERROR; a rejection after the fact costs
+                # nothing, because there is nothing left to refuse.
+                lease = acquire_conversation_worker(
+                    flow_key=conversational_flow_key(flow_copy),
+                    thread_id=input_data.thread_id,
+                    run_id=input_data.run_id,
+                    signal=abandonment,
+                )
+                sync_session = None
+                try:
+                    force_per_turn_trace_finalization(flow_copy)
+                    hydrated_inputs = hydrate_conversational_flow(
+                        flow_copy,
+                        inputs,
+                        conversational_turn,
+                    )
+                    overlay_conversational_persistence(
+                        flow_copy,
+                        hydrated_inputs,
+                        abandonment=abandonment,
+                    )
+                    sync_session = flow_copy.stream_turn(  # type: ignore[attr-defined]
+                        conversational_turn.message,
+                        session_id=input_data.thread_id,
+                    )
+                    # Constructed inside the guard: the adapter is what takes
+                    # over releasing the lease, so a constructor that raises
+                    # would otherwise leak the slot for the process lifetime.
+                    session = SyncStreamSessionAdapter(
+                        sync_session,
+                        abandonment=abandonment,
+                        lease=lease,
+                    )
+                except BaseException:
+                    # No adapter owns the lease OR the session yet: the driver's
+                    # ``session`` is still None here, so the teardown aclose()
+                    # cannot reach a turn ``stream_turn`` already opened. Close it
+                    # first, then give the slot back -- capacity accounting must
+                    # not report a slot whose session is still running.
+                    _close_orphaned_sync_session(
+                        sync_session,
+                        thread_id=input_data.thread_id,
+                        run_id=input_data.run_id,
+                    )
+                    lease.release()
+                    raise
             aiter = session.__aiter__()
             deadline = (
                 time.monotonic() + timeout if timeout is not None else None
@@ -2182,8 +2563,9 @@ async def _run_flow_frame_stream(
                 # Enforce the wall-clock ceiling per frame read via
                 # ``asyncio.wait_for``: on timeout it cancels the in-flight
                 # ``__anext__`` AND awaits its unwind before raising, so crewai's
-                # scoped stream sink / background kickoff task tear down cleanly;
-                # ``aclose()`` in the ``finally`` then fully drains the task.
+                # in-flight read unwinds cleanly; ``aclose()`` in the ``finally``
+                # then cancels the async session or requests a cooperative stop
+                # from the conversational sync adapter.
                 #
                 # Cross-version note (``requires-python`` floor is 3.10):
                 # ``wait_for`` internals differ. On 3.12+ it awaits the
@@ -2208,6 +2590,7 @@ async def _run_flow_frame_stream(
                             aiter.__anext__(), timeout=remaining
                         )
                     except StopAsyncIteration:
+                        stream_exhausted = True
                         break
                     except (asyncio.TimeoutError, TimeoutError) as te:
                         # ``wait_for``'s own timeout fires only once the
@@ -2225,6 +2608,7 @@ async def _run_flow_frame_stream(
                     try:
                         frame = await aiter.__anext__()
                     except StopAsyncIteration:
+                        stream_exhausted = True
                         break
 
                 # Look up the RAW event this frame carries (parked by our sink).
@@ -2265,6 +2649,21 @@ async def _run_flow_frame_stream(
                         run_id=input_data.run_id,
                     )
                     yield encoder.encode(event)
+                    if (
+                        current_turn_snapshot_pending
+                        and event.type == EventType.RUN_STARTED
+                    ):
+                        initial_messages = MessagesSnapshotEvent(
+                            type=EventType.MESSAGES_SNAPSHOT,
+                            messages=input_data.messages,
+                        )
+                        _stamp_correlation_ids(
+                            initial_messages,
+                            thread_id=input_data.thread_id,
+                            run_id=input_data.run_id,
+                        )
+                        yield encoder.encode(initial_messages)
+                        current_turn_snapshot_pending = False
 
                 if pending_raw and translator.run_started:
                     # The run just opened: flush the mirrors held back so they land
@@ -2279,7 +2678,11 @@ async def _run_flow_frame_stream(
                     # happy-path run. Drain the terminal tail to
                     # natural exhaustion (bounded by the cancel grace) so the run
                     # task completes and the ``finally`` aclose() is a no-op.
-                    await _drain_frames_after_finish(aiter)
+                    stream_exhausted = await _drain_frames_after_finish(
+                        aiter,
+                        thread_id=input_data.thread_id,
+                        run_id=input_data.run_id,
+                    )
                     break
 
             # Belt-and-braces terminal: the stream can exhaust with the run
@@ -2289,13 +2692,14 @@ async def _run_flow_frame_stream(
             # client never sees a run that never ends. The RUN_ERROR paths below
             # are the terminator for the errored case and never reach here.
             #
-            # Open the run first when a pause was captured but RUN_STARTED never
-            # went out (no flow_started frame): otherwise finalize() would
-            # short-circuit and strand the paused run with an empty stream.
-            interrupt_open = (
-                translator.ensure_run_started() if translator.interrupted else []
-            )
-            for event in (*interrupt_open, *translator.finalize()):
+            # Open the run first whenever RUN_STARTED never went out: a pause
+            # captured with no ``flow_started`` frame, or a stream that exhausted
+            # before any translatable frame at all. Otherwise finalize() would
+            # short-circuit on its run-is-open guard and the request would answer
+            # 200 with an empty body, leaving the client's run with no terminal
+            # event to end it. Both calls are idempotent, so an already-open run
+            # reaches finalize() unchanged.
+            for event in (*translator.ensure_run_started(), *translator.finalize()):
                 _stamp_correlation_ids(
                     event,
                     thread_id=input_data.thread_id,
@@ -2319,6 +2723,31 @@ async def _run_flow_frame_stream(
                     run_id=input_data.run_id,
                 )
                 yield encoder.encode(event)
+        except ConversationCapacityExceeded as capacity_exc:
+            # Declared BEFORE the generic handler so a saturated pool reports
+            # saturation, not AGUI_CREWAI_FLOW_ERROR_ConversationCapacityExceeded.
+            yield encoder.encode(
+                RunErrorEvent(
+                    message=(
+                        f"thread={input_data.thread_id} run={input_data.run_id}: "
+                        f"CrewAI conversational capacity exhausted "
+                        f"({capacity_exc.args[0] if capacity_exc.args else ''}); "
+                        f"{_conversation_pool_state()}. Raise "
+                        f"{MAX_CONVERSATION_WORKERS_ENV_VAR} to admit more "
+                        f"concurrent turns, or free slots sooner: "
+                        f"{_TURN_BOUND_ADVICE}."
+                    ),
+                    code="AGUI_CREWAI_CONVERSATION_CAPACITY",
+                    **_run_error_extras(input_data),
+                )
+            )
+        except ConversationThreadBusy as busy_exc:
+            yield encoder.encode(
+                _conversation_thread_busy_error(
+                    input_data,
+                    busy_exc.args[0] if busy_exc.args else "",
+                )
+            )
         except _CeilingExceeded as ceiling_exc:
             ceiling_display = f"{timeout:g}s"
             _LOGGER.warning(
@@ -2398,21 +2827,76 @@ async def _run_flow_frame_stream(
                 )
             )
     finally:
-        # aclose() replaces _cancel_and_join on this path; run it
-        # unconditionally (including under outer cancellation) so the kickoff
-        # task never leaks, then unregister the sink and reset the context var.
+        # Nothing may park into the request's buffers from here, terminal or not.
+        # Set before the clear below so a still-running worker cannot refill them
+        # in the window between the clear and its next emit.
+        request_torn_down.set()
+        # Abandon FIRST, before aclose() and before the sink is unregistered:
+        # from this point every other publisher must already be gated. Reached
+        # on disconnect, on the AG-UI ceiling, on outer cancellation, and on any
+        # early teardown -- everything except a run that terminated.
+        #
+        # Two ways to terminate, and the RUN_FINISHED one is not optional. A
+        # completed conversational turn keeps working after its terminal frame
+        # (assistant append, terminal turn handlers, thread join), so the drain
+        # routinely times out on a successful run. Treating that as abandonment
+        # would drop the turn's persistence writes and refuse the thread's next
+        # message. ``run_finished`` covers the pause tail too: ``finalize()``
+        # emits RUN_FINISHED with the interrupt outcome.
         try:
-            await _aclose_stream_session(
-                session,
-                thread_id=input_data.thread_id,
-                run_id=input_data.run_id,
-            )
+            try:
+                if not (translator.run_finished or stream_exhausted):
+                    abandonment.abandon()
+                    if getattr(session, "worker_alive", False):
+                        report_conversational_abandonment(
+                            thread_id=input_data.thread_id,
+                            run_id=input_data.run_id,
+                        )
+            finally:
+                # Run aclose() unconditionally (including under outer cancellation)
+                # before unregistering the sink and resetting the context var.
+                # Async sessions cancel their kickoff task; the conversational sync
+                # adapter makes any still-blocked cooperative shutdown observable
+                # in its log. In a ``finally`` because the report above reads the
+                # registry and logs: a raise there must not cost us the close that
+                # hands a never-started worker's pool slot back.
+                try:
+                    await _aclose_stream_session(
+                        session,
+                        thread_id=input_data.thread_id,
+                        run_id=input_data.run_id,
+                    )
+                finally:
+                    # After the session, because the session-level teardown is what
+                    # makes the iterator's own unwind cheap: crewai's async session
+                    # has already cancelled its kickoff task, and the conversational
+                    # adapter has already asked its worker to stop. In a ``finally``
+                    # of its own because the session close deliberately re-raises
+                    # CancelledError, and a cancel there IS the disconnect this
+                    # close exists for -- as a sequential statement it was skipped
+                    # on exactly that path, leaving the adapter's loop and queue
+                    # (with every undelivered frame) reachable until the collector.
+                    await _aclose_frame_iterator(
+                        aiter,
+                        thread_id=input_data.thread_id,
+                        run_id=input_data.run_id,
+                    )
         finally:
             try:
                 if sink_token is not None and callable(reset_stream_sinks):
                     reset_stream_sinks(sink_token)
             finally:
-                flow_context.reset(token)
+                try:
+                    # Request-owned buffers. Dropped here rather than left to GC
+                    # because a still-running conversational worker (abandoned or
+                    # merely finishing its tail) keeps a reference to this closure
+                    # through its copied context, so a parked raw event would
+                    # otherwise stay reachable for the rest of the turn.
+                    raw_events.clear()
+                    foreign_events.clear()
+                    pending_raw.clear()
+                finally:
+                    flow_context.reset(token)
 
 
 def _run_flow_stream(
@@ -2426,9 +2910,18 @@ def _run_flow_stream(
     hitl_options: HITLOptions | None = None,
     emit_raw_events: bool = False,
     emission_shape: str = DEFAULT_EMISSION_SHAPE,
+    conversational_turn: ConversationalTurn | None = None,
 ):
     """Select the StreamFrame path (crewai >= 1.6 + a real ``astream`` flow) or
     the legacy bus-listener path, returning the chosen async generator.
+
+    A ``conversational_turn`` forces the StreamFrame driver and skips the probe
+    entirely. That is not a shortcut: conversational mode drives
+    ``flow.stream_turn`` rather than ``astream``, so ``flow_supports_stream_frames``
+    is answering the wrong question, and the legacy bus-listener path has no way
+    to run a turn at all. Callers are expected to have already refused a flow that
+    cannot serve one (see ``_reject_unsupported_conversational_flow``), so an
+    unsupported flow never reaches here.
 
     The probe is per-flow (``flow_supports_stream_frames``): the test doubles in
     ``tests/test_task_cancellation.py`` implement only ``kickoff_async`` and so
@@ -2438,7 +2931,7 @@ def _run_flow_stream(
     ``checkpoint_kwargs`` is forwarded to whichever driver is chosen; each
     driver filters it against the exact method it invokes.
     """
-    if flow_supports_stream_frames(flow_copy):
+    if conversational_turn is not None or flow_supports_stream_frames(flow_copy):
         return _run_flow_frame_stream(
             flow_copy=flow_copy,
             encoder=encoder,
@@ -2449,6 +2942,7 @@ def _run_flow_stream(
             hitl_options=hitl_options,
             emit_raw_events=emit_raw_events,
             emission_shape=emission_shape,
+            conversational_turn=conversational_turn,
         )
     return _run_flow_event_stream(
         flow_copy=flow_copy,
@@ -2495,6 +2989,29 @@ async def _reject_unsupported_resume(input_data: RunAgentInput, encoder: EventEn
     )
 
 
+async def _reject_unsupported_conversational_flow(
+    input_data: RunAgentInput,
+    encoder: EventEncoder,
+):
+    """Fail loudly when conversational execution was explicitly requested."""
+    _LOGGER.warning(
+        "CrewAI conversational Flow requested but unavailable thread=%s run=%s",
+        input_data.thread_id,
+        input_data.run_id,
+    )
+    yield encoder.encode(
+        RunErrorEvent(
+            message=(
+                f"thread={input_data.thread_id} run={input_data.run_id}: "
+                "CrewAI conversational Flow execution is unsupported; the flow "
+                "must set conversational=True and expose stream_turn"
+            ),
+            code="AGUI_CREWAI_CONVERSATIONAL_FLOW_UNSUPPORTED",
+            **_run_error_extras(input_data),
+        )
+    )
+
+
 async def _run_flow_resume_stream(
     *,
     flow: object,
@@ -2503,6 +3020,7 @@ async def _run_flow_resume_stream(
     timeout: float | None,
     hitl_options: HITLOptions | None = None,
     emit_raw_events: bool = False,
+    conversational: bool = False,
 ):
     """Resume a flow paused for async human feedback and yield AG-UI events.
 
@@ -2521,6 +3039,43 @@ async def _run_flow_resume_stream(
     thread_id = input_data.thread_id
     run_id = input_data.run_id
     feedback, _interrupt_id = feedback_from_resume(input_data)
+
+    # A resume of a CONVERSATIONAL flow is another run for that conversation, so
+    # the same-conversation guard applies to it as much as to a fresh turn: an
+    # abandoned worker is still writing this conversation's state and finishes last
+    # as often as not. Refused BEFORE ``from_pending`` so the resume never reads the
+    # state it would race.
+    #
+    # This driver also serves REGULAR flows, which share nothing with a
+    # conversational turn but a client-chosen ``threadId``. Refusing one of those
+    # strands a paused run: a resume is the only way to complete it, and there is no
+    # later turn to retry with. So the gate is scoped to the flow AND to
+    # conversational mode, not to the thread alone.
+    busy_run = (
+        abandoned_conversational_run_for_thread(
+            thread_id, flow_key=conversational_flow_key(flow)
+        )
+        if conversational
+        else None
+    )
+    if busy_run is not None:
+        _LOGGER.warning(
+            "CrewAI resume refused while an abandoned conversational turn holds "
+            "the thread thread=%s run=%s holder=%s",
+            thread_id,
+            run_id,
+            busy_run,
+        )
+        yield encoder.encode(
+            _conversation_thread_busy_error(
+                input_data,
+                conversational_thread_busy_detail(
+                    thread_id=thread_id,
+                    run_id=busy_run,
+                ),
+            )
+        )
+        return
 
     # Reload the pending flow. ``from_pending`` builds its own instance from the
     # class + crewai persistence; a missing pending state (unknown / already
@@ -2802,6 +3357,7 @@ def add_crewai_flow_fastapi_endpoint(
     enable_legacy_on_interrupt_event: bool = True,
     emit_raw_events: bool | None = None,
     emission_shape: str | None = None,
+    conversational: bool = False,
 ):
     """Adds a CrewAI endpoint to the FastAPI app.
 
@@ -2815,6 +3371,10 @@ def add_crewai_flow_fastapi_endpoint(
     CHUNK form); ``None`` reads ``AGUI_CREWAI_EMISSION_SHAPE``. Both it and
     ``emit_raw_events`` resolve at registration, so a bad value fails once at
     startup rather than per request.
+
+    ``conversational=True`` drives CrewAI's public ``stream_turn`` API and maps
+    AG-UI ``thread_id`` to CrewAI ``session_id``. It fails loudly when the
+    supplied flow has not opted into CrewAI conversational mode.
 
     Async human-in-the-loop: when the flow pauses on an ``@human_feedback``
     method whose provider raises ``HumanFeedbackPending`` (see
@@ -2876,6 +3436,12 @@ def add_crewai_flow_fastapi_endpoint(
 
         timeout = _flow_timeout_seconds()
 
+        if conversational and not flow_supports_conversational_stream(flow):
+            return StreamingResponse(
+                _reject_unsupported_conversational_flow(input_data, encoder),
+                media_type=encoder.get_content_type(),
+            )
+
         # Resume a paused flow. ``from_pending`` reloads persisted pending state
         # (not a per-request copy), so the resume driver takes the ORIGINAL flow
         # (for its class) rather than a fresh ``_copy_flow``.
@@ -2893,6 +3459,7 @@ def add_crewai_flow_fastapi_endpoint(
                     timeout=timeout,
                     hitl_options=hitl_options,
                     emit_raw_events=resolved_emit_raw_events,
+                    conversational=conversational,
                 ),
                 media_type=encoder.get_content_type(),
             )
@@ -2916,6 +3483,11 @@ def add_crewai_flow_fastapi_endpoint(
         inputs["id"] = input_data.thread_id
 
         checkpoint_kwargs = build_checkpoint_kwargs(flow_copy, input_data)
+        conversational_turn = (
+            prepare_conversational_turn(input_data.messages)
+            if conversational
+            else None
+        )
 
         return StreamingResponse(
             _run_flow_stream(
@@ -2928,6 +3500,7 @@ def add_crewai_flow_fastapi_endpoint(
                 hitl_options=hitl_options,
                 emit_raw_events=resolved_emit_raw_events,
                 emission_shape=resolved_emission_shape,
+                conversational_turn=conversational_turn,
             ),
             media_type=encoder.get_content_type(),
         )

@@ -138,7 +138,8 @@ describe("AgentConfig forwarding", () => {
     expect("systemPrompt" in cfg).toBe(false);
     expect("name" in cfg).toBe(false);
     expect("description" in cfg).toBe(false);
-    expect("id" in cfg).toBe(false);
+    // id is always set (falls back to adapter name for stable session paths)
+    expect(cfg.id).toBe("t");
     expect("appState" in cfg).toBe(false);
     expect("modelState" in cfg).toBe(false);
     expect("traceAttributes" in cfg).toBe(false);

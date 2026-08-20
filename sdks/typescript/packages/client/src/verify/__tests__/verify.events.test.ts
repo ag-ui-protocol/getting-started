@@ -8,7 +8,6 @@ import {
   AGUIError,
   RunStartedEvent,
   RunFinishedEvent,
-  RunErrorEvent,
   TextMessageStartEvent,
   TextMessageContentEvent,
   TextMessageEndEvent,

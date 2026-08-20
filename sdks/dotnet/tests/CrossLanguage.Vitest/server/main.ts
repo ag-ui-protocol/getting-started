@@ -13,6 +13,7 @@ import {
   reasoningRun,
   activitySnapshotRun,
   humanInTheLoopRun,
+  tokenUsageRun,
   type FakeAgent,
 } from "./fakeAgents";
 
@@ -59,6 +60,7 @@ export function createApp(): express.Express {
   mountAgent(app, "/reasoning", reasoningRun);
   mountAgent(app, "/activity_snapshot", activitySnapshotRun);
   mountAgent(app, "/human_in_the_loop", humanInTheLoopRun);
+  mountAgent(app, "/token_usage", tokenUsageRun);
 
   return app;
 }

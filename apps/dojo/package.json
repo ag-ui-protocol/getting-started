@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "mastra:dev": "mastra dev",
     "generate-content-json": "npx tsx scripts/generate-content-json.ts",
+    "test:crewai-config": "tsx --test src/crewai.test.ts",
     "run-everything": "./scripts/prep-dojo-everything.js && ./scripts/run-dojo-everything.js",
     "local-install": "bash scripts/local-install.sh"
   },

@@ -268,7 +268,7 @@ const InterruptHumanInTheLoop: React.FC<{
   // Parse and initialize steps data
   let initialSteps: Step[] = [];
   if (event.value && event.value.steps && Array.isArray(event.value.steps)) {
-    initialSteps = event.value.steps.map((step: any) => ({
+    initialSteps = event.value.steps.map((step: Step | string) => ({
       description: typeof step === "string" ? step : step.description || "",
       status: typeof step === "object" && step.status ? step.status : "enabled",
     }));
@@ -351,7 +351,7 @@ const ChatContent = () => {
     
     render: ({ event, resolve }) => <InterruptHumanInTheLoop event={event} resolve={resolve} />,
   });
-  useHumanInTheLoop({
+  useHumanInTheLoop<{ steps: Step[] }>({
     agentId: "human_in_the_loop",
     name: "generate_task_steps",
     description: "Generates a list of steps for the user to perform",
@@ -365,7 +365,7 @@ const ChatContent = () => {
     })  ,
     // Note: In v1, `available` was used to disable this for langgraph integrations.
     // In v2, availability is handled at the agent/backend level.
-    render: ({ args, respond, status }: any) => {
+    render: ({ args, respond, status }) => {
       return <StepsFeedback args={args} respond={respond} status={status} />;
     },
   });
@@ -382,13 +382,22 @@ const ChatContent = () => {
   );
 };
 
-const StepsFeedback = ({ args, respond, status }: { args: any; respond: any; status: any }) => {
+interface StepsFeedbackProps {
+  args: { steps?: Step[] };
+  respond?: (result: unknown) => Promise<void>;
+  status: string;
+}
+
+const StepsFeedback = ({ args, respond, status }: StepsFeedbackProps) => {
   const { theme } = useTheme();
   const [localSteps, setLocalSteps] = useState<Step[]>([]);
   const [accepted, setAccepted] = useState<boolean | null>(null);
 
+  // NOTE (PNI-272): kept as an effect. Snapshotting during render would
+  // populate `localSteps` before the first commit, which is a behaviour change.
   useEffect(() => {
     if (status === "executing" && localSteps.length === 0 && Array.isArray(args?.steps) && args.steps.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLocalSteps(args.steps);
     }
   }, [status, args?.steps, localSteps]);
@@ -398,7 +407,7 @@ const StepsFeedback = ({ args, respond, status }: { args: any; respond: any; sta
   }
 
   const steps = Array.isArray(localSteps) && localSteps.length > 0 ? localSteps : args.steps;
-  const enabledCount = steps.filter((step: any) => step.status === "enabled").length;
+  const enabledCount = steps.filter((step: Step) => step.status === "enabled").length;
 
   const handleStepToggle = (index: number) => {
     setLocalSteps((prevSteps) =>
@@ -436,7 +445,7 @@ const StepsFeedback = ({ args, respond, status }: { args: any; respond: any; sta
       />
 
       <div className="space-y-3 mb-6">
-        {steps.map((step: any, index: any) => (
+        {steps.map((step: Step, index: number) => (
           <StepItem
             key={index}
             step={step}

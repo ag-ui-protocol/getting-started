@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -22,4 +23,13 @@ public sealed class RunFinishedEvent : BaseEvent
     [JsonPropertyName("outcome")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public RunFinishedOutcome? Outcome { get; set; }
+
+    // Optional per-(provider, model) token usage for the completed run. A list so
+    // runs that invoke multiple models keep them separate; consumers that only
+    // need totals can sum across entries. Null (not an empty list) when no usage
+    // was reported, so the field is omitted on the wire and legacy events
+    // round-trip unchanged.
+    [JsonPropertyName("usage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<TokenUsage>? Usage { get; set; }
 }

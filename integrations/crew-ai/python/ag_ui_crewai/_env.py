@@ -5,10 +5,12 @@ Prior to this module, ``crews.py`` imported ``_parse_env_float`` from
 (``endpoint`` imports ``ChatWithCrewFlow`` from ``crews`` at the top level).
 That workaround was fragile (a cold-``__pycache__`` first run could fail when
 both modules resolve each other simultaneously) and leaked import plumbing into
-a hot path. Extracting the shared helper here gives both ``endpoint`` and
-``crews`` a neutral third module to import from at load time, eliminating the
-cycle. This module intentionally has NO imports from ``endpoint`` or ``crews``;
-it must remain a leaf.
+a hot path. Extracting the shared helper here gave both modules a neutral third
+module to import from at load time, eliminating the cycle. ``endpoint`` still
+parses its own variables from here, as does ``_checkpoint``; ``crews`` now reads
+the knobs it shares with the example flows through ``_config``, itself a leaf over
+this module. Nothing here may import ``endpoint``, ``crews``, ``_checkpoint`` or
+``_config``: this is the leaf they all sit on.
 """
 
 import math

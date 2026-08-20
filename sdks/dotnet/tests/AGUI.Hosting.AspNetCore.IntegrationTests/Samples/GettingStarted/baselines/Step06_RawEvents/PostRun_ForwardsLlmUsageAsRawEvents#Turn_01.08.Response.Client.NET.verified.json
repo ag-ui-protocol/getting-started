@@ -24299,7 +24299,48 @@
       "runId": "run_Id_1",
       "outcome": {
         "type": "success"
+      },
+      "usage": [
+        {
+          "inputTokens": 13,
+          "outputTokens": 1471,
+          "totalTokens": 1484,
+          "reasoningTokens": 768,
+          "cachedInputTokens": 0
+        }
+      ]
+    }
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "usage",
+        "details": {
+          "inputTokenCount": 13,
+          "outputTokenCount": 1471,
+          "cachedInputTokenCount": 0,
+          "reasoningTokenCount": 768
+        }
       }
+    ],
+    "responseId": "run_Id_1",
+    "rawRepresentation": {
+      "type": "RUN_FINISHED",
+      "threadId": "thread_Id_1",
+      "runId": "run_Id_1",
+      "outcome": {
+        "type": "success"
+      },
+      "usage": [
+        {
+          "inputTokens": 13,
+          "outputTokens": 1471,
+          "totalTokens": 1484,
+          "reasoningTokens": 768,
+          "cachedInputTokens": 0
+        }
+      ]
     }
   }
 ]

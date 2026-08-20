@@ -27,4 +27,19 @@ public sealed class InterruptResponseContent : Microsoft.Extensions.AI.InputResp
     [JsonPropertyName("payload")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Payload { get; set; }
+
+    /// <summary>
+    /// Gets or sets extra information attached to the resume entry this response
+    /// becomes, open by key.
+    /// </summary>
+    /// <remarks>
+    /// Envelope data about the response — signatures, routing keys — as opposed
+    /// to <see cref="Payload"/>, which is the answer the agent asked for and
+    /// will act on. Carried to and from <see cref="AGUIResume.Metadata"/> by the
+    /// client and hosting adapters. The <c>ag-ui</c> key is reserved for AG-UI's
+    /// own use; see <see cref="AGUIMetadata.ReservedKey"/>.
+    /// </remarks>
+    [JsonPropertyName("metadata")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Metadata { get; set; }
 }

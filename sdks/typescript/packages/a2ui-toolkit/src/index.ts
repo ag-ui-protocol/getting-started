@@ -227,6 +227,7 @@ export interface PriorSurface {
  * matching surface is found.
  */
 export function findPriorSurface(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- published signature; see PrepareA2UIRequestInput.messages
   messages: Array<any>,
   surfaceId: string,
 ): PriorSurface | undefined {
@@ -248,7 +249,10 @@ export function findPriorSurface(
   let matched = false;
 
   for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
+    // Messages cross a wire boundary and arrive in several shapes (AG-UI
+    // `type`, LangChain-style `role`), so they are narrowed here rather than
+    // constrained at the signature.
+    const msg = messages[i] as Record<string, unknown> | undefined;
     if (!msg) continue;
     const role = msg.type ?? msg.role;
     if (role !== "tool" && role !== "ToolMessage") continue;
@@ -732,6 +736,11 @@ export interface PrepareA2UIRequestInput {
   /** Raw ``changes`` arg from the planner. */
   changes?: string;
   /** Conversation history with the current (unbalanced) tool call stripped. */
+  // DEFERRED (PNI-272): stays `any` because this is published API. Narrowing it
+  // to `unknown` compiles for callers that construct this, but breaks any
+  // consumer that reads a message back off it — a deliberate API decision, not a
+  // lint repair.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   messages: Array<any>;
   /** The agent's run state (read for context + catalog via buildContextPrompt). */
   state: Record<string, unknown>;

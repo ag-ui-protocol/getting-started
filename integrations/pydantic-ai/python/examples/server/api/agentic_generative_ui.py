@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from ag_ui.core import EventType, StateDeltaEvent, StateSnapshotEvent
 from pydantic_ai import Agent
 
+
 StepStatus = Literal['pending', 'completed']
 
 
@@ -109,6 +110,3 @@ async def update_plan_step(
         type=EventType.STATE_DELTA,
         delta=changes,
     )
-
-
-app = agent.to_ag_ui()

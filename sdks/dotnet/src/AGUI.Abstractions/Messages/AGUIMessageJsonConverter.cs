@@ -62,6 +62,13 @@ public sealed class AGUIMessageJsonConverter : JsonConverter<AGUIMessage>
             Id = jsonElement.TryGetProperty("id", out var idProp) ? idProp.GetString() : null,
             Name = jsonElement.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null,
             EncryptedValue = jsonElement.TryGetProperty("encryptedValue", out var encProp) ? encProp.GetString() : null,
+            // An explicit null is read as absent, matching the TypeScript and
+            // Python schemas — producers that serialize unset optionals as null
+            // must still round-trip.
+            Metadata = jsonElement.TryGetProperty("metadata", out var metadataProp)
+                && metadataProp.ValueKind != JsonValueKind.Null
+                    ? metadataProp.Clone()
+                    : null,
         };
 
         if (jsonElement.TryGetProperty("content", out var contentProp))
@@ -163,6 +170,12 @@ public sealed class AGUIMessageJsonConverter : JsonConverter<AGUIMessage>
         if (user.EncryptedValue is not null)
         {
             writer.WriteString("encryptedValue", user.EncryptedValue);
+        }
+
+        if (user.Metadata is { } metadata)
+        {
+            writer.WritePropertyName("metadata");
+            metadata.WriteTo(writer);
         }
 
         switch (user.Content.Value)

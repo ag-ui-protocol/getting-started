@@ -18,6 +18,7 @@ internal static class ProtoMessageMapper
         {
             Id = message.Id ?? string.Empty,
             Role = message.Role,
+            Metadata = ProtoValueConverter.ToStructOrNull(message.Metadata),
         };
 
         switch (message)
@@ -103,6 +104,13 @@ internal static class ProtoMessageMapper
     }
 
     public static AGUIMessage FromProto(Proto.Message proto)
+    {
+        var message = FromProtoCore(proto);
+        message.Metadata = ProtoValueConverter.StructToJsonElementOrNull(proto.Metadata);
+        return message;
+    }
+
+    private static AGUIMessage FromProtoCore(Proto.Message proto)
     {
         var id = string.IsNullOrEmpty(proto.Id) ? null : proto.Id;
 
@@ -200,6 +208,7 @@ internal static class ProtoMessageMapper
         {
             Id = toolCall.Id,
             Type = toolCall.Type,
+            Metadata = ProtoValueConverter.ToStructOrNull(toolCall.Metadata),
             Function = new Proto.ToolCall.Types.Function
             {
                 Name = toolCall.Function.Name,
@@ -219,6 +228,7 @@ internal static class ProtoMessageMapper
                 Name = proto.Function?.Name ?? string.Empty,
                 Arguments = proto.Function?.Arguments ?? string.Empty,
             },
+            Metadata = ProtoValueConverter.StructToJsonElementOrNull(proto.Metadata),
         };
     }
 

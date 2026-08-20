@@ -1,8 +1,10 @@
-import { test, expect } from "../../test-isolation-helper";
+import { test, expect } from "../../event-trace-test";
 import { AgenticChatPage } from "../../featurePages/AgenticChatPage";
+import { agenticChatPageEventTrace } from "./agenticChatPage.event-trace";
 
 test("[LangGraph] Agentic Chat sends and receives a message", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph/feature/agentic_chat");
 
@@ -16,10 +18,14 @@ test("[LangGraph] Agentic Chat sends and receives a message", async ({
   await chat.assertAgentReplyVisible(
     /Hello|Hi|Hey|Greetings|nice to meet|welcome/i,
   );
+  await eventTrace.expectJourney(
+    agenticChatPageEventTrace.sendsAndReceivesMessage,
+  );
 });
 
 test("[LangGraph] Agentic Chat changes background on message and reset", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph/feature/agentic_chat");
 
@@ -36,7 +42,9 @@ test("[LangGraph] Agentic Chat changes background on message and reset", async (
   const initialBackground = await getBackground();
 
   // 1. Send message to change background to blue
-  await chat.sendMessage("Hi change the background color to blue");
+  await chat.sendMessage("Hi change the background color to blue", {
+    assistantMessagesAdded: 2,
+  });
   await chat.assertUserMessageVisible("Hi change the background color to blue");
 
   // Wait for the full tool-execution cycle to complete (tool call + follow-up).
@@ -48,17 +56,21 @@ test("[LangGraph] Agentic Chat changes background on message and reset", async (
   const backgroundAfterBlue = await getBackground();
 
   // 2. Change to pink
-  await chat.sendMessage("Hi change the background color to pink");
+  await chat.sendMessage("Hi change the background color to pink", {
+    assistantMessagesAdded: 2,
+  });
   await chat.assertUserMessageVisible("Hi change the background color to pink");
   await chat.assertAgentReplyVisible(/done|completed|changed|background/i);
   await expect.poll(getBackground).not.toBe(backgroundAfterBlue);
   const backgroundAfterPink = await getBackground();
   // Verify it also differs from initial (not a reset)
   expect(backgroundAfterPink).not.toBe(initialBackground);
+  await eventTrace.expectJourney(agenticChatPageEventTrace.changesBackground);
 });
 
 test("[LangGraph] Agentic Chat retains memory of user messages during a conversation", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph/feature/agentic_chat");
 
@@ -90,6 +102,7 @@ test("[LangGraph] Agentic Chat retains memory of user messages during a conversa
     "Can you remind me what my favorite fruit is?",
   );
   await chat.assertAgentReplyVisible(new RegExp(favFruit, "i"));
+  await eventTrace.expectJourney(agenticChatPageEventTrace.retainsMemory);
 });
 
 // Skip: CopilotChat v2 does not wire up onRegenerate to assistant messages,

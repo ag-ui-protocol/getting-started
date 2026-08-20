@@ -2,8 +2,6 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Java](https://img.shields.io/badge/Java-17%2B-orange.svg)](https://adoptium.net/)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=ag-ui-4j_ag-ui&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ag-ui-4j_ag-ui)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ag-ui-4j_ag-ui&metric=coverage)](https://sonarcloud.io/summary/new_code?id=ag-ui-4j_ag-ui)
 
 A modular Java library for the [**AG-UI protocol**](https://docs.ag-ui.com) — the
 open, event-based protocol for connecting AI agents to user-facing applications.
@@ -105,9 +103,8 @@ you need:
 
 ## Contributing
 
-Contributions are welcome! Please read the organization's
-[Contributing Guide](https://github.com/ag-ui-4j/.github/blob/main/CONTRIBUTING.md)
-and [Code of Conduct](https://github.com/ag-ui-4j/.github/blob/main/CODE_OF_CONDUCT.md).
+Contributions are welcome! Please read the
+[Contributing Guide](https://docs.ag-ui.com/development/contributing) first.
 
 ## License
 

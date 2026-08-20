@@ -3,7 +3,7 @@ import {
   Message as LangGraphMessage,
 } from "@langchain/langgraph-sdk";
 import { MessageType } from "@langchain/core/messages";
-import { RunAgentInput } from "@ag-ui/core";
+import { RunAgentInput, TokenUsage } from "@ag-ui/core";
 
 export enum LangGraphEventTypes {
   OnChainStart = "on_chain_start",
@@ -76,6 +76,10 @@ export interface RunMetadata {
   hasFunctionStreaming?: boolean;
   // True once the platform-assigned run id is known (set from stream metadata)
   serverRunIdKnown?: boolean;
+  // Per-LLM-call token usage accumulated across the run from provider-reported
+  // numeric metadata; aggregated per (provider, model) and attached to the
+  // terminal RUN_FINISHED event. Never holds prompt/completion content.
+  usage?: TokenUsage[];
   // Set true when a tool call matching a predict_state entry is detected in
   // the chat model stream. Remains true through tool arg streaming and tool
   // execution; cleared in OnToolEnd/OnToolError. While set, STATE_SNAPSHOT

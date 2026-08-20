@@ -1,6 +1,6 @@
 [project]
 name = "ag-ui-langgraph"
-version = "0.0.42"
+version = "0.0.43"
 description = "Implementation of the AG-UI protocol for LangGraph."
 license = "MIT"
 license-files = ["LICENSE"]

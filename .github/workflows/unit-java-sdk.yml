@@ -1,0 +1,103 @@
+name: unit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sdks/community/java/**"
+      - ".github/workflows/unit-java-sdk.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "sdks/community/java/**"
+      - ".github/workflows/unit-java-sdk.yml"
+
+concurrency:
+  group: unit-java-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  java:
+    name: Java SDK unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # JDK 17 matches the reactor's maven.compiler.release and the SDK's
+      # documented minimum (see sdks/community/java/ag-ui/README.md).
+      - name: Set up JDK 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961  # v5.7.0
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          # Built-in cache is fork-safe (fork PRs can't write to base repo cache)
+          cache: maven
+
+      - name: Run tests
+        working-directory: sdks/community/java/ag-ui
+        run: mvn -B verify
+
+      # `mvn verify` already fails on a failing test, but it passes happily when
+      # surefire runs zero tests. Mirrors the Kotlin SDK's guard.
+      - name: Parse test results
+        if: always()
+        working-directory: sdks/community/java/ag-ui
+        run: |
+          echo "## Java SDK Test Results Summary"
+          echo ""
+
+          total_tests=0
+          total_failures=0
+          total_errors=0
+
+          for module in core client server; do
+            xml_dir="$module/target/surefire-reports"
+
+            if [ -d "$xml_dir" ]; then
+              # Sum up test counts from all XML files in the directory
+              module_tests=$(find "$xml_dir" -name "TEST-*.xml" -exec grep -h '<testsuite' {} \; | grep -o 'tests="[0-9]*"' | sed 's/tests="\([0-9]*\)"/\1/' | awk '{sum += $1} END {print sum}')
+              module_failures=$(find "$xml_dir" -name "TEST-*.xml" -exec grep -h '<testsuite' {} \; | grep -o 'failures="[0-9]*"' | sed 's/failures="\([0-9]*\)"/\1/' | awk '{sum += $1} END {print sum}')
+              module_errors=$(find "$xml_dir" -name "TEST-*.xml" -exec grep -h '<testsuite' {} \; | grep -o 'errors="[0-9]*"' | sed 's/errors="\([0-9]*\)"/\1/' | awk '{sum += $1} END {print sum}')
+
+              # Default to 0 if empty
+              module_tests=${module_tests:-0}
+              module_failures=${module_failures:-0}
+              module_errors=${module_errors:-0}
+
+              if [ "$module_tests" -gt 0 ]; then
+                echo "✅ java-$module: $module_tests tests, $module_failures failures, $module_errors errors"
+                total_tests=$((total_tests + module_tests))
+                total_failures=$((total_failures + module_failures))
+                total_errors=$((total_errors + module_errors))
+              fi
+            fi
+          done
+
+          echo ""
+          echo "---"
+          echo "### Overall Results: $total_tests tests, $total_failures failures, $total_errors errors"
+
+          if [ $total_failures -gt 0 ] || [ $total_errors -gt 0 ]; then
+            echo "❌ Some tests failed"
+            exit 1
+          elif [ $total_tests -eq 0 ]; then
+            echo "⚠️ No tests were found or executed"
+            exit 1
+          else
+            echo "✅ All $total_tests tests passed!"
+          fi
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: java-surefire-reports
+          path: sdks/community/java/ag-ui/*/target/surefire-reports/
+          retention-days: 7

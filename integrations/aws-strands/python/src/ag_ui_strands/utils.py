@@ -2,8 +2,10 @@
 
 import base64
 import logging
+import re
 import urllib.request
 from typing import Any, Dict, List, Optional, Set
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from ag_ui.core import (
     AudioInputContent,
@@ -23,6 +25,20 @@ _DOCUMENT_FORMATS: Set[str] = {"pdf", "csv", "doc", "docx", "xls", "xlsx", "html
 _VIDEO_FORMATS: Set[str] = {"flv", "mkv", "mov", "mpeg", "mpg", "mp4", "three_gp", "webm", "wmv"}
 
 
+# Common MIME subtype aliases that don't directly match the allowed format strings.
+# e.g. "text/plain" splits to "plain" but the allowed format is "txt".
+_MIME_FORMAT_ALIASES: Dict[str, str] = {
+    "plain": "txt",
+    "x-markdown": "md",
+    "markdown": "md",
+    "jpg": "jpeg",
+    "msword": "doc",
+    "vnd.ms-excel": "xls",
+    "vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+}
+
+
 def _mime_to_format(mime_type: Optional[str], allowed: Set[str]) -> Optional[str]:
     """Parse a MIME type into a short format string.
 
@@ -33,8 +49,10 @@ def _mime_to_format(mime_type: Optional[str], allowed: Set[str]) -> Optional[str
     if not mime_type:
         logger.warning("No MIME type provided, cannot determine format")
         return None
-    # Take the part after the last '/'
-    fmt = mime_type.rsplit("/", 1)[-1].lower()
+    # Strip MIME parameters (e.g. "; charset=utf-8") before parsing the subtype
+    fmt = mime_type.split(";", 1)[0].strip().rsplit("/", 1)[-1].lower()
+    # Resolve well-known aliases before checking the allowed set
+    fmt = _MIME_FORMAT_ALIASES.get(fmt, fmt)
     if fmt in allowed:
         return fmt
     logger.warning(
@@ -49,10 +67,31 @@ def _mime_to_format(mime_type: Optional[str], allowed: Set[str]) -> Optional[str
 def _fetch_url_bytes(url: str) -> Optional[bytes]:
     """Fetch raw bytes from *url* using :mod:`urllib`.
 
+    Non-ASCII characters in the URL path (e.g. CJK filenames) are
+    percent-encoded before the request to avoid ``UnicodeEncodeError``.
+
     Returns ``None`` on any failure (network error, timeout, etc.).
     """
     try:
-        with urllib.request.urlopen(url, timeout=30) as resp:
+        parts = urlsplit(url)
+        # Percent-encode non-ASCII chars in the path; preserve already-valid URL chars.
+        # '%' is kept in safe= so that existing percent-encoded sequences (e.g. %20,
+        # %2F in presigned URLs) are not double-encoded.  The trade-off is that a
+        # literal '%' not followed by two hex digits (e.g. "50%.txt") also passes
+        # through unescaped — the re.sub below fixes those up into valid %25 escapes.
+        encoded_path = quote(parts.path, safe="/:@!$&'()*+,;=-._~%")
+        encoded_path = re.sub(r"%(?![0-9A-Fa-f]{2})", "%25", encoded_path)
+        # Apply the same encoding to the query string for non-ASCII values.
+        # RFC 3986 allows these characters unencoded in a query component, so they
+        # must stay in safe= to avoid rewriting presigned URLs (S3/Azure/GCS) or
+        # breaking servers that distinguish encoded vs literal separators.
+        encoded_query = quote(parts.query, safe="/:@!$&'()*+,;=-._~?%") if parts.query else ""
+        encoded_query = re.sub(r"%(?![0-9A-Fa-f]{2})", "%25", encoded_query) if encoded_query else ""
+        safe_url = urlunsplit((
+            parts.scheme, parts.netloc, encoded_path,
+            encoded_query, parts.fragment,
+        ))
+        with urllib.request.urlopen(safe_url, timeout=30) as resp:
             return resp.read()
     except Exception as exc:
         logger.warning("Failed to fetch URL %s: %s", url, exc)
@@ -175,6 +214,10 @@ def convert_agui_content_to_strands(content: List[Any]) -> List[Dict[str, Any]]:
 
         else:
             logger.warning("Skipping unknown content type: %s", type(item).__name__)
+
+    # Bedrock rejects a message that contains document blocks but no text block.
+    if any("document" in b for b in blocks) and not any("text" in b for b in blocks):
+        blocks.insert(0, {"text": " "})
 
     return blocks
 

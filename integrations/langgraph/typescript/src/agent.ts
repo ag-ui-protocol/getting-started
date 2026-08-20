@@ -41,6 +41,9 @@ import {
   RunAgentInput,
   RunErrorEvent,
   RunFinishedEvent,
+  TokenUsage,
+  aggregateTokenUsage,
+  tokenUsageFromLangChainMetadata,
   RunFinishedInterruptOutcome,
   RunStartedEvent,
   StateDeltaEvent,
@@ -351,6 +354,7 @@ export class LangGraphAgent extends AbstractAgent {
     // LangGraphAgentConfig.emitInterruptOutcome.
     const includeOutcome =
       this.emitInterruptOutcome || !this.enableLegacyOnInterruptEvent;
+    const usage = this.collectRunUsage();
     this.dispatchEvent({
       type: EventType.RUN_FINISHED,
       threadId,
@@ -363,7 +367,18 @@ export class LangGraphAgent extends AbstractAgent {
             } satisfies RunFinishedInterruptOutcome,
           }
         : {}),
+      ...(usage ? { usage } : {}),
     });
+  }
+
+  /**
+   * Aggregate accumulated per-call usage for the terminal event. Returns
+   * `undefined` (omitted field) when no provider usage was reported, so
+   * consumers can treat missing usage as "not measured" rather than zero.
+   */
+  protected collectRunUsage(): TokenUsage[] | undefined {
+    const aggregated = aggregateTokenUsage(this.activeRun?.usage ?? []);
+    return aggregated.length > 0 ? aggregated : undefined;
   }
 
   protected async onInitialize(
@@ -400,6 +415,7 @@ export class LangGraphAgent extends AbstractAgent {
       threadId: input.threadId,
       hasFunctionStreaming: false,
       modelMadeToolCall: false,
+      usage: [],
     };
     this.pendingReasoningId = undefined;
     // Reset per-run flags
@@ -1164,10 +1180,12 @@ export class LangGraphAgent extends AbstractAgent {
           lgInterrupts: interrupts,
         });
       } else {
+        const usage = this.collectRunUsage();
         this.dispatchEvent({
           type: EventType.RUN_FINISHED,
           threadId,
           runId: this.activeRun!.id,
+          ...(usage ? { usage } : {}),
         });
       }
 
@@ -1216,6 +1234,21 @@ export class LangGraphAgent extends AbstractAgent {
       case LangGraphEventTypes.OnChatModelStream:
         let shouldEmitMessages = event.metadata["emit-messages"] ?? true;
         let shouldEmitToolCalls = event.metadata["emit-tool-calls"] ?? true;
+
+        // Capture provider-reported token usage. LangChain attaches
+        // `usage_metadata` to the final streamed chunk (the one that also
+        // carries `finish_reason`), so this must run *before* the finish-reason
+        // early return below or usage would be dropped.
+        const usageMetadata = (event.data.chunk as any).usage_metadata;
+        if (usageMetadata) {
+          const usageEntry = tokenUsageFromLangChainMetadata(usageMetadata, {
+            provider: event.metadata?.["ls_provider"],
+            model: event.metadata?.["ls_model_name"],
+          });
+          if (usageEntry) {
+            (this.activeRun!.usage ??= []).push(usageEntry);
+          }
+        }
 
         if (event.data.chunk.response_metadata.finish_reason) return;
         let currentStream = this.getMessageInProgress(this.activeRun!.id);

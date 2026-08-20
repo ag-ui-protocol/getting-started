@@ -1,0 +1,143 @@
+#nullable enable
+AGUI.A2UI.A2UIAgentState
+AGUI.A2UI.A2UIAgentState.A2UIAgentState() -> void
+AGUI.A2UI.A2UIAgentState.A2UISchema.get -> string?
+AGUI.A2UI.A2UIAgentState.A2UISchema.init -> void
+AGUI.A2UI.A2UIAgentState.Context.get -> System.Collections.Generic.IReadOnlyList<AGUI.A2UI.A2UIContextEntry!>?
+AGUI.A2UI.A2UIAgentState.Context.init -> void
+AGUI.A2UI.A2UIAttemptRecord
+AGUI.A2UI.A2UIAttemptRecord.A2UIAttemptRecord(int Attempt, bool Ok, System.Collections.Generic.IReadOnlyList<AGUI.A2UI.A2UIValidationError!>! Errors) -> void
+AGUI.A2UI.A2UIAttemptRecord.Attempt.get -> int
+AGUI.A2UI.A2UIAttemptRecord.Errors.get -> System.Collections.Generic.IReadOnlyList<AGUI.A2UI.A2UIValidationError!>!
+AGUI.A2UI.A2UIAttemptRecord.Ok.get -> bool
+AGUI.A2UI.A2UIComponentValidator
+AGUI.A2UI.A2UIConstants
+AGUI.A2UI.A2UIContextEntry
+AGUI.A2UI.A2UIContextEntry.A2UIContextEntry(string? Description, string? Value) -> void
+AGUI.A2UI.A2UIContextEntry.Description.get -> string?
+AGUI.A2UI.A2UIContextEntry.Value.get -> string?
+AGUI.A2UI.A2UIEditContext
+AGUI.A2UI.A2UIEditContext.A2UIEditContext(string! SurfaceId, AGUI.A2UI.A2UIPriorSurface! Prior, string? Changes = null) -> void
+AGUI.A2UI.A2UIEditContext.Changes.get -> string?
+AGUI.A2UI.A2UIEditContext.Prior.get -> AGUI.A2UI.A2UIPriorSurface!
+AGUI.A2UI.A2UIEditContext.SurfaceId.get -> string!
+AGUI.A2UI.A2UIGenerationRecovery
+AGUI.A2UI.A2UIGuidelines
+AGUI.A2UI.A2UIGuidelines.A2UIGuidelines() -> void
+AGUI.A2UI.A2UIGuidelines.CompositionGuide.get -> string?
+AGUI.A2UI.A2UIGuidelines.CompositionGuide.init -> void
+AGUI.A2UI.A2UIGuidelines.DesignGuidelines.get -> string?
+AGUI.A2UI.A2UIGuidelines.DesignGuidelines.init -> void
+AGUI.A2UI.A2UIGuidelines.GenerationGuidelines.get -> string?
+AGUI.A2UI.A2UIGuidelines.GenerationGuidelines.init -> void
+AGUI.A2UI.A2UIHistoryMessage
+AGUI.A2UI.A2UIHistoryMessage.A2UIHistoryMessage(string? Role, string? Content) -> void
+AGUI.A2UI.A2UIHistoryMessage.Content.get -> string?
+AGUI.A2UI.A2UIHistoryMessage.Role.get -> string?
+AGUI.A2UI.A2UIOperationBuilder
+AGUI.A2UI.A2UIPreparedRequest
+AGUI.A2UI.A2UIPreparedRequest.A2UIPreparedRequest(string! Prompt, bool IsUpdate, AGUI.A2UI.A2UIPriorSurface? Prior, string? Error) -> void
+AGUI.A2UI.A2UIPreparedRequest.Error.get -> string?
+AGUI.A2UI.A2UIPreparedRequest.IsUpdate.get -> bool
+AGUI.A2UI.A2UIPreparedRequest.Prior.get -> AGUI.A2UI.A2UIPriorSurface?
+AGUI.A2UI.A2UIPreparedRequest.Prompt.get -> string!
+AGUI.A2UI.A2UIPriorSurface
+AGUI.A2UI.A2UIPriorSurface.A2UIPriorSurface(System.Text.Json.Nodes.JsonArray? Components, System.Text.Json.Nodes.JsonNode? Data, string? CatalogId) -> void
+AGUI.A2UI.A2UIPriorSurface.CatalogId.get -> string?
+AGUI.A2UI.A2UIPriorSurface.Components.get -> System.Text.Json.Nodes.JsonArray?
+AGUI.A2UI.A2UIPriorSurface.Data.get -> System.Text.Json.Nodes.JsonNode?
+AGUI.A2UI.A2UIPromptDefaults
+AGUI.A2UI.A2UIRecoveryConfig
+AGUI.A2UI.A2UIRecoveryConfig.A2UIRecoveryConfig() -> void
+AGUI.A2UI.A2UIRecoveryConfig.MaxAttempts.get -> int?
+AGUI.A2UI.A2UIRecoveryConfig.MaxAttempts.init -> void
+AGUI.A2UI.A2UIRecoveryResult
+AGUI.A2UI.A2UIRecoveryResult.A2UIRecoveryResult(string! Envelope, System.Collections.Generic.IReadOnlyList<AGUI.A2UI.A2UIAttemptRecord!>! Attempts, bool Ok) -> void
+AGUI.A2UI.A2UIRecoveryResult.Attempts.get -> System.Collections.Generic.IReadOnlyList<AGUI.A2UI.A2UIAttemptRecord!>!
+AGUI.A2UI.A2UIRecoveryResult.Envelope.get -> string!
+AGUI.A2UI.A2UIRecoveryResult.Ok.get -> bool
+AGUI.A2UI.A2UIResolvedToolParams
+AGUI.A2UI.A2UIResolvedToolParams.A2UIResolvedToolParams(AGUI.A2UI.A2UIGuidelines? Guidelines, string! DefaultSurfaceId, string! DefaultCatalogId, string! ToolName, string! ToolDescription, AGUI.A2UI.A2UIValidationCatalog? Catalog, AGUI.A2UI.A2UIRecoveryConfig? Recovery, System.Action<AGUI.A2UI.A2UIAttemptRecord!>? OnAttempt) -> void
+AGUI.A2UI.A2UIResolvedToolParams.Catalog.get -> AGUI.A2UI.A2UIValidationCatalog?
+AGUI.A2UI.A2UIResolvedToolParams.DefaultCatalogId.get -> string!
+AGUI.A2UI.A2UIResolvedToolParams.DefaultSurfaceId.get -> string!
+AGUI.A2UI.A2UIResolvedToolParams.Guidelines.get -> AGUI.A2UI.A2UIGuidelines?
+AGUI.A2UI.A2UIResolvedToolParams.OnAttempt.get -> System.Action<AGUI.A2UI.A2UIAttemptRecord!>?
+AGUI.A2UI.A2UIResolvedToolParams.Recovery.get -> AGUI.A2UI.A2UIRecoveryConfig?
+AGUI.A2UI.A2UIResolvedToolParams.ToolDescription.get -> string!
+AGUI.A2UI.A2UIResolvedToolParams.ToolName.get -> string!
+AGUI.A2UI.A2UIToolDefinitions
+AGUI.A2UI.A2UIToolkit
+AGUI.A2UI.A2UIToolParams
+AGUI.A2UI.A2UIToolParams.A2UIToolParams() -> void
+AGUI.A2UI.A2UIToolParams.Catalog.get -> AGUI.A2UI.A2UIValidationCatalog?
+AGUI.A2UI.A2UIToolParams.Catalog.init -> void
+AGUI.A2UI.A2UIToolParams.DefaultCatalogId.get -> string?
+AGUI.A2UI.A2UIToolParams.DefaultCatalogId.init -> void
+AGUI.A2UI.A2UIToolParams.DefaultSurfaceId.get -> string?
+AGUI.A2UI.A2UIToolParams.DefaultSurfaceId.init -> void
+AGUI.A2UI.A2UIToolParams.Guidelines.get -> AGUI.A2UI.A2UIGuidelines?
+AGUI.A2UI.A2UIToolParams.Guidelines.init -> void
+AGUI.A2UI.A2UIToolParams.OnAttempt.get -> System.Action<AGUI.A2UI.A2UIAttemptRecord!>?
+AGUI.A2UI.A2UIToolParams.OnAttempt.init -> void
+AGUI.A2UI.A2UIToolParams.Recovery.get -> AGUI.A2UI.A2UIRecoveryConfig?
+AGUI.A2UI.A2UIToolParams.Recovery.init -> void
+AGUI.A2UI.A2UIToolParams.ToolDescription.get -> string?
+AGUI.A2UI.A2UIToolParams.ToolDescription.init -> void
+AGUI.A2UI.A2UIToolParams.ToolName.get -> string?
+AGUI.A2UI.A2UIToolParams.ToolName.init -> void
+AGUI.A2UI.A2UIValidationCatalog
+AGUI.A2UI.A2UIValidationCatalog.A2UIValidationCatalog(System.Text.Json.Nodes.JsonObject! components) -> void
+AGUI.A2UI.A2UIValidationCatalog.Components.get -> System.Text.Json.Nodes.JsonObject!
+AGUI.A2UI.A2UIValidationError
+AGUI.A2UI.A2UIValidationError.A2UIValidationError(string! Code, string! Path, string! Message) -> void
+AGUI.A2UI.A2UIValidationError.Code.get -> string!
+AGUI.A2UI.A2UIValidationError.Message.get -> string!
+AGUI.A2UI.A2UIValidationError.Path.get -> string!
+AGUI.A2UI.A2UIValidationErrorCodes
+AGUI.A2UI.A2UIValidationResult
+AGUI.A2UI.A2UIValidationResult.A2UIValidationResult(bool Valid, System.Collections.Generic.IReadOnlyList<AGUI.A2UI.A2UIValidationError!>! Errors) -> void
+AGUI.A2UI.A2UIValidationResult.Errors.get -> System.Collections.Generic.IReadOnlyList<AGUI.A2UI.A2UIValidationError!>!
+AGUI.A2UI.A2UIValidationResult.Valid.get -> bool
+const AGUI.A2UI.A2UIConstants.A2UIOperationsKey = "a2ui_operations" -> string!
+const AGUI.A2UI.A2UIConstants.A2UIRecoveryActivityType = "a2ui_recovery" -> string!
+const AGUI.A2UI.A2UIConstants.A2UISchemaContextDescription = "A2UI Component Schema — available components for generating UI surfaces. Use these component names and properties when creating A2UI operations." -> string!
+const AGUI.A2UI.A2UIConstants.BasicCatalogId = "https://a2ui.org/specification/v0_9/basic_catalog.json" -> string!
+const AGUI.A2UI.A2UIConstants.DefaultSurfaceId = "dynamic-surface" -> string!
+const AGUI.A2UI.A2UIConstants.GenerateA2UIToolName = "generate_a2ui" -> string!
+const AGUI.A2UI.A2UIConstants.MaxA2UIAttempts = 3 -> int
+const AGUI.A2UI.A2UIConstants.ProtocolVersion = "v0.9" -> string!
+const AGUI.A2UI.A2UIConstants.RenderA2UIToolName = "render_a2ui" -> string!
+const AGUI.A2UI.A2UIToolDefinitions.ChangesArgumentDescription = "Optional natural-language description of the changes to apply when intent='update'." -> string!
+const AGUI.A2UI.A2UIToolDefinitions.GenerateA2UIToolDescription = "Generate or update a dynamic A2UI surface based on the conversation. A secondary LLM designs the UI components and data. Use intent='create' (default) when the user requests new visual content (cards, forms, lists, dashboards, comparisons, etc.). Use intent='update' with target_surface_id to modify a surface you previously rendered (e.g. 'change the second card's price', 'add a Buy button', 'use red instead of blue')." -> string!
+const AGUI.A2UI.A2UIToolDefinitions.IntentArgumentDescription = "'create' to render a new surface; 'update' to modify a surface previously rendered in this conversation. Defaults to 'create'." -> string!
+const AGUI.A2UI.A2UIToolDefinitions.TargetSurfaceIdArgumentDescription = "Required when intent='update'. The surface id of the prior render to modify." -> string!
+const AGUI.A2UI.A2UIValidationErrorCodes.ChildCycle = "child_cycle" -> string!
+const AGUI.A2UI.A2UIValidationErrorCodes.DuplicateId = "duplicate_id" -> string!
+const AGUI.A2UI.A2UIValidationErrorCodes.EmptyComponents = "empty_components" -> string!
+const AGUI.A2UI.A2UIValidationErrorCodes.MissingComponentType = "missing_component_type" -> string!
+const AGUI.A2UI.A2UIValidationErrorCodes.MissingId = "missing_id" -> string!
+const AGUI.A2UI.A2UIValidationErrorCodes.MissingRequiredProp = "missing_required_prop" -> string!
+const AGUI.A2UI.A2UIValidationErrorCodes.NoRoot = "no_root" -> string!
+const AGUI.A2UI.A2UIValidationErrorCodes.UnknownComponent = "unknown_component" -> string!
+const AGUI.A2UI.A2UIValidationErrorCodes.UnresolvedBinding = "unresolved_binding" -> string!
+const AGUI.A2UI.A2UIValidationErrorCodes.UnresolvedChild = "unresolved_child" -> string!
+static AGUI.A2UI.A2UIComponentValidator.Validate(System.Text.Json.Nodes.JsonArray? components, System.Text.Json.Nodes.JsonObject? data = null, AGUI.A2UI.A2UIValidationCatalog? catalog = null, bool validateBindings = true) -> AGUI.A2UI.A2UIValidationResult!
+static AGUI.A2UI.A2UIGenerationRecovery.AugmentPromptWithValidationErrors(string! prompt, System.Collections.Generic.IReadOnlyList<AGUI.A2UI.A2UIValidationError!>! errors) -> string!
+static AGUI.A2UI.A2UIGenerationRecovery.FormatValidationErrors(System.Collections.Generic.IEnumerable<AGUI.A2UI.A2UIValidationError!>! errors) -> string!
+static AGUI.A2UI.A2UIGenerationRecovery.RunAsync(string! basePrompt, System.Func<string!, int, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<System.Text.Json.Nodes.JsonObject?>>! invokeSubagentAsync, System.Func<System.Text.Json.Nodes.JsonObject!, string!>! buildEnvelope, AGUI.A2UI.A2UIValidationCatalog? catalog = null, AGUI.A2UI.A2UIRecoveryConfig? config = null, System.Action<AGUI.A2UI.A2UIAttemptRecord!>? onAttempt = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<AGUI.A2UI.A2UIRecoveryResult!>!
+static AGUI.A2UI.A2UIOperationBuilder.CreateSurface(string! surfaceId, string! catalogId) -> System.Text.Json.Nodes.JsonObject!
+static AGUI.A2UI.A2UIOperationBuilder.UpdateComponents(string! surfaceId, System.Collections.Generic.IEnumerable<System.Text.Json.Nodes.JsonNode?>! components) -> System.Text.Json.Nodes.JsonObject!
+static AGUI.A2UI.A2UIOperationBuilder.UpdateDataModel(string! surfaceId, System.Text.Json.Nodes.JsonNode? value, string! path = "/") -> System.Text.Json.Nodes.JsonObject!
+static AGUI.A2UI.A2UIPromptDefaults.DesignGuidelines.get -> string!
+static AGUI.A2UI.A2UIPromptDefaults.GenerationGuidelines.get -> string!
+static AGUI.A2UI.A2UIToolDefinitions.CreateRenderA2UIToolDefinition() -> System.Text.Json.Nodes.JsonObject!
+static AGUI.A2UI.A2UIToolDefinitions.ResolveA2UIToolParams(AGUI.A2UI.A2UIToolParams? parameters) -> AGUI.A2UI.A2UIResolvedToolParams!
+static AGUI.A2UI.A2UIToolkit.AssembleOps(string! intent, string! surfaceId, string! catalogId, System.Text.Json.Nodes.JsonArray! components, System.Text.Json.Nodes.JsonObject? data = null) -> System.Collections.Generic.IReadOnlyList<System.Text.Json.Nodes.JsonObject!>!
+static AGUI.A2UI.A2UIToolkit.BuildA2UIEnvelope(System.Text.Json.Nodes.JsonObject! args, bool isUpdate, string? targetSurfaceId, AGUI.A2UI.A2UIPriorSurface? prior, string! defaultSurfaceId = "dynamic-surface", string! defaultCatalogId = "https://a2ui.org/specification/v0_9/basic_catalog.json") -> string!
+static AGUI.A2UI.A2UIToolkit.BuildContextPrompt(AGUI.A2UI.A2UIAgentState? state) -> string!
+static AGUI.A2UI.A2UIToolkit.BuildSubagentPrompt(string! contextPrompt, AGUI.A2UI.A2UIGuidelines? guidelines = null, AGUI.A2UI.A2UIEditContext? editContext = null) -> string!
+static AGUI.A2UI.A2UIToolkit.FindPriorSurface(System.Collections.Generic.IEnumerable<AGUI.A2UI.A2UIHistoryMessage!>! messages, string! surfaceId) -> AGUI.A2UI.A2UIPriorSurface?
+static AGUI.A2UI.A2UIToolkit.PrepareA2UIRequest(string? intent, string? targetSurfaceId, string? changes, System.Collections.Generic.IEnumerable<AGUI.A2UI.A2UIHistoryMessage!>! messages, AGUI.A2UI.A2UIAgentState? state, AGUI.A2UI.A2UIGuidelines? guidelines = null) -> AGUI.A2UI.A2UIPreparedRequest!
+static AGUI.A2UI.A2UIToolkit.WrapAsOperationsEnvelope(System.Collections.Generic.IEnumerable<System.Text.Json.Nodes.JsonObject!>! operations) -> string!
+static AGUI.A2UI.A2UIToolkit.WrapErrorEnvelope(string! message) -> string!

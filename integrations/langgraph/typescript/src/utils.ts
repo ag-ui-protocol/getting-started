@@ -309,6 +309,11 @@ export function langchainMessagesToAgui(messages: LangGraphMessage[]): Message[]
           role: "tool",
           content: stringifyIfNeeded(resolveMessageContent(message.content)),
           toolCallId: message.tool_call_id,
+          // A LangChain tool result signals failure only through `status`, with no
+          // error text. Restore AG-UI's `error` so the failure survives the round
+          // trip; the value is a fixed sentinel (#2305) because the original text is
+          // not recoverable from the flag alone.
+          ...(message.status === "error" ? { error: "error" } : {}),
         });
         break;
       default:

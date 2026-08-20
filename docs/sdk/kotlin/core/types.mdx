@@ -134,8 +134,9 @@ val toolResponse = AssistantMessage(
 data class ToolMessage(
     override val id: String,
     override val content: String,
+    val toolCallId: String,
     override val name: String? = null,
-    val toolCallId: String
+    val error: String? = null
 ) : Message()
 ```
 
