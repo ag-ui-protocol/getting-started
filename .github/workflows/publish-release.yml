@@ -242,6 +242,12 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
+          # Same failure the publish job's copy documents, in the job that runs
+          # FIRST: a TypeScript-only scope never invokes uv here, so the cache
+          # dir is never created and the post step errors, failing `build` after
+          # a green build and skipping `publish` entirely. Every TS-only canary
+          # scope is dead without this.
+          ignore-nothing-to-cache: true
 
       - name: Setup Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
