@@ -317,9 +317,13 @@ class Interrupt(ConfiguredBaseModel):
 ResumeStatus = Literal["resolved", "cancelled"]
 
 
-class ResumeEntry(ConfiguredBaseModel):
+class ResumeEntry(MetadataMixin):
     """
     A per-interrupt response in the resume array of a RunAgentInput.
+
+    ``metadata`` carries envelope data about the response — signatures, routing
+    keys — as opposed to ``payload``, which is the answer the agent asked for
+    and will act on.
     """
     interrupt_id: str
     status: ResumeStatus

@@ -61,6 +61,31 @@ var input = new RunAgentInput
 | `Context` | `context` | `IList<AGUIContext>?` | Context objects provided to the agent |
 | `ForwardedProperties` | `forwardedProps` | `JsonElement` | Additional properties forwarded by the client |
 
+## AGUIResume
+
+One per-interrupt response inside `RunAgentInput.Resume`, addressing an
+interrupt from the previous run. See
+[Interrupts](/concepts/interrupts#resuming-a-run) for the full resume contract.
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `InterruptId` | `interruptId` | `string` | ID of the interrupt this entry addresses |
+| `Status` | `status` | `string` | `ResumeStatus.Resolved` if the user responded, `ResumeStatus.Cancelled` if they abandoned |
+| `Payload` | `payload` | `JsonElement?` | The response itself, validated against the interrupt's `responseSchema` |
+| `Metadata` | `metadata` | `JsonElement?` | Envelope data about the response — signatures, routing keys — never the answer itself |
+
+`Metadata` follows the same conventions as metadata everywhere else in the
+protocol: open by key, any JSON value allowed under a key including `null`, the
+object itself absent or an object but never `null` on the wire, and the
+`ag-ui` key (`AGUIMetadata.ReservedKey`) reserved. A resume entry is a request
+field, so nothing merges into it; see
+[Metadata](/concepts/metadata#resume-entries). For non-tool interrupts, the
+hosting layer carries it onto `InterruptResponseContent.Metadata`, and
+`AGUIChatClient` copies it from `InterruptResponseContent` onto the entry it
+sends. Tool-approval entries are translated through MEAI's own approval
+content types, which have no metadata surface — read it from the raw entry via
+`RunAgentInput.Resume` if you need it there.
+
 ## Message Types
 
 Messages form a closed hierarchy rooted at `AGUIMessage`. The base type carries

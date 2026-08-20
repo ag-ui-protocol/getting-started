@@ -30,19 +30,49 @@ type RunAgentInput = {
   tools: Tool[]
   context: Context[]
   forwardedProps: any
+  resume?: ResumeEntry[]
 }
 ```
 
-| Property         | Type                | Description                                    |
-| ---------------- | ------------------- | ---------------------------------------------- |
-| `threadId`       | `string`            | ID of the conversation thread                  |
-| `runId`          | `string`            | ID of the current run                          |
-| `parentRunId`    | `string (optional)` | ID of the run that spawned this run            |
-| `state`          | `any`               | Current state of the agent                     |
-| `messages`       | `Message[]`         | Array of messages in the conversation          |
-| `tools`          | `Tool[]`            | Client-provided tools available for this run   |
-| `context`        | `Context[]`         | Array of context objects provided to the agent |
-| `forwardedProps` | `any`               | Additional properties forwarded to the agent   |
+| Property         | Type                       | Description                                    |
+| ---------------- | -------------------------- | ---------------------------------------------- |
+| `threadId`       | `string`                   | ID of the conversation thread                  |
+| `runId`          | `string`                   | ID of the current run                          |
+| `parentRunId`    | `string (optional)`        | ID of the run that spawned this run            |
+| `state`          | `any`                      | Current state of the agent                     |
+| `messages`       | `Message[]`                | Array of messages in the conversation          |
+| `tools`          | `Tool[]`                   | Client-provided tools available for this run   |
+| `context`        | `Context[]`                | Array of context objects provided to the agent |
+| `forwardedProps` | `any`                      | Additional properties forwarded to the agent   |
+| `resume`         | `ResumeEntry[] (optional)` | Per-interrupt responses resuming a run that finished with an interrupt outcome |
+
+## ResumeEntry
+
+One per-interrupt response inside `RunAgentInput.resume`, addressing an
+interrupt from the previous run. See
+[Interrupts](/concepts/interrupts#resuming-a-run) for the full resume contract.
+
+```typescript
+type ResumeEntry = {
+  interruptId: string
+  status: "resolved" | "cancelled"
+  payload?: any
+  metadata?: Record<string, any>
+}
+```
+
+| Property      | Type                                | Description                                                                 |
+| ------------- | ----------------------------------- | --------------------------------------------------------------------------- |
+| `interruptId` | `string`                            | ID of the interrupt this entry addresses                                     |
+| `status`      | `"resolved" \| "cancelled"`         | Whether the user responded or abandoned the interrupt                        |
+| `payload`     | `any (optional)`                    | The response itself, validated against the interrupt's `responseSchema`      |
+| `metadata`    | `Record<string, any> (optional)`    | Envelope data about the response — signatures, routing keys — never the answer itself |
+
+`metadata` follows the same conventions as metadata everywhere else in the
+protocol: open by key, any JSON value allowed under a key including `null`, the
+object itself absent or an object but never `null`, and the `ag-ui` key
+reserved. A resume entry is a request field, so nothing merges into it; see
+[Metadata](/concepts/metadata#resume-entries).
 
 ## Message Types
 

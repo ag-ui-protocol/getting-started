@@ -228,6 +228,9 @@ export const ResumeEntrySchema = z.object({
   interruptId: z.string(),
   status: z.enum(["resolved", "cancelled"]),
   payload: z.any().optional(),
+  // Envelope data about the response — signatures, routing keys — as opposed to
+  // `payload`, which is the answer the agent asked for and will act on.
+  metadata: OptionalMetadataSchema,
 });
 
 export const RunAgentInputSchema = z.object({

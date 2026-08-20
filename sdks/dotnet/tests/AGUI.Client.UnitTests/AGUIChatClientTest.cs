@@ -278,6 +278,58 @@ public sealed class AGUIChatClientTest
         Assert.Equal("caller-interrupt", entry.InterruptId);
     }
 
+    // Metadata set on an InterruptResponseContent travels onto the resume entry the
+    // client sends, alongside the payload — envelope data (signatures, routing keys)
+    // as opposed to the answer itself.
+    [Fact]
+    public async Task GetStreamingResponse_InterruptResponseMetadata_ReachesTheResumeEntry()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.User,
+            [
+                new InterruptResponseContent("req-interrupt")
+                {
+                    Payload = JsonDocument.Parse("""{"approved":true}""").RootElement,
+                    Metadata = JsonDocument.Parse(
+                        """{"definitionId":"review-plan","key":"afterModel-review"}""").RootElement,
+                },
+            ]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history));
+
+        var resume = transport.LastInput!.Resume;
+        Assert.NotNull(resume);
+        var entry = Assert.Single(resume!);
+        Assert.Equal("req-interrupt", entry.InterruptId);
+        Assert.True(entry.Payload!.Value.GetProperty("approved").GetBoolean());
+        Assert.NotNull(entry.Metadata);
+        Assert.Equal("review-plan", entry.Metadata!.Value.GetProperty("definitionId").GetString());
+        Assert.Equal("afterModel-review", entry.Metadata!.Value.GetProperty("key").GetString());
+    }
+
+    // An InterruptResponseContent without metadata produces a resume entry without it.
+    [Fact]
+    public async Task GetStreamingResponse_InterruptResponseWithoutMetadata_OmitsIt()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.User, [new InterruptResponseContent("req-interrupt")]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history));
+
+        var entry = Assert.Single(transport.LastInput!.Resume!);
+        Assert.Null(entry.Metadata);
+    }
+
     // https://github.com/microsoft/agent-framework/issues/5587
     [Fact]
     public async Task AGUIChatClient_ToolCallResultWithPlainTextContent_DoesNotParseAsJson()

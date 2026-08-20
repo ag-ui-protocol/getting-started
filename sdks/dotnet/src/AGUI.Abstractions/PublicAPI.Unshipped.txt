@@ -19,6 +19,8 @@ AGUI.Abstractions.InterruptRequestContent.ToolCallId.get -> string?
 AGUI.Abstractions.InterruptRequestContent.ToolCallId.set -> void
 AGUI.Abstractions.InterruptResponseContent
 AGUI.Abstractions.InterruptResponseContent.InterruptResponseContent(string! requestId) -> void
+AGUI.Abstractions.InterruptResponseContent.Metadata.get -> System.Text.Json.JsonElement?
+AGUI.Abstractions.InterruptResponseContent.Metadata.set -> void
 AGUI.Abstractions.InterruptResponseContent.Payload.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.InterruptResponseContent.Payload.set -> void
 static AGUI.Abstractions.AGUIChatMessageExtensions.AsChatMessages(this System.Collections.Generic.IEnumerable<AGUI.Abstractions.AGUIMessage!>! aguiMessages) -> System.Collections.Generic.IEnumerable<Microsoft.Extensions.AI.ChatMessage!>!
@@ -81,6 +83,8 @@ AGUI.Abstractions.AGUIResume
 AGUI.Abstractions.AGUIResume.AGUIResume() -> void
 AGUI.Abstractions.AGUIResume.InterruptId.get -> string!
 AGUI.Abstractions.AGUIResume.InterruptId.set -> void
+AGUI.Abstractions.AGUIResume.Metadata.get -> System.Text.Json.JsonElement?
+AGUI.Abstractions.AGUIResume.Metadata.set -> void
 AGUI.Abstractions.AGUIResume.Payload.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.AGUIResume.Payload.set -> void
 AGUI.Abstractions.AGUIResume.Status.get -> string!

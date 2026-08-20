@@ -101,6 +101,7 @@ type RunAgentInput = {
     interruptId: string
     status: "resolved" | "cancelled"
     payload?: any
+    metadata?: Record<string, any>
   }>
 }
 ```
@@ -110,6 +111,12 @@ type RunAgentInput = {
   payload (for example, `{ approved: false }`), not as a separate status.
 - `cancelled` — the user abandoned without providing meaningful input.
   `payload` should be omitted.
+- `metadata` — optional envelope data about the response (for example a
+  signature proving the human decision was not tampered with, or routing
+  keys), as opposed to `payload`, which is the answer the agent asked for and
+  will act on. Open by key; any JSON value is allowed under a key, including
+  `null`. The object itself is either absent or an object, never `null`. The
+  `ag-ui` key is reserved for AG-UI's own use. Allowed on either status.
 
 ## Contract rules
 
