@@ -21,7 +21,7 @@ Install the required peer dependencies along with at least one AI SDK provider:
 npm install @ag-ui/client rxjs ai @ai-sdk/openai
 ```
 
-The package targets `ai@^7.0.0` and requires `@ag-ui/client >=0.0.44` and `rxjs`. Any AI SDK v7 provider package works (`@ai-sdk/openai`, `@ai-sdk/anthropic`, `@ai-sdk/google`, etc.) — pick whichever one matches the model you want to use.
+The package targets `ai@^7.0.0` and requires `@ag-ui/client >=0.0.49` (for the reasoning events and multimodal content types it emits) and `rxjs`. Any AI SDK v7 provider package works (`@ai-sdk/openai`, `@ai-sdk/anthropic`, `@ai-sdk/google`, etc.) — pick whichever one matches the model you want to use.
 
 ## Quick Start
 
@@ -149,7 +149,7 @@ REASONING_MESSAGE_CONTENT  (deltas)
 REASONING_MESSAGE_END    / REASONING_END
 ```
 
-For Anthropic models, the encrypted reasoning signature (`providerMetadata.anthropic.signature`) is auto-forwarded as a `REASONING_ENCRYPTED_VALUE` event so it can be replayed on the next turn:
+For Anthropic models, the encrypted reasoning signature (`providerMetadata.anthropic.signature`) is auto-forwarded as a `REASONING_ENCRYPTED_VALUE` event and stored on the reasoning message; on the next run the message converter folds it back into the assistant turn as a signed reasoning part, so tool-use continuations with extended thinking replay correctly:
 
 ```ts
 import { VercelAISDKAgent } from "@ag-ui/vercel-ai-sdk";
@@ -202,13 +202,14 @@ import {
 } from "@ag-ui/vercel-ai-sdk";
 ```
 
-- `convertMessagesToVercelAISDKMessages(messages)` — converts AG-UI `Message[]` to AI SDK `ModelMessage[]`. Handles roles, multimodal user content (text / image / audio / video / document), assistant tool calls, and tool messages (with tool-name lookup against the conversation history).
+- `convertMessagesToVercelAISDKMessages(messages)` — converts AG-UI `Message[]` to AI SDK `ModelMessage[]`. Handles roles, multimodal user content (text / image / audio / video / document), assistant tool calls, and tool messages (with tool-name lookup against the conversation history; `ToolMessage.error` becomes an `error-text` output so providers flag it as a failure). Reasoning messages are folded into the following assistant message as reasoning parts, carrying the Anthropic signature when present.
 - `convertToolsToVercelAISDKTools(tools)` — converts AG-UI `Tool[]` to an AI SDK `ToolSet`. Each tool's JSON Schema is wrapped via the SDK's `jsonSchema()` helper. No `execute` function is attached — tool calls are surfaced back to the AG-UI client.
 
 `convertToolToVerlAISDKTools` is exported as a backward-compatible alias for the typo'd name from earlier versions of the package; new code should use `convertToolsToVercelAISDKTools`.
 
 ## Limitations & Future Work
 
+- `RunAgentInput.context` is forwarded to the model as a leading system message (`streamText` has no request-context channel). `RunAgentInput.state` and `forwardedProps` are not consumed — the integration is stateless between runs and emits no `STATE_SNAPSHOT`/`STATE_DELTA` events.
 - The `source`, `file`, `reasoning-file`, and `raw` AI SDK stream parts are not currently mapped to AG-UI events. They may be exposed as `CUSTOM` events in a future release.
 - The tool-approval lifecycle is surfaced as `CUSTOM` events: `tool-approval-request` → `name: "tool_approval_request"`, and `tool-approval-response` → `name: "tool_approval_response"` (carrying the `approved` flag and optional `reason`). Clients are responsible for their own approval UX.
 - Provider `custom` stream parts are passed through as `CUSTOM` events whose `name` is the part's namespaced `kind` (e.g. `"acme.telemetry"`), with the provider metadata as the event `value`.
