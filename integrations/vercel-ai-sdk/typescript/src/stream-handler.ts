@@ -36,6 +36,17 @@ function safeJsonStringify(value: unknown): string {
   }
 }
 
+// Tool-call arguments must be a valid JSON document (clients JSON.parse it),
+// so strings are quoted here — unlike safeJsonStringify, which passes string
+// tool OUTPUTS through as plain text.
+function jsonStringifyToolArgs(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? {}) ?? "{}";
+  } catch {
+    return "{}";
+  }
+}
+
 interface ToolCallPart {
   toolCallId: string;
   toolName: string;
@@ -97,8 +108,14 @@ export class StreamHandler {
   private completed = false;
 
   private openTextIds = new Set<string>();
+  // AI SDK part id → AG-UI message id for the current step. Provider part ids
+  // are only unique within one response (openai chat uses "0", anthropic the
+  // content-block index), so a part id that collides with a message already in
+  // finalMessages is remapped to a fresh UUID.
+  private textIdMap = new Map<string, string>();
   private openReasonings = new Map<string, ReasoningMessage>();
   private seenToolCalls = new Set<string>();
+  private openToolCallIds = new Set<string>();
   private emittedToolResults = new Set<string>();
 
   constructor(
@@ -136,6 +153,7 @@ export class StreamHandler {
 
     this.closeAllOpenReasonings();
     this.closeAllOpenTexts();
+    this.closeAllOpenToolCalls();
     this.synthesizeMissingToolResults();
 
     this.emit({
@@ -165,6 +183,12 @@ export class StreamHandler {
     if (this.currentMessagePushed) return;
     this.finalMessages.push(this.currentAssistantMessage);
     this.currentMessagePushed = true;
+  }
+
+  // Reuse the AI SDK part id as the AG-UI message id unless it collides with
+  // a message already in the conversation (prior run or prior step).
+  private uniqueMessageId(partId: string): string {
+    return this.finalMessages.some((m) => m.id === partId) ? randomUUID() : partId;
   }
 
   private handlePart(part: TextStreamPart<ToolSet>): void {
@@ -261,15 +285,17 @@ export class StreamHandler {
     // message in the snapshot (their accumulated content already lands in
     // currentAssistantMessage.content). That collapse is intentional — one
     // assistant turn is one snapshot message.
+    const messageId = this.textIdMap.get(part.id) ?? this.uniqueMessageId(part.id);
+    this.textIdMap.set(part.id, messageId);
     if (!this.currentMessagePushed) {
-      this.currentStepAssistantId = part.id;
-      this.currentAssistantMessage.id = part.id;
+      this.currentStepAssistantId = messageId;
+      this.currentAssistantMessage.id = messageId;
     }
     this.ensureAssistantPushed();
-    this.openTextIds.add(part.id);
+    this.openTextIds.add(messageId);
     this.emit({
       type: EventType.TEXT_MESSAGE_START,
-      messageId: part.id,
+      messageId,
       role: "assistant",
     });
   }
@@ -279,16 +305,17 @@ export class StreamHandler {
       `${this.currentAssistantMessage.content ?? ""}${part.text}`;
     this.emit({
       type: EventType.TEXT_MESSAGE_CONTENT,
-      messageId: part.id,
+      messageId: this.textIdMap.get(part.id) ?? part.id,
       delta: part.text,
     });
   }
 
   private onTextEnd(part: { id: string }): void {
-    this.openTextIds.delete(part.id);
+    const messageId = this.textIdMap.get(part.id) ?? part.id;
+    this.openTextIds.delete(messageId);
     this.emit({
       type: EventType.TEXT_MESSAGE_END,
-      messageId: part.id,
+      messageId,
     });
   }
 
@@ -302,12 +329,13 @@ export class StreamHandler {
   // reasoning ------------------------------------------------------------
   private onReasoningStart(part: { id: string }): void {
     if (this.openReasonings.has(part.id)) return;
-    const msg: ReasoningMessage = { id: part.id, role: "reasoning", content: "" };
+    const messageId = this.uniqueMessageId(part.id);
+    const msg: ReasoningMessage = { id: messageId, role: "reasoning", content: "" };
     this.openReasonings.set(part.id, msg);
-    this.emit({ type: EventType.REASONING_START, messageId: part.id });
+    this.emit({ type: EventType.REASONING_START, messageId });
     this.emit({
       type: EventType.REASONING_MESSAGE_START,
-      messageId: part.id,
+      messageId,
       role: "reasoning",
     });
   }
@@ -317,15 +345,16 @@ export class StreamHandler {
     if (msg) msg.content = `${msg.content ?? ""}${part.text}`;
     this.emit({
       type: EventType.REASONING_MESSAGE_CONTENT,
-      messageId: part.id,
+      messageId: msg?.id ?? part.id,
       delta: part.text,
     });
   }
 
   private onReasoningEnd(part: ReasoningEndPart): void {
     const msg = this.openReasonings.get(part.id);
-    this.emit({ type: EventType.REASONING_MESSAGE_END, messageId: part.id });
-    this.emit({ type: EventType.REASONING_END, messageId: part.id });
+    const messageId = msg?.id ?? part.id;
+    this.emit({ type: EventType.REASONING_MESSAGE_END, messageId });
+    this.emit({ type: EventType.REASONING_END, messageId });
 
     const sig = part.providerMetadata?.anthropic?.signature;
     if (typeof sig === "string" && sig.length > 0) {
@@ -333,7 +362,7 @@ export class StreamHandler {
       this.emit({
         type: EventType.REASONING_ENCRYPTED_VALUE,
         subtype: "message",
-        entityId: part.id,
+        entityId: messageId,
         encryptedValue: sig,
       });
     }
@@ -343,9 +372,9 @@ export class StreamHandler {
 
   private closeAllOpenReasonings(): void {
     if (this.openReasonings.size === 0) return;
-    for (const [id, msg] of this.openReasonings) {
-      this.emit({ type: EventType.REASONING_MESSAGE_END, messageId: id });
-      this.emit({ type: EventType.REASONING_END, messageId: id });
+    for (const msg of this.openReasonings.values()) {
+      this.emit({ type: EventType.REASONING_MESSAGE_END, messageId: msg.id });
+      this.emit({ type: EventType.REASONING_END, messageId: msg.id });
       this.finalMessages.push(msg);
     }
     this.openReasonings.clear();
@@ -356,6 +385,7 @@ export class StreamHandler {
     this.closeAllOpenReasonings();
     this.ensureAssistantPushed();
     this.seenToolCalls.add(part.id);
+    this.openToolCallIds.add(part.id);
     this.emit({
       type: EventType.TOOL_CALL_START,
       toolCallId: part.id,
@@ -373,7 +403,18 @@ export class StreamHandler {
   }
 
   private onToolInputEnd(part: { id: string }): void {
+    this.openToolCallIds.delete(part.id);
     this.emit({ type: EventType.TOOL_CALL_END, toolCallId: part.id });
+  }
+
+  // Providers can leave a streamed tool input unterminated (e.g. openai
+  // chat-completions never emits tool-input-end when generation is truncated
+  // mid-arguments); close them so RUN_FINISHED passes client verification.
+  private closeAllOpenToolCalls(): void {
+    for (const id of this.openToolCallIds) {
+      this.emit({ type: EventType.TOOL_CALL_END, toolCallId: id });
+    }
+    this.openToolCallIds.clear();
   }
 
   // tool call/result/error ------------------------------------------------
@@ -381,7 +422,14 @@ export class StreamHandler {
     this.closeAllOpenReasonings();
     this.ensureAssistantPushed();
 
-    const argsString = safeJsonStringify(part.input);
+    const argsString = jsonStringifyToolArgs(part.input);
+
+    // The final tool-call implies the input phase is over; close a streamed
+    // input whose tool-input-end never arrived.
+    if (this.openToolCallIds.has(part.toolCallId)) {
+      this.openToolCallIds.delete(part.toolCallId);
+      this.emit({ type: EventType.TOOL_CALL_END, toolCallId: part.toolCallId });
+    }
 
     // Defensive synthesis: provider didn't stream tool input parts, only
     // emitted the final tool-call. Fabricate START/ARGS/END so the client
@@ -516,6 +564,11 @@ export class StreamHandler {
   }
 
   private onFinishStep(): void {
+    // Close anything a misbehaving provider left open before sealing the
+    // step — otherwise the ids are lost to rotation and the end-of-run
+    // cleanup can no longer close them.
+    this.closeAllOpenTexts();
+    this.closeAllOpenToolCalls();
     this.emit({
       type: EventType.STEP_FINISHED,
       stepName: `step-${this.stepIndex}`,
@@ -532,16 +585,23 @@ export class StreamHandler {
       toolCalls: [],
     };
     this.currentMessagePushed = false;
-    this.openTextIds.clear();
+    this.textIdMap.clear();
     this.seenToolCalls.clear();
   }
 
   // cleanup ---------------------------------------------------------------
   private synthesizeMissingToolResults(): void {
+    // Client-side tools (everything in input.tools) are converted without an
+    // execute function, so their calls legitimately end the stream without a
+    // result: the AG-UI client executes them and supplies the result on the
+    // next run. Only server-executed tools that dropped their result get a
+    // synthesized placeholder.
+    const clientToolNames = new Set((this.input.tools ?? []).map((t) => t.name));
     for (const message of this.finalMessages) {
       if (message.role !== "assistant" || !message.toolCalls?.length) continue;
       for (const tc of message.toolCalls) {
         if (this.emittedToolResults.has(tc.id)) continue;
+        if (clientToolNames.has(tc.function.name)) continue;
         this.emitToolResult(tc.id, "Tool call missing result", "Tool call missing result");
       }
     }

@@ -229,3 +229,41 @@ describe("StreamHandler — basic text + lifecycle", () => {
     expect(textStartIdx).toBeLessThan(finishedIdx);
   });
 });
+
+describe("StreamHandler — message id collisions", () => {
+  it("remaps a text part id that collides with an existing message id", async () => {
+    // Chat-completions-style providers emit a per-response-constant text
+    // part id ("0"), which collides with the previous run's assistant
+    // message already present in input.messages.
+    const model = makeMockModel([
+      streamStart,
+      responseMetadata(),
+      { type: "text-start", id: "0" },
+      { type: "text-delta", id: "0", delta: "turn two" },
+      { type: "text-end", id: "0" },
+      finishStop(),
+    ]);
+    const events = await collectEvents(streamText({ model, prompt: "hi" }).fullStream, {
+      messages: [{ id: "0", role: "assistant", content: "turn one" }],
+    });
+
+    const start = eventsOfType<TextMessageStartEvent>(events, EventType.TEXT_MESSAGE_START)[0];
+    expect(start.messageId).not.toBe("0");
+    const content = eventsOfType<TextMessageContentEvent>(
+      events,
+      EventType.TEXT_MESSAGE_CONTENT,
+    )[0];
+    expect(content.messageId).toBe(start.messageId);
+    const end = eventsOfType<TextMessageEndEvent>(events, EventType.TEXT_MESSAGE_END)[0];
+    expect(end.messageId).toBe(start.messageId);
+
+    const snap = events.find(
+      (e) => e.type === EventType.MESSAGES_SNAPSHOT,
+    ) as MessagesSnapshotEvent;
+    const ids = snap.messages.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const newAssistant = snap.messages.find((m) => m.id === start.messageId) as AssistantMessage;
+    expect(newAssistant.content).toBe("turn two");
+    expect(snap.messages.find((m) => m.id === "0")?.content).toBe("turn one");
+  });
+});

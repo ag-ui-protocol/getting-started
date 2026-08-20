@@ -248,4 +248,41 @@ describe("StreamHandler — reasoning", () => {
     );
     expect(reasoning).toHaveLength(0);
   });
+
+  it("remaps a reasoning part id that collides with an existing message id", async () => {
+    // Anthropic reasoning part ids are the content-block index ("0"), which
+    // collides with a message already present in input.messages.
+    const model = makeMockModel([
+      streamStart,
+      responseMetadata(),
+      { type: "reasoning-start", id: "0" },
+      { type: "reasoning-delta", id: "0", delta: "hmm" },
+      { type: "reasoning-end", id: "0" },
+      { type: "text-start", id: "t1" },
+      { type: "text-delta", id: "t1", delta: "answer" },
+      { type: "text-end", id: "t1" },
+      finishStop(),
+    ]);
+    const events = await collectEvents(streamText({ model, prompt: "hi" }).fullStream, {
+      messages: [{ id: "0", role: "user", content: "hi" }],
+    });
+
+    const rStart = events.find(
+      (e) => e.type === EventType.REASONING_MESSAGE_START,
+    ) as unknown as { messageId: string };
+    expect(rStart.messageId).not.toBe("0");
+    const rContent = eventsOfType<ReasoningMessageContentEvent>(
+      events,
+      EventType.REASONING_MESSAGE_CONTENT,
+    )[0];
+    expect(rContent.messageId).toBe(rStart.messageId);
+
+    const snap = events.find(
+      (e) => e.type === EventType.MESSAGES_SNAPSHOT,
+    ) as MessagesSnapshotEvent;
+    const reasoningMsg = snap.messages.find((m) => m.role === "reasoning") as ReasoningMessage;
+    expect(reasoningMsg.id).toBe(rStart.messageId);
+    const ids = snap.messages.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });

@@ -416,3 +416,152 @@ describe("StreamHandler — tool streaming", () => {
     expect(ends).toHaveLength(1);
   });
 });
+
+describe("StreamHandler — client-side tool calls stay pending", () => {
+  it("does not synthesize a result for a tool defined in input.tools", async () => {
+    // Frontend tools are converted without an execute function, so the stream
+    // legitimately ends without a tool-result: the AG-UI client executes the
+    // call and supplies the result on the next run.
+    async function* parts(): AsyncIterable<unknown> {
+      yield { type: "start" };
+      yield { type: "start-step", request: {}, warnings: [] };
+      yield { type: "tool-input-start", id: "tc-fe", toolName: "change_background" };
+      yield { type: "tool-input-delta", id: "tc-fe", delta: '{"color":"blue"}' };
+      yield { type: "tool-input-end", id: "tc-fe" };
+      yield {
+        type: "tool-call",
+        toolCallId: "tc-fe",
+        toolName: "change_background",
+        input: { color: "blue" },
+      };
+      yield {
+        type: "finish-step",
+        response: {},
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        finishReason: "tool-calls",
+        rawFinishReason: undefined,
+        providerMetadata: undefined,
+      };
+      yield {
+        type: "finish",
+        finishReason: "tool-calls",
+        rawFinishReason: undefined,
+        totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      };
+    }
+
+    const events = await collectEvents(parts(), {
+      tools: [
+        {
+          name: "change_background",
+          description: "Change the page background",
+          parameters: { type: "object", properties: { color: { type: "string" } } },
+        },
+      ],
+    });
+
+    expect(eventsOfType(events, EventType.TOOL_CALL_RESULT)).toHaveLength(0);
+    const snap = events.find(
+      (e) => e.type === EventType.MESSAGES_SNAPSHOT,
+    ) as MessagesSnapshotEvent;
+    expect(snap.messages.some((m) => m.role === "tool")).toBe(false);
+    const assistant = snap.messages.find((m) => m.role === "assistant") as AssistantMessage;
+    expect(assistant.toolCalls?.map((tc) => tc.id)).toEqual(["tc-fe"]);
+    expect(events[events.length - 1].type).toBe(EventType.RUN_FINISHED);
+  });
+
+  it("still synthesizes a result for a tool NOT defined in input.tools", async () => {
+    async function* parts(): AsyncIterable<unknown> {
+      yield { type: "start" };
+      yield { type: "start-step", request: {}, warnings: [] };
+      yield { type: "tool-call", toolCallId: "tc-srv", toolName: "server_only", input: {} };
+      yield {
+        type: "finish",
+        finishReason: "tool-calls",
+        rawFinishReason: undefined,
+        totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      };
+    }
+
+    const events = await collectEvents(parts(), {
+      tools: [
+        {
+          name: "change_background",
+          description: "Change the page background",
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+    });
+
+    const results = eventsOfType<ToolCallResultEvent>(events, EventType.TOOL_CALL_RESULT);
+    expect(results).toHaveLength(1);
+    expect(results[0].toolCallId).toBe("tc-srv");
+  });
+});
+
+describe("StreamHandler — unterminated tool input", () => {
+  it("emits TOOL_CALL_END in the cleanup phase for a tool input left open at stream end", async () => {
+    // e.g. @ai-sdk/openai chat-completions: generation truncated by max
+    // tokens mid-arguments emits tool-input-start but never tool-input-end.
+    async function* parts(): AsyncIterable<unknown> {
+      yield { type: "start" };
+      yield { type: "start-step", request: {}, warnings: [] };
+      yield { type: "tool-input-start", id: "tc-trunc", toolName: "get_weather" };
+      yield { type: "tool-input-delta", id: "tc-trunc", delta: '{"city":"To' };
+      yield {
+        type: "finish",
+        finishReason: "length",
+        rawFinishReason: undefined,
+        totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      };
+    }
+
+    const events = await collectEvents(parts());
+    const types = events.map((e) => e.type);
+    const endIdx = events.findIndex(
+      (e) =>
+        e.type === EventType.TOOL_CALL_END &&
+        (e as unknown as { toolCallId: string }).toolCallId === "tc-trunc",
+    );
+    expect(endIdx).toBeGreaterThan(-1);
+    expect(endIdx).toBeLessThan(types.indexOf(EventType.RUN_FINISHED));
+  });
+});
+
+describe("StreamHandler — tool argument serialization", () => {
+  it("serializes a string tool-call input as valid JSON arguments", async () => {
+    async function* parts(): AsyncIterable<unknown> {
+      yield { type: "start" };
+      yield { type: "start-step", request: {}, warnings: [] };
+      // Bare tool-call whose parsed input is a JSON string, with no streamed
+      // input parts (so ARGS is synthesized from the input value).
+      yield { type: "tool-call", toolCallId: "tc-str", toolName: "echo", input: "Tokyo" };
+      yield {
+        type: "finish-step",
+        response: {},
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        finishReason: "tool-calls",
+        rawFinishReason: undefined,
+        providerMetadata: undefined,
+      };
+      yield {
+        type: "finish",
+        finishReason: "tool-calls",
+        rawFinishReason: undefined,
+        totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      };
+    }
+
+    const events = await collectEvents(parts());
+    const args = eventsOfType<ToolCallArgsEvent>(events, EventType.TOOL_CALL_ARGS);
+    expect(args).toHaveLength(1);
+    expect(args[0].delta).toBe('"Tokyo"');
+    expect(JSON.parse(args[0].delta)).toBe("Tokyo");
+
+    const snap = events.find(
+      (e) => e.type === EventType.MESSAGES_SNAPSHOT,
+    ) as MessagesSnapshotEvent;
+    const assistant = snap.messages.find((m) => m.role === "assistant") as AssistantMessage;
+    expect(assistant.toolCalls?.[0].function.arguments).toBe('"Tokyo"');
+  });
+});

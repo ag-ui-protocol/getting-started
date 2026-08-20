@@ -5,6 +5,8 @@ import {
   type MessagesSnapshotEvent,
   type StepFinishedEvent,
   type StepStartedEvent,
+  type TextMessageContentEvent,
+  type TextMessageStartEvent,
   type ToolCallStartEvent,
 } from "@ag-ui/client";
 import { jsonSchema, stepCountIs, streamText, tool } from "ai";
@@ -280,5 +282,100 @@ describe("StreamHandler — multi-step", () => {
     expect(introIdx).toBeLessThan(toolStartIdx);
     expect(toolResultIdx).toBeLessThan(answerIdx);
     expect(types).toContain(EventType.MESSAGES_SNAPSHOT);
+  });
+});
+
+describe("StreamHandler — step-boundary hygiene", () => {
+  it("closes an open text message at a step boundary when text-end is missing", async () => {
+    async function* parts(): AsyncIterable<unknown> {
+      yield { type: "start" };
+      yield { type: "start-step", request: {}, warnings: [] };
+      yield { type: "text-start", id: "t-open" };
+      yield { type: "text-delta", id: "t-open", text: "cut off" };
+      // Provider omitted text-end before finishing the step.
+      yield {
+        type: "finish-step",
+        response: {},
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        finishReason: "stop",
+        rawFinishReason: undefined,
+        providerMetadata: undefined,
+      };
+      yield {
+        type: "finish",
+        finishReason: "stop",
+        rawFinishReason: undefined,
+        totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      };
+    }
+
+    const events = await collectEvents(parts());
+    const ends = events.filter(
+      (e) =>
+        e.type === EventType.TEXT_MESSAGE_END &&
+        (e as unknown as { messageId: string }).messageId === "t-open",
+    );
+    expect(ends).toHaveLength(1);
+    expect(events[events.length - 1].type).toBe(EventType.RUN_FINISHED);
+  });
+
+  it("does not reuse a per-step-constant text part id across steps", async () => {
+    // Chat-completions-style providers restart text part ids every step
+    // (a constant "0"), so step 2's id collides with step 1's snapshot message.
+    async function* parts(): AsyncIterable<unknown> {
+      yield { type: "start" };
+      yield { type: "start-step", request: {}, warnings: [] };
+      yield { type: "text-start", id: "0" };
+      yield { type: "text-delta", id: "0", text: "step one" };
+      yield { type: "text-end", id: "0" };
+      yield {
+        type: "finish-step",
+        response: {},
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        finishReason: "stop",
+        rawFinishReason: undefined,
+        providerMetadata: undefined,
+      };
+      yield { type: "start-step", request: {}, warnings: [] };
+      yield { type: "text-start", id: "0" };
+      yield { type: "text-delta", id: "0", text: "step two" };
+      yield { type: "text-end", id: "0" };
+      yield {
+        type: "finish-step",
+        response: {},
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        finishReason: "stop",
+        rawFinishReason: undefined,
+        providerMetadata: undefined,
+      };
+      yield {
+        type: "finish",
+        finishReason: "stop",
+        rawFinishReason: undefined,
+        totalUsage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 },
+      };
+    }
+
+    const events = await collectEvents(parts());
+    const starts = eventsOfType<TextMessageStartEvent>(events, EventType.TEXT_MESSAGE_START);
+    expect(starts).toHaveLength(2);
+    expect(starts[0].messageId).toBe("0");
+    expect(starts[1].messageId).not.toBe("0");
+
+    const contents = eventsOfType<TextMessageContentEvent>(
+      events,
+      EventType.TEXT_MESSAGE_CONTENT,
+    );
+    expect(contents[1].messageId).toBe(starts[1].messageId);
+
+    const snap = events.find(
+      (e) => e.type === EventType.MESSAGES_SNAPSHOT,
+    ) as MessagesSnapshotEvent;
+    const assistants = snap.messages.filter((m) => m.role === "assistant");
+    expect(assistants).toHaveLength(2);
+    const ids = assistants.map((m) => m.id);
+    expect(new Set(ids).size).toBe(2);
+    // Streamed ids and snapshot ids stay aligned.
+    expect(ids).toEqual(starts.map((s) => s.messageId));
   });
 });
