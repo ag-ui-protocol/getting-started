@@ -319,6 +319,60 @@ describe("StreamHandler — step-boundary hygiene", () => {
     expect(events[events.length - 1].type).toBe(EventType.RUN_FINISHED);
   });
 
+  it("closes an open reasoning at a step boundary when reasoning-end is missing", async () => {
+    // Reasoning part ids restart per step on providers that key them by
+    // content-block index, so an unclosed reasoning would otherwise swallow
+    // the next step's reasoning under the stale id.
+    async function* parts(): AsyncIterable<unknown> {
+      yield { type: "start" };
+      yield { type: "start-step", request: {}, warnings: [] };
+      yield { type: "reasoning-start", id: "0" };
+      yield { type: "reasoning-delta", id: "0", text: "step one thinking" };
+      // Provider omitted reasoning-end before finishing the step.
+      yield {
+        type: "finish-step",
+        response: {},
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        finishReason: "stop",
+        rawFinishReason: undefined,
+        providerMetadata: undefined,
+      };
+      yield { type: "start-step", request: {}, warnings: [] };
+      yield { type: "reasoning-start", id: "0" };
+      yield { type: "reasoning-delta", id: "0", text: "step two thinking" };
+      yield { type: "reasoning-end", id: "0" };
+      yield {
+        type: "finish-step",
+        response: {},
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        finishReason: "stop",
+        rawFinishReason: undefined,
+        providerMetadata: undefined,
+      };
+      yield {
+        type: "finish",
+        finishReason: "stop",
+        rawFinishReason: undefined,
+        totalUsage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 },
+      };
+    }
+
+    const events = await collectEvents(parts());
+    const starts = events.filter((e) => e.type === EventType.REASONING_MESSAGE_START);
+    expect(starts).toHaveLength(2);
+
+    const snap = events.find(
+      (e) => e.type === EventType.MESSAGES_SNAPSHOT,
+    ) as MessagesSnapshotEvent;
+    const reasonings = snap.messages.filter((m) => m.role === "reasoning");
+    expect(reasonings).toHaveLength(2);
+    expect(reasonings.map((m) => (m as { content?: string }).content)).toEqual([
+      "step one thinking",
+      "step two thinking",
+    ]);
+    expect(new Set(reasonings.map((m) => m.id)).size).toBe(2);
+  });
+
   it("does not reuse a per-step-constant text part id across steps", async () => {
     // Chat-completions-style providers restart text part ids every step
     // (a constant "0"), so step 2's id collides with step 1's snapshot message.

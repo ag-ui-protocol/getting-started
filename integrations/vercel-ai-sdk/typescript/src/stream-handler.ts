@@ -566,7 +566,10 @@ export class StreamHandler {
   private onFinishStep(): void {
     // Close anything a misbehaving provider left open before sealing the
     // step — otherwise the ids are lost to rotation and the end-of-run
-    // cleanup can no longer close them.
+    // cleanup can no longer close them. Reasonings matter here too: their
+    // part ids restart per step on index-keyed providers, so an unclosed one
+    // would swallow the next step's reasoning under the stale id.
+    this.closeAllOpenReasonings();
     this.closeAllOpenTexts();
     this.closeAllOpenToolCalls();
     this.emit({
