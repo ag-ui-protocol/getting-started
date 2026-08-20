@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { EventType } from "@ag-ui/client";
 import { VercelAISDKAgent } from "../index";
 import { RunAgentInput } from "@ag-ui/client";
 import { firstValueFrom, toArray } from "rxjs";
@@ -12,49 +13,48 @@ vi.mock("ai", async (importOriginal) => {
     ...actual,
     streamText: (...args: unknown[]) => {
       mockStreamText(...args);
-      // Return a minimal streamText-like response that processDataStream can consume
-      const stream = new ReadableStream({
-        start(controller) {
-          // Vercel AI SDK data stream protocol:
-          // '0:"text"\n' = text part
-          // 'e:{"finishReason":"stop","usage":{"promptTokens":1,"completionTokens":1},"isContinued":false}\n' = finish step
-          // 'd:{"finishReason":"stop","usage":{"promptTokens":1,"completionTokens":1}}\n' = finish message
-          const encoder = new TextEncoder();
-          controller.enqueue(encoder.encode('0:"hello"\n'));
-          controller.enqueue(
-            encoder.encode(
-              'e:{"finishReason":"stop","usage":{"promptTokens":1,"completionTokens":1},"isContinued":false}\n',
-            ),
-          );
-          controller.enqueue(
-            encoder.encode(
-              'd:{"finishReason":"stop","usage":{"promptTokens":1,"completionTokens":1}}\n',
-            ),
-          );
-          controller.close();
-        },
-      });
-
-      return {
-        toDataStreamResponse: () => ({
-          body: stream,
-        }),
-      };
+      // Minimal v7-shaped result: run() only consumes `fullStream`. A real
+      // stream (not just call interception) keeps these tests on the
+      // successful RUN_FINISHED path instead of silently exercising RUN_ERROR.
+      async function* fullStream(): AsyncIterable<unknown> {
+        yield { type: "start" };
+        yield { type: "start-step", request: {}, warnings: [] };
+        yield { type: "text-start", id: "t1" };
+        yield { type: "text-delta", id: "t1", text: "hello" };
+        yield { type: "text-end", id: "t1" };
+        yield {
+          type: "finish-step",
+          response: {},
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+          finishReason: "stop",
+          rawFinishReason: undefined,
+          providerMetadata: undefined,
+        };
+        yield {
+          type: "finish",
+          finishReason: "stop",
+          rawFinishReason: undefined,
+          totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        };
+      }
+      return { fullStream: fullStream() };
     },
   };
 });
 
-// Minimal mock model satisfying LanguageModelV1 shape
+// Minimal mock model; streamText is mocked, so this is never invoked.
 const mockModel = {
-  specificationVersion: "v1" as const,
   provider: "test",
   modelId: "test-model",
-  defaultObjectGenerationMode: "json" as const,
-  supportsImageUrls: false,
-  supportsStructuredOutputs: false,
   doGenerate: vi.fn(),
   doStream: vi.fn(),
 };
+
+function expectSuccessfulRun(events: Array<{ type: string }>): void {
+  const types = events.map((e) => e.type);
+  expect(types).not.toContain(EventType.RUN_ERROR);
+  expect(types[types.length - 1]).toBe(EventType.RUN_FINISHED);
+}
 
 function makeInput(overrides?: Partial<RunAgentInput>): RunAgentInput {
   return {
@@ -85,7 +85,7 @@ describe("VercelAISDKAgent header forwarding", () => {
 
     const events = await firstValueFrom(agent.run(makeInput()).pipe(toArray()));
 
-    expect(events.length).toBeGreaterThan(0);
+    expectSuccessfulRun(events);
     expect(mockStreamText).toHaveBeenCalledTimes(1);
 
     const callArgs = mockStreamText.mock.calls[0][0];
@@ -104,7 +104,7 @@ describe("VercelAISDKAgent header forwarding", () => {
 
     const events = await firstValueFrom(agent.run(makeInput()).pipe(toArray()));
 
-    expect(events.length).toBeGreaterThan(0);
+    expectSuccessfulRun(events);
     expect(mockStreamText).toHaveBeenCalledTimes(1);
 
     const callArgs = mockStreamText.mock.calls[0][0];
@@ -166,7 +166,7 @@ describe("VercelAISDKAgent header forwarding", () => {
 
     const events = await firstValueFrom(agent.run(makeInput()).pipe(toArray()));
 
-    expect(events.length).toBeGreaterThan(0);
+    expectSuccessfulRun(events);
     expect(mockStreamText).toHaveBeenCalledTimes(1);
 
     const callArgs = mockStreamText.mock.calls[0][0];

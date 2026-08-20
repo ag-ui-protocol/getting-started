@@ -16,6 +16,7 @@ import {
   streamText,
   stepCountIs,
   type LanguageModel,
+  type ModelMessage,
   type ToolChoice,
 } from "ai";
 import { Observable } from "rxjs";
@@ -27,6 +28,19 @@ export interface VercelAISDKAgentConfig extends AgentConfig {
   model: LanguageModel;
   maxSteps?: number;
   toolChoice?: ToolChoice<Record<string, unknown>>;
+}
+
+// streamText has no request-context channel, so frontend-provided context
+// entries are delivered to the model as a leading system message.
+function contextToSystemMessages(context: RunAgentInput["context"]): ModelMessage[] {
+  if (!context?.length) return [];
+  const lines = context.map((c) => `- ${c.description}: ${c.value}`);
+  return [
+    {
+      role: "system",
+      content: `Context provided by the frontend application:\n${lines.join("\n")}`,
+    },
+  ];
 }
 
 export class VercelAISDKAgent extends AbstractAgent {
@@ -61,13 +75,30 @@ export class VercelAISDKAgent extends AbstractAgent {
     return cloned;
   }
 
+  // AbstractAgent.abortRun() is a no-op; abort the in-flight streamText
+  // request so the public stop/cancel API actually cancels the model call
+  // (same pattern as HttpAgent and the other in-process integrations).
+  public abortRun() {
+    this.activeAbortController?.abort();
+    super.abortRun();
+  }
+
+  private activeAbortController?: AbortController;
+
   run(input: RunAgentInput): Observable<BaseEvent> {
     return new Observable<BaseEvent>((subscriber) => {
       const abortController = new AbortController();
+      this.activeAbortController = abortController;
 
       const result = streamText({
         model: this.model,
-        messages: convertMessagesToVercelAISDKMessages(input.messages),
+        messages: [
+          ...contextToSystemMessages(input.context),
+          ...convertMessagesToVercelAISDKMessages(input.messages),
+        ],
+        // AG-UI histories carry system/developer messages inline; v7 rejects
+        // them in `messages` by default in favor of `instructions`.
+        allowSystemInMessages: true,
         tools: convertToolsToVercelAISDKTools(input.tools),
         stopWhen: stepCountIs(this.maxSteps),
         toolChoice: this.toolChoice,
@@ -84,6 +115,9 @@ export class VercelAISDKAgent extends AbstractAgent {
 
       return () => {
         abortController.abort();
+        if (this.activeAbortController === abortController) {
+          this.activeAbortController = undefined;
+        }
       };
     });
   }

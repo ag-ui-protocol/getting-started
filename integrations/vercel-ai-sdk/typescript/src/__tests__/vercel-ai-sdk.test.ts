@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { firstValueFrom, toArray } from "rxjs";
 import { EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/client";
 import { VercelAISDKAgent } from "../vercel-ai-sdk";
@@ -132,5 +132,98 @@ describe("VercelAISDKAgent", () => {
 
     const errs = events.filter((e) => e.type === EventType.RUN_ERROR);
     expect(errs.length).toBe(0);
+  });
+
+  it("abortRun() aborts the in-flight streamText request", async () => {
+    const { MockLanguageModelV3 } = await import("ai/test");
+    const seenSignals: AbortSignal[] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async ({ abortSignal }) => {
+        seenSignals.push(abortSignal!);
+        return {
+          stream: new ReadableStream({
+            start(controller) {
+              controller.enqueue(streamStart);
+              controller.enqueue(responseMetadata());
+              controller.enqueue({ type: "text-start", id: "t1" });
+              controller.enqueue({ type: "text-delta", id: "t1", delta: "Partial" });
+              // Never closes: the run stays in flight until aborted.
+            },
+          }),
+        } as never;
+      },
+    });
+    const agent = new VercelAISDKAgent({ model });
+    const sub = agent
+      .run(makeInput({ messages: [{ id: "u", role: "user", content: "Hi" }] }))
+      .subscribe({ error: () => {} });
+
+    await vi.waitFor(() => expect(seenSignals).toHaveLength(1));
+    expect(seenSignals[0].aborted).toBe(false);
+
+    agent.abortRun();
+
+    expect(seenSignals[0].aborted).toBe(true);
+    sub.unsubscribe();
+  });
+
+  it("forwards input.context to the model as a system message", async () => {
+    const { MockLanguageModelV3, convertArrayToReadableStream } = await import("ai/test");
+    const prompts: unknown[] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        prompts.push(prompt);
+        return {
+          stream: convertArrayToReadableStream([
+            streamStart,
+            responseMetadata(),
+            { type: "text-start", id: "t1" },
+            { type: "text-delta", id: "t1", delta: "Hi Bob" },
+            { type: "text-end", id: "t1" },
+            finishStop(),
+          ] as never[]),
+        } as never;
+      },
+    });
+    const agent = new VercelAISDKAgent({ model });
+    await collect(
+      agent,
+      makeInput({
+        messages: [{ id: "u", role: "user", content: "What is my name?" }],
+        context: [{ description: "user name", value: "Bob" }],
+      }),
+    );
+
+    expect(prompts).toHaveLength(1);
+    const first = (prompts[0] as Array<{ role: string; content: unknown }>)[0];
+    expect(first.role).toBe("system");
+    const serialized = JSON.stringify(first.content);
+    expect(serialized).toContain("user name");
+    expect(serialized).toContain("Bob");
+  });
+
+  it("runs successfully when the history contains a system message (v7 disallows them by default)", async () => {
+    const model = makeMockModel([
+      streamStart,
+      responseMetadata(),
+      { type: "text-start", id: "t1" },
+      { type: "text-delta", id: "t1", delta: "ok" },
+      { type: "text-end", id: "t1" },
+      finishStop(),
+    ]);
+    const agent = new VercelAISDKAgent({ model });
+    const events = await collect(
+      agent,
+      makeInput({
+        messages: [
+          { id: "sys", role: "system", content: "You are terse." },
+          { id: "u", role: "user", content: "Hi" },
+        ],
+      }),
+    );
+
+    const types = events.map((e) => e.type);
+    expect(types).not.toContain(EventType.RUN_ERROR);
+    expect(types[types.length - 1]).toBe(EventType.RUN_FINISHED);
   });
 });
