@@ -1,0 +1,40 @@
+{
+  "name": "@ag-ui/adk-js-examples",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Google ADK-JS agents used by the AG-UI Dojo",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "clean": "git clean -fdX --exclude=\"!.env\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:llm": "tsx scripts/live-llama-smoke.ts"
+  },
+  "dependencies": {
+    "@ag-ui/adk-js": "workspace:*",
+    "@ag-ui/client": "workspace:*",
+    "@ag-ui/core": "workspace:*",
+    "@google/adk": "^1.6.0",
+    "@google/genai": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.19",
+    "tsdown": "^0.20.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.3.3",
+    "vitest": "^4.0.18"
+  },
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  }
+}

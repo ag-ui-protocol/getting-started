@@ -1,0 +1,75 @@
+{
+  "name": "@ag-ui/adk-js",
+  "version": "0.0.1",
+  "description": "AG-UI integration for running Google ADK JavaScript agents in Node.js",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist/**",
+    "README.md"
+  ],
+  "keywords": [
+    "ag-ui",
+    "adk-js",
+    "google",
+    "agent-development-kit",
+    "agents",
+    "ai"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "clean": "git clean -fdX --exclude=\"!.env\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "test:exports": "publint --strict && attw --pack",
+    "link:global": "pnpm link --global",
+    "unlink:global": "pnpm unlink --global"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1"
+  },
+  "peerDependencies": {
+    "@ag-ui/client": ">=0.0.55",
+    "@ag-ui/core": ">=0.0.55",
+    "@google/adk": ">=1.6.0 <2",
+    "rxjs": "7.8.1"
+  },
+  "devDependencies": {
+    "@ag-ui/client": "workspace:*",
+    "@ag-ui/core": "workspace:*",
+    "@arethetypeswrong/cli": "^0.17.4",
+    "@google/adk": "^1.6.0",
+    "@types/node": "^20.11.19",
+    "@vitest/coverage-istanbul": "^4.0.18",
+    "publint": "^0.3.12",
+    "tsdown": "^0.20.1",
+    "typescript": "^5.3.3",
+    "vitest": "^4.0.18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ag-ui-protocol/ag-ui.git",
+    "directory": "integrations/adk-middleware/js"
+  },
+  "license": "MIT",
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  }
+}

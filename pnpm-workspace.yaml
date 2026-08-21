@@ -6,7 +6,24 @@ packages:
   - integrations/*/typescript
   - integrations/community/*/typescript
   - integrations/aws-strands/typescript/examples
+  - integrations/adk-middleware/js
+  - integrations/adk-middleware/js/examples
   - integrations/mastra/typescript/examples
 
 ignoredBuiltDependencies:
   - nx
+
+patchedDependencies:
+  "@copilotkit/aimock@1.37.4": patches/@copilotkit__aimock@1.37.4.patch
+
+overrides:
+  langium: 3.2.0
+  "@copilotkit/runtime>@ag-ui/a2ui-middleware": 0.0.8
+  "@copilotkit/runtime>@langchain/core": 0.3.80
+  "@langchain/openai>@langchain/core": 0.3.80
+  zod: 3.25.76
+  "@google/adk>zod": ^4.2.1
+  "@strands-agents/sdk>zod": ^4.4.3
+  "@ag-ui/aws-strands>zod": ^4.4.3
+  "@ag-ui/aws-strands-examples>zod": ^4.4.3
+  hono: 4.12.27

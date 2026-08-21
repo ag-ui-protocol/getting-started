@@ -194,6 +194,17 @@ export const menuIntegrations = [
     ],
   },
   {
+    id: "adk-js",
+    name: "Google ADK (JavaScript)",
+    features: [
+      "agentic_chat",
+      "backend_tool_rendering",
+      "tool_based_generative_ui",
+      "shared_state",
+      "interrupt",
+    ],
+  },
+  {
     id: "microsoft-agent-framework-dotnet",
     name: "Microsoft Agent Framework (.NET)",
     features: [

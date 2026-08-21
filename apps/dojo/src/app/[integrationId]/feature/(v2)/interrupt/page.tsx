@@ -93,6 +93,9 @@ const ChatContent = () => {
       // The adapter JSON-stringifies the interrupt value, so parse it.
       const raw = event.value ?? {};
       const parsed = (typeof raw === "string" ? JSON.parse(raw) : raw) as {
+        // ADK-JS exposes the normalized AG-UI interrupt directly.
+        message?: string;
+        reason?: string;
         // Mastra suspends a tool and carries the payload under `suspendPayload`.
         suspendPayload?: SuspendPayload;
         metadata?: {
@@ -103,19 +106,24 @@ const ChatContent = () => {
           // `interrupt(reason=...)`, and the bridge publishes that argument
           // verbatim under `metadata.reason`.
           reason?: SuspendPayload;
+          // ADK-JS carries the request-input payload under `metadata.payload`.
+          payload?: SuspendPayload;
         };
       };
 
       // Same picker every way: each framework pauses to ask for a meeting time,
       // and all of them take the same resume payload back through `resolve(...)`.
+      // ADK's request-input interrupt carries its prompt in `message` rather
+      // than a framework-specific suspend payload.
       const payload =
         parsed.suspendPayload ??
         parsed.metadata?.crewai?.output ??
         parsed.metadata?.reason ??
+        parsed.metadata?.payload ??
         {};
       return (
         <TimePickerCard
-          topic={payload.topic ?? "a call"}
+          topic={payload.topic ?? parsed.message ?? "a call"}
           attendee={payload.attendee}
           onPick={(slot) =>
             resolve({ chosen_time: slot.iso, chosen_label: slot.label })

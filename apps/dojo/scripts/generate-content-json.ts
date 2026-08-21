@@ -410,6 +410,28 @@ const agentFilesMapper: Record<
       {},
     );
   },
+  "adk-js": (agentKeys: string[]) => {
+    const fileNames: Record<string, string> = {
+      agentic_chat: "agentic-chat.ts",
+      backend_tool_rendering: "backend-tool-rendering.ts",
+      tool_based_generative_ui: "tool-based-generative-ui.ts",
+      shared_state: "shared-state.ts",
+      interrupt: "interrupt.ts",
+    };
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/adk-middleware/js/examples/src/${fileNames[agentId] ?? "index.ts"}`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
   "aws-strands": (agentKeys: string[]) => {
     return agentKeys.reduce(
       (acc, agentId) => ({
