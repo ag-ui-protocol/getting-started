@@ -149,10 +149,15 @@ events/messages/content. Cite: `src/AGUI.Abstractions/Events/BaseEventJsonConver
 
 ### NET-IMPL-04 · Property attribute kit present `[⚠️]`
 **Look for, on each serialized property:** explicit `[JsonPropertyName("camelCase")]`;
-`[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]` on optionals;
+**no** `[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]` on optionals —
+`AGUIJsonSerializerContext` sets `DefaultIgnoreCondition = WhenWritingNull` for every type it
+knows, and a re-added per-property attribute hides whether that global setting still works;
 required strings initialized to `string.Empty`; collections to `[]`.
 Cite: `src/AGUI.Abstractions/Events/RunStartedEvent.cs`.
-**Exceptions:** none for wire types.
+**Exceptions:** a non-nullable `JsonElement` the contract lets a producer omit takes
+`WhenWritingDefault` (`AGUITool.Parameters`, `RunAgentInput`); `InterruptRequestContent` and
+`InterruptResponseContent` keep `WhenWritingNull` attributes because they are registered onto
+caller-owned options and cannot inherit the context's setting.
 
 ### NET-IMPL-05 · `ConfigureAwait(false)` on every `await` in `src/` `[⚠️]`
 **Look for:** a bare `await` in a `src/` library path. Cite:

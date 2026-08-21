@@ -1073,11 +1073,11 @@ export const defaultApplyEvents = (
         }
 
         case EventType.TEXT_MESSAGE_CHUNK: {
-          throw new Error("TEXT_MESSAGE_CHUNK must be tranformed before being applied");
+          throw new Error("TEXT_MESSAGE_CHUNK must be transformed before being applied");
         }
 
         case EventType.TOOL_CALL_CHUNK: {
-          throw new Error("TOOL_CALL_CHUNK must be tranformed before being applied");
+          throw new Error("TOOL_CALL_CHUNK must be transformed before being applied");
         }
 
         case EventType.THINKING_START: {

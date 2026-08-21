@@ -73,7 +73,7 @@ description of the layout and conventions.
 
 ## How Parity Is Guarded
 
-Three independent layers catch drift; add to whichever layer the change touches.
+Four independent layers catch drift; add to whichever layer the change touches.
 
 - **Compatibility fixtures (catch JSON drift).**
   `tests/AGUI.Abstractions.UnitTests/Compatibility/` holds TS-produced JSON fixtures
@@ -87,6 +87,12 @@ Three independent layers catch drift; add to whichever layer the change touches.
   `parallel-tool-calls.test.ts`, `state-events.test.ts`, `protobuf-parity.test.ts`).
 - **Protobuf byte-parity tests.** `protobuf-parity.test.ts` plus
   `tests/AGUI.Protobuf.UnitTests/` verify the binary encoding matches the TS proto output.
+- **Shared cross-language fixtures (catch three-way drift).** `sdks/fixtures/` holds
+  language-neutral JSON that more than one SDK is held to, so an expectation is written down
+  once instead of three times. `null-omission.json` is the first: TypeScript, Python and .NET
+  each deserialize its `input` events, re-serialize through their own producer path, and
+  assert the result equals `expected`. A wire rule that all three must agree on belongs here
+  rather than in one SDK's test tree — see `sdks/fixtures/README.md`.
 
 ## Known Parity Boundary: Proto Is a Subset
 

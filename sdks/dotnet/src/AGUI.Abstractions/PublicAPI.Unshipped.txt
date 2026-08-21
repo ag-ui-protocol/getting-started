@@ -792,6 +792,7 @@ static AGUI.Abstractions.AGUIUserContent.implicit operator AGUI.Abstractions.AGU
 static AGUI.Abstractions.AGUIUserContent.implicit operator AGUI.Abstractions.AGUIUserContent(System.Collections.Generic.List<AGUI.Abstractions.AGUIInputContent!>! parts) -> AGUI.Abstractions.AGUIUserContent
 static AGUI.Abstractions.AGUIUserContent.implicit operator AGUI.Abstractions.AGUIUserContent(AGUI.Abstractions.AGUIInputContent![]! parts) -> AGUI.Abstractions.AGUIUserContent
 AGUI.Abstractions.AGUIJsonUtilities
+static AGUI.Abstractions.AGUIJsonUtilities.DefaultTypeInfoResolver.get -> System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver!
 static AGUI.Abstractions.AGUIJsonUtilities.RegisterInterruptContentTypes(System.Text.Json.JsonSerializerOptions! options) -> void
 AGUI.Abstractions.RunFinishedOutcomeTypes
 const AGUI.Abstractions.RunFinishedOutcomeTypes.Interrupt = "interrupt" -> string!

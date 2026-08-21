@@ -226,7 +226,12 @@ export const RunAgentInputSchema = z.object({
   threadId: z.string(),
   runId: z.string(),
   parentRunId: z.string().optional(),
-  state: z.any(),
+  // Optional by contract: absent means "no state", and a bare null reads as
+  // absent — every consumer collapses the two, and .NET's representation cannot
+  // tell them apart, so omission is the one spelling all SDKs share. This is
+  // the coerce pattern (not metadata's reject) because hand-rolled clients
+  // sending "state": null plausibly exist. Nulls INSIDE state are values.
+  state: z.any().transform((v) => v ?? undefined),
   messages: z.array(MessageSchema),
   tools: z.array(ToolSchema),
   context: z.array(ContextSchema),

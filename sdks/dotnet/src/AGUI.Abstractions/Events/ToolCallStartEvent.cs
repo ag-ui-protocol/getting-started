@@ -12,7 +12,6 @@ public sealed class ToolCallStartEvent : BaseEvent
     public override string Type => AGUIEventTypes.ToolCallStart;
 
     [JsonPropertyName("parentMessageId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ParentMessageId { get; set; }
 
     [JsonPropertyName("toolCallId")]

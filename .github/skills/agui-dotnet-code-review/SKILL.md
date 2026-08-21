@@ -101,9 +101,10 @@ From `AGENTS.md` "JSON serialization" / "Code style".
   serialization — go through the source-gen context `[❌]`
 - `NET-IMPL-03` Polymorphic JSON uses a hand-written discriminator `JsonConverter<T>` `[❌]`.
   Cite: `src/AGUI.Abstractions/Events/BaseEventJsonConverter.cs`.
-- `NET-IMPL-04` Property attribute kit present: explicit `[JsonPropertyName]`,
-  `[JsonIgnore(WhenWritingNull)]` on optionals, required strings = `string.Empty`,
-  collections = `[]` `[⚠️]`. Cite: `src/AGUI.Abstractions/Events/RunStartedEvent.cs`.
+- `NET-IMPL-04` Property attribute kit present: explicit `[JsonPropertyName]`, **no**
+  `[JsonIgnore(WhenWritingNull)]` on optionals (the context-wide default does that),
+  required strings = `string.Empty`, collections = `[]` `[⚠️]`.
+  Cite: `src/AGUI.Abstractions/Events/RunStartedEvent.cs`.
 - `NET-IMPL-05` `ConfigureAwait(false)` on every `await` in `src/` `[⚠️]`. Cite:
   `src/AGUI.Client/AGUIChatClient.cs`.
 - `NET-IMPL-06` `[EnumeratorCancellation]` on the token of any `IAsyncEnumerable<T>`

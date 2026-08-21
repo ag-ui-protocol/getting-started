@@ -31,6 +31,16 @@ function Page({ params }: PageProps) {
         }));
       }
     },
+    // DEFERRED (PNI-307): the rule's remedy is to drop `activeTabRef.current`
+    // (mutable ref values aren't reactive). The callback reads the ref at call
+    // time, and the per-tab `onNotification` closures below are pinned at tab
+    // creation and never refreshed — so the only thing this dep does is
+    // re-create `addNotification` when a render observes a new active tab,
+    // which re-runs the chat-instance effect below (a no-op for existing
+    // tabs). Removing it makes the callback permanently stable and changes
+    // that timing; kept verbatim until the notification wiring is reshaped
+    // (see the DEFERRED note on setChatInstances below).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeTabRef.current],
   );
 
@@ -66,8 +76,13 @@ function Page({ params }: PageProps) {
     // always allocates a new object, re-renders this component and loops
     // forever for any inactive tab holding messages. Left as-is until the
     // notification wiring is reshaped to pass a stable callback.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setChatInstances(newInstances);
+    // DEFERRED (PNI-307): `chatInstances` is read above but intentionally left
+    // out of the deps — the effect writes it, so including it loops: every
+    // setChatInstances allocates a new object, re-triggers the effect, and so
+    // on. The effect only ever appends instances for new tab ids, so keying off
+    // `tabs` is sufficient.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabs, params, addNotification]);
 
   const handleAddTab = () => {

@@ -28,8 +28,18 @@ public static class AGUIServiceCollectionExtensions
 
         services.Configure<JsonOptions>(options =>
         {
+            // AG-UI first, and AGUIJsonUtilities.DefaultTypeInfoResolver rather than the bare
+            // source-generated context. Routes that hand events to
+            // TypedResults.ServerSentEvents serialize with these application options, so two
+            // things have to hold for a field with no value to stay off the wire: the AG-UI
+            // resolver has to carry the omission (the context's own DefaultIgnoreCondition
+            // does not follow it into a different options instance), and it has to be asked
+            // before AIJsonUtilities' resolver, which answers for any type and would
+            // otherwise resolve AG-UI events itself. Get either wrong and these routes emit
+            // "parentRunId": null / "input": null, which TypeScript clients reject.
+            options.SerializerOptions.TypeInfoResolverChain.Insert(
+                0, AGUIJsonUtilities.DefaultTypeInfoResolver);
             options.SerializerOptions.TypeInfoResolverChain.Add(AIJsonUtilities.DefaultOptions.TypeInfoResolver!);
-            options.SerializerOptions.TypeInfoResolverChain.Add(AGUIJsonSerializerContext.Default);
             AGUIJsonUtilities.RegisterInterruptContentTypes(options.SerializerOptions);
         });
 

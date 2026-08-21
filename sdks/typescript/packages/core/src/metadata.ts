@@ -37,23 +37,22 @@ export type Metadata = z.infer<typeof MetadataSchema>;
 /**
  * How metadata is declared on events and messages.
  *
- * The object itself is absent or an object, never `null` — that is the
- * invariant a producer must uphold, and it always holds after parsing.
+ * The object itself is absent or an object, never `null` — and parsing
+ * enforces that invariant rather than coercing a `null` to absent.
  *
- * Parsing is deliberately more forgiving than that invariant: an explicit
- * `null` is accepted and coerced to absent. Pydantic models serialized with a
- * plain `model_dump()` — no `exclude_none=True` — emit `"metadata": null` for
- * an unset object, and rejecting that would make the Python SDK fail to parse
- * its own output. This is the same treatment `parentMessageId` and `outcome`
- * already receive in `events.ts`, for exactly the same reason.
+ * This is deliberately NOT the treatment `parentMessageId` and `outcome`
+ * receive in `events.ts`. Those tolerate `null` because released producers
+ * emitted it before the producer-side omission fix, and rejecting it would
+ * break agents already in the wild. Metadata has no such history: it postdates
+ * the fix that makes every official producer omit fields with no value, and no
+ * released Python or .NET package has ever emitted `"metadata": null`. Adding
+ * a tolerance here would grandfather in a fourth exception with nobody to
+ * protect; enforcing from day one means there is never anything to retire.
  *
- * Note the asymmetry, which is intentional: a `null` *value under a key* is
- * meaningful data and is preserved. Only a `null` in place of the whole object
- * is treated as absent.
+ * A `null` *value under a key* is meaningful data and is preserved. Only a
+ * `null` in place of the whole object is a contract violation.
  */
-export const OptionalMetadataSchema = MetadataSchema.nullable()
-  .optional()
-  .transform((v) => v ?? undefined);
+export const OptionalMetadataSchema = MetadataSchema.optional();
 
 /**
  * Folds `incoming` metadata into `existing`, key by key, with the last write

@@ -88,7 +88,6 @@ export const a2uiInjectConfig: A2UIInjectConfig = {
   recovery: { maxAttempts: 3 },
   onA2UIAttempt: (rec: A2UIAttemptRecord) => {
     // Dev observability: each attempt (incl. rejected ones) is logged.
-    // eslint-disable-next-line no-console
     console.log(
       `[a2ui recovery] attempt ${rec.attempt}: ${rec.ok ? "valid" : "invalid"}`,
       rec.errors,

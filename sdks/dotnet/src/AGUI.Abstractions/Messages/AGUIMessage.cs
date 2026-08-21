@@ -11,7 +11,6 @@ namespace AGUI.Abstractions;
 public abstract class AGUIMessage
 {
     [JsonPropertyName("id")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Id { get; set; }
 
     [JsonPropertyName("role")]
@@ -39,6 +38,5 @@ public abstract class AGUIMessage
     /// reducer of its own is separate work.
     /// </remarks>
     [JsonPropertyName("metadata")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Metadata { get; set; }
 }

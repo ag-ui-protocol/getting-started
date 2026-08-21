@@ -51,7 +51,7 @@ uv sync --extra langgraph --extra wayflow && uv run dev   # both runtimes; serve
 Environment
 - OpenAI-compatible variables commonly used by the examples (pick your provider):
   - `OPENAI_BASE_URL` (or provider-specific: `OSS_API_URL`, `LLAMA_API_URL`, etc.)
-  - `OPENAI_MODEL`  (the model slug, defaults to `gpt-4o` availble through OpenAI API)
+  - `OPENAI_MODEL`  (the model slug, defaults to `gpt-4o` available through OpenAI API)
   - `OPENAI_API_KEY`
 - Dojo server URL:
   - `AGENT_SPEC_URL=http://localhost:9003` when running the local example server

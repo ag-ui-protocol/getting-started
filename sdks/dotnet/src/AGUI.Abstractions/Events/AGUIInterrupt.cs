@@ -14,22 +14,17 @@ public sealed class AGUIInterrupt
     public string Reason { get; set; } = string.Empty;
 
     [JsonPropertyName("message")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Message { get; set; }
 
     [JsonPropertyName("toolCallId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ToolCallId { get; set; }
 
     [JsonPropertyName("responseSchema")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? ResponseSchema { get; set; }
 
     [JsonPropertyName("expiresAt")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ExpiresAt { get; set; }
 
     [JsonPropertyName("metadata")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Metadata { get; set; }
 }
