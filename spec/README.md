@@ -9,13 +9,40 @@ served on the web; this project exists to make sure it says what it means.
 
 ```
 draft/
-  schema.json        the contract: 31 events and everything they reference
-  json-patch.json    RFC 6902, kept separate because it is someone else's standard
+  schema.json        the contract: the events and everything they reference
   fixtures/          documents that must be accepted, and documents that must not
 harness/             the suite
 tools/reconcile.ts   builds RECONCILIATION.md
 RECONCILIATION.md    what each SDK requires today, against what the schema settled on
 ```
+
+## Exact objects, forgiving receivers
+
+The schema is a definition, not a gate: it says exactly what exists in this
+version of the protocol, so every object is closed with
+`unevaluatedProperties: false` and a property the schema does not declare fails
+validation. Compatibility across versions is the receiver's job, specified as
+behaviour rather than as shape: an SDK boundary tolerates fields it does not
+recognise — stripping them with a warning rather than rejecting the stream —
+because an unknown field from a newer minor version and a typo look identical
+to a validator, and only the receiver's own version makes the difference
+meaningful. That rule lives in the prose specification; a validator has no way
+to express strip-and-warn, so this file does not try.
+
+Two consequences worth knowing. Validating live traffic against this file with
+an off-the-shelf validator is a same-version conformance check, not a
+compatibility check: a stream from a newer producer will be rejected for
+carrying fields this copy has never heard of, so validate with a schema version
+at least as new as the producer's. And the property lists in this file are
+load-bearing beyond validation: once the SDKs are generated from it, they are
+what the compatibility boundary strips against, so a field missing here is a
+field that gets quietly removed from the wire.
+
+The exceptions, each open for a stated reason, are pinned by the closure test:
+the mixins (`BaseEvent`, `Attributable`, `BaseMessage`), which are composed
+into definitions that close the whole shape, and the RFC 6902 operations,
+which stay open because the RFC requires members an operation does not define
+to be ignored rather than rejected.
 
 ## Addressing a definition
 
@@ -26,16 +53,18 @@ anchor, so it can be referenced on its own:
 https://ag-ui.com/spec/draft/schema.json                        an event
 https://ag-ui.com/spec/draft/schema.json#RunAgentInput          the request body
 https://ag-ui.com/spec/draft/schema.json#TextMessageStartEvent  one event type
-https://ag-ui.com/spec/draft/json-patch.json#JsonPatch          a patch document
+https://ag-ui.com/spec/draft/schema.json#JsonPatch              a patch document
 ```
 
-The version lives in the `$id`s and nowhere else in the artifact, so freezing a
-version means rewriting the `$id` of each of the two files — and the generated
-protocol constant follows from that. Both have to move together: `schema.json`
-reaches JSON Patch by a relative reference, so a `schema.json` stamped `1.0`
-resolves it to `/spec/1.0/json-patch.json`, which only exists if that file was
-stamped too. The harness has its own copy of the two identifiers, which a version
-cut has to update as well.
+The file is self-contained — the JSON Patch definitions are inlined rather than
+referenced from a second file — so downloading it is all a consumer needs to
+validate, and freezing a version means rewriting the one `$id`. The harness has
+its own copy of the identifier, which a version cut has to update as well.
+
+When a document is rejected and the reason is not obvious, validate it against
+the event's own anchor rather than against the file root: the root is a union,
+so a generic validator reports one error per failed branch, and the branch that
+names the real problem drowns among the others.
 
 ## Adding a fixture
 
@@ -49,7 +78,7 @@ draft/fixtures/<Definition>/invalid/<what-it-shows>.expect.json
 
 `<Definition>` is the anchor name — `TextMessageContentEvent`, `RunAgentInput` —
 and the document is validated against that definition alone rather than against
-the whole union, so a failure points at one rule instead of thirty-one.
+the whole union, so a failure points at one rule instead of every branch.
 
 Every rejected document needs an `.expect.json` beside it naming the rule that
 rejected it and where:
@@ -73,7 +102,7 @@ identify one: inside a union every branch reports the same keyword at the same
 instance location, so an expectation could be satisfied by a sibling branch
 rather than the rule being tested. When the point of a fixture is that no branch
 accepted the document, assert the union's own `oneOf` rather than a branch's
-rule — the three union fixtures do exactly that.
+rule — the union fixtures do exactly that.
 
 The easiest way to get these values is to write the document, run the suite, and
 read the reported errors out of the failure message.
@@ -82,38 +111,31 @@ read the reported errors out of the failure message.
 
 Beyond the fixtures:
 
-- both files validate against the 2020-12 meta-schema
+- the file validates against the 2020-12 meta-schema
 - every definition **compiles**, not merely loads — strict mode's unknown-keyword
   check runs at compile time, so a misspelled keyword in a corner nothing
   compiled would otherwise sit there unreported
 - a misspelled keyword still fails, despite `$anchor` being declared to ajv
 - every anchor resolves, so the published addresses above actually work
-- every reference resolves, with nothing dangling
-- the union has exactly 31 members, matching the definitions and the `EventType` enum
-- each event's definition accepts its own documents and rejects the other thirty
+- every reference resolves within the file, with nothing dangling and nothing
+  pointing at a second file
+- the event union, the event definitions and the `EventType` enum agree exactly
+- each event's definition accepts its own documents and rejects every other
+  event's
 - every field name is camelCase and carries a description
-- no keyword outside the standard vocabulary, and no closed object anywhere
+- every shaped definition is closed, except the ones on the documented open
+  list, and nothing closes an object through a side door — a schema-valued
+  `additionalProperties`, a `not`, a boolean-false property
 - every valid event fixture also validates against `schema.json` itself, not only
   against its own definition
-- each definition's exact property set and required set, every union's members,
-  every enum's members and every fixed value, all pinned by hand — each with a
-  coverage check, so a definition, union, enum or `const` nobody pinned fails
-- the constraint operands — `type`, `pattern`, `minimum`, `maximum`, `minItems`,
-  `default`, `contentEncoding` and every `$ref` target — held in a snapshot, since
-  they are too numerous to spell out and too load-bearing to leave unchecked.
-  Descriptions are excluded, so a wording change does not churn it
-- the keyword vocabulary, so a keyword the harness does not model cannot appear
-  without someone deciding to teach it first
+- the keyword vocabulary is pinned, so a keyword the harness does not model
+  cannot appear without someone deciding to teach it first
 
-The last one is load-bearing rather than pedantic. The wire contract is open, so
-an unrecognised property is never a validation failure — which means nothing in
-the schema itself would catch a property that was simply never written down. Once
-the SDKs are generated from this file, those lists become what the compatibility
-boundary strips against, so a field missing here would be quietly removed from the
-wire rather than failing loudly. The coverage check matters just as much: without
-it the pin was only as good as what came to mind when it was written, and dropping
-`required: ["type"]` from `RunFinishedSuccessOutcome` left the whole suite green
-while making `"outcome": {}` a valid `RUN_FINISHED`.
+The schema itself is the single source of truth for the protocol's shape: what
+a definition declares and requires is asserted by fixtures that exercise it,
+not duplicated into a second hand-maintained copy. Closure is what makes that
+sufficient for unknown properties — with every object closed, a property
+nobody wrote down fails validation instead of passing silently.
 
 ## Known divergences
 
@@ -129,8 +151,8 @@ to tell it apart from an oversight.
   boolean schemas JSON Schema permits — `true`, meaning any answer is acceptable.
 - **Media-part `metadata` is unconstrained**, on the image, audio, video and
   document parts. Everywhere else in the protocol `metadata` is an object; on
-  these four the SDKs declare `unknown`, so a number validates here and would not
-  on a message. The schema follows the SDKs.
+  the media parts the SDKs declare `unknown`, so a number validates here and
+  would not on a message. The schema follows the SDKs.
 - **`Tool.parameters` accepts values that are not JSON Schemas.** It is one of the
   arbitrary-JSON fields by requirement, and TypeScript declares it `z.any()`, so a
   string or a number validates — while a consumer that compiles it as a schema
@@ -147,15 +169,11 @@ to tell it apart from an oversight.
   says a tool-approval interrupt carries one, and a consumer cannot correlate the
   approval without it — but `reason` is deliberately an open string, so there is no
   closed set of reasons to condition on, and a conditional requirement would need
-  `if`/`then`, which this schema does not use for the reasons above. It is a
-  behavioural rule, and belongs in the prose specification.
+  `if`/`then`, which this schema does not use. It is a behavioural rule, and
+  belongs in the prose specification.
 - **The `timestamp` unit is not stated.** Every SDK that sets it uses milliseconds
   since the Unix epoch, but nothing says so normatively, so a producer using
   seconds validates and is misread.
-- **Outcome objects forbid their sibling's field.** Objects are otherwise open
-  everywhere, but a success outcome carrying `interrupts` is a contradiction
-  rather than a forward-compatible extension — a consumer branching on the
-  discriminator would finish the run with an interrupt still pending.
 
 ## Commands
 

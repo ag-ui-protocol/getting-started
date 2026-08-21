@@ -379,10 +379,9 @@ as optional.
 
 ## RunFinishedSuccessOutcome
 
-| field      | TypeScript | Python   | .NET     | schema   |
-| ---------- | ---------- | -------- | -------- | -------- |
-| interrupts | —          | —        | —        | optional |
-| type       | required   | required | required | required |
+| field | TypeScript | Python   | .NET     | schema   |
+| ----- | ---------- | -------- | -------- | -------- |
+| type  | required   | required | required | required |
 
 ## RunFinishedInterruptOutcome
 

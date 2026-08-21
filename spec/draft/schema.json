@@ -2,12 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ag-ui.com/spec/draft/schema.json",
   "title": "AG-UI Protocol",
-  "description": "The machine-readable contract for the AG-UI protocol. Validating a document against this file validates it as an AG-UI event; every other definition is addressable by its own anchor, so this file's own address followed by #RunAgentInput names the request body. Addresses are written relative to $id rather than spelled out, so a frozen copy of this file describes itself rather than the draft it came from. Field names are camelCase because this describes the wire format rather than any language's idiom. Objects are deliberately open: an unrecognised property is never a validation failure, which is what makes a minor version able to add fields without breaking a consumer built against an earlier one. What a consumer does with an unrecognised property, how events may be ordered, and whether a patch applies to the state it targets are behavioural rules a validator cannot express; they live in the prose specification.",
+  "description": "The machine-readable contract for the AG-UI protocol. Validating a document against this file validates it as an AG-UI event; every other definition is addressable by its own anchor, so this file's own address followed by #RunAgentInput names the request body. Addresses are written relative to $id rather than spelled out, so a frozen copy of this file describes itself rather than the draft it came from. Field names are camelCase because this describes the wire format rather than any language's idiom. Objects are exact: this file defines what exists in this version of the protocol, so a property it does not declare fails validation. Compatibility with newer minor versions is a behavioural rule for receivers, who tolerate what they do not recognise rather than rejecting it; a validator has no way to express tolerance, so that rule lives in the prose specification. How events may be ordered and whether a patch applies to the state it targets are behavioural rules for the same reason. The one exception to exactness is the JSON Patch operations, which stay open because RFC 6902 requires members an operation does not define to be ignored rather than rejected.",
   "$ref": "#/$defs/Event",
   "$defs": {
     "Event": {
       "$anchor": "Event",
-      "description": "Any AG-UI event. Exactly 31 members, all normative: there is no optional tier and no event a consumer may decline to implement. Discriminated by the type property.",
+      "description": "Any AG-UI event. Every member is normative: there is no optional tier and no event a consumer may decline to implement. Discriminated by the type property.",
       "oneOf": [
         { "$ref": "#/$defs/TextMessageStartEvent" },
         { "$ref": "#/$defs/TextMessageContentEvent" },
@@ -42,7 +42,6 @@
         { "$ref": "#/$defs/SubagentErrorEvent" }
       ]
     },
-
     "EventType": {
       "$anchor": "EventType",
       "type": "string",
@@ -81,11 +80,10 @@
         "SUBAGENT_ERROR"
       ]
     },
-
     "BaseEvent": {
       "$anchor": "BaseEvent",
       "type": "object",
-      "description": "The fields every event carries, whatever its type. Composed into each event definition rather than repeated, so a change here reaches all 31 at once.",
+      "description": "The fields every event carries, whatever its type. Composed into each event definition rather than repeated, so a change here reaches every event at once.",
       "properties": {
         "type": {
           "$ref": "#/$defs/EventType",
@@ -98,7 +96,7 @@
           "description": "When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value."
         },
         "rawEvent": {
-          "description": "The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value. Optional, unlike RAW.event, which is the whole point of a RAW event and therefore required."
+          "description": "The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value."
         },
         "metadata": {
           "$ref": "#/$defs/Metadata",
@@ -107,11 +105,10 @@
       },
       "required": ["type"]
     },
-
     "Attributable": {
       "$anchor": "Attributable",
       "type": "object",
-      "description": "Composed into everything that can belong to a subagent's work: the 24 events that describe content or progress, all seven message types, and each interrupt. The four run-scoped events omit it, because RUN_STARTED, RUN_FINISHED and RUN_ERROR describe the run itself and MESSAGES_SNAPSHOT is conversation-wide, so none of them can belong to one subagent. A tool call omits it too and inherits its containing message's attribution.",
+      "description": "Composed into everything that can belong to a subagent's work: the events that describe content or progress, the message types, and each interrupt. Run-scoped events omit it — RUN_STARTED, RUN_FINISHED and RUN_ERROR describe the run itself and MESSAGES_SNAPSHOT is conversation-wide, so none of them can belong to one subagent. A tool call omits it too and inherits its containing message's attribution.",
       "properties": {
         "subagentRunId": {
           "$ref": "#/$defs/SubagentRunId",
@@ -119,32 +116,27 @@
         }
       }
     },
-
     "SubagentRunId": {
       "$anchor": "SubagentRunId",
       "type": "string",
       "description": "An opaque handle for one subagent invocation, not a reusable name for a subagent definition: two invocations of the same subagent carry two different values. Named to mirror runId one level down, the way the subagent's name mirrors agentId."
     },
-
     "Metadata": {
       "$anchor": "Metadata",
       "type": "object",
       "description": "Extra information attached to an event, a message, a tool call, a tool, an interrupt or a resume entry. Open by key: any JSON value is allowed under a key, including null, because a null there is meaningful data. The object itself may be absent but is never null when present. The key ag-ui is reserved for the protocol's own use; reservation is by convention, since validating the shape of a key's value would contradict being open by key.",
       "additionalProperties": true
     },
-
     "State": {
       "$anchor": "State",
       "description": "Agent state. Any JSON value: the protocol carries state without interpreting it, so an object, an array, a string and a number are all valid."
     },
-
     "TextMessageRole": {
       "$anchor": "TextMessageRole",
       "type": "string",
       "description": "The roles a streamed text message may take. Excludes tool, which is carried by TOOL_CALL_RESULT rather than streamed as text.",
       "enum": ["developer", "system", "assistant", "user"]
     },
-
     "Role": {
       "$anchor": "Role",
       "type": "string",
@@ -159,7 +151,6 @@
         "reasoning"
       ]
     },
-
     "TextMessageStartEvent": {
       "$anchor": "TextMessageStartEvent",
       "type": "object",
@@ -184,9 +175,9 @@
           "description": "An optional display name for the author, for providers that distinguish several participants in one role."
         }
       },
-      "required": ["type", "messageId"]
+      "required": ["type", "messageId"],
+      "unevaluatedProperties": false
     },
-
     "TextMessageContentEvent": {
       "$anchor": "TextMessageContentEvent",
       "type": "object",
@@ -206,9 +197,9 @@
           "description": "The fragment to append. May be the empty string: providers emit empty deltas as keep-alives and while a tool call is being decided, and rejecting them would kill runs that are working correctly."
         }
       },
-      "required": ["type", "messageId", "delta"]
+      "required": ["type", "messageId", "delta"],
+      "unevaluatedProperties": false
     },
-
     "TextMessageEndEvent": {
       "$anchor": "TextMessageEndEvent",
       "type": "object",
@@ -224,9 +215,9 @@
           "description": "The message being closed."
         }
       },
-      "required": ["type", "messageId"]
+      "required": ["type", "messageId"],
+      "unevaluatedProperties": false
     },
-
     "TextMessageChunkEvent": {
       "$anchor": "TextMessageChunkEvent",
       "type": "object",
@@ -254,9 +245,9 @@
           "description": "An optional display name for the author."
         }
       },
-      "required": ["type"]
+      "required": ["type"],
+      "unevaluatedProperties": false
     },
-
     "ToolCallStartEvent": {
       "$anchor": "ToolCallStartEvent",
       "type": "object",
@@ -280,9 +271,9 @@
           "description": "The assistant message that holds this call. Absent means the producer did not attribute it to one."
         }
       },
-      "required": ["type", "toolCallId", "toolCallName"]
+      "required": ["type", "toolCallId", "toolCallName"],
+      "unevaluatedProperties": false
     },
-
     "ToolCallArgsEvent": {
       "$anchor": "ToolCallArgsEvent",
       "type": "object",
@@ -302,9 +293,9 @@
           "description": "A fragment of the arguments, which concatenate into a JSON document. Deliberately a string rather than parsed JSON: a fragment of JSON is not itself JSON. May be the empty string."
         }
       },
-      "required": ["type", "toolCallId", "delta"]
+      "required": ["type", "toolCallId", "delta"],
+      "unevaluatedProperties": false
     },
-
     "ToolCallEndEvent": {
       "$anchor": "ToolCallEndEvent",
       "type": "object",
@@ -320,9 +311,9 @@
           "description": "The call being closed."
         }
       },
-      "required": ["type", "toolCallId"]
+      "required": ["type", "toolCallId"],
+      "unevaluatedProperties": false
     },
-
     "ToolCallChunkEvent": {
       "$anchor": "ToolCallChunkEvent",
       "type": "object",
@@ -350,9 +341,9 @@
           "description": "A fragment of the arguments. May be the empty string."
         }
       },
-      "required": ["type"]
+      "required": ["type"],
+      "unevaluatedProperties": false
     },
-
     "ToolCallResultEvent": {
       "$anchor": "ToolCallResultEvent",
       "type": "object",
@@ -380,9 +371,9 @@
           "description": "Present only for symmetry with the message it mints; the value is fixed, so a producer may leave it out."
         }
       },
-      "required": ["type", "messageId", "toolCallId", "content"]
+      "required": ["type", "messageId", "toolCallId", "content"],
+      "unevaluatedProperties": false
     },
-
     "StateSnapshotEvent": {
       "$anchor": "StateSnapshotEvent",
       "type": "object",
@@ -398,9 +389,9 @@
           "description": "The complete new state."
         }
       },
-      "required": ["type", "snapshot"]
+      "required": ["type", "snapshot"],
+      "unevaluatedProperties": false
     },
-
     "StateDeltaEvent": {
       "$anchor": "StateDeltaEvent",
       "type": "object",
@@ -412,13 +403,13 @@
       "properties": {
         "type": { "const": "STATE_DELTA" },
         "delta": {
-          "$ref": "json-patch.json#/$defs/JsonPatch",
+          "$ref": "#/$defs/JsonPatch",
           "description": "The change, as an RFC 6902 patch against the current state. Structural validity here does not mean the patch applies: a well-formed operation may point at a path that does not exist, which RFC 6902 leaves to the applier."
         }
       },
-      "required": ["type", "delta"]
+      "required": ["type", "delta"],
+      "unevaluatedProperties": false
     },
-
     "MessagesSnapshotEvent": {
       "$anchor": "MessagesSnapshotEvent",
       "type": "object",
@@ -432,9 +423,9 @@
           "items": { "$ref": "#/$defs/Message" }
         }
       },
-      "required": ["type", "messages"]
+      "required": ["type", "messages"],
+      "unevaluatedProperties": false
     },
-
     "ActivitySnapshotEvent": {
       "$anchor": "ActivitySnapshotEvent",
       "type": "object",
@@ -464,9 +455,9 @@
           "description": "Whether this snapshot overwrites the activity's existing content. Absent means it does, and that meaning is normative; only an explicit false asks a consumer to leave what is already there. It does not ask for a merge — ACTIVITY_DELTA is how content is changed incrementally. What a consumer does with a non-overwriting snapshot is behavioural and belongs in the prose."
         }
       },
-      "required": ["type", "messageId", "activityType", "content"]
+      "required": ["type", "messageId", "activityType", "content"],
+      "unevaluatedProperties": false
     },
-
     "ActivityDeltaEvent": {
       "$anchor": "ActivityDeltaEvent",
       "type": "object",
@@ -486,13 +477,13 @@
           "description": "What kind of activity this is."
         },
         "patch": {
-          "$ref": "json-patch.json#/$defs/JsonPatch",
+          "$ref": "#/$defs/JsonPatch",
           "description": "The change, as an RFC 6902 patch against the activity's content."
         }
       },
-      "required": ["type", "messageId", "activityType", "patch"]
+      "required": ["type", "messageId", "activityType", "patch"],
+      "unevaluatedProperties": false
     },
-
     "RawEvent": {
       "$anchor": "RawEvent",
       "type": "object",
@@ -511,9 +502,9 @@
           "description": "Which provider or framework the event came from."
         }
       },
-      "required": ["type", "event"]
+      "required": ["type", "event"],
+      "unevaluatedProperties": false
     },
-
     "CustomEvent": {
       "$anchor": "CustomEvent",
       "type": "object",
@@ -528,13 +519,11 @@
           "type": "string",
           "description": "What this custom event is. Required: without it a consumer cannot route the value."
         },
-        "value": {
-          "description": "The payload. Any JSON value, and required."
-        }
+        "value": { "description": "The payload. Any JSON value, and required." }
       },
-      "required": ["type", "name", "value"]
+      "required": ["type", "name", "value"],
+      "unevaluatedProperties": false
     },
-
     "RunStartedEvent": {
       "$anchor": "RunStartedEvent",
       "type": "object",
@@ -546,10 +535,7 @@
           "type": "string",
           "description": "The conversation this run belongs to."
         },
-        "runId": {
-          "type": "string",
-          "description": "Identifies this run."
-        },
+        "runId": { "type": "string", "description": "Identifies this run." },
         "parentRunId": {
           "type": "string",
           "description": "The run that spawned this one, when an agent invokes another agent as a separate run rather than as a subagent within one."
@@ -559,9 +545,9 @@
           "description": "The request this run was started from, echoed back so a consumer that did not make the request can still see what the agent was asked."
         }
       },
-      "required": ["type", "threadId", "runId"]
+      "required": ["type", "threadId", "runId"],
+      "unevaluatedProperties": false
     },
-
     "RunFinishedEvent": {
       "$anchor": "RunFinishedEvent",
       "type": "object",
@@ -573,10 +559,7 @@
           "type": "string",
           "description": "The conversation this run belongs to."
         },
-        "runId": {
-          "type": "string",
-          "description": "The run being closed."
-        },
+        "runId": { "type": "string", "description": "The run being closed." },
         "result": {
           "description": "The run's return value, if it has one. Any JSON value."
         },
@@ -590,9 +573,9 @@
           "items": { "$ref": "#/$defs/TokenUsage" }
         }
       },
-      "required": ["type", "threadId", "runId"]
+      "required": ["type", "threadId", "runId"],
+      "unevaluatedProperties": false
     },
-
     "RunErrorEvent": {
       "$anchor": "RunErrorEvent",
       "type": "object",
@@ -614,9 +597,9 @@
           "items": { "$ref": "#/$defs/TokenUsage" }
         }
       },
-      "required": ["type", "message"]
+      "required": ["type", "message"],
+      "unevaluatedProperties": false
     },
-
     "StepStartedEvent": {
       "$anchor": "StepStartedEvent",
       "type": "object",
@@ -632,9 +615,9 @@
           "description": "The step's name. Identifies it: the matching STEP_FINISHED carries the same name."
         }
       },
-      "required": ["type", "stepName"]
+      "required": ["type", "stepName"],
+      "unevaluatedProperties": false
     },
-
     "StepFinishedEvent": {
       "$anchor": "StepFinishedEvent",
       "type": "object",
@@ -650,9 +633,9 @@
           "description": "The step being closed."
         }
       },
-      "required": ["type", "stepName"]
+      "required": ["type", "stepName"],
+      "unevaluatedProperties": false
     },
-
     "ReasoningStartEvent": {
       "$anchor": "ReasoningStartEvent",
       "type": "object",
@@ -668,9 +651,9 @@
           "description": "The span being opened."
         }
       },
-      "required": ["type", "messageId"]
+      "required": ["type", "messageId"],
+      "unevaluatedProperties": false
     },
-
     "ReasoningMessageStartEvent": {
       "$anchor": "ReasoningMessageStartEvent",
       "type": "object",
@@ -687,12 +670,12 @@
         },
         "role": {
           "const": "reasoning",
-          "description": "Fixed, and required here rather than defaulted, unlike TEXT_MESSAGE_START.role. The asymmetry is inherited from the SDKs rather than chosen."
+          "description": "Fixed, and required rather than defaulted. The requirement is inherited from the SDKs rather than chosen."
         }
       },
-      "required": ["type", "messageId", "role"]
+      "required": ["type", "messageId", "role"],
+      "unevaluatedProperties": false
     },
-
     "ReasoningMessageContentEvent": {
       "$anchor": "ReasoningMessageContentEvent",
       "type": "object",
@@ -712,9 +695,9 @@
           "description": "The fragment to append. May be the empty string."
         }
       },
-      "required": ["type", "messageId", "delta"]
+      "required": ["type", "messageId", "delta"],
+      "unevaluatedProperties": false
     },
-
     "ReasoningMessageEndEvent": {
       "$anchor": "ReasoningMessageEndEvent",
       "type": "object",
@@ -730,9 +713,9 @@
           "description": "The reasoning message being closed."
         }
       },
-      "required": ["type", "messageId"]
+      "required": ["type", "messageId"],
+      "unevaluatedProperties": false
     },
-
     "ReasoningMessageChunkEvent": {
       "$anchor": "ReasoningMessageChunkEvent",
       "type": "object",
@@ -752,9 +735,9 @@
           "description": "The fragment to append. May be the empty string."
         }
       },
-      "required": ["type"]
+      "required": ["type"],
+      "unevaluatedProperties": false
     },
-
     "ReasoningEndEvent": {
       "$anchor": "ReasoningEndEvent",
       "type": "object",
@@ -770,9 +753,9 @@
           "description": "The span being closed."
         }
       },
-      "required": ["type", "messageId"]
+      "required": ["type", "messageId"],
+      "unevaluatedProperties": false
     },
-
     "ReasoningEncryptedValueEvent": {
       "$anchor": "ReasoningEncryptedValueEvent",
       "type": "object",
@@ -796,16 +779,15 @@
           "description": "The provider's opaque artefact."
         }
       },
-      "required": ["type", "subtype", "entityId", "encryptedValue"]
+      "required": ["type", "subtype", "entityId", "encryptedValue"],
+      "unevaluatedProperties": false
     },
-
     "ReasoningEncryptedValueSubtype": {
       "$anchor": "ReasoningEncryptedValueSubtype",
       "type": "string",
       "description": "Whether a REASONING_ENCRYPTED_VALUE belongs to a message or to a tool call.",
       "enum": ["tool-call", "message"]
     },
-
     "SubagentStartedEvent": {
       "$anchor": "SubagentStartedEvent",
       "type": "object",
@@ -838,9 +820,9 @@
           "description": "The message that held the spawning tool call."
         }
       },
-      "required": ["type", "subagentRunId", "name"]
+      "required": ["type", "subagentRunId", "name"],
+      "unevaluatedProperties": false
     },
-
     "SubagentFinishedEvent": {
       "$anchor": "SubagentFinishedEvent",
       "type": "object",
@@ -860,9 +842,9 @@
           "description": "Why the segment ended. Absent means success. A suspended subagent is neither a success nor a failure, which is why saying so needs its own value rather than being inferred from a later interrupt."
         }
       },
-      "required": ["type", "subagentRunId"]
+      "required": ["type", "subagentRunId"],
+      "unevaluatedProperties": false
     },
-
     "SubagentErrorEvent": {
       "$anchor": "SubagentErrorEvent",
       "type": "object",
@@ -883,9 +865,9 @@
           "description": "A machine-readable error code. An open string."
         }
       },
-      "required": ["type", "subagentRunId", "message"]
+      "required": ["type", "subagentRunId", "message"],
+      "unevaluatedProperties": false
     },
-
     "RunFinishedOutcome": {
       "$anchor": "RunFinishedOutcome",
       "description": "Why a run ended.",
@@ -894,21 +876,16 @@
         { "$ref": "#/$defs/RunFinishedInterruptOutcome" }
       ]
     },
-
     "RunFinishedSuccessOutcome": {
       "$anchor": "RunFinishedSuccessOutcome",
       "type": "object",
-      "description": "The run completed. Equivalent to an absent outcome.",
+      "description": "The run completed. Equivalent to an absent outcome. Closed like every other object, which is also what keeps it from carrying the suspended sibling's interrupts — a success with an interrupt still pending would be a contradiction, not an extension.",
       "properties": {
-        "type": { "const": "success", "description": "Discriminator." },
-        "interrupts": {
-          "not": {},
-          "description": "Must not be present. Objects are otherwise open here, because an unrecognised property is never fatal — but `interrupts` is a known field of the sibling variant, so a success carrying it is a contradiction rather than an extension, and a consumer branching on the discriminator would finish the run while an interrupt was still pending."
-        }
+        "type": { "const": "success", "description": "Discriminator." }
       },
-      "required": ["type"]
+      "required": ["type"],
+      "unevaluatedProperties": false
     },
-
     "RunFinishedInterruptOutcome": {
       "$anchor": "RunFinishedInterruptOutcome",
       "type": "object",
@@ -922,9 +899,9 @@
           "items": { "$ref": "#/$defs/Interrupt" }
         }
       },
-      "required": ["type", "interrupts"]
+      "required": ["type", "interrupts"],
+      "unevaluatedProperties": false
     },
-
     "SubagentFinishedOutcome": {
       "$anchor": "SubagentFinishedOutcome",
       "description": "Why a subagent's segment of a run ended. Mirrors RunFinishedOutcome one level down.",
@@ -933,21 +910,16 @@
         { "$ref": "#/$defs/SubagentFinishedSuspendedOutcome" }
       ]
     },
-
     "SubagentFinishedSuccessOutcome": {
       "$anchor": "SubagentFinishedSuccessOutcome",
       "type": "object",
       "description": "The subagent completed its work. Equivalent to an absent outcome.",
       "properties": {
-        "type": { "const": "success", "description": "Discriminator." },
-        "interruptIds": {
-          "not": {},
-          "description": "Must not be present, for the same reason as RunFinishedSuccessOutcome.interrupts: a completed subagent cannot own interrupts that are still waiting."
-        }
+        "type": { "const": "success", "description": "Discriminator." }
       },
-      "required": ["type"]
+      "required": ["type"],
+      "unevaluatedProperties": false
     },
-
     "SubagentFinishedSuspendedOutcome": {
       "$anchor": "SubagentFinishedSuspendedOutcome",
       "type": "object",
@@ -957,15 +929,12 @@
         "interruptIds": {
           "type": "array",
           "description": "The run-level interrupts this subagent raised itself. May be empty or absent: a subagent suspended because a descendant interrupted owns no interrupt of its own.",
-          "items": {
-            "type": "string",
-            "description": "An Interrupt.id."
-          }
+          "items": { "type": "string", "description": "An Interrupt.id." }
         }
       },
-      "required": ["type"]
+      "required": ["type"],
+      "unevaluatedProperties": false
     },
-
     "Interrupt": {
       "$anchor": "Interrupt",
       "type": "object",
@@ -1002,9 +971,9 @@
           "description": "Extra information attached to this interrupt."
         }
       },
-      "required": ["id", "reason"]
+      "required": ["id", "reason"],
+      "unevaluatedProperties": false
     },
-
     "ResumeEntry": {
       "$anchor": "ResumeEntry",
       "type": "object",
@@ -1027,13 +996,13 @@
           "description": "Envelope information about the response, such as signatures or routing keys, as opposed to payload, which is the answer itself."
         }
       },
-      "required": ["interruptId", "status"]
+      "required": ["interruptId", "status"],
+      "unevaluatedProperties": false
     },
-
     "TokenUsage": {
       "$anchor": "TokenUsage",
       "type": "object",
-      "description": "Token counts for one provider and model. Every field declared here is a label or a number — nothing content-bearing or identifying, no prompts, completions, messages, or thread, run and user identifiers. That is a statement about what the protocol asks for, not a guarantee validation enforces: this object is open like every other, so a producer can add a key and it will validate. Consumers strip what they do not recognise, which is where the guarantee actually comes from.",
+      "description": "Token counts for one provider and model. Every field is a label or a number — nothing content-bearing or identifying, no prompts, completions, messages, or thread, run and user identifiers.",
       "properties": {
         "provider": {
           "type": "string",
@@ -1073,9 +1042,9 @@
           "maximum": 9007199254740991,
           "description": "Prompt tokens served from a provider cache."
         }
-      }
+      },
+      "unevaluatedProperties": false
     },
-
     "Message": {
       "$anchor": "Message",
       "description": "Any message in a conversation. Discriminated by role.",
@@ -1089,7 +1058,6 @@
         { "$ref": "#/$defs/ReasoningMessage" }
       ]
     },
-
     "BaseMessage": {
       "$anchor": "BaseMessage",
       "type": "object",
@@ -1119,7 +1087,6 @@
       },
       "required": ["id", "role"]
     },
-
     "DeveloperMessage": {
       "$anchor": "DeveloperMessage",
       "type": "object",
@@ -1132,9 +1099,9 @@
           "description": "The instructions. Required: a developer message with nothing in it says nothing."
         }
       },
-      "required": ["id", "role", "content"]
+      "required": ["id", "role", "content"],
+      "unevaluatedProperties": false
     },
-
     "SystemMessage": {
       "$anchor": "SystemMessage",
       "type": "object",
@@ -1147,9 +1114,9 @@
           "description": "The instructions. Required."
         }
       },
-      "required": ["id", "role", "content"]
+      "required": ["id", "role", "content"],
+      "unevaluatedProperties": false
     },
-
     "AssistantMessage": {
       "$anchor": "AssistantMessage",
       "type": "object",
@@ -1167,9 +1134,9 @@
           "items": { "$ref": "#/$defs/ToolCall" }
         }
       },
-      "required": ["id", "role"]
+      "required": ["id", "role"],
+      "unevaluatedProperties": false
     },
-
     "UserMessage": {
       "$anchor": "UserMessage",
       "type": "object",
@@ -1181,26 +1148,20 @@
           "description": "What the person sent: either plain text, or an ordered list of parts for a multimodal message.",
           "oneOf": [
             { "type": "string" },
-            {
-              "type": "array",
-              "items": { "$ref": "#/$defs/InputContent" }
-            }
+            { "type": "array", "items": { "$ref": "#/$defs/InputContent" } }
           ]
         }
       },
-      "required": ["id", "role", "content"]
+      "required": ["id", "role", "content"],
+      "unevaluatedProperties": false
     },
-
     "ToolMessage": {
       "$anchor": "ToolMessage",
       "type": "object",
       "description": "What a tool returned, as a message in the conversation. Stands alone rather than composing BaseMessage, because it carries no name.",
       "allOf": [{ "$ref": "#/$defs/Attributable" }],
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Identifies the message."
-        },
+        "id": { "type": "string", "description": "Identifies the message." },
         "role": {
           "const": "tool",
           "description": "Fixed. Declared here rather than inherited, because this message does not compose BaseMessage."
@@ -1226,19 +1187,16 @@
           "description": "Extra information attached to this message."
         }
       },
-      "required": ["id", "role", "content", "toolCallId"]
+      "required": ["id", "role", "content", "toolCallId"],
+      "unevaluatedProperties": false
     },
-
     "ActivityMessage": {
       "$anchor": "ActivityMessage",
       "type": "object",
       "description": "Structured progress that is not conversation content, materialised as a message so it keeps its place in the sequence. Stands alone rather than composing BaseMessage, because its content is an object rather than a string.",
       "allOf": [{ "$ref": "#/$defs/Attributable" }],
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Identifies the message."
-        },
+        "id": { "type": "string", "description": "Identifies the message." },
         "role": {
           "const": "activity",
           "description": "Fixed. Declared here rather than inherited, because this message does not compose BaseMessage."
@@ -1257,27 +1215,21 @@
           "description": "Extra information attached to this message."
         }
       },
-      "required": ["id", "role", "activityType", "content"]
+      "required": ["id", "role", "activityType", "content"],
+      "unevaluatedProperties": false
     },
-
     "ReasoningMessage": {
       "$anchor": "ReasoningMessage",
       "type": "object",
       "description": "A span of the agent's reasoning, materialised as a message. Stands alone rather than composing BaseMessage, because it carries no name.",
       "allOf": [{ "$ref": "#/$defs/Attributable" }],
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Identifies the message."
-        },
+        "id": { "type": "string", "description": "Identifies the message." },
         "role": {
           "const": "reasoning",
           "description": "Fixed. Declared here rather than inherited, because this message does not compose BaseMessage."
         },
-        "content": {
-          "type": "string",
-          "description": "The reasoning text."
-        },
+        "content": { "type": "string", "description": "The reasoning text." },
         "encryptedValue": {
           "type": "string",
           "description": "A provider's opaque reasoning artefact belonging to this message."
@@ -1287,9 +1239,9 @@
           "description": "Extra information attached to this message."
         }
       },
-      "required": ["id", "role", "content"]
+      "required": ["id", "role", "content"],
+      "unevaluatedProperties": false
     },
-
     "ToolCall": {
       "$anchor": "ToolCall",
       "type": "object",
@@ -1316,9 +1268,9 @@
           "description": "Extra information attached to this call. Carried here rather than folded into the containing message, because several calls can share one parent and merging them would make the result depend on their order."
         }
       },
-      "required": ["id", "type", "function"]
+      "required": ["id", "type", "function"],
+      "unevaluatedProperties": false
     },
-
     "FunctionCall": {
       "$anchor": "FunctionCall",
       "type": "object",
@@ -1333,9 +1285,9 @@
           "description": "The arguments as a JSON string, not as parsed JSON. Kept as written because a model can emit arguments that are not valid JSON, and losing them at the protocol boundary would hide the fault from the consumer that has to handle it."
         }
       },
-      "required": ["name", "arguments"]
+      "required": ["name", "arguments"],
+      "unevaluatedProperties": false
     },
-
     "InputContent": {
       "$anchor": "InputContent",
       "description": "One part of a multimodal user message. Discriminated by type.",
@@ -1347,21 +1299,17 @@
         { "$ref": "#/$defs/DocumentInputContent" }
       ]
     },
-
     "TextInputContent": {
       "$anchor": "TextInputContent",
       "type": "object",
       "description": "A text part.",
       "properties": {
         "type": { "const": "text", "description": "Discriminator." },
-        "text": {
-          "type": "string",
-          "description": "The text."
-        }
+        "text": { "type": "string", "description": "The text." }
       },
-      "required": ["type", "text"]
+      "required": ["type", "text"],
+      "unevaluatedProperties": false
     },
-
     "ImageInputContent": {
       "$anchor": "ImageInputContent",
       "type": "object",
@@ -1373,12 +1321,12 @@
           "description": "Where the image comes from."
         },
         "metadata": {
-          "description": "Extra information about this part. Unconstrained rather than an object, unlike metadata everywhere else in the protocol, so a number validates here and would not on a message. Inherited from the SDKs, where these four are z.unknown() rather than a record; listed under known divergences in the README rather than resolved here."
+          "description": "Extra information about this part. Unconstrained rather than an object: inherited from the SDKs, which declare it unknown rather than a record; listed under known divergences in the README rather than resolved here."
         }
       },
-      "required": ["type", "source"]
+      "required": ["type", "source"],
+      "unevaluatedProperties": false
     },
-
     "AudioInputContent": {
       "$anchor": "AudioInputContent",
       "type": "object",
@@ -1393,9 +1341,9 @@
           "description": "Extra information about this part. Unconstrained, as on the other media parts."
         }
       },
-      "required": ["type", "source"]
+      "required": ["type", "source"],
+      "unevaluatedProperties": false
     },
-
     "VideoInputContent": {
       "$anchor": "VideoInputContent",
       "type": "object",
@@ -1410,9 +1358,9 @@
           "description": "Extra information about this part. Unconstrained, as on the other media parts."
         }
       },
-      "required": ["type", "source"]
+      "required": ["type", "source"],
+      "unevaluatedProperties": false
     },
-
     "DocumentInputContent": {
       "$anchor": "DocumentInputContent",
       "type": "object",
@@ -1427,9 +1375,9 @@
           "description": "Extra information about this part. Unconstrained, as on the other media parts."
         }
       },
-      "required": ["type", "source"]
+      "required": ["type", "source"],
+      "unevaluatedProperties": false
     },
-
     "InputContentSource": {
       "$anchor": "InputContentSource",
       "description": "Where a media part's bytes come from: carried inline, or referenced by URL.",
@@ -1438,7 +1386,6 @@
         { "$ref": "#/$defs/InputContentUrlSource" }
       ]
     },
-
     "InputContentDataSource": {
       "$anchor": "InputContentDataSource",
       "type": "object",
@@ -1455,9 +1402,9 @@
           "description": "What the bytes are. Required here, unlike on a URL source, because nothing else can tell a consumer how to read them."
         }
       },
-      "required": ["type", "value", "mimeType"]
+      "required": ["type", "value", "mimeType"],
+      "unevaluatedProperties": false
     },
-
     "InputContentUrlSource": {
       "$anchor": "InputContentUrlSource",
       "type": "object",
@@ -1473,9 +1420,9 @@
           "description": "What the resource is, when the producer knows. Optional, because the response can say."
         }
       },
-      "required": ["type", "value"]
+      "required": ["type", "value"],
+      "unevaluatedProperties": false
     },
-
     "Context": {
       "$anchor": "Context",
       "type": "object",
@@ -1485,14 +1432,11 @@
           "type": "string",
           "description": "What this context is, for the agent to interpret."
         },
-        "value": {
-          "type": "string",
-          "description": "The context itself."
-        }
+        "value": { "type": "string", "description": "The context itself." }
       },
-      "required": ["description", "value"]
+      "required": ["description", "value"],
+      "unevaluatedProperties": false
     },
-
     "Tool": {
       "$anchor": "Tool",
       "type": "object",
@@ -1514,9 +1458,9 @@
           "description": "Extra information about the tool, for consumers that attach their own rendering or routing information to it."
         }
       },
-      "required": ["name", "description"]
+      "required": ["name", "description"],
+      "unevaluatedProperties": false
     },
-
     "RunAgentInput": {
       "$anchor": "RunAgentInput",
       "type": "object",
@@ -1526,10 +1470,7 @@
           "type": "string",
           "description": "The conversation this run belongs to."
         },
-        "runId": {
-          "type": "string",
-          "description": "Identifies this run."
-        },
+        "runId": { "type": "string", "description": "Identifies this run." },
         "parentRunId": {
           "type": "string",
           "description": "The run that spawned this one."
@@ -1562,7 +1503,145 @@
           "items": { "$ref": "#/$defs/ResumeEntry" }
         }
       },
-      "required": ["threadId", "runId", "messages"]
+      "required": ["threadId", "runId", "messages"],
+      "unevaluatedProperties": false
+    },
+    "JsonPatch": {
+      "$anchor": "JsonPatch",
+      "type": "array",
+      "description": "A JSON Patch document as defined by RFC 6902, referenced by STATE_DELTA.delta and ACTIVITY_DELTA.patch: an ordered sequence of operations applied to a target document. An empty array is a valid no-op patch. Whether the operations actually apply to the document they target is a runtime question RFC 6902 leaves to the applier; structural validity here says nothing about it.",
+      "items": { "$ref": "#/$defs/JsonPatchOperation" }
+    },
+    "JsonPatchOperation": {
+      "$anchor": "JsonPatchOperation",
+      "description": "A single RFC 6902 operation. Exactly one of the operation shapes must match, discriminated by op. Unlike the protocol's own objects, the operations are open: RFC 6902 section 4 requires members an operation does not define to be ignored rather than rejected, so a remove carrying a leftover value is a valid patch. Two of the RFC's rules are relations between values rather than shapes, so no static schema can express them and neither is checked here: a move whose from is a proper prefix of its path (section 4.4), and any operation whose pointer does not resolve in the target document. Both are the applier's to reject.",
+      "oneOf": [
+        { "$ref": "#/$defs/AddOperation" },
+        { "$ref": "#/$defs/RemoveOperation" },
+        { "$ref": "#/$defs/ReplaceOperation" },
+        { "$ref": "#/$defs/MoveOperation" },
+        { "$ref": "#/$defs/CopyOperation" },
+        { "$ref": "#/$defs/TestOperation" }
+      ]
+    },
+    "AddOperation": {
+      "$anchor": "AddOperation",
+      "type": "object",
+      "description": "Inserts value at path. RFC 6902 section 4.1.",
+      "properties": {
+        "op": {
+          "const": "add",
+          "description": "Discriminator for the add operation."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where to insert the value."
+        },
+        "value": {
+          "description": "The value to insert. Any JSON value, including null, which is a legitimate thing to add."
+        }
+      },
+      "required": ["op", "path", "value"]
+    },
+    "RemoveOperation": {
+      "$anchor": "RemoveOperation",
+      "type": "object",
+      "description": "Removes the value at path. RFC 6902 section 4.2.",
+      "properties": {
+        "op": {
+          "const": "remove",
+          "description": "Discriminator for the remove operation."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "What to remove."
+        }
+      },
+      "required": ["op", "path"]
+    },
+    "ReplaceOperation": {
+      "$anchor": "ReplaceOperation",
+      "type": "object",
+      "description": "Replaces the value at path. RFC 6902 section 4.3.",
+      "properties": {
+        "op": {
+          "const": "replace",
+          "description": "Discriminator for the replace operation."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "What to replace."
+        },
+        "value": {
+          "description": "The replacement. Any JSON value, including null."
+        }
+      },
+      "required": ["op", "path", "value"]
+    },
+    "MoveOperation": {
+      "$anchor": "MoveOperation",
+      "type": "object",
+      "description": "Moves the value at from to path. RFC 6902 section 4.4.",
+      "properties": {
+        "op": {
+          "const": "move",
+          "description": "Discriminator for the move operation."
+        },
+        "from": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where the value is moved from."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where the value is moved to."
+        }
+      },
+      "required": ["op", "from", "path"]
+    },
+    "CopyOperation": {
+      "$anchor": "CopyOperation",
+      "type": "object",
+      "description": "Copies the value at from to path. RFC 6902 section 4.5.",
+      "properties": {
+        "op": {
+          "const": "copy",
+          "description": "Discriminator for the copy operation."
+        },
+        "from": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where the value is copied from."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where the value is copied to."
+        }
+      },
+      "required": ["op", "from", "path"]
+    },
+    "TestOperation": {
+      "$anchor": "TestOperation",
+      "type": "object",
+      "description": "Asserts that the value at path equals value. RFC 6902 section 4.6.",
+      "properties": {
+        "op": {
+          "const": "test",
+          "description": "Discriminator for the test operation."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "What to compare."
+        },
+        "value": {
+          "description": "The value the target must equal. Any JSON value, including null."
+        }
+      },
+      "required": ["op", "path", "value"]
+    },
+    "JsonPointer": {
+      "$anchor": "JsonPointer",
+      "type": "string",
+      "description": "A JSON Pointer as defined by RFC 6901. Either the empty string, meaning the whole document, or a sequence of slash-prefixed reference tokens in which a tilde is escaped as ~0 and a slash as ~1. A value with no leading slash, or a tilde followed by anything other than 0 or 1, is not a JSON Pointer.",
+      "pattern": "^(/([^/~]|~[01])*)*$"
     }
   }
 }

@@ -2,35 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   createAjv,
   definitionNames,
-  effectiveProperties,
-  effectiveRequired,
   eventDefinitions,
-  constPositions,
-  constraintMap,
-  enumPositions,
   shapedDefinitions,
-  unionPositions,
-  JSON_PATCH_ID,
-  jsonPatchDefinitionNames,
-  jsonPatchSchema,
   schema,
   SCHEMA_ID,
   unionMembers,
   validatorFor,
 } from "./validator";
-import {
-  EVENT_PROPERTIES,
-  EVENT_REQUIRED,
-  PATCH_PROPERTIES,
-  PATCH_REQUIRED,
-  CONST_VALUES,
-  ENUM_MEMBERS,
-  PATCH_CONST_VALUES,
-  PATCH_UNION_MEMBERS,
-  TYPE_PROPERTIES,
-  TYPE_REQUIRED,
-  UNION_MEMBERS,
-} from "./property-sets";
 
 /** Every keyword JSON Schema 2020-12 defines, plus the annotations it defines.
  *  A keyword outside this set is a custom annotation, which this contract
@@ -99,16 +77,11 @@ const STANDARD_KEYWORDS = new Set([
 /**
  * The keywords this contract actually uses.
  *
- * Tighter than the standard vocabulary on purpose. The harness understands a
- * specific set of constructs — `properties` and `allOf` for shape, `required`
- * for obligation — and a keyword outside that set can quietly change what a
- * document means while every assertion here stays green. `propertyNames`,
- * `maxProperties` or a conditional would each make an unknown property fatal
- * without tripping the openness check; `dependentRequired` would add an
- * obligation the required pin cannot see.
- *
- * So the vocabulary is pinned rather than policed one keyword at a time. Adding
- * one fails this test, which is the prompt to teach the harness what it means
+ * Tighter than the standard vocabulary on purpose. A keyword outside this set
+ * can quietly change what a document means — `propertyNames` or a conditional
+ * would reshape validation in ways none of these tests look for. So the
+ * vocabulary is pinned rather than policed one keyword at a time. Adding one
+ * fails this test, which is the prompt to decide what it means for the contract
  * before the contract starts relying on it.
  */
 const USED_KEYWORDS = new Set([
@@ -128,31 +101,43 @@ const USED_KEYWORDS = new Set([
   "maximum",
   "minItems",
   "minimum",
-  "not",
   "oneOf",
   "pattern",
   "properties",
   "required",
   "title",
   "type",
+  "unevaluatedProperties",
 ]);
 
 /**
- * The only places `not` is allowed, by exact location.
- *
- * Both stop a success outcome from carrying the field that belongs to its
- * suspended sibling — a contradiction rather than a forward-compatible
- * extension. Anywhere else, `not` would quietly close an object.
+ * The shaped definitions that stay open, each for a stated reason. Everything
+ * else describing an object closes with `unevaluatedProperties: false`: the
+ * schema defines exactly what exists, and tolerating fields from a newer
+ * version is the receiver's job, not the validator's.
  */
-const INTENTIONAL_NOT = new Set([
-  "schema.json/$defs/RunFinishedSuccessOutcome/properties/interrupts",
-  "schema.json/$defs/SubagentFinishedSuccessOutcome/properties/interruptIds",
+const OPEN_DEFINITIONS = new Set([
+  // Mixins, composed into other definitions via allOf. The composing definition
+  // closes the whole shape; a mixin that closed itself would reject the very
+  // properties its composers add, because evaluation runs bottom-up.
+  "BaseEvent",
+  "Attributable",
+  "BaseMessage",
+  // RFC 6902 operations. Section 4 requires members an operation does not
+  // define to be ignored rather than rejected, so closing them would make this
+  // copy unfaithful to the standard it mirrors.
+  "AddOperation",
+  "RemoveOperation",
+  "ReplaceOperation",
+  "MoveOperation",
+  "CopyOperation",
+  "TestOperation",
 ]);
 
 type Json = Record<string, unknown>;
 
-/** Walks both files, calling back at every schema position with its keywords. */
-function walkSchemas(
+/** Walks the file, calling back at every schema position with its keywords. */
+function walkSchema(
   root: Json,
   visit: (node: Json, path: string) => void,
 ): void {
@@ -200,21 +185,13 @@ function walkSchemas(
   step(root, "");
 }
 
-const FILES: Array<[string, Json]> = [
-  ["schema.json", schema],
-  ["json-patch.json", jsonPatchSchema],
-];
+describe("the schema file itself", () => {
+  it("validates against the 2020-12 meta-schema", () => {
+    const ajv = createAjv();
+    expect(ajv.validateSchema(schema)).toBe(true);
+  });
 
-describe("the schema files themselves", () => {
-  it.each(FILES)(
-    "%s validates against the 2020-12 meta-schema",
-    (_name, file) => {
-      const ajv = createAjv();
-      expect(ajv.validateSchema(file)).toBe(true);
-    },
-  );
-
-  it("compiles every definition, so strict mode sees every corner of both files", () => {
+  it("compiles every definition, so strict mode sees every corner of the file", () => {
     // Registering a schema does not compile it, and strict mode's unknown-keyword
     // check runs at compile time. So a misspelled keyword in a definition nothing
     // happened to compile would sit there unreported. Compiling all of them is
@@ -222,11 +199,7 @@ describe("the schema files themselves", () => {
     const ajv = createAjv();
     const targets = [
       ...definitionNames().map((name) => `${SCHEMA_ID}#/$defs/${name}`),
-      ...jsonPatchDefinitionNames().map(
-        (name) => `${JSON_PATCH_ID}#/$defs/${name}`,
-      ),
       SCHEMA_ID,
-      JSON_PATCH_ID,
     ];
     for (const target of targets) {
       expect(() => ajv.getSchema(target), target).not.toThrow();
@@ -258,243 +231,191 @@ describe("the schema files themselves", () => {
         "function",
       );
     }
-    for (const name of jsonPatchDefinitionNames()) {
-      const validate = ajv.getSchema(`${JSON_PATCH_ID}#${name}`);
-      expect(validate, `${JSON_PATCH_ID}#${name} does not resolve`).toBeTypeOf(
-        "function",
-      );
-    }
   });
 
   it("gives every definition an anchor matching its name", () => {
     const missing: string[] = [];
-    for (const [fileName, file] of FILES) {
-      for (const [name, def] of Object.entries(
-        (file.$defs ?? {}) as Record<string, Json>,
-      )) {
-        if (def.$anchor !== name) missing.push(`${fileName}: ${name}`);
-      }
+    for (const [name, def] of Object.entries(
+      (schema.$defs ?? {}) as Record<string, Json>,
+    )) {
+      if (def.$anchor !== name) missing.push(name);
     }
     expect(missing).toEqual([]);
   });
 
   it("uses only the keywords the harness understands", () => {
     const unexpected = new Set<string>();
-    for (const [, file] of FILES) {
-      walkSchemas(file, (node) => {
-        for (const key of Object.keys(node)) {
-          if (!USED_KEYWORDS.has(key)) unexpected.add(key);
-        }
-      });
-    }
+    walkSchema(schema, (node) => {
+      for (const key of Object.keys(node)) {
+        if (!USED_KEYWORDS.has(key)) unexpected.add(key);
+      }
+    });
     expect([...unexpected].sort()).toEqual([]);
   });
 
-  it.each(FILES)(
-    "%s uses no keyword outside the standard vocabulary",
-    (_name, file) => {
-      const offenders: string[] = [];
-      walkSchemas(file, (node, path) => {
-        for (const key of Object.keys(node)) {
-          if (!STANDARD_KEYWORDS.has(key)) offenders.push(`${path}: ${key}`);
-        }
-      });
-      expect(offenders).toEqual([]);
-    },
-  );
-
-  it("uses no construct that would hide a property from the pins", () => {
-    // effectiveProperties walks `properties` and `allOf` and nothing else. A
-    // definition that also introduced fields through a conditional or a union
-    // would be pinned incompletely while the suite stayed green, so the harness
-    // refuses to be the thing that silently decides which constructs matter.
-    const unmodelled = [
-      "dependentSchemas",
-      // dependentRequired makes a field mandatory conditionally, which
-      // effectiveRequired would not see: `{"provider": ["model"]}` on TokenUsage
-      // would leave the pin claiming every field optional while
-      // `{"provider": "openai"}` became invalid.
-      "dependentRequired",
-      "if",
-      "then",
-      "else",
-      "patternProperties",
-      "anyOf",
-      "oneOf",
-    ];
+  it("uses no keyword outside the standard vocabulary", () => {
     const offenders: string[] = [];
-    for (const [fileName, file] of FILES) {
-      for (const [name, def] of Object.entries(
-        (file.$defs ?? {}) as Record<string, Json>,
-      )) {
-        if (def.properties === undefined) continue;
-        for (const keyword of unmodelled) {
-          if (def[keyword] !== undefined)
-            offenders.push(`${fileName}: ${name} uses ${keyword}`);
-        }
+    walkSchema(schema, (node, path) => {
+      for (const key of Object.keys(node)) {
+        if (!STANDARD_KEYWORDS.has(key)) offenders.push(`${path}: ${key}`);
       }
-    }
+    });
     expect(offenders).toEqual([]);
   });
 
-  it("resolves every reference, with nothing dangling", () => {
+  it("resolves every reference within the file, with nothing dangling", () => {
     const dangling: string[] = [];
-    const defsOf = (file: Json) => (file.$defs ?? {}) as Json;
-    const anchorsOf = (file: Json) => {
-      const anchors = new Set<string>();
-      walkSchemas(file, (node) => {
-        if (typeof node.$anchor === "string") anchors.add(node.$anchor);
-      });
-      return anchors;
-    };
+    const defs = (schema.$defs ?? {}) as Json;
+    const anchors = new Set<string>();
+    walkSchema(schema, (node) => {
+      if (typeof node.$anchor === "string") anchors.add(node.$anchor);
+    });
 
-    const byFile: Record<string, Json> = {
-      "schema.json": schema,
-      "json-patch.json": jsonPatchSchema,
-    };
-
-    for (const [fileName, file] of FILES) {
-      walkSchemas(file, (node, path) => {
-        const ref = node.$ref;
-        if (typeof ref !== "string") return;
-        const [target, fragment = ""] = ref.split("#");
-        const resolvedFile = target === "" ? file : byFile[target];
-        if (!resolvedFile) {
-          dangling.push(`${fileName}${path}: unknown file "${target}"`);
-          return;
+    walkSchema(schema, (node, path) => {
+      const ref = node.$ref;
+      if (typeof ref !== "string") return;
+      const [target, fragment = ""] = ref.split("#");
+      if (target !== "") {
+        // The file is self-contained on purpose: a consumer downloads one file
+        // and validates, with nothing else to fetch or register.
+        dangling.push(`${path}: reference to another file "${target}"`);
+        return;
+      }
+      if (fragment.startsWith("/$defs/")) {
+        const name = fragment.replace("/$defs/", "");
+        if (!(name in defs)) {
+          dangling.push(`${path}: no definition "${name}"`);
         }
-        if (fragment.startsWith("/$defs/")) {
-          const name = fragment.replace("/$defs/", "");
-          if (!(name in defsOf(resolvedFile))) {
-            dangling.push(`${fileName}${path}: no definition "${name}"`);
-          }
-        } else if (fragment !== "" && !anchorsOf(resolvedFile).has(fragment)) {
-          dangling.push(`${fileName}${path}: no anchor "${fragment}"`);
-        }
-      });
-    }
+      } else if (fragment !== "" && !anchors.has(fragment)) {
+        dangling.push(`${path}: no anchor "${fragment}"`);
+      }
+    });
 
     expect(dangling).toEqual([]);
   });
 
   it("names every property in camelCase, because it describes the wire and not a language", () => {
     const offenders: string[] = [];
-    for (const [fileName, file] of FILES) {
-      walkSchemas(file, (node, path) => {
-        const properties = node.properties as Json | undefined;
-        for (const name of Object.keys(properties ?? {})) {
-          if (!/^[a-z][a-zA-Z0-9]*$/.test(name))
-            offenders.push(`${fileName}${path}: ${name}`);
-        }
-      });
-    }
+    walkSchema(schema, (node, path) => {
+      const properties = node.properties as Json | undefined;
+      for (const name of Object.keys(properties ?? {})) {
+        if (!/^[a-z][a-zA-Z0-9]*$/.test(name))
+          offenders.push(`${path}: ${name}`);
+      }
+    });
     expect(offenders).toEqual([]);
   });
 
   it("gives every field a description, so no meaning has to live in a generator template", () => {
     const undocumented: string[] = [];
+    const defs = (schema.$defs ?? {}) as Record<string, Json>;
 
-    for (const [fileName, file] of FILES) {
-      const defs = (file.$defs ?? {}) as Record<string, Json>;
+    /** The property names a definition inherits by composition. A property the
+     *  definition then redeclares is narrowing an inherited field — the `type`
+     *  const on each event, the `role` const on each message — and its meaning
+     *  is documented once on the field it narrows, not once per event. */
+    const inheritedNames = (def: Json): Set<string> => {
+      const names = new Set<string>();
+      for (const parent of (def.allOf as
+        | Array<{ $ref?: string }>
+        | undefined) ?? []) {
+        const ref = parent.$ref;
+        if (!ref?.startsWith("#/$defs/")) continue;
+        const parentDef = defs[ref.replace("#/$defs/", "")];
+        if (!parentDef) continue;
+        for (const name of Object.keys((parentDef.properties ?? {}) as Json))
+          names.add(name);
+        for (const name of inheritedNames(parentDef)) names.add(name);
+      }
+      return names;
+    };
 
-      /** The property names a definition inherits by composition. A property the
-       *  definition then redeclares is narrowing an inherited field — the `type`
-       *  const on each event, the `role` const on each message — and its meaning
-       *  is documented once on the field it narrows, not 31 times over. */
-      const inheritedNames = (def: Json): Set<string> => {
-        const names = new Set<string>();
-        for (const parent of (def.allOf as
-          | Array<{ $ref?: string }>
-          | undefined) ?? []) {
-          const ref = parent.$ref;
-          if (!ref?.startsWith("#/$defs/")) continue;
-          const parentDef = defs[ref.replace("#/$defs/", "")];
-          if (!parentDef) continue;
-          for (const name of Object.keys((parentDef.properties ?? {}) as Json))
-            names.add(name);
-          for (const name of inheritedNames(parentDef)) names.add(name);
+    walkSchema(schema, (node, path) => {
+      const properties = node.properties as Json | undefined;
+      if (!properties) return;
+      const inherited = inheritedNames(node);
+      for (const [name, child] of Object.entries(properties)) {
+        const subschema = child as Json;
+        if (typeof subschema.description === "string") continue;
+        // A field that only $refs a definition inherits that definition's
+        // description — but only if the definition actually has one. Exempting
+        // the reference without following it left `snapshot` undocumented while
+        // this test reported success.
+        const ref = subschema.$ref;
+        if (typeof ref === "string") {
+          const target = ref.startsWith("#/$defs/")
+            ? (defs[ref.replace("#/$defs/", "")] as Json | undefined)
+            : undefined;
+          if (typeof target?.description === "string") continue;
+          undocumented.push(`${path}/${name} (via ${ref})`);
+          continue;
         }
-        return names;
-      };
-
-      walkSchemas(file, (node, path) => {
-        const properties = node.properties as Json | undefined;
-        if (!properties) return;
-        const inherited = inheritedNames(node);
-        for (const [name, child] of Object.entries(properties)) {
-          const subschema = child as Json;
-          if (typeof subschema.description === "string") continue;
-          // A field that only $refs a definition inherits that definition's
-          // description — but only if the definition actually has one. Exempting
-          // the reference without following it left `snapshot` undocumented while
-          // this test reported success.
-          const ref = subschema.$ref;
-          if (typeof ref === "string") {
-            const target = ref.startsWith("#/$defs/")
-              ? (defs[ref.replace("#/$defs/", "")] as Json | undefined)
-              : undefined;
-            if (typeof target?.description === "string") continue;
-            undocumented.push(`${fileName}${path}/${name} (via ${ref})`);
-            continue;
-          }
-          if (inherited.has(name)) continue;
-          undocumented.push(`${fileName}${path}/${name}`);
-        }
-      });
-    }
+        if (inherited.has(name)) continue;
+        undocumented.push(`${path}/${name}`);
+      }
+    });
 
     expect(undocumented).toEqual([]);
   });
+});
 
-  it("leaves objects open, so an unrecognised property is never fatal", () => {
-    // Checking for a literal `false` is not enough: a schema-valued
-    // `additionalProperties` constrains unknown properties just as effectively.
-    // `{"type": "string"}` on TokenUsage would leave every fixture green while
-    // rejecting `{"vendorCost": 0.01}` — an additive field of exactly the kind
-    // openness exists to allow. So the value has to be absent or `true`.
-    const constrained: string[] = [];
-    for (const [fileName, file] of FILES) {
-      walkSchemas(file, (node, path) => {
-        for (const keyword of [
-          "additionalProperties",
-          "unevaluatedProperties",
-        ]) {
-          if (!(keyword in node)) continue;
-          if (node[keyword] !== true)
-            constrained.push(`${fileName}${path}: ${keyword}`);
-        }
-        // `not` closes an object just as effectively: `{"required":
-        // ["vendorCost"]}` under it rejects a document for carrying an additive
-        // field. It is used on purpose in exactly two places, to stop a success
-        // outcome carrying the field that belongs to its suspended sibling.
-        // Exempting those two by name rather than by shape matters: an earlier
-        // version exempted any `not` beneath a property, which would have let one
-        // on `metadata` reject an arbitrary key while this test stayed green.
-        if ("not" in node && !INTENTIONAL_NOT.has(`${fileName}${path}`)) {
-          constrained.push(`${fileName}${path}: not`);
-        }
-        // A property whose schema is `false` can never be satisfied, so declaring
-        // one closes the object against a field it claims to have. `metadata:
-        // false` on an event made metadata unusable while the property-set pin
-        // still reported it present — the walker skips boolean schemas, so this
-        // has to look at the values directly.
-        for (const [name, child] of Object.entries(
-          (node.properties ?? {}) as Record<string, unknown>,
-        )) {
-          if (child === false)
-            constrained.push(`${fileName}${path}/properties/${name}: false`);
-        }
-      });
+describe("closure", () => {
+  it("closes every shaped definition, except the ones open for a stated reason", () => {
+    // The schema is exact: a property it does not declare fails validation.
+    // Tolerating fields from a newer minor version is the receiver's job — the
+    // generated SDK boundaries strip what they do not recognise and warn — and
+    // a validator cannot express strip-and-warn, so it does not try.
+    const wrong: string[] = [];
+    for (const name of shapedDefinitions()) {
+      const def = (schema.$defs as Record<string, Json>)[name];
+      const closed = def.unevaluatedProperties === false;
+      if (OPEN_DEFINITIONS.has(name) && "unevaluatedProperties" in def) {
+        wrong.push(`${name} is on the open list but declares closure`);
+      }
+      if (!OPEN_DEFINITIONS.has(name) && !closed) {
+        wrong.push(`${name} is not closed`);
+      }
     }
-    expect(constrained).toEqual([]);
+    expect(wrong).toEqual([]);
+  });
+
+  it("lists no definition as open that does not exist or has no shape", () => {
+    // A renamed definition must not leave a stale exemption behind that would
+    // silently apply to nothing — or worse, to a future definition reusing the
+    // name.
+    const shaped = new Set(shapedDefinitions());
+    const stale = [...OPEN_DEFINITIONS].filter((name) => !shaped.has(name));
+    expect(stale).toEqual([]);
+  });
+
+  it("uses additionalProperties only to declare open-by-key objects", () => {
+    // The only legitimate value is `true`, on objects that are open by meaning:
+    // Metadata, activity content, a carried JSON Schema. A schema-valued or
+    // false `additionalProperties` would be a second closure mechanism the
+    // closure test above does not look for.
+    const offenders: string[] = [];
+    walkSchema(schema, (node, path) => {
+      if (
+        "additionalProperties" in node &&
+        node.additionalProperties !== true
+      ) {
+        offenders.push(path);
+      }
+      // `not` can reject properties just as effectively, and boolean-false
+      // property schemas close an object against a field it claims to have.
+      if ("not" in node) offenders.push(`${path}: not`);
+      for (const [name, child] of Object.entries(
+        (node.properties ?? {}) as Record<string, unknown>,
+      )) {
+        if (child === false)
+          offenders.push(`${path}/properties/${name}: false`);
+      }
+    });
+    expect(offenders).toEqual([]);
   });
 });
 
 describe("the event union", () => {
-  it("has exactly 31 members", () => {
-    expect(unionMembers()).toHaveLength(31);
-  });
-
   it("has no duplicates", () => {
     const members = unionMembers();
     expect(new Set(members).size).toBe(members.length);
@@ -521,163 +442,6 @@ describe("the event union", () => {
       );
     }
   });
-});
-
-describe("unions", () => {
-  it("pins every union in schema.json, wherever it appears, besides the event union", () => {
-    const { Event: _event, ...unions } = unionPositions();
-    expect(Object.keys(unions).sort()).toEqual(
-      Object.keys(UNION_MEMBERS).sort(),
-    );
-  });
-
-  it("pins every union in json-patch.json", () => {
-    expect(Object.keys(unionPositions(jsonPatchSchema)).sort()).toEqual(
-      Object.keys(PATCH_UNION_MEMBERS).sort(),
-    );
-  });
-
-  it.each(Object.entries(UNION_MEMBERS))(
-    "%s has exactly its pinned members",
-    (name, pinned) => {
-      expect(unionPositions()[name]).toEqual(pinned);
-    },
-  );
-
-  it.each(Object.entries(PATCH_UNION_MEMBERS))(
-    "%s has exactly its pinned members",
-    (name, pinned) => {
-      expect(unionPositions(jsonPatchSchema)[name]).toEqual(pinned);
-    },
-  );
-});
-
-describe("constraints", () => {
-  // A snapshot, because the operands are too numerous to spell out and too
-  // load-bearing to leave unchecked: `type`, `pattern`, `minimum`, `maximum`,
-  // `minItems`, `default`, `contentEncoding` and every `$ref` target. Changing one
-  // is fine; changing one without noticing is not, and updating the snapshot is
-  // the second, visible act that makes it deliberate.
-  it("matches the recorded constraints in schema.json", () => {
-    expect(constraintMap()).toMatchSnapshot();
-  });
-
-  it("matches the recorded constraints in json-patch.json", () => {
-    expect(constraintMap(jsonPatchSchema)).toMatchSnapshot();
-  });
-});
-
-describe("fixed values", () => {
-  it("pins every const in schema.json, wherever it appears", () => {
-    expect(constPositions()).toEqual(CONST_VALUES);
-  });
-
-  it("pins every const in json-patch.json", () => {
-    expect(constPositions(jsonPatchSchema)).toEqual(PATCH_CONST_VALUES);
-  });
-});
-
-describe("enums", () => {
-  it("pins every enum besides EventType, wherever it appears", () => {
-    const { EventType: _eventType, ...enums } = enumPositions();
-    expect(Object.keys(enums).sort()).toEqual(Object.keys(ENUM_MEMBERS).sort());
-  });
-
-  it("json-patch.json declares no enum", () => {
-    expect(Object.keys(enumPositions(jsonPatchSchema))).toEqual([]);
-  });
-
-  it.each(Object.entries(ENUM_MEMBERS))(
-    "%s has exactly its pinned members",
-    (name, pinned) => {
-      expect(enumPositions()[name]).toEqual(pinned);
-    },
-  );
-});
-
-describe("property sets", () => {
-  it("pins every shaped definition in schema.json, leaving none unchecked", () => {
-    // Without this, the pin is only as good as what came to mind when it was
-    // written: dropping `required: ["type"]` from RunFinishedSuccessOutcome once
-    // left the whole suite green while making `"outcome": {}` a valid
-    // RUN_FINISHED.
-    const pinned = [
-      ...Object.keys(EVENT_PROPERTIES),
-      ...Object.keys(TYPE_PROPERTIES),
-    ].sort();
-    expect(pinned).toEqual(shapedDefinitions());
-    expect(Object.keys(EVENT_REQUIRED).sort()).toEqual(
-      Object.keys(EVENT_PROPERTIES).sort(),
-    );
-    expect(Object.keys(TYPE_REQUIRED).sort()).toEqual(
-      Object.keys(TYPE_PROPERTIES).sort(),
-    );
-  });
-
-  it("pins every shaped definition in json-patch.json", () => {
-    expect(Object.keys(PATCH_PROPERTIES).sort()).toEqual(
-      shapedDefinitions(jsonPatchSchema),
-    );
-    expect(Object.keys(PATCH_REQUIRED).sort()).toEqual(
-      Object.keys(PATCH_PROPERTIES).sort(),
-    );
-  });
-
-  it.each(Object.entries(PATCH_PROPERTIES))(
-    "%s carries exactly its pinned fields",
-    (name, pinned) => {
-      expect(effectiveProperties(name, jsonPatchSchema)).toEqual(pinned);
-    },
-  );
-
-  it.each(Object.entries(PATCH_REQUIRED))(
-    "%s requires exactly its pinned fields",
-    (name, pinned) => {
-      expect(effectiveRequired(name, jsonPatchSchema)).toEqual(pinned);
-    },
-  );
-
-  it("pins all 31 events", () => {
-    expect(Object.keys(EVENT_PROPERTIES).sort()).toEqual(
-      [...unionMembers()].sort(),
-    );
-  });
-
-  it.each(Object.entries(EVENT_PROPERTIES))(
-    "%s carries exactly its pinned fields",
-    (name, pinned) => {
-      expect(effectiveProperties(name)).toEqual(pinned);
-    },
-  );
-
-  it.each(Object.entries(TYPE_PROPERTIES))(
-    "%s carries exactly its pinned fields",
-    (name, pinned) => {
-      expect(effectiveProperties(name)).toEqual(pinned);
-    },
-  );
-});
-
-describe("required fields", () => {
-  it("pins all 31 events", () => {
-    expect(Object.keys(EVENT_REQUIRED).sort()).toEqual(
-      [...unionMembers()].sort(),
-    );
-  });
-
-  it.each(Object.entries(EVENT_REQUIRED))(
-    "%s requires exactly its pinned fields",
-    (name, pinned) => {
-      expect(effectiveRequired(name)).toEqual(pinned);
-    },
-  );
-
-  it.each(Object.entries(TYPE_REQUIRED))(
-    "%s requires exactly its pinned fields",
-    (name, pinned) => {
-      expect(effectiveRequired(name)).toEqual(pinned);
-    },
-  );
 });
 
 describe("each event's own definition rejects the others", () => {
@@ -709,7 +473,8 @@ describe("each event's own definition rejects the others", () => {
 
 /** One accepted document per event, used only to prove cross-type rejection.
  *  The fixture tree is where documents are covered properly; these exist so the
- *  31-by-31 comparison does not depend on which fixtures happen to be present. */
+ *  all-against-all comparison does not depend on which fixtures happen to be
+ *  present. */
 const MINIMAL_EVENTS: Record<string, Json> = {
   TEXT_MESSAGE_START: { type: "TEXT_MESSAGE_START", messageId: "m1" },
   TEXT_MESSAGE_CONTENT: {

@@ -1,5 +1,5 @@
 {
-  "keyword": "not",
-  "instanceLocation": "/outcome/interrupts",
-  "keywordLocation": "#/$defs/RunFinishedSuccessOutcome/properties/interrupts/not"
+  "keyword": "unevaluatedProperties",
+  "instanceLocation": "/outcome",
+  "keywordLocation": "#/$defs/RunFinishedSuccessOutcome/unevaluatedProperties"
 }

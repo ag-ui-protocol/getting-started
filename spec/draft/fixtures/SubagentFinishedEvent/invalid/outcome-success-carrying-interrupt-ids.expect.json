@@ -1,5 +1,5 @@
 {
-  "keyword": "not",
-  "instanceLocation": "/outcome/interruptIds",
-  "keywordLocation": "#/$defs/SubagentFinishedSuccessOutcome/properties/interruptIds/not"
+  "keyword": "unevaluatedProperties",
+  "instanceLocation": "/outcome",
+  "keywordLocation": "#/$defs/SubagentFinishedSuccessOutcome/unevaluatedProperties"
 }

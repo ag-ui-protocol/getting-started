@@ -323,9 +323,19 @@ function main(): void {
     .map(([name]) => name)
     .filter(
       (name) =>
+        // Mixins have no wire shape of their own.
         name !== "Attributable" &&
         name !== "BaseEvent" &&
-        name !== "BaseMessage",
+        name !== "BaseMessage" &&
+        // The RFC 6902 operations are an external standard the SDKs consume
+        // through JSON Patch libraries rather than declare as types, so there
+        // is nothing to reconcile them against.
+        name !== "AddOperation" &&
+        name !== "RemoveOperation" &&
+        name !== "ReplaceOperation" &&
+        name !== "MoveOperation" &&
+        name !== "CopyOperation" &&
+        name !== "TestOperation",
     );
 
   const lines: string[] = [];
