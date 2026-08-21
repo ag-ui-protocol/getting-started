@@ -6,17 +6,30 @@
  * (rather than falling into the UNKNOWN_INTERRUPT_ID gate).
  */
 import { describe, it, expect, vi } from "vitest";
-import { EventType, type BaseEvent, type RunAgentInput, type Interrupt as AguiInterrupt } from "@ag-ui/core";
+import {
+  EventType,
+  type BaseEvent,
+  type RunAgentInput,
+  type ResumeEntry,
+  type Interrupt as AguiInterrupt,
+} from "@ag-ui/core";
 import {
   AgentResult as StrandsAgentResult,
   InterruptResponseContent,
   Message as StrandsMessage,
   TextBlock,
   type Interrupt as StrandsInterrupt,
+  type InterruptResponse,
 } from "@strands-agents/sdk";
 
 import { StrandsAgent } from "../agent";
-import { collect, minimalRunInput, scriptedAgent } from "./helpers";
+import {
+  collect,
+  minimalRunInput,
+  parkInterrupts,
+  scriptedAgent,
+  stream,
+} from "./helpers";
 
 function makeAgentResultStream(
   result: StrandsAgentResult,
@@ -111,6 +124,43 @@ describe("StrandsAgent native interrupt bridge (Strands SDK 1.1.0+)", () => {
     });
   });
 
+  it("logs a debug trace when a paused result carries no interrupts", async () => {
+    // The run finishes as a success with nothing to resume, so the only trace
+    // an operator can get that the checkpoint may still be parked is this log.
+    const debug = vi.fn();
+    const stubAgent = scriptedAgent([], {
+      stream: makeAgentResultStream(buildAgentResult([])) as never,
+    });
+    const sa = new StrandsAgent({
+      agent: stubAgent,
+      name: "t",
+      config: { logger: { debug, warn: vi.fn(), error: vi.fn() } },
+    });
+    (
+      sa as unknown as { _agentsByThread: Map<string, unknown> }
+    )._agentsByThread.set("thread-1", stubAgent);
+
+    const events = await collect(sa);
+
+    // Control flow is unchanged: still a plain success finish, no extra event.
+    const finished = events.at(-1) as BaseEvent & { outcome?: { type: string } };
+    expect(finished.type).toBe(EventType.RUN_FINISHED);
+    expect(finished.outcome).toBeUndefined();
+    expect(events.map((e) => e.type)).not.toContain(EventType.RUN_ERROR);
+
+    const traced = debug.mock.calls.map(([message]) => String(message));
+    expect(
+      traced.some(
+        (message) =>
+          message.includes("[@ag-ui/aws-strands]") &&
+          /stopped for an interrupt with an empty interrupts list/.test(
+            message,
+          ) &&
+          message.includes("reporting no pending interrupts"),
+      ),
+    ).toBe(true);
+  });
+
   it("accepts a matching resume[] and forwards InterruptResponseContent to Strands", async () => {
     let capturedArgs: unknown = null;
     const stubAgent = scriptedAgent([], {
@@ -133,12 +183,9 @@ describe("StrandsAgent native interrupt bridge (Strands SDK 1.1.0+)", () => {
     (
       sa as unknown as { _agentsByThread: Map<string, unknown> }
     )._agentsByThread.set("thread-1", stubAgent);
-    // Seed a pending interrupt on the thread so the gate accepts the resume.
-    (
-      sa as unknown as {
-        _pendingInterruptsByThread: Map<string, Map<string, AguiInterrupt>>;
-      }
-    )._pendingInterruptsByThread.set("thread-1", new Map([["int-7", { id: "int-7", reason: "tool_call" }]]));
+    // Park the interrupt on the SDK's checkpoint, with the adapter's metadata
+    // record beside it, so the gate accepts the resume.
+    parkInterrupts(sa, "thread-1", [{ id: "int-7", reason: "tool_call" }]);
     const input: RunAgentInput = minimalRunInput({
       resume: [
         {
@@ -172,12 +219,8 @@ describe("StrandsAgent native interrupt bridge (Strands SDK 1.1.0+)", () => {
   it("still emits UNKNOWN_INTERRUPT when resume[] references an unknown id", async () => {
     const stubAgent = scriptedAgent([]);
     const sa = new StrandsAgent({ agent: stubAgent, name: "t" });
-    // One pending interrupt, but the resume references a different id.
-    (
-      sa as unknown as {
-        _pendingInterruptsByThread: Map<string, Map<string, AguiInterrupt>>;
-      }
-    )._pendingInterruptsByThread.set("thread-1", new Map([["known", { id: "known", reason: "tool_call" }]]));
+    // One open interrupt, but the resume references a different id.
+    parkInterrupts(sa, "thread-1", [{ id: "known", reason: "tool_call" }]);
 
     const events = await collect(
       sa,
@@ -218,11 +261,7 @@ describe("StrandsAgent native interrupt bridge (Strands SDK 1.1.0+)", () => {
     (
       sa as unknown as { _agentsByThread: Map<string, unknown> }
     )._agentsByThread.set("thread-1", stubAgent);
-    (
-      sa as unknown as {
-        _pendingInterruptsByThread: Map<string, Map<string, AguiInterrupt>>;
-      }
-    )._pendingInterruptsByThread.set("thread-1", new Map([["ic", { id: "ic", reason: "tool_call" }]]));
+    parkInterrupts(sa, "thread-1", [{ id: "ic", reason: "tool_call" }]);
 
     await collect(
       sa,
@@ -240,5 +279,161 @@ describe("StrandsAgent native interrupt bridge (Strands SDK 1.1.0+)", () => {
     const [first] = capturedArgs as InterruptResponseContent[];
     expect(first.interruptResponse.interruptId).toBe("ic");
     expect(first.interruptResponse.response).toEqual({ status: "cancelled" });
+  });
+});
+
+/**
+ * Resume one generic interrupt and return the single `InterruptResponse` the
+ * adapter handed to Strands. Generic on purpose: no `responseSchema` means the
+ * payload gate never runs, so whatever the client sent reaches the SDK as-is.
+ */
+async function forwardedResumeResponse(
+  entry: ResumeEntry,
+): Promise<InterruptResponse> {
+  let capturedArgs: unknown = null;
+  const stubAgent = scriptedAgent([], {
+    stream: ((args: unknown) => {
+      capturedArgs = args;
+      return (async function* () {
+        return new StrandsAgentResult({
+          stopReason: "endTurn",
+          lastMessage: StrandsMessage.fromMessageData({
+            role: "assistant",
+            content: [new TextBlock("done").toJSON()],
+          }),
+          invocationState: {},
+        });
+      })();
+    }) as never,
+  });
+  const sa = new StrandsAgent({ agent: stubAgent, name: "t" });
+  (
+    sa as unknown as { _agentsByThread: Map<string, unknown> }
+  )._agentsByThread.set("thread-1", stubAgent);
+  parkInterrupts(sa, "thread-1", [
+    { id: entry.interruptId, reason: "need_input" },
+  ]);
+
+  const events = await collect(sa, minimalRunInput({ resume: [entry] }));
+  expect(events.map((e) => e.type)).not.toContain(EventType.RUN_ERROR);
+  expect(Array.isArray(capturedArgs)).toBe(true);
+  const [first] = capturedArgs as InterruptResponseContent[];
+  return first.interruptResponse;
+}
+
+describe("Resume responses recorded on the native interrupt", () => {
+  // Strands reads `response === undefined` as "still awaiting a human"
+  // (InterruptState.getUnansweredInterrupts, and the gate in
+  // interruptFromAgent that re-throws InterruptError). Handing it an
+  // undefined response re-raises the same interrupt on every resume, and a
+  // generic interrupt publishes no responseSchema, so nothing upstream
+  // rejects an empty payload first.
+  it("records a defined response when a resolved entry carries no payload", async () => {
+    const response = await forwardedResumeResponse({
+      interruptId: "int-absent",
+      status: "resolved",
+    });
+
+    expect(response.response).not.toBeUndefined();
+    expect(response.response).toStrictEqual({});
+  });
+
+  it("records a defined response when a resolved payload is explicitly undefined", async () => {
+    const response = await forwardedResumeResponse({
+      interruptId: "int-undef",
+      status: "resolved",
+      payload: undefined,
+    });
+
+    expect(response.response).not.toBeUndefined();
+    expect(response.response).toStrictEqual({});
+  });
+
+  // The substitution above must not become a blanket rewrite: a payload that
+  // is present is what the tool destructures, falsy values included.
+  it.each([
+    ["an object", { approved: true }],
+    ["false", false],
+    ["zero", 0],
+    ["an empty string", ""],
+    ["null", null],
+    ["an empty array", []],
+    ["an empty object", {}],
+    ["a string", "approved"],
+  ])("forwards a present payload unchanged: %s", async (_label, payload) => {
+    const response = await forwardedResumeResponse({
+      interruptId: "int-present",
+      status: "resolved",
+      payload,
+    });
+
+    expect(response.response).toStrictEqual(payload);
+  });
+
+  // The replay short-circuit answers from a fingerprint, so the fingerprint has
+  // to separate whatever this converter separates. Reading an absent payload
+  // and an explicit null as one resume answers the second with a success the
+  // SDK never produced.
+  it("does not read an explicit null payload as a replay of an absent one", async () => {
+    const forwarded: InterruptResponse[] = [];
+    const stubAgent = scriptedAgent([], {
+      stream: ((args: unknown) => {
+        for (const content of args as InterruptResponseContent[]) {
+          forwarded.push(content.interruptResponse);
+        }
+        return (async function* () {
+          yield stream.textDelta("resumed");
+          return new StrandsAgentResult({
+            stopReason: "endTurn",
+            lastMessage: StrandsMessage.fromMessageData({
+              role: "assistant",
+              content: [new TextBlock("resumed").toJSON()],
+            }),
+            invocationState: {},
+          });
+        })();
+      }) as never,
+    });
+    const sa = new StrandsAgent({ agent: stubAgent, name: "t" });
+    (
+      sa as unknown as { _agentsByThread: Map<string, unknown> }
+    )._agentsByThread.set("thread-1", stubAgent);
+    const recordOpenInterrupt = () =>
+      parkInterrupts(sa, "thread-1", [
+        { id: "int-null", reason: "need_input" },
+      ]);
+
+    recordOpenInterrupt();
+    await collect(
+      sa,
+      minimalRunInput({
+        runId: "r1",
+        resume: [{ interruptId: "int-null", status: "resolved" }],
+      }),
+    );
+
+    // The tool asks its question again, so the same id is open again and the
+    // client answers it with something else this time.
+    recordOpenInterrupt();
+    const second = await collect(
+      sa,
+      minimalRunInput({
+        runId: "r2",
+        resume: [
+          { interruptId: "int-null", status: "resolved", payload: null },
+        ],
+      }),
+    );
+
+    expect(forwarded.map((response) => response.response)).toStrictEqual([
+      {},
+      null,
+    ]);
+    expect(second.some((e) => e.type === EventType.RUN_ERROR)).toBe(false);
+    expect(
+      second
+        .filter((e) => e.type === EventType.TEXT_MESSAGE_CONTENT)
+        .map((e) => (e as unknown as { delta: string }).delta),
+    ).toStrictEqual(["resumed"]);
   });
 });

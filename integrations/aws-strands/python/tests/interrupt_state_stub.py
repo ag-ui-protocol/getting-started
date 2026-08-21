@@ -31,6 +31,42 @@ class InterruptStateStub:
             self.context = context
         self.activated = True
 
+    def resume(self, prompt: Any) -> None:
+        """Record the submitted answers on their interrupts, as Strands does.
+
+        Paraphrased rather than delegated for the reason given above: the real
+        method is on a private class that moved between releases, and the oldest
+        release this package supports has no ``resume`` at all, so calling it
+        would pin the suite. ``test_stub_resume_matches_the_installed_sdk``
+        holds the paraphrase to the installed release's behaviour.
+        """
+        if not self.activated:
+            return
+        if not isinstance(prompt, list):
+            raise TypeError(
+                f"prompt_type={type(prompt)} | must resume from interrupt with "
+                "list of interruptResponse's"
+            )
+        foreign_types = [
+            content_type
+            for content in prompt
+            for content_type in content
+            if content_type != "interruptResponse"
+        ]
+        if foreign_types:
+            raise TypeError(
+                f"content_types=<{foreign_types}> | must resume from interrupt "
+                "with list of interruptResponse's"
+            )
+        for content in prompt:
+            interrupt_id = content["interruptResponse"]["interruptId"]
+            if interrupt_id not in self.interrupts:
+                raise KeyError(f"interrupt_id=<{interrupt_id}> | no interrupt found")
+            self.interrupts[interrupt_id].response = content["interruptResponse"][
+                "response"
+            ]
+        self.context["responses"] = prompt
+
     def deactivate(self) -> None:
         """Clear the pause, dropping interrupts and context as Strands does."""
         self.interrupts = {}

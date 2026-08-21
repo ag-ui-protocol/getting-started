@@ -32,6 +32,23 @@ interface ReasoningMessageFields {
   messageId: string;
 }
 
+/**
+ * Spreads a chunk's metadata onto an event synthesized from that chunk.
+ *
+ * Applied to every event derived from a chunk, never to the synthetic `*_END`
+ * that closes the *previous* message — that is what stops a chunk's metadata
+ * leaking onto the message it is closing when one chunk ends one message and
+ * begins another.
+ *
+ * A chunk that expands into both a start and a content event stamps the same
+ * metadata twice. That is harmless: the merge is last-write-wins per key, so
+ * applying an identical object twice is indistinguishable from applying it once,
+ * and stamping both is what keeps the metadata attached when only one of the two
+ * is emitted.
+ */
+const withChunkMetadata = <T extends BaseEvent>(event: T, chunk: BaseEvent): T =>
+  chunk.metadata === undefined ? event : { ...event, metadata: chunk.metadata };
+
 export const transformChunks =
   (debugLogger?: DebugLoggerInput) =>
   (events$: Observable<BaseEvent>): Observable<BaseEvent> => {
@@ -169,12 +186,15 @@ export const transformChunks =
               };
               mode = "text";
 
-              const textMessageStartEvent = {
-                type: EventType.TEXT_MESSAGE_START,
-                messageId: messageChunkEvent.messageId,
-                role: messageChunkEvent.role || "assistant",
-                ...(messageChunkEvent.name !== undefined && { name: messageChunkEvent.name }),
-              } as TextMessageStartEvent;
+              const textMessageStartEvent = withChunkMetadata(
+                {
+                  type: EventType.TEXT_MESSAGE_START,
+                  messageId: messageChunkEvent.messageId,
+                  role: messageChunkEvent.role || "assistant",
+                  ...(messageChunkEvent.name !== undefined && { name: messageChunkEvent.name }),
+                } as TextMessageStartEvent,
+                messageChunkEvent,
+              );
 
               textMessageResult.push(textMessageStartEvent);
 
@@ -184,11 +204,14 @@ export const transformChunks =
             }
 
             if (messageChunkEvent.delta !== undefined) {
-              const textMessageContentEvent = {
-                type: EventType.TEXT_MESSAGE_CONTENT,
-                messageId: textMessageFields!.messageId,
-                delta: messageChunkEvent.delta,
-              } as TextMessageContentEvent;
+              const textMessageContentEvent = withChunkMetadata(
+                {
+                  type: EventType.TEXT_MESSAGE_CONTENT,
+                  messageId: textMessageFields!.messageId,
+                  delta: messageChunkEvent.delta,
+                } as TextMessageContentEvent,
+                messageChunkEvent,
+              );
 
               textMessageResult.push(textMessageContentEvent);
 
@@ -197,6 +220,20 @@ export const transformChunks =
               });
             }
 
+            // A continuation chunk carrying only metadata — a final chunk with
+            // usage and a finish reason, the case the merge design exists for —
+            // synthesizes nothing above. Emit a zero-delta content event so the
+            // metadata still reaches the reducer. It cannot ride the synthetic
+            // `*_END` instead: `finalize` discards the events it creates, so the
+            // last message of a stream would lose it.
+            if (textMessageResult.length === 0 && messageChunkEvent.metadata !== undefined) {
+              textMessageResult.push({
+                type: EventType.TEXT_MESSAGE_CONTENT,
+                messageId: textMessageFields!.messageId,
+                delta: "",
+                metadata: messageChunkEvent.metadata,
+              } as TextMessageContentEvent);
+            }
             return textMessageResult;
           }
           case EventType.TOOL_CALL_CHUNK: {
@@ -227,12 +264,15 @@ export const transformChunks =
               };
               mode = "tool";
 
-              const toolCallStartEvent = {
-                type: EventType.TOOL_CALL_START,
-                toolCallId: toolCallChunkEvent.toolCallId,
-                toolCallName: toolCallChunkEvent.toolCallName,
-                parentMessageId: toolCallChunkEvent.parentMessageId,
-              } as ToolCallStartEvent;
+              const toolCallStartEvent = withChunkMetadata(
+                {
+                  type: EventType.TOOL_CALL_START,
+                  toolCallId: toolCallChunkEvent.toolCallId,
+                  toolCallName: toolCallChunkEvent.toolCallName,
+                  parentMessageId: toolCallChunkEvent.parentMessageId,
+                } as ToolCallStartEvent,
+                toolCallChunkEvent,
+              );
 
               toolMessageResult.push(toolCallStartEvent);
 
@@ -243,11 +283,14 @@ export const transformChunks =
             }
 
             if (toolCallChunkEvent.delta !== undefined) {
-              const toolCallArgsEvent = {
-                type: EventType.TOOL_CALL_ARGS,
-                toolCallId: toolCallFields!.toolCallId,
-                delta: toolCallChunkEvent.delta,
-              } as ToolCallArgsEvent;
+              const toolCallArgsEvent = withChunkMetadata(
+                {
+                  type: EventType.TOOL_CALL_ARGS,
+                  toolCallId: toolCallFields!.toolCallId,
+                  delta: toolCallChunkEvent.delta,
+                } as ToolCallArgsEvent,
+                toolCallChunkEvent,
+              );
 
               toolMessageResult.push(toolCallArgsEvent);
 
@@ -256,6 +299,15 @@ export const transformChunks =
               });
             }
 
+            // Same as the text case above.
+            if (toolMessageResult.length === 0 && toolCallChunkEvent.metadata !== undefined) {
+              toolMessageResult.push({
+                type: EventType.TOOL_CALL_ARGS,
+                toolCallId: toolCallFields!.toolCallId,
+                delta: "",
+                metadata: toolCallChunkEvent.metadata,
+              } as ToolCallArgsEvent);
+            }
             return toolMessageResult;
           }
           case EventType.REASONING_MESSAGE_CHUNK: {
@@ -283,10 +335,13 @@ export const transformChunks =
               };
               mode = "reasoning";
 
-              const reasoningMessageStartEvent = {
-                type: EventType.REASONING_MESSAGE_START,
-                messageId: reasoningChunkEvent.messageId,
-              } as ReasoningMessageStartEvent;
+              const reasoningMessageStartEvent = withChunkMetadata(
+                {
+                  type: EventType.REASONING_MESSAGE_START,
+                  messageId: reasoningChunkEvent.messageId,
+                } as ReasoningMessageStartEvent,
+                reasoningChunkEvent,
+              );
               reasoningMessageResult.push(reasoningMessageStartEvent);
 
               log?.event("TRANSFORM", "REASONING_MESSAGE_START", reasoningMessageStartEvent, {
@@ -295,11 +350,14 @@ export const transformChunks =
             }
 
             if (reasoningChunkEvent.delta !== undefined) {
-              const reasoningMessageContentEvent = {
-                type: EventType.REASONING_MESSAGE_CONTENT,
-                messageId: reasoningMessageFields!.messageId,
-                delta: reasoningChunkEvent.delta,
-              } as ReasoningMessageContentEvent;
+              const reasoningMessageContentEvent = withChunkMetadata(
+                {
+                  type: EventType.REASONING_MESSAGE_CONTENT,
+                  messageId: reasoningMessageFields!.messageId,
+                  delta: reasoningChunkEvent.delta,
+                } as ReasoningMessageContentEvent,
+                reasoningChunkEvent,
+              );
 
               reasoningMessageResult.push(reasoningMessageContentEvent);
 
@@ -308,6 +366,15 @@ export const transformChunks =
               });
             }
 
+            // Same as the text case above.
+            if (reasoningMessageResult.length === 0 && reasoningChunkEvent.metadata !== undefined) {
+              reasoningMessageResult.push({
+                type: EventType.REASONING_MESSAGE_CONTENT,
+                messageId: reasoningMessageFields!.messageId,
+                delta: "",
+                metadata: reasoningChunkEvent.metadata,
+              } as ReasoningMessageContentEvent);
+            }
             return reasoningMessageResult;
           }
         }

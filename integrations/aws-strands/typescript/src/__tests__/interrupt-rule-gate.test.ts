@@ -1,8 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { EventType, type BaseEvent, type RunAgentInput, type Interrupt as AguiInterrupt } from "@ag-ui/core";
+import { EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/core";
 
 import { StrandsAgent } from "../agent";
-import { collect, minimalRunInput, scriptedAgent } from "./helpers";
+import {
+  collect,
+  minimalRunInput,
+  parkInterrupts,
+  scriptedAgent,
+} from "./helpers";
 
 /**
  * Interrupt-rule gate lives in `StrandsAgent.run()` above `_runRaw` so any
@@ -34,19 +39,16 @@ class NeverRanAgent extends StrandsAgent {
   }
 }
 
-/** Helper to set pending interrupts on the agent (new Map<string, Map<string, AguiInterrupt>> format). */
+/**
+ * Open `ids` on the thread: parked on the SDK's checkpoint, which decides what
+ * is still open, with the adapter's AG-UI metadata record beside them.
+ */
 function setPending(agent: StrandsAgent, threadId: string, ids: string[]) {
-  const pending = (
-    agent as unknown as {
-      _pendingInterruptsByThread: Map<string, Map<string, AguiInterrupt>>;
-    }
-  )._pendingInterruptsByThread;
-  const map = new Map<string, AguiInterrupt>();
-  for (const id of ids) {
-    map.set(id, { id, reason: "tool_call" });
-  }
-  pending.set(threadId, map);
-  return pending;
+  return parkInterrupts(
+    agent,
+    threadId,
+    ids.map((id) => ({ id, reason: "tool_call" })),
+  );
 }
 
 describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
@@ -134,6 +136,118 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
     expect(err.code).toBe("PENDING_INTERRUPTS");
   });
 
+  it("Rule 4: admits fresh input when the SDK holds no checkpoint", async () => {
+    const agent = new NeverRanAgent();
+    // A record that exists and holds nothing is what a completed resume leaves
+    // behind, and what a restart restores from persisted bookkeeping whose
+    // `pendingInterrupts` is `{}`. The SDK is the one that decides, and it has
+    // nothing parked.
+    setPending(agent, "t", []);
+
+    // Blocking the fresh turn would strand the thread: the resume such a block
+    // demands finds nothing to address.
+    const refusedResume = await collect(
+      agent,
+      minimalRunInput({
+        threadId: "t",
+        runId: "r1",
+        resume: [{ interruptId: "gone-1", status: "resolved", payload: {} }],
+      }),
+    );
+    expect(refusedResume.map((e) => e.type)).toEqual([
+      EventType.RUN_STARTED,
+      EventType.RUN_ERROR,
+    ]);
+    expect((refusedResume[1] as unknown as { code: string }).code).toBe(
+      "UNKNOWN_INTERRUPT_ID",
+    );
+
+    const events = await collect(
+      agent,
+      minimalRunInput({ threadId: "t", runId: "r2" }),
+    );
+    expect(events.map((e) => e.type)).toEqual([
+      EventType.RUN_STARTED,
+      EventType.RUN_FINISHED,
+    ]);
+    expect(agent.rawCalled).toBe(1);
+  });
+
+  it("Rule 4: admits fresh input over a record the SDK has no checkpoint for", async () => {
+    const agent = new NeverRanAgent();
+    // Python pops its record on resume success only, so a resume that errors
+    // mid-stream leaves a populated record beside an idle checkpoint. Reading
+    // the record as "something is pending" strands the thread: the block tells
+    // the client to resume, and the resume finds nothing open to address.
+    parkInterrupts(
+      agent,
+      "t",
+      [{ id: "gone-1", reason: "tool_call" }],
+      new Map(),
+    );
+
+    const refusedResume = await collect(
+      agent,
+      minimalRunInput({
+        threadId: "t",
+        runId: "r1",
+        resume: [{ interruptId: "gone-1", status: "resolved", payload: {} }],
+      }),
+    );
+    expect(refusedResume.map((e) => e.type)).toEqual([
+      EventType.RUN_STARTED,
+      EventType.RUN_ERROR,
+    ]);
+    expect(refusedResume[1]).toMatchObject({
+      code: "UNKNOWN_INTERRUPT_ID",
+      message: "No pending interrupts for this thread.",
+    });
+
+    const events = await collect(
+      agent,
+      minimalRunInput({ threadId: "t", runId: "r2" }),
+    );
+    expect(events.map((e) => e.type)).toEqual([
+      EventType.RUN_STARTED,
+      EventType.RUN_FINISHED,
+    ]);
+    expect(agent.rawCalled).toBe(1);
+  });
+
+  it("Rule 2: validates the submitted ids against the SDK, not the record", async () => {
+    const agent = new NeverRanAgent();
+    // The record and the checkpoint name different interrupts. Only the SDK can
+    // say which question is still being asked.
+    parkInterrupts(
+      agent,
+      "t",
+      [{ id: "recorded-only", reason: "tool_call" }],
+      new Map<string, unknown>([
+        ["sdk-open", { id: "sdk-open", name: "need_input" }],
+      ]),
+    );
+
+    const events = await collect(
+      agent,
+      minimalRunInput({
+        threadId: "t",
+        runId: "r1",
+        resume: [
+          { interruptId: "recorded-only", status: "resolved", payload: {} },
+        ],
+      }),
+    );
+
+    expect(agent.rawCalled).toBe(0);
+    expect(events.map((e) => e.type)).toEqual([
+      EventType.RUN_STARTED,
+      EventType.RUN_ERROR,
+    ]);
+    const err = events[1] as unknown as { code: string; message: string };
+    expect(err.code).toBe("UNKNOWN_INTERRUPT_ID");
+    expect(err.message).toContain("recorded-only");
+  });
+
   it("Rule 3: rejects partial resume that doesn't cover all interrupts", async () => {
     const agent = new NeverRanAgent();
     setPending(agent, "t", ["int-1", "int-2", "int-3"]);
@@ -218,14 +332,9 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
 
   it("Rule 7: rejects expired interrupt", async () => {
     const agent = new NeverRanAgent();
-    const pending = (
-      agent as unknown as {
-        _pendingInterruptsByThread: Map<string, Map<string, AguiInterrupt>>;
-      }
-    )._pendingInterruptsByThread;
-    const map = new Map<string, AguiInterrupt>();
-    map.set("exp-1", { id: "exp-1", reason: "tool_call", expiresAt: "2020-01-01T00:00:00Z" });
-    pending.set("t", map);
+    parkInterrupts(agent, "t", [
+      { id: "exp-1", reason: "tool_call", expiresAt: "2020-01-01T00:00:00Z" },
+    ]);
 
     const events = await collect(
       agent,
@@ -245,18 +354,17 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
 
   it("Rule 6: rejects invalid payload missing required keys", async () => {
     const agent = new NeverRanAgent();
-    const pending = (
-      agent as unknown as {
-        _pendingInterruptsByThread: Map<string, Map<string, AguiInterrupt>>;
-      }
-    )._pendingInterruptsByThread;
-    const map = new Map<string, AguiInterrupt>();
-    map.set("val-1", {
-      id: "val-1",
-      reason: "tool_call",
-      responseSchema: { type: "object", properties: { approved: { type: "boolean" } }, required: ["approved"] },
-    });
-    pending.set("t", map);
+    parkInterrupts(agent, "t", [
+      {
+        id: "val-1",
+        reason: "tool_call",
+        responseSchema: {
+          type: "object",
+          properties: { approved: { type: "boolean" } },
+          required: ["approved"],
+        },
+      },
+    ]);
 
     const events = await collect(
       agent,
@@ -277,7 +385,7 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
   it("Rule 6: rejects a non-boolean approval value", async () => {
     for (const invalidApproval of ["true", 1, null]) {
       const agent = new NeverRanAgent();
-      const pending = setPending(agent, "t", ["val-1"]).get("t")!;
+      const pending = setPending(agent, "t", ["val-1"]);
       pending.get("val-1")!.responseSchema = {
         type: "object",
         properties: { approved: { type: "boolean" } },
@@ -300,6 +408,52 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
     }
   });
 
+  it("Rule 6: validates a tool approval whose record lost its schema", async () => {
+    const agent = new NeverRanAgent();
+    // A restart can restore the checkpoint while the AG-UI record comes back
+    // without the response schema it advertised. A tool approval's contract is
+    // fixed, so the SDK's own interrupt still supplies it, and a payload waved
+    // through here would be recorded as "no answer" and re-raise forever.
+    parkInterrupts(
+      agent,
+      "t",
+      [{ id: "appr-1", reason: "tool_call" }],
+      new Map<string, unknown>([
+        [
+          "appr-1",
+          {
+            id: "appr-1",
+            name: "ag_ui:tool_call:deploy",
+            reason: {
+              tool_call: true,
+              tool_name: "deploy",
+              tool_input: {},
+              tool_use_id: "tc-1",
+            },
+          },
+        ],
+      ]),
+    );
+
+    const events = await collect(
+      agent,
+      minimalRunInput({
+        threadId: "t",
+        runId: "r1",
+        resume: [{ interruptId: "appr-1", status: "resolved", payload: {} }],
+      }),
+    );
+
+    expect(agent.rawCalled).toBe(0);
+    expect(events.map((e) => e.type)).toEqual([
+      EventType.RUN_STARTED,
+      EventType.RUN_ERROR,
+    ]);
+    const err = events[1] as unknown as { code: string; message: string };
+    expect(err.code).toBe("INVALID_PAYLOAD");
+    expect(err.message).toContain("approved");
+  });
+
   it("Rule 6: accepts explicit denial and optional approve-with-edits fields", async () => {
     const schema = {
       type: "object",
@@ -311,7 +465,7 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
     };
 
     const denied = new NeverRanAgent();
-    const deniedPending = setPending(denied, "denied", ["val-1"]).get("denied")!;
+    const deniedPending = setPending(denied, "denied", ["val-1"]);
     deniedPending.get("val-1")!.responseSchema = schema;
     const deniedEvents = await collect(
       denied,
@@ -324,7 +478,7 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
     expect(deniedEvents.some((event) => event.type === EventType.RUN_ERROR)).toBe(false);
 
     const edited = new NeverRanAgent();
-    const editedPending = setPending(edited, "edited", ["val-2"]).get("edited")!;
+    const editedPending = setPending(edited, "edited", ["val-2"]);
     editedPending.get("val-2")!.responseSchema = schema;
     const editedEvents = await collect(
       edited,

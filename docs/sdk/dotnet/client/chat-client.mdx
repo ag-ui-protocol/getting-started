@@ -258,6 +258,23 @@ static ChatMessage CreateInterruptResponse(InterruptRequestContent request)
 }
 ```
 
+`InterruptResponseContent.Metadata` optionally carries envelope data about the
+response — a signature proving the decision was not tampered with, routing keys
+— as opposed to `Payload`, which is the answer the agent asked for. The client
+copies it onto the resume entry's `metadata`, and the hosting layer hands it
+back to the server pipeline on `InterruptResponseContent`; see
+[Metadata](/concepts/metadata#resume-entries).
+
+```csharp
+new InterruptResponseContent(request.RequestId)
+{
+    Payload = payload.RootElement.Clone(),
+    Metadata = JsonDocument.Parse(
+        """{"definitionId":"review-plan","key":"afterModel-review"}""")
+        .RootElement.Clone(),
+}
+```
+
 ## Related references
 
 - [Transport](/sdk/dotnet/client/transport)

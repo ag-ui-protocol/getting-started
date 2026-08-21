@@ -48,6 +48,9 @@ from ag_ui.core.events import (
 )
 
 from ag_ui.core.types import (
+    AGUI_METADATA_KEY,
+    Metadata,
+    MetadataMixin,
     FunctionCall,
     ToolCall,
     BaseMessage,
@@ -102,6 +105,9 @@ from ag_ui.core.capabilities import (
 )
 
 __all__ = [
+    "AGUI_METADATA_KEY",
+    "Metadata",
+    "MetadataMixin",
     # Events
     "EventType",
     "BaseEvent",

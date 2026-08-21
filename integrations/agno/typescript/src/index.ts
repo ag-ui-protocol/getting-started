@@ -5,8 +5,4 @@
 
 import { HttpAgent } from "@ag-ui/client";
 
-export class AgnoAgent extends HttpAgent {
-  public override get maxVersion(): string {
-    return "0.0.53";
-  }
-}
+export class AgnoAgent extends HttpAgent {}

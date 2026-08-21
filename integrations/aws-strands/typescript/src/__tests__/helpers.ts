@@ -4,7 +4,11 @@
  */
 
 import type { Agent, AgentStreamEvent } from "@strands-agents/sdk";
-import type { BaseEvent, RunAgentInput } from "@ag-ui/core";
+import type {
+  BaseEvent,
+  Interrupt as AguiInterrupt,
+  RunAgentInput,
+} from "@ag-ui/core";
 
 import { StrandsAgent } from "../agent";
 import type { StrandsAgentConfig } from "../config";
@@ -118,6 +122,51 @@ export function scriptedStrandsAgent(
   byThread.set("thread-1", stub);
   byThread.set("default", stub);
   return sa;
+}
+
+/**
+ * Park interrupts on both stores production keeps in step: the SDK's activated
+ * checkpoint, which is what decides whether anything is open, and the adapter's
+ * own record, which carries only the AG-UI metadata the SDK has nowhere for
+ * (response schema, tool card, expiry).
+ *
+ * Seeding the record alone describes a thread whose SDK considers itself idle,
+ * which production never produces, and every gate reads the SDK.
+ *
+ * `native` overrides the parked Strands interrupts when a test needs a specific
+ * shape (a tool-approval name, or a recorded response); by default each recorded
+ * id is parked as a bare unanswered generic interrupt.
+ */
+export function parkInterrupts(
+  aguiAgent: StrandsAgent,
+  threadId: string,
+  recorded: AguiInterrupt[],
+  native?: Map<string, unknown>,
+): Map<string, AguiInterrupt> {
+  const internals = aguiAgent as unknown as {
+    _pendingInterruptsByThread: Map<string, Map<string, AguiInterrupt>>;
+    _agentsByThread: Map<string, unknown>;
+  };
+  const record = new Map(
+    recorded.map((interrupt) => [interrupt.id, interrupt]),
+  );
+  internals._pendingInterruptsByThread.set(threadId, record);
+
+  const interrupts =
+    native ??
+    new Map<string, unknown>(
+      recorded.map((interrupt) => [
+        interrupt.id,
+        { id: interrupt.id, name: "need_input" },
+      ]),
+    );
+  const strandsAgent = internals._agentsByThread.get(threadId) ?? {};
+  internals._agentsByThread.set(threadId, strandsAgent);
+  (strandsAgent as { _interruptState?: unknown })._interruptState = {
+    activated: interrupts.size > 0,
+    interrupts,
+  };
+  return record;
 }
 
 /** Iterate `agent.run()` into an array. Defaults to `minimalRunInput()`. */

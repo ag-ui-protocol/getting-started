@@ -33,6 +33,12 @@ message BaseEvent {
   EventType type = 1;
   optional int64 timestamp = 2;
   optional google.protobuf.Value raw_event = 3;
+  // Extra information, open by key. Declared here so every event carries it.
+  //
+  // Struct is map<string, Value>, and Value has NullValue, so a null *value*
+  // under a key survives the binary transport. Message-field presence keeps an
+  // absent object distinguishable from an empty one.
+  google.protobuf.Struct metadata = 4;
 }
 
 message TextMessageStartEvent {

@@ -244,4 +244,133 @@ export const protobufFixtures: ProtobufFixture[] = [
       value: { items: [1, 2, 3], ok: true },
     } as unknown as BaseEvent,
   },
+  // ---------------------------------------------------------------------
+  // Metadata (PNI-198).
+  //
+  // Metadata is declared once on BaseEvent, so it rides on every event type.
+  // It maps to `google.protobuf.Struct`, hence "roundtrip" byte parity for
+  // every fixture that carries one. Absent metadata is already covered by all
+  // the fixtures above, which carry none; the explicit case is kept here so the
+  // absent/empty distinction is visible in one place.
+  // ---------------------------------------------------------------------
+  {
+    name: "METADATA absent",
+    byteParity: "strict",
+    event: {
+      type: EventType.TEXT_MESSAGE_END,
+      messageId: "msg-metadata-absent",
+    } as BaseEvent,
+  },
+  {
+    name: "METADATA empty object",
+    byteParity: "roundtrip",
+    event: {
+      type: EventType.TEXT_MESSAGE_END,
+      messageId: "msg-metadata-empty",
+      metadata: {},
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "METADATA null value under a key",
+    byteParity: "roundtrip",
+    event: {
+      type: EventType.TEXT_MESSAGE_END,
+      messageId: "msg-metadata-null",
+      metadata: { finishReason: null },
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "METADATA primitives",
+    byteParity: "roundtrip",
+    event: {
+      type: EventType.TEXT_MESSAGE_END,
+      messageId: "msg-metadata-primitives",
+      metadata: { string: "stop", number: 42, float: 1.5, boolean: true },
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "METADATA arrays",
+    byteParity: "roundtrip",
+    event: {
+      type: EventType.TEXT_MESSAGE_END,
+      messageId: "msg-metadata-arrays",
+      metadata: {
+        emptyArray: [],
+        tags: ["a", "b"],
+        mixed: [1, "two", null, { nested: true }],
+      },
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "METADATA nested objects (including the reserved ag-ui key)",
+    byteParity: "roundtrip",
+    event: {
+      type: EventType.TEXT_MESSAGE_END,
+      messageId: "msg-metadata-nested",
+      metadata: {
+        "ag-ui": { usage: { input: 10, output: 20 } },
+        emptyObject: {},
+        user: { deeply: { nested: { value: "ok" } } },
+      },
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "METADATA on a non-message event (RUN_FINISHED)",
+    byteParity: "roundtrip",
+    event: {
+      type: EventType.RUN_FINISHED,
+      threadId: "thread-1",
+      runId: "run-1",
+      metadata: { "ag-ui": { usage: { total: 100 } }, finishReason: "stop" },
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "METADATA per-message inside MESSAGES_SNAPSHOT",
+    byteParity: "roundtrip",
+    event: {
+      type: EventType.MESSAGES_SNAPSHOT,
+      messages: [
+        {
+          id: "m1",
+          role: "assistant",
+          content: "with metadata",
+          metadata: { tokens: 7, tags: ["x"], nested: { a: null } },
+        },
+        // Deliberately carries none, so a leak between messages would show up.
+        { id: "m2", role: "assistant", content: "without metadata" },
+      ],
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "METADATA per tool call inside MESSAGES_SNAPSHOT",
+    byteParity: "roundtrip",
+    event: {
+      type: EventType.MESSAGES_SNAPSHOT,
+      messages: [
+        {
+          id: "m1",
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: "tc1",
+              type: "function",
+              function: { name: "a", arguments: "{}" },
+              metadata: {
+                "ag-ui": { usage: { input: 5 } },
+                phase: "one",
+                tags: ["x"],
+              },
+            },
+            // Carries none, so a leak between tool calls would surface.
+            {
+              id: "tc2",
+              type: "function",
+              function: { name: "b", arguments: "{}" },
+            },
+          ],
+        },
+      ],
+    } as unknown as BaseEvent,
+  },
 ];

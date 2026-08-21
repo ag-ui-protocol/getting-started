@@ -34,10 +34,6 @@ function normalizeEmptyToolResults(messages: Message[]): Message[] {
 }
 
 export class LlamaIndexAgent extends HttpAgent {
-  public override get maxVersion(): string {
-    return "0.0.39";
-  }
-
   public override run(input: RunAgentInput): Observable<BaseEvent> {
     const sanitizedInput: RunAgentInput = {
       ...input,

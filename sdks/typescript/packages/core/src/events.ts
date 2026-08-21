@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MessageSchema, StateSchema, RunAgentInputSchema, InterruptSchema } from "./types";
+import { OptionalMetadataSchema } from "./metadata";
 
 // Text messages can have any role except "tool"
 const TextMessageRoleSchema = z.union([
@@ -65,6 +66,9 @@ export const BaseEventSchema = z
     type: z.nativeEnum(EventType),
     timestamp: z.number().optional(),
     rawEvent: z.any().optional(),
+    // Declared once here so every event type carries it. See
+    // OptionalMetadataSchema for why an explicit null parses as absent.
+    metadata: OptionalMetadataSchema,
   })
   .passthrough();
 

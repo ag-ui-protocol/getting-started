@@ -429,6 +429,7 @@ export const agentsIntegrations = {
         new LlamaIndexAgent({ url: `${envVars.llamaIndexUrl}/${path}/run` }),
       {
         agentic_chat: "agentic_chat",
+        agentic_chat_multimodal: "agentic_chat_multimodal",
         human_in_the_loop: "human_in_the_loop",
         agentic_generative_ui: "agentic_generative_ui",
         shared_state: "shared_state",

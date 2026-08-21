@@ -6,14 +6,21 @@
 
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
-import { Value } from "./google/protobuf/struct";
+import { Struct, Value } from "./google/protobuf/struct";
 
 export const protobufPackage = "ag_ui";
 
 export interface ToolCall {
   id: string;
   type: string;
-  function: ToolCall_Function | undefined;
+  function:
+    | ToolCall_Function
+    | undefined;
+  /**
+   * Extra information, open by key. A tool call is not a message, so it carries
+   * its own metadata — several can share one parent assistant message.
+   */
+  metadata: { [key: string]: any } | undefined;
 }
 
 export interface ToolCall_Function {
@@ -77,6 +84,11 @@ export interface Message {
   toolCallId?: string | undefined;
   error?: string | undefined;
   contentParts: InputContent[];
+  /**
+   * Extra information, open by key. See BaseEvent.metadata in events.proto for
+   * why this is a Struct.
+   */
+  metadata: { [key: string]: any } | undefined;
 }
 
 export interface Interrupt {
@@ -90,7 +102,7 @@ export interface Interrupt {
 }
 
 function createBaseToolCall(): ToolCall {
-  return { id: "", type: "", function: undefined };
+  return { id: "", type: "", function: undefined, metadata: undefined };
 }
 
 export const ToolCall: MessageFns<ToolCall> = {
@@ -103,6 +115,9 @@ export const ToolCall: MessageFns<ToolCall> = {
     }
     if (message.function !== undefined) {
       ToolCall_Function.encode(message.function, writer.uint32(26).fork()).join();
+    }
+    if (message.metadata !== undefined) {
+      Struct.encode(Struct.wrap(message.metadata), writer.uint32(34).fork()).join();
     }
     return writer;
   },
@@ -138,6 +153,14 @@ export const ToolCall: MessageFns<ToolCall> = {
           message.function = ToolCall_Function.decode(reader, reader.uint32());
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.metadata = Struct.unwrap(Struct.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -157,6 +180,7 @@ export const ToolCall: MessageFns<ToolCall> = {
     message.function = (object.function !== undefined && object.function !== null)
       ? ToolCall_Function.fromPartial(object.function)
       : undefined;
+    message.metadata = object.metadata ?? undefined;
     return message;
   },
 };
@@ -797,6 +821,7 @@ function createBaseMessage(): Message {
     toolCallId: undefined,
     error: undefined,
     contentParts: [],
+    metadata: undefined,
   };
 }
 
@@ -825,6 +850,9 @@ export const Message: MessageFns<Message> = {
     }
     for (const v of message.contentParts) {
       InputContent.encode(v!, writer.uint32(66).fork()).join();
+    }
+    if (message.metadata !== undefined) {
+      Struct.encode(Struct.wrap(message.metadata), writer.uint32(74).fork()).join();
     }
     return writer;
   },
@@ -900,6 +928,14 @@ export const Message: MessageFns<Message> = {
           message.contentParts.push(InputContent.decode(reader, reader.uint32()));
           continue;
         }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.metadata = Struct.unwrap(Struct.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -922,6 +958,7 @@ export const Message: MessageFns<Message> = {
     message.toolCallId = object.toolCallId ?? undefined;
     message.error = object.error ?? undefined;
     message.contentParts = object.contentParts?.map((e) => InputContent.fromPartial(e)) || [];
+    message.metadata = object.metadata ?? undefined;
     return message;
   },
 };

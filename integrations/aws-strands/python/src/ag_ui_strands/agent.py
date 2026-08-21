@@ -11,7 +11,8 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Dict, List, Tuple
+from importlib.metadata import version as distribution_version
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from strands import Agent as StrandsAgentCore
 from strands.session import SessionManager
@@ -79,19 +80,111 @@ _TOOL_CALL_MAP_MAX = 512
 # tool receives this in place of a real answer and can treat it as a denial.
 INTERRUPT_CANCELLED = {"cancelled": True}
 
+# Reserved native-interrupt name prefix for interrupts this adapter's approval
+# hook raises. Anything else is a generic native interrupt.
+_TOOL_APPROVAL_NAME_PREFIX = "ag_ui:tool_call:"
+
+
+def _strands_uses_presence_based_interrupt_responses(installed_version: str) -> bool:
+    """Return the interrupt-response contract of a Strands SDK version."""
+    try:
+        major, minor = map(int, installed_version.split(".", 2)[:2])
+    except ValueError as exc:
+        raise RuntimeError(
+            "Cannot determine interrupt response semantics for "
+            f"strands-agents version {installed_version!r}"
+        ) from exc
+    return (major, minor) >= (1, 19)
+
+
+# Strands 1.15 through 1.18 returns a recorded response only when it is truthy.
+# Version 1.19 changed that predicate to presence (``response is not None``).
+_STRANDS_USES_PRESENCE_BASED_INTERRUPT_RESPONSES = (
+    _strands_uses_presence_based_interrupt_responses(
+        distribution_version("strands-agents")
+    )
+)
+
+
+def _tool_approval_response_schema() -> dict:
+    """The response contract advertised for a tool-approval interrupt.
+
+    Single source for both the schema published on the AG-UI ``Interrupt`` and
+    the resume-payload validation, so a resume can still be checked when the
+    AG-UI bookkeeping did not survive a process restart.
+    """
+    return {
+        "type": "object",
+        "properties": {"approved": {"type": "boolean"}},
+        "required": ["approved"],
+    }
+
+
+def _is_tool_approval_interrupt(native_interrupt: Any) -> bool:
+    """True when a native Strands interrupt came from the approval hook."""
+    name = getattr(native_interrupt, "name", None)
+    return (
+        isinstance(name, str)
+        and name.startswith(_TOOL_APPROVAL_NAME_PREFIX)
+        and isinstance(getattr(native_interrupt, "reason", None), dict)
+    )
+
 
 def _wrap_resume_response(status: str, payload: Any) -> dict:
     """Package a ``ResumeEntry`` for Strands' ``interruptResponse`` shape.
 
-    Strands' resume gate is truthiness-based (i.e. ``if interrupt_.response:``),
-    so a raw falsy payload (``None``, ``False``, ``""``, ``0``, ``[]``, ``{}``)
-    re-raises the same interrupt and re-runs the tool body — an infinite approve loop.
-    Always hand Strands a truthy envelope; up to the tool implementation to properly
-    destructures it (e.g. via ``.get("cancelled")`` / ``.get("response")``).
+    Supported Strands releases read a recorded answer either by truthiness
+    (1.15 through 1.18) or by presence (1.19+). Forwarding a raw falsy payload
+    can therefore re-raise the same interrupt and re-run the tool body on the
+    compatibility floor. Always hand Strands a truthy envelope; the tool
+    implementation unwraps it via ``.get("cancelled")`` / ``.get("response")``.
     """
     if status == "cancelled":
         return dict(INTERRUPT_CANCELLED)
     return {"response": payload}
+
+
+def _native_resume_response(entry: Any, native_interrupt: Any) -> Any:
+    """Return the answer Strands records when this entry is forwarded.
+
+    One definition, read both by the batch the run forwards and by the replay
+    comparison below, so the two cannot disagree about what was submitted.
+    """
+    if _is_tool_approval_interrupt(native_interrupt):
+        return {"approved": False} if entry.status == "cancelled" else entry.payload
+    return _wrap_resume_response(entry.status, entry.payload)
+
+
+def _replays_recorded_answers(interrupt_state: Any, resume_entries: Any) -> bool:
+    """True when this batch re-submits exactly the answers the checkpoint holds.
+
+    Strands records the submitted answers before it reruns hooks and the parked
+    tool execution, and clears the checkpoint only once that work succeeds. So a
+    hook failure, or a crash after session persistence, can restore a checkpoint
+    that is activated with every interrupt already answered. That thread has no
+    way forward: fresh input is refused because the checkpoint is active, and a
+    resume finds nothing open to address. Handing Strands the identical batch is
+    the way out, because it lets the SDK finish the parked execution. The
+    checkpoint itself must be left alone: clearing it would discard exactly that
+    parked execution. Anything short of an exact replay stays refused.
+    """
+    recorded = getattr(interrupt_state, "interrupts", {}) or {}
+    if not recorded or len(resume_entries) != len(recorded):
+        return False
+    addressed: set[str] = set()
+    for entry in resume_entries:
+        interrupt_id = getattr(entry, "interrupt_id", None)
+        native_interrupt = recorded.get(interrupt_id)
+        if native_interrupt is None or interrupt_id in addressed:
+            return False
+        addressed.add(interrupt_id)
+        if not _native_interrupt_is_answered(native_interrupt):
+            return False
+        if native_interrupt.response != _native_resume_response(
+            entry, native_interrupt
+        ):
+            return False
+    return True
 
 
 def _get_strands_session_manager(agent: Any) -> Any:
@@ -116,23 +209,14 @@ def _strands_interrupt_to_agui(strands_interrupt: Any) -> "Interrupt":
     name = getattr(strands_interrupt, "name", None) or "interrupt"
     raw_reason = getattr(strands_interrupt, "reason", None)
 
-    is_tool_approval = (
-        isinstance(name, str)
-        and name.startswith("ag_ui:tool_call:")
-        and isinstance(raw_reason, dict)
-    )
-    if is_tool_approval:
+    if _is_tool_approval_interrupt(strands_interrupt):
         tool_name = raw_reason.get("tool_name", "unknown")
         return Interrupt(
             id=s_id,
             reason="tool_call",
             message=f"Approve call to {tool_name}?",
             tool_call_id=raw_reason.get("tool_use_id"),
-            response_schema={
-                "type": "object",
-                "properties": {"approved": {"type": "boolean"}},
-                "required": ["approved"],
-            },
+            response_schema=_tool_approval_response_schema(),
             metadata={
                 "tool_name": tool_name,
                 "tool_input": raw_reason.get("tool_input", {}),
@@ -147,6 +231,34 @@ def _strands_interrupt_to_agui(strands_interrupt: Any) -> "Interrupt":
         response_schema=None,
         metadata={"reason": raw_reason} if raw_reason is not None else None,
     )
+
+
+def _native_interrupt_is_answered(interrupt: Any) -> bool:
+    """True when this interrupt already carries an answer Strands will hand back.
+
+    Match the installed SDK's own ``ToolContext.interrupt`` predicate. Strands
+    1.15 through 1.18 uses truthiness; 1.19 and later uses presence, with
+    ``None`` as the unanswered default.
+    """
+    response = getattr(interrupt, "response", None)
+    if _STRANDS_USES_PRESENCE_BASED_INTERRUPT_RESPONSES:
+        return response is not None
+    return bool(response)
+
+
+def _open_native_interrupts(interrupts: Any) -> dict:
+    """Return the entries of ``interrupts`` still awaiting a human, keyed by id.
+
+    The native interrupt state is the only record of what is still in flight, and
+    every "is anything still open?" decision reads it through this one predicate,
+    so the pause this run reports and the resume the next one submits cannot
+    disagree and strand a client between them.
+    """
+    return {
+        interrupt_id: interrupt
+        for interrupt_id, interrupt in (interrupts or {}).items()
+        if not _native_interrupt_is_answered(interrupt)
+    }
 
 
 def _extract_interrupts(agent: Any, terminal_result: Any) -> list:
@@ -164,14 +276,18 @@ def _extract_interrupts(agent: Any, terminal_result: Any) -> list:
                 return list(interrupts)
     interrupt_state = getattr(agent, "_interrupt_state", None)
     if interrupt_state is not None and getattr(interrupt_state, "activated", False):
-        # Mirrors Strands' own gate (strands/types/interrupt.py: ``if interrupt_.response:``)
-        # — an interrupt with a truthy response was already answered by a prior partial
-        # resume and must not be re-reported as still pending.
-        return [
-            interrupt
-            for interrupt in getattr(interrupt_state, "interrupts", {}).values()
-            if not getattr(interrupt, "response", None)
-        ]
+        open_interrupts = _open_native_interrupts(
+            getattr(interrupt_state, "interrupts", {})
+        )
+        if not open_interrupts:
+            # The checkpoint is still activated yet every interrupt is answered
+            # under the installed SDK's semantics, so this run reports success
+            # while the agent may remain parked.
+            logger.debug(
+                "Native interrupt state is activated but every interrupt is "
+                "answered; reporting no pending interrupts"
+            )
+        return list(open_interrupts.values())
     return []
 
 
@@ -230,12 +346,16 @@ def _preflight_resume_entries(
             "A submitted resume must contain at least one entry"
         )
 
-    current_interrupts = getattr(interrupt_state, "interrupts", {})
-    open_interrupts = {
-        interrupt_id: interrupt
-        for interrupt_id, interrupt in current_interrupts.items()
-        if not getattr(interrupt, "response", None)
-    }
+    open_interrupts = _open_native_interrupts(
+        getattr(interrupt_state, "interrupts", {})
+    )
+    # An active checkpoint whose every interrupt is answered is a thread the SDK
+    # parked mid-resume (see _replays_recorded_answers). The interrupts an exact
+    # replay may address are the answered ones it is replaying.
+    if _replays_recorded_answers(interrupt_state, resume_entries):
+        addressable = dict(getattr(interrupt_state, "interrupts", {}) or {})
+    else:
+        addressable = open_interrupts
     seen_ids: set[str] = set()
     for entry in resume_entries:
         interrupt_id = getattr(entry, "interrupt_id", None)
@@ -248,13 +368,13 @@ def _preflight_resume_entries(
                 f"Resume contains duplicate interrupt id: {interrupt_id}"
             )
         seen_ids.add(interrupt_id)
-        interrupt = open_interrupts.get(interrupt_id)
+        interrupt = addressable.get(interrupt_id)
         if interrupt is None:
             return _interrupt_resume_error(
                 f"Resume references an interrupt that is not open: {interrupt_id}"
             )
 
-    missing_ids = set(open_interrupts) - seen_ids
+    missing_ids = set(addressable) - seen_ids
     if missing_ids:
         return RunErrorEvent(
             type=EventType.RUN_ERROR,
@@ -278,14 +398,22 @@ def _preflight_resume_entries(
                     code="INTERRUPT_EXPIRED",
                 )
 
-        if (
-            entry.status != "resolved"
-            or not ag_ui_interrupt
-            or not getattr(ag_ui_interrupt, "response_schema", None)
+        schema = (
+            getattr(ag_ui_interrupt, "response_schema", None)
+            if ag_ui_interrupt
+            else None
+        )
+        if not schema and _is_tool_approval_interrupt(
+            addressable.get(entry.interrupt_id)
         ):
+            # AG-UI bookkeeping can be lost to a restart while the native
+            # interrupt is restored. A tool approval's contract is fixed, so
+            # validate against it rather than waving the payload through.
+            schema = _tool_approval_response_schema()
+
+        if entry.status != "resolved" or not schema:
             continue
 
-        schema = ag_ui_interrupt.response_schema
         payload = entry.payload
         if schema.get("type") != "object":
             continue
@@ -352,6 +480,7 @@ from ag_ui.core import (
     FunctionCall,
     Interrupt,
     MessagesSnapshotEvent,
+    RawEvent,
     ReasoningEncryptedValueEvent,
     ReasoningEndEvent,
     ReasoningMessageContentEvent,
@@ -491,6 +620,224 @@ def _coerce_text(content: Any) -> str:
 def _coerce_id(value: Any) -> str:
     """Return ``value`` if it is a non-empty string, else a fresh UUID."""
     return value if isinstance(value, str) and value else str(uuid.uuid4())
+
+
+# Separator for namespacing a sub-agent's tool call ids under the parent tool
+# call that owns them. Two agents mint toolUseIds independently, so an inner id
+# can be byte-identical to a parent one; without a namespace the inner result
+# would resolve the PARENT's tool card (and vice versa). "::" is not produced by
+# any Strands/Bedrock id generator, so the prefix is unambiguous.
+_INNER_TOOL_ID_SEP = "::"
+
+
+# Keys Strands' event loop injects into the *payload* of any event carrying a
+# ``delta``: ``ModelStreamEvent.prepare()`` does ``self.update(invocation_state)``
+# (strands/types/_events.py), which merges the live ``Agent`` object, telemetry
+# handles and cycle bookkeeping into the event dict. None of it is model output,
+# and ``agent`` in particular carries the system prompt, the full message history
+# and the model config — it must never reach a browser. Stripped by name so the
+# RAW payload keeps only the provider's own fields.
+_RAW_INVOCATION_STATE_KEYS = frozenset(
+    {
+        "agent",
+        "event_loop_cycle_id",
+        "event_loop_cycle_trace",
+        "event_loop_cycle_span",
+        "event_loop_parent_span",
+        "event_loop_parent_cycle_id",
+        "request_state",
+    }
+)
+
+# Terminal lifecycle events that carry no payload a frontend can use.
+# ``result`` is ``AgentResultEvent`` (an ``AgentResult`` holding
+# ``EventLoopMetrics``) and ``stop`` is ``EventLoopStopEvent`` (a tuple of the
+# same). Both are the end-of-run marker already represented by RUN_FINISHED, so
+# forwarding them would be duplicate noise even if they were serializable.
+_RAW_TERMINAL_KEYS = frozenset({"result", "stop"})
+
+# Keys the dispatch chain in ``run`` already owns. Each of their branches is
+# *conditionally* entered — ``"data" in event and event["data"]``,
+# ``"reasoningText" in event and event.get("reasoning")``,
+# ``"current_tool_use" in event and event["current_tool_use"]`` — so a payload
+# whose guard evaluates false matches no branch and, with the RAW fallback in
+# place, falls through to it.
+#
+# That conflates two different situations the fallback must keep apart:
+#
+#   unmapped            the adapter has no branch for this event at all, so
+#                       forwarding it as RAW is the whole point of issue #2291
+#   mapped-but-declined a branch exists and deliberately withheld the payload
+#
+# Only the first is RAW-eligible. Without this set the second leaks whatever
+# the guard exists to suppress: reasoning text with ``reasoning`` off,
+# encrypted ``reasoningRedactedContent``, and the ``reasoning_signature``
+# verification token would each be republished verbatim over RAW — the exact
+# content the gate withholds — while empty ``data`` and empty
+# ``current_tool_use`` updates would add a RAW event carrying no information.
+_RAW_SUPPRESSED_KEYS = frozenset(
+    {
+        "data",
+        "reasoningText",
+        "reasoningRedactedContent",
+        "reasoning_signature",
+        "current_tool_use",
+    }
+)
+
+
+def _sanitize_raw_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Return a JSON-safe RAW payload for ``event``, or ``None`` to drop it.
+
+    Sanitizing is deliberately an allow-by-serializability filter, never a
+    coercion: nothing is stringified to force it through. Coercing (e.g.
+    ``json.dumps(..., default=str)``) would ship the ``repr`` of the live
+    ``Agent`` — system prompt, conversation history, model configuration — to
+    every connected client. A payload that will not encode is dropped instead.
+    """
+    if any(key in event for key in _RAW_TERMINAL_KEYS):
+        return None
+
+    payload = {
+        key: value
+        for key, value in event.items()
+        if key not in _RAW_INVOCATION_STATE_KEYS
+    }
+    if not payload:
+        return None
+
+    try:
+        # Strict round-trip: no ``default=`` hook, so any non-JSON-native object
+        # raises here rather than being silently rendered. The decoded result is
+        # what gets forwarded, guaranteeing only plain JSON types reach the wire.
+        return json.loads(json.dumps(payload))
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            "Dropping unserializable Strands event from RAW forwarding "
+            f"(keys={sorted(payload)}): {exc}"
+        )
+        return None
+
+
+async def _forward_inner_agent_events(
+    inner_event: Any,
+    parent_tool_use: Dict[str, Any],
+    inner_tool_calls_seen: Dict[str, Dict[str, Any]],
+) -> AsyncIterator[Any]:
+    """Translate one agent-as-tool inner event into AG-UI tool-call events.
+
+    A Strands generator tool that wraps another ``Agent`` (the agent-as-tool
+    pattern) re-yields the inner agent's whole ``stream_async`` output; Strands
+    wraps each yield as ``tool_stream_event``. The inner agent's tool calls
+    therefore never reach the parent loop's ``current_tool_use`` /
+    ``contentBlockStop`` / tool-result branches, so without this the frontend
+    sees the sub-agent as an opaque black box (see issue #2304).
+
+    Only the tool-call lifecycle is forwarded, and only onto the wire —
+    inner calls are deliberately NOT spliced into ``MessagesSnapshotEvent``
+    history, which mirrors the parent conversation Strands actually persists.
+    """
+    if not isinstance(inner_event, dict):
+        return
+
+    parent_id = parent_tool_use.get("toolUseId") or "inner"
+
+    def _namespaced(inner_id: Any) -> str:
+        return f"{parent_id}{_INNER_TOOL_ID_SEP}{inner_id or uuid.uuid4()}"
+
+    # Inner tool call, streaming its args in.
+    tool_use = inner_event.get("current_tool_use")
+    if isinstance(tool_use, dict) and tool_use.get("name"):
+        call_id = _namespaced(tool_use.get("toolUseId"))
+        raw_input = tool_use.get("input", "")
+        raw_str = (
+            raw_input
+            if isinstance(raw_input, str)
+            else json.dumps(raw_input, default=str)
+        )
+        entry = inner_tool_calls_seen.get(call_id)
+        if entry is None:
+            entry = inner_tool_calls_seen[call_id] = {
+                "name": tool_use["name"],
+                "sent_len": 0,
+                "ended": False,
+                # Which parent tool call owns this inner call. The dict is
+                # shared across every parent agent-as-tool call in the run, so
+                # the contentBlockStop handler below needs this to avoid
+                # closing a sibling parent's inner call.
+                "parent_id": parent_id,
+            }
+            yield ToolCallStartEvent(
+                type=EventType.TOOL_CALL_START,
+                tool_call_id=call_id,
+                tool_call_name=tool_use["name"],
+            )
+        if len(raw_str) > entry["sent_len"]:
+            yield ToolCallArgsEvent(
+                type=EventType.TOOL_CALL_ARGS,
+                tool_call_id=call_id,
+                delta=raw_str[entry["sent_len"] :],
+            )
+            entry["sent_len"] = len(raw_str)
+        return
+
+    # Inner content block closed — close the newest still-open inner call
+    # *belonging to this parent*. Mirrors the parent loop, which also closes one
+    # call per contentBlockStop.
+    #
+    # The scoping is load-bearing: ``inner_tool_calls_seen`` is shared across
+    # every agent-as-tool call in the run, and Strands executes a parallel tool
+    # batch concurrently, so two sub-agents interleave their streams here. An
+    # unscoped "newest still-open call" search lets parent A's stop close
+    # parent B's inner call — B's tool card resolves early and A's never gets a
+    # TOOL_CALL_END at all, leaving it spinning forever on the frontend.
+    model_chunk = inner_event.get("event")
+    if isinstance(model_chunk, dict) and "contentBlockStop" in model_chunk:
+        for call_id, entry in reversed(list(inner_tool_calls_seen.items())):
+            if entry.get("parent_id") != parent_id:
+                continue
+            if not entry["ended"]:
+                entry["ended"] = True
+                yield ToolCallEndEvent(
+                    type=EventType.TOOL_CALL_END,
+                    tool_call_id=call_id,
+                )
+                break
+        return
+
+    # Inner tool results.
+    message = inner_event.get("message")
+    if isinstance(message, dict) and message.get("role") == "user":
+        for item in message.get("content") or []:
+            if not isinstance(item, dict) or "toolResult" not in item:
+                continue
+            tool_result = item["toolResult"]
+            if not isinstance(tool_result, dict):
+                continue
+            call_id = _namespaced(tool_result.get("toolUseId"))
+            # Only resolve calls this forwarder actually opened, so a result we
+            # never announced can't leave a dangling tool card on the frontend.
+            if call_id not in inner_tool_calls_seen:
+                continue
+            texts = [
+                block["text"]
+                for block in tool_result.get("content") or []
+                if isinstance(block, dict) and "text" in block
+            ]
+            raw_text = "".join(texts)
+            try:
+                result_data = json.loads(raw_text)
+            except (json.JSONDecodeError, TypeError):
+                result_data = raw_text
+            yield ToolCallResultEvent(
+                type=EventType.TOOL_CALL_RESULT,
+                tool_call_id=call_id,
+                message_id=str(uuid.uuid4()),
+                content=json.dumps(result_data, default=str),
+                # role intentionally omitted — same as the parent-level result
+                # path, so the frontend closes the spinner without writing the
+                # inner call into conversation history.
+            )
 
 
 def _build_snapshot_messages(input_messages: List[Any]) -> List[Any]:
@@ -887,7 +1234,7 @@ class StrandsInterruptHook:
         #   - raises InterruptException (first call, no response yet) → suspends loop
         #   - returns the human response payload (resume call) → enforce decision
         response = event.interrupt(
-            f"ag_ui:tool_call:{tool_name}",
+            f"{_TOOL_APPROVAL_NAME_PREFIX}{tool_name}",
             reason={
                 "tool_name": tool_name,
                 "tool_input": event.tool_use.get("input", {}),
@@ -979,7 +1326,10 @@ class StrandsAgent:
         self._agents_by_thread: Dict[str, StrandsAgentCore] = agents_by_thread if agents_by_thread is not None else {}
         # Track proxy tool names registered per thread
         self._proxy_tool_names_by_thread: Dict[str, set] = {}
-        # Store full AG-UI Interrupt objects per thread for resume validation
+        # AG-UI interrupt metadata per thread: the answer shape advertised to
+        # the client and validated on the way back, the tool card an interrupt
+        # belongs to, and an expiry. Never consulted to decide whether anything
+        # is pending; the native interrupt state answers that on its own.
         self._pending_interrupts_by_thread: Dict[str, Dict[str, Interrupt]] = {}
         # Fingerprint of last successfully-processed resume per thread (idempotency)
         self._last_resume_fingerprint: Dict[str, str] = {}
@@ -1121,7 +1471,10 @@ class StrandsAgent:
                 return
 
         # Rule 4: reject new input against a parked checkpoint before context
-        # or tool registries can be updated by a run that will not proceed.
+        # or tool registries can be updated by a run that will not proceed. The
+        # SDK owns the checkpoint, so a checkpoint it still holds active blocks
+        # the turn and is left exactly as it stands: deactivating it here would
+        # discard the tool use and tool results parked behind it.
         if (
             not resume_submitted
             and getattr(interrupt_state, "activated", False) is True
@@ -1316,40 +1669,19 @@ class StrandsAgent:
             for entry in resume_entries:
                 ag_ui_interrupt = pending_ag_ui.get(entry.interrupt_id)
                 native_interrupt = interrupt_state.interrupts.get(entry.interrupt_id)
-                is_tool_approval = (
-                    isinstance(getattr(native_interrupt, "name", None), str)
-                    and native_interrupt.name.startswith("ag_ui:tool_call:")
-                    and isinstance(getattr(native_interrupt, "reason", None), dict)
-                )
 
-                if entry.status == "cancelled":
-                    # Track tool_call_ids for cancelled tool-bound interrupts
-                    if ag_ui_interrupt and getattr(ag_ui_interrupt, "tool_call_id", None):
-                        _resumed_tool_call_ids.add(ag_ui_interrupt.tool_call_id)
-                    # Include a denial response so Strands marks this interrupt
-                    # as responded (prevents re-raising on resume).
+                if entry.status in ("cancelled", "resolved"):
+                    # A cancelled entry still carries a response, so Strands
+                    # marks the interrupt answered and stops re-raising it.
                     interrupt_responses.append({
                         "interruptResponse": {
                             "interruptId": entry.interrupt_id,
-                            "response": (
-                                {"approved": False}
-                                if is_tool_approval
-                                else _wrap_resume_response(entry.status, entry.payload)
+                            "response": _native_resume_response(
+                                entry, native_interrupt
                             ),
                         }
                     })
-                elif entry.status == "resolved":
-                    interrupt_responses.append({
-                        "interruptResponse": {
-                            "interruptId": entry.interrupt_id,
-                            "response": (
-                                entry.payload
-                                if is_tool_approval
-                                else _wrap_resume_response(entry.status, entry.payload)
-                            ),
-                        }
-                    })
-                    # Track tool_call_ids for resumed interrupts (suppress re-emission)
+                    # Track tool_call_ids so the tool card is not re-emitted.
                     if ag_ui_interrupt and getattr(ag_ui_interrupt, "tool_call_id", None):
                         _resumed_tool_call_ids.add(ag_ui_interrupt.tool_call_id)
 
@@ -1680,6 +2012,10 @@ class StrandsAgent:
             # tool-call AssistantMessage id.
             last_emitted_text_message_id: str | None = None
             tool_calls_seen = {}
+            # Tool calls made by a sub-agent running as a tool (issue #2304).
+            # Kept separate from ``tool_calls_seen`` so inner calls never take
+            # part in parent-level result lookup, snapshotting or halt logic.
+            inner_tool_calls_seen: Dict[str, Dict[str, Any]] = {}
             current_state = dict(input_data.state or {})  # Track state for final snapshot
             stop_text_streaming = False
             halt_event_stream = False
@@ -1698,6 +2034,10 @@ class StrandsAgent:
             # ``{"result": ...}`` stream event). Used after the loop to detect a
             # native interrupt pause (``stop_reason == "interrupt"``).
             terminal_result = None
+            # ``force_stop`` is an abnormal terminal signal. Keep consuming the
+            # stream so Strands can unwind and raise its underlying exception,
+            # then translate the failure into AG-UI's terminal error event.
+            force_stop_error: str | None = None
             pending_interrupt_outcome: RunFinishedInterruptOutcome | None = None
 
             # Reasoning/thinking state tracking
@@ -2029,19 +2369,64 @@ class StrandsAgent:
 
                     logger.debug(f"Received event: {event}")
 
-                    # Skip lifecycle events
-                    if event.get("init_event_loop") or event.get("start_event_loop"):
+                    # Skip lifecycle events. ``start`` is Strands' deprecated
+                    # alias of ``start_event_loop`` and is emitted alongside it;
+                    # listing it keeps the pair consistent so one half of a
+                    # duplicate does not surface as a RAW event.
+                    if (
+                        event.get("init_event_loop")
+                        or event.get("start_event_loop")
+                        or event.get("start")
+                    ):
                         continue
-                    if event.get("complete") or event.get("force_stop"):
-                        logger.debug(
-                            f"Breaking event stream: received complete or force_stop event (thread_id={input_data.thread_id}, complete={event.get('complete')}, force_stop={event.get('force_stop')})"
+                    # ``force_stop`` means Strands caught an exception mid-cycle.
+                    # It is a failed run, not assistant-authored content or a
+                    # successful finish. Continue once more so Strands can raise
+                    # the underlying exception and unwind the generator cleanly.
+                    if event.get("force_stop"):
+                        raw_reason = str(event.get("force_stop_reason", "")).strip()
+                        force_stop_error = (
+                            raw_reason or "The Strands agent stopped unexpectedly."
                         )
-                        # Generator will end naturally, no need to break
+                        logger.error(
+                            "Agent stream force-stopped (thread_id=%s, reason=%s)",
+                            input_data.thread_id,
+                            force_stop_error,
+                        )
+                        continue
+
+                    # Legacy terminator from pre-typed-events Strands.
+                    if event.get("complete"):
+                        logger.debug(
+                            f"Breaking event stream: complete received (thread_id={input_data.thread_id})"
+                        )
                         break
 
-                    # The terminal result is handled after the stream so the
-                    # live interrupt-state fallback remains available.
+                    # Modern Strands emits AgentResultEvent last. Consume the
+                    # generator to exhaustion after handling it so its cleanup
+                    # and trace finalizers run before AG-UI reports completion.
                     if "result" in event:
+                        result = event["result"]
+                        if result is not None:
+                            stop_reason = getattr(result, "stop_reason", None)
+                            logger.info(
+                                "agent_result: thread_id=%s stop_reason=%s",
+                                input_data.thread_id,
+                                stop_reason,
+                            )
+                            # Surface non-normal stops to the client as a CustomEvent
+                            # so a UI can render a hint (truncated / filtered / etc.).
+                            # end_turn and tool_use are the normal stops — no event.
+                            if stop_reason in (
+                                "max_tokens",
+                                "guardrail_intervened",
+                                "content_filtered",
+                            ):
+                                yield CustomEvent(
+                                    type=EventType.CUSTOM,
+                                    name="AgentStopped",
+                                    value={"stop_reason": stop_reason},
+                                )
                         continue  # never yield the raw result event
 
                     # Handle text streaming
@@ -2239,6 +2624,19 @@ class StrandsAgent:
                                     type=EventType.STATE_SNAPSHOT,
                                     snapshot=stream_data["state"],
                                 )
+                            else:
+                                # Agent-as-tool: a generator tool wrapping another
+                                # Agent re-yields that agent's own stream_async events
+                                # here. Forward the inner tool-call lifecycle so the
+                                # sub-agent isn't an opaque black box (issue #2304).
+                                # Reached only when no explicit handler claimed the
+                                # payload and it is not a state snapshot.
+                                async for inner_agui_event in _forward_inner_agent_events(
+                                    stream_data,
+                                    tool_stream.get("tool_use") or {},
+                                    inner_tool_calls_seen,
+                                ):
+                                    yield inner_agui_event
 
                     # Handle tool results from Strands for backend tool rendering
                     elif "message" in event and event["message"].get("role") == "user":
@@ -3070,6 +3468,55 @@ class StrandsAgent:
                                         )
                                         pending_halt = True
 
+                    # Strands' ``ModelMessageEvent`` re-announces the assistant
+                    # turn as a whole once the model finishes it. Every part of
+                    # it has already been streamed — text via
+                    # TEXT_MESSAGE_CONTENT, tool calls via TOOL_CALL_* — and the
+                    # authoritative copy reaches the client through
+                    # MessagesSnapshotEvent. Letting it fall through to RAW would
+                    # re-send the full assistant text a second time, so it is
+                    # skipped explicitly rather than by omission.
+                    elif isinstance(event.get("message"), dict) and event[
+                        "message"
+                    ].get("role") == "assistant":
+                        continue
+
+                    # A key the chain above owns, reached only because that
+                    # branch's guard declined it (see _RAW_SUPPRESSED_KEYS).
+                    # "Suppressed" must mean suppressed on every channel, so
+                    # this stays silent instead of handing the withheld payload
+                    # to the RAW fallback below.
+                    elif any(key in event for key in _RAW_SUPPRESSED_KEYS):
+                        logger.debug(
+                            f"Suppressing mapped-but-declined Strands event (thread_id={input_data.thread_id}, keys={sorted(event)})"
+                        )
+                        continue
+
+                    # Anything the chain above does not map gets forwarded as a
+                    # RAW event rather than being dropped without a trace
+                    # (issue #2291). Bedrock citation deltas arrive here, as do
+                    # provider extensions this adapter predates. The deliberate
+                    # lifecycle skips at the top of the loop short-circuit
+                    # before reaching this branch and stay silent.
+                    #
+                    # Sanitizing is mandatory, not defensive: Strands merges the
+                    # live Agent and telemetry handles into delta-bearing events,
+                    # and an unserializable payload aborts the whole SSE stream
+                    # in ``endpoint.py`` (RunErrorEvent + break), costing the
+                    # client its TEXT_MESSAGE_END, snapshots and RUN_FINISHED.
+                    else:
+                        raw_payload = _sanitize_raw_event(event)
+                        if raw_payload is None:
+                            continue
+                        logger.debug(
+                            f"Unmapped Strands event forwarded as RAW (thread_id={input_data.thread_id}): {raw_payload}"
+                        )
+                        yield RawEvent(
+                            type=EventType.RAW,
+                            event=raw_payload,
+                            source="strands",
+                        )
+
                 # Defer hand-off (safety flush): if the stream ended without a
                 # backend tool-result message (e.g. a turn with ONLY frontend tool
                 # calls), the per-batch flush above never ran and the buffered
@@ -3082,6 +3529,16 @@ class StrandsAgent:
                             tool_call_id=_fe_tool_use_id,
                         )
                     deferred_frontend_tool_ends = []
+            except Exception:
+                if force_stop_error is None:
+                    raise
+                # Strands normally raises immediately after ForceStopEvent.
+                # Keep it from bypassing message cleanup below, but preserve its
+                # traceback in case a distinct hook/finalizer failure occurred.
+                logger.exception(
+                    "Strands stream raised after force_stop (thread_id=%s)",
+                    input_data.thread_id,
+                )
             finally:
                 # Properly close the async generator to avoid context detachment errors
                 # The generator should complete naturally when we consume all events,
@@ -3160,6 +3617,14 @@ class StrandsAgent:
                         type=EventType.MESSAGES_SNAPSHOT,
                         messages=list(snapshot_messages),
                     )
+
+            if force_stop_error is not None:
+                yield RunErrorEvent(
+                    type=EventType.RUN_ERROR,
+                    message=force_stop_error,
+                    code="STRANDS_FORCE_STOP",
+                )
+                return
 
             # Streaming can create a mixed checkpoint that was not observable
             # during preflight. Do not advertise or finish it unless the same

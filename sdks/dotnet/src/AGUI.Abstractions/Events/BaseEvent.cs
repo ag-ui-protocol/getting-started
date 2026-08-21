@@ -29,4 +29,21 @@ public abstract class BaseEvent
     [JsonPropertyName("rawEvent")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? RawEvent { get; set; }
+
+    /// <summary>
+    /// Gets or sets extra information attached to this event, open by key.
+    /// </summary>
+    /// <remarks>
+    /// Declared here rather than per event, so every event type carries it. Any
+    /// JSON value is allowed under a key, including <c>null</c>. The object
+    /// itself is absent or an object, never <c>null</c> — <see
+    /// cref="JsonIgnoreCondition.WhenWritingNull"/> keeps an absent object off
+    /// the wire rather than emitting a null in its place.
+    ///
+    /// The <c>ag-ui</c> key is reserved for AG-UI's own use; see <see
+    /// cref="AGUIMetadata.ReservedKey"/>.
+    /// </remarks>
+    [JsonPropertyName("metadata")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Metadata { get; set; }
 }

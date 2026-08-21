@@ -55,6 +55,7 @@ type BaseEvent = {
   type: EventType // Discriminator field
   timestamp?: number
   rawEvent?: any
+  metadata?: Record<string, any>
 }
 ```
 
@@ -63,6 +64,13 @@ type BaseEvent = {
 | `type`      | `EventType`         | The type of event (discriminator field for the union) |
 | `timestamp` | `number` (optional) | Timestamp when the event was created                  |
 | `rawEvent`  | `any` (optional)    | Original event data if this event was transformed     |
+| `metadata`  | `Record<string, any>` (optional) | Extra information attached to the event               |
+
+`metadata` is open by key: any JSON value is allowed under a key, including
+`null`. The object may be absent, but a present one is never `null` — an
+explicit `null` parses as absent. The `ag-ui` key is reserved for AG-UI's own
+use. Use `mergeMetadata` from `@ag-ui/core` to fold event metadata into a
+message; see [Metadata](/concepts/metadata).
 
 ## Lifecycle Events
 

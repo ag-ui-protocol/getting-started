@@ -425,6 +425,8 @@ internal static class ProtoEventMapper
             baseEvent.RawEvent = ProtoValueConverter.ToValue(evt.RawEvent.Value);
         }
 
+        baseEvent.Metadata = ProtoValueConverter.ToStructOrNull(evt.Metadata);
+
         return baseEvent;
     }
 
@@ -444,6 +446,8 @@ internal static class ProtoEventMapper
         {
             target.RawEvent = ProtoValueConverter.ToJsonElement(baseEvent.RawEvent);
         }
+
+        target.Metadata = ProtoValueConverter.StructToJsonElementOrNull(baseEvent.Metadata);
     }
 
     private static RunFinishedOutcome? BuildOutcome(Proto.RunFinishedEvent proto)
