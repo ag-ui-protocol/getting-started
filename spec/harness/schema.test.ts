@@ -418,6 +418,16 @@ describe("closure", () => {
         }
       });
     });
+    // A `$ref` sitting directly on a definition is composition by another
+    // name — in 2020-12 it applies in place, alongside the definition's own
+    // keywords, so one pointing at an open schema would reopen the shape just
+    // like a rogue allOf member. Definitions reference; they do not carry a
+    // sibling $ref.
+    for (const [name, def] of Object.entries(
+      (schema.$defs ?? {}) as Record<string, Json>,
+    )) {
+      if ("$ref" in def) offenders.push(`/$defs/${name}: sibling $ref`);
+    }
     expect(offenders).toEqual([]);
   });
 

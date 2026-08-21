@@ -6,6 +6,7 @@ import {
   eventDefinitions,
   eventValidator,
   normaliseErrors,
+  schema,
   validatorFor,
 } from "./validator";
 
@@ -118,6 +119,43 @@ describe("rejected documents", () => {
           `${expectation.keywordLocation}, found none. All errors:\n` +
           JSON.stringify(errors, null, 2),
       ).toBeGreaterThan(0);
+    },
+  );
+});
+
+describe("closure probes", () => {
+  // Closure is a semantic property, and the structural guards in
+  // schema.test.ts can only forbid the neutralising constructs they know
+  // about — a rogue allOf member, a sibling $ref, a stray
+  // additionalProperties. This is the check no construct can dodge: take a
+  // document the definition provably accepts, add one property no version of
+  // the protocol declares, and demand rejection. Whatever route reopens a
+  // closed object, it ends with this probe being accepted, so it fails here.
+  const defs = schema.$defs as Record<string, Record<string, unknown>>;
+  const closedAnchors = new Set(
+    Object.entries(defs)
+      .filter(([, def]) => def.unevaluatedProperties === false)
+      .map(([name]) => name),
+  );
+  const probeable = valid.filter((fixture) =>
+    closedAnchors.has(fixture.anchor),
+  );
+
+  it("has closed-definition fixtures to probe", () => {
+    expect(probeable.length).toBeGreaterThan(0);
+  });
+
+  it.each(probeable.map((fixture) => [fixture.name, fixture] as const))(
+    "%s with an undeclared property is rejected",
+    (_name, fixture) => {
+      const validate = validatorFor(fixture.anchor);
+      const document = readJson<Record<string, unknown>>(fixture.path);
+      // The document validates without the probe (the accepted-documents suite
+      // pins that), so a rejection here is attributable to the probe alone.
+      expect(
+        validate({ ...document, xClosureProbe: true }),
+        "an undeclared property was accepted",
+      ).toBe(false);
     },
   );
 });
