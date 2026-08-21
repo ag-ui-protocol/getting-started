@@ -116,13 +116,13 @@ const USED_KEYWORDS = new Set([
  * schema defines exactly what exists, and tolerating fields from a newer
  * version is the receiver's job, not the validator's.
  */
+// Mixins, composed into other definitions via allOf. The composing definition
+// closes the whole shape; a mixin that closed itself would reject the very
+// properties its composers add, because evaluation runs bottom-up.
+const MIXINS = new Set(["BaseEvent", "Attributable", "BaseMessage"]);
+
 const OPEN_DEFINITIONS = new Set([
-  // Mixins, composed into other definitions via allOf. The composing definition
-  // closes the whole shape; a mixin that closed itself would reject the very
-  // properties its composers add, because evaluation runs bottom-up.
-  "BaseEvent",
-  "Attributable",
-  "BaseMessage",
+  ...MIXINS,
   // RFC 6902 operations. Section 4 requires members an operation does not
   // define to be ignored rather than rejected, so closing them would make this
   // copy unfaithful to the standard it mirrors.
@@ -377,6 +377,48 @@ describe("closure", () => {
       }
     }
     expect(wrong).toEqual([]);
+  });
+
+  it("declares unevaluatedProperties only as false, directly on a definition", () => {
+    // `unevaluatedProperties: true` inside an allOf member evaluates every
+    // property, which neutralises the composing definition's own
+    // `unevaluatedProperties: false` — annotations flow up from successfully
+    // evaluated subschemas. So the keyword is confined to the one position and
+    // the one value the closure design uses.
+    const offenders: string[] = [];
+    walkSchema(schema, (node, path) => {
+      if (!("unevaluatedProperties" in node)) return;
+      if (
+        node.unevaluatedProperties !== false ||
+        !/^\/\$defs\/[A-Za-z]+$/.test(path)
+      ) {
+        offenders.push(path);
+      }
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  it("composes only the mixins, so no allOf member can reopen a closed shape", () => {
+    // An allOf member is evaluated alongside the definition's own schema, so a
+    // member that evaluates arbitrary properties — an inline
+    // `unevaluatedProperties: true`, or a reference to an open-by-key
+    // definition such as Metadata — would make every property "evaluated" and
+    // switch the closure off. Composition in this schema means one thing:
+    // pulling in a mixin. Anything else fails here.
+    const offenders: string[] = [];
+    walkSchema(schema, (node, path) => {
+      const allOf = node.allOf as Array<Record<string, unknown>> | undefined;
+      if (!Array.isArray(allOf)) return;
+      allOf.forEach((member, index) => {
+        const keys = Object.keys(member);
+        const ref = member.$ref as string | undefined;
+        const target = ref?.replace("#/$defs/", "");
+        if (keys.length !== 1 || !ref || !target || !MIXINS.has(target)) {
+          offenders.push(`${path}/allOf/${index}`);
+        }
+      });
+    });
+    expect(offenders).toEqual([]);
   });
 
   it("lists no definition as open that does not exist or has no shape", () => {
