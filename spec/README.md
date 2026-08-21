@@ -131,11 +131,13 @@ Beyond the fixtures:
 - the keyword vocabulary is pinned, so a keyword the harness does not model
   cannot appear without someone deciding to teach it first
 
-The schema itself is the single source of truth for the protocol's shape: what
-a definition declares and requires is asserted by fixtures that exercise it,
-not duplicated into a second hand-maintained copy. Closure is what makes that
-sufficient for unknown properties — with every object closed, a property
-nobody wrote down fails validation instead of passing silently.
+The schema itself is the single source of truth for the protocol's shape:
+there is no second hand-maintained copy of what each definition declares and
+requires, so a shape change is caught by review of the schema diff and by
+whichever fixtures exercise the changed rule — not by a failing pin. Closure
+is what makes undeclared properties fail loudly rather than pass silently;
+for everything else, a rule only has a regression test if a fixture exercises
+it, which is the standing invitation to add one when a rule matters.
 
 ## Known divergences
 

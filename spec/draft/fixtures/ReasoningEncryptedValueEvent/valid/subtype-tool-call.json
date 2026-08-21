@@ -1,0 +1,6 @@
+{
+  "type": "REASONING_ENCRYPTED_VALUE",
+  "subtype": "tool-call",
+  "entityId": "call_1",
+  "encryptedValue": "b64"
+}

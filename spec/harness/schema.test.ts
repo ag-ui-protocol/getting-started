@@ -388,18 +388,28 @@ describe("closure", () => {
     expect(stale).toEqual([]);
   });
 
-  it("uses additionalProperties only to declare open-by-key objects", () => {
-    // The only legitimate value is `true`, on objects that are open by meaning:
-    // Metadata, activity content, a carried JSON Schema. A schema-valued or
-    // false `additionalProperties` would be a second closure mechanism the
-    // closure test above does not look for.
+  it("uses additionalProperties only at the pinned open-by-key positions", () => {
+    // `additionalProperties: true` evaluates every property, which neutralises
+    // an `unevaluatedProperties: false` on the same schema — so one added to a
+    // closed definition would quietly reopen it while the closure test above
+    // stayed green. The keyword is therefore pinned by exact location: the
+    // objects that are open by meaning, and nowhere else. A value other than
+    // `true` is never legitimate — `false` or a schema would be a second
+    // closure mechanism.
+    const OPEN_BY_KEY = new Set([
+      "/$defs/Metadata",
+      "/$defs/ActivitySnapshotEvent/properties/content",
+      "/$defs/ActivityMessage/properties/content",
+      "/$defs/Interrupt/properties/responseSchema",
+    ]);
     const offenders: string[] = [];
+    const seen = new Set<string>();
     walkSchema(schema, (node, path) => {
-      if (
-        "additionalProperties" in node &&
-        node.additionalProperties !== true
-      ) {
-        offenders.push(path);
+      if ("additionalProperties" in node) {
+        seen.add(path);
+        if (node.additionalProperties !== true || !OPEN_BY_KEY.has(path)) {
+          offenders.push(path);
+        }
       }
       // `not` can reject properties just as effectively, and boolean-false
       // property schemas close an object against a field it claims to have.
@@ -412,6 +422,9 @@ describe("closure", () => {
       }
     });
     expect(offenders).toEqual([]);
+    // And no stale pin: a renamed or removed open-by-key position must not
+    // leave an exemption behind.
+    expect([...OPEN_BY_KEY].filter((path) => !seen.has(path))).toEqual([]);
   });
 });
 
