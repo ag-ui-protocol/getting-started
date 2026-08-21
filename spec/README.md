@@ -38,11 +38,13 @@ load-bearing beyond validation: once the SDKs are generated from it, they are
 what the compatibility boundary strips against, so a field missing here is a
 field that gets quietly removed from the wire.
 
-The exceptions, each open for a stated reason, are pinned by the closure test:
-the mixins (`BaseEvent`, `Attributable`, `BaseMessage`), which are composed
-into definitions that close the whole shape, and the RFC 6902 operations,
-which stay open because the RFC requires members an operation does not define
-to be ignored rather than rejected.
+The exceptions, each open for a stated reason, are pinned by the suite: the
+mixins (`BaseEvent`, `Attributable`, `BaseMessage`), which are composed into
+definitions that close the whole shape; the RFC 6902 operations, which stay
+open because the RFC requires members an operation does not define to be
+ignored rather than rejected; and the open-by-key objects — `Metadata`,
+activity `content`, `Interrupt.responseSchema` — where arbitrary keys are the
+data itself rather than unrecognised fields, pinned by exact location.
 
 ## Addressing a definition
 
