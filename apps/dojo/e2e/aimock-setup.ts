@@ -1486,6 +1486,44 @@ export async function setupLLMock(): Promise<void> {
 
   // Load all fixture JSON files from the fixtures directory.
   // HITL fixtures loaded above take priority (first-match-wins).
+  // Multimodal image verification: only answer with the marker the LlamaIndex
+  // multimodal spec asserts on when the LLM request actually carries an
+  // image_url content part. The generic agentic-chat-multimodal.json fixture
+  // below matches on prompt text alone, so a client that silently flattens
+  // parts lists to text (e.g. a maxVersion<=0.0.39 compat pin) would still
+  // get an image-themed reply and the e2e would pass vacuously. With this
+  // predicate, a stripped image falls through to the JSON fixture, whose
+  // response lacks the marker, and the spec fails — making the test
+  // meaningful. Registered before loadFixtureDir (first match wins).
+  mockServer.addFixture({
+    match: {
+      predicate: (req) => {
+        const lastUser = req.messages.filter((m) => m.role === "user").pop();
+        const hasImagePart = req.messages.some(
+          (m) =>
+            Array.isArray(m.content) &&
+            m.content.some(
+              (p) =>
+                (p as { type?: string }).type === "image_url" &&
+                !!(p as { image_url?: { url?: string } }).image_url?.url,
+            ),
+        );
+        // "llamaindex-mm-check" scopes this fixture to the LlamaIndex suite:
+        // other integrations' multimodal specs send similar prompts with
+        // image_url parts, and without a unique token this fixture would
+        // intercept them (first match wins).
+        return (
+          hasImagePart &&
+          textOf(lastUser?.content).toLowerCase().includes("llamaindex-mm-check")
+        );
+      },
+    },
+    response: {
+      content:
+        "multimodal-image-verified: I received the uploaded image and can see its visual content. Happy to describe specific details.",
+    },
+  });
+
   mockServer.loadFixtureDir(FIXTURES_DIR);
 
   // Programmatic catch-all: when the last message is a tool result,

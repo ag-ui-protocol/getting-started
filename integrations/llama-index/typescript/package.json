@@ -1,7 +1,7 @@
 {
   "name": "@ag-ui/llamaindex",
   "author": "Logan Markewich <logan@runllama.ai>",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -270,6 +270,7 @@ export const menuIntegrations = [
     features: [
       "agentic_chat",
       "v1_agentic_chat",
+      "agentic_chat_multimodal",
       "backend_tool_rendering",
       "human_in_the_loop",
       "agentic_generative_ui",

@@ -67,7 +67,8 @@ export const BaseEventSchema = z
     timestamp: z.number().optional(),
     rawEvent: z.any().optional(),
     // Declared once here so every event type carries it. See
-    // OptionalMetadataSchema for why an explicit null parses as absent.
+    // OptionalMetadataSchema for why an explicit null is rejected rather than
+    // tolerated the way parentMessageId and outcome are.
     metadata: OptionalMetadataSchema,
   })
   .passthrough();

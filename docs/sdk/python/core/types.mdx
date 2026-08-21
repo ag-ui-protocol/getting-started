@@ -27,7 +27,7 @@ class RunAgentInput(ConfiguredBaseModel):
     thread_id: str
     run_id: str
     parent_run_id: Optional[str] = None
-    state: Any
+    state: Any = None  # optional: absent means "no state"; a bare null reads as absent
     messages: List[Message]
     tools: List[Tool]
     context: List[Context]
@@ -35,17 +35,17 @@ class RunAgentInput(ConfiguredBaseModel):
     resume: Optional[List[ResumeEntry]] = None
 ```
 
-| Property          | Type                          | Description                                    |
-| ----------------- | ----------------------------- | ---------------------------------------------- |
-| `thread_id`       | `str`                         | ID of the conversation thread                  |
-| `run_id`          | `str`                         | ID of the current run                          |
-| `parent_run_id`   | `Optional[str]`               | (Optional) ID of the run that spawned this run |
-| `state`           | `Any`                         | Current state of the agent                     |
-| `messages`        | `List[Message]`               | List of messages in the conversation           |
-| `tools`           | `List[Tool]`                  | Client-provided tools available for this run   |
-| `context`         | `List[Context]`               | List of context objects provided to the agent  |
-| `forwarded_props` | `Any`                         | Additional properties forwarded to the agent   |
-| `resume`          | `Optional[List[ResumeEntry]]` | Per-interrupt responses resuming a run that finished with an interrupt outcome |
+| Property          | Type                          | Description                                                                                         |
+| ----------------- | ----------------------------- | --------------------------------------------------------------------------------------------------- |
+| `thread_id`       | `str`                         | ID of the conversation thread                                                                       |
+| `run_id`          | `str`                         | ID of the current run                                                                               |
+| `parent_run_id`   | `Optional[str]`               | (Optional) ID of the run that spawned this run                                                      |
+| `state`           | `Any`                         | (Optional) Current state of the agent; absent means "no state", and a bare `null` is read as absent |
+| `messages`        | `List[Message]`               | List of messages in the conversation                                                                |
+| `tools`           | `List[Tool]`                  | Client-provided tools available for this run                                                        |
+| `context`         | `List[Context]`               | List of context objects provided to the agent                                                       |
+| `forwarded_props` | `Any`                         | Additional properties forwarded to the agent                                                        |
+| `resume`          | `Optional[List[ResumeEntry]]` | Per-interrupt responses resuming a run that finished with an interrupt outcome                      |
 
 ## ResumeEntry
 
@@ -62,18 +62,18 @@ class ResumeEntry(MetadataMixin):
     payload: Optional[Any] = None
 ```
 
-| Property       | Type                       | Description                                                                  |
-| -------------- | -------------------------- | ---------------------------------------------------------------------------- |
-| `interrupt_id` | `str`                      | ID of the interrupt this entry addresses                                      |
-| `status`       | `ResumeStatus`             | `"resolved"` if the user responded, `"cancelled"` if they abandoned           |
-| `payload`      | `Optional[Any]`            | The response itself, validated against the interrupt's `response_schema`      |
+| Property       | Type                       | Description                                                                           |
+| -------------- | -------------------------- | ------------------------------------------------------------------------------------- |
+| `interrupt_id` | `str`                      | ID of the interrupt this entry addresses                                              |
+| `status`       | `ResumeStatus`             | `"resolved"` if the user responded, `"cancelled"` if they abandoned                   |
+| `payload`      | `Optional[Any]`            | The response itself, validated against the interrupt's `response_schema`              |
 | `metadata`     | `Optional[Dict[str, Any]]` | Envelope data about the response — signatures, routing keys — never the answer itself |
 
 `metadata` follows the same conventions as metadata everywhere else in the
 protocol: open by key, any JSON value allowed under a key including `None`, the
-object itself absent or a mapping but never `null` on the wire, and the
-`ag-ui` key reserved. A resume entry is a request field, so nothing merges into
-it; see [Metadata](/concepts/metadata#resume-entries).
+object itself absent or a mapping but never `null` on the wire, and the `ag-ui`
+key reserved. A resume entry is a request field, so nothing merges into it; see
+[Metadata](/concepts/metadata#resume-entries).
 
 ## Message Types
 

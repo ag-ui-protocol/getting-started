@@ -513,13 +513,14 @@ class TestEvents(unittest.TestCase):
             source=None  # Explicit None
         )
         self.assertIsNone(event.source)
-        
-        # Test serialization
+
+        # Test serialization: `source` is optional, so having no value means the
+        # key is left out rather than written as null.
         serialized = event.model_dump(by_alias=True)
         self.assertEqual(serialized["type"], "RAW")
         self.assertEqual(serialized["event"]["data"], "test")
-        self.assertIsNone(serialized["source"])
-        
+        self.assertNotIn("source", serialized)
+
         # Test round-trip
         event_adapter = TypeAdapter(Event)
         json_str = event.model_dump_json(by_alias=True)

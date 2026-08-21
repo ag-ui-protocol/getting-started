@@ -21,6 +21,5 @@ public sealed class ToolCallResultEvent : BaseEvent
     public string Content { get; set; } = string.Empty;
 
     [JsonPropertyName("role")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Role { get; set; }
 }

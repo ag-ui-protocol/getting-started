@@ -29,15 +29,24 @@ describe("metadata on the unvalidated fallback encode path", () => {
     warn.mockRestore();
   });
 
-  it("still encodes a valid event whose metadata is explicitly null", () => {
-    // Here the schema coerces null to absent before encoding.
-    const bytes = encode({
-      type: EventType.TEXT_MESSAGE_END,
-      messageId: "m1",
-      metadata: null,
-    } as any);
+  it("treats an event whose metadata is explicitly null as malformed", () => {
+    // A whole-object null is a contract violation (metadata is absent or an
+    // object, never null — see OptionalMetadataSchema), so validation rejects
+    // it and encoding succeeds only through the warn-and-encode fallback.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    expect(bytes.length).toBeGreaterThan(0);
+    let bytes: Uint8Array | undefined;
+    expect(() => {
+      bytes = encode({
+        type: EventType.TEXT_MESSAGE_END,
+        messageId: "m1",
+        metadata: null,
+      } as any);
+    }).not.toThrow();
+    expect(bytes!.length).toBeGreaterThan(0);
+    expect(warn).toHaveBeenCalled();
+
+    warn.mockRestore();
   });
 });
 

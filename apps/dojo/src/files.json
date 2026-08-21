@@ -3679,6 +3679,26 @@
       "type": "file"
     }
   ],
+  "llama-index::agentic_chat_multimodal": [
+    {
+      "name": "page.tsx",
+      "content": "\"use client\";\nimport React, { useState } from \"react\";\nimport \"@copilotkit/react-core/v2/styles.css\";\nimport {\n  useFrontendTool,\n  useConfigureSuggestions,\n  CopilotChat,\n} from \"@copilotkit/react-core/v2\";\nimport { z } from \"zod\";\nimport { CopilotKit } from \"@copilotkit/react-core\";\n\ninterface AgenticChatMultimodalProps {\n  params: Promise<{\n    integrationId: string;\n  }>;\n}\n\nconst AgenticChatMultimodal: React.FC<AgenticChatMultimodalProps> = ({ params }) => {\n  const { integrationId } = React.use(params);\n\n  return (\n    <CopilotKit\n      runtimeUrl={`/api/copilotkit/${integrationId}`}\n      showDevConsole={false}\n      agent=\"agentic_chat_multimodal\"\n    >\n      <Chat />\n    </CopilotKit>\n  );\n};\n\nconst Chat = () => {\n  const [background, setBackground] = useState<string>(\"--copilot-kit-background-color\");\n\n  useFrontendTool({\n    name: \"change_background\",\n    description:\n      \"Change the background color of the chat. Can be anything that the CSS background attribute accepts. Regular colors, linear or radial gradients etc.\",\n    parameters: z.object({\n      background: z.string().describe(\"The background. Prefer gradients. Only use when asked.\"),\n    }),\n    handler: async ({ background }: { background: string }) => {\n      setBackground(background);\n      return {\n        status: \"success\",\n        message: `Background changed to ${background}`,\n      };\n    },\n  });\n\n  useConfigureSuggestions({\n    suggestions: [\n      {\n        title: \"Upload an image\",\n        message: \"Describe what you see in the image I upload.\",\n      },\n      {\n        title: \"Analyze a photo\",\n        message: \"What objects can you identify in this photo?\",\n      },\n    ],\n    available: \"always\",\n  });\n\n  return (\n    <div\n      className=\"flex justify-center items-center h-full w-full\"\n      data-testid=\"background-container\"\n      style={{ background }}\n    >\n      <div className=\"h-full w-full md:w-8/10 md:h-8/10 rounded-lg\">\n        <CopilotChat\n          agentId=\"agentic_chat_multimodal\"\n          className=\"h-full rounded-2xl max-w-6xl mx-auto\"\n          attachments={{ enabled: true }}\n        />\n      </div>\n    </div>\n  );\n};\n\nexport default AgenticChatMultimodal;\n",
+      "language": "typescript",
+      "type": "file"
+    },
+    {
+      "name": "README.mdx",
+      "content": "# Agentic Chat Multimodal\n\nThis example demonstrates multimodal input support in AG-UI. Users can upload images and other media alongside text messages, and the agent analyzes them.\n\n## How it works\n\n- The `CopilotChat` component is configured with `attachments={{ enabled: true }}` to allow file uploads\n- Uploaded images are sent as `ImageInputContent` with base64-encoded data through the AG-UI protocol\n- The backend agent uses a vision-capable model to analyze the uploaded content\n- The AG-UI integration layer automatically converts between AG-UI's multimodal content types and the framework's native format\n\n## Try it\n\n1. Click the attachment icon in the chat input\n2. Upload an image\n3. Ask the agent to describe or analyze the image\n",
+      "language": "markdown",
+      "type": "file"
+    },
+    {
+      "name": "agentic_chat_multimodal.py",
+      "content": "\"\"\"Agentic Chat Multimodal — Accepts images and documents.\"\"\"\n\nfrom llama_index.llms.openai import OpenAI\nfrom llama_index.protocols.ag_ui.router import get_ag_ui_workflow_router\n\nagentic_chat_multimodal_router = get_ag_ui_workflow_router(\n    llm=OpenAI(model=\"gpt-4.1\"),\n    system_prompt=(\n        \"You are a helpful assistant that can analyze images and documents. \"\n        \"Analyze any media the user sends and answer their questions about it. \"\n        \"Be descriptive when analyzing visual content. \"\n        \"If the user sends multiple files, analyze each one.\"\n    ),\n)\n",
+      "language": "python",
+      "type": "file"
+    }
+  ],
   "llama-index::backend_tool_rendering": [
     {
       "name": "page.tsx",

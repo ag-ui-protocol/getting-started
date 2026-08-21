@@ -26,48 +26,41 @@ public sealed class TokenUsage
     /// The provider that served the request (for example <c>"openai"</c>), when known.
     /// </summary>
     [JsonPropertyName("provider")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Provider { get; set; }
 
     /// <summary>
     /// The model that served the request (for example <c>"gpt-4o"</c>), when known.
     /// </summary>
     [JsonPropertyName("model")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Model { get; set; }
 
     /// <summary>
     /// Tokens consumed by the input, including any counted by <see cref="CachedInputTokens"/>.
     /// </summary>
     [JsonPropertyName("inputTokens")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? InputTokens { get; set; }
 
     /// <summary>
     /// Tokens produced as output, including any counted by <see cref="ReasoningTokens"/>.
     /// </summary>
     [JsonPropertyName("outputTokens")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? OutputTokens { get; set; }
 
     /// <summary>
     /// Total tokens billed for the request, as reported by the provider.
     /// </summary>
     [JsonPropertyName("totalTokens")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? TotalTokens { get; set; }
 
     /// <summary>
     /// Output tokens the model spent on internal reasoning.
     /// </summary>
     [JsonPropertyName("reasoningTokens")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? ReasoningTokens { get; set; }
 
     /// <summary>
     /// Input tokens served from the provider's cache.
     /// </summary>
     [JsonPropertyName("cachedInputTokens")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? CachedInputTokens { get; set; }
 }
