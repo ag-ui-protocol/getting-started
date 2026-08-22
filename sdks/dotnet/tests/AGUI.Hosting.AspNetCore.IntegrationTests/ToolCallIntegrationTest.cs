@@ -179,6 +179,52 @@ public sealed class ToolCallIntegrationTest : IntegrationTestBase
         Assert.Equal("call-1", fcc.CallId);
     }
 
+    [Theory]
+    [InlineData(TransportFormat.Json)]
+    [InlineData(TransportFormat.Protobuf)]
+    public async Task PostRun_ContinuationStreamsGenuinelyNewToolCall(TransportFormat format)
+    {
+        var client = CreateClient((messages, options, ct) =>
+            EmitToolCallResponse(
+                "call-new",
+                "next_step",
+                new Dictionary<string, object?> { ["value"] = 42 },
+                ct),
+            format);
+        var confirmTool = AIFunctionFactory.Create(
+            () => "confirmed",
+            "confirm",
+            "Confirms an action");
+
+        var updates = await CollectUpdates(
+            client,
+            [
+                new ChatMessage(ChatRole.Assistant,
+                [
+                    new FunctionCallContent("call-existing", "confirm",
+                        new Dictionary<string, object?>())
+                ]),
+                new ChatMessage(ChatRole.Tool,
+                [
+                    new FunctionResultContent("call-existing", """{"choice":"yes"}""")
+                ])
+            ],
+            new ChatOptions { Tools = [confirmTool] });
+
+        Assert.Collection(updates,
+            u => Assert.IsType<RunStartedEvent>(u.RawRepresentation),
+            u =>
+            {
+                var toolEnd = Assert.IsType<ToolCallEndEvent>(u.RawRepresentation);
+                Assert.Equal("call-new", toolEnd.ToolCallId);
+                var call = Assert.Single(u.Contents.OfType<FunctionCallContent>());
+                Assert.Equal("call-new", call.CallId);
+                Assert.Equal("next_step", call.Name);
+                Assert.Equal("42", call.Arguments!["value"]?.ToString());
+            },
+            u => Assert.IsType<RunFinishedEvent>(u.RawRepresentation));
+    }
+
     // A dummy client tool so AGUIChatClient treats unmatched tool calls as server tools
     // and passes them through instead of letting FunctionInvokingChatClient loop on them.
     private static readonly AIFunction DummyClientTool = AIFunctionFactory.Create(

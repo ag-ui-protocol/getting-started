@@ -148,6 +148,9 @@ public static class ChatResponseUpdateAGUIExtensions
         var jsonSerializerOptions = context.JsonSerializerOptions;
         var isContinuation = context.IsContinuation;
         var clientToolNames = context.ClientToolNames;
+        var preExistingToolCalls = isContinuation
+            ? GetMostRecentToolCalls(context.Messages)
+            : null;
 
         bool runStartedEmitted = false;
         bool runFinishedEmitted = false;
@@ -246,6 +249,12 @@ public static class ChatResponseUpdateAGUIExtensions
                         }
 
                         rawToolCallId = fragment.ToolCallId;
+
+                        if (preExistingToolCalls?.ContainsKey(rawToolCallId) is true)
+                        {
+                            continue;
+                        }
+
                         rawToolCallIdsByIndex[fragment.Index] = rawToolCallId;
                         rawToolCallIndexById[rawToolCallId] = fragment.Index;
 
@@ -369,8 +378,9 @@ public static class ChatResponseUpdateAGUIExtensions
                             break;
                         }
 
-                        // On continuation, suppress re-emitted FCCs (client already has them from turn 1)
-                        if (isContinuation)
+                        // On continuation, suppress only calls already present in the request
+                        // history. New calls produced by the resumed model must still stream.
+                        if (preExistingToolCalls?.ContainsKey(fcc.CallId) is true)
                         {
                             // Still track for correlating FRCs later
                             callIdToToolName ??= new Dictionary<string, string>(StringComparer.Ordinal);
@@ -414,10 +424,15 @@ public static class ChatResponseUpdateAGUIExtensions
                         break;
 
                     case FunctionResultContent frc:
+                        string? frcToolName = null;
+                        if (callIdToToolName?.TryGetValue(frc.CallId, out frcToolName) is not true)
+                        {
+                            preExistingToolCalls?.TryGetValue(frc.CallId, out frcToolName);
+                        }
+
                         // On continuation, suppress client tool results (client already has them)
                         if (isContinuation
-                            && callIdToToolName is not null
-                            && callIdToToolName.TryGetValue(frc.CallId, out var frcToolName)
+                            && frcToolName is not null
                             && clientToolNames.Contains(frcToolName))
                         {
                             break;
@@ -613,6 +628,44 @@ public static class ChatResponseUpdateAGUIExtensions
             yield return RunFinishedEvent.Create(threadId, runId, new RunFinishedSuccessOutcome(),
                 usageTracker.Build());
         }
+    }
+
+    private static Dictionary<string, string> GetMostRecentToolCalls(List<ChatMessage> messages)
+    {
+        // Continuation reconstruction may append user approval responses after the source
+        // assistant batch. Only that most recent assistant tool-call batch can be replayed.
+        for (var i = messages.Count - 1; i >= 0; i--)
+        {
+            var message = messages[i];
+            if (message.Role != ChatRole.Assistant)
+            {
+                continue;
+            }
+
+            Dictionary<string, string>? toolCalls = null;
+            foreach (var content in message.Contents)
+            {
+                FunctionCallContent? call = content switch
+                {
+                    FunctionCallContent functionCall => functionCall,
+                    ToolApprovalRequestContent { ToolCall: FunctionCallContent functionCall } => functionCall,
+                    _ => null,
+                };
+
+                if (call is not null)
+                {
+                    toolCalls ??= new Dictionary<string, string>(StringComparer.Ordinal);
+                    toolCalls[call.CallId] = call.Name;
+                }
+            }
+
+            if (toolCalls is not null)
+            {
+                return toolCalls;
+            }
+        }
+
+        return new Dictionary<string, string>(StringComparer.Ordinal);
     }
 
     private static string? SerializeResultContent(FunctionResultContent frc, JsonSerializerOptions options)

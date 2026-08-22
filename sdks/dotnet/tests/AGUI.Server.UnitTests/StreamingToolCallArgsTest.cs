@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AGUI.Abstractions;
 using Microsoft.Extensions.AI;
 using Xunit;
@@ -38,6 +39,13 @@ public sealed class StreamingToolCallArgsTest
     {
         var context = new RunAgentInput { ThreadId = ThreadId, RunId = RunId }
             .ToChatRequestContext(AIJsonUtilities.DefaultOptions, OptionsWithExtractor());
+        return await RunAsync(context, updates).ConfigureAwait(false);
+    }
+
+    private static async Task<List<BaseEvent>> RunAsync(
+        ChatRequestContext context,
+        params ChatResponseUpdate[] updates)
+    {
         var events = new List<BaseEvent>();
         await foreach (var evt in ToAsyncEnumerable(updates).AsAGUIEventStreamAsync(context).ConfigureAwait(false))
         {
@@ -55,6 +63,66 @@ public sealed class StreamingToolCallArgsTest
         }
 
         await Task.CompletedTask.ConfigureAwait(false);
+    }
+
+    [Fact]
+    public async Task Continuation_FragmentsSuppressReplayedCallAndStreamNewCallAsync()
+    {
+        var context = new RunAgentInput
+        {
+            ThreadId = ThreadId,
+            RunId = RunId,
+            Tools =
+            [
+                new AGUITool
+                {
+                    Name = "confirm",
+                    Parameters = JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone()
+                }
+            ],
+            Messages =
+            [
+                new AGUIAssistantMessage
+                {
+                    ToolCalls =
+                    [
+                        new AGUIToolCall
+                        {
+                            Id = "call_existing",
+                            Function = new AGUIToolCallFunction
+                            {
+                                Name = "confirm",
+                                Arguments = "{}"
+                            }
+                        }
+                    ]
+                },
+                new AGUIToolMessage
+                {
+                    ToolCallId = "call_existing",
+                    Content = """{"choice":"yes"}"""
+                }
+            ]
+        }.ToChatRequestContext(AIJsonUtilities.DefaultOptions, OptionsWithExtractor());
+        var updates = new[]
+        {
+            Fragment(0, "call_existing", "confirm", "{\"choice\":"),
+            Fragment(0, null, null, "\"yes\"}"),
+            Coalesced("call_existing", "confirm"),
+            Fragment(0, "call_new", "next_step", "{\"value\":"),
+            Fragment(0, null, null, "42}"),
+            Coalesced("call_new", "next_step"),
+        };
+
+        var events = await RunAsync(context, updates);
+
+        Assert.Collection(events,
+            e => Assert.IsType<RunStartedEvent>(e),
+            e => Assert.Equal("call_new", Assert.IsType<ToolCallStartEvent>(e).ToolCallId),
+            e => Assert.Equal("{\"value\":", Assert.IsType<ToolCallArgsEvent>(e).Delta),
+            e => Assert.Equal("42}", Assert.IsType<ToolCallArgsEvent>(e).Delta),
+            e => Assert.Equal("call_new", Assert.IsType<ToolCallEndEvent>(e).ToolCallId),
+            e => Assert.IsType<RunFinishedEvent>(e));
     }
 
     [Fact]

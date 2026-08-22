@@ -45,7 +45,7 @@ export function useMobileChat(defaultChatHeight = 50) {
       document.removeEventListener('mouseup', handleMouseUp);
       document.body.style.userSelect = '';
     };
-  }, [isDragging, dragStartY, dragStartHeight, chatHeight]);
+  }, [isDragging, dragStartY, dragStartHeight, chatHeight, defaultChatHeight]);
 
   const handleDragStart = (e: React.MouseEvent) => {
     setIsDragging(true);
