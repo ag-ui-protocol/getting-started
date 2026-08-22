@@ -393,6 +393,79 @@ class TestMultimodalConversion(unittest.TestCase):
         self.assertEqual(agui_content[0].source.mime_type, "image/jpeg")
         self.assertEqual(agui_content[0].source.value, "/9j/4AAQ")
 
+    def test_langchain_pdf_data_url_to_agui_produces_document_input_content(self):
+        """A non-image data URL must come back as a DOCUMENT, not an image.
+
+        Everything media-shaped leaves for LangChain as an ``image_url`` block,
+        because that is the only media block LangChain takes. Coming back, the
+        mime type in the data URL is the only surviving record of what the
+        attachment actually was — so reading it is what keeps a PDF a PDF.
+        Answering ``image`` for ``application/pdf`` makes a client render the
+        attachment as a picture, which fails to decode and shows a broken image
+        where the document should be.
+        """
+        lc_content = [
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:application/pdf;base64,JVBERi0xLjMK"}
+            },
+        ]
+
+        agui_content = convert_langchain_multimodal_to_agui(lc_content)
+
+        self.assertEqual(len(agui_content), 1)
+        self.assertIsInstance(agui_content[0], DocumentInputContent)
+        self.assertEqual(agui_content[0].type, "document")
+        self.assertIsInstance(agui_content[0].source, InputContentDataSource)
+        self.assertEqual(agui_content[0].source.mime_type, "application/pdf")
+        self.assertEqual(agui_content[0].source.value, "JVBERi0xLjMK")
+
+    def test_langchain_audio_data_url_to_agui_produces_audio_input_content(self):
+        """Same rule for audio: the mime type decides the modality."""
+        agui_content = convert_langchain_multimodal_to_agui([
+            {"type": "image_url", "image_url": {"url": "data:audio/mpeg;base64,SUQzBA"}},
+        ])
+
+        self.assertEqual(len(agui_content), 1)
+        self.assertIsInstance(agui_content[0], AudioInputContent)
+        self.assertEqual(agui_content[0].source.mime_type, "audio/mpeg")
+
+    def test_langchain_video_data_url_to_agui_produces_video_input_content(self):
+        """Same rule for video."""
+        agui_content = convert_langchain_multimodal_to_agui([
+            {"type": "image_url", "image_url": {"url": "data:video/mp4;base64,AAAAIGZ0"}},
+        ])
+
+        self.assertEqual(len(agui_content), 1)
+        self.assertIsInstance(agui_content[0], VideoInputContent)
+        self.assertEqual(agui_content[0].source.mime_type, "video/mp4")
+
+    def test_round_trip_document_survives_as_a_document(self):
+        """A document must still be a document after AG-UI -> LangChain -> AG-UI.
+
+        This is the defect as a user meets it: attach a PDF, and the run's echo
+        of the conversation turns it into an image.
+        """
+        original = [
+            DocumentInputContent(
+                type="document",
+                source=InputContentDataSource(
+                    type="data",
+                    value="JVBERi0xLjMK",
+                    mime_type="application/pdf",
+                ),
+            ),
+        ]
+
+        round_tripped = convert_langchain_multimodal_to_agui(
+            convert_agui_multimodal_to_langchain(original)
+        )
+
+        self.assertEqual(len(round_tripped), 1)
+        self.assertIsInstance(round_tripped[0], DocumentInputContent)
+        self.assertEqual(round_tripped[0].source.mime_type, "application/pdf")
+        self.assertEqual(round_tripped[0].source.value, "JVBERi0xLjMK")
+
     # ── Round-trip tests ────────────────────────────────────────────────
 
     def test_round_trip_langchain_url_to_agui_and_back(self):
