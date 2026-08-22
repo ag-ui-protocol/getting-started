@@ -1,6 +1,6 @@
 # Security Policy
 
-At **AG-UI**, we are continuously working to improve not only the project but also the open-source repository. To achieve this, we encourage you to take some time to responsibly disclose any issues you may encounter.
+At **CopilotKit**, we are continuously working to improve not only the project but also the open-source repository. To achieve this, we encourage you to take some time to responsibly disclose any issues you may encounter.
 
 ## Reporting a Vulnerability
 
