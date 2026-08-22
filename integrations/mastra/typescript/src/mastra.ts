@@ -12,6 +12,7 @@ import type {
   ReasoningMessageEndEvent,
   ReasoningEndEvent,
   RunAgentInput,
+  RunErrorEvent,
   RunFinishedEvent,
   RunFinishedInterruptOutcome,
   RunStartedEvent,
@@ -662,6 +663,21 @@ export class MastraAgent extends AbstractAgent {
     const pendingInterrupts: Interrupt[] = [];
 
     return new Observable<BaseEvent>((subscriber) => {
+      // A failed run must still terminate the AG-UI stream: emit RUN_ERROR as
+      // the terminal event (mirrors LangGraph / AWS Strands) BEFORE surfacing
+      // the failure on the rxjs error channel, which callers already depend on.
+      const failRun = (error: unknown) => {
+        if (subscriber.closed) return;
+        subscriber.next({
+          type: EventType.RUN_ERROR,
+          message:
+            error instanceof Error
+              ? error.message
+              : String(error ?? "Unknown error"),
+        } as RunErrorEvent);
+        subscriber.error(error);
+      };
+
       const run = async () => {
         const runStartedEvent: RunStartedEvent = {
           type: EventType.RUN_STARTED,
@@ -733,7 +749,7 @@ export class MastraAgent extends AbstractAgent {
                 ? JSON.parse(forwardedCommand.interruptEvent)
                 : forwardedCommand.interruptEvent;
           } catch (err) {
-            subscriber.error(
+            failRun(
               new Error("Invalid interruptEvent: malformed JSON", {
                 cause: err,
               }),
@@ -743,7 +759,7 @@ export class MastraAgent extends AbstractAgent {
 
           // Validate required fields for resume
           if (!interruptEvent?.toolCallId || !interruptEvent?.runId) {
-            subscriber.error(
+            failRun(
               new Error("Invalid interruptEvent: missing toolCallId or runId"),
             );
             return;
@@ -823,7 +839,7 @@ export class MastraAgent extends AbstractAgent {
                 typeof response !== "object" ||
                 !response.fullStream
               ) {
-                subscriber.error(
+                failRun(
                   new Error(
                     "resumeStream returned no valid response (missing fullStream)",
                   ),
@@ -836,7 +852,7 @@ export class MastraAgent extends AbstractAgent {
                 {
                   ...callbacks,
                   onError: (error) => {
-                    subscriber.error(error);
+                    failRun(error);
                   },
                 },
               );
@@ -856,7 +872,7 @@ export class MastraAgent extends AbstractAgent {
               const remoteAgent = this
                 .agent as unknown as Partial<RemoteResumableAgent>;
               if (typeof remoteAgent.resumeStream !== "function") {
-                subscriber.error(
+                failRun(
                   new Error(
                     "Resume from interrupt requires a @mastra/client-js version that supports agent.resumeStream(); please upgrade @mastra/client-js",
                   ),
@@ -873,7 +889,7 @@ export class MastraAgent extends AbstractAgent {
                 !response ||
                 typeof response.processDataStream !== "function"
               ) {
-                subscriber.error(
+                failRun(
                   new Error(
                     "resumeStream returned no valid response (missing processDataStream)",
                   ),
@@ -885,7 +901,7 @@ export class MastraAgent extends AbstractAgent {
               const { handleChunk, flush } = this.createChunkProcessor({
                 ...callbacks,
                 onError: (error) => {
-                  subscriber.error(error);
+                  failRun(error);
                 },
               });
 
@@ -905,7 +921,7 @@ export class MastraAgent extends AbstractAgent {
               }
             }
           } catch (error) {
-            subscriber.error(error);
+            failRun(error);
           }
           return;
         }
@@ -918,7 +934,7 @@ export class MastraAgent extends AbstractAgent {
         try {
           await this.syncInputStateToWorkingMemory(input);
         } catch (error) {
-          subscriber.error(error);
+          failRun(error);
           return;
         }
 
@@ -936,7 +952,7 @@ export class MastraAgent extends AbstractAgent {
           await this.streamMastraAgent(input, {
             ...streamCallbacks,
             onError: (error) => {
-              subscriber.error(error);
+              failRun(error);
             },
             onRunFinished: async (traceId, usage) => {
               await this.emitWorkingMemorySnapshot(subscriber, input.threadId);
@@ -953,13 +969,12 @@ export class MastraAgent extends AbstractAgent {
             },
           });
         } catch (error) {
-          subscriber.error(error);
+          failRun(error);
         }
       };
 
       run().catch((err) => {
-        if (subscriber.closed) return;
-        subscriber.error(err);
+        failRun(err);
       });
 
       return () => {};

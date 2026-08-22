@@ -787,11 +787,13 @@ describe("interrupt bridge: tool-call buffering", () => {
     const { error, events } = await collectError(agent, makeInput());
 
     expect(error.message).toBe("remote agent failed");
-    // Only RUN_STARTED + one text chunk before error — no post-error events
+    // RUN_STARTED + one text chunk before the error, then the terminal
+    // RUN_ERROR — the post-error "after" chunk and RUN_FINISHED never happen.
     const types = events.map((e) => e.type);
     expect(types).toEqual([
       EventType.RUN_STARTED,
       EventType.TEXT_MESSAGE_CHUNK,
+      EventType.RUN_ERROR,
     ]);
   });
 
@@ -1252,7 +1254,7 @@ describe("interrupt bridge: resume path", () => {
       resourceId: "resource-1",
     });
 
-    const { error } = await collectError(
+    const { error, events } = await collectError(
       agent,
       makeResumeInput({
         type: "mastra_suspend",
@@ -1262,6 +1264,7 @@ describe("interrupt bridge: resume path", () => {
     );
 
     expect(error.message).toBe("Resume failed: no snapshot");
+    expect(events[events.length - 1].type).toBe(EventType.RUN_ERROR);
   });
 
   it("errors on malformed interruptEvent JSON", async () => {
@@ -1280,8 +1283,10 @@ describe("interrupt bridge: resume path", () => {
     );
 
     expect(error.message).toContain("Invalid interruptEvent");
-    // Protocol invariant: RUN_STARTED must be emitted before any error
+    // Protocol invariant: RUN_STARTED must be emitted before any error, and
+    // the run must still terminate with RUN_ERROR.
     expect(events[0]?.type).toBe(EventType.RUN_STARTED);
+    expect(events[events.length - 1].type).toBe(EventType.RUN_ERROR);
   });
 
   it("errors when interruptEvent is missing toolCallId", async () => {
@@ -1294,6 +1299,7 @@ describe("interrupt bridge: resume path", () => {
 
     expect(error.message).toContain("missing toolCallId or runId");
     expect(events[0]?.type).toBe(EventType.RUN_STARTED);
+    expect(events[events.length - 1].type).toBe(EventType.RUN_ERROR);
   });
 
   it("errors when interruptEvent is missing runId", async () => {

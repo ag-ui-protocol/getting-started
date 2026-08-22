@@ -329,6 +329,78 @@ describe("error handling", () => {
     expect(error.message).toBe("Remote agent unavailable");
   });
 
+  it("emits a terminal RUN_ERROR for an error chunk from the local agent stream", async () => {
+    const agent = makeLocalMastraAgent({
+      streamChunks: [
+        { type: "text-delta", payload: { text: "Hello" } },
+        { type: "error", payload: { error: "Something went wrong" } },
+      ],
+    });
+
+    const { error, events } = await collectError(agent, makeInput());
+
+    const last = events[events.length - 1];
+    expect(last.type).toBe(EventType.RUN_ERROR);
+    expect((last as any).message).toBe("Something went wrong");
+    // The rxjs error channel stays intact for callers that rely on it.
+    expect(error.message).toBe("Something went wrong");
+  });
+
+  it("emits a terminal RUN_ERROR when local agent stream() throws", async () => {
+    const fakeAgent = new FakeLocalAgent({ streamChunks: [] });
+    fakeAgent.stream = async () => {
+      throw new Error("Agent connection failed");
+    };
+
+    const agent = new MastraAgent({
+      agentId: "test-agent",
+      agent: fakeAgent as any,
+      resourceId: "resource-1",
+    });
+
+    const { error, events } = await collectError(agent, makeInput());
+
+    const last = events[events.length - 1];
+    expect(last.type).toBe(EventType.RUN_ERROR);
+    expect((last as any).message).toBe("Agent connection failed");
+    expect(error.message).toBe("Agent connection failed");
+  });
+
+  it("emits a terminal RUN_ERROR when remote agent stream() throws", async () => {
+    const fakeAgent = new FakeRemoteAgent({ streamChunks: [] });
+    fakeAgent.stream = async () => {
+      throw new Error("Remote agent unavailable");
+    };
+
+    const agent = new MastraAgent({
+      agentId: "test-agent",
+      agent: fakeAgent as any,
+      resourceId: "resource-1",
+    });
+
+    const { error, events } = await collectError(agent, makeInput());
+
+    const last = events[events.length - 1];
+    expect(last.type).toBe(EventType.RUN_ERROR);
+    expect((last as any).message).toBe("Remote agent unavailable");
+    expect(error.message).toBe("Remote agent unavailable");
+  });
+
+  it("emits exactly one terminal event for a failed run", async () => {
+    const agent = makeLocalMastraAgent({
+      streamChunks: [{ type: "error", payload: { error: "boom" } }],
+    });
+
+    const { events } = await collectError(agent, makeInput());
+
+    const terminal = events.filter(
+      (e) =>
+        e.type === EventType.RUN_ERROR || e.type === EventType.RUN_FINISHED,
+    );
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0].type).toBe(EventType.RUN_ERROR);
+  });
+
   it("still emits RUN_FINISHED when getWorkingMemory throws on run finish", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const memory = new FakeMemory();
