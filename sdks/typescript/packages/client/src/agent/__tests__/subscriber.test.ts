@@ -501,6 +501,33 @@ describe("AgentSubscriber", () => {
 
       consoleErrorSpy.mockRestore();
     });
+
+    it("should use the configured logger when default error behavior runs", async () => {
+      class ErrorAgent extends AbstractAgent {
+        run(input: RunAgentInput): Observable<BaseEvent> {
+          return from([
+            {
+              type: EventType.RUN_STARTED,
+              threadId: input.threadId,
+              runId: input.runId,
+            } as RunStartedEvent,
+          ]).pipe(mergeMap(() => throwError(() => new Error("Test error"))));
+        }
+      }
+
+      const logger = {
+        error: vi.fn(),
+      };
+      const errorAgent = new ErrorAgent({ logger });
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+      await expect(errorAgent.runAgent({})).rejects.toThrow("Test error");
+
+      expect(logger.error).toHaveBeenCalledWith("Agent execution failed:", expect.any(Error));
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+
+      consoleErrorSpy.mockRestore();
+    });
   });
 
   describe("subscriber order and chaining", () => {

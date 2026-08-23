@@ -30,6 +30,11 @@ export function resolveAgentDebugConfig(
   return { enabled: events || lifecycle, events, lifecycle, verbose };
 }
 
+/** Injectable error logger used by the agent execution lifecycle. */
+export interface AgentLogger {
+  error(message: string, ...args: unknown[]): void;
+}
+
 export interface AgentConfig {
   agentId?: string;
   description?: string;
@@ -37,6 +42,8 @@ export interface AgentConfig {
   initialMessages?: Message[];
   initialState?: State;
   debug?: AgentDebugConfig;
+  /** Receives agent execution errors. Defaults to `console.error`. */
+  logger?: AgentLogger;
 }
 
 export type HttpAgentFetchFn = (url: string, requestInit: RequestInit) => Promise<Response>;
