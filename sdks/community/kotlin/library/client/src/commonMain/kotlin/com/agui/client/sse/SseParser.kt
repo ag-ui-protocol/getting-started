@@ -33,6 +33,13 @@ class SseParser(
         } catch (e: Exception) {
             logger.e(e) { "Failed to parse JSON event: $jsonStr" }
             null
+        } catch (e: Error) {
+            // A deeply nested payload makes the recursive descent JSON parser
+            // raise StackOverflowError, which is an Error rather than an
+            // Exception. Left uncaught it escapes the flow and tears down the
+            // caller, so a single malformed event ends the whole stream.
+            logger.e(e) { "Failed to parse JSON event: $jsonStr" }
+            null
         }
     }
 }

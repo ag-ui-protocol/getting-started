@@ -34,4 +34,21 @@ class SseParserTest {
             assertEquals("stream-1", start.messageId)
         }
     }
+
+    @Test
+    fun parseFlow_survivesDeeplyNestedJson() = runTest {
+        val parser = SseParser()
+        val depth = 100_000
+        val deeplyNested = "[".repeat(depth) + "]".repeat(depth)
+        val validEvent = TextMessageStartEvent(messageId = "stream-2", role = Role.ASSISTANT)
+        val serialized = AgUiJson.encodeToString(BaseEvent.serializer(), validEvent)
+
+        // A deeply nested payload overflows the recursive descent parser with a
+        // StackOverflowError, which is an Error rather than an Exception. The
+        // stream must drop the bad payload and keep delivering later events.
+        val events = parser.parseFlow(flowOf(deeplyNested, serialized)).toList()
+
+        assertEquals(1, events.size)
+        assertIs<TextMessageStartEvent>(events.first())
+    }
 }
