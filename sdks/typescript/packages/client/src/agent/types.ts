@@ -37,6 +37,7 @@ export interface AgentConfig {
   initialMessages?: Message[];
   initialState?: State;
   debug?: AgentDebugConfig;
+  messageFilter?: (messages: Message[]) => Message[];
 }
 
 export type HttpAgentFetchFn = (url: string, requestInit: RequestInit) => Promise<Response>;

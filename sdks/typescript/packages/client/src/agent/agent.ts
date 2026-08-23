@@ -58,6 +58,7 @@ export abstract class AbstractAgent {
   public state: State;
   private _debug: ResolvedAgentDebugConfig;
   private _debugLogger: DebugLogger | undefined;
+  private _messageFilter?: (messages: Message[]) => Message[];
   public subscribers: AgentSubscriber[] = [];
   public isRunning: boolean = false;
   /** Interrupts emitted by the most recent run that have not yet been resolved.
@@ -88,9 +89,7 @@ export abstract class AbstractAgent {
 
   set debugLogger(value: DebugLogger | boolean | undefined) {
     if (typeof value === "boolean") {
-      this._debugLogger = value
-        ? createDebugLogger(resolveAgentDebugConfig(true))
-        : undefined;
+      this._debugLogger = value ? createDebugLogger(resolveAgentDebugConfig(true)) : undefined;
     } else {
       this._debugLogger = value;
     }
@@ -103,6 +102,7 @@ export abstract class AbstractAgent {
     initialMessages,
     initialState,
     debug,
+    messageFilter,
   }: AgentConfig = {}) {
     this.agentId = agentId;
     this.description = description ?? "";
@@ -111,6 +111,7 @@ export abstract class AbstractAgent {
     this.state = structuredClone_(initialState ?? {});
     this._debug = resolveAgentDebugConfig(debug);
     this._debugLogger = createDebugLogger(this._debug);
+    this._messageFilter = messageFilter;
 
     if (compareVersions(this.maxVersion, "0.0.39") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_39());
@@ -127,7 +128,6 @@ export abstract class AbstractAgent {
     if (compareVersions(this.maxVersion, "0.0.47") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_47());
     }
-
   }
 
   public subscribe(subscriber: AgentSubscriber) {
@@ -385,6 +385,9 @@ export abstract class AbstractAgent {
   protected prepareRunAgentInput(parameters?: RunAgentParameters): RunAgentInput {
     const clonedMessages = structuredClone_(this.messages) as Message[];
     const messagesWithoutActivity = clonedMessages.filter((message) => message.role !== "activity");
+    const messages = this._messageFilter
+      ? this._messageFilter(messagesWithoutActivity)
+      : messagesWithoutActivity;
 
     return {
       threadId: this.threadId,
@@ -393,7 +396,7 @@ export abstract class AbstractAgent {
       context: structuredClone_(parameters?.context ?? []),
       forwardedProps: structuredClone_(parameters?.forwardedProps ?? {}),
       state: structuredClone_(this.state),
-      messages: messagesWithoutActivity,
+      messages,
       ...(parameters?.resume !== undefined ? { resume: structuredClone_(parameters.resume) } : {}),
     };
   }
@@ -401,9 +404,7 @@ export abstract class AbstractAgent {
   protected async onInitialize(input: RunAgentInput, subscribers: AgentSubscriber[]) {
     if (this.pendingInterrupts.length > 0) {
       const resumeIds = new Set((input.resume ?? []).map((r) => r.interruptId));
-      const uncovered = this.pendingInterrupts
-        .map((i) => i.id)
-        .filter((id) => !resumeIds.has(id));
+      const uncovered = this.pendingInterrupts.map((i) => i.id).filter((id) => !resumeIds.has(id));
       if (uncovered.length > 0) {
         throw new AGUIError(
           `Thread has ${uncovered.length} pending interrupt(s) not addressed by resume: ${uncovered.join(", ")}`,
@@ -563,6 +564,7 @@ export abstract class AbstractAgent {
     cloned.state = structuredClone_(this.state);
     cloned._debug = this._debug;
     cloned._debugLogger = this._debugLogger;
+    cloned._messageFilter = this._messageFilter;
     cloned.isRunning = this.isRunning;
     cloned.subscribers = [...this.subscribers];
     cloned.middlewares = [...this.middlewares];
