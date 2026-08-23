@@ -5,6 +5,14 @@ use futures::{Stream, StreamExt};
 use reqwest::Response;
 use std::pin::Pin;
 
+/// Maximum number of bytes held in the read buffer while waiting for a frame
+/// delimiter.
+///
+/// Mirrors the Dart SDK's `kSseDefaultMaxDataCodeUnits` (8 MiB) so the community
+/// SDKs bound an unterminated stream at the same point. Exceeding it clears the
+/// buffer and surfaces an [`AgUiClientError::SseParse`].
+pub const SSE_MAX_BUFFER_BYTES: usize = 8 * 1024 * 1024;
+
 /// Represents a parsed Server-Sent Event
 #[derive(Debug)]
 pub struct SseEvent {
@@ -41,7 +49,8 @@ pub struct SseEvent {
 /// - `id`: Optional field providing an event identifier
 /// - `data`: The event payload, often JSON data
 ///
-/// Events are separated by double newlines (`\n\n`).
+/// Events are separated by a blank line, i.e. two consecutive line terminators
+/// (`\r\n`, `\n`, or `\r` in any combination).
 #[async_trait]
 pub trait SseResponseExt {
     /// Converts a reqwest::Response into a Stream of SSE events
@@ -89,8 +98,20 @@ impl SseEventProcessor {
                         buffer.push_str(&text);
 
                         // Process complete events from the buffer
-                        let (events, new_buffer) = process_raw_sse_events(&buffer);
-                        buffer = new_buffer;
+                        let (mut events, new_buffer) = process_raw_sse_events(&buffer);
+
+                        if new_buffer.len() > SSE_MAX_BUFFER_BYTES {
+                            // No frame delimiter has arrived within the cap; drop the
+                            // partial frame rather than let the buffer grow unbounded.
+                            buffer = String::new();
+                            events.push(Err(AgUiClientError::SseParse {
+                                message: format!(
+                                    "SSE buffer exceeded {SSE_MAX_BUFFER_BYTES} bytes without a complete event"
+                                ),
+                            }));
+                        } else {
+                            buffer = new_buffer;
+                        }
 
                         events
                     }
@@ -110,38 +131,50 @@ impl SseEventProcessor {
 /// - new_buffer: The remaining buffer that might contain incomplete events
 fn process_raw_sse_events(buffer: &str) -> (Vec<Result<SseEvent, AgUiClientError>>, String) {
     let mut results = Vec::new();
-    let chunks: Vec<&str> = buffer.split("\n\n").collect();
+    let mut rest = buffer;
 
-    // If there's only one chunk and it doesn't end with a double newline,
-    // it might be incomplete - keep it in the buffer
-    if chunks.len() == 1 && !buffer.ends_with("\n\n") {
-        return (Vec::new(), buffer.to_string());
+    while let Some((frame_end, delimiter_len)) = find_frame_end(rest) {
+        let frame = &rest[..frame_end];
+        if !frame.is_empty() {
+            results.push(parse_sse_event(frame));
+        }
+        rest = &rest[frame_end + delimiter_len..];
     }
 
-    let complete_chunks = if buffer.ends_with("\n\n") {
-        // All chunks are complete
-        &chunks[..]
-    } else {
-        // Last chunk might be incomplete
-        &chunks[..chunks.len() - 1]
-    };
+    // Whatever follows the last delimiter is an incomplete frame; keep buffering it.
+    (results, rest.to_string())
+}
 
-    // Process all complete events
-    for chunk in complete_chunks {
-        if !chunk.is_empty() {
-            results.push(parse_sse_event(chunk));
+/// Length of the line terminator at `index`, if one starts there.
+///
+/// The SSE spec allows CRLF, LF, or a bare CR to end a line.
+fn line_terminator_len(bytes: &[u8], index: usize) -> Option<usize> {
+    match bytes.get(index)? {
+        b'\r' if bytes.get(index + 1) == Some(&b'\n') => Some(2),
+        b'\r' | b'\n' => Some(1),
+        _ => None,
+    }
+}
+
+/// Locate the first frame boundary, i.e. two consecutive line terminators.
+///
+/// Returns `(offset of the first terminator, combined length of both terminators)`,
+/// or `None` when the buffer holds no complete frame yet.
+fn find_frame_end(buffer: &str) -> Option<(usize, usize)> {
+    let bytes = buffer.as_bytes();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        match line_terminator_len(bytes, index) {
+            Some(first) => match line_terminator_len(bytes, index + first) {
+                Some(second) => return Some((index, first + second)),
+                None => index += first,
+            },
+            None => index += 1,
         }
     }
 
-    // If the buffer doesn't end with a double newline and we have chunks,
-    // the last chunk is incomplete - keep it in the buffer
-    let new_buffer = if !buffer.ends_with("\n\n") && !chunks.is_empty() {
-        chunks.last().unwrap().to_string()
-    } else {
-        String::new()
-    };
-
-    (results, new_buffer)
+    None
 }
 
 /// Parse a single SSE event text into an SseEvent
@@ -150,7 +183,9 @@ fn parse_sse_event(event_text: &str) -> Result<SseEvent, AgUiClientError> {
     let mut id = None;
     let mut data_lines = Vec::new();
 
-    for line in event_text.lines() {
+    // Split on any spec-legal line terminator; CRLF yields an empty segment that the
+    // emptiness check below skips.
+    for line in event_text.split(['\r', '\n']) {
         if line.is_empty() {
             continue;
         }
@@ -215,6 +250,67 @@ mod tests {
         assert_eq!(
             new_buffer,
             "data: {\"event_type\":\"test2\",\"data\":\"hello2\"}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_raw_sse_events_crlf() {
+        // A spec-legal CRLF-delimited stream must dispatch just like an LF one.
+        let buffer = "event: ping\r\ndata: {\"message\":\"hello\"}\r\n\r\n\
+                      event: update\r\nid: 7\r\ndata: {\"status\":\"ok\"}\r\n\r\n";
+        let (events, new_buffer) = process_raw_sse_events(buffer);
+        assert_eq!(events.len(), 2);
+        assert_eq!(new_buffer, "");
+
+        let ping = events[0].as_ref().unwrap();
+        assert_eq!(ping.event, Some("ping".to_string()));
+        assert_eq!(ping.data, "{\"message\":\"hello\"}");
+
+        let update = events[1].as_ref().unwrap();
+        assert_eq!(update.event, Some("update".to_string()));
+        assert_eq!(update.id, Some("7".to_string()));
+        assert_eq!(update.data, "{\"status\":\"ok\"}");
+    }
+
+    #[tokio::test]
+    async fn test_process_raw_sse_events_crlf_partial_frame_is_retained() {
+        let buffer = "data: first\r\n\r\ndata: seco";
+        let (events, new_buffer) = process_raw_sse_events(buffer);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].as_ref().unwrap().data, "first");
+        assert_eq!(new_buffer, "data: seco");
+    }
+
+    #[tokio::test]
+    async fn test_process_raw_sse_events_bare_cr() {
+        // A bare CR is also a spec-legal line terminator.
+        let buffer = "event: ping\rdata: one\r\rdata: two\r\r";
+        let (events, new_buffer) = process_raw_sse_events(buffer);
+        assert_eq!(events.len(), 2);
+        assert_eq!(new_buffer, "");
+        assert_eq!(events[0].as_ref().unwrap().event, Some("ping".to_string()));
+        assert_eq!(events[0].as_ref().unwrap().data, "one");
+        assert_eq!(events[1].as_ref().unwrap().data, "two");
+    }
+
+    #[tokio::test]
+    async fn test_buffer_is_capped_when_no_frame_ever_completes() {
+        // A stream that never emits a frame delimiter must not grow without bound.
+        let chunk_len = 1024 * 1024;
+        let chunk_count = SSE_MAX_BUFFER_BYTES / chunk_len + 2;
+        let chunks: Vec<Result<Bytes, reqwest::Error>> = (0..chunk_count)
+            .map(|_| Ok(Bytes::from(vec![b'x'; chunk_len])))
+            .collect();
+
+        let results: Vec<_> = SseEventProcessor::new(futures::stream::iter(chunks))
+            .collect::<Vec<_>>()
+            .await;
+
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Err(AgUiClientError::SseParse { .. }))),
+            "expected an SseParse error once the buffer exceeded the cap"
         );
     }
 
