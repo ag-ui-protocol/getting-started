@@ -39,6 +39,14 @@ internal static class ToolApprovalScenariosRoute
                             () => "protected-server-result",
                             "delete_file")));
             }
+            else if (scenario == "mixed-client-local-approval")
+            {
+                context.ChatOptions.Tools ??= [];
+                context.ChatOptions.Tools.Add(
+                    AIFunctionFactory.Create(
+                        () => "normal-server-result",
+                        "get_weather"));
+            }
 
             using var chatClient = new FunctionInvokingChatClient(
                 new ScenarioChatClient(scenario));
@@ -74,7 +82,9 @@ internal static class ToolApprovalScenariosRoute
                     : "approved";
                 yield return new ChatResponseUpdate(
                     ChatRole.Assistant,
-                    scenario is "server-approval" or "client-local-approval"
+                    scenario is "server-approval"
+                        or "client-local-approval"
+                        or "mixed-client-local-approval"
                         ? $"completed:{scenario}:{outcome}"
                         : $"completed:{scenario}");
                 yield break;
@@ -128,6 +138,27 @@ internal static class ToolApprovalScenariosRoute
                             {
                                 ["path"] = "report.txt",
                             }),
+                    ],
+                    FinishReason = ChatFinishReason.ToolCalls,
+                };
+                yield break;
+            }
+
+            if (scenario == "mixed-client-local-approval")
+            {
+                yield return new ChatResponseUpdate
+                {
+                    Role = ChatRole.Assistant,
+                    Contents =
+                    [
+                        new FunctionCallContent(
+                            "call-mixed-client",
+                            "get_user_location",
+                            new Dictionary<string, object?>()),
+                        new FunctionCallContent(
+                            "call-mixed-server",
+                            "get_weather",
+                            new Dictionary<string, object?>()),
                     ],
                     FinishReason = ChatFinishReason.ToolCalls,
                 };

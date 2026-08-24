@@ -203,4 +203,51 @@ describe("TS HttpAgent -> C# tool ownership and approval semantics", () => {
     );
     expect(agent.pendingInterrupts).toEqual([]);
   });
+
+  it.each([
+    { result: "Tokyo, Japan", expected: "approved" },
+    { result: "rejected by user", expected: "rejected" },
+  ])("mixed client-local approval: $expected keeps C+S message-only", async ({
+    result,
+    expected,
+  }) => {
+    const agent = new HttpAgent({
+      url: `${baseUrl()}/tool_approval_scenarios/mixed-client-local-approval`,
+      threadId: `tool-approval-mixed-client-${expected}`,
+      agentId: "cross-language-test",
+    });
+    agent.messages = [{ id: "u1", role: "user", content: "Location and weather." }];
+
+    const turn1: BaseEvent[] = [];
+    await agent.runAgent(
+      { tools: [clientTool] },
+      { onEvent: ({ event }) => turn1.push(event) },
+    );
+
+    const clientCall = findCall(turn1, "get_user_location");
+    const serverCall = findCall(turn1, "get_weather");
+    expect(clientCall).toBeDefined();
+    expect(serverCall).toBeDefined();
+    expect(finish(turn1).outcome?.type).not.toBe("interrupt");
+    expect(agent.pendingInterrupts).toEqual([]);
+
+    agent.messages.push({
+      id: `mixed-client-${expected}`,
+      role: "tool",
+      toolCallId: clientCall.toolCallId,
+      content: result,
+    } as any);
+
+    const turn2: BaseEvent[] = [];
+    await agent.runAgent(
+      { tools: [clientTool] },
+      { onEvent: ({ event }) => turn2.push(event) },
+    );
+
+    expect(turn2.map((event) => event.type)).toContain(EventType.TOOL_CALL_RESULT);
+    expect(collectText(turn2)).toBe(
+      `completed:mixed-client-local-approval:${expected}`,
+    );
+    expect(agent.pendingInterrupts).toEqual([]);
+  });
 });
