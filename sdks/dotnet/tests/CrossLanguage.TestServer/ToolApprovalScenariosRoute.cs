@@ -22,6 +22,15 @@ internal static class ToolApprovalScenariosRoute
             CancellationToken cancellationToken) =>
         {
             var context = input.ToChatRequestContext(jsonOptions.Value.SerializerOptions);
+            if (scenario == "server-only")
+            {
+                context.ChatOptions.Tools ??= [];
+                context.ChatOptions.Tools.Add(
+                    AIFunctionFactory.Create(
+                        () => "server-result",
+                        "get_weather"));
+            }
+
             using var chatClient = new FunctionInvokingChatClient(
                 new ScenarioChatClient(scenario));
 
@@ -64,6 +73,23 @@ internal static class ToolApprovalScenariosRoute
                         new FunctionCallContent(
                             "call-client-only",
                             "get_user_location",
+                            new Dictionary<string, object?>()),
+                    ],
+                    FinishReason = ChatFinishReason.ToolCalls,
+                };
+                yield break;
+            }
+
+            if (scenario == "server-only")
+            {
+                yield return new ChatResponseUpdate
+                {
+                    Role = ChatRole.Assistant,
+                    Contents =
+                    [
+                        new FunctionCallContent(
+                            "call-server-only",
+                            "get_weather",
                             new Dictionary<string, object?>()),
                     ],
                     FinishReason = ChatFinishReason.ToolCalls,

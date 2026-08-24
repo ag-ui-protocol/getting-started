@@ -70,4 +70,31 @@ describe("TS HttpAgent -> C# tool ownership and approval semantics", () => {
     expect(collectText(turn2)).toBe("completed:client-only");
     expect(agent.pendingInterrupts).toEqual([]);
   });
+
+  it("server-only: executes and returns its result in one successful run", async () => {
+    const agent = new HttpAgent({
+      url: `${baseUrl()}/tool_approval_scenarios/server-only`,
+      threadId: "tool-approval-server-only",
+      agentId: "cross-language-test",
+    });
+    agent.messages = [{ id: "u1", role: "user", content: "Get the weather." }];
+
+    const events: BaseEvent[] = [];
+    await agent.runAgent(
+      {},
+      { onEvent: ({ event }) => events.push(event) },
+    );
+
+    expect(
+      (events.filter(
+        (event) => event.type === EventType.TOOL_CALL_START,
+      ) as ToolCallStartEvent[]).some(
+        (event) => event.toolCallName === "get_weather",
+      ),
+    ).toBe(true);
+    expect(events.map((event) => event.type)).toContain(EventType.TOOL_CALL_RESULT);
+    expect(collectText(events)).toBe("completed:server-only");
+    expect(finish(events).outcome?.type).not.toBe("interrupt");
+    expect(agent.pendingInterrupts).toEqual([]);
+  });
 });
