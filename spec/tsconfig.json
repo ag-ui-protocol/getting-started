@@ -15,6 +15,6 @@
   // Matches the other packages, which type-check their sources and not their
   // build configuration: vitest.config.ts imports the shared base from another
   // package, whose dev dependencies are not resolvable from here.
-  "include": ["harness", "tools"],
+  "include": ["generator", "harness", "tools"],
   "exclude": ["node_modules"]
 }

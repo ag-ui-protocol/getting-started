@@ -1,4 +1,7 @@
 generated/
+# The schema-generated sources in core are committed on purpose: the spec
+# suite regenerates them and fails CI on any difference.
+!packages/core/src/generated/
 
 # Logs
 logs

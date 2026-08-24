@@ -12,6 +12,7 @@ draft/
   schema.json        the contract: the events and everything they reference
   fixtures/          documents that must be accepted, and documents that must not
 harness/             the suite
+generator/           schema in, generated source files out, deterministic
 tools/reconcile.ts   builds RECONCILIATION.md
 RECONCILIATION.md    what each SDK requires today, against what the schema settled on
 ```
@@ -183,6 +184,7 @@ to tell it apart from an oversight.
 
 ```bash
 pnpm --filter @ag-ui/spec test        # the suite
+pnpm --filter @ag-ui/spec generate    # regenerate the TypeScript output from the schema
 pnpm --filter @ag-ui/spec reconcile   # regenerate RECONCILIATION.md
 ```
 

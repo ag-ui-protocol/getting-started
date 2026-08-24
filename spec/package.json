@@ -11,10 +11,11 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint \"harness/**/*.ts\" \"tools/**/*.ts\"",
+    "lint": "eslint \"harness/**/*.ts\" \"tools/**/*.ts\" \"generator/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "reconcile": "tsx tools/reconcile.ts",
-    "clean": "git clean -fdX --exclude=\"!.env\""
+    "clean": "git clean -fdX --exclude=\"!.env\"",
+    "generate": "tsx generator/generate.ts"
   },
   "devDependencies": {
     "@types/node": "^20.19.21",
@@ -22,6 +23,7 @@
     "eslint": "^9.37.0",
     "tsx": "^4.19.2",
     "typescript": "^5.8.2",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "prettier": "^3.5.3"
   }
 }
