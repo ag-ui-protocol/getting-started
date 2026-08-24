@@ -68,6 +68,9 @@ describe("TS HttpAgent → C# AG-UI server (mixed client + server tools)", () =>
     expect(weatherCall, "server tool get_weather should be surfaced").not.toBeNull();
     expect(locationCall, "client tool get_user_location should be surfaced").not.toBeNull();
     expect(turn1.map((e) => e.type)).not.toContain(EventType.TOOL_CALL_RESULT);
+    expect((turn1.find((e) => e.type === EventType.RUN_FINISHED) as any).outcome?.type)
+      .not.toBe("interrupt");
+    expect(agent.pendingInterrupts).toEqual([]);
 
     // The client executes ONLY the tool it owns and echoes BOTH tool calls back,
     // with a result for its own tool. It does not know get_weather is server-side.
@@ -94,6 +97,7 @@ describe("TS HttpAgent → C# AG-UI server (mixed client + server tools)", () =>
     // Turn 2: the server resolves get_weather transparently and returns the summary.
     const turn2: BaseEvent[] = [];
     await agent.runAgent({ tools: [getUserLocation] }, { onEvent: ({ event }) => { turn2.push(event); } });
+    expect(agent.pendingInterrupts).toEqual([]);
 
     const types2 = turn2.map((e) => e.type);
     expect(types2).toContain(EventType.RUN_FINISHED);

@@ -295,14 +295,6 @@ public static class RunAgentInputExtensions
             out var clientCallResults,
             out var assistantCallIndex))
         {
-            if (chatMessages[assistantCallIndex].Contents
-                .OfType<FunctionCallContent>()
-                .Any(call => !clientToolNames.Contains(call.Name)))
-            {
-                throw new InvalidOperationException(
-                    "Mixed client/server tool continuations require a complete approval Resume batch.");
-            }
-
             ProcessContinuation(
                 chatOptions,
                 clientTools,
