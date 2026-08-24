@@ -1,0 +1,9 @@
+{
+  "type": "STATE_DELTA",
+  "delta": [
+    {
+      "op": "remove",
+      "path": "/a~1b/c~0d"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "type": "MESSAGES_SNAPSHOT",
+  "messages": [
+    {
+      "id": "1",
+      "role": "narrator",
+      "content": "x",
+      "toolCallId": "tc1"
+    }
+  ]
+}

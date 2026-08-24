@@ -1,0 +1,6 @@
+{
+  "type": "TOOL_CALL_RESULT",
+  "messageId": "m2",
+  "toolCallId": "c1",
+  "content": "3 results"
+}

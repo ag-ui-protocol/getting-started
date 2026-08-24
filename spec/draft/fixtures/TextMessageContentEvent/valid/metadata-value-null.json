@@ -1,0 +1,8 @@
+{
+  "type": "TEXT_MESSAGE_CONTENT",
+  "messageId": "m1",
+  "delta": "hi",
+  "metadata": {
+    "finishReason": null
+  }
+}

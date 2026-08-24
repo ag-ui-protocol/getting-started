@@ -8,6 +8,10 @@ on:
       - "typescript-sdk/**"
       - "integrations/**"
       - "middlewares/**"
+      # `pnpm run test` is `nx run-many -t test`, which includes @ag-ui/spec — but
+      # only once this workflow is triggered, so a change confined to the schema,
+      # a fixture or the harness would otherwise merge without the suite running.
+      - "spec/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
@@ -20,6 +24,10 @@ on:
       - "typescript-sdk/**"
       - "integrations/**"
       - "middlewares/**"
+      # `pnpm run test` is `nx run-many -t test`, which includes @ag-ui/spec — but
+      # only once this workflow is triggered, so a change confined to the schema,
+      # a fixture or the harness would otherwise merge without the suite running.
+      - "spec/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"

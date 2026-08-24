@@ -1,0 +1,10 @@
+{
+  "type": "STATE_DELTA",
+  "delta": [
+    {
+      "op": "test",
+      "path": "/version",
+      "value": 3
+    }
+  ]
+}

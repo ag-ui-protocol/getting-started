@@ -1,0 +1,5 @@
+{
+  "keyword": "maximum",
+  "instanceLocation": "/timestamp",
+  "keywordLocation": "#/properties/timestamp/maximum"
+}

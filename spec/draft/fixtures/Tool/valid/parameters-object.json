@@ -1,0 +1,7 @@
+{
+  "name": "search",
+  "description": "Searches",
+  "parameters": {
+    "a": 1
+  }
+}

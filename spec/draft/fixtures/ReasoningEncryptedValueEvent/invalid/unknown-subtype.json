@@ -1,0 +1,6 @@
+{
+  "type": "REASONING_ENCRYPTED_VALUE",
+  "subtype": "step",
+  "entityId": "n1",
+  "encryptedValue": "b64"
+}

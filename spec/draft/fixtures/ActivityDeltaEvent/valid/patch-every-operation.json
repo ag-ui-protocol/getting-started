@@ -1,0 +1,38 @@
+{
+  "type": "ACTIVITY_DELTA",
+  "messageId": "a1",
+  "activityType": "search",
+  "patch": [
+    {
+      "op": "add",
+      "path": "/items/-",
+      "value": {
+        "id": 1
+      }
+    },
+    {
+      "op": "remove",
+      "path": "/items/0"
+    },
+    {
+      "op": "replace",
+      "path": "/status",
+      "value": "done"
+    },
+    {
+      "op": "move",
+      "from": "/draft",
+      "path": "/final"
+    },
+    {
+      "op": "copy",
+      "from": "/template",
+      "path": "/instance"
+    },
+    {
+      "op": "test",
+      "path": "/version",
+      "value": 3
+    }
+  ]
+}

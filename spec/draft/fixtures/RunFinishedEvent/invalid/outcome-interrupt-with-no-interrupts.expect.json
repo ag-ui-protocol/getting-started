@@ -1,0 +1,5 @@
+{
+  "keyword": "minItems",
+  "instanceLocation": "/outcome/interrupts",
+  "keywordLocation": "#/properties/interrupts/minItems"
+}

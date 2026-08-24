@@ -1,0 +1,5 @@
+{
+  "type": "RUN_ERROR",
+  "message": "boom",
+  "usage": [42]
+}

@@ -1,0 +1,5 @@
+{
+  "type": "SUBAGENT_STARTED",
+  "subagentRunId": "s1",
+  "name": "researcher"
+}

@@ -1,0 +1,8 @@
+{
+  "type": "SUBAGENT_FINISHED",
+  "subagentRunId": "s1",
+  "outcome": {
+    "type": "success",
+    "interruptIds": ["i1"]
+  }
+}

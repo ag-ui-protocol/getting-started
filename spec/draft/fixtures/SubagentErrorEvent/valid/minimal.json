@@ -1,0 +1,5 @@
+{
+  "type": "SUBAGENT_ERROR",
+  "subagentRunId": "s1",
+  "message": "tool unavailable"
+}

@@ -1,0 +1,5 @@
+{
+  "type": "TOOL_CALL_START",
+  "toolCallId": "c1",
+  "toolCallName": "search"
+}

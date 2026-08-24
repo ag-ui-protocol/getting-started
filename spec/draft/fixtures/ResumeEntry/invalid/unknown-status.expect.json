@@ -1,0 +1,5 @@
+{
+  "keyword": "enum",
+  "instanceLocation": "/status",
+  "keywordLocation": "#/properties/status/enum"
+}
