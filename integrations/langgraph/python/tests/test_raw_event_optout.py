@@ -10,7 +10,7 @@ at the single ``_dispatch_event`` choke point, while leaving the explicit
 import unittest
 from unittest.mock import MagicMock
 
-from ag_ui.core import EventType, TextMessageEndEvent
+from ag_ui.core import EventType, RawEvent, TextMessageEndEvent
 
 from ag_ui_langgraph import LangGraphAgent
 
@@ -49,6 +49,31 @@ class TestEmitRawEventsOptOut(unittest.TestCase):
         agent = _make_agent(emit_raw_events=False)
         cloned = agent.clone()
         self.assertFalse(cloned.emit_raw_events)
+
+    def test_dispatch_event_raw_passthrough_ignores_the_opt_out(self):
+        """The ``EventType.RAW`` arm json-safes its payload and never reads the flag.
+
+        RAW is the explicit passthrough channel: opting out suppresses RAW
+        events at the emission layer (see test_raw_event_payload_size), so any
+        RAW event that does reach ``_dispatch_event`` was asked for and must
+        arrive whole. Asserted on both an opted-out instance and an instance
+        built without ``__init__`` — the arm runs before any flag lookup, so it
+        must not need one. The second case is the load-bearing one: the flag is
+        a plain instance attribute set by ``__init__``, so a lookup added to
+        this arm would raise AttributeError, not merely read the wrong value.
+        """
+        for label, agent in (
+            ("opted out", _make_agent(emit_raw_events=False)),
+            ("no __init__", object.__new__(LangGraphAgent)),
+        ):
+            with self.subTest(agent=label):
+                ev = RawEvent(type=EventType.RAW, event={"tags": {"a", "b"}})
+                out = agent._dispatch_event(ev)
+                # Payload preserved, and json-safed on the way through (the set
+                # became a list) — which is the whole job of this arm.
+                self.assertIsNotNone(out.event)
+                self.assertEqual(sorted(out.event["tags"]), ["a", "b"])
+                self.assertIsInstance(out.event["tags"], list)
 
 
 if __name__ == "__main__":

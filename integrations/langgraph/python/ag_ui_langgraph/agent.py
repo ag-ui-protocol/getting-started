@@ -108,6 +108,36 @@ logger = logging.getLogger(__name__)
 
 ROOT_SUBGRAPH_NAME = "root"
 
+# The behavior flags clone() carries onto the fresh instance: everything
+# LangGraphAgent.__init__ accepts except the four parameters that identify
+# *which* agent is being cloned (name, graph, description, config), which
+# clone() passes to the constructor instead.
+#
+# Written down statically rather than derived from __init__ at runtime. The
+# derivation looked self-maintaining and was not: it read the *current*
+# ``LangGraphAgent.__init__``, so any wrapper around that attribute which
+# presents as ``(*args, **kwargs)`` — a decorator that forgot
+# ``functools.wraps``, a test double, an instrumentation shim — derived an
+# EMPTY tuple. clone() then carried no flags at all and a deliberate
+# ``emit_raw_events=False`` silently reverted to True on every request, with no
+# error and no log. ``inspect.signature`` could also raise outright on an
+# unreadable ``__init__``.
+#
+# Nothing is lost by fixing the list: the flags are spelled out as explicit
+# keyword parameters on __init__, so a fourth one cannot be passed today
+# without editing that signature. This tuple only writes down a constraint that
+# already exists. ``TestCloneBehaviorFlagList`` in tests/test_clone.py fails in
+# both directions if the two ever disagree, which moves the drift protection
+# from every request to CI.
+_CLONE_BEHAVIOR_FLAGS = (
+    "enable_legacy_on_interrupt_event",
+    "emit_interrupt_outcome",
+    "emit_raw_events",
+)
+
+#: "No such attribute", distinguishable from a flag legitimately set to None.
+_FLAG_MISSING = object()
+
 
 class PreparedStream(TypedDict):
     """Payload returned by prepare_stream / prepare_regenerate_stream.
@@ -163,25 +193,81 @@ class LangGraphAgent:
     def clone(self) -> Self:
         """Create a fresh copy with clean per-request state.
 
-        Subclasses that add required __init__ parameters must override clone()
+        The contract for subclasses is the four keyword arguments below, and
+        *only* those four: any subclass whose __init__ accepts (name, graph,
+        description, config) can be cloned. A constructor clone() does not own
+        is never handed anything beyond what it is documented to accept —
+        passing the behavior flags too made an accepted keyword look like a
+        usable one, which it is not (a ``**kwargs`` subclass can forward a flag
+        into a parent that rejects it, or pin the same flag and receive it
+        twice).
+
+        The behavior flags (``_CLONE_BEHAVIOR_FLAGS``) are carried over by
+        assignment once construction has returned; dropping them would silently
+        reset a non-default flag (e.g. ``emit_raw_events=False``) on every
+        request.
+
+        Subclasses that add *required* __init__ parameters must override clone()
         to pass those parameters through.
         """
+        # Read per flag, and skip any the instance genuinely does not have
+        # rather than raising. A subclass that never calls super().__init__(),
+        # or that stores a constructor parameter under a different attribute
+        # name, has no such attribute — and because the endpoint clones per
+        # request, a bare AttributeError here is a 500 on *every* request for a
+        # shape that is otherwise perfectly usable. Carrying the flags that do
+        # exist and leaving the rest on the constructor's default is strictly
+        # better than failing the request.
+        flags = {}
+        for name in _CLONE_BEHAVIOR_FLAGS:
+            value = getattr(self, name, _FLAG_MISSING)
+            if value is _FLAG_MISSING:
+                # debug, not warning: once per flag per request, so a warning
+                # would spam a loaded deployment without adding anything after
+                # the first line.
+                logger.debug(
+                    "%s has no attribute %r, so clone() cannot carry it over; "
+                    "the clone keeps whatever its __init__ set.",
+                    type(self).__name__,
+                    name,
+                )
+                continue
+            flags[name] = value
+
+        # Evaluated before the try below on purpose: a non-mapping ``config``
+        # makes dict() raise TypeError, which is a config problem and must not
+        # be relabeled as an __init__ signature problem.
+        config = dict(self.config) if self.config else None
+
         try:
-            return type(self)(
+            clone = type(self)(
                 name=self.name,
                 graph=self.graph,
                 description=self.description,
-                config=dict(self.config) if self.config else None,
-                enable_legacy_on_interrupt_event=self.enable_legacy_on_interrupt_event,
-                emit_interrupt_outcome=self.emit_interrupt_outcome,
-                emit_raw_events=self.emit_raw_events,
+                config=config,
             )
         except TypeError as exc:
+            # One construction, one diagnosis. Any TypeError here is reported as
+            # a signature problem, including one raised from inside a subclass's
+            # constructor body: distinguishing the two needs signature-binding
+            # machinery that exists only to serve guesswork, and the original
+            # error survives verbatim in the interpolated ``{exc}`` and in
+            # ``__cause__`` either way. A misleading first sentence is a message
+            # quality issue; the introspection was a source of real defects.
             raise TypeError(
                 f"{type(self).__name__} must override clone() or ensure its "
                 f"__init__ accepts (name, graph, description, config) as "
                 f"keyword arguments: {exc}"
             ) from exc
+
+        # Unconditionally, for every flag. The constructor is handed no flags at
+        # all, so this assignment is the *only* thing that carries a non-default
+        # value onto the clone, and it holds whatever the subclass __init__ does
+        # with (or without) the four documented parameters.
+        for name, value in flags.items():
+            setattr(clone, name, value)
+
+        return clone
 
     def _dispatch_event(self, event: ProcessedEvents) -> ProcessedEvents:
         if event.type == EventType.RAW:
