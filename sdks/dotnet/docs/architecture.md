@@ -26,7 +26,7 @@ The core design philosophy is: **you should not have to learn a new programming 
 
 **`AGUI.Protobuf`** provides the protobuf codec (the `internal` `AGUIProtobuf`), the public `ProtobufEventStreamFormatter`, and a `JsonElement`↔`google.protobuf.Value` bridge. The generated proto types are `internal`; the `.proto` schema is referenced from `sdks/typescript/packages/proto` (it is not copied), keeping the wire format in lockstep with `@ag-ui/proto`. It depends on Abstractions, Formatting, and `Google.Protobuf`.
 
-**`AGUI.Server`** is the **framework-agnostic** server-side adapter (the rename of the former `AGUI.Hosting.AspNetCore`, with all ASP.NET stripped). It provides extension methods that convert a stream of `ChatResponseUpdate` objects (the output of any `IChatClient`) into a stream of AG-UI events: `ToChatRequestContext`/`ChatRequestContext`, `AsAGUIEventStreamAsync`, `AGUIStreamOptions`, and `AGUIConstants`. It references only Abstractions and `Microsoft.Extensions.AI.Abstractions` — **no ASP.NET**.
+**`AGUI.Server`** is the **framework-agnostic** server-side adapter (the rename of the former `AGUI.Hosting.AspNetCore`, with all ASP.NET stripped). It provides extension methods that convert a stream of `ChatResponseUpdate` objects (the output of any `IChatClient`) into a stream of AG-UI events: `ToChatRequestContext`/`ChatRequestContext`, `AsAGUIEventStreamAsync`, `AGUIStreamOptions`, and `AGUIConstants`. It references Abstractions and `Microsoft.Extensions.AI` (mixed client/server continuation uses FICC invocation context to correlate client results by call ID) — **no ASP.NET**.
 
 **`AGUI.Client`** is the package you use when consuming an AG-UI server. It wraps an HTTP connection in an `IChatClient` implementation (`AGUIChatClient`, constructed from `AGUIChatClientOptions`) so calling code doesn't need to know it's talking to an AG-UI endpoint. It also carries the transport layer (`AGUIHttpTransport`/`IAGUITransport`) and the transport-negotiation primitives (`AGUIEventStreamHandler`, a public `DelegatingHandler`, and `ReadAGUIEventStreamAsync`) that callers can wire into their own `HttpClient` to request protobuf. It depends on Formatting (and, through it, Abstractions).
 
@@ -38,7 +38,7 @@ The server and client sides are **kept independent on purpose.** The server pack
 | AGUI.Formatting | AGUI.Abstractions, `System.Net.ServerSentEvents` | net10.0, net9.0, net8.0, netstandard2.0, net472 |
 | AGUI.Protobuf | AGUI.Abstractions, AGUI.Formatting, `Google.Protobuf` | net10.0, net9.0, net8.0, netstandard2.0, net472 |
 | AGUI.Client | AGUI.Abstractions, AGUI.Formatting, `M.E.AI`, `System.Net.ServerSentEvents` | net10.0, net9.0, net8.0, netstandard2.0, net472 |
-| AGUI.Server | AGUI.Abstractions, `M.E.AI.Abstractions` | net10.0, net9.0, net8.0 |
+| AGUI.Server | AGUI.Abstractions, `M.E.AI` | net10.0, net9.0, net8.0 |
 | *samples/AGUI.Samples.Shared* | AGUI.Server, AGUI.Protobuf, `Microsoft.AspNetCore.App` | net10.0 |
 
 All `src/` packages are AOT-compatible. Every serializable type is registered in `AGUIJsonSerializerContext`, a source-generated `JsonSerializerContext`, and no serialization path relies on runtime reflection.

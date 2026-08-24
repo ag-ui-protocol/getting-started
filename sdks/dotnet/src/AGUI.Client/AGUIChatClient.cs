@@ -61,6 +61,8 @@ public sealed class AGUIChatClient : DelegatingChatClient
         // Instead, pass the approval info through AdditionalProperties for BuildRunAgentInput to use.
         // Check the last message for fresh approval responses — older ones were already processed.
         var messagesList = messages.ToList();
+        var hasCallerSuppliedResume =
+            options?.RawRepresentationFactory?.Invoke(this) is RunAgentInput { Resume.Count: > 0 };
         List<ToolApprovalResponseContent>? approvalResponses = null;
         List<InterruptResponseContent>? interruptResponses = null;
         var lastMsg = messagesList.Count > 0 ? messagesList[messagesList.Count - 1] : null;
@@ -83,37 +85,57 @@ public sealed class AGUIChatClient : DelegatingChatClient
 
         if (approvalResponses is { Count: > 0 })
         {
-            var filtered = new List<ChatMessage>();
-            foreach (var message in messagesList)
+            if (hasCallerSuppliedResume)
             {
-                if (message.Contents.Any(c => c is ToolApprovalRequestContent || c is ToolApprovalResponseContent))
-                {
-                    continue;
-                }
-
-                filtered.Add(message);
+                messagesList = RemoveContents(
+                    messagesList,
+                    static content => content is ToolApprovalRequestContent
+                        or ToolApprovalResponseContent);
             }
+            else
+            {
+            var requestsById = ValidateApprovalResponses(
+                messagesList,
+                approvalResponses);
+            var clientToolNames = new HashSet<string>(
+                options?.Tools?.Select(tool => tool.Name) ?? [],
+                StringComparer.Ordinal);
+            var clientRequestIds = new HashSet<string>(
+                requestsById
+                    .Where(entry => entry.Value.ToolCall is FunctionCallContent call
+                        && clientToolNames.Contains(call.Name))
+                    .Select(entry => entry.Key),
+                StringComparer.Ordinal);
+            var callIndexById = requestsById.Values
+                .Select((request, index) => new { request.ToolCall.CallId, index })
+                .ToDictionary(entry => entry.CallId, entry => entry.index, StringComparer.Ordinal);
+            var serverApprovalResponses = approvalResponses
+                .Where(response => !clientRequestIds.Contains(response.RequestId)
+#pragma warning disable MEAI001
+                    && requestsById[response.RequestId].RequiresConfirmation)
+#pragma warning restore MEAI001
+                .ToList();
 
-            messagesList = filtered;
+            messagesList = NormalizeApprovalContents(
+                messagesList,
+                clientRequestIds,
+                clientToolNames,
+                callIndexById);
             innerOptions = (innerOptions ?? options)?.Clone() ?? new ChatOptions();
-            innerOptions.AdditionalProperties ??= [];
-            innerOptions.AdditionalProperties[AGUIClientInternalKeys.ApprovalResponses] = approvalResponses;
+            if (serverApprovalResponses.Count > 0)
+            {
+                innerOptions.AdditionalProperties ??= [];
+                innerOptions.AdditionalProperties[AGUIClientInternalKeys.ApprovalResponses] =
+                    serverApprovalResponses;
+            }
+            }
         }
 
         if (interruptResponses is { Count: > 0 })
         {
-            var filtered = new List<ChatMessage>();
-            foreach (var message in messagesList)
-            {
-                if (message.Contents.Any(c => c is InterruptRequestContent || c is InterruptResponseContent))
-                {
-                    continue;
-                }
-
-                filtered.Add(message);
-            }
-
-            messagesList = filtered;
+            messagesList = RemoveContents(
+                messagesList,
+                static content => content is InterruptRequestContent or InterruptResponseContent);
             innerOptions = (innerOptions ?? options)?.Clone() ?? new ChatOptions();
             innerOptions.AdditionalProperties ??= [];
             innerOptions.AdditionalProperties[AGUIClientInternalKeys.InterruptResponses] = interruptResponses;
@@ -155,6 +177,149 @@ public sealed class AGUIChatClient : DelegatingChatClient
 
             yield return update;
         }
+    }
+
+    private static List<ChatMessage> RemoveContents(
+        List<ChatMessage> messages,
+        Func<AIContent, bool> shouldRemove)
+    {
+        var filtered = new List<ChatMessage>(messages.Count);
+        foreach (var message in messages)
+        {
+            var retainedContents = message.Contents.Where(content => !shouldRemove(content)).ToList();
+            if (retainedContents.Count == 0)
+            {
+                continue;
+            }
+
+            if (retainedContents.Count == message.Contents.Count)
+            {
+                filtered.Add(message);
+                continue;
+            }
+
+            var replacement = message.Clone();
+            replacement.Contents = retainedContents;
+            filtered.Add(replacement);
+        }
+
+        return filtered;
+    }
+
+    private static Dictionary<string, ToolApprovalRequestContent> ValidateApprovalResponses(
+        List<ChatMessage> messages,
+        List<ToolApprovalResponseContent> approvalResponses)
+    {
+        var requestsById = messages.SelectMany(message => message.Contents)
+            .OfType<ToolApprovalRequestContent>()
+            .ToDictionary(request => request.RequestId, StringComparer.Ordinal);
+        var responsesById = approvalResponses.ToDictionary(
+            response => response.RequestId,
+            StringComparer.Ordinal);
+        var unansweredRequestIds = requestsById.Keys
+            .Where(requestId => !responsesById.ContainsKey(requestId))
+            .ToList();
+
+        if (unansweredRequestIds.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Approval responses are missing for request(s): {string.Join(", ", unansweredRequestIds)}.");
+        }
+
+        foreach (var response in approvalResponses)
+        {
+            if (!requestsById.TryGetValue(response.RequestId, out var request)
+                || request.ToolCall is not FunctionCallContent requestCall
+                || response.ToolCall is not FunctionCallContent responseCall
+                || !ToolCallsMatch(requestCall, responseCall))
+            {
+                throw new InvalidOperationException(
+                    $"Approval response '{response.RequestId}' does not match its original request.");
+            }
+        }
+
+        return requestsById;
+    }
+
+    private static bool ToolCallsMatch(
+        FunctionCallContent requestCall,
+        FunctionCallContent responseCall)
+    {
+        if (!string.Equals(requestCall.CallId, responseCall.CallId, StringComparison.Ordinal)
+            || !string.Equals(requestCall.Name, responseCall.Name, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var typeInfo = AGUIJsonSerializerContext.Default.GetTypeInfo(
+            typeof(IDictionary<string, object?>))!;
+        return JsonElement.DeepEquals(
+            JsonSerializer.SerializeToElement(requestCall.Arguments, typeInfo),
+            JsonSerializer.SerializeToElement(responseCall.Arguments, typeInfo));
+    }
+
+    private static List<ChatMessage> NormalizeApprovalContents(
+        List<ChatMessage> messages,
+        HashSet<string> clientRequestIds,
+        HashSet<string> clientToolNames,
+        Dictionary<string, int> callIndexById)
+    {
+        var normalized = new List<ChatMessage>(messages.Count);
+        foreach (var message in messages)
+        {
+            var retainedContents = new List<AIContent>(message.Contents.Count);
+            foreach (var content in message.Contents)
+            {
+                if (content is ToolApprovalRequestContent { ToolCall: FunctionCallContent call })
+                {
+                    call.AdditionalProperties ??= [];
+                    call.AdditionalProperties[AGUIClientInternalKeys.ApprovalCallIndex] =
+                        callIndexById[call.CallId];
+                    if (clientRequestIds.Contains(
+                        ((ToolApprovalRequestContent)content).RequestId))
+                    {
+                        retainedContents.Add(content);
+                    }
+                    else
+                    {
+                        if (!clientToolNames.Contains(call.Name))
+                        {
+                            call.InformationalOnly = true;
+                        }
+                        retainedContents.Add(call);
+                    }
+                }
+                else if (content is ToolApprovalResponseContent response)
+                {
+                    if (clientRequestIds.Contains(response.RequestId))
+                    {
+                        retainedContents.Add(content);
+                    }
+                }
+                else if (content is not ToolApprovalRequestContent)
+                {
+                    retainedContents.Add(content);
+                }
+            }
+
+            if (retainedContents.Count == 0)
+            {
+                continue;
+            }
+
+            if (retainedContents.Count == message.Contents.Count
+                && retainedContents.SequenceEqual(message.Contents))
+            {
+                normalized.Add(message);
+                continue;
+            }
+
+            var replacement = message.Clone();
+            replacement.Contents = retainedContents;
+            normalized.Add(replacement);
+        }
+
+        return normalized;
     }
 
     private static IAGUITransport GetTransport(AGUIChatClientOptions options)
@@ -252,7 +417,10 @@ public sealed class AGUIChatClient : DelegatingChatClient
             }
 
             await foreach (var update in EventStreamConverter.AsChatResponseUpdates(
-                _transport.SendAsync(input, cancellationToken), _jsonSerializerOptions, cancellationToken).ConfigureAwait(false))
+                _transport.SendAsync(input, cancellationToken),
+                _jsonSerializerOptions,
+                clientToolSet,
+                cancellationToken).ConfigureAwait(false))
             {
                 // Add agui_thread_id to RunStarted updates
                 if (update.RawRepresentation is RunStartedEvent)
@@ -323,6 +491,7 @@ public sealed class AGUIChatClient : DelegatingChatClient
             string threadId,
             JsonSerializerOptions jsonSerializerOptions)
         {
+            RestoreChatMessageToolCallOrder(messagesList);
             var input = new RunAgentInput
             {
                 ThreadId = threadId,
@@ -475,6 +644,45 @@ public sealed class AGUIChatClient : DelegatingChatClient
 
             return input;
         }
+
+        private static void RestoreChatMessageToolCallOrder(List<ChatMessage> messages)
+        {
+            for (var start = 0; start < messages.Count;)
+            {
+                if (messages[start].Role != ChatRole.Assistant
+                    || !messages[start].Contents.OfType<FunctionCallContent>().Any())
+                {
+                    start++;
+                    continue;
+                }
+
+                var end = start + 1;
+                while (end < messages.Count
+                    && messages[end].Role == ChatRole.Assistant
+                    && messages[end].Contents.OfType<FunctionCallContent>().Any())
+                {
+                    end++;
+                }
+
+                var ordered = messages.GetRange(start, end - start)
+                    .OrderBy(message => message.Contents
+                        .OfType<FunctionCallContent>()
+                        .Select(GetApprovalCallIndex)
+                        .DefaultIfEmpty(int.MaxValue)
+                        .Min())
+                    .ToList();
+                messages.RemoveRange(start, end - start);
+                messages.InsertRange(start, ordered);
+                start = end;
+            }
+        }
+
+        private static int GetApprovalCallIndex(FunctionCallContent call) =>
+            call.AdditionalProperties?.TryGetValue(
+                AGUIClientInternalKeys.ApprovalCallIndex,
+                out int index) is true
+                ? index
+                : int.MaxValue;
 
         private static string? ExtractThreadIdFromOptions(ChatOptions? options)
         {

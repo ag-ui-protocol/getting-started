@@ -244,6 +244,210 @@ public sealed class AGUIChatClientTest
         Assert.Equal("caller-interrupt", entry.InterruptId);
     }
 
+    [Fact]
+    public async Task GetStreamingResponse_ApprovalFilteringPreservesPeerToolCalls()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+        var peerCall = new FunctionCallContent("peer-call", "server_tool");
+        var approvalCall = new FunctionCallContent("approval-call", "protected_tool");
+        var approval = new ToolApprovalRequestContent("approval-request", approvalCall);
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.Assistant, [peerCall, approval]),
+            new(ChatRole.User, [approval.CreateResponse(approved: true)]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history));
+
+        var assistant = Assert.Single(transport.LastInput!.Messages.OfType<AGUIAssistantMessage>());
+        Assert.Collection(
+            assistant.ToolCalls!,
+            toolCall =>
+            {
+                Assert.Equal("peer-call", toolCall.Id);
+                Assert.Equal("server_tool", toolCall.Function.Name);
+            },
+            toolCall =>
+            {
+                Assert.Equal("approval-call", toolCall.Id);
+                Assert.Equal("protected_tool", toolCall.Function.Name);
+            });
+        Assert.Equal("approval-request", Assert.Single(transport.LastInput.Resume!).InterruptId);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_MissingPeerApprovalResponseThrows()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+        var first = new ToolApprovalRequestContent(
+            "approval-1",
+            new FunctionCallContent("call-1", "first_tool"));
+        var second = new ToolApprovalRequestContent(
+            "approval-2",
+            new FunctionCallContent("call-2", "second_tool"));
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.Assistant, [first, second]),
+            new(ChatRole.Tool, [new FunctionResultContent("call-2", "already-complete")]),
+            new(ChatRole.User, [first.CreateResponse(approved: true)]),
+        };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => DrainAsync(client.GetStreamingResponseAsync(history))).ConfigureAwait(true);
+
+        Assert.Contains("approval-2", exception.Message);
+        Assert.Null(transport.LastInput);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_CrossedApprovalResponsesThrow()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+        var first = new ToolApprovalRequestContent(
+            "approval-1",
+            new FunctionCallContent("call-1", "first_tool"));
+        var second = new ToolApprovalRequestContent(
+            "approval-2",
+            new FunctionCallContent("call-2", "second_tool"));
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.Assistant, [first, second]),
+            new(ChatRole.User,
+            [
+                new ToolApprovalResponseContent("approval-1", true, second.ToolCall),
+                new ToolApprovalResponseContent("approval-2", false, first.ToolCall),
+            ]),
+        };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => DrainAsync(client.GetStreamingResponseAsync(history))).ConfigureAwait(true);
+
+        Assert.Contains("does not match its original request", exception.Message);
+        Assert.Null(transport.LastInput);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_RoutesClientApprovalLocallyAndServerApprovalToResume()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+        var clientInvocations = 0;
+        var clientTool = AIFunctionFactory.Create(
+            () =>
+            {
+                clientInvocations++;
+                return "client-result";
+            },
+            "client_tool");
+        var clientRequest = new ToolApprovalRequestContent(
+            "client-approval",
+            new FunctionCallContent("client-call", "client_tool"))
+        {
+#pragma warning disable MEAI001
+            RequiresConfirmation = false,
+#pragma warning restore MEAI001
+        };
+        var serverRequest = new ToolApprovalRequestContent(
+            "server-approval",
+            new FunctionCallContent("server-call", "protected_server_tool"));
+        var peerRequest = new ToolApprovalRequestContent(
+            "peer-approval",
+            new FunctionCallContent("peer-call", "normal_server_tool")
+            {
+                InformationalOnly = true,
+            })
+        {
+#pragma warning disable MEAI001
+            RequiresConfirmation = false,
+#pragma warning restore MEAI001
+        };
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.Assistant, [clientRequest, serverRequest, peerRequest]),
+            new(ChatRole.User,
+            [
+                clientRequest.CreateResponse(approved: true),
+                serverRequest.CreateResponse(approved: true),
+                peerRequest.CreateResponse(approved: true),
+            ]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(
+            history,
+            new ChatOptions { Tools = [clientTool] }));
+
+        Assert.Equal(1, clientInvocations);
+        var resume = Assert.Single(transport.LastInput!.Resume!);
+        Assert.Equal("server-approval", resume.InterruptId);
+        Assert.Equal(
+            ["client-call", "server-call", "peer-call"],
+            transport.LastInput.Messages
+                .OfType<AGUIAssistantMessage>()
+                .SelectMany(message => message.ToolCalls ?? [])
+                .Select(call => call.Id));
+        Assert.Contains(
+            transport.LastInput.Messages.OfType<AGUIToolMessage>(),
+            message => message.ToolCallId == "client-call");
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_CompletedMixedTurnDoesNotCreateResume()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+        var options = new ChatOptions
+        {
+            Tools = [AIFunctionFactory.Create(() => "client-result", "client_tool")],
+        };
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.User, "first turn"),
+            new(ChatRole.Assistant,
+            [
+                new FunctionCallContent("client-call", "client_tool"),
+                new FunctionCallContent("server-call", "server_tool"),
+            ]),
+            new(ChatRole.Tool, [new FunctionResultContent("client-call", "client-result")]),
+            new(ChatRole.Assistant, "finished"),
+            new(ChatRole.User, "new turn"),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history, options));
+
+        Assert.Null(transport.LastInput!.Resume);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_CompletedServerPeerDoesNotCreateResume()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+        var options = new ChatOptions
+        {
+            Tools = [AIFunctionFactory.Create(() => "unused", "client_tool")],
+        };
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.Assistant,
+            [
+                new FunctionCallContent("client-call", "client_tool"),
+                new FunctionCallContent("server-call", "server_tool"),
+            ]),
+            new(ChatRole.Tool,
+            [
+                new FunctionResultContent("client-call", "client-result"),
+                new FunctionResultContent("server-call", "server-result"),
+            ]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history, options));
+
+        Assert.Null(transport.LastInput!.Resume);
+    }
+
     // A caller-supplied Resume takes precedence over the interrupt-response translation
     // too, matching the approval path. Previously the interrupt block appended
     // unconditionally, so a caller Resume dropped approvals but kept interrupts (#2177).

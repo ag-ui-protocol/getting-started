@@ -116,6 +116,60 @@ public sealed class ToolCallBuilderTest
     }
 
     [Fact]
+    public void FlushWithInterrupts_WrapsClientPeerAsNonConfirmingApproval()
+    {
+        var builder = new ToolCallBuilder();
+        builder.StartToolCall(new ToolCallStartEvent
+        {
+            ToolCallId = "client-call",
+            ToolCallName = "client_tool"
+        });
+        builder.EndToolCall(new ToolCallEndEvent { ToolCallId = "client-call" }, s_options);
+        builder.StartToolCall(new ToolCallStartEvent
+        {
+            ToolCallId = "server-call",
+            ToolCallName = "server_tool"
+        });
+        builder.EndToolCall(new ToolCallEndEvent { ToolCallId = "server-call" }, s_options);
+        builder.StartToolCall(new ToolCallStartEvent
+        {
+            ToolCallId = "normal-server-call",
+            ToolCallName = "normal_server_tool"
+        });
+        builder.EndToolCall(new ToolCallEndEvent { ToolCallId = "normal-server-call" }, s_options);
+        var outcome = new RunFinishedInterruptOutcome
+        {
+            Interrupts =
+            [
+                new AGUIInterrupt
+                {
+                    Id = "server-approval",
+                    Reason = InterruptReasons.ToolCall,
+                    ToolCallId = "server-call",
+                },
+            ],
+        };
+
+        var updates = builder.FlushWithInterrupts(
+            outcome,
+            new HashSet<string>(StringComparer.Ordinal) { "client_tool" });
+
+        var approvals = updates.SelectMany(update => update.Contents)
+            .OfType<ToolApprovalRequestContent>()
+            .ToList();
+        Assert.Equal(3, approvals.Count);
+#pragma warning disable MEAI001
+        Assert.False(approvals.Single(request => request.ToolCall.CallId == "client-call").RequiresConfirmation);
+        Assert.True(approvals.Single(request => request.ToolCall.CallId == "server-call").RequiresConfirmation);
+        var normalServerApproval = approvals.Single(
+            request => request.ToolCall.CallId == "normal-server-call");
+        Assert.False(normalServerApproval.RequiresConfirmation);
+#pragma warning restore MEAI001
+        Assert.True(
+            Assert.IsType<FunctionCallContent>(normalServerApproval.ToolCall).InformationalOnly);
+    }
+
+    [Fact]
     public void InvalidJsonArgs_ThrowsJsonException()
     {
         var builder = new ToolCallBuilder();

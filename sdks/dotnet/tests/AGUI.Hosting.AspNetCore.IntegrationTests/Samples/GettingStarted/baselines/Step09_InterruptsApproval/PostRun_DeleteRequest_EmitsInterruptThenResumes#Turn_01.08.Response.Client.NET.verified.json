@@ -23,9 +23,13 @@
           "arguments": {
             "filename": "report-draft.txt"
           },
-          "informationalOnly": false,
-          "callId": "call_Id_1"
+          "informationalOnly": true,
+          "callId": "call_Id_1",
+          "additionalProperties": {
+            "agui_approval_call_index": 0
+          }
         },
+        "requiresConfirmation": true,
         "requestId": "ficc_Id_1"
       }
     ],
@@ -50,6 +54,7 @@
               "annotations": null,
               "additionalProperties": null
             },
+            "requiresConfirmation": true,
             "requestId": "ficc_Id_1",
             "annotations": null,
             "additionalProperties": null

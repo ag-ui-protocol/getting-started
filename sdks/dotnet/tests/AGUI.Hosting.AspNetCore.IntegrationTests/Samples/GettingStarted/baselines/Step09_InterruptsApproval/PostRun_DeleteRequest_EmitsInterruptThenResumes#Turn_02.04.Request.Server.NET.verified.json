@@ -23,6 +23,7 @@
             "informationalOnly": false,
             "callId": "call_Id_1"
           },
+          "requiresConfirmation": true,
           "requestId": "ficc_Id_1"
         }
       ]

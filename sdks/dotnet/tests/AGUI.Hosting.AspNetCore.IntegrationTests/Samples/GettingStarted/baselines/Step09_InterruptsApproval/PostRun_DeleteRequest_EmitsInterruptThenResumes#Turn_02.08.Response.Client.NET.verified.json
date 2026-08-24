@@ -13,49 +13,6 @@
     }
   },
   {
-    "role": "assistant",
-    "contents": [
-      {
-        "$type": "functionCall",
-        "name": "delete_file",
-        "arguments": {
-          "filename": "report-draft.txt"
-        },
-        "informationalOnly": true,
-        "callId": "call_Id_1"
-      }
-    ],
-    "responseId": "run_Id_2",
-    "rawRepresentation": {
-      "type": "TOOL_CALL_END",
-      "toolCallId": "call_Id_1",
-      "rawEvent": {
-        "authorName": null,
-        "role": "assistant",
-        "contents": [
-          {
-            "$type": "functionCall",
-            "name": "delete_file",
-            "arguments": {
-              "filename": "report-draft.txt"
-            },
-            "informationalOnly": true,
-            "callId": "call_Id_1",
-            "annotations": null,
-            "additionalProperties": null
-          }
-        ],
-        "additionalProperties": null,
-        "responseId": "guid_Id_1",
-        "messageId": "guid_Id_1",
-        "conversationId": null,
-        "finishReason": null,
-        "modelId": null,
-        "continuationToken": null
-      }
-    }
-  },
-  {
     "role": "tool",
     "contents": [
       {

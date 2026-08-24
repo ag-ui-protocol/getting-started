@@ -38,7 +38,7 @@
       {
         "type": "ApprovalRequiredAIFunction",
         "name": "GetUserLocation",
-        "description": ""
+        "description": "Get the user\u0027s current location from GPS."
       }
     ]
   }
