@@ -60,6 +60,20 @@ internal static class ToolApprovalScenariosRoute
                         () => "normal-server-result",
                         "get_weather"));
             }
+            else if (scenario == "multiple-server-approvals")
+            {
+                context.ChatOptions.Tools ??= [];
+                context.ChatOptions.Tools.Add(
+                    new ApprovalRequiredAIFunction(
+                        AIFunctionFactory.Create(
+                            () => "first-protected-result",
+                            "delete_file")));
+                context.ChatOptions.Tools.Add(
+                    new ApprovalRequiredAIFunction(
+                        AIFunctionFactory.Create(
+                            () => "second-protected-result",
+                            "send_email")));
+            }
 
             using var chatClient = new FunctionInvokingChatClient(
                 new ScenarioChatClient(scenario));
@@ -104,6 +118,7 @@ internal static class ToolApprovalScenariosRoute
                         or "client-local-approval"
                         or "mixed-client-local-approval"
                         or "mixed-server-approval"
+                        or "multiple-server-approvals"
                         ? $"completed:{scenario}:{outcome}"
                         : $"completed:{scenario}");
                 yield break;
@@ -206,6 +221,33 @@ internal static class ToolApprovalScenariosRoute
                             "call-mixed-normal",
                             "get_weather",
                             new Dictionary<string, object?>()),
+                    ],
+                    FinishReason = ChatFinishReason.ToolCalls,
+                };
+                yield break;
+            }
+
+            if (scenario == "multiple-server-approvals")
+            {
+                yield return new ChatResponseUpdate
+                {
+                    Role = ChatRole.Assistant,
+                    Contents =
+                    [
+                        new FunctionCallContent(
+                            "call-protected-delete",
+                            "delete_file",
+                            new Dictionary<string, object?>
+                            {
+                                ["path"] = "report.txt",
+                            }),
+                        new FunctionCallContent(
+                            "call-protected-email",
+                            "send_email",
+                            new Dictionary<string, object?>
+                            {
+                                ["recipient"] = "reviewer@example.com",
+                            }),
                     ],
                     FinishReason = ChatFinishReason.ToolCalls,
                 };

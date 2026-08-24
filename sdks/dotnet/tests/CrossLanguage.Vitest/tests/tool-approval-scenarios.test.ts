@@ -322,4 +322,81 @@ describe("TS HttpAgent -> C# tool ownership and approval semantics", () => {
     );
     expect(agent.pendingInterrupts).toEqual([]);
   });
+
+  it("multiple server approvals: requires Resume for every pending interrupt", async () => {
+    const agent = new HttpAgent({
+      url: `${baseUrl()}/tool_approval_scenarios/multiple-server-approvals`,
+      threadId: "tool-approval-multiple-server",
+      agentId: "cross-language-test",
+    });
+    agent.messages = [
+      { id: "u1", role: "user", content: "Delete the file and send an email." },
+    ];
+
+    const turn1: BaseEvent[] = [];
+    await agent.runAgent(
+      {},
+      { onEvent: ({ event }) => turn1.push(event) },
+    );
+
+    const deleteCall = findCall(turn1, "delete_file");
+    const emailCall = findCall(turn1, "send_email");
+    expect(agent.pendingInterrupts).toHaveLength(2);
+    expect(new Set(agent.pendingInterrupts.map((interrupt) => interrupt.toolCallId)))
+      .toEqual(new Set([deleteCall.toolCallId, emailCall.toolCallId]));
+
+    await expect(
+      agent.runAgent({
+        resume: [
+          {
+            interruptId: agent.pendingInterrupts[0]!.id,
+            status: "resolved",
+            payload: { approved: true },
+          },
+        ],
+      }),
+    ).rejects.toThrow(/pending interrupt/i);
+
+    const interruptByCallId = new Map(
+      agent.pendingInterrupts.map((interrupt) => [
+        interrupt.toolCallId,
+        interrupt,
+      ]),
+    );
+    const turn2: BaseEvent[] = [];
+    await agent.runAgent(
+      {
+        resume: [
+          {
+            interruptId: interruptByCallId.get(deleteCall.toolCallId)!.id,
+            status: "resolved",
+            payload: {
+              approved: true,
+              toolCall: {
+                callId: deleteCall.toolCallId,
+                name: "delete_file",
+                arguments: { path: "report.txt" },
+              },
+            },
+          },
+          {
+            interruptId: interruptByCallId.get(emailCall.toolCallId)!.id,
+            status: "resolved",
+            payload: {
+              approved: false,
+              toolCall: {
+                callId: emailCall.toolCallId,
+                name: "send_email",
+                arguments: { recipient: "reviewer@example.com" },
+              },
+            },
+          },
+        ],
+      },
+      { onEvent: ({ event }) => turn2.push(event) },
+    );
+
+    expect(collectText(turn2)).toMatch(/^completed:multiple-server-approvals:/);
+    expect(agent.pendingInterrupts).toEqual([]);
+  });
 });
