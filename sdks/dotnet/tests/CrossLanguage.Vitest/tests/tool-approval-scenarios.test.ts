@@ -156,4 +156,51 @@ describe("TS HttpAgent -> C# tool ownership and approval semantics", () => {
     expect(collectText(turn2)).toBe(`completed:server-approval:${expected}`);
     expect(agent.pendingInterrupts).toEqual([]);
   });
+
+  it.each([
+    { approved: true, result: "Tokyo, Japan", expected: "approved" },
+    { approved: false, result: "rejected by user", expected: "rejected" },
+  ])("client-local approval: $expected remains message-only", async ({
+    approved,
+    result,
+    expected,
+  }) => {
+    const agent = new HttpAgent({
+      url: `${baseUrl()}/tool_approval_scenarios/client-local-approval`,
+      threadId: `tool-approval-client-local-${expected}`,
+      agentId: "cross-language-test",
+    });
+    agent.messages = [{ id: "u1", role: "user", content: "Where am I?" }];
+
+    const turn1: BaseEvent[] = [];
+    await agent.runAgent(
+      { tools: [clientTool] },
+      { onEvent: ({ event }) => turn1.push(event) },
+    );
+
+    const call = findCall(turn1, clientTool.name);
+    expect(call).toBeDefined();
+    expect(finish(turn1).outcome?.type).not.toBe("interrupt");
+    expect(agent.pendingInterrupts).toEqual([]);
+
+    // This decision belongs to the client application. It does not create
+    // an AG-UI interrupt or Resume entry.
+    agent.messages.push({
+      id: `client-local-${expected}`,
+      role: "tool",
+      toolCallId: call.toolCallId,
+      content: approved ? result : "rejected by user",
+    } as any);
+
+    const turn2: BaseEvent[] = [];
+    await agent.runAgent(
+      { tools: [clientTool] },
+      { onEvent: ({ event }) => turn2.push(event) },
+    );
+
+    expect(collectText(turn2)).toBe(
+      `completed:client-local-approval:${expected}`,
+    );
+    expect(agent.pendingInterrupts).toEqual([]);
+  });
 });

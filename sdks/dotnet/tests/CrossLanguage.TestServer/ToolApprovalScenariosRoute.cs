@@ -74,13 +74,13 @@ internal static class ToolApprovalScenariosRoute
                     : "approved";
                 yield return new ChatResponseUpdate(
                     ChatRole.Assistant,
-                    scenario == "server-approval"
+                    scenario is "server-approval" or "client-local-approval"
                         ? $"completed:{scenario}:{outcome}"
                         : $"completed:{scenario}");
                 yield break;
             }
 
-            if (scenario == "client-only")
+            if (scenario is "client-only" or "client-local-approval")
             {
                 yield return new ChatResponseUpdate
                 {
