@@ -7,6 +7,7 @@ import {
   registerA2UICrewAIFixtures,
 } from "./a2ui-crewai-fixtures";
 import { registerInterruptCrewAIFixtures } from "./interrupt-crewai-fixtures";
+import { registerMultiAgentStrandsFixtures } from "./multi-agent-strands-fixtures";
 
 // Configurable so parallel worktrees / runs don't collide on one aimock port.
 const MOCK_PORT = Number(process.env.AIMOCK_PORT) || 5555;
@@ -46,6 +47,10 @@ export async function setupLLMock(): Promise<void> {
   // pause and the confirm call after the resume. Scoped to this flow's own
   // system prompts, before the generic loader.
   registerInterruptCrewAIFixtures(mockServer);
+
+  // AWS Strands multi-agent graph: one fixture per node, each scoped to that
+  // node's own system prompt. Predicate fixtures, before the generic loader.
+  registerMultiAgentStrandsFixtures(mockServer);
 
   // Extract text from message content — handles both string and array-of-parts
   // (Strands SDK sends content as [{type: "text", text: "..."}])

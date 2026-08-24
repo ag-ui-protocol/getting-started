@@ -226,8 +226,10 @@ def flatten_content_to_text(content: Any) -> str:
     """Extract plain text from AG-UI message content.
 
     * If *content* is a ``str``, return it as-is.
-    * If *content* is a ``list``, join all :class:`TextInputContent` ``.text``
-      values with spaces.
+    * If *content* is a ``list``, join the text of every text block with
+      spaces. Both :class:`TextInputContent` instances and the equivalent
+      ``{"type": "text", "text": ...}`` mappings are recognised, since content
+      reaching the orchestrator path has not been through model validation.
     * If *content* is ``None``, return ``""``.
     """
     if content is None:
@@ -235,11 +237,14 @@ def flatten_content_to_text(content: Any) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        parts = [
-            item.text
-            for item in content
-            if isinstance(item, TextInputContent)
-        ]
+        parts = []
+        for item in content:
+            if isinstance(item, TextInputContent):
+                parts.append(item.text)
+            elif isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
         return " ".join(parts)
     return ""
 

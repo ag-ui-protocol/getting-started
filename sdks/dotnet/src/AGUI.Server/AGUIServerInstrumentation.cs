@@ -11,7 +11,7 @@ namespace AGUI.Server;
 /// <see cref="ChatResponseUpdateAGUIExtensions.AsAGUIEventStreamAsync(System.Collections.Generic.IAsyncEnumerable{Microsoft.Extensions.AI.ChatResponseUpdate}, ChatRequestContext, System.Threading.CancellationToken)"/>
 /// is emitted as an <c>agui.run</c> span tagged with <c>agui.thread_id</c>, <c>agui.run_id</c>,
 /// <c>agui.parent_run_id</c> (on a continuation), <c>agui.run.outcome</c>
-/// (<c>success</c>/<c>interrupt</c>/<c>error</c>), and <c>agui.events.count</c>. The model and tool
+/// (<c>success</c>/<c>interrupt</c>/<c>error</c>/<c>canceled</c>), and <c>agui.events.count</c>. The model and tool
 /// spans emitted by the wrapped <see cref="Microsoft.Extensions.AI.IChatClient"/> nest under it.
 /// </remarks>
 public static class AGUIServerInstrumentation

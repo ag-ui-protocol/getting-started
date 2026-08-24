@@ -151,6 +151,35 @@ public sealed class StreamingToolCallArgsTest
     }
 
     [Fact]
+    public async Task CallMapper_RunErrorEvent_StopsStreamAsync()
+    {
+        var error = new RunErrorEvent { Message = "mapped error" };
+        var options = OptionsWithExtractor()
+            .MapCall("get_weather", _ =>
+            [
+                error,
+                new CustomEvent
+                {
+                    Name = "after-error",
+                    Value = JsonDocument.Parse("true").RootElement.Clone()
+                }
+            ]);
+        var context = new RunAgentInput { ThreadId = ThreadId, RunId = RunId }
+            .ToChatRequestContext(AIJsonUtilities.DefaultOptions, options);
+        var updates = new[]
+        {
+            Fragment(0, "call_a", "get_weather", "{}"),
+            Coalesced("call_a", "get_weather"),
+        };
+
+        var events = await RunAsync(context, updates);
+
+        Assert.Same(error, events[^1]);
+        Assert.DoesNotContain(events, e => e is RunFinishedEvent);
+        Assert.DoesNotContain(events, e => e is CustomEvent);
+    }
+
+    [Fact]
     public async Task ParallelCalls_TrackedByIndex_EachBalancedAsync()
     {
         // Arrange: two concurrent calls at indexes 0 and 1, interleaved fragments, both coalesce.

@@ -583,6 +583,7 @@ export const agentsIntegrations = {
           backend_tool_rendering: "backend-tool-rendering",
           agentic_generative_ui: "agentic-generative-ui",
           shared_state: "shared-state",
+          multi_agent: "multi-agent",
           // A2UI dynamic/recovery: plain Strands agents with no a2ui wiring;
           // they get per-agent `generate_a2ui` injection below. fixed_schema
           // wires its own backend tools, so it is NOT in the inject whitelist.
@@ -627,6 +628,7 @@ export const agentsIntegrations = {
           agentic_generative_ui: "agentic-generative-ui",
           shared_state: "shared-state",
           tool_based_generative_ui: "tool-based-generative-ui",
+          multi_agent: "multi-agent",
           // A2UI dynamic/recovery are auto-injected per-agent below;
           // fixed_schema wires its own backend tools (no injection).
           a2ui_dynamic_schema: "a2ui-dynamic-schema",
