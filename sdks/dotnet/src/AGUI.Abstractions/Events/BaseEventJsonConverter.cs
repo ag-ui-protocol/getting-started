@@ -33,9 +33,11 @@ public sealed class BaseEventJsonConverter : JsonConverter<BaseEvent>
             AGUIEventTypes.TextMessageStart => jsonElement.Deserialize(options.GetTypeInfo(typeof(TextMessageStartEvent))) as TextMessageStartEvent,
             AGUIEventTypes.TextMessageContent => jsonElement.Deserialize(options.GetTypeInfo(typeof(TextMessageContentEvent))) as TextMessageContentEvent,
             AGUIEventTypes.TextMessageEnd => jsonElement.Deserialize(options.GetTypeInfo(typeof(TextMessageEndEvent))) as TextMessageEndEvent,
+            AGUIEventTypes.TextMessageChunk => jsonElement.Deserialize(options.GetTypeInfo(typeof(TextMessageChunkEvent))) as TextMessageChunkEvent,
             AGUIEventTypes.ToolCallStart => jsonElement.Deserialize(options.GetTypeInfo(typeof(ToolCallStartEvent))) as ToolCallStartEvent,
             AGUIEventTypes.ToolCallArgs => jsonElement.Deserialize(options.GetTypeInfo(typeof(ToolCallArgsEvent))) as ToolCallArgsEvent,
             AGUIEventTypes.ToolCallEnd => jsonElement.Deserialize(options.GetTypeInfo(typeof(ToolCallEndEvent))) as ToolCallEndEvent,
+            AGUIEventTypes.ToolCallChunk => jsonElement.Deserialize(options.GetTypeInfo(typeof(ToolCallChunkEvent))) as ToolCallChunkEvent,
             AGUIEventTypes.ToolCallResult => jsonElement.Deserialize(options.GetTypeInfo(typeof(ToolCallResultEvent))) as ToolCallResultEvent,
             AGUIEventTypes.StateSnapshot => jsonElement.Deserialize(options.GetTypeInfo(typeof(StateSnapshotEvent))) as StateSnapshotEvent,
             AGUIEventTypes.StateDelta => jsonElement.Deserialize(options.GetTypeInfo(typeof(StateDeltaEvent))) as StateDeltaEvent,
@@ -125,6 +127,12 @@ public sealed class BaseEventJsonConverter : JsonConverter<BaseEvent>
                 break;
             case ReasoningMessageChunkEvent reasoningMessageChunk:
                 JsonSerializer.Serialize(writer, reasoningMessageChunk, options.GetTypeInfo(typeof(ReasoningMessageChunkEvent)));
+                break;
+            case TextMessageChunkEvent textMessageChunk:
+                JsonSerializer.Serialize(writer, textMessageChunk, options.GetTypeInfo(typeof(TextMessageChunkEvent)));
+                break;
+            case ToolCallChunkEvent toolCallChunk:
+                JsonSerializer.Serialize(writer, toolCallChunk, options.GetTypeInfo(typeof(ToolCallChunkEvent)));
                 break;
             case ReasoningEndEvent reasoningEnd:
                 JsonSerializer.Serialize(writer, reasoningEnd, options.GetTypeInfo(typeof(ReasoningEndEvent)));

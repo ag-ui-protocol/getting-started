@@ -44,7 +44,8 @@
     "vitest": "^4.0.18",
     "ts-proto": "^2.7.0",
     "tsdown": "^0.20.1",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "@types/node": "^20.19.21"
   },
   "exports": {
     ".": {

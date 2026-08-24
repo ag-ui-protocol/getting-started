@@ -14,9 +14,15 @@ public static class AGUIEventTypes
     public const string TextMessageStart = "TEXT_MESSAGE_START";
     public const string TextMessageContent = "TEXT_MESSAGE_CONTENT";
     public const string TextMessageEnd = "TEXT_MESSAGE_END";
+
+    /// <summary>Compact text message chunk event type.</summary>
+    public const string TextMessageChunk = "TEXT_MESSAGE_CHUNK";
     public const string ToolCallStart = "TOOL_CALL_START";
     public const string ToolCallArgs = "TOOL_CALL_ARGS";
     public const string ToolCallEnd = "TOOL_CALL_END";
+
+    /// <summary>Compact tool call chunk event type.</summary>
+    public const string ToolCallChunk = "TOOL_CALL_CHUNK";
     public const string ToolCallResult = "TOOL_CALL_RESULT";
     public const string StateSnapshot = "STATE_SNAPSHOT";
     public const string StateDelta = "STATE_DELTA";

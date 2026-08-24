@@ -936,3 +936,31 @@ AGUI.Abstractions.AGUIMessage.Metadata.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.AGUIMessage.Metadata.set -> void
 AGUI.Abstractions.AGUIToolCall.Metadata.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.AGUIToolCall.Metadata.set -> void
+AGUI.Abstractions.AGUIJsonSerializerContext.TextMessageChunkEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TextMessageChunkEvent>
+AGUI.Abstractions.AGUIJsonSerializerContext.ToolCallChunkEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ToolCallChunkEvent>
+AGUI.Abstractions.TextMessageChunkEvent
+AGUI.Abstractions.TextMessageChunkEvent.TextMessageChunkEvent() -> void
+AGUI.Abstractions.TextMessageChunkEvent.MessageId.get -> string?
+AGUI.Abstractions.TextMessageChunkEvent.MessageId.set -> void
+AGUI.Abstractions.TextMessageChunkEvent.Role.get -> string?
+AGUI.Abstractions.TextMessageChunkEvent.Role.set -> void
+AGUI.Abstractions.TextMessageChunkEvent.Delta.get -> string?
+AGUI.Abstractions.TextMessageChunkEvent.Delta.set -> void
+AGUI.Abstractions.TextMessageChunkEvent.Name.get -> string?
+AGUI.Abstractions.TextMessageChunkEvent.Name.set -> void
+override AGUI.Abstractions.TextMessageChunkEvent.Type.get -> string!
+AGUI.Abstractions.ToolCallChunkEvent
+AGUI.Abstractions.ToolCallChunkEvent.ToolCallChunkEvent() -> void
+AGUI.Abstractions.ToolCallChunkEvent.ToolCallId.get -> string?
+AGUI.Abstractions.ToolCallChunkEvent.ToolCallId.set -> void
+AGUI.Abstractions.ToolCallChunkEvent.ToolCallName.get -> string?
+AGUI.Abstractions.ToolCallChunkEvent.ToolCallName.set -> void
+AGUI.Abstractions.ToolCallChunkEvent.ParentMessageId.get -> string?
+AGUI.Abstractions.ToolCallChunkEvent.ParentMessageId.set -> void
+AGUI.Abstractions.ToolCallChunkEvent.Delta.get -> string?
+AGUI.Abstractions.ToolCallChunkEvent.Delta.set -> void
+override AGUI.Abstractions.ToolCallChunkEvent.Type.get -> string!
+const AGUI.Abstractions.AGUIEventTypes.TextMessageChunk = "TEXT_MESSAGE_CHUNK" -> string!
+const AGUI.Abstractions.AGUIEventTypes.ToolCallChunk = "TOOL_CALL_CHUNK" -> string!
+AGUI.Abstractions.BaseEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.BaseEvent.SubagentRunId.set -> void

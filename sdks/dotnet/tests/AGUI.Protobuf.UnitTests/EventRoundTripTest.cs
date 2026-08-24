@@ -439,11 +439,15 @@ public sealed class EventRoundTripTest
     }
 
     [Fact]
-    public void Custom_NoValue_RoundTrips()
+    public void Custom_NoValue_RoundTripsAsExplicitNull()
     {
+        // The schema makes value required, so the wire always carries it: a
+        // C#-null model value crosses as a JSON null and comes back as a
+        // null-kind element, which the JSON serialiser collapses to absent.
         var result = RoundTrip(new CustomEvent { Name = "ping" });
 
         Assert.Equal("ping", result.Name);
-        Assert.Null(result.Value);
+        Assert.NotNull(result.Value);
+        Assert.Equal(JsonValueKind.Null, result.Value.Value.ValueKind);
     }
 }

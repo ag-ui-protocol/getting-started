@@ -6,6 +6,7 @@ on:
     paths:
       - "sdks/dotnet/**"
       - "sdks/typescript/**"
+      - "spec/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - ".github/workflows/unit-dotnet-sdk.yml"
@@ -14,6 +15,7 @@ on:
     paths:
       - "sdks/dotnet/**"
       - "sdks/typescript/**"
+      - "spec/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - ".github/workflows/unit-dotnet-sdk.yml"
@@ -79,6 +81,13 @@ jobs:
 
       - name: Run integration tests
         run: dotnet test tests/AGUI.Hosting.AspNetCore.IntegrationTests -c Release -p:SignAssembly=false
+
+      # IsAotCompatible=true is a promise the analyzers only partially check;
+      # publishing and running a real native binary is the proof.
+      - name: Native AOT smoke (AGUI.Protobuf)
+        run: |
+          dotnet publish tests/AGUI.Protobuf.AotSmoke -c Release -f net10.0
+          ./tests/AGUI.Protobuf.AotSmoke/bin/Release/net10.0/linux-x64/publish/AGUI.Protobuf.AotSmoke
 
   cross-language:
     name: dotnet / cross-language (TS <-> C#)

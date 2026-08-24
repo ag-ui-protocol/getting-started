@@ -92,6 +92,8 @@ namespace AGUI.Abstractions;
 [JsonSerializable(typeof(ReasoningMessageContentEvent))]
 [JsonSerializable(typeof(ReasoningMessageEndEvent))]
 [JsonSerializable(typeof(ReasoningMessageChunkEvent))]
+[JsonSerializable(typeof(TextMessageChunkEvent))]
+[JsonSerializable(typeof(ToolCallChunkEvent))]
 [JsonSerializable(typeof(ReasoningEndEvent))]
 [JsonSerializable(typeof(ReasoningEncryptedValueEvent))]
 [JsonSerializable(typeof(ActivitySnapshotEvent))]

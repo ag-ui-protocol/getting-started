@@ -11,6 +11,7 @@ served on the web; this project exists to make sure it says what it means.
 draft/
   schema.json        the contract: the events and everything they reference
   fixtures/          documents that must be accepted, and documents that must not
+  proto-freeze.txt   the binary wire's number ledger: append-only, generator-maintained
 harness/             the suite
 generator/           schema in, generated source files out, deterministic
 tools/reconcile.ts   builds RECONCILIATION.md

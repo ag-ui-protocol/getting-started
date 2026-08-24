@@ -6,6 +6,11 @@
 *.tsx text eol=lf
 *.py text eol=lf
 
+# Protobuf byte fixtures (cross-runtime wire goldens). Never eol-normalise:
+# a fixture whose bytes happen to contain no NUL could be misdetected as text
+# and corrupted on checkout.
+*.bin binary
+
 # Generated E2E event-trace goldens. Keep these reviewable as artifacts without
 # letting their size obscure the hand-written test harness in GitHub diffs.
 apps/dojo/e2e/tests/**/*.event-trace.ts linguist-generated=true

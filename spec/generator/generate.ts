@@ -12,7 +12,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { format, resolveConfig } from "prettier";
 import { buildModel } from "./ir";
+import { emitDotnet } from "./dotnet";
+import { buildWireModel, emitFreeze, emitProtoFiles } from "./protobuf";
 import { emitPython } from "./python";
+import { emitProtoTranslation } from "./proto-translation";
 import { emitTypeScript } from "./typescript";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
@@ -36,6 +39,27 @@ export const PY_OUTPUT_DIR = join(
   "python",
   "ag_ui",
   "_generated",
+);
+
+export const PROTO_PACKAGE_DIR = join(
+  REPO_ROOT,
+  "sdks",
+  "typescript",
+  "packages",
+  "proto",
+);
+
+export const PROTO_OUTPUT_DIR = join(PROTO_PACKAGE_DIR, "src", "proto");
+
+export const FREEZE_PATH = join(HERE, "..", "draft", "proto-freeze.txt");
+
+export const DOTNET_OUTPUT_DIR = join(
+  REPO_ROOT,
+  "sdks",
+  "dotnet",
+  "src",
+  "AGUI.Protobuf",
+  "Generated",
 );
 
 export interface GeneratedOutput {
@@ -68,7 +92,35 @@ export async function generateFiles(): Promise<GeneratedOutput[]> {
     content: file.content,
   }));
 
-  return [...typescript, ...python];
+  // The wire freeze is both input and output: frozen slots keep their
+  // numbers, new slots are appended, and the diff gate reviews the result.
+  const wire = buildWireModel(model, readFileSync(FREEZE_PATH, "utf8"));
+  const protoFiles = emitProtoFiles(wire).map((file) => ({
+    path: join(PROTO_OUTPUT_DIR, file.name),
+    content: file.content,
+  }));
+  const translation = {
+    path: join(PROTO_PACKAGE_DIR, "src", "proto.ts"),
+    content: await format(emitProtoTranslation(wire), {
+      ...config,
+      parser: "typescript",
+    }),
+  };
+  const freeze = { path: FREEZE_PATH, content: emitFreeze(wire) };
+
+  const dotnet = emitDotnet(wire).map((file) => ({
+    path: join(DOTNET_OUTPUT_DIR, file.name),
+    content: file.content,
+  }));
+
+  return [
+    ...typescript,
+    ...python,
+    ...protoFiles,
+    translation,
+    freeze,
+    ...dotnet,
+  ];
 }
 
 async function main(): Promise<void> {

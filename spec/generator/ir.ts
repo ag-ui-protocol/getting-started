@@ -26,6 +26,12 @@ export interface ProtocolModel {
   definitions: Definition[];
   /** The names of the mixin definitions that were flattened away. */
   mixins: string[];
+  /**
+   * The mixins' own flattened shapes, for emitters whose wire format keeps a
+   * composed representation (protobuf's base_event submessage) rather than
+   * flattening like the model emitters do.
+   */
+  mixinShapes: ObjectDefinition[];
 }
 
 export type Definition =
@@ -616,10 +622,15 @@ export function buildModel(schema: Json): ProtocolModel {
   };
   for (const name of definitions.keys()) visit(name);
 
+  const mixinShapes = [...mixins]
+    .sort()
+    .map((name) => flattenObject(name, defs[name], defs, mixins));
+
   return {
     version: versionMatch[1],
     schemaId,
     definitions: ordered,
     mixins: [...mixins].sort(),
+    mixinShapes,
   };
 }

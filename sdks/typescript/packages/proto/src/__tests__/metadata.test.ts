@@ -118,21 +118,11 @@ describe("tool call metadata over the binary transport", () => {
 });
 
 describe("protobuf event coverage", () => {
-  // The wire format represents a subset of the event types. Metadata rides the
-  // base event, so it reaches the binary transport for exactly the events that
-  // reach it at all — no more, no less. Pinned so the documented scope cannot
-  // drift from reality.
+  // Every schema event crosses the binary transport since the wire format is
+  // generated from the schema. The legacy THINKING_* aliases are the remaining
+  // exception: they predate the schema, have no wire message, and ride the
+  // JSON path only. Pinned so the documented scope cannot drift from reality.
   const NOT_REPRESENTABLE = [
-    EventType.TOOL_CALL_RESULT,
-    EventType.ACTIVITY_SNAPSHOT,
-    EventType.ACTIVITY_DELTA,
-    EventType.REASONING_START,
-    EventType.REASONING_MESSAGE_START,
-    EventType.REASONING_MESSAGE_CONTENT,
-    EventType.REASONING_MESSAGE_END,
-    EventType.REASONING_MESSAGE_CHUNK,
-    EventType.REASONING_END,
-    EventType.REASONING_ENCRYPTED_VALUE,
     EventType.THINKING_START,
     EventType.THINKING_END,
     EventType.THINKING_TEXT_MESSAGE_START,
@@ -143,12 +133,42 @@ describe("protobuf event coverage", () => {
   it.each(NOT_REPRESENTABLE)("%s does not cross the binary transport", (type) => {
     // These have no message in the wire format, so the event cannot travel —
     // with or without metadata. Encoding yields an empty payload that decode
-    // then rejects. That is pre-existing behaviour of the format's coverage,
-    // recorded here so the documented scope stays honest.
+    // then rejects.
     const bytes = encode({ type, metadata: { a: 1 } } as any);
     expect(bytes.length).toBe(0);
     expect(() => decode(bytes)).toThrow();
   });
+
+  // Formerly unrepresentable, now generated from the schema: metadata rides
+  // the base event for every one of them.
+  const NEWLY_REPRESENTABLE: Array<[EventType, Record<string, unknown>]> = [
+    [EventType.TOOL_CALL_RESULT, { messageId: "m1", toolCallId: "t1", content: "ok" }],
+    [EventType.ACTIVITY_SNAPSHOT, { messageId: "m1", activityType: "a", content: {} }],
+    [EventType.ACTIVITY_DELTA, { messageId: "m1", activityType: "a", patch: [] }],
+    [EventType.REASONING_START, { messageId: "m1" }],
+    [EventType.REASONING_MESSAGE_START, { messageId: "m1", role: "reasoning" }],
+    [EventType.REASONING_MESSAGE_CONTENT, { messageId: "m1", delta: "d" }],
+    [EventType.REASONING_MESSAGE_END, { messageId: "m1" }],
+    [EventType.REASONING_MESSAGE_CHUNK, { messageId: "m1" }],
+    [EventType.REASONING_END, { messageId: "m1" }],
+    [
+      EventType.REASONING_ENCRYPTED_VALUE,
+      { subtype: "message", entityId: "m1", encryptedValue: "v" },
+    ],
+  ];
+
+  it.each(NEWLY_REPRESENTABLE)(
+    "%s crosses the binary transport with its metadata",
+    (type, fields) => {
+      const decoded = roundTrip({
+        type,
+        ...fields,
+        metadata: { usage: { output: 340 } },
+      } as any);
+      expect(decoded.type).toBe(type);
+      expect(decoded.metadata).toEqual({ usage: { output: 340 } });
+    },
+  );
 
   it("carries metadata for an event the wire format does represent", () => {
     const decoded = roundTrip({

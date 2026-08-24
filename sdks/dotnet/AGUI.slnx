@@ -15,6 +15,7 @@
     <Project Path="tests/AGUI.Formatting.UnitTests/AGUI.Formatting.UnitTests.csproj" />
     <Project Path="tests/AGUI.Server.UnitTests/AGUI.Server.UnitTests.csproj" />
     <Project Path="tests/AGUI.Protobuf.UnitTests/AGUI.Protobuf.UnitTests.csproj" />
+    <Project Path="tests/AGUI.Protobuf.AotSmoke/AGUI.Protobuf.AotSmoke.csproj" />
     <Project Path="tests/AGUI.Hosting.AspNetCore.IntegrationTests/AGUI.Hosting.AspNetCore.IntegrationTests.csproj" />
     <Project Path="tests/CrossLanguage.TestServer/CrossLanguage.TestServer.csproj" />
     <Project Path="tests/AGUI.CrossLanguage.IntegrationTests/AGUI.CrossLanguage.IntegrationTests.csproj" />
