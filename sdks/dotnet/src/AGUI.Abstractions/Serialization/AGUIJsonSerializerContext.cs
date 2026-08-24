@@ -8,6 +8,33 @@ namespace AGUI.Abstractions;
 /// Source-generated JSON serializer context for AG-UI types.
 /// Types are added incrementally as each slice is implemented.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="JsonIgnoreCondition.WhenWritingNull"/> is set here, once, as the context-wide
+/// default: a property with no value is left out of the JSON rather than written as
+/// <c>null</c>. That matches what TypeScript producers put on the wire and is the whole
+/// reason this is a global setting instead of a per-property attribute — an attribute has
+/// to be remembered on every new nullable property, and forgetting one emits a <c>null</c>
+/// that receiving SDKs reject.
+/// </para>
+/// <para>
+/// <strong>The setting belongs to this context's own <see cref="JsonSerializerContext.Options"/>
+/// and does not travel.</strong> Serializing through <c>Default.&lt;Type&gt;</c> — what the SSE
+/// formatter, the protobuf formatter and the HTTP transport all do — gets the omission.
+/// Inserting <c>Default</c> into a *different* <see cref="JsonSerializerOptions"/> does not:
+/// the source generator leaves the per-property ignore condition unset, so those options fall
+/// back to their own <c>DefaultIgnoreCondition</c> and the nulls come back. Compose AG-UI types
+/// into caller-owned options with <see cref="AGUIJsonUtilities.DefaultTypeInfoResolver"/>
+/// instead, which carries the rule on the type metadata. <c>NullOmissionTest</c>'s
+/// <c>RawContextInsertedIntoCallerOwnedOptionsIsNotEnough</c> pins this distinction.
+/// </para>
+/// <para>
+/// Guarded by <c>NullOmissionTest</c> in <c>AGUI.Abstractions.UnitTests</c>, which walks
+/// every wire type by reflection and fails on any <c>null</c> the contract does not permit.
+/// Properties that need <see cref="JsonIgnoreCondition.WhenWritingDefault"/> instead (a
+/// non-nullable <see cref="JsonElement"/>, say) still declare it explicitly.
+/// </para>
+/// </remarks>
 [JsonSerializable(typeof(BaseEvent))]
 [JsonSerializable(typeof(RunStartedEvent))]
 [JsonSerializable(typeof(RunFinishedEvent))]

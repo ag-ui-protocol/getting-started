@@ -16,7 +16,12 @@
     "types": ["vitest/globals"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      // Dedupe @ag-ui/client type identity: @copilotkit/runtime pins its own
+      // copy (0.0.57), whose AbstractAgent is nominally different from the
+      // workspace package (private members). Point every import at the
+      // workspace build so agents typecheck against a single declaration.
+      "@ag-ui/client": ["./node_modules/@ag-ui/client/dist/index.d.ts"]
     },
     "stripInternal": true
   },

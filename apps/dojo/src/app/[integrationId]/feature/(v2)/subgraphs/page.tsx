@@ -353,6 +353,10 @@ function TravelPlanner() {
     if (!agentState) {
       agent.setState(INITIAL_STATE);
     }
+    // DEFERRED (PNI-307): mount-only by design — seeds the travel state once.
+    // Adding `agent`/`agentState` would re-seed INITIAL_STATE if the agent
+    // state ever becomes falsy later within the same mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useLangGraphInterrupt({
@@ -524,11 +528,8 @@ function TravelPlanner() {
       {/* NOTE (PNI-272): these three stay defined inside TravelPlanner. Hoisting
           them to module scope gives React stable component identities, which
           stops the remount-per-render these currently do — a behaviour change. */}
-      {/* eslint-disable-next-line react-hooks/static-components */}
       <ItineraryStrip />
-      {/* eslint-disable-next-line react-hooks/static-components */}
       <AgentStatus />
-      {/* eslint-disable-next-line react-hooks/static-components */}
       <TravelDetails />
     </div>
   );

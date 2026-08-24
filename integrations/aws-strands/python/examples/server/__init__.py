@@ -34,6 +34,7 @@ from .api import (
     agentic_generative_ui_app,
     backend_tool_rendering_app,
     human_in_the_loop_app,
+    multi_agent_app,
     shared_state_app,
 )
 
@@ -67,6 +68,7 @@ app.mount('/backend-tool-rendering', backend_tool_rendering_app, 'Backend Tool R
 app.mount('/agentic-generative-ui', agentic_generative_ui_app, 'Agentic Generative UI')
 app.mount('/shared-state', shared_state_app, 'Shared State')
 app.mount('/human-in-the-loop', human_in_the_loop_app, 'Human in the Loop')
+app.mount('/multi-agent', multi_agent_app, 'Multi Agent')
 
 @app.get("/")
 def root():
@@ -82,7 +84,8 @@ def root():
             "backend_tool_rendering": "/backend-tool-rendering",
             "agentic_generative_ui": "/agentic-generative-ui",
             "shared_state": "/shared-state",
-            "human_in_the_loop": "/human-in-the-loop"
+            "human_in_the_loop": "/human-in-the-loop",
+            "multi_agent": "/multi-agent"
         }
     }
 

@@ -11,6 +11,5 @@ public sealed class AGUIReasoningMessage : AGUIMessage
     public string Content { get; set; } = string.Empty;
 
     [JsonPropertyName("encryptedValue")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? EncryptedValue { get; set; }
 }

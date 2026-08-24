@@ -278,6 +278,58 @@ public sealed class AGUIChatClientTest
         Assert.Equal("caller-interrupt", entry.InterruptId);
     }
 
+    // Metadata set on an InterruptResponseContent travels onto the resume entry the
+    // client sends, alongside the payload — envelope data (signatures, routing keys)
+    // as opposed to the answer itself.
+    [Fact]
+    public async Task GetStreamingResponse_InterruptResponseMetadata_ReachesTheResumeEntry()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.User,
+            [
+                new InterruptResponseContent("req-interrupt")
+                {
+                    Payload = JsonDocument.Parse("""{"approved":true}""").RootElement,
+                    Metadata = JsonDocument.Parse(
+                        """{"definitionId":"review-plan","key":"afterModel-review"}""").RootElement,
+                },
+            ]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history));
+
+        var resume = transport.LastInput!.Resume;
+        Assert.NotNull(resume);
+        var entry = Assert.Single(resume!);
+        Assert.Equal("req-interrupt", entry.InterruptId);
+        Assert.True(entry.Payload!.Value.GetProperty("approved").GetBoolean());
+        Assert.NotNull(entry.Metadata);
+        Assert.Equal("review-plan", entry.Metadata!.Value.GetProperty("definitionId").GetString());
+        Assert.Equal("afterModel-review", entry.Metadata!.Value.GetProperty("key").GetString());
+    }
+
+    // An InterruptResponseContent without metadata produces a resume entry without it.
+    [Fact]
+    public async Task GetStreamingResponse_InterruptResponseWithoutMetadata_OmitsIt()
+    {
+        var transport = new CapturingTransport();
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.User, [new InterruptResponseContent("req-interrupt")]),
+        };
+
+        await DrainAsync(client.GetStreamingResponseAsync(history));
+
+        var entry = Assert.Single(transport.LastInput!.Resume!);
+        Assert.Null(entry.Metadata);
+    }
+
     // https://github.com/microsoft/agent-framework/issues/5587
     [Fact]
     public async Task AGUIChatClient_ToolCallResultWithPlainTextContent_DoesNotParseAsJson()
@@ -469,6 +521,66 @@ public sealed class AGUIChatClientTest
         Assert.Equal(33, usage.TotalTokenCount);
         Assert.Equal(44, usage.ReasoningTokenCount);
         Assert.Equal(55, usage.CachedInputTokenCount);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponse_SurfacesRunErrorUsageAsUsageContent()
+    {
+        var errorEvent = new RunErrorEvent
+        {
+            Message = "failed",
+            Code = "ERR",
+            Usage =
+            [
+                new TokenUsage
+                {
+                    Provider = "openai",
+                    Model = "gpt-4o",
+                    InputTokens = 11,
+                    OutputTokens = 22,
+                    TotalTokens = 33,
+                }
+            ]
+        };
+        var transport = new StaticTransport(
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            errorEvent);
+        using var client = new AGUIChatClient(new() { Transport = transport });
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var update in client.GetStreamingResponseAsync(
+            new[] { new ChatMessage(ChatRole.User, "hi") }))
+        {
+            updates.Add(update);
+        }
+
+        Assert.Collection(updates,
+            update =>
+            {
+                Assert.IsType<RunStartedEvent>(update.RawRepresentation);
+            },
+            update =>
+            {
+                var error = Assert.IsType<ErrorContent>(Assert.Single(update.Contents));
+                Assert.Equal("failed", error.Message);
+                Assert.Equal("ERR", error.ErrorCode);
+                Assert.Same(errorEvent, update.RawRepresentation);
+            },
+            update =>
+            {
+                var usage = Assert.IsType<UsageContent>(Assert.Single(update.Contents));
+                Assert.Equal("gpt-4o", update.ModelId);
+                Assert.Equal(11, usage.Details.InputTokenCount);
+                Assert.Equal(22, usage.Details.OutputTokenCount);
+                Assert.Equal(33, usage.Details.TotalTokenCount);
+                Assert.Same(errorEvent, update.RawRepresentation);
+            });
+
+        var aggregated = updates.ToChatResponse().Usage;
+        Assert.NotNull(aggregated);
+        Assert.Equal(11, aggregated.InputTokenCount);
+        Assert.Equal(22, aggregated.OutputTokenCount);
+        Assert.Equal(33, aggregated.TotalTokenCount);
     }
 
     [Fact]

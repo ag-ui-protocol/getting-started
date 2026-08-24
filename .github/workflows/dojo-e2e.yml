@@ -344,15 +344,19 @@ jobs:
         working-directory: apps/dojo/e2e
         run: pnpm install --ignore-scripts
 
+      # Neither --with-deps nor install-deps: both shell out to apt, and apt on the
+      # runners cannot always reach azure.archive.ubuntu.com — it can retry for long
+      # enough to burn this job's whole timeout before a test runs. Chromium's system
+      # libraries are already present on the Ubuntu runner image, so downloading the
+      # browser is all this job needs.
+      #
+      # No cache-hit guard either. actions/cache only reports cache-hit: true on an
+      # exact key match, so any change to apps/dojo/e2e/package.json restores the
+      # browsers via restore-keys and still reports a miss. On such a restore the
+      # browsers are already in ~/.cache/ms-playwright and this returns in seconds.
       - name: Install Playwright browsers
         working-directory: apps/dojo/e2e
-        if: steps.cache-playwright.outputs.cache-hit != 'true'
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Install Playwright system dependencies
-        working-directory: apps/dojo/e2e
-        if: steps.cache-playwright.outputs.cache-hit == 'true'
-        run: pnpm exec playwright install-deps chromium
+        run: pnpm exec playwright install chromium
 
       - name: Create langgraph stub .env files
         if: ${{ contains(join(matrix.services, ','), 'langgraph-platform-python') || contains(join(matrix.services, ','), 'langgraph-platform-typescript') }}

@@ -453,6 +453,78 @@ export class LangGraphAgent extends AbstractAgent {
     );
   }
 
+  private shapePayloadConfig(payloadConfig: LangGraphConfig | undefined) {
+    const contextSchemaKeys = new Set(
+      this.activeRun!.schemaKeys?.context ?? [],
+    );
+    const configurable = payloadConfig?.configurable ?? {};
+    const contextFromConfigurable: Record<string, unknown> = {};
+    const remainingConfigurable: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(configurable)) {
+      if (contextSchemaKeys.has(key)) {
+        contextFromConfigurable[key] = value;
+      } else {
+        remainingConfigurable[key] = value;
+      }
+    }
+
+    const finalConfig = payloadConfig
+      ? {
+          ...payloadConfig,
+          configurable:
+            Object.keys(remainingConfigurable).length > 0
+              ? remainingConfigurable
+              : undefined,
+        }
+      : undefined;
+    const hasContext = Object.keys(contextFromConfigurable).length > 0;
+    const hasConfigurable =
+      finalConfig?.configurable != null &&
+      Object.keys(finalConfig.configurable).length > 0;
+
+    if (hasContext && hasConfigurable) {
+      console.warn(
+        `[@ag-ui/langgraph] Dropping configurable keys not in context_schema: [${Object.keys(remainingConfigurable).join(", ")}]. Use context instead.`,
+      );
+    }
+
+    const configForPayloadBase = (() => {
+      if (!finalConfig) return undefined;
+      if (hasConfigurable && !hasContext) return finalConfig;
+      const { configurable: _stripped, ...configSansConfigurable } =
+        finalConfig;
+      return Object.keys(configSansConfigurable).length > 0
+        ? configSansConfigurable
+        : undefined;
+    })();
+
+    const forwardedHeaders = Object.fromEntries(
+      Object.entries(this.headers ?? {}).filter(([key]) =>
+        key.toLowerCase().startsWith("x-"),
+      ),
+    );
+    const configForPayload =
+      Object.keys(forwardedHeaders).length > 0
+        ? {
+            ...(configForPayloadBase ?? {}),
+            configurable: {
+              ...((
+                configForPayloadBase as {
+                  configurable?: Record<string, unknown>;
+                }
+              )?.configurable ?? {}),
+              copilotkit_forwarded_headers: forwardedHeaders,
+            },
+          }
+        : configForPayloadBase;
+
+    return {
+      config: configForPayload,
+      context: hasContext ? contextFromConfigurable : undefined,
+    };
+  }
+
   async prepareRegenerateStream(
     input: RegenerateInput,
     streamMode: StreamMode | StreamMode[],
@@ -494,6 +566,9 @@ export class LangGraphAgent extends AbstractAgent {
       });
     }
 
+    const { config: configForPayload, context: payloadContext } =
+      this.shapePayloadConfig(payloadConfig);
+
     const payload = {
       ...(input.forwardedProps ?? {}),
       input: this.langGraphDefaultMergeState(
@@ -504,7 +579,8 @@ export class LangGraphAgent extends AbstractAgent {
       // @ts-ignore
       checkpointId: fork.checkpoint.checkpoint_id!,
       streamMode,
-      config: payloadConfig,
+      config: configForPayload,
+      ...(payloadContext ? { context: payloadContext } : {}),
     };
     return {
       streamResponse: this.client.runs.stream(
@@ -726,99 +802,8 @@ export class LangGraphAgent extends AbstractAgent {
       }
     }
 
-    // Build context from configurable keys that match the graph's context_schema.
-    // RunAgentInput.context is a separate ag-ui concept (Array<{description, value}>)
-    // that already flows into the graph's input state via langGraphDefaultMergeState.
-    // It does NOT go into the payload-level context field.
-    const contextSchemaKeys = new Set(
-      this.activeRun!.schemaKeys?.context ?? [],
-    );
-    const configurable = payloadConfig?.configurable ?? {};
-
-    // Partition configurable: keys declared in context_schema go to context,
-    // the rest stay in configurable (for backward compat with older servers).
-    const contextFromConfigurable: Record<string, unknown> = {};
-    const remainingConfigurable: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(configurable)) {
-      if (contextSchemaKeys.has(key)) {
-        contextFromConfigurable[key] = value;
-      } else {
-        remainingConfigurable[key] = value;
-      }
-    }
-
-    // Build payload-level context ONLY from configurable keys matching context_schema.
-    // Do NOT spread RunAgentInput.context here — it is Array<{description, value}>,
-    // not Record<string, unknown>, and belongs in the graph's input state, not the
-    // payload-level context field.
-    const mergedContext = { ...contextFromConfigurable };
-
-    // Build final config: if remaining configurable is empty, omit it
-    const finalConfig = payloadConfig
-      ? {
-          ...payloadConfig,
-          configurable:
-            Object.keys(remainingConfigurable).length > 0
-              ? remainingConfigurable
-              : undefined,
-        }
-      : undefined;
-
-    // If both context and configurable would be present, context wins
-    // (matches langgraph-api >= 0.7.x expectation).
-    // If context is empty, omit it (backward compat with older servers).
-    const hasContext = Object.keys(mergedContext).length > 0;
-    const hasConfigurable =
-      finalConfig?.configurable != null &&
-      Object.keys(finalConfig.configurable).length > 0;
-
-    // Warn if non-schema configurable keys are being dropped because context wins
-    if (hasContext && hasConfigurable) {
-      const droppedKeys = Object.keys(remainingConfigurable);
-      if (droppedKeys.length > 0) {
-        console.warn(
-          `[@ag-ui/langgraph] Dropping configurable keys not in context_schema: [${droppedKeys.join(", ")}]. Use context instead.`,
-        );
-      }
-    }
-
-    // Strip configurable cleanly using destructuring to avoid leaving an
-    // explicit `configurable: undefined` key in the serialized payload.
-    const configForPayloadBase = (() => {
-      if (!finalConfig) return undefined;
-      if (hasConfigurable && !hasContext) return finalConfig; // old-style: configurable only
-      const { configurable: _stripped, ...configSansConfigurable } =
-        finalConfig;
-      return Object.keys(configSansConfigurable).length > 0
-        ? configSansConfigurable
-        : undefined;
-    })();
-
-    // Forward x-* request headers into payload.config.configurable so the
-    // Python middleware can extract them via _extract_forwarded_headers_from_config.
-    // This is infrastructure metadata (correlation IDs, x-aimock-context, etc.),
-    // NOT graph context, so it must ride in configurable regardless of whether
-    // context_schema wins. Only x-* headers are forwarded; auth/content-type
-    // headers stay on the HTTP wire via the onRequest hook.
-    const forwardedHeaders = Object.fromEntries(
-      Object.entries(this.headers ?? {}).filter(([k]) =>
-        k.toLowerCase().startsWith("x-"),
-      ),
-    );
-    const configForPayload =
-      Object.keys(forwardedHeaders).length > 0
-        ? {
-            ...(configForPayloadBase ?? {}),
-            configurable: {
-              ...((
-                configForPayloadBase as {
-                  configurable?: Record<string, unknown>;
-                }
-              )?.configurable ?? {}),
-              copilotkit_forwarded_headers: forwardedHeaders,
-            },
-          }
-        : configForPayloadBase;
+    const { config: configForPayload, context: payloadContext } =
+      this.shapePayloadConfig(payloadConfig);
 
     const payload: Record<string, unknown> = {
       ...restProps,
@@ -826,7 +811,7 @@ export class LangGraphAgent extends AbstractAgent {
       streamMode,
       input: payloadInput,
       config: configForPayload,
-      ...(hasContext ? { context: mergedContext } : {}),
+      ...(payloadContext ? { context: payloadContext } : {}),
     };
 
     // If there are still outstanding unresolved interrupts, we must force resolution of them before moving forward

@@ -16,13 +16,11 @@ public sealed class ReasoningMessageChunkEvent : BaseEvent
     /// Gets or sets the optional message identifier.
     /// </summary>
     [JsonPropertyName("messageId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MessageId { get; set; }
 
     /// <summary>
     /// Gets or sets the optional content delta.
     /// </summary>
     [JsonPropertyName("delta")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Delta { get; set; }
 }

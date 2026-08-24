@@ -62,6 +62,110 @@ const LOG_PREFIX = "[@ag-ui/aws-strands]";
 const uuid = (): string => randomUUID();
 
 /**
+ * Events the RAW fallback deliberately stays silent about.
+ *
+ * Two groups, both of which would be noise rather than new information:
+ *
+ * 1. Lifecycle/plumbing brackets. The TS SDK surfaces hook brackets the Python
+ *    `stream_async` generator never emits, so these are the TS counterpart of
+ *    Python's `init_event_loop` / `start_event_loop` / `start` skips: they carry
+ *    no payload of their own and only bracket work already reported by mapped
+ *    events.
+ *
+ * 2. Payload-carrying events whose payload is *already* on the wire under a
+ *    mapped AG-UI event. Forwarding these as RAW duplicates content the client
+ *    has seen — the same class of bug as Python re-emitting `ModelMessageEvent`
+ *    after the text has already streamed:
+ *      - `agentResultEvent`  — terminal result; already `RUN_FINISHED`.
+ *      - `modelMessageEvent` — the assembled assistant message, already streamed
+ *                              as `TEXT_MESSAGE_CONTENT` / `TOOL_CALL_*`.
+ *      - `toolResultEvent`   — already mapped from `afterToolCallEvent` to
+ *                              `TOOL_CALL_RESULT`.
+ *      - `messageAddedEvent` — framework-side history bookkeeping; the client's
+ *                              history comes from `MESSAGES_SNAPSHOT`.
+ *
+ * Deliberately NOT skipped — these carry information no mapped AG-UI event
+ * conveys, which is exactly what the RAW fallback exists for (issue #2291):
+ *   - `modelMetadataEvent`  — token usage and latency metrics, which the AG-UI
+ *                             event set has no equivalent for.
+ *   - `modelRedactionEvent` — a guardrail redaction notice. Losing it silently
+ *                             would leave a client unable to tell redacted
+ *                             output from an ordinary short answer.
+ *
+ * Everything else falls through to a RAW event.
+ */
+const RAW_SKIPPED_EVENT_KINDS = new Set<string>([
+  // 1. Lifecycle / plumbing brackets.
+  "initializedEvent",
+  "beforeInvocationEvent",
+  "afterInvocationEvent",
+  "beforeModelCallEvent",
+  "afterModelCallEvent",
+  "beforeToolsEvent",
+  "afterToolsEvent",
+  "beforeToolCallEvent",
+  "modelMessageStartEvent",
+  "modelMessageStopEvent",
+  // 2. Payloads already represented by a mapped AG-UI event.
+  "agentResultEvent",
+  "modelMessageEvent",
+  "toolResultEvent",
+  "messageAddedEvent",
+]);
+
+/**
+ * Context keys Strands hangs off its events that are never model output.
+ *
+ * `agent` is a live `LocalAgent` — system prompt, full message history, model
+ * configuration — and `invocationState` transitively holds the same. Hook events
+ * define a `toJSON()` that drops both, but the model-layer events that reach the
+ * RAW fallback after unwrapping (`modelMetadataEvent` and friends) do not, so
+ * the keys are stripped by name rather than trusted to `toJSON()`.
+ *
+ * Mirrors `_RAW_INVOCATION_STATE_KEYS` in the Python adapter.
+ */
+const RAW_STRIPPED_EVENT_KEYS = new Set<string>([
+  "agent",
+  "invocationState",
+  "requestState",
+]);
+
+/**
+ * Reduce a Strands event to a JSON-safe RAW payload, or `undefined` to drop it.
+ *
+ * Two passes, both mandatory:
+ *  1. Drop the context keys above, so no agent internals reach a client.
+ *  2. Round-trip through JSON, so what we emit is plain data an in-process
+ *     consumer cannot follow back to a live object.
+ *
+ * Anything that will not serialize is dropped rather than coerced. Coercing
+ * unserializable values to strings is precisely how an agent's internals would
+ * end up on the wire, so it is never an option here.
+ */
+function sanitizeRawEvent(event: unknown): unknown | undefined {
+  if (!event || typeof event !== "object") return undefined;
+
+  const payload: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(event as Record<string, unknown>)) {
+    if (RAW_STRIPPED_EVENT_KEYS.has(key)) continue;
+    payload[key] = value;
+  }
+  if (Object.keys(payload).length === 0) return undefined;
+
+  try {
+    const serialized = JSON.stringify(payload);
+    if (serialized === undefined) return undefined;
+    const decoded = JSON.parse(serialized) as Record<string, unknown>;
+    // A nested `toJSON()` could reintroduce a stripped key; strip once more on
+    // the decoded, plain-data copy.
+    for (const key of RAW_STRIPPED_EVENT_KEYS) delete decoded[key];
+    return decoded;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Structural interface for a Strands multi-agent orchestrator (Graph/Swarm).
  * TypeScript-only: the Python SDK currently has no orchestrator equivalent.
  */
@@ -209,18 +313,122 @@ function _errorMessage(e: unknown): string {
 }
 
 /**
- * Return native Strands interrupt IDs across SDK versions and test doubles.
+ * Return every native Strands interrupt on the checkpoint, keyed by ID.
  *
  * Strands' current InterruptState serializes `interrupts` as a Record, while
  * older mocks used a Map. Supporting both keeps cold-start validation aligned
- * with the state that SessionManager actually restores.
+ * with the state that SessionManager actually restores, and every reader of the
+ * restored interrupts goes through here so only one place knows both shapes.
  */
-function _nativeInterruptIds(interrupts: unknown): Set<string> {
-  if (interrupts instanceof Map) return new Set(interrupts.keys());
-  if (interrupts && typeof interrupts === "object") {
-    return new Set(Object.keys(interrupts));
+function _nativeInterruptsById(interrupts: unknown): Map<string, unknown> {
+  const entries: Iterable<[string, unknown]> =
+    interrupts instanceof Map
+      ? interrupts.entries()
+      : interrupts && typeof interrupts === "object"
+        ? Object.entries(interrupts)
+        : [];
+  return new Map(entries);
+}
+
+/**
+ * Return the native Strands interrupts still awaiting a human, keyed by ID.
+ *
+ * An interrupt carrying a recorded response was already answered, so it must
+ * not be demanded again on the next resume. This mirrors the SDK's own
+ * `response === undefined` predicate: presence decides, not truthiness, so an
+ * answer of `false`, `0` or `""` counts as answered.
+ *
+ * The native interrupt state is the only record of what is still in flight, so
+ * every "is anything still open?" decision reads it through here.
+ */
+function _openNativeInterrupts(interrupts: unknown): Map<string, unknown> {
+  const open = new Map<string, unknown>();
+  for (const [id, interrupt] of _nativeInterruptsById(interrupts)) {
+    const response = (interrupt as { response?: unknown } | null)?.response;
+    if (response === undefined) open.set(id, interrupt);
   }
-  return new Set();
+  return open;
+}
+
+/** Structural equality over the JSON-shaped answers Strands records. */
+function _sameRecordedAnswer(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  if (typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    return (
+      a.length === b.length &&
+      a.every((item, index) => _sameRecordedAnswer(item, b[index]))
+    );
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every(
+      (key) => key in right && _sameRecordedAnswer(left[key], right[key]),
+    )
+  );
+}
+
+/**
+ * True when `entries` re-submits exactly the answers the checkpoint already holds.
+ *
+ * Strands records the submitted answers before it reruns hooks and the parked
+ * tool execution, and clears the checkpoint only once that work succeeds. So a
+ * hook failure, or a crash after session persistence, can restore a checkpoint
+ * that is activated with every interrupt already answered. That thread has no
+ * way forward: fresh input is refused because the checkpoint is active, and a
+ * resume finds nothing open to address. Handing Strands the identical batch is
+ * the way out, because it lets the SDK finish the parked execution. The
+ * checkpoint itself must be left alone: clearing it would discard exactly that
+ * parked execution. Anything short of an exact replay stays refused.
+ */
+function _replaysRecordedAnswers(
+  interrupts: unknown,
+  entries: ResumeEntry[],
+): boolean {
+  const recorded = _nativeInterruptsById(interrupts);
+  if (recorded.size === 0 || entries.length !== recorded.size) return false;
+  const addressed = new Set<string>();
+  for (const entry of entries) {
+    const interrupt = recorded.get(entry.interruptId);
+    if (!interrupt || addressed.has(entry.interruptId)) return false;
+    addressed.add(entry.interruptId);
+    const answer = (interrupt as { response?: unknown }).response;
+    if (answer === undefined) return false;
+    if (!_sameRecordedAnswer(answer, toResumeResponse(entry))) return false;
+  }
+  return true;
+}
+
+/**
+ * Reserved native-interrupt name prefix for interrupts this adapter's
+ * `interruptOnCall` hook raises. Anything else is a generic native interrupt.
+ */
+const TOOL_APPROVAL_NAME_PREFIX = "ag_ui:tool_call:";
+
+/**
+ * The response contract advertised for a tool-approval interrupt.
+ *
+ * Single source for both the schema published on the AG-UI `Interrupt` and the
+ * resume-payload validation, so a resume can still be checked when the AG-UI
+ * bookkeeping did not survive a process restart.
+ */
+function toolApprovalResponseSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: { approved: { type: "boolean" } },
+    required: ["approved"],
+  };
+}
+
+/** True when a native Strands interrupt came from the approval hook. */
+function isToolApprovalInterrupt(interrupt: unknown): boolean {
+  const name = (interrupt as { name?: unknown } | null)?.name;
+  return typeof name === "string" && name.startsWith(TOOL_APPROVAL_NAME_PREFIX);
 }
 
 /**
@@ -660,7 +868,7 @@ export class StrandsAgent {
                   return;
                 }
                 const response = event.interrupt({
-                  name: `ag_ui:tool_call:${toolName}`,
+                  name: `${TOOL_APPROVAL_NAME_PREFIX}${toolName}`,
                   reason: { tool_call: true, tool_name: toolName, tool_input: event.toolUse!.input ?? {}, tool_use_id: event.toolUse!.toolUseId },
                 });
                 if (
@@ -721,58 +929,83 @@ export class StrandsAgent {
     // interrupts. Gated above `_runRaw` so subclasses that override only
     // `_runRaw` still inherit the checks.
     if (hasResume) {
-      let pending = this._pendingInterruptsByThread.get(threadId);
-
       // Rule 5: idempotency — detect replayed resumes
       fingerprint = resumeFingerprint(inputData.resume!);
 
-      // Cold-restart fallback: if this process has nothing cached in memory
-      // for this threadId, restore the per-thread agent first (so a
-      // SessionManager-backed appState can be read), then check whether the
-      // fingerprint/pending-interrupt bookkeeping was persisted there by a
-      // prior process (see loadPersistedInterruptBookkeeping doc above).
-      // Also covers cold-restart resume validation (comment 1): the agent
-      // must be restored before deciding whether to skip validation.
-      let nativePendingIds: Set<string> | undefined;
-      if (
-        !pending &&
-        !this._lastResumeFingerprint.has(threadId) &&
-        this.config.sessionManagerProvider
-      ) {
+      // The SDK's interrupt state is the only record of what is still in
+      // flight. A cold process has nothing cached for this thread, so restore
+      // the per-thread agent first: SessionManager brings the checkpoint back
+      // with it.
+      let strandsAgent = this._agentsByThread.get(threadId);
+      if (!strandsAgent && this.config.sessionManagerProvider) {
         const restored = await this._ensureAgent(inputData, threadId);
         if ("error" in restored) {
           yield _runStarted(inputData);
           yield restored.error;
           return;
         }
-        const interruptState = (
-          restored.agent as unknown as {
-            _interruptState?: { activated?: boolean; interrupts?: unknown };
-          }
-        )._interruptState;
-        if (interruptState?.activated) {
-          nativePendingIds = _nativeInterruptIds(interruptState.interrupts);
-        }
+        strandsAgent = restored.agent;
+      }
+
+      // The AG-UI metadata and the idempotency fingerprint are this adapter's
+      // own, and a restart loses the in-process copy while SessionManager still
+      // restores the checkpoint, so read what was persisted beside it (see
+      // loadPersistedInterruptBookkeeping doc above) whenever this process holds
+      // none.
+      if (
+        strandsAgent &&
+        !this._pendingInterruptsByThread.get(threadId)?.size
+      ) {
         const { pending: persistedPending, fingerprint: persistedFingerprint } =
-          loadPersistedInterruptBookkeeping(restored.agent);
+          loadPersistedInterruptBookkeeping(strandsAgent);
         if (persistedPending) {
           this._pendingInterruptsByThread.set(threadId, persistedPending);
         }
-        if (persistedFingerprint) {
+        if (
+          persistedFingerprint &&
+          !this._lastResumeFingerprint.has(threadId)
+        ) {
           this._lastResumeFingerprint.set(threadId, persistedFingerprint);
         }
-        // Re-check the AG-UI-side map too: _ensureAgent may have raced with
-        // another call that populated it while we awaited.
-        pending = this._pendingInterruptsByThread.get(threadId);
       }
 
-      if (this._lastResumeFingerprint.get(threadId) === fingerprint) {
+      const interruptState = (
+        strandsAgent as
+          | { _interruptState?: { activated?: boolean; interrupts?: unknown } }
+          | undefined
+      )?._interruptState;
+      const checkpointActive = interruptState?.activated === true;
+      const open = checkpointActive
+        ? _openNativeInterrupts(interruptState!.interrupts)
+        : new Map<string, unknown>();
+
+      // An active checkpoint whose every interrupt is answered is a thread the
+      // SDK parked mid-resume (see _replaysRecordedAnswers). Only an exact
+      // replay gets out of it, and it has to reach Strands to do so.
+      const replayingParkedResume =
+        checkpointActive &&
+        _replaysRecordedAnswers(interruptState!.interrupts, inputData.resume!);
+
+      // Rule 5: idempotency. A replayed resume the thread already completed is
+      // answered from the fingerprint. A parked resume has not completed, so
+      // answering it here would report success while the checkpoint never
+      // advances.
+      if (
+        !replayingParkedResume &&
+        this._lastResumeFingerprint.get(threadId) === fingerprint
+      ) {
         yield _runStarted(inputData);
         yield { type: EventType.RUN_FINISHED, threadId: inputData.threadId, runId: inputData.runId, outcome: { type: "success" } };
         return;
       }
 
-      if (!pending && !nativePendingIds) {
+      // The interrupts this resume may address: normally the open ones, or the
+      // answered ones a parked resume is replaying.
+      const addressable = replayingParkedResume
+        ? _nativeInterruptsById(interruptState!.interrupts)
+        : open;
+
+      if (addressable.size === 0) {
         yield _runStarted(inputData);
         yield _runError(
           "No pending interrupts for this thread.",
@@ -781,118 +1014,70 @@ export class StrandsAgent {
         return;
       }
 
-      if (!pending && nativePendingIds) {
-        // Best-effort validation against the restored native interrupt IDs
-        // only (rules 2/3) — used when persisted AG-UI bookkeeping wasn't
-        // available (e.g. no sessionManagerProvider configured) but
-        // Strands' own native interrupt state was still restored.
-        const unknown = inputData
-          .resume!.map((entry) => entry.interruptId)
-          .filter((id) => !nativePendingIds!.has(id));
-        if (unknown.length > 0) {
-          yield _runStarted(inputData);
-          yield _runError(
-            `This agent did not issue any interrupts to resume: ${unknown
-              .slice(0, 4)
-              .join(", ")}. ` +
-              "Resume entries must reference an outstanding interruptId.",
-            "UNKNOWN_INTERRUPT_ID",
-          );
-          return;
-        }
-        const resumedIds = new Set(inputData.resume!.map((e) => e.interruptId));
-        const missing = [...nativePendingIds].filter((id) => !resumedIds.has(id));
-        if (missing.length > 0) {
-          yield _runStarted(inputData);
-          yield _runError(
-            `Partial resume: missing interrupt IDs: ${missing.join(", ")}. All open interrupts must be addressed.`,
-            "PARTIAL_RESUME",
-          );
-          return;
-        }
+      // Rule 2: reject unknown interrupt IDs
+      const unknown = inputData
+        .resume!.map((entry) => entry.interruptId)
+        .filter((id) => !addressable.has(id));
+      if (unknown.length > 0) {
+        yield _runStarted(inputData);
+        yield _runError(
+          `This agent did not issue any interrupts to resume: ${unknown
+            .slice(0, 4)
+            .join(", ")}. ` +
+            "Resume entries must reference an outstanding interruptId.",
+          "UNKNOWN_INTERRUPT_ID",
+        );
+        return;
       }
 
-      if (pending) {
-        // Rule 2: reject unknown interrupt IDs
-        const unknown = inputData
-          .resume!.map((entry) => entry.interruptId)
-          .filter((id) => !pending.has(id));
-        if (unknown.length > 0) {
-          yield _runStarted(inputData);
-          yield _runError(
-            `This agent did not issue any interrupts to resume: ${unknown
-              .slice(0, 4)
-              .join(", ")}. ` +
-              "Resume entries must reference an outstanding interruptId.",
-            "UNKNOWN_INTERRUPT_ID",
-          );
-          return;
-        }
+      // Rule 3: all open interrupts must be addressed
+      const resumedIds = new Set(inputData.resume!.map((e) => e.interruptId));
+      const missing = [...addressable.keys()].filter(
+        (id) => !resumedIds.has(id),
+      );
+      if (missing.length > 0) {
+        yield _runStarted(inputData);
+        yield _runError(
+          `Partial resume: missing interrupt IDs: ${missing.join(", ")}. All open interrupts must be addressed.`,
+          "PARTIAL_RESUME",
+        );
+        return;
+      }
 
-        // Rule 3: all open interrupts must be addressed
-        const resumedIds = new Set(inputData.resume!.map((e) => e.interruptId));
-        const missing = [...pending.keys()].filter((id) => !resumedIds.has(id));
-        if (missing.length > 0) {
-          yield _runStarted(inputData);
-          yield _runError(
-            `Partial resume: missing interrupt IDs: ${missing.join(", ")}. All open interrupts must be addressed.`,
-            "PARTIAL_RESUME",
-          );
-          return;
-        }
+      // Rules 6 and 7 read what the SDK has nowhere for: the answer shape
+      // advertised to the client, and an expiry. A restart can lose that
+      // record, and a tool approval's contract is fixed, so the SDK's own
+      // interrupt supplies the schema when the record cannot.
+      const recorded = this._pendingInterruptsByThread.get(threadId);
+      for (const entry of inputData.resume!) {
+        const metadata = recorded?.get(entry.interruptId);
 
         // Rule 7: expiresAt enforcement
-        for (const entry of inputData.resume!) {
-          const interrupt = pending.get(entry.interruptId)!;
-          if (interrupt.expiresAt && new Date() > new Date(interrupt.expiresAt)) {
-            yield _runStarted(inputData);
-            yield _runError(
-              `Interrupt '${entry.interruptId}' has expired.`,
-              "INTERRUPT_EXPIRED",
-            );
-            return;
-          }
+        if (metadata?.expiresAt && new Date() > new Date(metadata.expiresAt)) {
+          yield _runStarted(inputData);
+          yield _runError(
+            `Interrupt '${entry.interruptId}' has expired.`,
+            "INTERRUPT_EXPIRED",
+          );
+          return;
+        }
 
-          // Rule 6: basic payload validation against responseSchema
-          if (entry.status === "resolved" && interrupt.responseSchema) {
-            const schema = interrupt.responseSchema as Record<string, unknown>;
-            if (schema.type === "object") {
-              if (typeof entry.payload !== "object" || entry.payload == null) {
-                yield _runStarted(inputData);
-                yield _runError(
-                  `Invalid payload for interrupt '${entry.interruptId}': expected an object.`,
-                  "INVALID_PAYLOAD",
-                );
-                return;
-              }
-              const required = schema.required as string[] | undefined;
-              if (Array.isArray(required)) {
-                const missingKeys = required.filter(
-                  (k) => !(k in (entry.payload as Record<string, unknown>)),
-                );
-                if (missingKeys.length > 0) {
-                  yield _runStarted(inputData);
-                  yield _runError(
-                    `Invalid payload for interrupt '${entry.interruptId}': missing required keys ${JSON.stringify(missingKeys)}.`,
-                    "INVALID_PAYLOAD",
-                  );
-                  return;
-                }
-              }
-              const typeError = validateObjectPayloadPropertyTypes(
-                schema,
-                entry.payload as Record<string, unknown>,
-              );
-              if (typeError) {
-                yield _runStarted(inputData);
-                yield _runError(
-                  `Invalid payload for interrupt '${entry.interruptId}': ${typeError}`,
-                  "INVALID_PAYLOAD",
-                );
-                return;
-              }
-            }
-          }
+        // Rule 6: basic payload validation against responseSchema. Skipping it
+        // for a tool approval would forward a falsy payload raw, Strands would
+        // record it as "no answer", and the same interrupt would re-raise
+        // forever.
+        if (entry.status !== "resolved") continue;
+        const schema =
+          (metadata?.responseSchema as Record<string, unknown> | undefined) ??
+          (isToolApprovalInterrupt(addressable.get(entry.interruptId))
+            ? toolApprovalResponseSchema()
+            : undefined);
+        if (!schema) continue;
+        const payloadError = validateResumePayload(entry, schema);
+        if (payloadError) {
+          yield _runStarted(inputData);
+          yield payloadError;
+          return;
         }
       }
 
@@ -901,31 +1086,31 @@ export class StrandsAgent {
       // Rule 4: pending interrupts block new input without resume.
       // Per spec, clients must address all pending interrupts via resume[].
       // To abandon interrupts, send resume with all entries status: "cancelled".
-      // Check both in-memory tracking AND the Strands agent's _interruptState
-      // (which SessionManager may have restored).
-      let hasPending = this._pendingInterruptsByThread.has(threadId);
-      if (!hasPending) {
-        const cached = this._agentsByThread.get(threadId);
-        if (cached) {
-          const is = (cached as { _interruptState?: { activated: boolean } })._interruptState;
-          if (is?.activated) hasPending = true;
-        } else if (this.config.sessionManagerProvider) {
-          // A cold process has no cached agent yet, but SessionManager may
-          // restore a native pending interrupt for this thread. Restore it
-          // before deciding whether new input may proceed (Rule 4).
-          const restored = await this._ensureAgent(inputData, threadId);
-          if ("error" in restored) {
-            yield _runStarted(inputData);
-            yield restored.error;
-            return;
-          }
-          const interruptState = (
-            restored.agent as { _interruptState?: { activated?: boolean } }
-          )._interruptState;
-          hasPending = interruptState?.activated === true;
+      // The SDK owns the checkpoint, so one it still holds active blocks the
+      // turn and is left exactly as it stands: clearing it here would discard
+      // the tool execution parked behind it.
+      let interruptState: unknown;
+      const cached = this._agentsByThread.get(threadId);
+      if (cached) {
+        interruptState = (cached as { _interruptState?: unknown })
+          ._interruptState;
+      } else if (this.config.sessionManagerProvider) {
+        // A cold process has no cached agent yet, but SessionManager may
+        // restore a native pending interrupt for this thread. Restore it
+        // before deciding whether new input may proceed (Rule 4).
+        const restored = await this._ensureAgent(inputData, threadId);
+        if ("error" in restored) {
+          yield _runStarted(inputData);
+          yield restored.error;
+          return;
         }
+        interruptState = (restored.agent as { _interruptState?: unknown })
+          ._interruptState;
       }
-      if (hasPending) {
+      if (
+        (interruptState as { activated?: boolean } | null | undefined)
+          ?.activated === true
+      ) {
         yield _runStarted(inputData);
         yield _runError(
           "Thread has pending interrupts. Include resume[] to address them.",
@@ -1424,6 +1609,13 @@ export class StrandsAgent {
           // (type: 'modelStreamUpdateEvent', event: ModelStreamEvent) before
           // yielding them from `agent.stream()`. Unwrap once so the dispatch
           // below operates on the inner event shape.
+          // `contentBlockEvent` is the assembled form of deltas that have
+          // already streamed, so it must never reach the RAW fallback (see
+          // `isAssembledContentBlock`). The wrapper kind has to be captured
+          // BEFORE unwrapping, because unwrapping is exactly what erases it —
+          // the bare block's own `type` is `textBlock` / `reasoningBlock` /
+          // whatever the SDK adds next.
+          const isAssembledBlock = isAssembledContentBlock(next.value);
           const event = unwrapStrandsEvent(next.value);
           const kind = getEventKind(event);
 
@@ -1630,7 +1822,19 @@ export class StrandsAgent {
                 }
               }
             }
-            continue;
+
+            // Only the delta kinds handled above are consumed here. Anything
+            // else falls through to the RAW fallback: Bedrock citations reach
+            // the adapter as `citationsDelta` inside this event, so an
+            // unconditional continue is what kept them off the wire.
+            const handled: ReadonlyArray<string> = [
+              "textDelta",
+              "reasoningContentDelta",
+              "toolUseInputDelta",
+            ];
+            if (handled.includes((delta as { type: string }).type)) {
+              continue;
+            }
           }
 
           // Reasoning signature (verification token) — not exposed to UI.
@@ -2201,8 +2405,44 @@ export class StrandsAgent {
             };
             continue;
           }
-          // Ignore events we don't translate (BeforeInvocationEvent,
-          // ModelStreamEventHook wrappers, etc.).
+
+          // Terminal fallback: anything the dispatch above does not translate
+          // is forwarded verbatim as RAW rather than dropped without a trace
+          // (issue #2291) — provider extensions this adapter predates, Bedrock
+          // citations among them, arrive here. Mirrors the Python adapter's
+          // terminal `else`, and matches what every other streaming adapter
+          // (LangGraph, watsonx, a2a) already does. The lifecycle brackets in
+          // `RAW_SKIPPED_EVENT_KINDS` stay silent, as they do in Python.
+          if (kind && RAW_SKIPPED_EVENT_KINDS.has(kind)) continue;
+          // An assembled content block duplicates content already on the wire,
+          // whatever kind of block it turned out to be. Keyed on the wrapper
+          // rather than on a list of block names so a block type added by a
+          // future SDK release is covered the day it ships.
+          if (isAssembledBlock) {
+            this._log.debug(
+              `${LOG_PREFIX} Skipping assembled content block for RAW ` +
+                `forwarding; its content already streamed ` +
+                `(threadId=${inputData.threadId}, block=${kind ?? "unknown"})`,
+            );
+            continue;
+          }
+          const rawPayload = sanitizeRawEvent(event);
+          if (rawPayload === undefined) {
+            this._log.warn(
+              `${LOG_PREFIX} Dropping unserializable Strands event from RAW ` +
+                `forwarding (threadId=${inputData.threadId}, kind=${kind ?? "unknown"})`,
+            );
+            continue;
+          }
+          this._log.debug(
+            `${LOG_PREFIX} Unmapped Strands event forwarded as RAW ` +
+              `(threadId=${inputData.threadId}, kind=${kind ?? "unknown"})`,
+          );
+          yield {
+            type: EventType.RAW,
+            event: rawPayload,
+            source: "strands",
+          } as unknown as BaseEvent;
         }
       } finally {
         // Consumer bailed (client disconnect, frontend-tool halt, error).
@@ -2299,6 +2539,12 @@ export class StrandsAgent {
           };
           return;
         }
+        // The run paused with nothing to hand back, so it falls through to the
+        // success finish below while the native checkpoint may stay parked.
+        // Mirrors the Python sibling's trace for the same blind spot.
+        this._log.debug(
+          `${LOG_PREFIX} Strands stopped for an interrupt with an empty interrupts list; reporting no pending interrupts`,
+        );
       }
 
       yield {
@@ -2788,18 +3034,63 @@ function _runError(message: string, code: string): BaseEvent {
   return { type: EventType.RUN_ERROR, message, code };
 }
 
+/**
+ * Validate a resolved resume payload against an object response schema, or
+ * `null` when it satisfies the schema (or the schema is not an object schema).
+ */
+function validateResumePayload(
+  entry: ResumeEntry,
+  schema: Record<string, unknown>,
+): BaseEvent | null {
+  if (schema.type !== "object") return null;
+  if (typeof entry.payload !== "object" || entry.payload == null) {
+    return _runError(
+      `Invalid payload for interrupt '${entry.interruptId}': expected an object.`,
+      "INVALID_PAYLOAD",
+    );
+  }
+  const payload = entry.payload as Record<string, unknown>;
+  const required = schema.required as string[] | undefined;
+  if (Array.isArray(required)) {
+    const missingKeys = required.filter((k) => !(k in payload));
+    if (missingKeys.length > 0) {
+      return _runError(
+        `Invalid payload for interrupt '${entry.interruptId}': missing required keys ${JSON.stringify(missingKeys)}.`,
+        "INVALID_PAYLOAD",
+      );
+    }
+  }
+  const typeError = validateObjectPayloadPropertyTypes(schema, payload);
+  if (typeError) {
+    return _runError(
+      `Invalid payload for interrupt '${entry.interruptId}': ${typeError}`,
+      "INVALID_PAYLOAD",
+    );
+  }
+  return null;
+}
+
 /** Non-empty `resume[]` entries, or `[]` if missing. */
 function resolveResumeEntries(input: RunAgentInput): ResumeEntry[] {
   const resume = (input as { resume?: ResumeEntry[] }).resume;
   return Array.isArray(resume) && resume.length > 0 ? resume : [];
 }
 
-/** AG-UI `ResumeEntry` → Strands `InterruptResponseContent.response`. */
+/**
+ * AG-UI `ResumeEntry` → Strands `InterruptResponseContent.response`.
+ *
+ * A present payload is passed through raw, because that is what tools
+ * destructure. It just can never be `undefined`: Strands reads
+ * `response === undefined` as "still awaiting a human" and re-raises the same
+ * interrupt forever. A generic interrupt publishes no responseSchema, so an
+ * empty payload reaches here unchecked; stand in an empty object, which the
+ * SDK counts as answered and a destructuring tool can still take.
+ */
 function toResumeResponse(entry: ResumeEntry): unknown {
   if (entry.status === "cancelled") {
     return { status: "cancelled" };
   }
-  return entry.payload as unknown;
+  return entry.payload === undefined ? {} : (entry.payload as unknown);
 }
 
 // ---------------------------------------------------------------------------
@@ -2925,11 +3216,7 @@ function strandsInterruptToAgui(interrupt: StrandsInterrupt): AguiInterrupt {
   // purpose — must stay generic: preserve its native name/reason payload
   // rather than guessing tool-approval semantics out of an unrelated
   // object.
-  const isToolApproval =
-    typeof interrupt.name === "string" &&
-    interrupt.name.startsWith("ag_ui:tool_call:");
-
-  if (!isToolApproval) {
+  if (!isToolApprovalInterrupt(interrupt)) {
     const out: AguiInterrupt = {
       id: interrupt.id,
       reason: interrupt.name ?? "interrupt",
@@ -2953,11 +3240,7 @@ function strandsInterruptToAgui(interrupt: StrandsInterrupt): AguiInterrupt {
     const toolUseId = (reasonRaw as Record<string, unknown>).tool_use_id;
     if (typeof toolUseId === "string") out.toolCallId = toolUseId;
   }
-  out.responseSchema = {
-    type: "object",
-    properties: { approved: { type: "boolean" } },
-    required: ["approved"],
-  };
+  out.responseSchema = toolApprovalResponseSchema();
   const meta: Record<string, unknown> = { strandsName: interrupt.name };
   if (typeof reasonRaw === "object" && reasonRaw != null) {
     const r = reasonRaw as Record<string, unknown>;
@@ -2974,6 +3257,32 @@ function getEventKind(event: unknown): string | undefined {
     return typeof t === "string" ? t : undefined;
   }
   return undefined;
+}
+
+/**
+ * True if `event` is a `ContentBlockEvent` — an assembled content block.
+ *
+ * `Agent.stream()` yields one of these for EVERY completed content block: any
+ * value from `model.streamAggregated` that is not a `ModelStreamEvent` gets
+ * wrapped as `new ContentBlockEvent({ contentBlock })`. A content block is by
+ * construction the assembled form of deltas the adapter has *already* streamed
+ * — `textBlock` is the finished text of a turn that went out chunk by chunk as
+ * `TEXT_MESSAGE_CONTENT`, `reasoningBlock` the finished reasoning that went out
+ * as `REASONING_MESSAGE_CONTENT`.
+ *
+ * The dispatch chain translates only `toolUseBlock`, so with a terminal RAW
+ * fallback in place every other block kind would fall through and re-deliver
+ * the whole assistant message a second time, immediately after it streamed.
+ * That is the same duplication the Python adapter's explicit
+ * `ModelMessageEvent` skip prevents.
+ *
+ * Tested against the real `ContentBlockEvent` / `TextBlock` / `ReasoningBlock`
+ * classes rather than object literals — see `raw-content-block.test.ts`.
+ *
+ * Must be evaluated before `unwrapStrandsEvent`, which discards the wrapper.
+ */
+function isAssembledContentBlock(event: unknown): boolean {
+  return getEventKind(event) === "contentBlockEvent";
 }
 
 /**
@@ -3312,9 +3621,20 @@ function _sortKeys(val: unknown): unknown {
  */
 function resumeFingerprint(entries: ResumeEntry[]): string {
   const canonicalEntries = entries
-    .map(
-      (entry) =>
-        [entry.interruptId, entry.status, _sortKeys(entry.payload)] as const,
+    .map((entry) =>
+      // A resolved entry without a payload is not the same resume as one
+      // carrying an explicit null: `toResumeResponse` sends `{}` for the first
+      // and `null` for the second. Omit the slot rather than serializing
+      // `undefined`, which JSON would collapse into the null it must differ
+      // from. A cancelled entry's payload never reaches the SDK, so its
+      // canonical form is left alone.
+      entry.status !== "cancelled" && entry.payload === undefined
+        ? ([entry.interruptId, entry.status] as const)
+        : ([
+            entry.interruptId,
+            entry.status,
+            _sortKeys(entry.payload),
+          ] as const),
     )
     .sort((left, right) =>
       JSON.stringify(left).localeCompare(JSON.stringify(right)),

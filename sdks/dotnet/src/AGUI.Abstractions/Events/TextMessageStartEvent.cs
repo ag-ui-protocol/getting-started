@@ -15,6 +15,5 @@ public sealed class TextMessageStartEvent : BaseEvent
     public string Role { get; set; } = string.Empty;
 
     [JsonPropertyName("name")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Name { get; set; }
 }

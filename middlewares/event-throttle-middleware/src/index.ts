@@ -64,6 +64,25 @@ function isReasoningChunk(
   return event.type === EventType.REASONING_MESSAGE_CHUNK;
 }
 
+/**
+ * Fold one chunk's metadata into another's, key by key, last write winning.
+ *
+ * Deliberately inlined rather than importing `mergeMetadata` from `@ag-ui/client`:
+ * this package declares a peer range of `>=0.0.40`, and that export only exists
+ * from the release that introduced metadata. Importing it would break every
+ * installation on an admitted older client — a missing named export under ESM,
+ * or a call to `undefined` under CJS. The rule is a shallow spread, so keeping a
+ * local copy costs nothing; `mergeMetadata` in `@ag-ui/core` remains canonical.
+ */
+function mergeChunkMetadata(
+  previous: Record<string, unknown> | undefined,
+  next: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (next === undefined) return previous;
+  if (previous === undefined) return { ...next };
+  return { ...previous, ...next };
+}
+
 /** Return the coalescence key for a chunk event, or null if not coalescable. */
 function chunkKey(
   event: BaseEvent,
@@ -165,6 +184,20 @@ export class EventThrottleMiddleware extends Middleware {
               if (isTextChunk(last)) last.delta = merged;
               else if (isToolCallChunk(last)) last.delta = merged;
               else if (isReasoningChunk(last)) last.delta = merged;
+
+              // Keeping only the first chunk's fields is right for role, name
+              // and toolCallName — they appear on the first chunk. Metadata is
+              // the opposite: it is designed to arrive last, carrying usage and
+              // the finish reason, so it merges key by key with the last write
+              // winning, matching the reducer. Dropping it here would swallow a
+              // trailing usage-only chunk before transformChunks ever sees it.
+              const mergedMetadata = mergeChunkMetadata(
+                last.metadata as Record<string, unknown> | undefined,
+                event.metadata as Record<string, unknown> | undefined,
+              );
+              if (mergedMetadata !== undefined) {
+                last.metadata = mergedMetadata;
+              }
             } else {
               // Push a shallow copy so we don't mutate the original event
               coalesced.push({ ...event } as BaseEvent);

@@ -448,7 +448,7 @@ describe("AgentSubscriber", () => {
       errorAgent.subscribe(errorHandlingSubscriber);
 
       // Mock console.error to check if it's called
-      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation();
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       // This should not throw because the subscriber handles the error
       await expect(errorAgent.runAgent({})).resolves.toBeDefined();
@@ -489,7 +489,7 @@ describe("AgentSubscriber", () => {
       errorAgent.subscribe(errorHandlingSubscriber);
 
       // Mock console.error to check if it's called
-      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation();
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       // This should throw because the subscriber doesn't stop propagation
       await expect(errorAgent.runAgent({})).rejects.toThrow("Test error");

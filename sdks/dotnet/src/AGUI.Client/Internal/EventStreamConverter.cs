@@ -192,8 +192,35 @@ internal static class EventStreamConverter
                         ResponseId = responseId,
                         RawRepresentation = errorEvent
                     };
+
+                    // Preserve partial usage from failed runs through the IChatClient abstraction,
+                    // matching the projection used for RUN_FINISHED usage.
+                    if (errorEvent.Usage is { Count: > 0 } errorUsageEntries)
+                    {
+                        foreach (var entry in errorUsageEntries)
+                        {
+                            yield return new ChatResponseUpdate
+                            {
+                                Role = ChatRole.Assistant,
+                                ConversationId = conversationId,
+                                ResponseId = responseId,
+                                ModelId = entry.Model,
+                                Contents = [new UsageContent(ToUsageDetails(entry))],
+                                RawRepresentation = errorEvent,
+                            };
+                        }
+                    }
+
                     break;
 
+                // These four events update builder state and yield no
+                // ChatResponseUpdate, so anything carried only on them — metadata
+                // included — does not reach an AGUIChatClient consumer, not even
+                // through RawRepresentation. That is deliberate: metadata is a
+                // wire-level field in .NET, consistent with every other
+                // message-level AG-UI field (see AGUIMessage.Metadata). Consumers
+                // needing it read the raw event stream instead. Documented in
+                // docs/concepts/metadata.mdx.
                 case TextMessageStartEvent textStart:
                     textMessageBuilder.AddTextStart(textStart);
                     break;

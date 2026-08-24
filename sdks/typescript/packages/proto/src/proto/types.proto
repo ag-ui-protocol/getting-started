@@ -15,6 +15,9 @@ message ToolCall {
     string arguments = 2; 
   }  
   Function function = 3;
+  // Extra information, open by key. A tool call is not a message, so it carries
+  // its own metadata — several can share one parent assistant message.
+  google.protobuf.Struct metadata = 4;
 }
 
 message InputContentDataSource {
@@ -77,6 +80,9 @@ message Message {
   optional string tool_call_id = 6;
   optional string error = 7;
   repeated InputContent content_parts = 8;
+  // Extra information, open by key. See BaseEvent.metadata in events.proto for
+  // why this is a Struct.
+  google.protobuf.Struct metadata = 9;
 }
 
 message Interrupt {

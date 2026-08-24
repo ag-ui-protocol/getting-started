@@ -28,5 +28,9 @@ class EventEncoder:
     def _encode_sse(self, event: BaseEvent) -> str:
         """
         Encodes an event into an SSE string.
+
+        Optional fields with no value are left out by ``ConfiguredBaseModel``
+        itself, so no ``exclude_none`` is passed here — every producer path gets
+        the same omission whether or not it goes through this encoder.
         """
-        return f"data: {event.model_dump_json(by_alias=True, exclude_none=True)}\n\n"
+        return f"data: {event.model_dump_json(by_alias=True)}\n\n"

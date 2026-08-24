@@ -75,9 +75,14 @@
       ],
       "cache": true
     },
-    "check-types": {
+    "typecheck": {
       "dependsOn": [
-        "^check-types"
+        "^build",
+        "generate"
+      ],
+      "inputs": [
+        "default",
+        "^production"
       ],
       "cache": true
     },

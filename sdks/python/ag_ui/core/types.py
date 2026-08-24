@@ -3,21 +3,114 @@ This module contains the types for the Agent User Interaction Protocol Python SD
 """
 
 import warnings
-from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, Dict, FrozenSet, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 from pydantic.alias_generators import to_camel
+
+_OMITTABLE_KEYS_CACHE_ATTR = "__agui_omittable_keys__"
 
 
 class ConfiguredBaseModel(BaseModel):
     """
     A configurable base model.
+
+    Serialization omits every optional field that has no value instead of
+    writing it out as JSON ``null``. Pydantic's default is to include it, which
+    made this SDK the only AG-UI producer that put ``null`` on the wire where
+    TypeScript simply left the key out — and cost the protocol three
+    receiving-side tolerance patches (``TOOL_CALL_START.parentMessageId``,
+    ``TOOL_CALL_CHUNK.parentMessageId``, ``RUN_FINISHED.outcome``). Omission is
+    applied here, in the base model, so it holds on every serialization path
+    (``model_dump``, ``model_dump_json``, nesting inside another model, and any
+    ``TypeAdapter``) rather than depending on each call site remembering
+    ``exclude_none=True``.
+
+    "Has no value" means a field that is declared optional *and* defaults to
+    ``None`` — that is exactly the set the contract lets a producer leave out.
+    Nulls that carry meaning are untouched: a required field, a ``None`` inside
+    a ``dict``/``list`` value (an individual metadata value, say), and any extra
+    field all serialize as ``null``.
     """
     model_config = ConfigDict(
         extra="allow",
         alias_generator=to_camel,
         populate_by_name=True,
     )
+
+    @classmethod
+    def _omittable_keys(cls) -> FrozenSet[str]:
+        """
+        The serialized keys that may be dropped when their value is ``None``.
+
+        Both the field name and its alias are included, because the caller
+        chooses between them with ``by_alias``. Cached per class in the class's
+        own ``__dict__`` so a subclass never inherits its parent's answer.
+        """
+        cached = cls.__dict__.get(_OMITTABLE_KEYS_CACHE_ATTR)
+        if cached is None:
+            keys = set()
+            for name, field in cls.model_fields.items():
+                if not field.is_required() and field.default is None:
+                    keys.add(name)
+                    if field.alias is not None:
+                        keys.add(field.alias)
+                    if field.serialization_alias is not None:
+                        keys.add(field.serialization_alias)
+            cached = frozenset(keys)
+            setattr(cls, _OMITTABLE_KEYS_CACHE_ATTR, cached)
+        return cached
+
+    @model_serializer(mode="wrap")
+    def _omit_fields_without_value(self, handler: SerializerFunctionWrapHandler):
+        # Deliberately unannotated return: annotating it (``Dict[str, Any]``, say)
+        # makes Pydantic replace the model's serialization JSON schema with a bare
+        # ``{"type": "object"}``. Left off, the handler's own schema is kept.
+        serialized = handler(self)
+        omittable = type(self)._omittable_keys()
+        return {
+            key: value
+            for key, value in serialized.items()
+            if value is not None or key not in omittable
+        }
+
+
+Metadata = Dict[str, Any]
+
+AGUI_METADATA_KEY = "ag-ui"
+"""
+The key reserved for AG-UI's own use inside a metadata object. Every other key
+is user space.
+
+Reservation is by convention: nothing rejects a write to this key at runtime,
+because metadata is open by key and validating its shape would contradict that.
+"""
+
+
+class MetadataMixin(ConfiguredBaseModel):
+    """
+    Adds an optional metadata object.
+
+    Open by key — any JSON value is allowed under a key, including ``None``. A
+    ``None`` value under a key is meaningful data and is preserved.
+
+    The object itself is absent or a mapping, never ``None``.
+    ``ConfiguredBaseModel`` omits an unset optional field on every
+    serialization path, so an absent metadata object never reaches the wire as
+    ``null`` — no ``exclude_none=True`` needed at any call site. The TypeScript
+    client enforces the same contract from the other side and rejects a
+    ``null`` metadata object: metadata postdates the omission fix, so unlike
+    some older optional fields there is no legacy producer to tolerate.
+    """
+
+    metadata: Optional[Metadata] = None
 
 
 class FunctionCall(ConfiguredBaseModel):
@@ -28,9 +121,13 @@ class FunctionCall(ConfiguredBaseModel):
     arguments: str
 
 
-class ToolCall(ConfiguredBaseModel):
+class ToolCall(MetadataMixin):
     """
     A tool call, modelled after OpenAI tool calls.
+
+    Carries its own metadata rather than folding into the assistant message that
+    owns it: several tool calls can share one parent, so merging them all into it
+    would make the result depend on their relative order.
     """
     id: str
     type: Literal["function"] = "function"  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -38,7 +135,7 @@ class ToolCall(ConfiguredBaseModel):
     encrypted_value: Optional[str] = None
 
 
-class BaseMessage(ConfiguredBaseModel):
+class BaseMessage(MetadataMixin):
     """
     A base message, modelled after OpenAI messages.
     """
@@ -189,7 +286,7 @@ class UserMessage(BaseMessage):
     content: Union[str, List[InputContent]]
 
 
-class ToolMessage(ConfiguredBaseModel):
+class ToolMessage(MetadataMixin):
     """
     A tool result message.
     """
@@ -201,7 +298,7 @@ class ToolMessage(ConfiguredBaseModel):
     encrypted_value: Optional[str] = None
 
 
-class ActivityMessage(ConfiguredBaseModel):
+class ActivityMessage(MetadataMixin):
     """
     An activity progress message emitted between chat messages.
     """
@@ -212,7 +309,7 @@ class ActivityMessage(ConfiguredBaseModel):
     content: Dict[str, Any]
 
 
-class ReasoningMessage(ConfiguredBaseModel):
+class ReasoningMessage(MetadataMixin):
     """
     A reasoning message containing the agent's internal reasoning process.
     """
@@ -274,9 +371,13 @@ class Interrupt(ConfiguredBaseModel):
 ResumeStatus = Literal["resolved", "cancelled"]
 
 
-class ResumeEntry(ConfiguredBaseModel):
+class ResumeEntry(MetadataMixin):
     """
     A per-interrupt response in the resume array of a RunAgentInput.
+
+    ``metadata`` carries envelope data about the response — signatures, routing
+    keys — as opposed to ``payload``, which is the answer the agent asked for
+    and will act on.
     """
     interrupt_id: str
     status: ResumeStatus
@@ -290,7 +391,11 @@ class RunAgentInput(ConfiguredBaseModel):
     thread_id: str
     run_id: str
     parent_run_id: Optional[str] = None
-    state: Any
+    # Optional by contract: absent means "no state", and a bare null on the wire
+    # reads as absent (every consumer collapses the two, and .NET's representation
+    # cannot tell them apart). Defaulting to None makes the base model omit it
+    # when unset. Nulls INSIDE a state object are values and survive.
+    state: Any = None
     messages: List[Message]
     tools: List[Tool]
     context: List[Context]

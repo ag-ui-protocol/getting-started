@@ -6,12 +6,15 @@ Translates Strands streaming events into the AG-UI event protocol.
 import asyncio
 import base64
 import hashlib
+import functools
 import inspect
 import json
 import logging
+import types
 import uuid
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Dict, List, Tuple
+from importlib.metadata import version as distribution_version
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from strands import Agent as StrandsAgentCore
 from strands.session import SessionManager
@@ -79,19 +82,111 @@ _TOOL_CALL_MAP_MAX = 512
 # tool receives this in place of a real answer and can treat it as a denial.
 INTERRUPT_CANCELLED = {"cancelled": True}
 
+# Reserved native-interrupt name prefix for interrupts this adapter's approval
+# hook raises. Anything else is a generic native interrupt.
+_TOOL_APPROVAL_NAME_PREFIX = "ag_ui:tool_call:"
+
+
+def _strands_uses_presence_based_interrupt_responses(installed_version: str) -> bool:
+    """Return the interrupt-response contract of a Strands SDK version."""
+    try:
+        major, minor = map(int, installed_version.split(".", 2)[:2])
+    except ValueError as exc:
+        raise RuntimeError(
+            "Cannot determine interrupt response semantics for "
+            f"strands-agents version {installed_version!r}"
+        ) from exc
+    return (major, minor) >= (1, 19)
+
+
+# Strands 1.15 through 1.18 returns a recorded response only when it is truthy.
+# Version 1.19 changed that predicate to presence (``response is not None``).
+_STRANDS_USES_PRESENCE_BASED_INTERRUPT_RESPONSES = (
+    _strands_uses_presence_based_interrupt_responses(
+        distribution_version("strands-agents")
+    )
+)
+
+
+def _tool_approval_response_schema() -> dict:
+    """The response contract advertised for a tool-approval interrupt.
+
+    Single source for both the schema published on the AG-UI ``Interrupt`` and
+    the resume-payload validation, so a resume can still be checked when the
+    AG-UI bookkeeping did not survive a process restart.
+    """
+    return {
+        "type": "object",
+        "properties": {"approved": {"type": "boolean"}},
+        "required": ["approved"],
+    }
+
+
+def _is_tool_approval_interrupt(native_interrupt: Any) -> bool:
+    """True when a native Strands interrupt came from the approval hook."""
+    name = getattr(native_interrupt, "name", None)
+    return (
+        isinstance(name, str)
+        and name.startswith(_TOOL_APPROVAL_NAME_PREFIX)
+        and isinstance(getattr(native_interrupt, "reason", None), dict)
+    )
+
 
 def _wrap_resume_response(status: str, payload: Any) -> dict:
     """Package a ``ResumeEntry`` for Strands' ``interruptResponse`` shape.
 
-    Strands' resume gate is truthiness-based (i.e. ``if interrupt_.response:``),
-    so a raw falsy payload (``None``, ``False``, ``""``, ``0``, ``[]``, ``{}``)
-    re-raises the same interrupt and re-runs the tool body — an infinite approve loop.
-    Always hand Strands a truthy envelope; up to the tool implementation to properly
-    destructures it (e.g. via ``.get("cancelled")`` / ``.get("response")``).
+    Supported Strands releases read a recorded answer either by truthiness
+    (1.15 through 1.18) or by presence (1.19+). Forwarding a raw falsy payload
+    can therefore re-raise the same interrupt and re-run the tool body on the
+    compatibility floor. Always hand Strands a truthy envelope; the tool
+    implementation unwraps it via ``.get("cancelled")`` / ``.get("response")``.
     """
     if status == "cancelled":
         return dict(INTERRUPT_CANCELLED)
     return {"response": payload}
+
+
+def _native_resume_response(entry: Any, native_interrupt: Any) -> Any:
+    """Return the answer Strands records when this entry is forwarded.
+
+    One definition, read both by the batch the run forwards and by the replay
+    comparison below, so the two cannot disagree about what was submitted.
+    """
+    if _is_tool_approval_interrupt(native_interrupt):
+        return {"approved": False} if entry.status == "cancelled" else entry.payload
+    return _wrap_resume_response(entry.status, entry.payload)
+
+
+def _replays_recorded_answers(interrupt_state: Any, resume_entries: Any) -> bool:
+    """True when this batch re-submits exactly the answers the checkpoint holds.
+
+    Strands records the submitted answers before it reruns hooks and the parked
+    tool execution, and clears the checkpoint only once that work succeeds. So a
+    hook failure, or a crash after session persistence, can restore a checkpoint
+    that is activated with every interrupt already answered. That thread has no
+    way forward: fresh input is refused because the checkpoint is active, and a
+    resume finds nothing open to address. Handing Strands the identical batch is
+    the way out, because it lets the SDK finish the parked execution. The
+    checkpoint itself must be left alone: clearing it would discard exactly that
+    parked execution. Anything short of an exact replay stays refused.
+    """
+    recorded = getattr(interrupt_state, "interrupts", {}) or {}
+    if not recorded or len(resume_entries) != len(recorded):
+        return False
+    addressed: set[str] = set()
+    for entry in resume_entries:
+        interrupt_id = getattr(entry, "interrupt_id", None)
+        native_interrupt = recorded.get(interrupt_id)
+        if native_interrupt is None or interrupt_id in addressed:
+            return False
+        addressed.add(interrupt_id)
+        if not _native_interrupt_is_answered(native_interrupt):
+            return False
+        if native_interrupt.response != _native_resume_response(
+            entry, native_interrupt
+        ):
+            return False
+    return True
 
 
 def _get_strands_session_manager(agent: Any) -> Any:
@@ -116,23 +211,14 @@ def _strands_interrupt_to_agui(strands_interrupt: Any) -> "Interrupt":
     name = getattr(strands_interrupt, "name", None) or "interrupt"
     raw_reason = getattr(strands_interrupt, "reason", None)
 
-    is_tool_approval = (
-        isinstance(name, str)
-        and name.startswith("ag_ui:tool_call:")
-        and isinstance(raw_reason, dict)
-    )
-    if is_tool_approval:
+    if _is_tool_approval_interrupt(strands_interrupt):
         tool_name = raw_reason.get("tool_name", "unknown")
         return Interrupt(
             id=s_id,
             reason="tool_call",
             message=f"Approve call to {tool_name}?",
             tool_call_id=raw_reason.get("tool_use_id"),
-            response_schema={
-                "type": "object",
-                "properties": {"approved": {"type": "boolean"}},
-                "required": ["approved"],
-            },
+            response_schema=_tool_approval_response_schema(),
             metadata={
                 "tool_name": tool_name,
                 "tool_input": raw_reason.get("tool_input", {}),
@@ -147,6 +233,34 @@ def _strands_interrupt_to_agui(strands_interrupt: Any) -> "Interrupt":
         response_schema=None,
         metadata={"reason": raw_reason} if raw_reason is not None else None,
     )
+
+
+def _native_interrupt_is_answered(interrupt: Any) -> bool:
+    """True when this interrupt already carries an answer Strands will hand back.
+
+    Match the installed SDK's own ``ToolContext.interrupt`` predicate. Strands
+    1.15 through 1.18 uses truthiness; 1.19 and later uses presence, with
+    ``None`` as the unanswered default.
+    """
+    response = getattr(interrupt, "response", None)
+    if _STRANDS_USES_PRESENCE_BASED_INTERRUPT_RESPONSES:
+        return response is not None
+    return bool(response)
+
+
+def _open_native_interrupts(interrupts: Any) -> dict:
+    """Return the entries of ``interrupts`` still awaiting a human, keyed by id.
+
+    The native interrupt state is the only record of what is still in flight, and
+    every "is anything still open?" decision reads it through this one predicate,
+    so the pause this run reports and the resume the next one submits cannot
+    disagree and strand a client between them.
+    """
+    return {
+        interrupt_id: interrupt
+        for interrupt_id, interrupt in (interrupts or {}).items()
+        if not _native_interrupt_is_answered(interrupt)
+    }
 
 
 def _extract_interrupts(agent: Any, terminal_result: Any) -> list:
@@ -164,14 +278,18 @@ def _extract_interrupts(agent: Any, terminal_result: Any) -> list:
                 return list(interrupts)
     interrupt_state = getattr(agent, "_interrupt_state", None)
     if interrupt_state is not None and getattr(interrupt_state, "activated", False):
-        # Mirrors Strands' own gate (strands/types/interrupt.py: ``if interrupt_.response:``)
-        # — an interrupt with a truthy response was already answered by a prior partial
-        # resume and must not be re-reported as still pending.
-        return [
-            interrupt
-            for interrupt in getattr(interrupt_state, "interrupts", {}).values()
-            if not getattr(interrupt, "response", None)
-        ]
+        open_interrupts = _open_native_interrupts(
+            getattr(interrupt_state, "interrupts", {})
+        )
+        if not open_interrupts:
+            # The checkpoint is still activated yet every interrupt is answered
+            # under the installed SDK's semantics, so this run reports success
+            # while the agent may remain parked.
+            logger.debug(
+                "Native interrupt state is activated but every interrupt is "
+                "answered; reporting no pending interrupts"
+            )
+        return list(open_interrupts.values())
     return []
 
 
@@ -230,12 +348,16 @@ def _preflight_resume_entries(
             "A submitted resume must contain at least one entry"
         )
 
-    current_interrupts = getattr(interrupt_state, "interrupts", {})
-    open_interrupts = {
-        interrupt_id: interrupt
-        for interrupt_id, interrupt in current_interrupts.items()
-        if not getattr(interrupt, "response", None)
-    }
+    open_interrupts = _open_native_interrupts(
+        getattr(interrupt_state, "interrupts", {})
+    )
+    # An active checkpoint whose every interrupt is answered is a thread the SDK
+    # parked mid-resume (see _replays_recorded_answers). The interrupts an exact
+    # replay may address are the answered ones it is replaying.
+    if _replays_recorded_answers(interrupt_state, resume_entries):
+        addressable = dict(getattr(interrupt_state, "interrupts", {}) or {})
+    else:
+        addressable = open_interrupts
     seen_ids: set[str] = set()
     for entry in resume_entries:
         interrupt_id = getattr(entry, "interrupt_id", None)
@@ -248,13 +370,13 @@ def _preflight_resume_entries(
                 f"Resume contains duplicate interrupt id: {interrupt_id}"
             )
         seen_ids.add(interrupt_id)
-        interrupt = open_interrupts.get(interrupt_id)
+        interrupt = addressable.get(interrupt_id)
         if interrupt is None:
             return _interrupt_resume_error(
                 f"Resume references an interrupt that is not open: {interrupt_id}"
             )
 
-    missing_ids = set(open_interrupts) - seen_ids
+    missing_ids = set(addressable) - seen_ids
     if missing_ids:
         return RunErrorEvent(
             type=EventType.RUN_ERROR,
@@ -278,14 +400,22 @@ def _preflight_resume_entries(
                     code="INTERRUPT_EXPIRED",
                 )
 
-        if (
-            entry.status != "resolved"
-            or not ag_ui_interrupt
-            or not getattr(ag_ui_interrupt, "response_schema", None)
+        schema = (
+            getattr(ag_ui_interrupt, "response_schema", None)
+            if ag_ui_interrupt
+            else None
+        )
+        if not schema and _is_tool_approval_interrupt(
+            addressable.get(entry.interrupt_id)
         ):
+            # AG-UI bookkeeping can be lost to a restart while the native
+            # interrupt is restored. A tool approval's contract is fixed, so
+            # validate against it rather than waving the payload through.
+            schema = _tool_approval_response_schema()
+
+        if entry.status != "resolved" or not schema:
             continue
 
-        schema = ag_ui_interrupt.response_schema
         payload = entry.payload
         if schema.get("type") != "object":
             continue
@@ -352,6 +482,7 @@ from ag_ui.core import (
     FunctionCall,
     Interrupt,
     MessagesSnapshotEvent,
+    RawEvent,
     ReasoningEncryptedValueEvent,
     ReasoningEndEvent,
     ReasoningMessageContentEvent,
@@ -491,6 +622,224 @@ def _coerce_text(content: Any) -> str:
 def _coerce_id(value: Any) -> str:
     """Return ``value`` if it is a non-empty string, else a fresh UUID."""
     return value if isinstance(value, str) and value else str(uuid.uuid4())
+
+
+# Separator for namespacing a sub-agent's tool call ids under the parent tool
+# call that owns them. Two agents mint toolUseIds independently, so an inner id
+# can be byte-identical to a parent one; without a namespace the inner result
+# would resolve the PARENT's tool card (and vice versa). "::" is not produced by
+# any Strands/Bedrock id generator, so the prefix is unambiguous.
+_INNER_TOOL_ID_SEP = "::"
+
+
+# Keys Strands' event loop injects into the *payload* of any event carrying a
+# ``delta``: ``ModelStreamEvent.prepare()`` does ``self.update(invocation_state)``
+# (strands/types/_events.py), which merges the live ``Agent`` object, telemetry
+# handles and cycle bookkeeping into the event dict. None of it is model output,
+# and ``agent`` in particular carries the system prompt, the full message history
+# and the model config — it must never reach a browser. Stripped by name so the
+# RAW payload keeps only the provider's own fields.
+_RAW_INVOCATION_STATE_KEYS = frozenset(
+    {
+        "agent",
+        "event_loop_cycle_id",
+        "event_loop_cycle_trace",
+        "event_loop_cycle_span",
+        "event_loop_parent_span",
+        "event_loop_parent_cycle_id",
+        "request_state",
+    }
+)
+
+# Terminal lifecycle events that carry no payload a frontend can use.
+# ``result`` is ``AgentResultEvent`` (an ``AgentResult`` holding
+# ``EventLoopMetrics``) and ``stop`` is ``EventLoopStopEvent`` (a tuple of the
+# same). Both are the end-of-run marker already represented by RUN_FINISHED, so
+# forwarding them would be duplicate noise even if they were serializable.
+_RAW_TERMINAL_KEYS = frozenset({"result", "stop"})
+
+# Keys the dispatch chain in ``run`` already owns. Each of their branches is
+# *conditionally* entered — ``"data" in event and event["data"]``,
+# ``"reasoningText" in event and event.get("reasoning")``,
+# ``"current_tool_use" in event and event["current_tool_use"]`` — so a payload
+# whose guard evaluates false matches no branch and, with the RAW fallback in
+# place, falls through to it.
+#
+# That conflates two different situations the fallback must keep apart:
+#
+#   unmapped            the adapter has no branch for this event at all, so
+#                       forwarding it as RAW is the whole point of issue #2291
+#   mapped-but-declined a branch exists and deliberately withheld the payload
+#
+# Only the first is RAW-eligible. Without this set the second leaks whatever
+# the guard exists to suppress: reasoning text with ``reasoning`` off,
+# encrypted ``reasoningRedactedContent``, and the ``reasoning_signature``
+# verification token would each be republished verbatim over RAW — the exact
+# content the gate withholds — while empty ``data`` and empty
+# ``current_tool_use`` updates would add a RAW event carrying no information.
+_RAW_SUPPRESSED_KEYS = frozenset(
+    {
+        "data",
+        "reasoningText",
+        "reasoningRedactedContent",
+        "reasoning_signature",
+        "current_tool_use",
+    }
+)
+
+
+def _sanitize_raw_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Return a JSON-safe RAW payload for ``event``, or ``None`` to drop it.
+
+    Sanitizing is deliberately an allow-by-serializability filter, never a
+    coercion: nothing is stringified to force it through. Coercing (e.g.
+    ``json.dumps(..., default=str)``) would ship the ``repr`` of the live
+    ``Agent`` — system prompt, conversation history, model configuration — to
+    every connected client. A payload that will not encode is dropped instead.
+    """
+    if any(key in event for key in _RAW_TERMINAL_KEYS):
+        return None
+
+    payload = {
+        key: value
+        for key, value in event.items()
+        if key not in _RAW_INVOCATION_STATE_KEYS
+    }
+    if not payload:
+        return None
+
+    try:
+        # Strict round-trip: no ``default=`` hook, so any non-JSON-native object
+        # raises here rather than being silently rendered. The decoded result is
+        # what gets forwarded, guaranteeing only plain JSON types reach the wire.
+        return json.loads(json.dumps(payload))
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            "Dropping unserializable Strands event from RAW forwarding "
+            f"(keys={sorted(payload)}): {exc}"
+        )
+        return None
+
+
+async def _forward_inner_agent_events(
+    inner_event: Any,
+    parent_tool_use: Dict[str, Any],
+    inner_tool_calls_seen: Dict[str, Dict[str, Any]],
+) -> AsyncIterator[Any]:
+    """Translate one agent-as-tool inner event into AG-UI tool-call events.
+
+    A Strands generator tool that wraps another ``Agent`` (the agent-as-tool
+    pattern) re-yields the inner agent's whole ``stream_async`` output; Strands
+    wraps each yield as ``tool_stream_event``. The inner agent's tool calls
+    therefore never reach the parent loop's ``current_tool_use`` /
+    ``contentBlockStop`` / tool-result branches, so without this the frontend
+    sees the sub-agent as an opaque black box (see issue #2304).
+
+    Only the tool-call lifecycle is forwarded, and only onto the wire —
+    inner calls are deliberately NOT spliced into ``MessagesSnapshotEvent``
+    history, which mirrors the parent conversation Strands actually persists.
+    """
+    if not isinstance(inner_event, dict):
+        return
+
+    parent_id = parent_tool_use.get("toolUseId") or "inner"
+
+    def _namespaced(inner_id: Any) -> str:
+        return f"{parent_id}{_INNER_TOOL_ID_SEP}{inner_id or uuid.uuid4()}"
+
+    # Inner tool call, streaming its args in.
+    tool_use = inner_event.get("current_tool_use")
+    if isinstance(tool_use, dict) and tool_use.get("name"):
+        call_id = _namespaced(tool_use.get("toolUseId"))
+        raw_input = tool_use.get("input", "")
+        raw_str = (
+            raw_input
+            if isinstance(raw_input, str)
+            else json.dumps(raw_input, default=str)
+        )
+        entry = inner_tool_calls_seen.get(call_id)
+        if entry is None:
+            entry = inner_tool_calls_seen[call_id] = {
+                "name": tool_use["name"],
+                "sent_len": 0,
+                "ended": False,
+                # Which parent tool call owns this inner call. The dict is
+                # shared across every parent agent-as-tool call in the run, so
+                # the contentBlockStop handler below needs this to avoid
+                # closing a sibling parent's inner call.
+                "parent_id": parent_id,
+            }
+            yield ToolCallStartEvent(
+                type=EventType.TOOL_CALL_START,
+                tool_call_id=call_id,
+                tool_call_name=tool_use["name"],
+            )
+        if len(raw_str) > entry["sent_len"]:
+            yield ToolCallArgsEvent(
+                type=EventType.TOOL_CALL_ARGS,
+                tool_call_id=call_id,
+                delta=raw_str[entry["sent_len"] :],
+            )
+            entry["sent_len"] = len(raw_str)
+        return
+
+    # Inner content block closed — close the newest still-open inner call
+    # *belonging to this parent*. Mirrors the parent loop, which also closes one
+    # call per contentBlockStop.
+    #
+    # The scoping is load-bearing: ``inner_tool_calls_seen`` is shared across
+    # every agent-as-tool call in the run, and Strands executes a parallel tool
+    # batch concurrently, so two sub-agents interleave their streams here. An
+    # unscoped "newest still-open call" search lets parent A's stop close
+    # parent B's inner call — B's tool card resolves early and A's never gets a
+    # TOOL_CALL_END at all, leaving it spinning forever on the frontend.
+    model_chunk = inner_event.get("event")
+    if isinstance(model_chunk, dict) and "contentBlockStop" in model_chunk:
+        for call_id, entry in reversed(list(inner_tool_calls_seen.items())):
+            if entry.get("parent_id") != parent_id:
+                continue
+            if not entry["ended"]:
+                entry["ended"] = True
+                yield ToolCallEndEvent(
+                    type=EventType.TOOL_CALL_END,
+                    tool_call_id=call_id,
+                )
+                break
+        return
+
+    # Inner tool results.
+    message = inner_event.get("message")
+    if isinstance(message, dict) and message.get("role") == "user":
+        for item in message.get("content") or []:
+            if not isinstance(item, dict) or "toolResult" not in item:
+                continue
+            tool_result = item["toolResult"]
+            if not isinstance(tool_result, dict):
+                continue
+            call_id = _namespaced(tool_result.get("toolUseId"))
+            # Only resolve calls this forwarder actually opened, so a result we
+            # never announced can't leave a dangling tool card on the frontend.
+            if call_id not in inner_tool_calls_seen:
+                continue
+            texts = [
+                block["text"]
+                for block in tool_result.get("content") or []
+                if isinstance(block, dict) and "text" in block
+            ]
+            raw_text = "".join(texts)
+            try:
+                result_data = json.loads(raw_text)
+            except (json.JSONDecodeError, TypeError):
+                result_data = raw_text
+            yield ToolCallResultEvent(
+                type=EventType.TOOL_CALL_RESULT,
+                tool_call_id=call_id,
+                message_id=str(uuid.uuid4()),
+                content=json.dumps(result_data, default=str),
+                # role intentionally omitted — same as the parent-level result
+                # path, so the frontend closes the spinner without writing the
+                # inner call into conversation history.
+            )
 
 
 def _build_snapshot_messages(input_messages: List[Any]) -> List[Any]:
@@ -840,6 +1189,394 @@ def _persist_interrupt_bookkeeping(
 
 
 # ---------------------------------------------------------------------------
+# Multi-agent (Graph / Swarm) event translation
+# ---------------------------------------------------------------------------
+
+# Strands multi-agent event discriminators, as emitted by
+# ``Graph.stream_async`` / ``Swarm.stream_async``.
+MULTIAGENT_NODE_START = "multiagent_node_start"
+MULTIAGENT_NODE_STOP = "multiagent_node_stop"
+MULTIAGENT_NODE_STREAM = "multiagent_node_stream"
+MULTIAGENT_HANDOFF = "multiagent_handoff"
+MULTIAGENT_NODE_CANCEL = "multiagent_node_cancel"
+MULTIAGENT_NODE_INTERRUPT = "multiagent_node_interrupt"
+
+# Depth cap for unwrapping nested orchestrator node streams.
+_MAX_MULTIAGENT_NESTING = 10
+
+# AG-UI CUSTOM event names carrying multi-agent lifecycle detail that has no
+# first-class protocol event. Frontends match these strings exactly.
+CUSTOM_MULTIAGENT_HANDOFF = "MultiAgentHandoff"
+CUSTOM_MULTIAGENT_NODE_CANCEL = "MultiAgentNodeCancel"
+CUSTOM_MULTIAGENT_NODE_INTERRUPT = "MultiAgentNodeInterrupt"
+CUSTOM_MULTIAGENT_NODE_STATUS = "MultiAgentNodeStatus"
+
+
+# Guard key used when one orchestrator instance is shared by every run, so any
+# overlap is refused rather than only a same-thread one.
+_SHARED_ORCHESTRATOR_RUN_KEY = "\x00shared-orchestrator"
+
+
+def _busy_scope(key: str) -> str:
+    """Human-readable description of what the busy guard is protecting."""
+    if key == _SHARED_ORCHESTRATOR_RUN_KEY:
+        return "this orchestrator, which is shared by every thread"
+    return f'thread "{key}"'
+
+
+def _is_orchestrator(candidate: Any) -> bool:
+    """Whether an object is a Strands multi-agent orchestrator.
+
+    A Graph or Swarm has no ``model`` (a real Agent always resolves one), owns
+    a ``nodes`` collection, and streams through ``stream_async``. All three are
+    required: a modelless object that is not an orchestrator would otherwise be
+    driven down this path and produce a silent empty run.
+    """
+    return (
+        getattr(candidate, "model", None) is None
+        and getattr(candidate, "nodes", None) is not None
+        and callable(getattr(candidate, "stream_async", None))
+    )
+
+
+def _is_orchestrator_factory(candidate: Any) -> bool:
+    """Whether ``agent`` is a callable that builds an orchestrator per run.
+
+    Callability alone is not enough to tell a factory from an agent: a Strands
+    ``Agent`` is callable too, and so is a test double. A factory is therefore
+    required to be a plain function, method or ``functools.partial``, which an
+    agent instance never is.
+    """
+    if _is_orchestrator(candidate):
+        return False
+    return isinstance(
+        candidate,
+        (
+            types.FunctionType,
+            types.MethodType,
+            types.BuiltinFunctionType,
+            functools.partial,
+        ),
+    )
+
+
+def _snapshot_orchestrator_nodes(
+    orchestrator: Any, _depth: int = 0
+) -> "List[Tuple[list, list]] | None":
+    """Copy every leaf agent's conversation so a run can be undone.
+
+    A Python Graph does not snapshot and restore its node agents around an
+    execution, so a reused instance carries one run's messages into the next.
+    A node can itself be a Graph or Swarm, so this recurses to the leaf agents
+    rather than only looking one level down.
+
+    Returns pairs of (live list, copy). None means some node exposed neither a
+    conversation nor nested nodes, so isolation cannot be guaranteed and the
+    caller must refuse to reuse the instance rather than leak between runs.
+    """
+    if _depth > _MAX_MULTIAGENT_NESTING:
+        return None
+    nodes = getattr(orchestrator, "nodes", None)
+    if not isinstance(nodes, dict):
+        return None
+    pairs: List[Tuple[list, list]] = []
+    for node in nodes.values():
+        executor = getattr(node, "executor", None)
+        messages = getattr(executor, "messages", None)
+        if isinstance(messages, list):
+            pairs.append((messages, list(messages)))
+            continue
+        # A nested orchestrator has no conversation of its own; its leaves do.
+        nested = _snapshot_orchestrator_nodes(executor, _depth + 1)
+        if nested is None:
+            return None
+        pairs.extend(nested)
+    return pairs
+
+
+def _restore_orchestrator_nodes(
+    snapshot: "List[Tuple[list, list]] | None",
+) -> None:
+    """Put every leaf agent's conversation back to its pre-run state."""
+    if snapshot is None:
+        return
+    for live, copy in snapshot:
+        live[:] = copy
+
+
+def _unwrap_multiagent_node_stream(
+    event: Dict[str, Any],
+) -> "Tuple[str, Dict[str, Any] | None]":
+    """Innermost agent event of a node-stream wrapper, and the node it came from.
+
+    A nested Graph or Swarm wraps its own node-stream event inside the outer
+    one, so a single unwrap yields another wrapper rather than the agent event.
+    The OUTER node id is kept: that is the node the run has a step open for, so
+    the text envelope closes with its step rather than being swept at the end.
+    """
+    node_id = event.get("node_id", "unknown")
+    inner = event.get("event")
+    # Bounded so a malformed or self-referential payload cannot spin here.
+    for _ in range(_MAX_MULTIAGENT_NESTING):
+        if not isinstance(inner, dict):
+            return node_id, None
+        if inner.get("type") != MULTIAGENT_NODE_STREAM:
+            return node_id, inner
+        inner = inner.get("event")
+    logger.warning(
+        "multi-agent node stream nested deeper than %d levels; dropping event",
+        _MAX_MULTIAGENT_NESTING,
+    )
+    return node_id, None
+
+
+def _json_safe(value: Any) -> Any:
+    """Recursively reduce a value to something the wire can carry.
+
+    Containers are walked rather than accepted wholesale: a dict whose own
+    values are native objects is still unserializable, which is exactly the
+    shape a Strands interrupt reason takes.
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return str(value)
+
+
+def _multiagent_node_status(event: Dict[str, Any]) -> "str | None":
+    """Non-completed status of a stopped node, or None when it succeeded.
+
+    ``node_result.status`` is a ``Status`` enum on the SDK's ``NodeResult``.
+    Only abnormal outcomes are reported, so the common path stays quiet.
+    """
+    node_result = event.get("node_result")
+    status = getattr(node_result, "status", None)
+    if status is None:
+        return None
+    name = getattr(status, "value", None) or getattr(status, "name", None) or str(status)
+    name = str(name).lower()
+    return None if name == "completed" else name
+
+
+def _multiagent_step_name(node_id: Any, node_type: Any) -> str:
+    """STEP_STARTED / STEP_FINISHED name for a multi-agent node.
+
+    ``node_type`` is only present on ``multiagent_node_start``; the stop event
+    carries just ``node_id``. Callers pass the type remembered from the start
+    event so the two step names pair (events.mdx, StepFinished).
+    """
+    return f"{node_type or 'agent'}:{node_id or 'unknown'}"
+
+
+def _multiagent_handoff_value(event: Dict[str, Any]) -> Dict[str, Any]:
+    """CUSTOM payload for ``multiagent_handoff``.
+
+    Swarm emits single-element lists plus a ``message``; Graph emits batch
+    transitions and omits ``message`` entirely.
+    """
+    return {
+        "from_nodes": event.get("from_node_ids", []),
+        "to_nodes": event.get("to_node_ids", []),
+        "message": event.get("message"),
+    }
+
+
+def _multiagent_cancel_value(event: Dict[str, Any]) -> Dict[str, Any]:
+    """CUSTOM payload for ``multiagent_node_cancel``.
+
+    Raised when a ``BeforeNodeCallEvent`` hook sets ``cancel_node``. Strands
+    follows the cancel with a FAILED ``multiagent_node_stop`` and then raises,
+    so this event is the only place the cancellation reason is available.
+    """
+    return {
+        "node_id": event.get("node_id"),
+        "message": event.get("message"),
+    }
+
+
+def _multiagent_interrupt_value(event: Dict[str, Any]) -> Dict[str, Any]:
+    """CUSTOM payload for ``multiagent_node_interrupt``.
+
+    ``interrupts`` holds native Strands ``Interrupt`` objects, which are not
+    JSON-serializable, so each is reduced to its wire-safe identity fields.
+    """
+    raw = event.get("interrupts")
+    # A string is iterable, so a malformed payload would otherwise be walked
+    # one character at a time and emit junk entries.
+    interrupts = raw if isinstance(raw, (list, tuple)) else []
+    serialized = [
+        {
+            "id": getattr(interrupt, "id", ""),
+            "name": getattr(interrupt, "name", None) or "interrupt",
+            "reason": _json_safe(getattr(interrupt, "reason", None)),
+        }
+        for interrupt in interrupts
+    ]
+    return {"node_id": event.get("node_id"), "interrupts": serialized}
+
+
+class _ParkedOrchestrator:
+    """An orchestrator held between an interrupt and its answer.
+
+    ``baseline`` is the leaf conversation state from BEFORE the run that first
+    interrupted, and it is never replaced by a later snapshot: a resume run
+    starts from an already-paused conversation, so snapshotting again would
+    make the paused turns the thing restored, leaving them on a shared
+    instance for the next thread. ``None`` for a factory-built orchestrator,
+    which is discarded rather than rewound.
+    """
+
+    __slots__ = ("orchestrator", "baseline")
+
+    def __init__(self, orchestrator: Any, baseline: "List[Tuple[list, list]] | None"):
+        self.orchestrator = orchestrator
+        self.baseline = baseline
+
+
+class _MultiAgentNodeStreams:
+    """Per-node text and reasoning envelopes for one orchestrator run.
+
+    A Graph executes a batch of nodes as concurrent tasks whose events are
+    multiplexed into a single queue, so envelopes have to be keyed by node:
+    one shared message id would splice two nodes' text together and close the
+    envelope as soon as either node stopped.
+    """
+
+    def __init__(self) -> None:
+        self._text: Dict[str, str] = {}
+        self._reasoning: Dict[str, str] = {}
+
+    def text(self, node_id: str, delta: str) -> List[Any]:
+        events: List[Any] = []
+        message_id = self._text.get(node_id)
+        if message_id is None:
+            # Reasoning precedes the answer it explains, so close it here
+            # rather than leaving the two envelopes overlapping.
+            events.extend(self._close_reasoning(node_id))
+            message_id = str(uuid.uuid4())
+            self._text[node_id] = message_id
+            events.append(
+                TextMessageStartEvent(
+                    type=EventType.TEXT_MESSAGE_START,
+                    message_id=message_id,
+                    role="assistant",
+                )
+            )
+        events.append(
+            TextMessageContentEvent(
+                type=EventType.TEXT_MESSAGE_CONTENT,
+                message_id=message_id,
+                delta=delta,
+            )
+        )
+        return events
+
+    def reasoning(self, node_id: str, delta: str) -> List[Any]:
+        events: List[Any] = []
+        message_id = self._reasoning.get(node_id)
+        if message_id is None:
+            # Symmetric with text(): the two envelopes never overlap, so a
+            # node that goes text, then reasoning, then text again produces
+            # three separate messages rather than nesting one inside another.
+            events.extend(self._close_text(node_id))
+            message_id = str(uuid.uuid4())
+            self._reasoning[node_id] = message_id
+            events.append(
+                ReasoningStartEvent(
+                    type=EventType.REASONING_START, message_id=message_id
+                )
+            )
+            events.append(
+                ReasoningMessageStartEvent(
+                    type=EventType.REASONING_MESSAGE_START,
+                    message_id=message_id,
+                    role="reasoning",
+                )
+            )
+        events.append(
+            ReasoningMessageContentEvent(
+                type=EventType.REASONING_MESSAGE_CONTENT,
+                message_id=message_id,
+                delta=delta,
+            )
+        )
+        return events
+
+    def _close_text(self, node_id: str) -> List[Any]:
+        message_id = self._text.pop(node_id, None)
+        if message_id is None:
+            return []
+        return [
+            TextMessageEndEvent(
+                type=EventType.TEXT_MESSAGE_END, message_id=message_id
+            )
+        ]
+
+    def _close_reasoning(self, node_id: str) -> List[Any]:
+        message_id = self._reasoning.pop(node_id, None)
+        if message_id is None:
+            return []
+        return [
+            ReasoningMessageEndEvent(
+                type=EventType.REASONING_MESSAGE_END, message_id=message_id
+            ),
+            ReasoningEndEvent(
+                type=EventType.REASONING_END, message_id=message_id
+            ),
+        ]
+
+    def close(self, node_id: str) -> List[Any]:
+        events = self._close_text(node_id)
+        events.extend(self._close_reasoning(node_id))
+        return events
+
+    def close_all(self) -> List[Any]:
+        events: List[Any] = []
+        for node_id in list(self._text) + [
+            n for n in self._reasoning if n not in self._text
+        ]:
+            events.extend(self.close(node_id))
+        return events
+
+
+def _close_open_multiagent(
+    nodes: "_MultiAgentNodeStreams",
+    open_steps: Dict[str, str],
+    failed: bool = False,
+) -> List[Any]:
+    """Terminate every envelope and step this run left open.
+
+    Shared by the success and error paths. A node that interrupts never emits
+    a stop event, and a Graph that fails fast re-raises mid-node, so both exits
+    can leave a message unterminated and a step the UI still shows running.
+
+    On the error path the still-open nodes are the ones that did not finish, so
+    each is reported as failed before its step closes. Without that the close
+    itself reads as success and the node settles green.
+    """
+    events = nodes.close_all()
+    for node_id, step_name in list(open_steps.items()):
+        if failed:
+            events.append(
+                CustomEvent(
+                    type=EventType.CUSTOM,
+                    name=CUSTOM_MULTIAGENT_NODE_STATUS,
+                    value={"node_id": node_id, "status": "failed"},
+                )
+            )
+        events.append(
+            StepFinishedEvent(
+                type=EventType.STEP_FINISHED, step_name=step_name
+            )
+        )
+    open_steps.clear()
+    return events
+
+
+# ---------------------------------------------------------------------------
 # Strands-native interrupt hook
 # ---------------------------------------------------------------------------
 
@@ -887,7 +1624,7 @@ class StrandsInterruptHook:
         #   - raises InterruptException (first call, no response yet) → suspends loop
         #   - returns the human response payload (resume call) → enforce decision
         response = event.interrupt(
-            f"ag_ui:tool_call:{tool_name}",
+            f"{_TOOL_APPROVAL_NAME_PREFIX}{tool_name}",
             reason={
                 "tool_name": tool_name,
                 "tool_input": event.tool_use.get("input", {}),
@@ -923,15 +1660,65 @@ class StrandsAgent:
         hooks: "list | None" = None,
         agents_by_thread: "Dict[str, Any] | None" = None,
     ):
-        # Store template agent configuration for creating fresh instances
-        self._model = agent.model
-        self._system_prompt = agent.system_prompt
-        self._tools = (
-            list(agent.tool_registry.registry.values())
-            if hasattr(agent, "tool_registry")
-            else []
-        )
-        self._agent_kwargs = _extract_agent_kwargs(agent)
+        # Detect a multi-agent orchestrator structurally. A Graph or Swarm has
+        # no ``model`` (a real Agent always resolves one, defaulting to
+        # BedrockModel even when constructed with ``model=None``) and owns a
+        # ``nodes`` collection it streams through. Both halves are required:
+        # a modelless agent that is not an orchestrator would otherwise be
+        # driven down this path and produce a silent empty run instead of
+        # failing loudly.
+        #
+        # Probing attributes rather than importing ``strands.multiagent``
+        # matters because a deprecation shim can keep the import working after
+        # the symbol has moved.
+        # A callable is treated as a factory: it is invoked per run, so each
+        # run gets its own orchestrator and nothing can carry between them.
+        # This is the safe way to wrap a Graph or Swarm.
+        self._orchestrator_factory = agent if _is_orchestrator_factory(agent) else None
+        if self._orchestrator_factory is not None:
+            self._orchestrator = self._orchestrator_factory()
+            if not _is_orchestrator(self._orchestrator):
+                raise TypeError(
+                    "The callable passed as `agent` did not return a Strands "
+                    "orchestrator (an object with `nodes` and `stream_async` "
+                    f"and no `model`); got {type(self._orchestrator).__name__}."
+                )
+        else:
+            self._orchestrator = agent if _is_orchestrator(agent) else None
+
+        # A shared instance is reused across runs, so its node conversations
+        # are snapshotted and restored around each one. Warn when that is not
+        # possible rather than letting one run's history reach the next.
+        if self._orchestrator is not None and self._orchestrator_factory is None:
+            if _snapshot_orchestrator_nodes(self._orchestrator) is None:
+                # Refused rather than warned: a shared instance whose leaf
+                # conversations cannot be restored carries one thread's turns
+                # into the next thread's model input, and a warning does not
+                # stop that reaching another user.
+                raise TypeError(
+                    "This multi-agent orchestrator was passed directly, but "
+                    "its node conversations cannot be isolated between runs, "
+                    "so one run's history would reach the next. Pass a "
+                    "callable that builds and returns a fresh orchestrator "
+                    "per run instead."
+                )
+
+        # Store template agent configuration for creating fresh instances.
+        # Orchestrators are invoked directly, so there is no template to clone.
+        if self._orchestrator is None:
+            self._model = agent.model
+            self._system_prompt = agent.system_prompt
+            self._tools = (
+                list(agent.tool_registry.registry.values())
+                if hasattr(agent, "tool_registry")
+                else []
+            )
+            self._agent_kwargs = _extract_agent_kwargs(agent)
+        else:
+            self._model = None
+            self._system_prompt = None
+            self._tools = []
+            self._agent_kwargs = {}
 
         # Hook providers forwarded to each per-thread StrandsAgentCore.
         #
@@ -965,7 +1752,8 @@ class StrandsAgent:
         # Forwarding it would make every AG-UI thread share one session_id.
         template_session_manager = getattr(agent, "_session_manager", None)
         if (
-            template_session_manager is not None
+            self._orchestrator is None
+            and template_session_manager is not None
             and self.config.session_manager_provider is None
         ):
             logger.warning(
@@ -979,7 +1767,10 @@ class StrandsAgent:
         self._agents_by_thread: Dict[str, StrandsAgentCore] = agents_by_thread if agents_by_thread is not None else {}
         # Track proxy tool names registered per thread
         self._proxy_tool_names_by_thread: Dict[str, set] = {}
-        # Store full AG-UI Interrupt objects per thread for resume validation
+        # AG-UI interrupt metadata per thread: the answer shape advertised to
+        # the client and validated on the way back, the tool card an interrupt
+        # belongs to, and an expiry. Never consulted to decide whether anything
+        # is pending; the native interrupt state answers that on its own.
         self._pending_interrupts_by_thread: Dict[str, Dict[str, Interrupt]] = {}
         # Fingerprint of last successfully-processed resume per thread (idempotency)
         self._last_resume_fingerprint: Dict[str, str] = {}
@@ -989,6 +1780,14 @@ class StrandsAgent:
         # same new thread_id could otherwise both create an agent and one
         # would clobber the other.
         self._thread_init_lock = asyncio.Lock()
+        # Threads with an in-flight orchestrator run. A Graph or Swarm holds
+        # its node agents, which reject overlapping invocations, so a second
+        # run on the same thread is rejected rather than allowed to collide.
+        self._active_orchestrator_runs: set[str] = set()
+        # Orchestrators holding an unanswered interrupt, by thread. A resume
+        # has to reach the instance that paused; a fresh one was never
+        # interrupted and rejects the response.
+        self._parked_orchestrators_by_thread: Dict[str, Any] = {}
 
     def _will_emit_tool_snapshot(self, behavior: Any, emit_snapshots: bool) -> bool:
         # ``emit_snapshots`` is the per-run gate (config flag AND not a
@@ -998,8 +1797,381 @@ class StrandsAgent:
             behavior and behavior.skip_messages_snapshot
         )
 
+    def _orchestrator_resume_prompt(
+        self, input_data: RunAgentInput, thread_id: str
+    ) -> "List[Dict[str, Any]] | None":
+        """Response blocks for an orchestrator parked at an interrupt.
+
+        Returns None when this run is not a resume, in which case the caller
+        builds an ordinary task string. Entries whose interrupt this thread
+        never raised are ignored, so a stale or invented id cannot wedge the
+        orchestrator by resuming it with something it is not waiting for.
+        """
+        resume_entries = list(getattr(input_data, "resume", None) or [])
+        if not resume_entries:
+            return None
+
+        pending = self._pending_interrupts_by_thread.get(thread_id, {})
+        responses: List[Dict[str, Any]] = []
+        for entry in resume_entries:
+            interrupt_id = getattr(entry, "interrupt_id", None)
+            # Strictly: an empty pending map means this thread has nothing
+            # parked, so every id is stale. Being lenient there let a stale id
+            # through and wedged the orchestrator, which is the failure this
+            # check exists to prevent.
+            if interrupt_id is None or interrupt_id not in pending:
+                logger.warning(
+                    "Ignoring resume for interrupt %r: this thread has no such "
+                    "pending interrupt.",
+                    interrupt_id,
+                )
+                continue
+            responses.append(
+                {
+                    "interruptResponse": {
+                        "interruptId": interrupt_id,
+                        # Always a truthy envelope: Strands' resume gate is
+                        # truthiness-based, so a falsy payload re-raises the
+                        # same interrupt forever.
+                        "response": _wrap_resume_response(
+                            getattr(entry, "status", "resolved"),
+                            getattr(entry, "payload", None),
+                        ),
+                    }
+                }
+            )
+        return responses or None
+
+    async def _run_orchestrator(
+        self, input_data: RunAgentInput
+    ) -> AsyncIterator[Any]:
+        """Drive a multi-agent orchestrator and translate its event stream.
+
+        Mirrors the TypeScript adapter's orchestrator path. Per-thread agent
+        caching, session managers and proxy-tool sync do not apply: a Graph or
+        Swarm owns its own nodes, so there is no template to clone.
+        """
+        yield RunStartedEvent(
+            type=EventType.RUN_STARTED,
+            thread_id=input_data.thread_id,
+            run_id=input_data.run_id,
+        )
+
+        # Bound before the try so the except path can always close them, even
+        # when the failure happens before the stream is opened.
+        #
+        # Per-node, not global: a Graph runs a whole batch of nodes as
+        # concurrent tasks multiplexed into one queue, so a single shared
+        # message id would interleave two nodes into one envelope and close it
+        # when whichever finished first stopped.
+        nodes = _MultiAgentNodeStreams()
+        # Native interrupts raised during this run, reported on RUN_FINISHED so
+        # the client knows the run paused rather than completed.
+        native_interrupts: List[Any] = []
+        # Leaf conversation state to rewind to when this run does not pause.
+        baseline: "List[Tuple[list, list]] | None" = None
+        # Set only once an interrupt outcome has actually been committed. While
+        # false, the outer finally always rewinds, so a cancelled or abandoned
+        # run cannot leave a shared instance carrying its turns.
+        preserve_for_resume = False
+        # node_id -> step name, so STEP_FINISHED reuses the node_type that only
+        # the start event carries, and so any step left open by a terminal
+        # interrupt is still closed before RUN_FINISHED.
+        open_steps: Dict[str, str] = {}
+        # Resolved before the guarded body, not inside it: the cleanup below
+        # runs however far this generator got, including a consumer closing
+        # the stream after the very first event, and it cannot reference a
+        # name that a later statement was going to bind.
+        thread_id = input_data.thread_id or "default"
+
+        try:
+          try:
+              state = input_data.state
+              if isinstance(state, dict):
+                  yield StateSnapshotEvent(
+                      type=EventType.STATE_SNAPSHOT,
+                      snapshot={
+                          k: v for k, v in state.items() if k != "messages"
+                      },
+                  )
+
+              # A run that resumes an interrupt must hand Strands its response
+              # blocks, not a task string: the orchestrator is parked at a
+              # checkpoint and rejects a string outright. Getting this wrong
+              # leaves the orchestrator interrupted forever, so every later run
+              # fails too.
+              resume_prompt = self._orchestrator_resume_prompt(input_data, thread_id)
+
+              if resume_prompt is not None:
+                  prompt: Any = resume_prompt
+              else:
+                  # Orchestrators take a task string (MultiAgentInput); use the
+                  # text of the last user or tool turn.
+                  prompt = "Hello"
+                  for message in reversed(input_data.messages or []):
+                      role = getattr(message, "role", None)
+                      content = getattr(message, "content", None)
+                      if role in ("user", "tool") and content is not None:
+                          prompt = flatten_content_to_text(content)
+                          break
+
+              parked = self._parked_orchestrators_by_thread.get(thread_id)
+              if self._orchestrator_factory is not None:
+                  if resume_prompt is not None and parked is not None:
+                      # An interrupt lives on the instance that raised it, so a
+                      # resume has to reach that one. A freshly built graph was
+                      # never interrupted and rejects the response outright.
+                      orchestrator = parked.orchestrator
+                      baseline = parked.baseline
+                  else:
+                      # Otherwise fresh per run: nothing carries from a previous
+                      # run, and two runs never touch the same instance.
+                      orchestrator = self._orchestrator_factory()
+                      baseline = None
+              else:
+                  orchestrator = self._orchestrator
+                  # Carried forward across a resume rather than retaken: this
+                  # run's starting point is already the paused conversation, so
+                  # a fresh snapshot would preserve the pause instead of undoing
+                  # it.
+                  baseline = (
+                      parked.baseline
+                      if parked is not None
+                      else _snapshot_orchestrator_nodes(orchestrator)
+                  )
+
+              stream = orchestrator.stream_async(prompt)
+              try:
+                  async for event in stream:
+                      if not isinstance(event, dict):
+                          continue
+                      event_type = event.get("type")
+
+                      if event_type == MULTIAGENT_NODE_START:
+                          node_id = event.get("node_id", "unknown")
+                          step_name = _multiagent_step_name(
+                              node_id, event.get("node_type")
+                          )
+                          # A node re-entered without an intervening stop (a
+                          # Swarm hand-back, a cyclic graph) would otherwise
+                          # produce two STEP_STARTED for one STEP_FINISHED,
+                          # which frontends cannot pair.
+                          if node_id in open_steps:
+                              for closing in nodes.close(node_id):
+                                  yield closing
+                              yield StepFinishedEvent(
+                                  type=EventType.STEP_FINISHED,
+                                  step_name=open_steps[node_id],
+                              )
+                          open_steps[node_id] = step_name
+                          yield StepStartedEvent(
+                              type=EventType.STEP_STARTED, step_name=step_name
+                          )
+
+                      elif event_type == MULTIAGENT_NODE_STOP:
+                          node_id = event.get("node_id", "unknown")
+                          for closing in nodes.close(node_id):
+                              yield closing
+                          status = _multiagent_node_status(event)
+                          # A node can stop FAILED (a cancelling hook, a node
+                          # timeout, an execution limit) without the stream
+                          # raising. STEP_FINISHED alone reads as success, so the
+                          # outcome is published rather than discarded.
+                          if status is not None:
+                              yield CustomEvent(
+                                  type=EventType.CUSTOM,
+                                  name=CUSTOM_MULTIAGENT_NODE_STATUS,
+                                  value={"node_id": node_id, "status": status},
+                              )
+                          # Only close a step this run actually opened: an
+                          # unpaired STEP_FINISHED is a protocol violation that
+                          # a strict client rejects outright.
+                          step_name = open_steps.pop(node_id, None)
+                          if step_name is not None:
+                              yield StepFinishedEvent(
+                                  type=EventType.STEP_FINISHED,
+                                  step_name=step_name,
+                              )
+
+                      elif event_type == MULTIAGENT_HANDOFF:
+                          yield CustomEvent(
+                              type=EventType.CUSTOM,
+                              name=CUSTOM_MULTIAGENT_HANDOFF,
+                              value=_multiagent_handoff_value(event),
+                          )
+
+                      elif event_type == MULTIAGENT_NODE_CANCEL:
+                          yield CustomEvent(
+                              type=EventType.CUSTOM,
+                              name=CUSTOM_MULTIAGENT_NODE_CANCEL,
+                              value=_multiagent_cancel_value(event),
+                          )
+
+                      elif event_type == MULTIAGENT_NODE_INTERRUPT:
+                          raw = event.get("interrupts")
+                          native_interrupts.extend(
+                              raw if isinstance(raw, (list, tuple)) else []
+                          )
+                          yield CustomEvent(
+                              type=EventType.CUSTOM,
+                              name=CUSTOM_MULTIAGENT_NODE_INTERRUPT,
+                              value=_multiagent_interrupt_value(event),
+                          )
+
+                      elif event_type == MULTIAGENT_NODE_STREAM:
+                          # A Graph or Swarm can itself be a node, in which case
+                          # the payload is another node-stream wrapper rather
+                          # than the agent event. Unwrap to the innermost one, or
+                          # a nested orchestrator streams nothing at all.
+                          node_id, inner = _unwrap_multiagent_node_stream(event)
+                          if inner is None:
+                              continue
+                          if inner.get("data"):
+                              for text_event in nodes.text(node_id, inner["data"]):
+                                  yield text_event
+                          elif inner.get("reasoningText") and inner.get("reasoning"):
+                              for reasoning_event in nodes.reasoning(
+                                  node_id, inner["reasoningText"]
+                              ):
+                                  yield reasoning_event
+              finally:
+                  # Orchestrator streams take no cancel signal, so closing the
+                  # iterator is the only way to stop one when the consumer bails.
+                  aclose = getattr(stream, "aclose", None)
+                  if aclose is not None:
+                      try:
+                          await aclose()
+                      except Exception:
+                          logger.debug(
+                              "orchestrator stream teardown failed", exc_info=True
+                          )
+
+              for closing in _close_open_multiagent(nodes, open_steps):
+                  yield closing
+
+              outcome = None
+              if native_interrupts:
+                  ag_ui_interrupts = [
+                      _strands_interrupt_to_agui(interrupt)
+                      for interrupt in native_interrupts
+                  ]
+                  outcome = RunFinishedInterruptOutcome(
+                      type="interrupt", interrupts=ag_ui_interrupts
+                  )
+                  self._pending_interrupts_by_thread[thread_id] = {
+                      interrupt.id: interrupt for interrupt in ag_ui_interrupts
+                  }
+                  # Held so the resume reaches the instance that paused, together
+                  # with the ORIGINAL baseline: its conversation must stay as the
+                  # interrupt left it, but the eventual rewind has to go all the
+                  # way back to before the run that paused.
+                  self._parked_orchestrators_by_thread[thread_id] = _ParkedOrchestrator(
+                      orchestrator, baseline
+                  )
+                  preserve_for_resume = True
+
+              yield RunFinishedEvent(
+                  type=EventType.RUN_FINISHED,
+                  thread_id=input_data.thread_id,
+                  run_id=input_data.run_id,
+                  outcome=outcome,
+              )
+          except Exception as e:
+              code = (
+                  "ADAPTER_BUG"
+                  if isinstance(e, (TypeError, AttributeError, NameError))
+                  else "STRANDS_ERROR"
+              )
+              logger.error(f"_run_orchestrator failed: {e}", exc_info=True)
+              # A Graph fails fast: the first node exception cancels its siblings
+              # and re-raises, so a raise landing mid-text is routine. Without
+              # this the run would end on a dangling message envelope and a step
+              # the UI still shows running.
+              for closing in _close_open_multiagent(nodes, open_steps, failed=True):
+                  yield closing
+              yield RunErrorEvent(
+                  type=EventType.RUN_ERROR, message=str(e), code=code
+              )
+        finally:
+            # Runs for normal completion, exceptions, cancellation and
+            # generator close alike. Anything other than a committed interrupt
+            # rewinds the shared instance before the busy guard is released, or
+            # a client that simply disconnects would leave its turns behind for
+            # the next thread.
+            if not preserve_for_resume:
+                _restore_orchestrator_nodes(baseline)
+                self._pending_interrupts_by_thread.pop(thread_id, None)
+                self._parked_orchestrators_by_thread.pop(thread_id, None)
+
     async def run(self, input_data: RunAgentInput) -> AsyncIterator[Any]:
         """Run the Strands agent and yield AG-UI events."""
+
+        if self._orchestrator is not None:
+            # An orchestrator carries execution state on the instance and its
+            # node agents are not safe to invoke concurrently, so overlapping
+            # runs either clobber that state or surface a raw SDK error with a
+            # half-drawn pipeline behind it. Reject the collision up front with
+            # the protocol-shaped code the TypeScript adapter uses.
+            # A factory builds a fresh orchestrator per run, so only the same
+            # thread can collide. A shared instance cannot be multiplexed at
+            # all, so ANY overlapping run is refused, whatever its thread.
+            orchestrator_thread = (
+                (input_data.thread_id or "default")
+                if self._orchestrator_factory is not None
+                else _SHARED_ORCHESTRATOR_RUN_KEY
+            )
+            # A shared instance parked mid-execution for one thread must not
+            # be handed to anybody else, nor re-entered by a fresh run on its
+            # own thread: it is still sitting at its interrupt.
+            parked_threads = (
+                set(self._parked_orchestrators_by_thread)
+                if self._orchestrator_factory is None
+                else set()
+            )
+            is_resume = bool(getattr(input_data, "resume", None))
+            blocked_by_park = bool(parked_threads) and not (
+                is_resume and (input_data.thread_id or "default") in parked_threads
+            )
+
+            if orchestrator_thread in self._active_orchestrator_runs or blocked_by_park:
+                yield RunStartedEvent(
+                    type=EventType.RUN_STARTED,
+                    thread_id=input_data.thread_id,
+                    run_id=input_data.run_id,
+                )
+                yield RunErrorEvent(
+                    type=EventType.RUN_ERROR,
+                    message=(
+                        "Another run is already in progress on "
+                        f"{_busy_scope(orchestrator_thread)}. Wait for "
+                        "RUN_FINISHED before starting another."
+                        if not blocked_by_park
+                        else (
+                            "this orchestrator, which is paused at an interrupt "
+                            f"on thread \"{sorted(parked_threads)[0]}\". Answer "
+                            "that interrupt before starting another run."
+                        )
+                    ),
+                    code="THREAD_BUSY",
+                )
+                return
+            self._active_orchestrator_runs.add(orchestrator_thread)
+            # Close the delegate explicitly: when the consumer abandons this
+            # generator, `async for` alone would leave the inner one suspended
+            # until GC, so the orchestrator stream would keep running.
+            orchestrator_events = self._run_orchestrator(input_data)
+            try:
+                async for event in orchestrator_events:
+                    yield event
+            finally:
+                # Released only after teardown finishes: freeing the slot
+                # first would let a queued run start while this one still
+                # holds the orchestrator.
+                try:
+                    await orchestrator_events.aclose()
+                finally:
+                    self._active_orchestrator_runs.discard(orchestrator_thread)
+            return
 
         # Get or create agent instance for this thread. When a
         # session_manager_provider is configured, the SessionManager handles
@@ -1121,7 +2293,10 @@ class StrandsAgent:
                 return
 
         # Rule 4: reject new input against a parked checkpoint before context
-        # or tool registries can be updated by a run that will not proceed.
+        # or tool registries can be updated by a run that will not proceed. The
+        # SDK owns the checkpoint, so a checkpoint it still holds active blocks
+        # the turn and is left exactly as it stands: deactivating it here would
+        # discard the tool use and tool results parked behind it.
         if (
             not resume_submitted
             and getattr(interrupt_state, "activated", False) is True
@@ -1316,40 +2491,19 @@ class StrandsAgent:
             for entry in resume_entries:
                 ag_ui_interrupt = pending_ag_ui.get(entry.interrupt_id)
                 native_interrupt = interrupt_state.interrupts.get(entry.interrupt_id)
-                is_tool_approval = (
-                    isinstance(getattr(native_interrupt, "name", None), str)
-                    and native_interrupt.name.startswith("ag_ui:tool_call:")
-                    and isinstance(getattr(native_interrupt, "reason", None), dict)
-                )
 
-                if entry.status == "cancelled":
-                    # Track tool_call_ids for cancelled tool-bound interrupts
-                    if ag_ui_interrupt and getattr(ag_ui_interrupt, "tool_call_id", None):
-                        _resumed_tool_call_ids.add(ag_ui_interrupt.tool_call_id)
-                    # Include a denial response so Strands marks this interrupt
-                    # as responded (prevents re-raising on resume).
+                if entry.status in ("cancelled", "resolved"):
+                    # A cancelled entry still carries a response, so Strands
+                    # marks the interrupt answered and stops re-raising it.
                     interrupt_responses.append({
                         "interruptResponse": {
                             "interruptId": entry.interrupt_id,
-                            "response": (
-                                {"approved": False}
-                                if is_tool_approval
-                                else _wrap_resume_response(entry.status, entry.payload)
+                            "response": _native_resume_response(
+                                entry, native_interrupt
                             ),
                         }
                     })
-                elif entry.status == "resolved":
-                    interrupt_responses.append({
-                        "interruptResponse": {
-                            "interruptId": entry.interrupt_id,
-                            "response": (
-                                entry.payload
-                                if is_tool_approval
-                                else _wrap_resume_response(entry.status, entry.payload)
-                            ),
-                        }
-                    })
-                    # Track tool_call_ids for resumed interrupts (suppress re-emission)
+                    # Track tool_call_ids so the tool card is not re-emitted.
                     if ag_ui_interrupt and getattr(ag_ui_interrupt, "tool_call_id", None):
                         _resumed_tool_call_ids.add(ag_ui_interrupt.tool_call_id)
 
@@ -1680,6 +2834,10 @@ class StrandsAgent:
             # tool-call AssistantMessage id.
             last_emitted_text_message_id: str | None = None
             tool_calls_seen = {}
+            # Tool calls made by a sub-agent running as a tool (issue #2304).
+            # Kept separate from ``tool_calls_seen`` so inner calls never take
+            # part in parent-level result lookup, snapshotting or halt logic.
+            inner_tool_calls_seen: Dict[str, Dict[str, Any]] = {}
             current_state = dict(input_data.state or {})  # Track state for final snapshot
             stop_text_streaming = False
             halt_event_stream = False
@@ -1698,7 +2856,14 @@ class StrandsAgent:
             # ``{"result": ...}`` stream event). Used after the loop to detect a
             # native interrupt pause (``stop_reason == "interrupt"``).
             terminal_result = None
+            # ``force_stop`` is an abnormal terminal signal. Keep consuming the
+            # stream so Strands can unwind and raise its underlying exception,
+            # then translate the failure into AG-UI's terminal error event.
+            force_stop_error: str | None = None
             pending_interrupt_outcome: RunFinishedInterruptOutcome | None = None
+            # node_id -> STEP_STARTED name, so the stop event (which carries no
+            # node_type) can emit the matching STEP_FINISHED name.
+            multiagent_step_names: Dict[str, str] = {}
 
             # Reasoning/thinking state tracking
             reasoning_started = False
@@ -2029,19 +3194,64 @@ class StrandsAgent:
 
                     logger.debug(f"Received event: {event}")
 
-                    # Skip lifecycle events
-                    if event.get("init_event_loop") or event.get("start_event_loop"):
+                    # Skip lifecycle events. ``start`` is Strands' deprecated
+                    # alias of ``start_event_loop`` and is emitted alongside it;
+                    # listing it keeps the pair consistent so one half of a
+                    # duplicate does not surface as a RAW event.
+                    if (
+                        event.get("init_event_loop")
+                        or event.get("start_event_loop")
+                        or event.get("start")
+                    ):
                         continue
-                    if event.get("complete") or event.get("force_stop"):
-                        logger.debug(
-                            f"Breaking event stream: received complete or force_stop event (thread_id={input_data.thread_id}, complete={event.get('complete')}, force_stop={event.get('force_stop')})"
+                    # ``force_stop`` means Strands caught an exception mid-cycle.
+                    # It is a failed run, not assistant-authored content or a
+                    # successful finish. Continue once more so Strands can raise
+                    # the underlying exception and unwind the generator cleanly.
+                    if event.get("force_stop"):
+                        raw_reason = str(event.get("force_stop_reason", "")).strip()
+                        force_stop_error = (
+                            raw_reason or "The Strands agent stopped unexpectedly."
                         )
-                        # Generator will end naturally, no need to break
+                        logger.error(
+                            "Agent stream force-stopped (thread_id=%s, reason=%s)",
+                            input_data.thread_id,
+                            force_stop_error,
+                        )
+                        continue
+
+                    # Legacy terminator from pre-typed-events Strands.
+                    if event.get("complete"):
+                        logger.debug(
+                            f"Breaking event stream: complete received (thread_id={input_data.thread_id})"
+                        )
                         break
 
-                    # The terminal result is handled after the stream so the
-                    # live interrupt-state fallback remains available.
+                    # Modern Strands emits AgentResultEvent last. Consume the
+                    # generator to exhaustion after handling it so its cleanup
+                    # and trace finalizers run before AG-UI reports completion.
                     if "result" in event:
+                        result = event["result"]
+                        if result is not None:
+                            stop_reason = getattr(result, "stop_reason", None)
+                            logger.info(
+                                "agent_result: thread_id=%s stop_reason=%s",
+                                input_data.thread_id,
+                                stop_reason,
+                            )
+                            # Surface non-normal stops to the client as a CustomEvent
+                            # so a UI can render a hint (truncated / filtered / etc.).
+                            # end_turn and tool_use are the normal stops — no event.
+                            if stop_reason in (
+                                "max_tokens",
+                                "guardrail_intervened",
+                                "content_filtered",
+                            ):
+                                yield CustomEvent(
+                                    type=EventType.CUSTOM,
+                                    name="AgentStopped",
+                                    value={"stop_reason": stop_reason},
+                                )
                         continue  # never yield the raw result event
 
                     # Handle text streaming
@@ -2136,33 +3346,54 @@ class StrandsAgent:
                         logger.debug(f"Received reasoning signature: {str(sig)[:20]}...")
 
                     # Handle multi-agent node start (maps to STEP_STARTED)
-                    elif isinstance(event, dict) and event.get("type") == "multiagent_node_start":
+                    elif isinstance(event, dict) and event.get("type") == MULTIAGENT_NODE_START:
                         node_id = event.get("node_id", "unknown")
-                        node_type = event.get("node_type", "agent")
+                        step_name = _multiagent_step_name(
+                            node_id, event.get("node_type")
+                        )
+                        multiagent_step_names[node_id] = step_name
                         yield StepStartedEvent(
-                            type=EventType.STEP_STARTED,
-                            step_name=f"{node_type}:{node_id}"
+                            type=EventType.STEP_STARTED, step_name=step_name
                         )
 
-                    # Handle multi-agent node stop (maps to STEP_FINISHED)
-                    elif isinstance(event, dict) and event.get("type") == "multiagent_node_stop":
+                    # Handle multi-agent node stop (maps to STEP_FINISHED).
+                    # The stop event carries no node_type, so reuse the name
+                    # built from the start event to keep the pair matched.
+                    elif isinstance(event, dict) and event.get("type") == MULTIAGENT_NODE_STOP:
                         node_id = event.get("node_id", "unknown")
-                        node_type = event.get("node_type", "agent")
+                        step_name = multiagent_step_names.pop(
+                            node_id,
+                            _multiagent_step_name(node_id, event.get("node_type")),
+                        )
                         yield StepFinishedEvent(
-                            type=EventType.STEP_FINISHED,
-                            step_name=f"{node_type}:{node_id}"
+                            type=EventType.STEP_FINISHED, step_name=step_name
                         )
 
                     # Handle multi-agent handoff (emit as CUSTOM event)
-                    elif isinstance(event, dict) and event.get("type") == "multiagent_handoff":
+                    elif isinstance(event, dict) and event.get("type") == MULTIAGENT_HANDOFF:
                         yield CustomEvent(
                             type=EventType.CUSTOM,
-                            name="MultiAgentHandoff",
-                            value={
-                                "from_nodes": event.get("from_node_ids", []),
-                                "to_nodes": event.get("to_node_ids", []),
-                                "message": event.get("message")
-                            }
+                            name=CUSTOM_MULTIAGENT_HANDOFF,
+                            value=_multiagent_handoff_value(event),
+                        )
+
+                    # Handle multi-agent node cancel (emit as CUSTOM event).
+                    # Must precede the user-message branch below: this event
+                    # carries `message` as a plain string, which that branch
+                    # would call `.get("role")` on.
+                    elif isinstance(event, dict) and event.get("type") == MULTIAGENT_NODE_CANCEL:
+                        yield CustomEvent(
+                            type=EventType.CUSTOM,
+                            name=CUSTOM_MULTIAGENT_NODE_CANCEL,
+                            value=_multiagent_cancel_value(event),
+                        )
+
+                    # Handle multi-agent node interrupt (emit as CUSTOM event)
+                    elif isinstance(event, dict) and event.get("type") == MULTIAGENT_NODE_INTERRUPT:
+                        yield CustomEvent(
+                            type=EventType.CUSTOM,
+                            name=CUSTOM_MULTIAGENT_NODE_INTERRUPT,
+                            value=_multiagent_interrupt_value(event),
                         )
 
                     # Handle tool streaming events for real-time state updates
@@ -2239,6 +3470,19 @@ class StrandsAgent:
                                     type=EventType.STATE_SNAPSHOT,
                                     snapshot=stream_data["state"],
                                 )
+                            else:
+                                # Agent-as-tool: a generator tool wrapping another
+                                # Agent re-yields that agent's own stream_async events
+                                # here. Forward the inner tool-call lifecycle so the
+                                # sub-agent isn't an opaque black box (issue #2304).
+                                # Reached only when no explicit handler claimed the
+                                # payload and it is not a state snapshot.
+                                async for inner_agui_event in _forward_inner_agent_events(
+                                    stream_data,
+                                    tool_stream.get("tool_use") or {},
+                                    inner_tool_calls_seen,
+                                ):
+                                    yield inner_agui_event
 
                     # Handle tool results from Strands for backend tool rendering
                     elif "message" in event and event["message"].get("role") == "user":
@@ -3070,6 +4314,55 @@ class StrandsAgent:
                                         )
                                         pending_halt = True
 
+                    # Strands' ``ModelMessageEvent`` re-announces the assistant
+                    # turn as a whole once the model finishes it. Every part of
+                    # it has already been streamed — text via
+                    # TEXT_MESSAGE_CONTENT, tool calls via TOOL_CALL_* — and the
+                    # authoritative copy reaches the client through
+                    # MessagesSnapshotEvent. Letting it fall through to RAW would
+                    # re-send the full assistant text a second time, so it is
+                    # skipped explicitly rather than by omission.
+                    elif isinstance(event.get("message"), dict) and event[
+                        "message"
+                    ].get("role") == "assistant":
+                        continue
+
+                    # A key the chain above owns, reached only because that
+                    # branch's guard declined it (see _RAW_SUPPRESSED_KEYS).
+                    # "Suppressed" must mean suppressed on every channel, so
+                    # this stays silent instead of handing the withheld payload
+                    # to the RAW fallback below.
+                    elif any(key in event for key in _RAW_SUPPRESSED_KEYS):
+                        logger.debug(
+                            f"Suppressing mapped-but-declined Strands event (thread_id={input_data.thread_id}, keys={sorted(event)})"
+                        )
+                        continue
+
+                    # Anything the chain above does not map gets forwarded as a
+                    # RAW event rather than being dropped without a trace
+                    # (issue #2291). Bedrock citation deltas arrive here, as do
+                    # provider extensions this adapter predates. The deliberate
+                    # lifecycle skips at the top of the loop short-circuit
+                    # before reaching this branch and stay silent.
+                    #
+                    # Sanitizing is mandatory, not defensive: Strands merges the
+                    # live Agent and telemetry handles into delta-bearing events,
+                    # and an unserializable payload aborts the whole SSE stream
+                    # in ``endpoint.py`` (RunErrorEvent + break), costing the
+                    # client its TEXT_MESSAGE_END, snapshots and RUN_FINISHED.
+                    else:
+                        raw_payload = _sanitize_raw_event(event)
+                        if raw_payload is None:
+                            continue
+                        logger.debug(
+                            f"Unmapped Strands event forwarded as RAW (thread_id={input_data.thread_id}): {raw_payload}"
+                        )
+                        yield RawEvent(
+                            type=EventType.RAW,
+                            event=raw_payload,
+                            source="strands",
+                        )
+
                 # Defer hand-off (safety flush): if the stream ended without a
                 # backend tool-result message (e.g. a turn with ONLY frontend tool
                 # calls), the per-batch flush above never ran and the buffered
@@ -3082,6 +4375,16 @@ class StrandsAgent:
                             tool_call_id=_fe_tool_use_id,
                         )
                     deferred_frontend_tool_ends = []
+            except Exception:
+                if force_stop_error is None:
+                    raise
+                # Strands normally raises immediately after ForceStopEvent.
+                # Keep it from bypassing message cleanup below, but preserve its
+                # traceback in case a distinct hook/finalizer failure occurred.
+                logger.exception(
+                    "Strands stream raised after force_stop (thread_id=%s)",
+                    input_data.thread_id,
+                )
             finally:
                 # Properly close the async generator to avoid context detachment errors
                 # The generator should complete naturally when we consume all events,
@@ -3160,6 +4463,14 @@ class StrandsAgent:
                         type=EventType.MESSAGES_SNAPSHOT,
                         messages=list(snapshot_messages),
                     )
+
+            if force_stop_error is not None:
+                yield RunErrorEvent(
+                    type=EventType.RUN_ERROR,
+                    message=force_stop_error,
+                    code="STRANDS_FORCE_STOP",
+                )
+                return
 
             # Streaming can create a mixed checkpoint that was not observable
             # during preflight. Do not advertise or finish it unless the same

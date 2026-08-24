@@ -605,3 +605,57 @@ describe("EventThrottleMiddleware", () => {
     });
   });
 });
+
+describe("metadata across coalesced chunks", () => {
+  // Coalescing keeps the first chunk's fields and concatenates deltas, which is
+  // right for role/name/toolCallName — they only appear on the first chunk.
+  // Metadata is the opposite: it is designed to arrive last, carrying usage and
+  // the finish reason. Dropping it here would swallow it before transformChunks
+  // ever sees it.
+  const chunkWithMetadata = (messageId: string, delta: string | undefined, metadata: unknown) =>
+    ev({
+      type: EventType.TEXT_MESSAGE_CHUNK,
+      messageId,
+      ...(delta !== undefined && { delta }),
+      metadata,
+    });
+
+  it("merges metadata from every coalesced chunk, last write winning", async () => {
+    const mw = new EventThrottleMiddleware({ intervalMs: 50 });
+    const { agent, events, done } = setup(mw);
+
+    agent.subject.next(runStarted());
+    agent.subject.next(chunkWithMetadata("m1", "Hel", { source: "openai", stage: "a" }));
+    agent.subject.next(chunkWithMetadata("m1", "lo", { stage: "b" }));
+    // The motivating case: a trailing usage-only chunk with no delta.
+    agent.subject.next(chunkWithMetadata("m1", undefined, { usage: { output: 340 } }));
+    agent.subject.next(runFinished());
+    agent.subject.complete();
+
+    await done;
+
+    expect(collectTextDeltas(events)).toBe("Hello");
+
+    const merged = events
+      .filter((e) => e.type === EventType.TEXT_MESSAGE_CHUNK)
+      .reduce<Record<string, unknown>>((acc, e) => ({ ...acc, ...((e as any).metadata ?? {}) }), {});
+    expect(merged).toEqual({ source: "openai", stage: "b", usage: { output: 340 } });
+  });
+
+  it("leaves chunks without metadata untouched", async () => {
+    const mw = new EventThrottleMiddleware({ intervalMs: 50 });
+    const { agent, events, done } = setup(mw);
+
+    agent.subject.next(runStarted());
+    agent.subject.next(textChunk("m1", "a"));
+    agent.subject.next(textChunk("m1", "b"));
+    agent.subject.next(runFinished());
+    agent.subject.complete();
+
+    await done;
+
+    expect(collectTextDeltas(events)).toBe("ab");
+    const chunks = events.filter((e) => e.type === EventType.TEXT_MESSAGE_CHUNK);
+    expect(chunks.every((e) => (e as any).metadata === undefined)).toBe(true);
+  });
+});

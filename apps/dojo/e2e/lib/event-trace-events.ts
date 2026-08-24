@@ -60,6 +60,21 @@ const ENVIRONMENT_VALUE_TOKENS = new Map([
   ["langgraph_version", "<langgraph-version>"],
   ["langgraph_api_version", "<langgraph-api-version>"],
 ]);
+
+// Metadata keys that exist only when LangSmith tracing happens to be enabled,
+// so their *presence* — not just their value — varies by environment.
+//
+// langgraph-api turns tracing on whenever it sees a LangSmith API key
+// (LANGSMITH_CONTROL_PLANE_API_KEY defaults to LANGSMITH_API_KEY, which
+// force-sets LANGSMITH_TRACING). The LangSmith client then merges every
+// LANGSMITH_*/LANGCHAIN_* env var into each run's metadata dict, and
+// langchain_core hands the tracer the *same* dict object the run config
+// streams out — so `langgraph dev`'s LANGSMITH_LANGGRAPH_API_VARIANT=local_dev
+// lands in STATE_SNAPSHOT metadata. Anyone with a LangSmith key in their
+// environment (CI or a local shell) would otherwise fail every LangGraph
+// golden trace. `revision_id` is a lowercase sibling from the same merge, but
+// it is too generic a name to drop wholesale — keep the prefix rule narrow.
+const TRACING_ENV_METADATA_PATTERN = /^(?:LANGSMITH|LANGCHAIN)_/;
 const APP_CONTEXT_PREFIX = "App Context:\n";
 
 const UUID_PATTERN =
@@ -234,6 +249,7 @@ export function normalizeEventTrace(
     return Object.fromEntries(
       Object.entries(value).flatMap(([key, child]) => {
         if (key === "timestamp" && path.length === 0) return [];
+        if (TRACING_ENV_METADATA_PATTERN.test(key)) return [];
 
         const nextPath = [...path, key];
         let normalized: unknown;

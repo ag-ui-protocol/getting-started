@@ -30,6 +30,7 @@ from strands.tools.registry import ToolRegistry
 
 from ag_ui_strands.agent import StrandsAgent, _resume_fingerprint
 from ag_ui_strands.config import StrandsAgentConfig, ToolBehavior
+from tests.interrupt_state_stub import InterruptStateStub
 
 
 def _template_agent() -> MagicMock:
@@ -254,3 +255,208 @@ class TestPersistenceHelpersAreDefensiveAgainstMocks:
         pending, fingerprint = _load_persisted_interrupt_bookkeeping(_NoState())
         assert pending is None
         assert fingerprint is None
+
+
+class TestParkedResumeRecoveredAfterRestart:
+    """A restored checkpoint that is active with nothing open must recover.
+
+    Strands records the submitted answers onto the checkpoint before it reruns
+    the parked hooks and tool execution, and clears the checkpoint only once
+    that work succeeds. A failure in between persists a checkpoint that is
+    active with every interrupt answered, and that thread has no way forward:
+    fresh input is refused because the checkpoint is active, and a resume finds
+    nothing open to address. Replaying the exact batch is the way out, because
+    it hands Strands the answers it already holds and lets it finish the parked
+    execution. The checkpoint is never torn down here, since that would discard
+    exactly that execution.
+    """
+
+    THREAD = "parked-resume-thread"
+    INTERRUPT_ID = "v1:before_tool_call:tc-1:deploy"
+    APPROVAL = {"approved": True}
+    PARKED_OUTPUT = "Deployed to production."
+
+    def _parked_interrupt(self) -> StrandsInterrupt:
+        """The approval the tool raised, as SessionManager restores it."""
+        return StrandsInterrupt(
+            id=self.INTERRUPT_ID,
+            name="ag_ui:tool_call:deploy",
+            reason={"tool_name": "deploy", "tool_input": {}, "tool_use_id": "tc-1"},
+        )
+
+    def _submitted_batch(self, approved: bool = True) -> list:
+        return [
+            ResumeEntry(
+                interrupt_id=self.INTERRUPT_ID,
+                status="resolved",
+                payload={"approved": approved},
+            )
+        ]
+
+    def _restored_process(
+        self,
+        checkpoint: InterruptStateStub,
+        state: AgentState,
+        parked_work: Any,
+    ) -> tuple[StrandsAgent, list]:
+        """Wire an adapter onto a restored checkpoint, as a fresh process would.
+
+        ``parked_work`` stands where Strands reruns the hooks and tool execution
+        the checkpoint parked: it returns the stream events that work produces,
+        or raises. Either way the submitted answers are already recorded by
+        then, and the checkpoint is cleared only if it returns, which is the
+        order the SDK itself keeps.
+        """
+        agent = StrandsAgent(
+            _template_agent(), name="test-agent", config=StrandsAgentConfig()
+        )
+        inner = MagicMock()
+        inner.tool_registry = ToolRegistry()
+        inner.state = state
+        inner._interrupt_state = checkpoint
+        submitted: list = []
+
+        async def _stream(message: Any):
+            submitted.append(message)
+            checkpoint.resume(message)
+            for event in parked_work():
+                yield event
+            checkpoint.deactivate()
+
+        inner.stream_async = _stream
+        agent._agents_by_thread[self.THREAD] = inner
+        return agent, submitted
+
+    async def _stranded_thread(self) -> tuple[InterruptStateStub, AgentState, list]:
+        """Drive the failure that strands the thread; return what persists."""
+        checkpoint = InterruptStateStub(
+            interrupts={self.INTERRUPT_ID: self._parked_interrupt()}
+        )
+        checkpoint.activate()
+        state = AgentState()
+
+        def _hook_failure():
+            raise RuntimeError("post-approval hook failed")
+
+        agent, _ = self._restored_process(checkpoint, state, _hook_failure)
+        events = await _collect(
+            agent, _run_input(self.THREAD, resume=self._submitted_batch())
+        )
+        return checkpoint, state, events
+
+    def _parked_output(self) -> list:
+        return [{"data": self.PARKED_OUTPUT}]
+
+    async def test_a_failed_resume_persists_an_active_checkpoint_with_nothing_open(
+        self,
+    ):
+        """The premise: the answer is recorded and the checkpoint stays active."""
+        checkpoint, _, events = await self._stranded_thread()
+
+        assert checkpoint.activated is True
+        assert checkpoint.interrupts[self.INTERRUPT_ID].response == self.APPROVAL
+        assert [event.type for event in events if event.type == EventType.RUN_ERROR]
+
+    async def test_replaying_the_exact_batch_completes_the_parked_execution(self):
+        checkpoint, state, _ = await self._stranded_thread()
+
+        agent, submitted = self._restored_process(
+            checkpoint, state, self._parked_output
+        )
+        events = await _collect(
+            agent, _run_input(self.THREAD, resume=self._submitted_batch())
+        )
+
+        # The answers Strands already held were handed back to it unchanged.
+        assert submitted == [
+            [
+                {
+                    "interruptResponse": {
+                        "interruptId": self.INTERRUPT_ID,
+                        "response": self.APPROVAL,
+                    }
+                }
+            ]
+        ]
+        # The parked tool's output reached the client, so the execution ran.
+        assert [
+            event.delta
+            for event in events
+            if event.type == EventType.TEXT_MESSAGE_CONTENT
+        ] == [self.PARKED_OUTPUT]
+        assert not [
+            event for event in events if event.type == EventType.RUN_ERROR
+        ]
+        assert events[-1].type == EventType.RUN_FINISHED
+        assert events[-1].outcome.type == "success"
+        # Strands cleared its own checkpoint once the parked work succeeded.
+        assert checkpoint.activated is False
+
+    async def test_a_batch_that_does_not_replay_is_still_refused(self):
+        checkpoint, state, _ = await self._stranded_thread()
+
+        agent, submitted = self._restored_process(
+            checkpoint, state, self._parked_output
+        )
+        events = await _collect(
+            agent,
+            _run_input(self.THREAD, resume=self._submitted_batch(approved=False)),
+        )
+
+        errors = [event for event in events if event.type == EventType.RUN_ERROR]
+        assert [error.code for error in errors] == ["INTERRUPT_RESUME_ERROR"]
+        # Nothing reached Strands and the checkpoint stands exactly as restored.
+        assert submitted == []
+        assert checkpoint.activated is True
+        assert checkpoint.interrupts[self.INTERRUPT_ID].response == self.APPROVAL
+
+    async def test_an_answered_interrupt_cannot_ride_along_with_an_open_one(self):
+        """A still-open sibling means nothing is parked, so nothing is replayed.
+
+        A tool approval forwards its payload raw, so a submitted ``None`` equals
+        the unanswered default and slips past comparing answers alone. Only the
+        checkpoint's own answered/open reading separates the two.
+        """
+        open_approval = StrandsInterrupt(
+            id="v1:before_tool_call:tc-2:deploy",
+            name="ag_ui:tool_call:deploy",
+            reason={"tool_name": "deploy", "tool_input": {}, "tool_use_id": "tc-2"},
+        )
+        checkpoint, state, _ = await self._stranded_thread()
+        checkpoint.interrupts[open_approval.id] = open_approval
+        checkpoint.activate()
+
+        agent, submitted = self._restored_process(
+            checkpoint, state, self._parked_output
+        )
+        events = await _collect(
+            agent,
+            _run_input(
+                self.THREAD,
+                resume=self._submitted_batch()
+                + [
+                    ResumeEntry(
+                        interrupt_id=open_approval.id,
+                        status="resolved",
+                        payload=None,
+                    )
+                ],
+            ),
+        )
+
+        errors = [event for event in events if event.type == EventType.RUN_ERROR]
+        assert [error.code for error in errors] == ["INTERRUPT_RESUME_ERROR"]
+        assert submitted == []
+
+    async def test_fresh_input_against_the_parked_checkpoint_is_still_refused(self):
+        checkpoint, state, _ = await self._stranded_thread()
+
+        agent, submitted = self._restored_process(
+            checkpoint, state, self._parked_output
+        )
+        events = await _collect(agent, _run_input(self.THREAD))
+
+        errors = [event for event in events if event.type == EventType.RUN_ERROR]
+        assert [error.code for error in errors] == ["PENDING_INTERRUPTS"]
+        assert submitted == []
+        assert checkpoint.activated is True

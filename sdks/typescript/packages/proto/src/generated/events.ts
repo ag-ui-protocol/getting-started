@@ -6,7 +6,7 @@
 
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
-import { Value } from "./google/protobuf/struct";
+import { Struct, Value } from "./google/protobuf/struct";
 import { JsonPatchOperation } from "./patch";
 import { Interrupt, Message } from "./types";
 
@@ -35,7 +35,17 @@ export enum EventType {
 export interface BaseEvent {
   type: EventType;
   timestamp?: number | undefined;
-  rawEvent?: any | undefined;
+  rawEvent?:
+    | any
+    | undefined;
+  /**
+   * Extra information, open by key. Declared here so every event carries it.
+   *
+   * Struct is map<string, Value>, and Value has NullValue, so a null *value*
+   * under a key survives the binary transport. Message-field presence keeps an
+   * absent object distinguishable from an empty one.
+   */
+  metadata: { [key: string]: any } | undefined;
 }
 
 export interface TextMessageStartEvent {
@@ -186,7 +196,7 @@ export interface Event {
 }
 
 function createBaseBaseEvent(): BaseEvent {
-  return { type: 0, timestamp: undefined, rawEvent: undefined };
+  return { type: 0, timestamp: undefined, rawEvent: undefined, metadata: undefined };
 }
 
 export const BaseEvent: MessageFns<BaseEvent> = {
@@ -199,6 +209,9 @@ export const BaseEvent: MessageFns<BaseEvent> = {
     }
     if (message.rawEvent !== undefined) {
       Value.encode(Value.wrap(message.rawEvent), writer.uint32(26).fork()).join();
+    }
+    if (message.metadata !== undefined) {
+      Struct.encode(Struct.wrap(message.metadata), writer.uint32(34).fork()).join();
     }
     return writer;
   },
@@ -234,6 +247,14 @@ export const BaseEvent: MessageFns<BaseEvent> = {
           message.rawEvent = Value.unwrap(Value.decode(reader, reader.uint32()));
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.metadata = Struct.unwrap(Struct.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -251,6 +272,7 @@ export const BaseEvent: MessageFns<BaseEvent> = {
     message.type = object.type ?? 0;
     message.timestamp = object.timestamp ?? undefined;
     message.rawEvent = object.rawEvent ?? undefined;
+    message.metadata = object.metadata ?? undefined;
     return message;
   },
 };

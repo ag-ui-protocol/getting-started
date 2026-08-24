@@ -21,7 +21,7 @@ describe("RunStartedEvent with input.messages", () => {
       this.events = events;
     }
 
-    protected run(_input: RunAgentInput): Observable<BaseEvent> {
+    run(_input: RunAgentInput): Observable<BaseEvent> {
       return of(...this.events);
     }
   }

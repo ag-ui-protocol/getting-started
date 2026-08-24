@@ -212,3 +212,34 @@ test("retains the complete SSE response when a data frame is malformed", () => {
       error.frameIndex === 1,
   );
 });
+
+test("drops LangSmith tracing env metadata, whose presence varies by environment", () => {
+  // `langgraph dev` always exports LANGSMITH_LANGGRAPH_API_VARIANT=local_dev,
+  // but it only reaches run metadata when a LangSmith key enabled tracing.
+  // A trace recorded without a key must still match one recorded with it.
+  const normalized = normalizeEventTrace([
+    {
+      type: "STATE_SNAPSHOT",
+      rawEvent: {
+        data: {
+          metadata: {
+            graph_id: "agentic_chat",
+            langgraph_step: 1,
+            LANGSMITH_LANGGRAPH_API_VARIANT: "local_dev",
+            LANGSMITH_PROJECT: "dojo",
+            LANGCHAIN_CALLBACKS_BACKGROUND: "true",
+          },
+        },
+      },
+    },
+  ]);
+
+  assert.deepEqual(normalized, [
+    {
+      type: "STATE_SNAPSHOT",
+      rawEvent: {
+        data: { metadata: { graph_id: "agentic_chat", langgraph_step: 1 } },
+      },
+    },
+  ]);
+});

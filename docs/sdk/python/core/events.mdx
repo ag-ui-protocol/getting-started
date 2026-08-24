@@ -59,6 +59,7 @@ class BaseEvent(ConfiguredBaseModel):
     type: EventType
     timestamp: Optional[int] = None
     raw_event: Optional[Any] = None
+    metadata: Optional[Dict[str, Any]] = None
 ```
 
 | Property    | Type            | Description                                           |
@@ -66,6 +67,14 @@ class BaseEvent(ConfiguredBaseModel):
 | `type`      | `EventType`     | The type of event (discriminator field for the union) |
 | `timestamp` | `Optional[int]` | Timestamp when the event was created                  |
 | `raw_event` | `Optional[Any]` | Original event data if this event was transformed     |
+| `metadata`  | `Optional[Dict[str, Any]]` | Extra information attached to the event               |
+
+`metadata` is open by key: any JSON value is allowed under a key, including
+`None`. The object may be absent, but a present one is never `None` — an
+explicit `null` is read back as absent, so a plain `model_dump_json()`
+round-trips. `EventEncoder` uses `exclude_none=True`, so an absent object is
+omitted from the wire rather than emitted as `null`. The `ag-ui` key is reserved
+for AG-UI's own use.
 
 ## Lifecycle Events
 

@@ -270,6 +270,7 @@ export const menuIntegrations = [
     features: [
       "agentic_chat",
       "v1_agentic_chat",
+      "agentic_chat_multimodal",
       "backend_tool_rendering",
       "human_in_the_loop",
       "agentic_generative_ui",
@@ -334,6 +335,7 @@ export const menuIntegrations = [
       "agentic_generative_ui",
       "shared_state",
       "human_in_the_loop",
+      "multi_agent",
       "a2ui_dynamic_schema",
       "a2ui_fixed_schema",
       "a2ui_recovery",
@@ -352,6 +354,7 @@ export const menuIntegrations = [
       "shared_state",
       "human_in_the_loop",
       "tool_based_generative_ui",
+      "multi_agent",
       "a2ui_dynamic_schema",
       "a2ui_fixed_schema",
       "a2ui_recovery",

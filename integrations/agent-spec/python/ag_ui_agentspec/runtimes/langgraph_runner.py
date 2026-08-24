@@ -41,7 +41,9 @@ def prepare_langgraph_agent_inputs(input_data: RunAgentInput) -> List[Dict[str, 
             del m_dict["name"]
         if m_dict["role"] == "tool" and "error" in m_dict:
             del m_dict["error"]
-        if m_dict["role"] == "assistant" and m_dict["content"] is None:
+        # .get: an assistant turn carrying only tool calls has no content, and an
+        # optional field with no value is absent from the dump, not present as None.
+        if m_dict["role"] == "assistant" and m_dict.get("content") is None:
             m_dict["content"] = ""
         messages_to_return.append(m_dict)
     return messages_to_return

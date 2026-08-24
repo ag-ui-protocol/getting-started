@@ -291,6 +291,7 @@ describe("AbstractAgent multiple runs", () => {
         messageId: "activity-1",
         activityType: "PLAN",
         content: { tasks: ["task 1"] },
+        replace: false,
       } as ActivitySnapshotEvent,
       {
         type: EventType.RUN_FINISHED,

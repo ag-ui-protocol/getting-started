@@ -7,7 +7,15 @@ from typing import Annotated, Any, List, Literal, Optional, Union
 
 from pydantic import Field, field_validator
 
-from .types import ConfiguredBaseModel, Message, State, Role, RunAgentInput, Interrupt
+from .types import (
+    ConfiguredBaseModel,
+    Interrupt,
+    Message,
+    MetadataMixin,
+    Role,
+    RunAgentInput,
+    State,
+)
 
 # Text messages can have any role except "tool"
 TextMessageRole = Literal["developer", "system", "assistant", "user"]
@@ -101,9 +109,12 @@ class EventType(str, Enum):
     REASONING_ENCRYPTED_VALUE = "REASONING_ENCRYPTED_VALUE"
 
 
-class BaseEvent(ConfiguredBaseModel):
+class BaseEvent(MetadataMixin):
     """
     Base event for all events in the Agent User Interaction Protocol.
+
+    ``metadata`` is declared here rather than per event, so every event type
+    carries it.
     """
     type: EventType
     timestamp: Optional[int] = None

@@ -32,6 +32,21 @@ All events share a common set of base properties:
 | `type`      | The specific event type identifier                               |
 | `timestamp` | Optional timestamp indicating when the event was created         |
 | `rawEvent`  | Optional field containing the original event data if transformed |
+| `metadata`  | Optional extra information attached to the event                 |
+
+### Metadata
+
+`metadata` is an optional, open-by-key object for attaching extra information to
+an event — token usage, a trace id, a finish reason. It is declared once on the
+base event, so every event type carries it.
+
+Consumers merge an event's metadata into the message that event builds, key by
+key, with the last write winning. That is what lets a producer send token usage
+on the final event of a message rather than having to know it up front.
+
+See [Metadata](/concepts/metadata) for the full rules: the reserved `ag-ui` key,
+which events do and do not merge, how tool calls carry their own, and how the
+object behaves across transports.
 
 ## Lifecycle Events
 
@@ -108,8 +123,8 @@ or `RunError`.
   array addressing every open interrupt.
 
 <Note>
-  For the full interrupt lifecycle — the `Interrupt` type, contract rules,
-  error handling, reason taxonomy, and worked examples — see
+  For the full interrupt lifecycle — the `Interrupt` type, contract rules, error
+  handling, reason taxonomy, and worked examples — see
   [Interrupts](/concepts/interrupts).
 </Note>
 

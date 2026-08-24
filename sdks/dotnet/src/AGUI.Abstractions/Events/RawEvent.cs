@@ -23,6 +23,5 @@ public sealed class RawEvent : BaseEvent
     /// Optional source identifier for the raw data.
     /// </summary>
     [JsonPropertyName("source")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Source { get; set; }
 }
