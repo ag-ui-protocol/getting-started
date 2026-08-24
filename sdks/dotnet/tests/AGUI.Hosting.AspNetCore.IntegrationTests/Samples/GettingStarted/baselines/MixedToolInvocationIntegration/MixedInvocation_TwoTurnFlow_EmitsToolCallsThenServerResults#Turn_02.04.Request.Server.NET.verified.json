@@ -21,7 +21,7 @@
             "informationalOnly": false,
             "callId": "call_Id_1"
           },
-          "requiresConfirmation": true,
+          "requiresConfirmation": false,
           "requestId": "approval_Id_1"
         },
         {
@@ -35,7 +35,7 @@
             "informationalOnly": false,
             "callId": "call_Id_2"
           },
-          "requiresConfirmation": true,
+          "requiresConfirmation": false,
           "requestId": "approval_Id_2"
         }
       ]
