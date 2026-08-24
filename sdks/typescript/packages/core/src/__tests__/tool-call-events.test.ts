@@ -42,22 +42,18 @@ describe("ToolCallStartEventSchema — parentMessageId is optional and back-comp
     expect(parsed.parentMessageId).toBe("msg-1");
   });
 
-  // Skipped until PNI-205/PNI-207 land: the tolerance moves from the schema
-  // into a middleware that runs before enforcement. Re-enable there, asserting
-  // the middleware conversion instead of schema normalisation.
-  it.skip("normalizes `parentMessageId: null` through the EventSchemas union", () => {
-    // EventSchemas is what the HTTP transport validates each streamed event
-    // against — the exact path that surfaced the null in the wild.
-    const parsed = EventSchemas.parse({
+  // The end-to-end tolerance for this null lives in the client's inbound
+  // compatibility boundary since PNI-205/207 (see the client's
+  // compatibility-boundary tests); at the schema layer the union rejects it,
+  // like the per-event schema above.
+  it("rejects `parentMessageId: null` through the EventSchemas union", () => {
+    const result = EventSchemas.safeParse({
       type: EventType.TOOL_CALL_START,
       toolCallId: "tc-1",
       toolCallName: "get_weather",
       parentMessageId: null,
     });
-    expect(parsed.type).toBe(EventType.TOOL_CALL_START);
-    if (parsed.type === EventType.TOOL_CALL_START) {
-      expect(parsed.parentMessageId).toBeUndefined();
-    }
+    expect(result.success).toBe(false);
   });
 });
 

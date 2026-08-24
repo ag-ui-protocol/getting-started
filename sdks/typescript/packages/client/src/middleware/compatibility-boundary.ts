@@ -36,6 +36,8 @@ const THINKING_TEXT_MESSAGE_END = "THINKING_TEXT_MESSAGE_END";
  *   nothing to do).
  * - Legacy binary content parts inside inbound messages (MESSAGES_SNAPSHOT,
  *   RUN_STARTED input) -> the modern media parts.
+ * - The three legacy nulls -> absent: parentMessageId on TOOL_CALL_START and
+ *   TOOL_CALL_CHUNK, and RUN_FINISHED.outcome.
  */
 export class CompatibilityBoundary extends Middleware {
   private currentReasoningId: string | null = null;
@@ -122,6 +124,27 @@ export class CompatibilityBoundary extends Middleware {
           type: EventType.REASONING_END,
           messageId: reasoningId,
         };
+      }
+
+      case EventType.TOOL_CALL_START:
+      case EventType.TOOL_CALL_CHUNK: {
+        const record = event as BaseEvent & { parentMessageId?: string | null };
+        if (record.parentMessageId === null) {
+          this.warn(`${event.type}.parentMessageId: null`, "an absent field");
+          const { parentMessageId: _null, ...rest } = record;
+          return rest as BaseEvent;
+        }
+        return event;
+      }
+
+      case EventType.RUN_FINISHED: {
+        const record = event as BaseEvent & { outcome?: unknown };
+        if (record.outcome === null) {
+          this.warn("RUN_FINISHED.outcome: null", "an absent field");
+          const { outcome: _null, ...rest } = record;
+          return rest as BaseEvent;
+        }
+        return event;
       }
 
       case EventType.MESSAGES_SNAPSHOT: {

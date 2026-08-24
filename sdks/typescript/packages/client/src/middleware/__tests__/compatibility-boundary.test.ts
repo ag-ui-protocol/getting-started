@@ -154,6 +154,92 @@ describe("the inbound compatibility boundary (legacy binary content)", () => {
   });
 });
 
+describe("the inbound compatibility boundary (legacy nulls)", () => {
+  it.each([
+    [
+      "TOOL_CALL_START.parentMessageId",
+      [
+        START,
+        {
+          type: EventType.TOOL_CALL_START,
+          toolCallId: "tc1",
+          toolCallName: "f",
+          parentMessageId: null,
+        },
+        { type: EventType.TOOL_CALL_END, toolCallId: "tc1" },
+        FINISH,
+      ],
+      EventType.TOOL_CALL_START,
+    ],
+    [
+      "TOOL_CALL_CHUNK.parentMessageId",
+      // The chunk is expanded by transformChunks into start/args/end; the
+      // null must already be gone when the expanded start is enforced.
+      [
+        START,
+        {
+          type: EventType.TOOL_CALL_CHUNK,
+          toolCallId: "tc1",
+          toolCallName: "f",
+          delta: "{}",
+          parentMessageId: null,
+        },
+        FINISH,
+      ],
+      EventType.TOOL_CALL_START,
+    ],
+    [
+      "RUN_FINISHED.outcome",
+      [START, { type: EventType.RUN_FINISHED, ...run, outcome: null }],
+      EventType.RUN_FINISHED,
+    ],
+  ] as const)("converts %s null to absent, end to end", async (_name, events, expectType) => {
+    const { seen } = await materialise(events as unknown as BaseEvent[]);
+    const converted = seen.find((entry) => entry.type === expectType)!;
+    expect(converted).toBeDefined();
+    expect("parentMessageId" in converted ? converted.parentMessageId : undefined).not.toBe(null);
+    expect("outcome" in converted ? converted.outcome : undefined).not.toBe(null);
+    expect(warnSpy.mock.calls.some((c: unknown[]) => String(c[0]).includes("null"))).toBe(true);
+  });
+
+  it("without the boundary, each null is fatal (the tolerance lives here, not in the schema)", async () => {
+    const { enforceEvents } = await import("@/enforce");
+    const { lastValueFrom } = await import("rxjs");
+    const { toArray } = await import("rxjs/operators");
+    for (const event of [
+      {
+        type: EventType.TOOL_CALL_START,
+        toolCallId: "tc1",
+        toolCallName: "f",
+        parentMessageId: null,
+      },
+      { type: EventType.TOOL_CALL_CHUNK, toolCallId: "tc1", parentMessageId: null },
+      { type: EventType.RUN_FINISHED, ...run, outcome: null },
+    ]) {
+      await expect(
+        lastValueFrom(enforceEvents()(of(event as unknown as BaseEvent)).pipe(toArray())),
+      ).rejects.toThrow();
+    }
+  });
+
+  it("a null VALUE under a metadata key is data and survives untouched", async () => {
+    const { seen } = await materialise([
+      START,
+      {
+        type: EventType.STEP_STARTED,
+        stepName: "s",
+        metadata: { finishReason: null },
+      } as unknown as BaseEvent,
+      { type: EventType.STEP_FINISHED, stepName: "s" } as BaseEvent,
+      FINISH,
+    ]);
+    const step = seen.find((event) => event.type === EventType.STEP_STARTED) as {
+      metadata?: Record<string, unknown>;
+    };
+    expect(step.metadata).toEqual({ finishReason: null });
+  });
+});
+
 describe("the boundary on the connect/subscribe path", () => {
   it("translates thinking events arriving through connectAgent", async () => {
     class ConnectingAgent extends AbstractAgent {
@@ -179,5 +265,31 @@ describe("the boundary on the connect/subscribe path", () => {
     await agent.connectAgent({ runId: "r1" });
     expect(seen.some((event) => event.type === EventType.REASONING_START)).toBe(true);
     expect(seen.some((event) => (event.type as string) === "THINKING_START")).toBe(false);
+  });
+});
+
+describe("the boundary sees raw chunks (before chunk transformation)", () => {
+  it("converts a null parentMessageId on a continuation chunk too", async () => {
+    // Continuation chunks lose their extra fields in chunk expansion; the
+    // boundary must have converted the null BEFORE that, or the deviation
+    // would vanish unwarned.
+    const { seen } = await materialise([
+      START,
+      {
+        type: EventType.TOOL_CALL_CHUNK,
+        toolCallId: "tc1",
+        toolCallName: "f",
+        delta: "{",
+      } as unknown as BaseEvent,
+      {
+        type: EventType.TOOL_CALL_CHUNK,
+        toolCallId: "tc1",
+        delta: "}",
+        parentMessageId: null,
+      } as unknown as BaseEvent,
+      FINISH,
+    ]);
+    expect(seen.some((event) => event.type === EventType.TOOL_CALL_START)).toBe(true);
+    expect(warnSpy.mock.calls.some((c: unknown[]) => String(c[0]).includes("null"))).toBe(true);
   });
 });

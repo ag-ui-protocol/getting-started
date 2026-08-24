@@ -1,0 +1,33 @@
+# Deprecations
+
+The shims the SDKs still carry for peers speaking a pre-1.0 protocol. Each
+entry names what was retired, what replaces it, where the shim lives, and
+when the shim itself expires — twelve months after it shipped, following the
+project's shim window. After the expiry date the shim may be removed in the
+next release, and the deprecated shape stops working entirely.
+
+The 1.0 contract (spec/draft/schema.json) does not describe any of these
+shapes. They exist only as conversions in the client middleware layer: the
+always-on inbound boundary (`CompatibilityBoundary`) upgrades what arrives,
+and the version-gated `BackwardCompatibility_0_0_39`/`_0_0_47` middlewares
+downgrade or upgrade what is sent. Every inbound conversion warns; outbound,
+the warnings fire where a conversion loses or strands content (the
+non-lossy binary upgrade for a modern peer is silent).
+`SUPPRESS_TRANSFORMATION_WARNINGS=true` silences the warnings, not the
+conversions.
+
+| Deprecated shape | Replacement | Shim | Expires |
+| --- | --- | --- | --- |
+| `THINKING_START` event | `REASONING_START` | inbound boundary (and `BackwardCompatibility_0_0_45` for gated flows) | 2027-08-24 |
+| `THINKING_END` event | `REASONING_END` | inbound boundary (and `BackwardCompatibility_0_0_45`) | 2027-08-24 |
+| `THINKING_TEXT_MESSAGE_START` event | `REASONING_MESSAGE_START` | inbound boundary (and `BackwardCompatibility_0_0_45`) | 2027-08-24 |
+| `THINKING_TEXT_MESSAGE_CONTENT` event | `REASONING_MESSAGE_CONTENT` | inbound boundary (and `BackwardCompatibility_0_0_45`) | 2027-08-24 |
+| `THINKING_TEXT_MESSAGE_END` event | `REASONING_MESSAGE_END` | inbound boundary (and `BackwardCompatibility_0_0_45`) | 2027-08-24 |
+| `{ type: "binary" }` input content part | the media parts (`image`, `audio`, `video`, `document`) with a `source` | inbound boundary; outbound `BackwardCompatibility_0_0_47` | 2027-08-24 |
+| `parentMessageId: null` on `TOOL_CALL_START` | omit the field | inbound boundary | 2027-08-24 |
+| `parentMessageId: null` on `TOOL_CALL_CHUNK` | omit the field | inbound boundary | 2027-08-24 |
+| `outcome: null` on `RUN_FINISHED` | omit the field | inbound boundary | 2027-08-24 |
+
+A `null` **value under a metadata key** is not on this list and never will
+be: metadata is open by key and a null value there is data. Only a `null` in
+place of a whole optional field was ever a deviation.
