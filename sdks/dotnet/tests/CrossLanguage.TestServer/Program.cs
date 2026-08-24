@@ -46,6 +46,7 @@ app.MapPredictiveState("/predictive_state_updates");
 app.MapHumanInTheLoop("/human_in_the_loop");
 app.MapParallelToolCalls("/parallel_tool_calls");
 app.MapTokenUsage("/token_usage");
+app.MapToolApprovalScenarios("/tool_approval_scenarios/{scenario}");
 app.MapProtobufParity();
 
 await app.RunAsync().ConfigureAwait(false);
