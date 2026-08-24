@@ -255,26 +255,31 @@ public sealed class RunAgentInputApprovalFlowTest
     }
 
     [Fact]
-    public void Resume_IncompleteCallBatchIsRejected()
+    public void Resume_ProtectedSubsetCombinesWithMessageOnlyPeers()
     {
         var clientCall = CreateCall("client-1", "client_tool");
         var protectedServerCall = CreateCall("server-1", "server_tool");
         var omittedServerCall = CreateCall("server-2", "other_server_tool");
-        var input = CreateInput([clientCall, protectedServerCall, omittedServerCall]);
+        var input = CreateInput(
+            [clientCall, protectedServerCall, omittedServerCall],
+            new Dictionary<string, string> { ["client-1"] = "client-result" });
         input.Resume =
         [
-            CreateClientResume(clientCall, "client-result"),
             CreateApprovalResume(protectedServerCall, approved: true, result: null),
         ];
 
-        var exception = Assert.Throws<InvalidOperationException>(
-            () => input.ToChatRequestContext(s_jsonOptions));
+        var context = input.ToChatRequestContext(s_jsonOptions);
 
-        Assert.Contains("complete latest unresolved tool-call batch", exception.Message);
+        Assert.True(context.IsContinuation);
+        Assert.Equal(
+            3,
+            context.Messages.SelectMany(message => message.Contents)
+                .OfType<ToolApprovalRequestContent>()
+                .Count());
     }
 
     [Fact]
-    public void LegacyResult_MixedCallBatchRequiresResume()
+    public void LegacyResult_MixedCallBatchUsesMessageOnlyContinuation()
     {
         var input = CreateInput(
             [
@@ -283,14 +288,13 @@ public sealed class RunAgentInputApprovalFlowTest
             ],
             new Dictionary<string, string> { ["client-1"] = "client-result" });
 
-        var exception = Assert.Throws<InvalidOperationException>(
-            () => input.ToChatRequestContext(s_jsonOptions));
+        var context = input.ToChatRequestContext(s_jsonOptions);
 
-        Assert.Contains("require a complete approval Resume batch", exception.Message);
+        Assert.True(context.IsContinuation);
     }
 
     [Fact]
-    public void LegacyResult_CompletedMixedBatchDoesNotResume()
+    public void LegacyResult_CompletedMixedBatchIsContinuationForReplaySuppression()
     {
         var input = CreateInput(
             [
@@ -306,7 +310,7 @@ public sealed class RunAgentInputApprovalFlowTest
 
         var context = input.ToChatRequestContext(s_jsonOptions);
 
-        Assert.False(context.IsContinuation);
+        Assert.True(context.IsContinuation);
         Assert.DoesNotContain(
             context.Messages.SelectMany(message => message.Contents),
             content => content is ToolApprovalRequestContent);

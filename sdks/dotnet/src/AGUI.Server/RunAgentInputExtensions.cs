@@ -267,7 +267,8 @@ public static class RunAgentInputExtensions
                 chatMessages,
                 clientToolNames,
                 out var messageClientResults,
-                out var resumedAssistantCallIndex);
+                out var resumedAssistantCallIndex,
+                out _);
             foreach (var result in messageClientResults)
             {
                 resumedClientResults[result.Key] = result.Value;
@@ -304,7 +305,8 @@ public static class RunAgentInputExtensions
             chatMessages,
             clientToolNames,
             out var clientCallResults,
-            out var assistantCallIndex))
+            out var assistantCallIndex,
+            out var completedClientBatch))
         {
             ProcessContinuation(
                 chatOptions,
@@ -312,6 +314,11 @@ public static class RunAgentInputExtensions
                 chatMessages,
                 clientCallResults,
                 assistantCallIndex);
+            return true;
+        }
+        if (completedClientBatch)
+        {
+            AddClientToolProxies(chatOptions, clientTools, clientCallResults);
             return true;
         }
 
@@ -393,10 +400,12 @@ public static class RunAgentInputExtensions
         List<ChatMessage> messages,
         HashSet<string> clientToolNames,
         out Dictionary<string, FunctionResultContent> clientCallResults,
-        out int assistantCallIndex)
+        out int assistantCallIndex,
+        out bool completedBatch)
     {
         clientCallResults = new Dictionary<string, FunctionResultContent>(StringComparer.Ordinal);
         assistantCallIndex = -1;
+        completedBatch = false;
         var clientCallIds = new HashSet<string>(StringComparer.Ordinal);
         var batchCallIds = new HashSet<string>(StringComparer.Ordinal);
         var resultCallIds = new HashSet<string>(StringComparer.Ordinal);
@@ -453,8 +462,7 @@ public static class RunAgentInputExtensions
 
         if (batchCallIds.Count > 0 && batchCallIds.All(resultCallIds.Contains))
         {
-            clientCallResults.Clear();
-            assistantCallIndex = -1;
+            completedBatch = true;
             return false;
         }
 
