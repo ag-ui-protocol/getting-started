@@ -2,7 +2,12 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildModel } from "../generator/ir";
-import { generateFiles, OUTPUT_DIR, SCHEMA_PATH } from "../generator/generate";
+import {
+  generateFiles,
+  PY_OUTPUT_DIR,
+  SCHEMA_PATH,
+  TS_OUTPUT_DIR,
+} from "../generator/generate";
 import { schema } from "./validator";
 import * as generatedSchemas from "../../sdks/typescript/packages/core/src/generated/schemas";
 
@@ -17,12 +22,22 @@ describe("the generator", () => {
   it("matches the committed output, byte for byte", () => {
     // This is the CI gate: a schema or generator change without a matching
     // regeneration fails here, and so does a hand edit to a generated file.
-    const committed = readdirSync(OUTPUT_DIR).sort();
-    expect(committed).toEqual(files.map((file) => file.name).sort());
+    for (const dir of [TS_OUTPUT_DIR, PY_OUTPUT_DIR]) {
+      const committed = readdirSync(dir)
+        .filter((name) => name !== "__pycache__")
+        .sort();
+      const emitted = files
+        .filter((file) => dirname(file.path) === dir)
+        .map((file) => basename(file.path))
+        .sort();
+      expect(committed, `${dir} has files the generator did not emit`).toEqual(
+        emitted,
+      );
+    }
     for (const file of files) {
       expect(
-        readFileSync(join(OUTPUT_DIR, file.name), "utf8"),
-        `${file.name} is stale — run: pnpm --filter @ag-ui/spec generate`,
+        readFileSync(file.path, "utf8"),
+        `${file.path} is stale — run: pnpm --filter @ag-ui/spec generate`,
       ).toBe(file.content);
     }
   });
@@ -46,17 +61,24 @@ describe("the generator", () => {
     // $id, which is also the directory the schema lives in.
     const directory = basename(dirname(SCHEMA_PATH));
     expect(model.version).toBe(directory);
-    const version = files.find((file) => file.name === "version.ts");
-    expect(version?.content).toContain(
-      `export const PROTOCOL_VERSION = ${JSON.stringify(model.version)};`,
-    );
+    for (const [path, declaration] of [
+      [join(TS_OUTPUT_DIR, "version.ts"), "const PROTOCOL_VERSION ="],
+      [join(PY_OUTPUT_DIR, "version.py"), "PROTOCOL_VERSION ="],
+    ]) {
+      const version = files.find((file) => file.path === path);
+      expect(version, path).toBeDefined();
+      expect(version?.content).toContain(
+        `${declaration} ${JSON.stringify(model.version)}`,
+      );
+    }
   });
 
   it("marks every emitted file as generated", () => {
     for (const file of files) {
+      const comment = file.path.endsWith(".py") ? "#" : "//";
       expect(
-        file.content.startsWith("// @generated"),
-        `${file.name} has no @generated banner`,
+        file.content.startsWith(`${comment} @generated`),
+        `${file.path} has no @generated banner`,
       ).toBe(true);
       expect(file.content).toContain("DO NOT EDIT");
       expect(file.content).toContain(model.schemaId);
@@ -73,45 +95,55 @@ describe("the generator", () => {
     expect(model.mixins).toEqual(["Attributable", "BaseEvent", "BaseMessage"]);
   });
 
+  it("keeps the generated directories out of each package's reachable surface", () => {
+    // index.ts (TypeScript) and the ag_ui package modules (Python) are the
+    // public entries; nothing outside the generated directories referencing
+    // them means nothing exports them. Not by import syntax — by path: every
+    // route to a module (from, import(), import-type queries, side-effect
+    // imports, require, template literals, Python imports) has to name the
+    // module's path, so the scan flags any reference instead of enumerating
+    // syntaxes.
+    const scans: Array<[string, RegExp, RegExp]> = [
+      [
+        join(TS_OUTPUT_DIR, ".."),
+        /\.(ts|tsx)$/,
+        /(\.\/|\.\.\/|src\/|@\/)generated\b/,
+      ],
+      [join(PY_OUTPUT_DIR, ".."), /\.py$/, /_generated\b/],
+    ];
+    const generatedDirs = new Set([TS_OUTPUT_DIR, PY_OUTPUT_DIR]);
+    const offenders: string[] = [];
+    for (const [root, extension, pattern] of scans) {
+      const walk = (dir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const path = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            if (!generatedDirs.has(path) && entry.name !== "__pycache__") {
+              walk(path);
+            }
+            continue;
+          }
+          if (!extension.test(entry.name)) continue;
+          if (pattern.test(readFileSync(path, "utf8"))) {
+            offenders.push(relative(root, path));
+          }
+        }
+      };
+      expect(existsSync(root)).toBe(true);
+      walk(root);
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it("mentions the generated directory nowhere in the package manifest", () => {
-    // The import-graph test below proves nothing reachable from index.ts
-    // touches generated/; this closes the other door — a package.json entry
-    // (exports, files, main) pointing into it directly.
+    // The scan above proves nothing reachable from the entries touches the
+    // generated directories; this closes the other door — a package.json
+    // entry (exports, files, main) pointing into generated/ directly.
     const manifest = readFileSync(
-      join(OUTPUT_DIR, "..", "..", "package.json"),
+      join(TS_OUTPUT_DIR, "..", "..", "package.json"),
       "utf8",
     );
     expect(manifest).not.toContain("generated");
-  });
-
-  it("keeps the generated directory out of the package's reachable surface", () => {
-    // index.ts is the only entry, so nothing outside generated/ importing from
-    // it means nothing exports it. The existing types keep their import paths.
-    const srcDir = join(OUTPUT_DIR, "..");
-    const offenders: string[] = [];
-    const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const path = join(dir, entry.name);
-        if (entry.isDirectory()) {
-          if (path !== OUTPUT_DIR) walk(path);
-          continue;
-        }
-        if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".tsx"))
-          continue;
-        const source = readFileSync(path, "utf8");
-        // Not by import syntax — by path. Every route to a module (from,
-        // import(), import-type queries, side-effect imports, require,
-        // template literals) has to name the module's path, so the scan flags
-        // any reference to the generated directory instead of enumerating
-        // syntaxes.
-        if (/(\.\/|\.\.\/|src\/|@\/)generated\b/.test(source)) {
-          offenders.push(relative(srcDir, path));
-        }
-      }
-    };
-    expect(existsSync(srcDir)).toBe(true);
-    walk(srcDir);
-    expect(offenders).toEqual([]);
   });
 });
 
@@ -163,19 +195,6 @@ describe("the generated zod schemas against the fixture corpus", () => {
     expect(validator.safeParse(document).success).toBe(false);
   });
 
-  // The tolerant layer's whole promise is that unknown keys SURVIVE the parse
-  // — the strip-and-warn middleware needs to see them, and a re-serialising
-  // intermediary must not lose them. A silent switch from looseObject to a
-  // stripping z.object would pass every assertion above; this is what fails.
-  const objectAnchors = new Set(
-    model.definitions
-      .filter((definition) => definition.kind === "object")
-      .map((definition) => definition.name),
-  );
-  const probeable = collect("valid").filter(([, anchor]) =>
-    objectAnchors.has(anchor),
-  );
-
   // The union schemas never run above — every fixture anchor is an object
   // definition — so a broken union (a discriminated union on the wrong key
   // throws at parse time) would pass the whole suite. Every valid fixture of
@@ -213,6 +232,19 @@ describe("the generated zod schemas against the fixture corpus", () => {
       schemas.EventSchema.safeParse({ type: "NOT_AN_EVENT" }).success,
     ).toBe(false);
   });
+
+  // The tolerant layer's whole promise is that unknown keys SURVIVE the parse
+  // — the strip-and-warn middleware needs to see them, and a re-serialising
+  // intermediary must not lose them. A silent switch from looseObject to a
+  // stripping z.object would pass every assertion above; this is what fails.
+  const objectAnchors = new Set(
+    model.definitions
+      .filter((definition) => definition.kind === "object")
+      .map((definition) => definition.name),
+  );
+  const probeable = collect("valid").filter(([, anchor]) =>
+    objectAnchors.has(anchor),
+  );
 
   it.each(probeable)(
     "%s keeps an unknown key through the parse",

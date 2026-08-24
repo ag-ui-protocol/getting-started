@@ -8,20 +8,20 @@
  */
 
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { format, resolveConfig } from "prettier";
 import { buildModel } from "./ir";
-import { emitTypeScript, type GeneratedFile } from "./typescript";
+import { emitPython } from "./python";
+import { emitTypeScript } from "./typescript";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
+const REPO_ROOT = join(HERE, "..", "..");
 
 export const SCHEMA_PATH = join(HERE, "..", "draft", "schema.json");
 
-export const OUTPUT_DIR = join(
-  HERE,
-  "..",
-  "..",
+export const TS_OUTPUT_DIR = join(
+  REPO_ROOT,
   "sdks",
   "typescript",
   "packages",
@@ -30,35 +30,55 @@ export const OUTPUT_DIR = join(
   "generated",
 );
 
-export async function generateFiles(): Promise<GeneratedFile[]> {
+export const PY_OUTPUT_DIR = join(
+  REPO_ROOT,
+  "sdks",
+  "python",
+  "ag_ui",
+  "_generated",
+);
+
+export interface GeneratedOutput {
+  /** Absolute path the file is committed at. */
+  path: string;
+  content: string;
+}
+
+export async function generateFiles(): Promise<GeneratedOutput[]> {
   const schema = JSON.parse(readFileSync(SCHEMA_PATH, "utf8")) as Record<
     string,
     unknown
   >;
   const model = buildModel(schema);
-  const files = emitTypeScript(model);
-  // Formatted with the repo's own prettier config, resolved against the output
-  // location, so the generated files pass the same format check as everything
-  // else and the bytes are stable across machines (the version is pinned by
-  // the lockfile).
-  const config = (await resolveConfig(join(OUTPUT_DIR, "x.ts"))) ?? {};
-  return Promise.all(
-    files.map(async (file) => ({
-      name: file.name,
+
+  // TypeScript is formatted with the repo's own prettier config, resolved
+  // against the output location, so the generated files pass the same format
+  // check as everything else and the bytes are stable across machines (the
+  // version is pinned by the lockfile). Python is emitted in final form.
+  const config = (await resolveConfig(join(TS_OUTPUT_DIR, "x.ts"))) ?? {};
+  const typescript = await Promise.all(
+    emitTypeScript(model).map(async (file) => ({
+      path: join(TS_OUTPUT_DIR, file.name),
       content: await format(file.content, { ...config, parser: "typescript" }),
     })),
   );
+
+  const python = emitPython(model).map((file) => ({
+    path: join(PY_OUTPUT_DIR, file.name),
+    content: file.content,
+  }));
+
+  return [...typescript, ...python];
 }
 
 async function main(): Promise<void> {
   const files = await generateFiles();
-  mkdirSync(OUTPUT_DIR, { recursive: true });
   for (const file of files) {
-    writeFileSync(join(OUTPUT_DIR, file.name), file.content);
+    mkdirSync(dirname(file.path), { recursive: true });
+    writeFileSync(file.path, file.content);
   }
-  console.log(
-    `Wrote ${files.map((file) => file.name).join(", ")} to ${OUTPUT_DIR}`,
-  );
+  console.log(`Wrote ${files.length} files:`);
+  for (const file of files) console.log(`  ${file.path}`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

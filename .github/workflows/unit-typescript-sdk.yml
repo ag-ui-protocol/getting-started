@@ -12,6 +12,9 @@ on:
       # only once this workflow is triggered, so a change confined to the schema,
       # a fixture or the harness would otherwise merge without the suite running.
       - "spec/**"
+      # The spec suite's drift gate also compares the generated Python files
+      # byte for byte, so a hand edit confined to them must trigger it too.
+      - "sdks/python/ag_ui/_generated/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
@@ -28,6 +31,9 @@ on:
       # only once this workflow is triggered, so a change confined to the schema,
       # a fixture or the harness would otherwise merge without the suite running.
       - "spec/**"
+      # The spec suite's drift gate also compares the generated Python files
+      # byte for byte, so a hand edit confined to them must trigger it too.
+      - "sdks/python/ag_ui/_generated/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"

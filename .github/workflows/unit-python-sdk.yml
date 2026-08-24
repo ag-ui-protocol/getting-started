@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
     paths:
+      # The generated-model tests read spec/draft/fixtures at runtime, so a
+      # fixture or schema change must re-run them even when no Python file
+      # moved.
+      - "spec/**"
       - "sdks/python/**"
       - "integrations/langgraph/python/**"
       - "integrations/watsonx/python/**"
@@ -31,6 +35,10 @@ on:
   pull_request:
     branches: [main]
     paths:
+      # The generated-model tests read spec/draft/fixtures at runtime, so a
+      # fixture or schema change must re-run them even when no Python file
+      # moved.
+      - "spec/**"
       - "sdks/python/**"
       - "integrations/langgraph/python/**"
       - "integrations/watsonx/python/**"
