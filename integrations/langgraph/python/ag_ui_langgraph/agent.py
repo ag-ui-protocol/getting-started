@@ -1493,7 +1493,12 @@ class LangGraphAgent:
                     )
                     self.set_message_in_progress(
                         self.active_run["id"],
-                        MessageInProgress(id=chunk_id, tool_call_id=tool_call_data["id"], tool_call_name=tool_call_data["name"])
+                        MessageInProgress(
+                            id=chunk_id,
+                            tool_call_id=tool_call_data["id"],
+                            tool_call_name=tool_call_data["name"],
+                            run_id=event.get("run_id"),
+                        )
                     )
                 return
 
@@ -1534,7 +1539,8 @@ class LangGraphAgent:
                         MessageInProgress(
                             id=message_id,
                             tool_call_id=None,
-                            tool_call_name=None
+                            tool_call_name=None,
+                            run_id=event.get("run_id"),
                         )
                     )
                     current_stream = self.get_message_in_progress(self.active_run["id"])
@@ -1550,32 +1556,34 @@ class LangGraphAgent:
                 return
 
         elif event_type == LangGraphEventTypes.OnChatModelEnd:
-            if self.get_message_in_progress(self.active_run["id"]) and self.get_message_in_progress(self.active_run["id"]).get("tool_call_id"):
+            message_in_progress = self.get_message_in_progress(self.active_run["id"])
+            # LangGraph interleaves on_chat_model_end across parallel
+            # branches/subgraphs sharing one client run_id, so this end
+            # event isn't necessarily for the call that's currently tracked.
+            # Only close/clear the tracked entry if the run_ids match;
+            # otherwise leave it alone and let the real owner's end event
+            # close it later.
+            belongs_to_this_call = (
+                message_in_progress is not None
+                and message_in_progress.get("run_id") == event.get("run_id")
+            )
+            if belongs_to_this_call and message_in_progress.get("tool_call_id"):
                 resolved = self._dispatch_event(
-                    ToolCallEndEvent(type=EventType.TOOL_CALL_END, tool_call_id=self.get_message_in_progress(self.active_run["id"])["tool_call_id"], raw_event=event)
+                    ToolCallEndEvent(type=EventType.TOOL_CALL_END, tool_call_id=message_in_progress["tool_call_id"], raw_event=event)
                 )
-                # Always clear in-progress tracking once the underlying
-                # LangGraph chat-model call has genuinely ended, regardless
-                # of whether `_dispatch_event` chose to emit, transform, or
-                # suppress (return None for) the resulting AG-UI event.
-                # Subclasses (e.g. CopilotKit's LangGraphAGUIAgent) may
-                # legitimately filter out ToolCallEndEvent/TextMessageEndEvent
-                # by returning None (for calls tagged
-                # copilotkit:emit-tool-calls=False /
-                # copilotkit:emit-messages=False) — previously this left
-                # `messages_in_process[run_id]` permanently "in progress"
-                # after the very first suppressed call in a run, causing
-                # every subsequent *real* streamed message in that same run
-                # to skip TextMessageStartEvent entirely.
+                # Clear tracking even if `_dispatch_event` suppressed the
+                # event (returned None). Subclasses like CopilotKit's
+                # LangGraphAGUIAgent do this for calls tagged
+                # copilotkit:emit-tool-calls=False / emit-messages=False, and
+                # leaving the slot "in progress" would block every later
+                # message in the run from getting its TEXT_MESSAGE_START.
                 self.messages_in_process[self.active_run["id"]] = None
                 yield resolved
-            elif self.get_message_in_progress(self.active_run["id"]) and self.get_message_in_progress(self.active_run["id"]).get("id"):
+            elif belongs_to_this_call and message_in_progress.get("id"):
                 resolved = self._dispatch_event(
-                    TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=self.get_message_in_progress(self.active_run["id"])["id"], raw_event=event)
+                    TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=message_in_progress["id"], raw_event=event)
                 )
-                # See comment above: clear tracking unconditionally so a
-                # suppressed (None-returning) dispatch doesn't poison the
-                # state for the rest of the run.
+                # Same reasoning as above.
                 self.messages_in_process[self.active_run["id"]] = None
                 yield resolved
 

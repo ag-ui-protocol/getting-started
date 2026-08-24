@@ -1,53 +1,67 @@
-"""Regression test for a bug where a suppressed (None-returning)
-``_dispatch_event`` result on ``OnChatModelEnd`` permanently left
-``messages_in_process[run_id]`` "in progress", causing every subsequent
-*real* streamed message in the same run to skip ``TextMessageStartEvent``.
+"""Regression tests: OnChatModelEnd clearing the wrong message.
 
-This mirrors how CopilotKit's ``LangGraphAGUIAgent._dispatch_event`` filters
-out ``TEXT_MESSAGE_*`` / ``TOOL_CALL_*`` events by returning ``None`` when the
-LangGraph run's metadata carries ``copilotkit:emit-messages=False`` /
-``emit-tool-calls=False`` (e.g. for internal, non-user-facing structured
-output calls) — a supported and common pattern for suppressing intermediate
-LLM calls while still allowing the final, user-facing reply to stream
-normally in the same run.
+``messages_in_process`` has one slot per client run_id. LangGraph
+interleaves ``on_chat_model_end`` across parallel branches/subgraphs, and
+subclasses (e.g. CopilotKit's LangGraphAGUIAgent) suppress events by
+returning ``None`` from ``_dispatch_event``. Two bugs come out of that:
+
+1. Clearing the slot only when dispatch returned truthy left it stuck
+   "in progress" forever after the first suppressed call, so every later
+   real message skipped TEXT_MESSAGE_START.
+2. Clearing it unconditionally fixed that but could close a *different*
+   message's slot if a suppressed call's end event arrived while a real
+   message was still mid-stream. The fix tags each in-progress entry with
+   the LangGraph run_id that created it and only closes/clears on a match.
 """
 import unittest
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import AIMessageChunk
 
 from ag_ui.core import EventType
 
 from ag_ui_langgraph.types import LangGraphEventTypes
+from tests._helpers import make_agent
+
+
+def _text_chunk(content: str, *, chunk_id: str) -> AIMessageChunk:
+    chunk = AIMessageChunk(content=content, id=chunk_id)
+    chunk.response_metadata = {}
+    chunk.tool_call_chunks = []
+    return chunk
+
+
+def _tool_call_chunk(*, name: str, tool_call_id: str, chunk_id: str) -> AIMessageChunk:
+    chunk = AIMessageChunk(content="", id=chunk_id)
+    chunk.response_metadata = {}
+    chunk.tool_call_chunks = [{"name": name, "args": "", "id": tool_call_id, "index": 0}]
+    return chunk
 
 
 class TestSuppressedMessageDoesNotPoisonStream(unittest.IsolatedAsyncioTestCase):
     def _make_agent(self, dispatch_side_effect=None):
-        from ag_ui_langgraph.agent import LangGraphAgent
-
-        mock_graph = MagicMock()
-        agent = LangGraphAgent(name="test", graph=mock_graph)
+        agent = make_agent()
         agent.active_run = {
             "id": "run-1",
             "thread_id": "t1",
+            "mode": "continue",
             "reasoning_process": None,
             "node_name": "agent",
             "has_function_streaming": False,
+            "streamed_tool_call_ids": set(),
             "model_made_tool_call": False,
             "state_reliable": True,
-            "streamed_messages": [],
-            "manually_emitted_state": None,
-            "schema_keys": {"input": ["messages", "tools"], "output": ["messages", "tools"], "config": [], "context": []},
         }
         if dispatch_side_effect is not None:
             agent._dispatch_event = MagicMock(side_effect=dispatch_side_effect)
         return agent
 
-    async def _stream_chunk(self, agent, message_id: str, content: str, *, suppress: bool = False):
-        """Feed a single OnChatModelStream chunk through _handle_single_event."""
+    async def _stream_chunk(self, agent, chunk, *, run_id: str, suppress: bool = False):
         event = {
             "event": LangGraphEventTypes.OnChatModelStream.value,
-            "data": {"chunk": {"id": message_id, "content": content, "tool_call_chunks": []}},
+            "run_id": run_id,
+            "data": {"chunk": chunk},
             "metadata": {"copilotkit:emit-messages": not suppress},
         }
         events = []
@@ -55,63 +69,112 @@ class TestSuppressedMessageDoesNotPoisonStream(unittest.IsolatedAsyncioTestCase)
             events.append(ev)
         return events
 
-    async def _end_chat_model(self, agent, *, suppress: bool = False):
+    async def _end_chat_model(self, agent, *, run_id: str, suppress: bool = False):
         event = {
             "event": LangGraphEventTypes.OnChatModelEnd.value,
+            "run_id": run_id,
             "data": {},
-            "metadata": {"copilotkit:emit-messages": not suppress},
+            "metadata": {"copilotkit:emit-messages": not suppress, "copilotkit:emit-tool-calls": not suppress},
         }
         events = []
         async for ev in agent._handle_single_event(event, {}):
             events.append(ev)
         return events
+
+    @staticmethod
+    def _copilotkit_passthrough(ev):
+        """Mimic CopilotKit's dispatcher: return None for TEXT_MESSAGE_*/
+        TOOL_CALL_* events when the raw event's metadata says to suppress."""
+        if ev.type in (
+            EventType.TEXT_MESSAGE_START,
+            EventType.TEXT_MESSAGE_CONTENT,
+            EventType.TEXT_MESSAGE_END,
+        ):
+            raw_metadata = (ev.raw_event or {}).get("metadata", {})
+            if raw_metadata.get("copilotkit:emit-messages") is False:
+                return None
+        if ev.type in (EventType.TOOL_CALL_START, EventType.TOOL_CALL_ARGS, EventType.TOOL_CALL_END):
+            raw_metadata = (ev.raw_event or {}).get("metadata", {})
+            if raw_metadata.get("copilotkit:emit-tool-calls") is False:
+                return None
+        return ev
 
     @pytest.mark.asyncio
     async def test_real_message_after_suppressed_message_still_gets_start_event(self):
-        """A suppressed internal call (dispatch returns None) must not
-        prevent TextMessageStartEvent from firing for the next real message
-        in the same run."""
+        agent = self._make_agent(dispatch_side_effect=self._copilotkit_passthrough)
 
-        def dispatch_passthrough(ev):
-            # Simulate CopilotKit's LangGraphAGUIAgent._dispatch_event: it
-            # inspects raw_event's LangGraph run metadata and suppresses
-            # TEXT_MESSAGE_*/TOOL_CALL_* events by returning None when
-            # ``copilotkit:emit-messages`` is False (used for internal,
-            # non-user-facing structured-output calls).
-            if ev.type in (
-                EventType.TEXT_MESSAGE_START,
-                EventType.TEXT_MESSAGE_CONTENT,
-                EventType.TEXT_MESSAGE_END,
-            ):
-                raw_metadata = (ev.raw_event or {}).get("metadata", {})
-                if raw_metadata.get("copilotkit:emit-messages") is False:
-                    return None
-            return ev
+        # Suppressed internal call, its own invocation, streams and ends.
+        await self._stream_chunk(
+            agent,
+            _text_chunk("internal output", chunk_id="internal-msg"),
+            run_id="run-internal",
+            suppress=True,
+        )
+        await self._end_chat_model(agent, run_id="run-internal", suppress=True)
+        self.assertIsNone(agent.get_message_in_progress("run-1"))
 
-        agent = self._make_agent(dispatch_side_effect=dispatch_passthrough)
-
-        # 1. Internal (suppressed) call streams and ends first, in its own
-        # graph node (e.g. a "classify" node in tool-agent's search_subgraph).
-        for event in agent.handle_node_change("classify"):
-            pass
-        await self._stream_chunk(agent, "internal-msg", "internal output", suppress=True)
-        await self._end_chat_model(agent, suppress=True)
-
-        # Regardless of suppression, tracking must be cleared after the
-        # first call's OnChatModelEnd — this is the core of the fix.
-        assert agent.get_message_in_progress("run-1") is None
-
-        # 2. A second, real (non-suppressed) message streams in the same run,
-        # from a different node (e.g. the final "model" node) — this clears
-        # the pinned text-message id, matching the real multi-node scenario.
-        for event in agent.handle_node_change("model"):
-            pass
-        events = await self._stream_chunk(agent, "real-msg", "Hello there")
+        # A real message streams as a separate invocation in the same run.
+        events = await self._stream_chunk(
+            agent,
+            _text_chunk("Hello there", chunk_id="real-msg"),
+            run_id="run-real",
+        )
 
         event_types = [e.type for e in events if e is not None]
-        assert EventType.TEXT_MESSAGE_START in event_types, (
-            "TEXT_MESSAGE_START must be emitted for a genuine message even "
-            "when an earlier suppressed message in the same run returned "
-            "None from _dispatch_event on OnChatModelEnd."
+        self.assertIn(EventType.TEXT_MESSAGE_START, event_types)
+        self.assertIn(EventType.TEXT_MESSAGE_CONTENT, event_types)
+
+    @pytest.mark.asyncio
+    async def test_unrelated_call_ending_does_not_close_a_different_mid_stream_message(self):
+        agent = self._make_agent(dispatch_side_effect=self._copilotkit_passthrough)
+
+        # A real message starts streaming and is still mid-stream (no end yet).
+        await self._stream_chunk(
+            agent,
+            _text_chunk("partial", chunk_id="real-msg"),
+            run_id="run-real",
         )
-        assert EventType.TEXT_MESSAGE_CONTENT in event_types
+        in_progress = agent.get_message_in_progress("run-1")
+        self.assertIsNotNone(in_progress)
+        self.assertEqual(in_progress["id"], "real-msg")
+
+        # A different (suppressed) invocation ends while the real message
+        # is still open.
+        events = await self._end_chat_model(agent, run_id="run-internal", suppress=True)
+
+        event_types = [e.type for e in events if e is not None]
+        self.assertNotIn(EventType.TEXT_MESSAGE_END, event_types)
+        still_in_progress = agent.get_message_in_progress("run-1")
+        self.assertIsNotNone(still_in_progress)
+        self.assertEqual(still_in_progress["id"], "real-msg")
+
+        # The real invocation's own end event closes it normally.
+        events = await self._end_chat_model(agent, run_id="run-real")
+        event_types = [e.type for e in events if e is not None]
+        self.assertIn(EventType.TEXT_MESSAGE_END, event_types)
+        self.assertIsNone(agent.get_message_in_progress("run-1"))
+
+    @pytest.mark.asyncio
+    async def test_real_tool_call_after_suppressed_tool_call_still_gets_end_event(self):
+        agent = self._make_agent(dispatch_side_effect=self._copilotkit_passthrough)
+
+        # Suppressed internal tool call, its own invocation.
+        await self._stream_chunk(
+            agent,
+            _tool_call_chunk(name="internal_tool", tool_call_id="tc-internal", chunk_id="internal-msg"),
+            run_id="run-internal",
+            suppress=True,
+        )
+        await self._end_chat_model(agent, run_id="run-internal", suppress=True)
+        self.assertIsNone(agent.get_message_in_progress("run-1"))
+
+        # A real tool call streams and ends as a separate invocation.
+        await self._stream_chunk(
+            agent,
+            _tool_call_chunk(name="real_tool", tool_call_id="tc-real", chunk_id="real-msg"),
+            run_id="run-real",
+        )
+        events = await self._end_chat_model(agent, run_id="run-real")
+
+        event_types = [e.type for e in events if e is not None]
+        self.assertIn(EventType.TOOL_CALL_END, event_types)

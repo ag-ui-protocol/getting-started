@@ -40,7 +40,12 @@ ThinkingProcess = TypedDict("ThinkingProcess", {
 MessageInProgress = TypedDict("MessageInProgress", {
     "id": str,
     "tool_call_id": NotRequired[Optional[str]],
-    "tool_call_name": NotRequired[Optional[str]]
+    "tool_call_name": NotRequired[Optional[str]],
+    # LangGraph run_id of the chat-model call that created this entry.
+    # OnChatModelEnd checks this against the ending event's run_id before
+    # clearing, so an unrelated call finishing early can't close a message
+    # that's still mid-stream under the same client run.
+    "run_id": NotRequired[Optional[str]],
 })
 
 RunMetadata = TypedDict("RunMetadata", {
