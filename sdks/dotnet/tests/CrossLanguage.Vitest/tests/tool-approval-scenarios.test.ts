@@ -250,4 +250,76 @@ describe("TS HttpAgent -> C# tool ownership and approval semantics", () => {
     );
     expect(agent.pendingInterrupts).toEqual([]);
   });
+
+  it.each([
+    { approved: true, expected: "approved" },
+    { approved: false, expected: "rejected" },
+  ])("mixed server approval: only P interrupts and resumes as $expected", async ({
+    approved,
+    expected,
+  }) => {
+    const agent = new HttpAgent({
+      url: `${baseUrl()}/tool_approval_scenarios/mixed-server-approval`,
+      threadId: `tool-approval-mixed-server-${expected}`,
+      agentId: "cross-language-test",
+    });
+    agent.messages = [
+      { id: "u1", role: "user", content: "Location, delete, and weather." },
+    ];
+
+    const turn1: BaseEvent[] = [];
+    await agent.runAgent(
+      { tools: [clientTool] },
+      { onEvent: ({ event }) => turn1.push(event) },
+    );
+
+    const clientCall = findCall(turn1, "get_user_location");
+    const protectedCall = findCall(turn1, "delete_file");
+    const normalCall = findCall(turn1, "get_weather");
+    expect(clientCall).toBeDefined();
+    expect(protectedCall).toBeDefined();
+    expect(normalCall).toBeDefined();
+    expect(finish(turn1).outcome?.type).toBe("interrupt");
+    expect(agent.pendingInterrupts).toHaveLength(1);
+    expect(agent.pendingInterrupts[0]?.toolCallId).toBe(
+      protectedCall.toolCallId,
+    );
+
+    agent.messages.push({
+      id: "mixed-client-result",
+      role: "tool",
+      toolCallId: clientCall.toolCallId,
+      content: "Tokyo, Japan",
+    } as any);
+
+    const turn2: BaseEvent[] = [];
+    await agent.runAgent(
+      {
+        tools: [clientTool],
+        resume: [
+          {
+            interruptId: agent.pendingInterrupts[0]!.id,
+            status: "resolved",
+            payload: {
+              approved,
+              toolCall: {
+                callId: protectedCall.toolCallId,
+                name: "delete_file",
+                arguments: { path: "report.txt" },
+              },
+            },
+          },
+        ],
+      },
+      { onEvent: ({ event }) => turn2.push(event) },
+    );
+
+    expect(turn2.map((event) => event.type)).toContain(
+      EventType.TOOL_CALL_RESULT,
+    );
+    expect(collectText(turn2)).toBe(
+      `completed:mixed-server-approval:${expected}`,
+    );
+    expect(agent.pendingInterrupts).toEqual([]);
+  });
 });

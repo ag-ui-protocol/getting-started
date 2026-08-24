@@ -263,7 +263,18 @@ public static class RunAgentInputExtensions
     {
         if (resumedApprovalCallIds.Count > 0)
         {
-            var resumedAssistantCallIndex = FindLatestAssistantFunctionCallIndex(chatMessages);
+            _ = TryGetClientToolResults(
+                chatMessages,
+                clientToolNames,
+                out var messageClientResults,
+                out var resumedAssistantCallIndex);
+            foreach (var result in messageClientResults)
+            {
+                resumedClientResults[result.Key] = result.Value;
+            }
+            resumedAssistantCallIndex = resumedAssistantCallIndex >= 0
+                ? resumedAssistantCallIndex
+                : FindLatestAssistantFunctionCallIndex(chatMessages);
             if (resumedAssistantCallIndex < 0
                 || !IsResumeForLatestCallBatch(
                     chatMessages,
@@ -335,7 +346,7 @@ public static class RunAgentInputExtensions
             .OfType<FunctionCallContent>()
             .Select(call => call.CallId)
             .ToHashSet(StringComparer.Ordinal);
-        if (!batchCallIds.SetEquals(resumedCallIds))
+        if (!resumedCallIds.All(batchCallIds.Contains))
         {
             return false;
         }
@@ -345,8 +356,10 @@ public static class RunAgentInputExtensions
             .Take(resumeMessageStartIndex - assistantCallIndex - 1)
             .SelectMany(message => message.Contents)
             .OfType<FunctionResultContent>()
-            .Select(result => result.CallId);
-        if (persistedResultCallIds.Any(batchCallIds.Contains))
+            .Select(result => result.CallId)
+            .ToHashSet(StringComparer.Ordinal);
+        if (persistedResultCallIds.Any(resumedCallIds.Contains)
+            || batchCallIds.All(persistedResultCallIds.Contains))
         {
             return false;
         }

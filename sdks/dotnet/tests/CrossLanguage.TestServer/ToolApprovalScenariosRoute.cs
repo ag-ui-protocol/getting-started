@@ -47,6 +47,19 @@ internal static class ToolApprovalScenariosRoute
                         () => "normal-server-result",
                         "get_weather"));
             }
+            else if (scenario == "mixed-server-approval")
+            {
+                context.ChatOptions.Tools ??= [];
+                context.ChatOptions.Tools.Add(
+                    new ApprovalRequiredAIFunction(
+                        AIFunctionFactory.Create(
+                            () => "protected-server-result",
+                            "delete_file")));
+                context.ChatOptions.Tools.Add(
+                    AIFunctionFactory.Create(
+                        () => "normal-server-result",
+                        "get_weather"));
+            }
 
             using var chatClient = new FunctionInvokingChatClient(
                 new ScenarioChatClient(scenario));
@@ -74,7 +87,12 @@ internal static class ToolApprovalScenariosRoute
                 .OfType<FunctionResultContent>()
                 .FirstOrDefault() is { } result)
             {
-                var resultText = result.Result?.ToString() ?? string.Empty;
+                var protectedResult = history.SelectMany(message => message.Contents)
+                    .OfType<FunctionResultContent>()
+                    .FirstOrDefault(content => content.CallId == "call-mixed-protected");
+                var resultText = protectedResult?.Result?.ToString()
+                    ?? result.Result?.ToString()
+                    ?? string.Empty;
                 var outcome = resultText.Contains(
                     "rejected",
                     StringComparison.OrdinalIgnoreCase)
@@ -85,6 +103,7 @@ internal static class ToolApprovalScenariosRoute
                     scenario is "server-approval"
                         or "client-local-approval"
                         or "mixed-client-local-approval"
+                        or "mixed-server-approval"
                         ? $"completed:{scenario}:{outcome}"
                         : $"completed:{scenario}");
                 yield break;
@@ -157,6 +176,34 @@ internal static class ToolApprovalScenariosRoute
                             new Dictionary<string, object?>()),
                         new FunctionCallContent(
                             "call-mixed-server",
+                            "get_weather",
+                            new Dictionary<string, object?>()),
+                    ],
+                    FinishReason = ChatFinishReason.ToolCalls,
+                };
+                yield break;
+            }
+
+            if (scenario == "mixed-server-approval")
+            {
+                yield return new ChatResponseUpdate
+                {
+                    Role = ChatRole.Assistant,
+                    Contents =
+                    [
+                        new FunctionCallContent(
+                            "call-mixed-client",
+                            "get_user_location",
+                            new Dictionary<string, object?>()),
+                        new FunctionCallContent(
+                            "call-mixed-protected",
+                            "delete_file",
+                            new Dictionary<string, object?>
+                            {
+                                ["path"] = "report.txt",
+                            }),
+                        new FunctionCallContent(
+                            "call-mixed-normal",
                             "get_weather",
                             new Dictionary<string, object?>()),
                     ],
