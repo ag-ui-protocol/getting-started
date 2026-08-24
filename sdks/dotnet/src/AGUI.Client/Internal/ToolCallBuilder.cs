@@ -132,6 +132,11 @@ internal sealed class ToolCallBuilder
                 && update.Contents[0] is FunctionCallContent fcc
                 && interruptById.TryGetValue(fcc.CallId, out var interrupt))
             {
+                if (clientToolNames?.Contains(fcc.Name) is not true)
+                {
+                    fcc.InformationalOnly = true;
+                }
+
                 // This tool call is interrupted — replace with ToolApprovalRequestContent
                 var approvalRequest = new ToolApprovalRequestContent(
                     interrupt.Id, fcc)

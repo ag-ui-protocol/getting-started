@@ -14,6 +14,10 @@ internal static class AGUIClientInternalKeys
     // BuildRunAgentInput so they can be encoded as AGUIResume entries.
     internal const string ApprovalResponses = "agui_approval_responses";
 
+    // Preserves the original assistant tool-call order while local FICC removes and
+    // recreates client-owned approval calls.
+    internal const string ApprovalCallIndex = "agui_approval_call_index";
+
     // Carries a list of InterruptResponseContent items from the outer chat client to
     // BuildRunAgentInput so they can be encoded as AGUIResume entries.
     internal const string InterruptResponses = "agui_interrupt_responses";

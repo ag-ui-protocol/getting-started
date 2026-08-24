@@ -461,13 +461,7 @@ public sealed class MixedToolInvocationIntegrationTest : IntegrationTestBase
         Assert.True(
             Assert.IsType<FunctionCallContent>(normalServerApproval.ToolCall).InformationalOnly);
 
-        var clientCall = Assert.IsType<FunctionCallContent>(clientApproval.ToolCall);
-        var clientResult = await clientTool.InvokeAsync(new AIFunctionArguments(clientCall.Arguments));
         var clientResponse = clientApproval.CreateResponse(approved: true);
-        clientResponse.AdditionalProperties = new AdditionalPropertiesDictionary
-        {
-            ["result"] = clientResult?.ToString(),
-        };
 
         var approvalResponses = new AIContent[]
         {
