@@ -30,6 +30,15 @@ internal static class ToolApprovalScenariosRoute
                         () => "server-result",
                         "get_weather"));
             }
+            else if (scenario == "server-approval")
+            {
+                context.ChatOptions.Tools ??= [];
+                context.ChatOptions.Tools.Add(
+                    new ApprovalRequiredAIFunction(
+                        AIFunctionFactory.Create(
+                            () => "protected-server-result",
+                            "delete_file")));
+            }
 
             using var chatClient = new FunctionInvokingChatClient(
                 new ScenarioChatClient(scenario));
@@ -55,11 +64,19 @@ internal static class ToolApprovalScenariosRoute
             var history = messages.ToList();
             if (history.SelectMany(message => message.Contents)
                 .OfType<FunctionResultContent>()
-                .Any())
+                .FirstOrDefault() is { } result)
             {
+                var resultText = result.Result?.ToString() ?? string.Empty;
+                var outcome = resultText.Contains(
+                    "rejected",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? "rejected"
+                    : "approved";
                 yield return new ChatResponseUpdate(
                     ChatRole.Assistant,
-                    $"completed:{scenario}");
+                    scenario == "server-approval"
+                        ? $"completed:{scenario}:{outcome}"
+                        : $"completed:{scenario}");
                 yield break;
             }
 
@@ -91,6 +108,26 @@ internal static class ToolApprovalScenariosRoute
                             "call-server-only",
                             "get_weather",
                             new Dictionary<string, object?>()),
+                    ],
+                    FinishReason = ChatFinishReason.ToolCalls,
+                };
+                yield break;
+            }
+
+            if (scenario == "server-approval")
+            {
+                yield return new ChatResponseUpdate
+                {
+                    Role = ChatRole.Assistant,
+                    Contents =
+                    [
+                        new FunctionCallContent(
+                            "call-server-approval",
+                            "delete_file",
+                            new Dictionary<string, object?>
+                            {
+                                ["path"] = "report.txt",
+                            }),
                     ],
                     FinishReason = ChatFinishReason.ToolCalls,
                 };
