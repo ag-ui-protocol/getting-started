@@ -29,6 +29,10 @@ import { LegacyRuntimeProtocolEvent } from "@/legacy/types";
 import { lastValueFrom } from "rxjs";
 import { transformChunks } from "@/chunks";
 import { enforceEvents } from "@/enforce";
+import {
+  CompatibilityBoundary,
+  compatibilityBoundaryOperator,
+} from "@/middleware/compatibility-boundary";
 import { AgentStateMutation, AgentSubscriber, runSubscribersWithMutation } from "./subscriber";
 import { AGUIConnectNotImplementedError, AGUIError } from "@ag-ui/core";
 import { isInterruptExpired } from "@/interrupts";
@@ -201,11 +205,12 @@ export abstract class AbstractAgent {
       const pipeline = pipe(
         () => {
           // Build middleware chain using reduceRight so middlewares can intercept runs.
-          if (this.middlewares.length === 0) {
-            return this.run(input);
-          }
-
-          const chainedAgent = this.middlewares.reduceRight(
+          // The always-on inbound compatibility boundary runs innermost —
+          // closest to the wire — so every other middleware and the
+          // enforcement stage see 1.0-shaped events. Appended per run and
+          // never stored, so it is installed exactly once regardless of
+          // use() or clone().
+          const chainedAgent = [...this.middlewares, new CompatibilityBoundary()].reduceRight(
             (nextAgent: AbstractAgent, middleware) =>
               ({
                 run: (i: RunAgentInput) => middleware.run(i, nextAgent),
@@ -300,7 +305,11 @@ export abstract class AbstractAgent {
 
       const pipeline = pipe(
         () => defer(() => this.connect(input)),
-        transformChunks(this.debugLogger),
+        // The connect flow has no middleware chain, so the always-on inbound
+        // boundary applies as a plain operator here (composed with the chunk
+        // stage: rxjs pipe() runs out of typed arities beyond nine stages).
+        (source$: Observable<BaseEvent>) =>
+          transformChunks(this.debugLogger)(compatibilityBoundaryOperator()(source$)),
         enforceEvents(this.debugLogger),
         verifyEvents(this.debugLogger),
         // Stop processing immediately when this run is detached
@@ -722,11 +731,7 @@ export abstract class AbstractAgent {
 
     // Build middleware chain for legacy bridge
     const runObservable = (() => {
-      if (this.middlewares.length === 0) {
-        return this.run(input);
-      }
-
-      const chainedAgent = this.middlewares.reduceRight(
+      const chainedAgent = [...this.middlewares, new CompatibilityBoundary()].reduceRight(
         (nextAgent: AbstractAgent, middleware) =>
           ({
             run: (i: RunAgentInput) => middleware.run(i, nextAgent),

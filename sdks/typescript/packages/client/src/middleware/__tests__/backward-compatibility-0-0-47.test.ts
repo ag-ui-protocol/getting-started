@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AbstractAgent } from "@/agent";
 import { BaseEvent, EventType, RunAgentInput } from "@ag-ui/core";
 import { Observable, from, lastValueFrom, toArray } from "rxjs";
@@ -38,13 +38,9 @@ describe("BackwardCompatibility_0_0_47", () => {
   });
 
   it("passes through plain string content unchanged", async () => {
-    const agent = new MockAgent([
-      { type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" },
-    ]);
+    const agent = new MockAgent([{ type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" }]);
 
-    const input = createInput([
-      { id: "msg-1", role: "user", content: "hello world" },
-    ]);
+    const input = createInput([{ id: "msg-1", role: "user", content: "hello world" }]);
 
     await lastValueFrom(middleware.run(input, agent).pipe(toArray()));
 
@@ -355,5 +351,38 @@ describe("BackwardCompatibility_0_0_47", () => {
       type: "image",
       source: { type: "data", value: "base64data", mimeType: "image/png" },
     });
+  });
+});
+
+describe("BackwardCompatibility_0_0_47 (lossy path warning)", () => {
+  it("warns when an id-only binary part cannot be converted", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    delete process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
+    const middleware = new BackwardCompatibility_0_0_47();
+    const agent = new MockAgent([]);
+    const input = {
+      threadId: "t",
+      runId: "r",
+      state: {},
+      tools: [],
+      context: [],
+      forwardedProps: {},
+      messages: [
+        {
+          id: "msg-1",
+          role: "user",
+          content: [{ type: "binary", mimeType: "image/png", id: "asset-1" }],
+        },
+      ],
+    } as unknown as RunAgentInput;
+
+    await lastValueFrom(middleware.run(input, agent).pipe(toArray()), {
+      defaultValue: undefined,
+    });
+
+    const warned = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(warned).toContain("asset-1");
+    expect(warned).toContain("DEPRECATIONS.md");
+    warnSpy.mockRestore();
   });
 });
