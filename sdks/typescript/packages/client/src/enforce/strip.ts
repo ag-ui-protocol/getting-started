@@ -1,0 +1,163 @@
+import { z } from "zod/v4";
+
+/**
+ * Deep-strips material a schema does not describe, without judging what it
+ * does describe.
+ *
+ * The tolerant validators deliberately keep unknown keys so middleware can
+ * see them; this is the stage after middleware, where whatever nobody handled
+ * is removed and reported. Three kinds of deviation are stripped, never
+ * fatal:
+ *
+ * - an unknown property on a described object (dropped, path reported),
+ * - an unrecognised member of a discriminated union (the element is dropped
+ *   from its array, or the key omitted, path reported),
+ * - nothing else: a malformed VALUE on a described field is left in place for
+ *   the validator to reject fatally, because inventing a reading for it would
+ *   be data corruption.
+ *
+ * Arbitrary-JSON positions (state, metadata, rawEvent, forwardedProps, …) are
+ * opaque schemas (z.any / z.custom), so their insides pass through untouched
+ * — open-by-key means open.
+ */
+export interface StripResult<T> {
+  value: T;
+  /** JSON-pointer-ish paths of everything removed, for the deviation log. */
+  stripped: string[];
+}
+
+/** Marks "this whole value is unrecognisable here" while unwinding. */
+const DROP = Symbol("agui.strip.drop");
+
+function unwrap(schema: z.ZodType): z.ZodType {
+  let current: z.ZodType = schema;
+  for (;;) {
+    if (
+      current instanceof z.ZodOptional ||
+      current instanceof z.ZodNullable ||
+      current instanceof z.ZodDefault ||
+      current instanceof z.ZodReadonly
+    ) {
+      current = (current as { unwrap(): unknown }).unwrap() as z.ZodType;
+      continue;
+    }
+    return current;
+  }
+}
+
+function discriminatorOf(schema: z.ZodType): string | undefined {
+  const def = (schema as { def?: { discriminator?: unknown } }).def;
+  return typeof def?.discriminator === "string" ? def.discriminator : undefined;
+}
+
+function literalValueOf(schema: z.ZodType): unknown {
+  const unwrapped = unwrap(schema);
+  if (unwrapped instanceof z.ZodLiteral) {
+    const probe = unwrapped as unknown as { values?: unknown[]; value?: unknown };
+    if (Array.isArray(probe.values) && probe.values.length === 1) return probe.values[0];
+    return probe.value;
+  }
+  return undefined;
+}
+
+function stripAgainst(
+  value: unknown,
+  schema: z.ZodType,
+  path: string,
+  stripped: string[],
+): unknown {
+  const target = unwrap(schema);
+
+  if (target instanceof z.ZodObject) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return value; // wrong shape: the validator's to reject, fatally
+    }
+    const shape = target.shape as Record<string, z.ZodType>;
+    const record = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    for (const key of Object.keys(record)) {
+      const field = shape[key];
+      if (field === undefined) {
+        stripped.push(`${path}/${key}`);
+        continue;
+      }
+      const child = stripAgainst(record[key], field, `${path}/${key}`, stripped);
+      if (child === DROP) {
+        // An unrecognisable value in an OPTIONAL position is removable; in a
+        // REQUIRED position the whole containing object is unrecognisable,
+        // and the drop cascades — so a media part with a future source kind
+        // removes the part, never leaving a sourceless part behind for the
+        // validator to reject fatally.
+        if (field.safeParse(undefined).success) {
+          stripped.push(`${path}/${key}`);
+          continue;
+        }
+        return DROP;
+      }
+      result[key] = child;
+    }
+    return result;
+  }
+
+  if (target instanceof z.ZodArray) {
+    if (!Array.isArray(value)) return value;
+    const element = target.element as z.ZodType;
+    const result: unknown[] = [];
+    value.forEach((entry, index) => {
+      const child = stripAgainst(entry, element, `${path}/${index}`, stripped);
+      if (child === DROP) {
+        stripped.push(`${path}/${index}`);
+        return;
+      }
+      result.push(child);
+    });
+    return result;
+  }
+
+  if (target instanceof z.ZodUnion) {
+    const options = target.options as z.ZodType[];
+    const discriminator = discriminatorOf(target);
+    if (discriminator !== undefined) {
+      if (typeof value !== "object" || value === null) return value;
+      const tag = (value as Record<string, unknown>)[discriminator];
+      for (const option of options) {
+        const unwrapped = unwrap(option);
+        if (!(unwrapped instanceof z.ZodObject)) continue;
+        const shape = unwrapped.shape as Record<string, z.ZodType>;
+        if (literalValueOf(shape[discriminator]) === tag) {
+          return stripAgainst(value, option, path, stripped);
+        }
+      }
+      // An unrecognised union member: removable, never fatal.
+      return DROP;
+    }
+    // A structural union (e.g. string | array): recurse into the option whose
+    // basic kind matches; if none does, the validator rejects fatally.
+    for (const option of options) {
+      const unwrapped = unwrap(option);
+      if (unwrapped instanceof z.ZodArray && Array.isArray(value)) {
+        return stripAgainst(value, option, path, stripped);
+      }
+      if (
+        unwrapped instanceof z.ZodObject &&
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value)
+      ) {
+        return stripAgainst(value, option, path, stripped);
+      }
+    }
+    return value;
+  }
+
+  // Leaves (strings, numbers, enums, literals) and opaque schemas
+  // (z.any, z.custom — the arbitrary-JSON positions) pass through whole.
+  return value;
+}
+
+/** Deep-strips `value` against `schema`; see the module comment. */
+export function stripUnknown<T>(value: T, schema: z.ZodType): StripResult<T> {
+  const stripped: string[] = [];
+  const result = stripAgainst(value, schema, "", stripped);
+  return { value: (result === DROP ? value : result) as T, stripped };
+}

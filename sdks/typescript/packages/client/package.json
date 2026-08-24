@@ -42,7 +42,7 @@
     "rxjs": "7.8.1",
     "untruncate-json": "^0.0.1",
     "uuid": "^11.1.0",
-    "zod": "^3.22.4"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^20.11.19",

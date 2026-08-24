@@ -1,7 +1,4 @@
 import { BaseEvent } from "@ag-ui/core";
-// Runtime validation comes from the schemas subpath: the generated union is
-// the single source of what the protocol accepts.
-import { EventSchema as EventSchemas } from "@ag-ui/core/schemas";
 import { Subject, ReplaySubject, Observable } from "rxjs";
 import { HttpEvent, HttpEventType } from "../run/http-request";
 import { parseSSEStream } from "./sse";
@@ -54,17 +51,20 @@ export const transformHttpEventStream = (
           // Use SSE JSON parser for all other cases
           parseSSEStream(bufferSubject, log).subscribe({
             next: (json) => {
-              try {
-                const parsedEvent = EventSchemas.parse(json);
-                log?.event("HTTP", "Event validated:", parsedEvent, {
-                  type: parsedEvent.type,
-                  valid: true,
-                });
-                eventSubject.next(parsedEvent as BaseEvent);
-              } catch (err) {
+              // No schema enforcement here: validation runs AFTER the
+              // middleware chain (the enforcement stage in the agent
+              // pipeline), so a translator for a deprecated or unrecognised
+              // event stays reachable. The transport only requires the one
+              // thing nothing downstream can work without: a string type.
+              const record = json as { type?: unknown };
+              if (typeof record.type !== "string" || record.type.length === 0) {
+                const err = new Error("Invalid event: the frame carries no event type.");
                 log?.event("HTTP", "Event invalid:", { json, error: String(err) });
                 eventSubject.error(err);
+                return;
               }
+              log?.event("HTTP", "Event received:", json, { type: record.type });
+              eventSubject.next(json as BaseEvent);
             },
             error: (err) => {
               if ((err as DOMException)?.name === "AbortError") {

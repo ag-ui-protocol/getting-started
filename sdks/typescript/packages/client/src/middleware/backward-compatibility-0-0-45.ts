@@ -76,7 +76,10 @@ export class BackwardCompatibility_0_0_45 extends Middleware {
           ...event,
           type: EventType.REASONING_MESSAGE_START,
           messageId: this.currentMessageId,
-          role: "assistant" as const,
+          // The schema pins this role to "reasoning"; the translation used to
+          // say "assistant", which nothing validated until enforcement moved
+          // behind the middleware chain and made the invalid output fatal.
+          role: "reasoning" as const,
         };
       }
 

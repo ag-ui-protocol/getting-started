@@ -47,7 +47,9 @@ describe("runSubscribersWithMutation clone cost", () => {
       {
         id: "m",
         role: "assistant",
-        toolCalls: [{ id: "tc", type: "function", function: { name: "write_file", arguments: bigArgs } }],
+        toolCalls: [
+          { id: "tc", type: "function", function: { name: "write_file", arguments: bigArgs } },
+        ],
       } as unknown as Message,
     ];
     await run(messages, {});
@@ -65,11 +67,19 @@ describe("runSubscribersWithMutation clone cost", () => {
       {
         id: "m",
         role: "assistant",
-        toolCalls: [{ id: "tc", type: "function", function: { name: "write_file", arguments: bigArgs } }],
+        toolCalls: [
+          { id: "tc", type: "function", function: { name: "write_file", arguments: bigArgs } },
+        ],
       } as unknown as Message,
     ];
     const result = await runSubscribersWithMutation([mutating], messages, {}, (s, m, st) =>
-      s.onEvent?.({ messages: m, state: st, agent: {} as any, input: {} as any, event: { type: "RUN_STARTED" } as any }),
+      s.onEvent?.({
+        messages: m,
+        state: st,
+        agent: {} as any,
+        input: {} as any,
+        event: { type: "RUN_STARTED" } as any,
+      }),
     );
     // Exactly one clone — the defensive copy of the returned mutation (isolation
     // contract preserved), not a per-event baseline clone.

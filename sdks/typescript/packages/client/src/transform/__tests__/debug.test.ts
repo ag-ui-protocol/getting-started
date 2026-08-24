@@ -203,17 +203,18 @@ describe("transformHttpEventStream debug logging", () => {
 
     await resultPromise;
 
-    const validatedCalls = debugSpy.mock.calls.filter(
-      (call) => typeof call[0] === "string" && call[0] === "[HTTP] Event validated:",
+    // The transport no longer validates (enforcement runs after middleware,
+    // in the agent pipeline); it logs receipt.
+    const receivedCalls = debugSpy.mock.calls.filter(
+      (call) => typeof call[0] === "string" && call[0] === "[HTTP] Event received:",
     );
-    expect(validatedCalls.length).toBe(1);
-    expect(validatedCalls[0][1]).toEqual({
+    expect(receivedCalls.length).toBe(1);
+    expect(receivedCalls[0][1]).toEqual({
       type: EventType.TEXT_MESSAGE_START,
-      valid: true,
     });
   });
 
-  it("event invalid log: [HTTP] Event invalid: on schema parse failure", async () => {
+  it("event invalid log: [HTTP] Event invalid: on a frame with no event type", async () => {
     expect.assertions(1);
 
     const logger = createDebugLogger({
@@ -234,12 +235,13 @@ describe("transformHttpEventStream debug logging", () => {
     });
 
     source$.next(createHeaders());
-    // Send an event with an invalid type to trigger schema parse failure
+    // An UNKNOWN type is no longer the transport's to reject — that material
+    // must reach middleware. Only a frame with no usable type at all is
+    // malformed at this layer.
     source$.next(
       createSSEData({
-        type: "COMPLETELY_INVALID_EVENT_TYPE_THAT_DOES_NOT_EXIST",
         data: "bad",
-      }),
+      } as never),
     );
 
     // Wait for processing

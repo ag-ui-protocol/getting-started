@@ -1,12 +1,6 @@
 import { AbstractAgent } from "@/agent";
 import { Middleware } from "@/middleware";
-import {
-  BaseEvent,
-  EventType,
-  Message,
-  RunAgentInput,
-  TextMessageChunkEvent,
-} from "@ag-ui/core";
+import { BaseEvent, EventType, Message, RunAgentInput, TextMessageChunkEvent } from "@ag-ui/core";
 import { Observable } from "rxjs";
 
 describe("Middleware chained runNextWithState", () => {
@@ -90,8 +84,12 @@ describe("Middleware chained runNextWithState", () => {
     // so every layer transparently resolves to the real agent's state.
     const outerWrapper = {
       run: (i: RunAgentInput) => innerMiddleware.run(i, realAgent),
-      get messages() { return realAgent.messages; },
-      get state() { return realAgent.state; },
+      get messages() {
+        return realAgent.messages;
+      },
+      get state() {
+        return realAgent.state;
+      },
     } as AbstractAgent;
 
     const events: BaseEvent[] = [];

@@ -23,7 +23,7 @@ const createAgent = (messages: Message[] = []) =>
   ({
     messages: messages.map((message) => ({ ...message })),
     state: {},
-  } as unknown as AbstractAgent);
+  }) as unknown as AbstractAgent;
 
 describe("defaultApplyEvents with text messages", () => {
   it("should handle text message events correctly", async () => {
@@ -46,7 +46,11 @@ describe("defaultApplyEvents with text messages", () => {
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
     // Send events
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.TEXT_MESSAGE_START,
       messageId: "msg1",
@@ -120,7 +124,11 @@ describe("defaultApplyEvents with text messages", () => {
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
     // Send events for two different messages
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
 
     // First message
     events$.next({
@@ -225,7 +233,11 @@ describe("defaultApplyEvents with text messages", () => {
     const sharedMessageId = "d0b45a7f-d877-4a59-a6db-e11365066393";
 
     // Send events mimicking the real-world scenario
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
 
     // Tool call with parentMessageId creates a message with that ID
     events$.next({
@@ -344,9 +356,7 @@ describe("defaultApplyEvents with text messages", () => {
     const stateUpdates = await stateUpdatesPromise;
 
     // Find the update where the message was created (TEXT_MESSAGE_START)
-    const msgUpdate = stateUpdates.find(
-      (u) => u.messages?.some((m) => m.id === "msg1"),
-    );
+    const msgUpdate = stateUpdates.find((u) => u.messages?.some((m) => m.id === "msg1"));
     expect(msgUpdate).toBeDefined();
     const msg = msgUpdate!.messages!.find((m) => m.id === "msg1");
     expect((msg as any).name).toBe("research-agent");
@@ -391,9 +401,7 @@ describe("defaultApplyEvents with text messages", () => {
     events$.complete();
     const stateUpdates = await stateUpdatesPromise;
 
-    const msgUpdate = stateUpdates.find(
-      (u) => u.messages?.some((m) => m.id === "msg1"),
-    );
+    const msgUpdate = stateUpdates.find((u) => u.messages?.some((m) => m.id === "msg1"));
     expect(msgUpdate).toBeDefined();
     const msg = msgUpdate!.messages!.find((m) => m.id === "msg1");
     expect((msg as any).name).toBeUndefined();

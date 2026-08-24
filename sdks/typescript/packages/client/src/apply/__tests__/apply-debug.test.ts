@@ -49,7 +49,11 @@ describe("defaultApplyEvents debug logging", () => {
     const result$ = defaultApplyEvents(input, events$, agent, [], undefined);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.TEXT_MESSAGE_START,
       messageId: "msg-1",
@@ -61,6 +65,8 @@ describe("defaultApplyEvents debug logging", () => {
     } as TextMessageEndEvent);
     events$.next({
       type: EventType.RUN_FINISHED,
+      threadId: "test-thread",
+      runId: "test-run",
     } as RunFinishedEvent);
 
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -85,7 +91,11 @@ describe("defaultApplyEvents debug logging", () => {
     const result$ = defaultApplyEvents(input, events$, agent, subscribers, logger);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.TEXT_MESSAGE_START,
       messageId: "msg-1",
@@ -126,7 +136,11 @@ describe("defaultApplyEvents debug logging", () => {
     const result$ = defaultApplyEvents(input, events$, agent, [], logger);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     events$.complete();
@@ -164,7 +178,11 @@ describe("defaultApplyEvents debug logging", () => {
     const result$ = defaultApplyEvents(input, events$, agent, subscribers, logger);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     events$.complete();

@@ -76,7 +76,11 @@ describe("verifyEvents concurrent operations", () => {
       messageId: "msg1",
     } as TextMessageEndEvent);
 
-    source$.next({ type: EventType.RUN_FINISHED } as RunFinishedEvent);
+    source$.next({
+      type: EventType.RUN_FINISHED,
+      threadId: "test",
+      runId: "test",
+    } as RunFinishedEvent);
 
     // Complete the source
     source$.complete();
@@ -151,7 +155,11 @@ describe("verifyEvents concurrent operations", () => {
       toolCallId: "tool1",
     } as ToolCallEndEvent);
 
-    source$.next({ type: EventType.RUN_FINISHED } as RunFinishedEvent);
+    source$.next({
+      type: EventType.RUN_FINISHED,
+      threadId: "test",
+      runId: "test",
+    } as RunFinishedEvent);
 
     // Complete the source
     source$.complete();
@@ -242,7 +250,11 @@ describe("verifyEvents concurrent operations", () => {
       messageId: "msg2",
     } as TextMessageEndEvent);
 
-    source$.next({ type: EventType.RUN_FINISHED } as RunFinishedEvent);
+    source$.next({
+      type: EventType.RUN_FINISHED,
+      threadId: "test",
+      runId: "test",
+    } as RunFinishedEvent);
 
     // Complete the source
     source$.complete();
@@ -333,7 +345,11 @@ describe("verifyEvents concurrent operations", () => {
       stepName: "search_step",
     } as StepFinishedEvent);
 
-    source$.next({ type: EventType.RUN_FINISHED } as RunFinishedEvent);
+    source$.next({
+      type: EventType.RUN_FINISHED,
+      threadId: "test",
+      runId: "test",
+    } as RunFinishedEvent);
 
     // Complete the source
     source$.complete();
@@ -543,7 +559,11 @@ describe("verifyEvents concurrent operations", () => {
     } as TextMessageStartEvent);
 
     // Try to finish run while messages are still active
-    source$.next({ type: EventType.RUN_FINISHED } as RunFinishedEvent);
+    source$.next({
+      type: EventType.RUN_FINISHED,
+      threadId: "test",
+      runId: "test",
+    } as RunFinishedEvent);
 
     // Complete the source and wait for processing
     source$.complete();
@@ -589,7 +609,11 @@ describe("verifyEvents concurrent operations", () => {
     } as ToolCallStartEvent);
 
     // Try to finish run while tool calls are still active
-    source$.next({ type: EventType.RUN_FINISHED } as RunFinishedEvent);
+    source$.next({
+      type: EventType.RUN_FINISHED,
+      threadId: "test",
+      runId: "test",
+    } as RunFinishedEvent);
 
     // Complete the source and wait for processing
     source$.complete();
@@ -674,7 +698,11 @@ describe("verifyEvents concurrent operations", () => {
       } as ToolCallEndEvent);
     }
 
-    source$.next({ type: EventType.RUN_FINISHED } as RunFinishedEvent);
+    source$.next({
+      type: EventType.RUN_FINISHED,
+      threadId: "test",
+      runId: "test",
+    } as RunFinishedEvent);
 
     // Complete the source
     source$.complete();

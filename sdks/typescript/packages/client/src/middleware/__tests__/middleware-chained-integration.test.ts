@@ -444,11 +444,17 @@ describe("Chained middleware integration (via runAgent)", () => {
       expect(newMessages[0]).toMatchObject({ role: "assistant", content: "Hello from agent" });
 
       expect(inner.capturedMessages).toHaveLength(1);
-      expect(inner.capturedMessages[0]).toMatchObject({ role: "assistant", content: "Hello from agent" });
+      expect(inner.capturedMessages[0]).toMatchObject({
+        role: "assistant",
+        content: "Hello from agent",
+      });
 
       // This was the broken case: outer middleware's `next` was a bare { run } wrapper
       expect(outer.capturedMessages).toHaveLength(1);
-      expect(outer.capturedMessages[0]).toMatchObject({ role: "assistant", content: "Hello from agent" });
+      expect(outer.capturedMessages[0]).toMatchObject({
+        role: "assistant",
+        content: "Hello from agent",
+      });
     });
 
     it("three CapturingMiddlewares all track messages correctly", async () => {
@@ -463,7 +469,10 @@ describe("Chained middleware integration (via runAgent)", () => {
 
       for (const mw of [innermost, middle, outermost]) {
         expect(mw.capturedMessages).toHaveLength(1);
-        expect(mw.capturedMessages[0]).toMatchObject({ role: "assistant", content: "Hello from agent" });
+        expect(mw.capturedMessages[0]).toMatchObject({
+          role: "assistant",
+          content: "Hello from agent",
+        });
       }
     });
   });
@@ -609,8 +618,16 @@ describe("Chained middleware integration (via runAgent)", () => {
       // After MESSAGES_SNAPSHOT, messages should be replaced
       for (const mw of [inner, outer]) {
         expect(mw.capturedMessages).toHaveLength(2);
-        expect(mw.capturedMessages[0]).toMatchObject({ id: "snap-1", role: "user", content: "question" });
-        expect(mw.capturedMessages[1]).toMatchObject({ id: "snap-2", role: "assistant", content: "answer" });
+        expect(mw.capturedMessages[0]).toMatchObject({
+          id: "snap-1",
+          role: "user",
+          content: "question",
+        });
+        expect(mw.capturedMessages[1]).toMatchObject({
+          id: "snap-2",
+          role: "assistant",
+          content: "answer",
+        });
       }
     });
   });
@@ -750,7 +767,10 @@ describe("Chained middleware integration (via runAgent)", () => {
       for (const mw of [inner, outer]) {
         expect(mw.capturedMessages).toHaveLength(2);
         expect(mw.capturedMessages[0]).toMatchObject({ role: "user", content: "Hi" });
-        expect(mw.capturedMessages[1]).toMatchObject({ role: "assistant", content: "Hello from agent" });
+        expect(mw.capturedMessages[1]).toMatchObject({
+          role: "assistant",
+          content: "Hello from agent",
+        });
       }
     });
 

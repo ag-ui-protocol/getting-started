@@ -68,7 +68,11 @@ const applyAndGetMessages = async (events: BaseEvent[]): Promise<Message[]> => {
   return last?.messages ?? [];
 };
 
-const runStarted = { type: EventType.RUN_STARTED } as RunStartedEvent;
+const runStarted = {
+  type: EventType.RUN_STARTED,
+  threadId: "test",
+  runId: "test",
+} as RunStartedEvent;
 
 describe("metadata merging into text messages", () => {
   it("merges across start, content and end with the last write winning", async () => {

@@ -75,7 +75,10 @@ describe("BackwardCompatibility_0_0_45", () => {
     expect(result[0]).toEqual({
       type: EventType.REASONING_MESSAGE_START,
       messageId: "mock-uuid",
-      role: "assistant",
+      // Pinned to what the schema requires; the translation used to invent
+      // "assistant" here, unvalidated until enforcement moved behind
+      // middleware.
+      role: "reasoning",
     });
   });
 
@@ -213,17 +216,19 @@ describe("BackwardCompatibility_0_0_45 (browser environment)", () => {
 
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const result = await lastValueFrom(
-        middleware.run(
-          {
-            threadId: "thread-1",
-            runId: "run-1",
-            messages: [],
-            tools: [],
-            context: [],
-            forwardedProps: {},
-          },
-          agent,
-        ).pipe(toArray()),
+        middleware
+          .run(
+            {
+              threadId: "thread-1",
+              runId: "run-1",
+              messages: [],
+              tools: [],
+              context: [],
+              forwardedProps: {},
+            },
+            agent,
+          )
+          .pipe(toArray()),
       );
 
       // Should have transformed the event without throwing ReferenceError

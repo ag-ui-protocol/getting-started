@@ -400,9 +400,7 @@ export async function runSubscribersWithMutation(
     ...(messagesMutated
       ? { messages: Object.isFrozen(messages) ? structuredClone_(messages) : messages }
       : {}),
-    ...(stateMutated
-      ? { state: Object.isFrozen(state) ? structuredClone_(state) : state }
-      : {}),
+    ...(stateMutated ? { state: Object.isFrozen(state) ? structuredClone_(state) : state } : {}),
     ...(stopPropagation !== undefined ? { stopPropagation } : {}),
   };
 }

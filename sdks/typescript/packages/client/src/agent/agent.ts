@@ -28,6 +28,7 @@ import { convertToLegacyEvents } from "@/legacy/convert";
 import { LegacyRuntimeProtocolEvent } from "@/legacy/types";
 import { lastValueFrom } from "rxjs";
 import { transformChunks } from "@/chunks";
+import { enforceEvents } from "@/enforce";
 import { AgentStateMutation, AgentSubscriber, runSubscribersWithMutation } from "./subscriber";
 import { AGUIConnectNotImplementedError, AGUIError } from "@ag-ui/core";
 import { isInterruptExpired } from "@/interrupts";
@@ -89,9 +90,7 @@ export abstract class AbstractAgent {
 
   set debugLogger(value: DebugLogger | boolean | undefined) {
     if (typeof value === "boolean") {
-      this._debugLogger = value
-        ? createDebugLogger(resolveAgentDebugConfig(true))
-        : undefined;
+      this._debugLogger = value ? createDebugLogger(resolveAgentDebugConfig(true)) : undefined;
     } else {
       this._debugLogger = value;
     }
@@ -223,6 +222,7 @@ export abstract class AbstractAgent {
           return chainedAgent.run(input);
         },
         transformChunks(this.debugLogger),
+        enforceEvents(this.debugLogger),
         verifyEvents(this.debugLogger),
         // Stop processing immediately when this run is detached
         (source$) => source$.pipe(takeUntil(this.activeRunDetach$!)),
@@ -301,6 +301,7 @@ export abstract class AbstractAgent {
       const pipeline = pipe(
         () => defer(() => this.connect(input)),
         transformChunks(this.debugLogger),
+        enforceEvents(this.debugLogger),
         verifyEvents(this.debugLogger),
         // Stop processing immediately when this run is detached
         (source$) => source$.pipe(takeUntil(this.activeRunDetach$!)),
@@ -418,9 +419,7 @@ export abstract class AbstractAgent {
   protected async onInitialize(input: RunAgentInput, subscribers: AgentSubscriber[]) {
     if (this.pendingInterrupts.length > 0) {
       const resumeIds = new Set((input.resume ?? []).map((r) => r.interruptId));
-      const uncovered = this.pendingInterrupts
-        .map((i) => i.id)
-        .filter((id) => !resumeIds.has(id));
+      const uncovered = this.pendingInterrupts.map((i) => i.id).filter((id) => !resumeIds.has(id));
       if (uncovered.length > 0) {
         throw new AGUIError(
           `Thread has ${uncovered.length} pending interrupt(s) not addressed by resume: ${uncovered.join(", ")}`,
@@ -746,6 +745,7 @@ export abstract class AbstractAgent {
 
     return runObservable.pipe(
       transformChunks(this.debugLogger),
+      enforceEvents(this.debugLogger),
       verifyEvents(this.debugLogger),
       convertToLegacyEvents(this.threadId, input.runId, this.agentId),
       (events$: Observable<LegacyRuntimeProtocolEvent>) => {

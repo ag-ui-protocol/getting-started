@@ -1,0 +1,243 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { of, lastValueFrom, Observable } from "rxjs";
+import { toArray, map } from "rxjs/operators";
+import { BaseEvent, EventType, RunAgentInput } from "@ag-ui/core";
+import { AbstractAgent } from "@/agent";
+import { Middleware } from "@/middleware";
+import { enforceEvents, enforceOutgoingInput, isRecognizedEvent } from "../enforce";
+import { stripUnknown } from "../strip";
+import { EventSchema } from "@ag-ui/core/schemas";
+
+class MemoryAgent extends AbstractAgent {
+  constructor(private events: BaseEvent[]) {
+    super({});
+  }
+  run(_input: RunAgentInput): Observable<BaseEvent> {
+    return of(...this.events);
+  }
+}
+
+/** Records every event type it sees, transforming nothing. */
+class ObservingMiddleware extends Middleware {
+  public seen: string[] = [];
+  override run(input: RunAgentInput, next: AbstractAgent): Observable<BaseEvent> {
+    return this.runNext(input, next).pipe(
+      map((event) => {
+        this.seen.push(String(event.type));
+        return event;
+      }),
+    );
+  }
+}
+
+const run = (threadId = "t1", runId = "r1") => ({ threadId, runId });
+const START = { type: EventType.RUN_STARTED, ...run() } as BaseEvent;
+const FINISH = { type: EventType.RUN_FINISHED, ...run() } as BaseEvent;
+
+let warnSpy: ReturnType<typeof vi.spyOn>;
+beforeEach(() => {
+  warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+});
+afterEach(() => {
+  warnSpy.mockRestore();
+});
+
+describe("the enforcement boundary (in-memory path)", () => {
+  it("unknown material reaches middleware, and subscribers never see it", async () => {
+    // The whole point of running enforcement AFTER middleware: the unknown
+    // event demonstrably arrives at a middleware, and demonstrably does not
+    // arrive at a subscriber.
+    const unknown = { type: "SOME_FUTURE_EVENT", payload: 1 } as unknown as BaseEvent;
+    const agent = new MemoryAgent([START, unknown, FINISH]);
+    const observer = new ObservingMiddleware();
+    agent.use(observer);
+    const subscriberSaw: string[] = [];
+    agent.subscribe({
+      onEvent: ({ event }) => {
+        subscriberSaw.push(String(event.type));
+      },
+    });
+
+    await agent.runAgent({ runId: "r1" });
+
+    expect(observer.seen).toContain("SOME_FUTURE_EVENT");
+    expect(subscriberSaw).not.toContain("SOME_FUTURE_EVENT");
+    expect(
+      warnSpy.mock.calls.some((c: unknown[]) => String(c[0]).includes("SOME_FUTURE_EVENT")),
+    ).toBe(true);
+  });
+
+  it("strips unknown properties with a warning before subscribers see them", async () => {
+    const decorated = {
+      type: EventType.STEP_STARTED,
+      stepName: "plan",
+      xVendorExtra: { secret: 1 },
+    } as unknown as BaseEvent;
+    const stepFinished = { type: EventType.STEP_FINISHED, stepName: "plan" } as BaseEvent;
+    const agent = new MemoryAgent([START, decorated, stepFinished, FINISH]);
+    const seen: BaseEvent[] = [];
+    agent.subscribe({
+      onEvent: ({ event }) => {
+        seen.push(event);
+      },
+    });
+
+    await agent.runAgent({ runId: "r1" });
+
+    const step = seen.find((event) => event.type === EventType.STEP_STARTED)!;
+    expect(step).toBeDefined();
+    expect("xVendorExtra" in step).toBe(false);
+    expect(warnSpy.mock.calls.some((c: unknown[]) => String(c[0]).includes("/xVendorExtra"))).toBe(
+      true,
+    );
+  });
+
+  it("a malformed value on a known field is fatal", async () => {
+    const malformed = {
+      type: EventType.STEP_STARTED,
+      stepName: 42, // wrong type on a described field: never repaired
+    } as unknown as BaseEvent;
+    const agent = new MemoryAgent([START, malformed, FINISH]);
+
+    await expect(agent.runAgent({ runId: "r1" })).rejects.toThrow();
+  });
+});
+
+describe("enforceEvents (unit)", () => {
+  it("drops an unrecognised event and keeps the stream alive", async () => {
+    const events = [START, { type: "NOPE" } as unknown as BaseEvent, FINISH];
+    const out = await lastValueFrom(enforceEvents()(of(...events)).pipe(toArray()));
+    expect(out.map((event) => event.type)).toEqual([EventType.RUN_STARTED, EventType.RUN_FINISHED]);
+  });
+
+  it("removes an unrecognised union member non-fatally", async () => {
+    // A retired content-part shape nothing translated: the part is removed
+    // (with a warning), the message survives, the event validates.
+    const snapshot = {
+      type: EventType.MESSAGES_SNAPSHOT,
+      messages: [
+        {
+          id: "u1",
+          role: "user",
+          content: [
+            { type: "text", text: "hi" },
+            { type: "hologram", beam: "☄" },
+          ],
+        },
+      ],
+    } as unknown as BaseEvent;
+    const out = await lastValueFrom(enforceEvents()(of(snapshot)).pipe(toArray()));
+    const message = (out[0] as unknown as { messages: Array<{ content: unknown[] }> }).messages[0];
+    expect(message.content).toEqual([{ type: "text", text: "hi" }]);
+    expect(
+      warnSpy.mock.calls.some((c: unknown[]) => String(c[0]).includes("/messages/0/content/1")),
+    ).toBe(true);
+  });
+
+  it("leaves the open-by-key positions untouched, null values included", async () => {
+    const event = {
+      type: EventType.STEP_STARTED,
+      stepName: "plan",
+      metadata: { finishReason: null, nested: { deep: [1, null] } },
+    } as unknown as BaseEvent;
+    const out = await lastValueFrom(enforceEvents()(of(event)).pipe(toArray()));
+    expect((out[0] as { metadata: unknown }).metadata).toEqual({
+      finishReason: null,
+      nested: { deep: [1, null] },
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("enforceEvents (nested required union member)", () => {
+  it("cascades the drop instead of leaving an invalid husk", async () => {
+    // An image part whose SOURCE kind is unknown: the source is required, so
+    // stripping just the source would leave a part the validator rejects
+    // fatally. The drop cascades — the whole part is removed, the message
+    // survives, nothing is fatal.
+    const snapshot = {
+      type: EventType.MESSAGES_SNAPSHOT,
+      messages: [
+        {
+          id: "u1",
+          role: "user",
+          content: [
+            { type: "text", text: "hi" },
+            { type: "image", source: { type: "quantum-link", value: "?" } },
+          ],
+        },
+      ],
+    } as unknown as BaseEvent;
+    const out = await lastValueFrom(enforceEvents()(of(snapshot)).pipe(toArray()));
+    const message = (out[0] as unknown as { messages: Array<{ content: unknown[] }> }).messages[0];
+    expect(message.content).toEqual([{ type: "text", text: "hi" }]);
+  });
+});
+
+describe("isRecognizedEvent", () => {
+  it("narrows to the known set", () => {
+    expect(isRecognizedEvent(START)).toBe(true);
+    expect(isRecognizedEvent({ type: "MYSTERY" })).toBe(false);
+  });
+});
+
+describe("stripUnknown (unit)", () => {
+  it("reports the path of everything it removes", () => {
+    const schema = EventSchema.options.find(
+      (option) =>
+        (option as unknown as { shape: { type: { value: string } } }).shape.type.value ===
+        EventType.STEP_STARTED,
+    )!;
+    const { value, stripped } = stripUnknown(
+      { type: EventType.STEP_STARTED, stepName: "plan", extra: 1 },
+      schema as never,
+    );
+    expect(stripped).toEqual(["/extra"]);
+    expect(value).toEqual({ type: EventType.STEP_STARTED, stepName: "plan" });
+  });
+});
+
+describe("enforceOutgoingInput", () => {
+  it("strips unknown material from the outgoing input with a warning", () => {
+    const input = {
+      threadId: "t1",
+      runId: "r1",
+      messages: [],
+      forwardedProps: { anything: { goes: true } },
+      xInternalBookkeeping: 1,
+    } as unknown as RunAgentInput;
+    const out = enforceOutgoingInput(input);
+    expect("xInternalBookkeeping" in out).toBe(false);
+    // The opaque positions stay whole.
+    expect(out.forwardedProps).toEqual({ anything: { goes: true } });
+    expect(
+      warnSpy.mock.calls.some((c: unknown[]) => String(c[0]).includes("/xInternalBookkeeping")),
+    ).toBe(true);
+  });
+
+  it("a malformed known field is fatal before transmission", () => {
+    const input = { threadId: 5, runId: "r1", messages: [] } as unknown as RunAgentInput;
+    expect(() => enforceOutgoingInput(input)).toThrow();
+  });
+
+  it("fails the run through its error handling, never synchronously", async () => {
+    // A fatal outgoing input must travel the run's error path — a throw
+    // during pipeline construction would also reject the (async) runAgent
+    // promise, so the rejection alone proves nothing. What distinguishes the
+    // paths is the lifecycle: catchError feeds onRunFailed, finalisation
+    // resolves the completion machinery, and the agent is reusable after.
+    const { HttpAgent } = await import("@/agent/http");
+    const agent = new HttpAgent({ url: "https://example.test/agent" });
+    const failures: unknown[] = [];
+    agent.subscribe({
+      onRunFailed: (params) => {
+        failures.push(params.error);
+      },
+    });
+    await expect(
+      agent.runAgent({ forwardedProps: undefined, runId: 5 as unknown as string }),
+    ).rejects.toThrow();
+    expect(failures).toHaveLength(1);
+    expect(agent.isRunning).toBe(false);
+  });
+});
