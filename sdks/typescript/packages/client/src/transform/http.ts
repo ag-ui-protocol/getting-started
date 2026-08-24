@@ -1,4 +1,7 @@
-import { BaseEvent, EventSchemas } from "@ag-ui/core";
+import { BaseEvent } from "@ag-ui/core";
+// Runtime validation comes from the schemas subpath: the generated union is
+// the single source of what the protocol accepts.
+import { EventSchema as EventSchemas } from "@ag-ui/core/schemas";
 import { Subject, ReplaySubject, Observable } from "rxjs";
 import { HttpEvent, HttpEventType } from "../run/http-request";
 import { parseSSEStream } from "./sse";

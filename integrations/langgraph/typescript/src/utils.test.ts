@@ -8,7 +8,7 @@ import {
   Message,
   UserMessage,
   TextInputContent,
-  BinaryInputContent,
+  InputContent,
   ImageInputContent,
   AudioInputContent,
   VideoInputContent,
@@ -22,6 +22,17 @@ import {
 import { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage } from "@langchain/core/messages";
 import { aguiMessagesToLangChain, langchainMessagesToAgui, resolveReasoningContent } from "./utils";
+
+// The legacy binary part left @ag-ui/core in 1.0; this boundary still reads
+// it (see utils.ts), so the tests type it locally.
+interface BinaryInputContent {
+  type: "binary";
+  mimeType: string;
+  id?: string;
+  url?: string;
+  data?: string;
+  filename?: string;
+}
 
 describe("Multimodal Message Conversion", () => {
   describe("aguiMessagesToLangChain", () => {
@@ -251,7 +262,7 @@ describe("Multimodal Message Conversion", () => {
             mimeType: "application/pdf",
             url: "https://example.com/legacy.pdf",
             filename: "legacy.pdf",
-          } as BinaryInputContent,
+          } as BinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -435,7 +446,7 @@ describe("Multimodal Message Conversion", () => {
               mimeType: "application/pdf",
               data: "JVBERi0xLjQK",
               filename: "",
-            } as BinaryInputContent,
+            } as BinaryInputContent as unknown as InputContent,
           ],
         } as UserMessage,
       ])[0].content as Array<any>;
@@ -495,7 +506,7 @@ describe("Multimodal Message Conversion", () => {
             mimeType: "application/pdf",
             data: "JVBERi0xLjQK",
             filename: "legacy-invoice.pdf",
-          } as BinaryInputContent,
+          } as BinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -521,7 +532,7 @@ describe("Multimodal Message Conversion", () => {
             type: "binary",
             mimeType: "image/jpeg",
             url: "https://example.com/photo.jpg",
-          } as BinaryInputContent,
+          } as BinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -543,7 +554,7 @@ describe("Multimodal Message Conversion", () => {
             type: "binary",
             mimeType: "image/png",
             data: "iVBORw0KGgoAAAANSUhEUgAAAAUA",
-          } as BinaryInputContent,
+          } as BinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -806,7 +817,7 @@ describe("Multimodal Message Conversion", () => {
             type: "binary",
             mimeType: "image/jpeg",
             id: "img-123",
-          } as BinaryInputContent,
+          } as BinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -858,7 +869,7 @@ describe("Multimodal Message Conversion", () => {
             type: "binary",
             mimeType: "image/jpeg",
             // No url, data, or id
-          } as BinaryInputContent,
+          } as BinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -1962,7 +1973,7 @@ describe("Multimodal Message Conversion", () => {
             mimeType: "application/pdf",
             data: "JVBERi0xLjQK",
             filename: "legacy-invoice.pdf",
-          } as BinaryInputContent,
+          } as BinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -1987,7 +1998,7 @@ describe("Multimodal Message Conversion", () => {
             type: "binary",
             mimeType: "audio/wav",
             data: "SGVsbG8=",
-          } as BinaryInputContent,
+          } as BinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -2056,7 +2067,7 @@ describe("Multimodal Message Conversion", () => {
       const aguiMessage: UserMessage = {
         id: "boundary-legacy-audio-mime",
         role: "user",
-        content: [{ type: "binary", mimeType, data: "SGVsbG8=" } as BinaryInputContent],
+        content: [{ type: "binary", mimeType, data: "SGVsbG8=" } as BinaryInputContent as unknown as InputContent],
       };
 
       const emitted = emittedBlocks(aguiMessage);
@@ -2136,7 +2147,7 @@ describe("Multimodal Message Conversion", () => {
         const aguiMessage: UserMessage = {
           id: "boundary-legacy-audio-unsupported",
           role: "user",
-          content: [{ type: "binary", mimeType, data: "SGVsbG8=" } as BinaryInputContent],
+          content: [{ type: "binary", mimeType, data: "SGVsbG8=" } as BinaryInputContent as unknown as InputContent],
         };
 
         const emitted = emittedBlocks(aguiMessage);

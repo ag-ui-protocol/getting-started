@@ -10,7 +10,7 @@ import {
   StepStartedEventSchema,
   CustomEventSchema,
   EventType,
-} from "../events";
+} from "../index";
 
 describe("event subagentRunId attribution", () => {
   it("accepts subagentRunId on creation events", () => {

@@ -1,4 +1,4 @@
-import { TokenUsage } from "./events";
+import type { TokenUsage } from "./generated/types";
 
 /**
  * Accept a value only if it is a real, finite number.

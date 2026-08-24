@@ -1,5 +1,5 @@
-import { z } from "zod";
-import { ToolSchema } from "./types";
+import { z } from "zod/v4";
+import { ToolSchema } from "./generated/schemas";
 
 /** Describes a sub-agent that can be invoked by a parent agent. */
 export const SubAgentInfoSchema = z.object({
@@ -28,7 +28,7 @@ export const IdentityCapabilitiesSchema = z.object({
   /** URL to the agent's documentation or homepage. */
   documentationUrl: z.string().optional(),
   /** Arbitrary key-value pairs for integration-specific identity info. */
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 /**
@@ -239,7 +239,7 @@ export const AgentCapabilitiesSchema = z.object({
   /** Human-in-the-loop support (approvals, interventions, feedback). */
   humanInTheLoop: HumanInTheLoopCapabilitiesSchema.optional(),
   /** Integration-specific capabilities not covered by the standard categories. */
-  custom: z.record(z.unknown()).optional(),
+  custom: z.record(z.string(), z.unknown()).optional(),
 });
 
 /** Describes a sub-agent that can be invoked by a parent agent. */

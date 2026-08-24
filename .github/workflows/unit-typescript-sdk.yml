@@ -109,6 +109,13 @@ jobs:
       - name: Run tests
         run: pnpm run test
 
+      # @ag-ui/core declares zod ^3.25.76 but all its runtime code uses the
+      # zod/v4 subpath API, which both supported majors ship. The matrix packs
+      # the built package and consumes it under zod 3 and zod 4, through
+      # require() and import, so an API drift on either major fails here.
+      - name: Verify both zod majors (both module formats)
+        run: node sdks/typescript/packages/core/scripts/verify-zod-matrix.mjs
+
   # The lane above runs against the SDK version the lockfile pins. The
   # aws-strands package declares an open-ended `@strands-agents/sdk` peer, and
   # consumers install it prebuilt, so they can be running a newer SDK than the

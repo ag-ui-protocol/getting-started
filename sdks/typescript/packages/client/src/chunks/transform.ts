@@ -213,11 +213,6 @@ export const transformChunks =
           case EventType.CUSTOM:
           case EventType.STEP_STARTED:
           case EventType.STEP_FINISHED:
-          case EventType.THINKING_START:
-          case EventType.THINKING_END:
-          case EventType.THINKING_TEXT_MESSAGE_START:
-          case EventType.THINKING_TEXT_MESSAGE_CONTENT:
-          case EventType.THINKING_TEXT_MESSAGE_END:
           case EventType.REASONING_START:
           case EventType.REASONING_MESSAGE_START:
           case EventType.REASONING_MESSAGE_CONTENT:
@@ -548,8 +543,14 @@ export const transformChunks =
             return reasoningMessageResult;
           }
         }
+        // Not a chunk event: a legacy type a compat middleware still
+        // translates, a future one, or simply an event this stage has no
+        // assembly to do for. Not this stage's to judge — it passes through
+        // untouched and downstream layers decide. Dropping it here would
+        // starve the middlewares, and closing lanes would end messages an
+        // unrelated event never spoke about.
         const _exhaustiveCheck: never = event.type;
-        return [];
+        return [event];
       }),
       finalize(() => {
         // Drops any lane still mid-assembly when the source completes. The END events

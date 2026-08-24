@@ -1342,6 +1342,21 @@ function convertLangchainMultimodalToAgui(content: (IncomingMediaBlock | string)
 }
 
 /**
+ * The legacy binary content part, which left `@ag-ui/core` in 1.0 (the
+ * 0.0.47 client middleware converts it on modern pipelines). Old producers
+ * still send it straight to servers, so this boundary keeps reading it —
+ * typed locally, because the protocol no longer knows the shape.
+ */
+interface LegacyBinaryInputContent {
+  type: "binary";
+  mimeType: string;
+  id?: string;
+  url?: string;
+  data?: string;
+  filename?: string;
+}
+
+/**
  * Convert AG-UI multimodal content to LangChain's format.
  *
  * Malformed input is handled per THE MALFORMED-INPUT CONTRACT, documented above
@@ -1378,7 +1393,9 @@ function convertLangchainMultimodalToAgui(content: (IncomingMediaBlock | string)
  * as the `audio/mp3` spelling the provider's enum actually lists. See
  * {@link OPENAI_AUDIO_MIME_TYPES}.
  */
-function convertAguiMultimodalToLangchain(content: InputContent[]): LangchainContentBlock[] {
+function convertAguiMultimodalToLangchain(
+  content: Array<InputContent | LegacyBinaryInputContent>,
+): LangchainContentBlock[] {
   const langchainContent: LangchainContentBlock[] = [];
 
   for (const item of content) {

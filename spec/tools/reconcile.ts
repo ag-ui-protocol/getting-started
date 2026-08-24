@@ -66,7 +66,11 @@ function parseTypeScript(): Model {
   const raw = new Map<string, { parent?: string; fields: Shape }>();
   const read = (file: string): string =>
     readFileSync(join(REPO, "sdks/typescript/packages/core/src", file), "utf8");
-  const sources = ["events.ts", "types.ts"].map((file) => ({
+  // Since PNI-212 the TypeScript SDK's protocol source IS the generated
+  // schemas, so this column now verifies the generated output against the
+  // schema rather than revealing hand-written divergence. Reading it anyway,
+  // rather than declaring agreement by fiat: a generator bug would show here.
+  const sources = ["generated/schemas.ts"].map((file) => ({
     file,
     text: read(file),
   }));
@@ -76,16 +80,8 @@ function parseTypeScript(): Model {
   // optional, so the alias has to be substituted before reading it — otherwise
   // `snapshot: StateSchema` looks mandatory when z.any() means the opposite.
   //
-  // metadata.ts is read too, and only for its aliases: `OptionalMetadataSchema`
-  // is where every metadata field's optionality and null tolerance is actually
-  // declared. Read rather than assumed, because that declaration is changing —
-  // the null tolerance is being retired — and a table stating what the tool was
-  // told once is worse than no table.
   const aliases = new Map<string, string>();
-  for (const text of [
-    ...sources.map((source) => source.text),
-    read("metadata.ts"),
-  ]) {
+  for (const text of sources.map((source) => source.text)) {
     // `[^;{]` stops at an object literal, so `z.object({...})` definitions are
     // not mistaken for aliases while multi-line chains like
     // `MetadataSchema.nullable().optional().transform(...)` still resolve.
@@ -103,10 +99,10 @@ function parseTypeScript(): Model {
   };
 
   for (const { text: source } of sources) {
-    // export const XSchema = z.object({...})            -> no parent
-    // export const XSchema = BaseEventSchema.extend({...}) -> parent BaseEvent
+    // export const XSchema = z.looseObject({...}) — the generated schemas
+    // flatten their mixins, so there is no .extend chain to resolve.
     const blocks = source.matchAll(
-      /export const (\w+)Schema = (?:(\w+)Schema\s*\.extend|z\s*\.object)\(\{([\s\S]*?)\n\s*\}\)/g,
+      /export const (\w+)Schema = (?:(\w+)Schema\s*\.extend|z\s*\.looseObject)\(\{([\s\S]*?)\n\s*\}\)/g,
     );
     for (const [, name, parent, body] of blocks) {
       const fields: Shape = new Map();
@@ -122,9 +118,11 @@ function parseTypeScript(): Model {
           declaration.includes(".optional()") ||
           declaration.includes(".default(") ||
           // z.any() accepts undefined, so its key is optional whether or not
-          // anyone wrote .optional() — the single most common reason a field is
-          // mandatory in Python and not in TypeScript.
-          /^z\.any\(\)/.test(declaration.trim());
+          // anyone wrote .optional() — unless the generated required-any
+          // guard follows: .refine((value) => value !== undefined) is exactly
+          // how the generator says "the key must be present".
+          (/^z\.any\(\)/.test(declaration.trim()) &&
+            !declaration.includes("value !== undefined"));
         fields.set(field, {
           presence: optional ? "optional" : "required",
           nullable: declaration.includes(".nullable()"),

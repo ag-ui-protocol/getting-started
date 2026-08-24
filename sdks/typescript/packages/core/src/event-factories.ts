@@ -1,118 +1,107 @@
-import { z } from "zod";
-import type { Interrupt } from "./types";
-import {
+import type { z } from "zod/v4";
+import { EventType } from "./generated/types";
+import type {
   ActivityDeltaEvent,
-  ActivityDeltaEventProps,
-  ActivityDeltaEventSchema,
   ActivitySnapshotEvent,
-  ActivitySnapshotEventProps,
-  ActivitySnapshotEventSchema,
   CustomEvent,
-  CustomEventProps,
-  CustomEventSchema,
-  EventType,
+  Interrupt,
   MessagesSnapshotEvent,
-  MessagesSnapshotEventProps,
-  MessagesSnapshotEventSchema,
   RawEvent,
-  RawEventProps,
-  RawEventSchema,
-  RunErrorEvent,
-  RunErrorEventProps,
-  RunErrorEventSchema,
-  RunFinishedEvent,
-  RunFinishedEventProps,
-  RunFinishedEventSchema,
-  RunStartedEvent,
-  RunStartedEventProps,
-  RunStartedEventSchema,
-  StateDeltaEvent,
-  StateDeltaEventProps,
-  StateDeltaEventSchema,
-  StateSnapshotEvent,
-  StateSnapshotEventProps,
-  StateSnapshotEventSchema,
-  StepFinishedEvent,
-  StepFinishedEventProps,
-  StepFinishedEventSchema,
-  StepStartedEvent,
-  StepStartedEventProps,
-  StepStartedEventSchema,
-  TextMessageChunkEvent,
-  TextMessageChunkEventProps,
-  TextMessageChunkEventSchema,
-  TextMessageContentEvent,
-  TextMessageContentEventProps,
-  TextMessageContentEventSchema,
-  TextMessageEndEvent,
-  TextMessageEndEventProps,
-  TextMessageEndEventSchema,
-  TextMessageStartEvent,
-  TextMessageStartEventProps,
-  TextMessageStartEventSchema,
-  ThinkingEndEvent,
-  ThinkingEndEventProps,
-  ThinkingEndEventSchema,
-  ThinkingStartEvent,
-  ThinkingStartEventProps,
-  ThinkingStartEventSchema,
-  ThinkingTextMessageContentEvent,
-  ThinkingTextMessageContentEventProps,
-  ThinkingTextMessageContentEventSchema,
-  ThinkingTextMessageEndEvent,
-  ThinkingTextMessageEndEventProps,
-  ThinkingTextMessageEndEventSchema,
-  ThinkingTextMessageStartEvent,
-  ThinkingTextMessageStartEventProps,
-  ThinkingTextMessageStartEventSchema,
-  ToolCallArgsEvent,
-  ToolCallArgsEventProps,
-  ToolCallArgsEventSchema,
-  ToolCallChunkEvent,
-  ToolCallChunkEventProps,
-  ToolCallChunkEventSchema,
-  ToolCallEndEvent,
-  ToolCallEndEventProps,
-  ToolCallEndEventSchema,
-  ToolCallResultEvent,
-  ToolCallResultEventProps,
-  ToolCallResultEventSchema,
-  ToolCallStartEvent,
-  ToolCallStartEventProps,
-  ToolCallStartEventSchema,
-  ReasoningStartEvent,
-  ReasoningStartEventProps,
-  ReasoningStartEventSchema,
-  ReasoningMessageStartEvent,
-  ReasoningMessageStartEventProps,
-  ReasoningMessageStartEventSchema,
-  ReasoningMessageContentEvent,
-  ReasoningMessageContentEventProps,
-  ReasoningMessageContentEventSchema,
-  ReasoningMessageEndEvent,
-  ReasoningMessageEndEventProps,
-  ReasoningMessageEndEventSchema,
-  ReasoningMessageChunkEvent,
-  ReasoningMessageChunkEventProps,
-  ReasoningMessageChunkEventSchema,
-  ReasoningEndEvent,
-  ReasoningEndEventProps,
-  ReasoningEndEventSchema,
   ReasoningEncryptedValueEvent,
-  ReasoningEncryptedValueEventProps,
-  ReasoningEncryptedValueEventSchema,
-  SubagentStartedEvent,
-  SubagentStartedEventProps,
-  SubagentStartedEventSchema,
-  SubagentFinishedEvent,
-  SubagentFinishedEventProps,
-  SubagentFinishedEventSchema,
+  ReasoningEndEvent,
+  ReasoningMessageChunkEvent,
+  ReasoningMessageContentEvent,
+  ReasoningMessageEndEvent,
+  ReasoningMessageStartEvent,
+  ReasoningStartEvent,
+  RunErrorEvent,
+  RunFinishedEvent,
+  RunStartedEvent,
+  StateDeltaEvent,
+  StateSnapshotEvent,
+  StepFinishedEvent,
+  StepStartedEvent,
   SubagentErrorEvent,
-  SubagentErrorEventProps,
+  SubagentFinishedEvent,
+  SubagentStartedEvent,
+  TextMessageChunkEvent,
+  TextMessageContentEvent,
+  TextMessageEndEvent,
+  TextMessageStartEvent,
+  ToolCallArgsEvent,
+  ToolCallChunkEvent,
+  ToolCallEndEvent,
+  ToolCallResultEvent,
+  ToolCallStartEvent,
+} from "./generated/types";
+import {
+  ActivityDeltaEventSchema,
+  ActivitySnapshotEventSchema,
+  CustomEventSchema,
+  MessagesSnapshotEventSchema,
+  RawEventSchema,
+  ReasoningEncryptedValueEventSchema,
+  ReasoningEndEventSchema,
+  ReasoningMessageChunkEventSchema,
+  ReasoningMessageContentEventSchema,
+  ReasoningMessageEndEventSchema,
+  ReasoningMessageStartEventSchema,
+  ReasoningStartEventSchema,
+  RunErrorEventSchema,
+  RunFinishedEventSchema,
+  RunStartedEventSchema,
+  StateDeltaEventSchema,
+  StateSnapshotEventSchema,
+  StepFinishedEventSchema,
+  StepStartedEventSchema,
   SubagentErrorEventSchema,
-} from "./events";
+  SubagentFinishedEventSchema,
+  SubagentStartedEventSchema,
+  TextMessageChunkEventSchema,
+  TextMessageContentEventSchema,
+  TextMessageEndEventSchema,
+  TextMessageStartEventSchema,
+  ToolCallArgsEventSchema,
+  ToolCallChunkEventSchema,
+  ToolCallEndEventSchema,
+  ToolCallResultEventSchema,
+  ToolCallStartEventSchema,
+} from "./generated/schemas";
+import type {
+  ActivityDeltaEventProps,
+  ActivitySnapshotEventProps,
+  CustomEventProps,
+  MessagesSnapshotEventProps,
+  RawEventProps,
+  ReasoningEncryptedValueEventProps,
+  ReasoningEndEventProps,
+  ReasoningMessageChunkEventProps,
+  ReasoningMessageContentEventProps,
+  ReasoningMessageEndEventProps,
+  ReasoningMessageStartEventProps,
+  ReasoningStartEventProps,
+  RunErrorEventProps,
+  RunFinishedEventProps,
+  RunStartedEventProps,
+  StateDeltaEventProps,
+  StateSnapshotEventProps,
+  StepFinishedEventProps,
+  StepStartedEventProps,
+  SubagentErrorEventProps,
+  SubagentFinishedEventProps,
+  SubagentStartedEventProps,
+  TextMessageChunkEventProps,
+  TextMessageContentEventProps,
+  TextMessageEndEventProps,
+  TextMessageStartEventProps,
+  ToolCallArgsEventProps,
+  ToolCallChunkEventProps,
+  ToolCallEndEventProps,
+  ToolCallResultEventProps,
+  ToolCallStartEventProps,
+} from "./compat";
 
-const buildEvent = <Schema extends z.ZodTypeAny>(
+const buildEvent = <Schema extends z.ZodType>(
   eventType: EventType,
   schema: Schema,
   props: Omit<z.input<Schema>, "type">,
@@ -153,30 +142,6 @@ export const createTextMessageChunkEvent = (
   buildEvent(EventType.TEXT_MESSAGE_CHUNK, TextMessageChunkEventSchema, props);
 
 /**
- * Creates a THINKING_TEXT_MESSAGE_START event.
- */
-export const createThinkingTextMessageStartEvent = (
-  props: ThinkingTextMessageStartEventProps,
-): ThinkingTextMessageStartEvent =>
-  buildEvent(EventType.THINKING_TEXT_MESSAGE_START, ThinkingTextMessageStartEventSchema, props);
-
-/**
- * Creates a THINKING_TEXT_MESSAGE_CONTENT event.
- */
-export const createThinkingTextMessageContentEvent = (
-  props: ThinkingTextMessageContentEventProps,
-): ThinkingTextMessageContentEvent =>
-  buildEvent(EventType.THINKING_TEXT_MESSAGE_CONTENT, ThinkingTextMessageContentEventSchema, props);
-
-/**
- * Creates a THINKING_TEXT_MESSAGE_END event.
- */
-export const createThinkingTextMessageEndEvent = (
-  props: ThinkingTextMessageEndEventProps,
-): ThinkingTextMessageEndEvent =>
-  buildEvent(EventType.THINKING_TEXT_MESSAGE_END, ThinkingTextMessageEndEventSchema, props);
-
-/**
  * Creates a TOOL_CALL_START event.
  */
 export const createToolCallStartEvent = (props: ToolCallStartEventProps): ToolCallStartEvent =>
@@ -205,18 +170,6 @@ export const createToolCallChunkEvent = (props: ToolCallChunkEventProps): ToolCa
  */
 export const createToolCallResultEvent = (props: ToolCallResultEventProps): ToolCallResultEvent =>
   buildEvent(EventType.TOOL_CALL_RESULT, ToolCallResultEventSchema, props);
-
-/**
- * Creates a THINKING_START event.
- */
-export const createThinkingStartEvent = (props: ThinkingStartEventProps): ThinkingStartEvent =>
-  buildEvent(EventType.THINKING_START, ThinkingStartEventSchema, props);
-
-/**
- * Creates a THINKING_END event.
- */
-export const createThinkingEndEvent = (props: ThinkingEndEventProps): ThinkingEndEvent =>
-  buildEvent(EventType.THINKING_END, ThinkingEndEventSchema, props);
 
 /**
  * Creates a STATE_SNAPSHOT event.

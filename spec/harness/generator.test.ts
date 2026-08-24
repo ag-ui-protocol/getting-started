@@ -110,44 +110,62 @@ describe("the generator", () => {
     expect(model.mixins).toEqual(["Attributable", "BaseEvent", "BaseMessage"]);
   });
 
-  it("keeps the generated directories out of each package's reachable surface", () => {
-    // index.ts (TypeScript) and the ag_ui package modules (Python) are the
-    // public entries; nothing outside the generated directories referencing
-    // them means nothing exports them. Not by import syntax — by path: every
-    // route to a module (from, import(), import-type queries, side-effect
-    // imports, require, template literals, Python imports) has to name the
-    // module's path, so the scan flags any reference instead of enumerating
-    // syntaxes.
-    const scans: Array<[string, RegExp, RegExp]> = [
-      [
-        join(TS_OUTPUT_DIR, ".."),
-        /\.(ts|tsx)$/,
-        /(\.\/|\.\.\/|src\/|@\/)generated\b/,
-      ],
-      [join(PY_OUTPUT_DIR, ".."), /\.py$/, /_generated\b/],
-    ];
-    const generatedDirs = new Set([TS_OUTPUT_DIR, PY_OUTPUT_DIR]);
+  it("keeps the generated Python directory out of the package's reachable surface", () => {
+    // Python has not moved onto the generated models yet: the ag_ui package
+    // modules are the public entries, and nothing outside the generated
+    // directory referencing them means nothing exports them. Not by import
+    // syntax — by path: every route to a module has to name the module's
+    // path, so the scan flags any reference instead of enumerating syntaxes.
+    // (TypeScript inverted with PNI-212: its generated directory IS the
+    // internal source, gated by the surface test below instead.)
+    const root = join(PY_OUTPUT_DIR, "..");
+    const pattern = /_generated\b/;
     const offenders: string[] = [];
-    for (const [root, extension, pattern] of scans) {
-      const walk = (dir: string): void => {
-        for (const entry of readdirSync(dir, { withFileTypes: true })) {
-          const path = join(dir, entry.name);
-          if (entry.isDirectory()) {
-            if (!generatedDirs.has(path) && entry.name !== "__pycache__") {
-              walk(path);
-            }
-            continue;
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (path !== PY_OUTPUT_DIR && entry.name !== "__pycache__") {
+            walk(path);
           }
-          if (!extension.test(entry.name)) continue;
-          if (pattern.test(readFileSync(path, "utf8"))) {
-            offenders.push(relative(root, path));
-          }
+          continue;
         }
-      };
-      expect(existsSync(root)).toBe(true);
-      walk(root);
-    }
+        if (!/\.py$/.test(entry.name)) continue;
+        if (pattern.test(readFileSync(path, "utf8"))) {
+          offenders.push(relative(root, path));
+        }
+      }
+    };
+    expect(existsSync(root)).toBe(true);
+    walk(root);
     expect(offenders).toEqual([]);
+  });
+
+  it("keeps the generated TypeScript as the only protocol source in core", () => {
+    // The inverse gate since PNI-212: the generated directory is the internal
+    // source, the package entry must actually consume it, and the old
+    // hand-written duplicate homes must not quietly return.
+    const srcDir = join(TS_OUTPUT_DIR, "..");
+    const index = readFileSync(join(srcDir, "index.ts"), "utf8");
+    expect(index).toContain('"./generated/types"');
+    expect(index).toContain('"./generated/schemas"');
+    for (const retired of ["events.ts", "types.ts"]) {
+      expect(
+        existsSync(join(srcDir, retired)),
+        `${retired} was retired by PNI-212; protocol semantics live in generated/`,
+      ).toBe(false);
+    }
+    // No hand-written module may re-declare the protocol surface: looseObject
+    // is the generated validators' signature shape, and an EventType enum
+    // outside generated/ is a duplicate constant table.
+    for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
+      const content = readFileSync(join(srcDir, entry.name), "utf8");
+      expect(
+        /z\.looseObject|enum EventType/.test(content),
+        `${entry.name} re-declares protocol semantics that belong to generated/`,
+      ).toBe(false);
+    }
   });
 
   it("mentions the generated directory nowhere in the package manifest", () => {

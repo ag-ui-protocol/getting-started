@@ -6,7 +6,7 @@ import {
   type ToolCallStartEvent,
   type ToolCallStartEventProps,
   ToolCallStartEventSchema,
-} from "../events";
+} from "../index";
 
 describe("ToolCallStartEventSchema — parentMessageId is optional and back-compat", () => {
   it("parses an event with no parentMessageId", () => {
@@ -18,19 +18,18 @@ describe("ToolCallStartEventSchema — parentMessageId is optional and back-comp
     expect(parsed.parentMessageId).toBeUndefined();
   });
 
-  it("accepts an explicit `parentMessageId: null` and normalizes it to undefined", () => {
-    // Cross-language back-compat: the .NET Microsoft Agent Framework adapter
-    // (System.Text.Json) serializes the optional `parentMessageId` as JSON
-    // `null` rather than omitting it. Treating null as "field omitted" keeps
-    // .NET→TS wire interop working instead of aborting the run on the first
-    // tool call.
-    const parsed = ToolCallStartEventSchema.parse({
+  it("rejects an explicit `parentMessageId: null`", () => {
+    // The 1.0 schema rejects the null. The .NET Microsoft Agent Framework
+    // adapter (System.Text.Json) serializes the optional field as JSON null,
+    // so the tolerance still exists — but as a middleware conversion with an
+    // expiry (PNI-207), not as schema semantics.
+    const result = ToolCallStartEventSchema.safeParse({
       type: EventType.TOOL_CALL_START,
       toolCallId: "tc-1",
       toolCallName: "get_weather",
       parentMessageId: null,
     });
-    expect(parsed.parentMessageId).toBeUndefined();
+    expect(result.success).toBe(false);
   });
 
   it("preserves a real string parentMessageId", () => {
@@ -43,7 +42,10 @@ describe("ToolCallStartEventSchema — parentMessageId is optional and back-comp
     expect(parsed.parentMessageId).toBe("msg-1");
   });
 
-  it("normalizes `parentMessageId: null` through the EventSchemas union", () => {
+  // Skipped until PNI-205/PNI-207 land: the tolerance moves from the schema
+  // into a middleware that runs before enforcement. Re-enable there, asserting
+  // the middleware conversion instead of schema normalisation.
+  it.skip("normalizes `parentMessageId: null` through the EventSchemas union", () => {
     // EventSchemas is what the HTTP transport validates each streamed event
     // against — the exact path that surfaced the null in the wild.
     const parsed = EventSchemas.parse({
@@ -59,14 +61,16 @@ describe("ToolCallStartEventSchema — parentMessageId is optional and back-comp
   });
 });
 
-describe("ToolCallChunkEventSchema — parentMessageId accepts null", () => {
-  it("accepts an explicit `parentMessageId: null` and normalizes it to undefined", () => {
-    const parsed = ToolCallChunkEventSchema.parse({
+describe("ToolCallChunkEventSchema — parentMessageId rejects null", () => {
+  it("rejects an explicit `parentMessageId: null`", () => {
+    // As on TOOL_CALL_START: the 1.0 schema rejects the null; the middleware
+    // conversion for legacy producers lands with PNI-207.
+    const result = ToolCallChunkEventSchema.safeParse({
       type: EventType.TOOL_CALL_CHUNK,
       toolCallId: "tc-1",
       parentMessageId: null,
     });
-    expect(parsed.parentMessageId).toBeUndefined();
+    expect(result.success).toBe(false);
   });
 });
 
@@ -86,12 +90,13 @@ describe("ToolCallStart — public type contract is not broken (compile-time)", 
     const read: string | undefined = consumerOmits.parentMessageId;
     expect(read).toBeUndefined();
 
-    // Construction/props type (`z.input`) only WIDENS — `null` is now accepted
-    // ALONGSIDE the previously-valid string and omitted forms. This is additive:
-    // every input that compiled before still compiles.
+    // Construction/props type: parentMessageId is an optional string. The
+    // pre-1.0 null-widening is gone — the schema rejects an explicit null at
+    // runtime (pinned above), so the type refusing it is the honest contract.
     const propsWithNull: ToolCallStartEventProps = {
       toolCallId: "tc-1",
       toolCallName: "get_weather",
+      // @ts-expect-error null no longer compiles as a parentMessageId
       parentMessageId: null,
     };
     const propsWithString: ToolCallStartEventProps = {

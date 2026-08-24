@@ -62,9 +62,22 @@ export type ClaudeAgentAdapterConfig = AgentConfig & Options & {
 };
 
 /**
- * Union of all AG-UI event types this adapter can emit.
+ * The extra attribution this adapter rides on every event. Not protocol
+ * fields: the tolerant validators keep unknown keys, and the strip-and-warn
+ * middleware owns dropping them — declared here so the decoration is a type,
+ * not a cast.
  */
-export type ProcessedEvent =
+type AdapterAttribution = {
+  threadId?: string;
+  runId?: string;
+};
+
+/**
+ * Union of all AG-UI event types this adapter can emit, each carrying the
+ * adapter's attribution fields.
+ */
+export type ProcessedEvent = AdapterAttribution &
+  (
   | RunStartedEvent
   | RunFinishedEvent
   | RunErrorEvent
@@ -83,4 +96,4 @@ export type ProcessedEvent =
   | ReasoningEncryptedValueEvent
   | StateSnapshotEvent
   | MessagesSnapshotEvent
-  | CustomEvent;
+  | CustomEvent);

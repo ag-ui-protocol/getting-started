@@ -39,10 +39,21 @@
     "tsdown": "^0.20.1",
     "typescript": "^5.8.2"
   },
+  "typesVersions": {
+    "*": {
+      "schemas": [
+        "./dist/schemas.d.ts"
+      ]
+    }
+  },
   "exports": {
     ".": {
       "require": "./dist/index.js",
       "import": "./dist/index.mjs"
+    },
+    "./schemas": {
+      "require": "./dist/schemas.js",
+      "import": "./dist/schemas.mjs"
     },
     "./package.json": "./package.json"
   }

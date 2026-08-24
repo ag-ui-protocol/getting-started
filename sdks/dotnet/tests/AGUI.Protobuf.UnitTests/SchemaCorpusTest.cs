@@ -111,7 +111,7 @@ public sealed class SchemaCorpusTest
         MaterialiseWireArrays(expected);
         Assert.True(
             JsonNode.DeepEquals(ToNode(expected), ToNode(decoded)),
-            $"{Path.GetFileName(path)}: binary round trip changed the event.\nexpected: {JsonSerializer.Serialize(expected, s_options)}\nactual:   {JsonSerializer.Serialize(decoded, s_options)}");
+            $"{anchor}/{Path.GetFileName(path)}: binary round trip changed the event.\nexpected: {JsonSerializer.Serialize(expected, s_options)}\nactual:   {JsonSerializer.Serialize(decoded, s_options)}");
     }
 
     [Theory]
@@ -130,20 +130,16 @@ public sealed class SchemaCorpusTest
         var bytes = File.ReadAllBytes(bytesPath);
         var decoded = AGUIProtobuf.Decode(bytes);
 
-        // The TS bytes carry the TS materialisation (its validation applies
-        // the schema-documented defaults); normalise the .NET expectation the
-        // same way before comparing.
+        // Since TypeScript moved onto the generated validators (which treat a
+        // schema default as documentation, not behaviour), its bytes carry no
+        // materialised defaults — the only remaining normalisation is the
+        // wire's absent-vs-empty blindness on the input arrays. Nested
+        // subagentRunId now rides the TS bytes (Message.10 / Interrupt.8);
+        // this runtime ignores those slots until #2350 gives the models a
+        // property, and the fixture-parsed expectation lacks them the same
+        // way, so the comparison stays symmetric.
         var expected = ParseFixture(path);
         MaterialiseWireArrays(expected);
-        if (expected is TextMessageStartEvent start && start.Role.Length == 0)
-        {
-            start.Role = "assistant";
-        }
-
-        if (expected is ActivitySnapshotEvent snapshot)
-        {
-            snapshot.Replace ??= true;
-        }
 
         Assert.True(
             JsonNode.DeepEquals(ToNode(expected), ToNode(decoded)),

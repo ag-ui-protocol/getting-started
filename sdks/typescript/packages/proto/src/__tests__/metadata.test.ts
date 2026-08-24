@@ -119,22 +119,12 @@ describe("tool call metadata over the binary transport", () => {
 
 describe("protobuf event coverage", () => {
   // Every schema event crosses the binary transport since the wire format is
-  // generated from the schema. The legacy THINKING_* aliases are the remaining
-  // exception: they predate the schema, have no wire message, and ride the
-  // JSON path only. Pinned so the documented scope cannot drift from reality.
-  const NOT_REPRESENTABLE = [
-    EventType.THINKING_START,
-    EventType.THINKING_END,
-    EventType.THINKING_TEXT_MESSAGE_START,
-    EventType.THINKING_TEXT_MESSAGE_CONTENT,
-    EventType.THINKING_TEXT_MESSAGE_END,
-  ];
-
-  it.each(NOT_REPRESENTABLE)("%s does not cross the binary transport", (type) => {
-    // These have no message in the wire format, so the event cannot travel —
-    // with or without metadata. Encoding yields an empty payload that decode
-    // then rejects.
-    const bytes = encode({ type, metadata: { a: 1 } } as any);
+  // generated from the schema. An event type the wire does not know (the
+  // schema can be ahead of a deployed peer, or the type can simply be junk)
+  // must not cross silently: encoding yields an empty payload that decode
+  // then rejects. Pinned so the documented scope cannot drift from reality.
+  it("an unknown event type does not cross the binary transport", () => {
+    const bytes = encode({ type: "NOT_A_WIRE_EVENT", metadata: { a: 1 } } as any);
     expect(bytes.length).toBe(0);
     expect(() => decode(bytes)).toThrow();
   });

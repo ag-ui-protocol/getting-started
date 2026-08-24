@@ -174,10 +174,23 @@ describe("Run Events and Misc Events", () => {
       expectRoundTripEquality(event);
     });
 
-    it("should handle CustomEvent without a value", () => {
+    it("rejects a CustomEvent without a value on decode", () => {
+      // The schema requires value (an explicit null is the way to say
+      // "nothing"), and the .NET decoder rejects the same bytes for the same
+      // reason. Encode falls back loudly; decode refuses to invent the field.
+      const event = {
+        type: EventType.CUSTOM,
+        name: "heartbeat",
+      } as unknown as CustomEvent;
+
+      expect(() => decode(encode(event))).toThrow();
+    });
+
+    it("round-trips a CustomEvent with an explicit null value", () => {
       const event: CustomEvent = {
         type: EventType.CUSTOM,
         name: "heartbeat",
+        value: null,
       };
 
       expectRoundTripEquality(event);
@@ -228,7 +241,7 @@ describe("Run Events and Misc Events", () => {
           threadId: "thread-basic",
           runId: "run-basic",
         },
-        { type: EventType.CUSTOM, name: "empty" },
+        { type: EventType.CUSTOM, name: "empty", value: null },
       ];
 
       for (const event of events) {
@@ -266,6 +279,7 @@ describe("Run Events and Misc Events", () => {
         {
           type: EventType.CUSTOM,
           name: "full_event",
+          value: { payload: true },
           timestamp: Date.now(),
           rawEvent: { original: "data", from: "external_system" },
         },

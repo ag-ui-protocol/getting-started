@@ -334,12 +334,13 @@ describe("parseProtoStream", () => {
       expect(operation.op).toEqual(stateDeltaEvent.delta[index].op);
       expect(operation.path).toEqual(stateDeltaEvent.delta[index].path);
 
-      if ("from" in operation) {
-        expect(operation.from).toEqual(stateDeltaEvent.delta[index].from);
+      const expected = stateDeltaEvent.delta[index];
+      if ("from" in operation && "from" in expected) {
+        expect(operation.from).toEqual(expected.from);
       }
 
-      if ("value" in operation) {
-        expect(operation.value).toEqual(stateDeltaEvent.delta[index].value);
+      if ("value" in operation && "value" in expected) {
+        expect(operation.value).toEqual(expected.value);
       }
     });
 

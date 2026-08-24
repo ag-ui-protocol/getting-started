@@ -26,10 +26,12 @@ describe("BackwardCompatibility_0_0_47", () => {
     middleware = new BackwardCompatibility_0_0_47();
   });
 
-  const createInput = (messages: RunAgentInput["messages"]): RunAgentInput => ({
+  // Legacy message shapes: the binary content part left the Message type in
+  // 1.0, and feeding it anyway is this suite's entire purpose.
+  const createInput = (messages: unknown[]): RunAgentInput => ({
     threadId: "thread-1",
     runId: "run-1",
-    messages,
+    messages: messages as RunAgentInput["messages"],
     tools: [],
     context: [],
     forwardedProps: {},

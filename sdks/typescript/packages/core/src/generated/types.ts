@@ -68,7 +68,7 @@ export type TextMessageRole = "developer" | "system" | "assistant" | "user";
  * Opens a streamed text message. The content arrives as TEXT_MESSAGE_CONTENT
  * events and the message closes with TEXT_MESSAGE_END.
  */
-export interface TextMessageStartEvent {
+export type TextMessageStartEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -115,12 +115,12 @@ export interface TextMessageStartEvent {
    * several participants in one role.
    */
   name?: string;
-}
+};
 
 /**
  * Appends a fragment to a streamed text message.
  */
-export interface TextMessageContentEvent {
+export type TextMessageContentEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -160,12 +160,12 @@ export interface TextMessageContentEvent {
    * rejecting them would kill runs that are working correctly.
    */
   delta: string;
-}
+};
 
 /**
  * Closes a streamed text message.
  */
-export interface TextMessageEndEvent {
+export type TextMessageEndEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -199,7 +199,7 @@ export interface TextMessageEndEvent {
    * The message being closed.
    */
   messageId: string;
-}
+};
 
 /**
  * A shorthand that stands in for a start, content and end sequence, for
@@ -208,7 +208,7 @@ export interface TextMessageEndEvent {
  * message a field-less chunk continues is a sequence question the prose
  * specification answers.
  */
-export interface TextMessageChunkEvent {
+export type TextMessageChunkEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -255,13 +255,13 @@ export interface TextMessageChunkEvent {
    * An optional display name for the author.
    */
   name?: string;
-}
+};
 
 /**
  * Opens a tool call. The arguments arrive as TOOL_CALL_ARGS events and the
  * call closes with TOOL_CALL_END.
  */
-export interface ToolCallStartEvent {
+export type ToolCallStartEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -304,12 +304,12 @@ export interface ToolCallStartEvent {
    * not attribute it to one.
    */
   parentMessageId?: string;
-}
+};
 
 /**
  * Appends a fragment of a tool call's arguments.
  */
-export interface ToolCallArgsEvent {
+export type ToolCallArgsEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -349,12 +349,12 @@ export interface ToolCallArgsEvent {
    * itself JSON. May be the empty string.
    */
   delta: string;
-}
+};
 
 /**
  * Closes a tool call, meaning its arguments are complete.
  */
-export interface ToolCallEndEvent {
+export type ToolCallEndEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -388,13 +388,13 @@ export interface ToolCallEndEvent {
    * The call being closed.
    */
   toolCallId: string;
-}
+};
 
 /**
  * A shorthand that stands in for a tool call's start, args and end sequence.
  * Every field is optional for the same reason as TEXT_MESSAGE_CHUNK.
  */
-export interface ToolCallChunkEvent {
+export type ToolCallChunkEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -440,13 +440,13 @@ export interface ToolCallChunkEvent {
    * A fragment of the arguments. May be the empty string.
    */
   delta?: string;
-}
+};
 
 /**
  * Carries what a tool returned. Mints a tool message rather than appending to
  * an existing one, which is why it has its own messageId.
  */
-export interface ToolCallResultEvent {
+export type ToolCallResultEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -494,7 +494,7 @@ export interface ToolCallResultEvent {
    * so a producer may leave it out.
    */
   role?: "tool";
-}
+};
 
 /**
  * Agent state. Any JSON value: the protocol carries state without interpreting
@@ -506,7 +506,7 @@ export type State = any;
  * Replaces the agent state wholesale. Sent when a delta cannot express the
  * change, or to resynchronise a consumer.
  */
-export interface StateSnapshotEvent {
+export type StateSnapshotEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -540,7 +540,7 @@ export interface StateSnapshotEvent {
    * The complete new state.
    */
   snapshot: State;
-}
+};
 
 /**
  * A JSON Pointer as defined by RFC 6901. Either the empty string, meaning the
@@ -553,7 +553,7 @@ export type JsonPointer = string;
 /**
  * Inserts value at path. RFC 6902 section 4.1.
  */
-export interface AddOperation {
+export type AddOperation = {
   /**
    * Discriminator for the add operation.
    */
@@ -567,12 +567,12 @@ export interface AddOperation {
    * thing to add.
    */
   value: any;
-}
+};
 
 /**
  * Removes the value at path. RFC 6902 section 4.2.
  */
-export interface RemoveOperation {
+export type RemoveOperation = {
   /**
    * Discriminator for the remove operation.
    */
@@ -581,12 +581,12 @@ export interface RemoveOperation {
    * What to remove.
    */
   path: JsonPointer;
-}
+};
 
 /**
  * Replaces the value at path. RFC 6902 section 4.3.
  */
-export interface ReplaceOperation {
+export type ReplaceOperation = {
   /**
    * Discriminator for the replace operation.
    */
@@ -599,12 +599,12 @@ export interface ReplaceOperation {
    * The replacement. Any JSON value, including null.
    */
   value: any;
-}
+};
 
 /**
  * Moves the value at from to path. RFC 6902 section 4.4.
  */
-export interface MoveOperation {
+export type MoveOperation = {
   /**
    * Discriminator for the move operation.
    */
@@ -617,12 +617,12 @@ export interface MoveOperation {
    * Where the value is moved to.
    */
   path: JsonPointer;
-}
+};
 
 /**
  * Copies the value at from to path. RFC 6902 section 4.5.
  */
-export interface CopyOperation {
+export type CopyOperation = {
   /**
    * Discriminator for the copy operation.
    */
@@ -635,12 +635,12 @@ export interface CopyOperation {
    * Where the value is copied to.
    */
   path: JsonPointer;
-}
+};
 
 /**
  * Asserts that the value at path equals value. RFC 6902 section 4.6.
  */
-export interface TestOperation {
+export type TestOperation = {
   /**
    * Discriminator for the test operation.
    */
@@ -653,7 +653,7 @@ export interface TestOperation {
    * The value the target must equal. Any JSON value, including null.
    */
   value: any;
-}
+};
 
 /**
  * A single RFC 6902 operation. Exactly one of the operation shapes must match,
@@ -687,7 +687,7 @@ export type JsonPatch = JsonPatchOperation[];
 /**
  * Changes the agent state incrementally.
  */
-export interface StateDeltaEvent {
+export type StateDeltaEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -723,12 +723,12 @@ export interface StateDeltaEvent {
    * point at a path that does not exist, which RFC 6902 leaves to the applier.
    */
   delta: JsonPatch;
-}
+};
 
 /**
  * Instructions from the application developer.
  */
-export interface DeveloperMessage {
+export type DeveloperMessage = {
   /**
    * The subagent invocation this belongs to. Absent means the parent agent
    * produced it directly.
@@ -761,12 +761,12 @@ export interface DeveloperMessage {
    * nothing.
    */
   content: string;
-}
+};
 
 /**
  * Instructions from the system.
  */
-export interface SystemMessage {
+export type SystemMessage = {
   /**
    * The subagent invocation this belongs to. Absent means the parent agent
    * produced it directly.
@@ -798,12 +798,12 @@ export interface SystemMessage {
    * The instructions. Required.
    */
   content: string;
-}
+};
 
 /**
  * The name and arguments of a tool call.
  */
-export interface FunctionCall {
+export type FunctionCall = {
   /**
    * Which tool is being called.
    */
@@ -815,14 +815,14 @@ export interface FunctionCall {
    * has to handle it.
    */
   arguments: string;
-}
+};
 
 /**
  * A call an assistant message made. Carries no subagent attribution of its own
  * and inherits its containing message's, since several calls can share one
  * parent.
  */
-export interface ToolCall {
+export type ToolCall = {
   /**
    * Identifies the call. The answering tool message carries this as its
    * toolCallId.
@@ -846,13 +846,13 @@ export interface ToolCall {
    * and merging them would make the result depend on their order.
    */
   metadata?: Metadata;
-}
+};
 
 /**
  * A message from the agent. Content is optional because a turn may consist
  * only of tool calls.
  */
-export interface AssistantMessage {
+export type AssistantMessage = {
   /**
    * The subagent invocation this belongs to. Absent means the parent agent
    * produced it directly.
@@ -888,12 +888,12 @@ export interface AssistantMessage {
    * The tool calls this turn made.
    */
   toolCalls?: ToolCall[];
-}
+};
 
 /**
  * A text part.
  */
-export interface TextInputContent {
+export type TextInputContent = {
   /**
    * Discriminator.
    */
@@ -902,12 +902,12 @@ export interface TextInputContent {
    * The text.
    */
   text: string;
-}
+};
 
 /**
  * Bytes carried inline.
  */
-export interface InputContentDataSource {
+export type InputContentDataSource = {
   /**
    * Discriminator.
    */
@@ -924,12 +924,12 @@ export interface InputContentDataSource {
    * else can tell a consumer how to read them.
    */
   mimeType: string;
-}
+};
 
 /**
  * Bytes referenced by URL, fetched by whoever needs them.
  */
-export interface InputContentUrlSource {
+export type InputContentUrlSource = {
   /**
    * Discriminator.
    */
@@ -944,7 +944,7 @@ export interface InputContentUrlSource {
    * response can say.
    */
   mimeType?: string;
-}
+};
 
 /**
  * Where a media part's bytes come from: carried inline, or referenced by URL.
@@ -954,7 +954,7 @@ export type InputContentSource = InputContentDataSource | InputContentUrlSource;
 /**
  * An image part.
  */
-export interface ImageInputContent {
+export type ImageInputContent = {
   /**
    * Discriminator.
    */
@@ -969,12 +969,12 @@ export interface ImageInputContent {
    * listed under known divergences in the README rather than resolved here.
    */
   metadata?: any;
-}
+};
 
 /**
  * An audio part.
  */
-export interface AudioInputContent {
+export type AudioInputContent = {
   /**
    * Discriminator.
    */
@@ -988,12 +988,12 @@ export interface AudioInputContent {
    * parts.
    */
   metadata?: any;
-}
+};
 
 /**
  * A video part.
  */
-export interface VideoInputContent {
+export type VideoInputContent = {
   /**
    * Discriminator.
    */
@@ -1007,12 +1007,12 @@ export interface VideoInputContent {
    * parts.
    */
   metadata?: any;
-}
+};
 
 /**
  * A document part.
  */
-export interface DocumentInputContent {
+export type DocumentInputContent = {
   /**
    * Discriminator.
    */
@@ -1026,7 +1026,7 @@ export interface DocumentInputContent {
    * parts.
    */
   metadata?: any;
-}
+};
 
 /**
  * One part of a multimodal user message. Discriminated by type.
@@ -1041,7 +1041,7 @@ export type InputContent =
 /**
  * A message from the person using the application.
  */
-export interface UserMessage {
+export type UserMessage = {
   /**
    * The subagent invocation this belongs to. Absent means the parent agent
    * produced it directly.
@@ -1074,13 +1074,13 @@ export interface UserMessage {
    * multimodal message.
    */
   content: string | InputContent[];
-}
+};
 
 /**
  * What a tool returned, as a message in the conversation. Stands alone rather
  * than composing BaseMessage, because it carries no name.
  */
-export interface ToolMessage {
+export type ToolMessage = {
   /**
    * The subagent invocation this belongs to. Absent means the parent agent
    * produced it directly.
@@ -1116,7 +1116,7 @@ export interface ToolMessage {
    * Extra information attached to this message.
    */
   metadata?: Metadata;
-}
+};
 
 /**
  * Structured progress that is not conversation content, materialised as a
@@ -1124,7 +1124,7 @@ export interface ToolMessage {
  * composing BaseMessage, because its content is an object rather than a
  * string.
  */
-export interface ActivityMessage {
+export type ActivityMessage = {
   /**
    * The subagent invocation this belongs to. Absent means the parent agent
    * produced it directly.
@@ -1151,13 +1151,13 @@ export interface ActivityMessage {
    * Extra information attached to this message.
    */
   metadata?: Metadata;
-}
+};
 
 /**
  * A span of the agent's reasoning, materialised as a message. Stands alone
  * rather than composing BaseMessage, because it carries no name.
  */
-export interface ReasoningMessage {
+export type ReasoningMessage = {
   /**
    * The subagent invocation this belongs to. Absent means the parent agent
    * produced it directly.
@@ -1184,7 +1184,7 @@ export interface ReasoningMessage {
    * Extra information attached to this message.
    */
   metadata?: Metadata;
-}
+};
 
 /**
  * Any message in a conversation. Discriminated by role.
@@ -1207,7 +1207,7 @@ export type Message =
  * which subagent owns each message it contains, through the messages
  * themselves.
  */
-export interface MessagesSnapshotEvent {
+export type MessagesSnapshotEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -1236,13 +1236,13 @@ export interface MessagesSnapshotEvent {
    * The messages the producer is declaring, in order.
    */
   messages: Message[];
-}
+};
 
 /**
  * Reports structured progress that is not conversation content, such as a step
  * a UI renders as its own widget.
  */
-export interface ActivitySnapshotEvent {
+export type ActivitySnapshotEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -1295,12 +1295,12 @@ export interface ActivitySnapshotEvent {
    * @default true
    */
   replace?: boolean;
-}
+};
 
 /**
  * Changes an activity message's content incrementally.
  */
-export interface ActivityDeltaEvent {
+export type ActivityDeltaEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -1342,13 +1342,13 @@ export interface ActivityDeltaEvent {
    * The change, as an RFC 6902 patch against the activity's content.
    */
   patch: JsonPatch;
-}
+};
 
 /**
  * Passes a provider-native event through untranslated, for consumers that need
  * detail the protocol does not model.
  */
-export interface RawEvent {
+export type RawEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -1387,13 +1387,13 @@ export interface RawEvent {
    * Which provider or framework the event came from.
    */
   source?: string;
-}
+};
 
 /**
  * The protocol's extension point for an application's own events. Anything a
  * consumer does with one is outside the protocol.
  */
-export interface CustomEvent {
+export type CustomEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -1432,12 +1432,12 @@ export interface CustomEvent {
    * The payload. Any JSON value, and required.
    */
   value: any;
-}
+};
 
 /**
  * A tool the agent may call.
  */
-export interface Tool {
+export type Tool = {
   /**
    * The tool's name, as the agent will call it.
    */
@@ -1459,13 +1459,13 @@ export interface Tool {
    * rendering or routing information to it.
    */
   metadata?: Metadata;
-}
+};
 
 /**
  * A named piece of ambient information given to the agent for the run,
  * distinct from the conversation.
  */
-export interface Context {
+export type Context = {
   /**
    * What this context is, for the agent to interpret.
    */
@@ -1474,12 +1474,12 @@ export interface Context {
    * The context itself.
    */
   value: string;
-}
+};
 
 /**
  * An answer to one interrupt, sent on the run that continues from it.
  */
-export interface ResumeEntry {
+export type ResumeEntry = {
   /**
    * The interrupt being answered.
    */
@@ -1497,7 +1497,7 @@ export interface ResumeEntry {
    * keys, as opposed to payload, which is the answer itself.
    */
   metadata?: Metadata;
-}
+};
 
 /**
  * A request to run an agent. Also echoed back as RUN_STARTED.input. Only
@@ -1506,7 +1506,7 @@ export interface ResumeEntry {
  * mean the same thing, so requiring them would catch nothing a producer could
  * get wrong.
  */
-export interface RunAgentInput {
+export type RunAgentInput = {
   /**
    * The conversation this run belongs to.
    */
@@ -1545,12 +1545,12 @@ export interface RunAgentInput {
    * continues from one.
    */
   resume?: ResumeEntry[];
-}
+};
 
 /**
  * Opens a run. Run-scoped, so it carries no subagent attribution.
  */
-export interface RunStartedEvent {
+export type RunStartedEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -1593,7 +1593,7 @@ export interface RunStartedEvent {
    * not make the request can still see what the agent was asked.
    */
   input?: RunAgentInput;
-}
+};
 
 /**
  * The run completed. Equivalent to an absent outcome. Closed like every other
@@ -1601,18 +1601,18 @@ export interface RunStartedEvent {
  * interrupts — a success with an interrupt still pending would be a
  * contradiction, not an extension.
  */
-export interface RunFinishedSuccessOutcome {
+export type RunFinishedSuccessOutcome = {
   /**
    * Discriminator.
    */
   type: "success";
-}
+};
 
 /**
  * Something a run needs from outside before it can continue, such as an
  * approval or a missing value.
  */
-export interface Interrupt {
+export type Interrupt = {
   /**
    * The subagent invocation this belongs to. Absent means the parent agent
    * produced it directly.
@@ -1661,13 +1661,13 @@ export interface Interrupt {
    * Extra information attached to this interrupt.
    */
   metadata?: Metadata;
-}
+};
 
 /**
  * The run is paused, waiting for something outside it. Resuming means starting
  * a new run whose resume entries answer these interrupts.
  */
-export interface RunFinishedInterruptOutcome {
+export type RunFinishedInterruptOutcome = {
   /**
    * Discriminator.
    */
@@ -1677,7 +1677,7 @@ export interface RunFinishedInterruptOutcome {
    * nothing to answer would leave a consumer with nothing to do.
    */
   interrupts: Interrupt[];
-}
+};
 
 /**
  * Why a run ended.
@@ -1689,7 +1689,7 @@ export type RunFinishedOutcome = RunFinishedSuccessOutcome | RunFinishedInterrup
  * — nothing content-bearing or identifying, no prompts, completions, messages,
  * or thread, run and user identifiers.
  */
-export interface TokenUsage {
+export type TokenUsage = {
   /**
    * Which provider served the request.
    */
@@ -1721,13 +1721,13 @@ export interface TokenUsage {
    * Prompt tokens served from a provider cache.
    */
   cachedInputTokens?: number;
-}
+};
 
 /**
  * Closes a run that did not fail. Run-scoped, so it carries no subagent
  * attribution.
  */
-export interface RunFinishedEvent {
+export type RunFinishedEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -1775,13 +1775,13 @@ export interface RunFinishedEvent {
    * totals sums across the entries.
    */
   usage?: TokenUsage[];
-}
+};
 
 /**
  * Ends a run that failed. Run-scoped, so it carries no subagent attribution; a
  * subagent that fails without ending the run reports SUBAGENT_ERROR instead.
  */
-export interface RunErrorEvent {
+export type RunErrorEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -1820,13 +1820,13 @@ export interface RunErrorEvent {
    * more model calls before dying.
    */
   usage?: TokenUsage[];
-}
+};
 
 /**
  * Opens a named step within a run, for producers whose frameworks have a step
  * concept worth surfacing.
  */
-export interface StepStartedEvent {
+export type StepStartedEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -1861,12 +1861,12 @@ export interface StepStartedEvent {
    * same name.
    */
   stepName: string;
-}
+};
 
 /**
  * Closes a named step.
  */
-export interface StepFinishedEvent {
+export type StepFinishedEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -1900,12 +1900,12 @@ export interface StepFinishedEvent {
    * The step being closed.
    */
   stepName: string;
-}
+};
 
 /**
  * Opens a span of reasoning. A span may contain several reasoning messages.
  */
-export interface ReasoningStartEvent {
+export type ReasoningStartEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -1939,12 +1939,12 @@ export interface ReasoningStartEvent {
    * The span being opened.
    */
   messageId: string;
-}
+};
 
 /**
  * Opens a streamed reasoning message.
  */
-export interface ReasoningMessageStartEvent {
+export type ReasoningMessageStartEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -1983,12 +1983,12 @@ export interface ReasoningMessageStartEvent {
    * from the SDKs rather than chosen.
    */
   role: "reasoning";
-}
+};
 
 /**
  * Appends a fragment to a streamed reasoning message.
  */
-export interface ReasoningMessageContentEvent {
+export type ReasoningMessageContentEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -2026,12 +2026,12 @@ export interface ReasoningMessageContentEvent {
    * The fragment to append. May be the empty string.
    */
   delta: string;
-}
+};
 
 /**
  * Closes a streamed reasoning message.
  */
-export interface ReasoningMessageEndEvent {
+export type ReasoningMessageEndEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -2065,13 +2065,13 @@ export interface ReasoningMessageEndEvent {
    * The reasoning message being closed.
    */
   messageId: string;
-}
+};
 
 /**
  * A shorthand that stands in for a reasoning message's start, content and end
  * sequence.
  */
-export interface ReasoningMessageChunkEvent {
+export type ReasoningMessageChunkEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -2110,12 +2110,12 @@ export interface ReasoningMessageChunkEvent {
    * The fragment to append. May be the empty string.
    */
   delta?: string;
-}
+};
 
 /**
  * Closes a span of reasoning.
  */
-export interface ReasoningEndEvent {
+export type ReasoningEndEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -2149,7 +2149,7 @@ export interface ReasoningEndEvent {
    * The span being closed.
    */
   messageId: string;
-}
+};
 
 /**
  * Whether a REASONING_ENCRYPTED_VALUE belongs to a message or to a tool call.
@@ -2160,7 +2160,7 @@ export type ReasoningEncryptedValueSubtype = "tool-call" | "message";
  * Carries a provider's opaque, encrypted reasoning artefact, which a consumer
  * stores and returns on a later turn without being able to read it.
  */
-export interface ReasoningEncryptedValueEvent {
+export type ReasoningEncryptedValueEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -2204,7 +2204,7 @@ export interface ReasoningEncryptedValueEvent {
    * The provider's opaque artefact.
    */
   encryptedValue: string;
-}
+};
 
 /**
  * Announces that a subagent invocation has begun. Everything the subagent
@@ -2214,7 +2214,7 @@ export interface ReasoningEncryptedValueEvent {
  * identifies the subagent rather than attributing the event to one;
  * attribution to an enclosing subagent is parentSubagentRunId.
  */
-export interface SubagentStartedEvent {
+export type SubagentStartedEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -2267,24 +2267,24 @@ export interface SubagentStartedEvent {
    * The message that held the spawning tool call.
    */
   parentMessageId?: string;
-}
+};
 
 /**
  * The subagent completed its work. Equivalent to an absent outcome.
  */
-export interface SubagentFinishedSuccessOutcome {
+export type SubagentFinishedSuccessOutcome = {
   /**
    * Discriminator.
    */
   type: "success";
-}
+};
 
 /**
  * The subagent is paused awaiting outside input. Terminal for this stream, not
  * for the subagent: a later run may continue the same invocation once the
  * interrupts are answered.
  */
-export interface SubagentFinishedSuspendedOutcome {
+export type SubagentFinishedSuspendedOutcome = {
   /**
    * Discriminator.
    */
@@ -2295,7 +2295,7 @@ export interface SubagentFinishedSuspendedOutcome {
    * interrupt of its own. Each item: An Interrupt.id.
    */
   interruptIds?: string[];
-}
+};
 
 /**
  * Why a subagent's segment of a run ended. Mirrors RunFinishedOutcome one
@@ -2309,7 +2309,7 @@ export type SubagentFinishedOutcome =
  * Ends a subagent invocation's segment of this run, either because the work
  * completed or because it is suspended awaiting outside input.
  */
-export interface SubagentFinishedEvent {
+export type SubagentFinishedEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -2349,14 +2349,14 @@ export interface SubagentFinishedEvent {
    * value rather than being inferred from a later interrupt.
    */
   outcome?: SubagentFinishedOutcome;
-}
+};
 
 /**
  * Reports that a subagent invocation failed. The run may continue: a parent
  * agent is free to handle a failed subagent, which is why this is not
  * RUN_ERROR.
  */
-export interface SubagentErrorEvent {
+export type SubagentErrorEvent = {
   /**
    * Which event this is. Each event definition narrows this to a single value.
    */
@@ -2393,7 +2393,7 @@ export interface SubagentErrorEvent {
    * A machine-readable error code. An open string.
    */
   code?: string;
-}
+};
 
 /**
  * Any AG-UI event. Every member is normative: there is no optional tier and no
@@ -2444,3 +2444,89 @@ export type Role =
   | "tool"
   | "activity"
   | "reasoning";
+
+/**
+ * Composed into everything that can belong to a subagent's work: the events
+ * that describe content or progress, the message types, and each interrupt.
+ * Run-scoped events omit it — RUN_STARTED, RUN_FINISHED and RUN_ERROR describe
+ * the run itself and MESSAGES_SNAPSHOT is conversation-wide, so none of them
+ * can belong to one subagent. A tool call omits it too and inherits its
+ * containing message's attribution.
+ */
+export type Attributable = {
+  /**
+   * The subagent invocation this belongs to. Absent means the parent agent
+   * produced it directly.
+   */
+  subagentRunId?: SubagentRunId;
+};
+
+/**
+ * The fields every event carries, whatever its type. Composed into each event
+ * definition rather than repeated, so a change here reaches every event at
+ * once.
+ */
+export type BaseEvent = {
+  /**
+   * Which event this is. Each event definition narrows this to a single value.
+   */
+  type: EventType;
+  /**
+   * When the event was created. Bounded to the range JSON numbers survive a
+   * round trip in, so the value a consumer reads is the value the producer
+   * wrote. Deliberately not a float. The unit is not constrained here, because
+   * it never has been stated normatively; every SDK that sets it in practice
+   * uses milliseconds since the Unix epoch, and a producer choosing another
+   * unit will be misread by consumers even though it validates. Nothing in the
+   * protocol computes with this value.
+   */
+  timestamp?: number;
+  /**
+   * The provider-native event this one was translated from, carried verbatim
+   * for debugging and for consumers that need detail the protocol does not
+   * model. Any JSON value.
+   */
+  rawEvent?: any;
+  /**
+   * Extra information attached to this event.
+   */
+  metadata?: Metadata;
+};
+
+/**
+ * The fields shared by the developer, system, assistant and user messages.
+ * Deliberately excludes content, because a user message's content may be an
+ * array while the others are strings, and composition here intersects rather
+ * than overrides: a base that constrained content to a string would make an
+ * array content invalid. The tool, activity and reasoning messages do not
+ * compose this, because they carry no name.
+ */
+export type BaseMessage = {
+  /**
+   * The subagent invocation this belongs to. Absent means the parent agent
+   * produced it directly.
+   */
+  subagentRunId?: SubagentRunId;
+  /**
+   * Identifies the message within the conversation.
+   */
+  id: string;
+  /**
+   * Who the message is from. Each message definition narrows this to a single
+   * value.
+   */
+  role: string;
+  /**
+   * An optional display name for the author.
+   */
+  name?: string;
+  /**
+   * A provider's opaque artefact belonging to this message, stored by a
+   * consumer and returned on a later turn.
+   */
+  encryptedValue?: string;
+  /**
+   * Extra information attached to this message.
+   */
+  metadata?: Metadata;
+};

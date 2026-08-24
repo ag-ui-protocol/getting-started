@@ -621,7 +621,9 @@ export const RunAgentInputSchema = z.looseObject({
   threadId: z.string(),
   runId: z.string(),
   parentRunId: z.string().optional(),
-  state: StateSchema.optional(),
+  state: StateSchema.nullable()
+    .transform((value) => value ?? undefined)
+    .optional(),
   messages: z.array(MessageSchema),
   tools: z.array(ToolSchema).optional(),
   context: z.array(ContextSchema).optional(),
@@ -982,3 +984,44 @@ export const RoleSchema = z.enum([
   "activity",
   "reasoning",
 ]);
+
+/**
+ * Composed into everything that can belong to a subagent's work: the events
+ * that describe content or progress, the message types, and each interrupt.
+ * Run-scoped events omit it — RUN_STARTED, RUN_FINISHED and RUN_ERROR describe
+ * the run itself and MESSAGES_SNAPSHOT is conversation-wide, so none of them
+ * can belong to one subagent. A tool call omits it too and inherits its
+ * containing message's attribution.
+ */
+export const AttributableSchema = z.looseObject({
+  subagentRunId: SubagentRunIdSchema.optional(),
+});
+
+/**
+ * The fields every event carries, whatever its type. Composed into each event
+ * definition rather than repeated, so a change here reaches every event at
+ * once.
+ */
+export const BaseEventSchema = z.looseObject({
+  type: EventTypeSchema,
+  timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
+  rawEvent: z.any().optional(),
+  metadata: MetadataSchema.optional(),
+});
+
+/**
+ * The fields shared by the developer, system, assistant and user messages.
+ * Deliberately excludes content, because a user message's content may be an
+ * array while the others are strings, and composition here intersects rather
+ * than overrides: a base that constrained content to a string would make an
+ * array content invalid. The tool, activity and reasoning messages do not
+ * compose this, because they carry no name.
+ */
+export const BaseMessageSchema = z.looseObject({
+  subagentRunId: SubagentRunIdSchema.optional(),
+  id: z.string(),
+  role: z.string(),
+  name: z.string().optional(),
+  encryptedValue: z.string().optional(),
+  metadata: MetadataSchema.optional(),
+});

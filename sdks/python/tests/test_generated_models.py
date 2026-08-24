@@ -125,12 +125,6 @@ class GeneratedModelsAgainstFixtures(unittest.TestCase):
 # The handwritten models do not know these events yet: they land with the
 # subagent PR (#2350). Until it merges they exist in the schema and the
 # generated models only, which is expected.
-HANDWRITTEN_UNSUPPORTED = {
-    "SUBAGENT_STARTED",
-    "SUBAGENT_FINISHED",
-    "SUBAGENT_ERROR",
-}
-
 # Every place the handwritten JSON is allowed to differ from the generated
 # JSON, recorded as (event type, field) -> why. The handwritten models apply
 # schema defaults at parse time (the schema treats a default as
@@ -171,10 +165,6 @@ class GeneratedAgainstHandwritten(unittest.TestCase):
             if not isinstance(document, dict):
                 continue
             if document.get("type") not in event_types:
-                continue
-            if document["type"] in HANDWRITTEN_UNSUPPORTED:
-                with self.subTest(name), self.assertRaises(ValidationError):
-                    HANDWRITTEN_EVENT.validate_python(document)
                 continue
             with self.subTest(name):
                 try:

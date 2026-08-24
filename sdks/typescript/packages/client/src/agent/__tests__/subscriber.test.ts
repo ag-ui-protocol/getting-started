@@ -1020,7 +1020,7 @@ describe("AgentSubscriber", () => {
         {
           type: EventType.CUSTOM,
           name: "user_interaction",
-          data: { action: "click", target: "button" },
+          value: { action: "click", target: "button" },
         } as CustomEvent,
       ]);
 
@@ -1031,7 +1031,7 @@ describe("AgentSubscriber", () => {
           event: expect.objectContaining({
             type: EventType.CUSTOM,
             name: "user_interaction",
-            data: { action: "click", target: "button" },
+            value: { action: "click", target: "button" },
           }),
           messages: [],
           state: {},
@@ -1165,7 +1165,7 @@ describe("AgentSubscriber", () => {
         } as TextMessageEndEvent,
         {
           type: EventType.STATE_SNAPSHOT,
-          state: { weather: "sunny" },
+          snapshot: { weather: "sunny" },
         } as StateSnapshotEvent,
         {
           type: EventType.RUN_FINISHED,

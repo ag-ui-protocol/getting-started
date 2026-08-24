@@ -6,7 +6,7 @@ import {
   SubagentFinishedEventSchema,
   SubagentErrorEventSchema,
   RunFinishedEventSchema,
-} from "../events";
+} from "../index";
 import {
   createSubagentStartedEvent,
   createSubagentFinishedEvent,

@@ -108,7 +108,16 @@ describe("metadata on events", () => {
 describe("metadata on messages", () => {
   // Developer, system, assistant and user derive from BaseMessageSchema; tool,
   // activity and reasoning are standalone schemas that declare it themselves.
-  const cases: Array<[string, { parse: (v: unknown) => { metadata?: unknown } }, object]> = [
+  const cases: Array<
+    [
+      string,
+      {
+        parse: (v: unknown) => { metadata?: unknown };
+        safeParse: (v: unknown) => { success: boolean };
+      },
+      object,
+    ]
+  > = [
     ["developer", DeveloperMessageSchema, { id: "1", role: "developer", content: "c" }],
     ["system", SystemMessageSchema, { id: "1", role: "system", content: "c" }],
     ["assistant", AssistantMessageSchema, { id: "1", role: "assistant", content: "c" }],
