@@ -57,6 +57,13 @@ describe("convertMessagesToVercelAISDKMessages", () => {
     expect(result).toEqual([{ role: "user", content: [{ type: "text", text: "hi" }] }]);
   });
 
+  it("falls back to empty string content when the parts array is empty", () => {
+    const result = convertMessagesToVercelAISDKMessages([
+      { id: "u1", role: "user", content: [] },
+    ]);
+    expect(result).toEqual([{ role: "user", content: "" }]);
+  });
+
   it("converts user image part with data source to a data URL", () => {
     const result = convertMessagesToVercelAISDKMessages([
       {
@@ -145,7 +152,7 @@ describe("convertMessagesToVercelAISDKMessages", () => {
     ]);
   });
 
-  it("warns and skips legacy binary with neither url nor data", () => {
+  it("warns and falls back to empty string content when every part is dropped", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const result = convertMessagesToVercelAISDKMessages([
       {
@@ -154,7 +161,7 @@ describe("convertMessagesToVercelAISDKMessages", () => {
         content: [{ type: "binary", mimeType: "application/octet-stream" }],
       },
     ]);
-    expect(result).toEqual([{ role: "user", content: [] }]);
+    expect(result).toEqual([{ role: "user", content: "" }]);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });

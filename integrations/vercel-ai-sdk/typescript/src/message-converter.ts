@@ -28,12 +28,15 @@ function safeJsonParse(input: string): unknown {
 
 type UserPart = TextPart | ImagePart | FilePart;
 
-function toUserContent(content: Message["content"]): string | UserPart[] {
+// The user message content union from AG-UI (string | InputContent[]), derived
+// from the Message union rather than re-declared here.
+type UserContent = Extract<Message, { role: "user" }>["content"];
+
+function toUserContent(content: UserContent): string | UserPart[] {
   if (!content) return "";
   if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
 
-  // Array content always converts to a parts array, even when every part is
+  // A non-empty array converts to a parts array, even when every part is
   // text and even for a single part: joining text parts would alter the user's
   // input by introducing separators and losing part boundaries. Text is
   // user-provided and passes through verbatim, with no trimming and no
@@ -79,7 +82,9 @@ function toUserContent(content: Message["content"]): string | UserPart[] {
       }
     }
   }
-  return parts;
+  // Providers reject an empty content array, so an empty turn is encoded as the
+  // empty string; no user text is altered here because there is none.
+  return parts.length ? parts : "";
 }
 
 function lookupToolName(messages: Message[], toolCallId: string): string {
