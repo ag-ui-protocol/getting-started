@@ -4,7 +4,8 @@ import base64
 import logging
 import re
 import urllib.request
-from typing import Any, Dict, List, Optional, Set
+import warnings
+from typing import Any, Callable, Dict, List, Optional, Set
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from ag_ui.core import (
@@ -254,37 +255,81 @@ def create_strands_app(
     path: str = "/",
     ping_path: str | None = "/ping",
     origins: Optional[List[str]] = None,
+    auth: Optional[Callable[..., Any]] = None,
+    allow_methods: Optional[List[str]] = None,
+    allow_headers: Optional[List[str]] = None,
+    cors_enabled: Optional[bool] = None,
 ) -> "Any":
     """Create a FastAPI app with a single Strands agent endpoint and optional ping endpoint.
+
+    The agent endpoint is unauthenticated unless *auth* is supplied. For
+    backward compatibility, permissive wildcard CORS remains enabled when no
+    CORS option is supplied, but that implicit fallback emits a
+    :class:`FutureWarning` and will be removed in a future release.
 
     Args:
         agent: The StrandsAgent instance
         path: Path for the agent endpoint (default: "/")
         ping_path: Path for the ping endpoint (default: "/ping"). Pass None to disable.
-        origins: Allowed CORS origins. Defaults to ``["*"]`` (wildcard) for local
-            development. Credentials are only enabled when explicit, non-wildcard
-            origins are supplied — a wildcard origin can never be combined with
-            ``allow_credentials=True``.
+        origins: Allowed CORS origins. A non-empty list configures those origins
+            and silences the implicit-wildcard warning. ``None`` and ``[]``
+            preserve the legacy ``["*"]`` fallback. Pass the exact origins your
+            frontend is served from, e.g. ``["http://localhost:3000"]``, or pass
+            ``["*"]`` to explicitly acknowledge wildcard CORS. Credentials are
+            only enabled for explicit, non-wildcard origins — a wildcard origin
+            can never be combined with ``allow_credentials=True``.
+        auth: Optional FastAPI dependency callable used to authenticate requests
+            to the agent endpoint. It should raise
+            :class:`fastapi.HTTPException` to reject a request, e.g.::
+
+                def require_token(authorization: str | None = Header(default=None)):
+                    if authorization != f"Bearer {os.environ['AGENT_TOKEN']}":
+                        raise HTTPException(status_code=401, detail="Unauthorized")
+
+                app = create_strands_app(agent, auth=require_token)
+
+            The ping endpoint stays unauthenticated so health probes keep working.
+        allow_methods: CORS methods to allow. ``None`` defaults to ``["*"]``
+            for backward compatibility; ``[]`` allows none.
+        allow_headers: CORS request headers to allow. ``None`` defaults to
+            ``["*"]`` for backward compatibility; ``[]`` allows none beyond
+            CORS-safelisted request headers.
+        cors_enabled: Explicit CORS switch. Pass ``False`` to add no CORS
+            middleware, even if *origins* is supplied. Pass ``True`` to retain
+            CORS explicitly; when *origins* is empty, this uses ``["*"]`` without
+            emitting the implicit-wildcard warning. ``None`` preserves the
+            legacy behavior and warns when *origins* is empty.
     """
     from fastapi import FastAPI
     from .endpoint import add_strands_fastapi_endpoint, add_ping
 
     app = FastAPI(title=f"AWS Strands - {agent.name}")
 
-    # Add CORS middleware
-    from fastapi.middleware.cors import CORSMiddleware
-    cors_origins = origins or ["*"]
-    is_wildcard = "*" in cors_origins
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cors_origins,
-        allow_credentials=bool(origins) and not is_wildcard,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    if cors_enabled is None and not origins:
+        warnings.warn(
+            "Implicit wildcard CORS is insecure and deprecated. Pass origins=[...] "
+            "to allow only trusted browser origins, origins=['*'] to explicitly "
+            "retain wildcard CORS, or cors_enabled=False to disable CORS. The "
+            "implicit wildcard default will be removed in a future release.",
+            FutureWarning,
+            stacklevel=2,
+        )
+
+    # Preserve the legacy permissive CORS behavior unless explicitly disabled.
+    if cors_enabled is not False:
+        from fastapi.middleware.cors import CORSMiddleware
+        cors_origins = origins or ["*"]
+        is_wildcard = "*" in cors_origins
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=bool(origins) and not is_wildcard,
+            allow_methods=allow_methods if allow_methods is not None else ["*"],
+            allow_headers=allow_headers if allow_headers is not None else ["*"],
+        )
 
     # Add the agent endpoint
-    add_strands_fastapi_endpoint(app, agent, path)
+    add_strands_fastapi_endpoint(app, agent, path, auth=auth)
 
     # Add ping endpoint if path is provided
     if ping_path is not None:

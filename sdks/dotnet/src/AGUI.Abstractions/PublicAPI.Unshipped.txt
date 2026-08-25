@@ -797,6 +797,114 @@ static AGUI.Abstractions.AGUIJsonUtilities.RegisterInterruptContentTypes(System.
 AGUI.Abstractions.RunFinishedOutcomeTypes
 const AGUI.Abstractions.RunFinishedOutcomeTypes.Interrupt = "interrupt" -> string!
 const AGUI.Abstractions.RunFinishedOutcomeTypes.Success = "success" -> string!
+AGUI.Abstractions.AGUIJsonSerializerContext.SubagentErrorEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentErrorEvent>
+AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedEvent>
+AGUI.Abstractions.AGUIJsonSerializerContext.SubagentStartedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentStartedEvent>
+AGUI.Abstractions.AGUIMessage.SubagentRunId.get -> string?
+AGUI.Abstractions.AGUIMessage.SubagentRunId.set -> void
+AGUI.Abstractions.ActivityDeltaEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ActivityDeltaEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ActivitySnapshotEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ActivitySnapshotEvent.SubagentRunId.set -> void
+AGUI.Abstractions.CustomEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.CustomEvent.SubagentRunId.set -> void
+AGUI.Abstractions.RawEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.RawEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ReasoningEncryptedValueEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ReasoningEncryptedValueEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ReasoningEndEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ReasoningEndEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ReasoningMessageChunkEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ReasoningMessageChunkEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ReasoningMessageContentEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ReasoningMessageContentEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ReasoningMessageEndEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ReasoningMessageEndEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ReasoningMessageStartEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ReasoningMessageStartEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ReasoningStartEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ReasoningStartEvent.SubagentRunId.set -> void
+AGUI.Abstractions.StateDeltaEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.StateDeltaEvent.SubagentRunId.set -> void
+AGUI.Abstractions.StateSnapshotEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.StateSnapshotEvent.SubagentRunId.set -> void
+AGUI.Abstractions.StepFinishedEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.StepFinishedEvent.SubagentRunId.set -> void
+AGUI.Abstractions.StepStartedEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.StepStartedEvent.SubagentRunId.set -> void
+AGUI.Abstractions.SubagentErrorEvent
+AGUI.Abstractions.SubagentErrorEvent.Code.get -> string?
+AGUI.Abstractions.SubagentErrorEvent.Code.set -> void
+AGUI.Abstractions.SubagentErrorEvent.Message.get -> string?
+AGUI.Abstractions.SubagentErrorEvent.Message.set -> void
+AGUI.Abstractions.SubagentErrorEvent.SubagentErrorEvent() -> void
+AGUI.Abstractions.SubagentErrorEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.SubagentErrorEvent.SubagentRunId.set -> void
+AGUI.Abstractions.SubagentFinishedEvent
+AGUI.Abstractions.SubagentFinishedEvent.Result.get -> System.Text.Json.JsonElement?
+AGUI.Abstractions.SubagentFinishedEvent.Result.set -> void
+AGUI.Abstractions.SubagentFinishedEvent.SubagentFinishedEvent() -> void
+AGUI.Abstractions.SubagentFinishedEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.SubagentFinishedEvent.SubagentRunId.set -> void
+AGUI.Abstractions.SubagentStartedEvent
+AGUI.Abstractions.SubagentStartedEvent.Description.get -> string?
+AGUI.Abstractions.SubagentStartedEvent.Description.set -> void
+AGUI.Abstractions.SubagentStartedEvent.Name.get -> string?
+AGUI.Abstractions.SubagentStartedEvent.Name.set -> void
+AGUI.Abstractions.SubagentStartedEvent.ParentMessageId.get -> string?
+AGUI.Abstractions.SubagentStartedEvent.ParentMessageId.set -> void
+AGUI.Abstractions.SubagentStartedEvent.ParentSubagentRunId.get -> string?
+AGUI.Abstractions.SubagentStartedEvent.ParentSubagentRunId.set -> void
+AGUI.Abstractions.SubagentStartedEvent.ParentToolCallId.get -> string?
+AGUI.Abstractions.SubagentStartedEvent.ParentToolCallId.set -> void
+AGUI.Abstractions.SubagentStartedEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.SubagentStartedEvent.SubagentRunId.set -> void
+AGUI.Abstractions.SubagentStartedEvent.SubagentStartedEvent() -> void
+AGUI.Abstractions.TextMessageContentEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.TextMessageContentEvent.SubagentRunId.set -> void
+AGUI.Abstractions.TextMessageEndEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.TextMessageEndEvent.SubagentRunId.set -> void
+AGUI.Abstractions.TextMessageStartEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.TextMessageStartEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ToolCallArgsEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ToolCallArgsEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ToolCallEndEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ToolCallEndEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ToolCallResultEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ToolCallResultEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ToolCallStartEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ToolCallStartEvent.SubagentRunId.set -> void
+const AGUI.Abstractions.AGUIEventTypes.SubagentError = "SUBAGENT_ERROR" -> string!
+const AGUI.Abstractions.AGUIEventTypes.SubagentFinished = "SUBAGENT_FINISHED" -> string!
+const AGUI.Abstractions.AGUIEventTypes.SubagentStarted = "SUBAGENT_STARTED" -> string!
+override AGUI.Abstractions.SubagentErrorEvent.Type.get -> string!
+override AGUI.Abstractions.SubagentFinishedEvent.Type.get -> string!
+override AGUI.Abstractions.SubagentStartedEvent.Type.get -> string!
+AGUI.Abstractions.SubagentFinishedOutcome
+abstract AGUI.Abstractions.SubagentFinishedOutcome.Type.get -> string!
+AGUI.Abstractions.SubagentFinishedSuccessOutcome
+AGUI.Abstractions.SubagentFinishedSuccessOutcome.SubagentFinishedSuccessOutcome() -> void
+override AGUI.Abstractions.SubagentFinishedSuccessOutcome.Type.get -> string!
+AGUI.Abstractions.SubagentFinishedSuspendedOutcome
+AGUI.Abstractions.SubagentFinishedSuspendedOutcome.SubagentFinishedSuspendedOutcome() -> void
+AGUI.Abstractions.SubagentFinishedSuspendedOutcome.InterruptIds.get -> System.Collections.Generic.IList<string!>?
+AGUI.Abstractions.SubagentFinishedSuspendedOutcome.InterruptIds.set -> void
+override AGUI.Abstractions.SubagentFinishedSuspendedOutcome.Type.get -> string!
+AGUI.Abstractions.SubagentFinishedOutcomeJsonConverter
+AGUI.Abstractions.SubagentFinishedOutcomeJsonConverter.SubagentFinishedOutcomeJsonConverter() -> void
+override AGUI.Abstractions.SubagentFinishedOutcomeJsonConverter.CanConvert(System.Type! typeToConvert) -> bool
+override AGUI.Abstractions.SubagentFinishedOutcomeJsonConverter.Read(ref System.Text.Json.Utf8JsonReader reader, System.Type! typeToConvert, System.Text.Json.JsonSerializerOptions! options) -> AGUI.Abstractions.SubagentFinishedOutcome!
+override AGUI.Abstractions.SubagentFinishedOutcomeJsonConverter.Write(System.Text.Json.Utf8JsonWriter! writer, AGUI.Abstractions.SubagentFinishedOutcome! value, System.Text.Json.JsonSerializerOptions! options) -> void
+AGUI.Abstractions.SubagentFinishedOutcomeTypes
+const AGUI.Abstractions.SubagentFinishedOutcomeTypes.Success = "success" -> string!
+const AGUI.Abstractions.SubagentFinishedOutcomeTypes.Suspended = "suspended" -> string!
+AGUI.Abstractions.SubagentFinishedEvent.Outcome.get -> AGUI.Abstractions.SubagentFinishedOutcome?
+AGUI.Abstractions.SubagentFinishedEvent.Outcome.set -> void
+AGUI.Abstractions.AGUIInterrupt.SubagentRunId.get -> string?
+AGUI.Abstractions.AGUIInterrupt.SubagentRunId.set -> void
+AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedOutcome>
+AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedSuccessOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedSuccessOutcome>
+AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedSuspendedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedSuspendedOutcome>
 AGUI.Abstractions.TokenUsage
 AGUI.Abstractions.TokenUsage.TokenUsage() -> void
 AGUI.Abstractions.TokenUsage.Provider.get -> string?

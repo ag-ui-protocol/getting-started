@@ -31,6 +31,9 @@ import {
   ReasoningMessageEndEvent,
   ReasoningEndEvent,
   ReasoningEncryptedValueEvent,
+  SubagentStartedEvent,
+  SubagentFinishedEvent,
+  SubagentErrorEvent,
 } from "@ag-ui/core";
 import { AbstractAgent } from "./agent";
 import { structuredClone_ } from "@/utils";
@@ -90,6 +93,16 @@ export interface AgentSubscriber {
   ): MaybePromise<AgentStateMutation | void>;
   onStepFinishedEvent?(
     params: { event: StepFinishedEvent } & AgentSubscriberParams,
+  ): MaybePromise<AgentStateMutation | void>;
+
+  onSubagentStartedEvent?(
+    params: { event: SubagentStartedEvent } & AgentSubscriberParams,
+  ): MaybePromise<AgentStateMutation | void>;
+  onSubagentFinishedEvent?(
+    params: { event: SubagentFinishedEvent } & AgentSubscriberParams,
+  ): MaybePromise<AgentStateMutation | void>;
+  onSubagentErrorEvent?(
+    params: { event: SubagentErrorEvent } & AgentSubscriberParams,
   ): MaybePromise<AgentStateMutation | void>;
 
   onTextMessageStartEvent?(

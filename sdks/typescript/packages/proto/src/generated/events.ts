@@ -29,6 +29,9 @@ export enum EventType {
   RUN_ERROR = 13,
   STEP_STARTED = 14,
   STEP_FINISHED = 15,
+  SUBAGENT_STARTED = 16,
+  SUBAGENT_FINISHED = 17,
+  SUBAGENT_ERROR = 18,
   UNRECOGNIZED = -1,
 }
 
@@ -53,17 +56,20 @@ export interface TextMessageStartEvent {
   messageId: string;
   role?: string | undefined;
   name?: string | undefined;
+  subagentRunId?: string | undefined;
 }
 
 export interface TextMessageContentEvent {
   baseEvent: BaseEvent | undefined;
   messageId: string;
   delta: string;
+  subagentRunId?: string | undefined;
 }
 
 export interface TextMessageEndEvent {
   baseEvent: BaseEvent | undefined;
   messageId: string;
+  subagentRunId?: string | undefined;
 }
 
 export interface ToolCallStartEvent {
@@ -71,27 +77,39 @@ export interface ToolCallStartEvent {
   toolCallId: string;
   toolCallName: string;
   parentMessageId?: string | undefined;
+  subagentRunId?: string | undefined;
 }
 
 export interface ToolCallArgsEvent {
   baseEvent: BaseEvent | undefined;
   toolCallId: string;
   delta: string;
+  subagentRunId?: string | undefined;
 }
 
 export interface ToolCallEndEvent {
   baseEvent: BaseEvent | undefined;
   toolCallId: string;
+  subagentRunId?: string | undefined;
 }
 
+/**
+ * StateSnapshotEvent / StateDeltaEvent carry subagent_run_id because they are
+ * attributable: the protocol design lists them alongside the other standalone
+ * events. Attribution here is PROVENANCE, not ownership -- it records which
+ * subagent produced the update, while the state stays run-scoped and is applied
+ * run-scoped. There is no per-subagent state.
+ */
 export interface StateSnapshotEvent {
   baseEvent: BaseEvent | undefined;
   snapshot: any | undefined;
+  subagentRunId?: string | undefined;
 }
 
 export interface StateDeltaEvent {
   baseEvent: BaseEvent | undefined;
   delta: JsonPatchOperation[];
+  subagentRunId?: string | undefined;
 }
 
 export interface MessagesSnapshotEvent {
@@ -103,12 +121,14 @@ export interface RawEvent {
   baseEvent: BaseEvent | undefined;
   event: any | undefined;
   source?: string | undefined;
+  subagentRunId?: string | undefined;
 }
 
 export interface CustomEvent {
   baseEvent: BaseEvent | undefined;
   name: string;
   value?: any | undefined;
+  subagentRunId?: string | undefined;
 }
 
 export interface RunStartedEvent {
@@ -151,11 +171,13 @@ export interface RunErrorEvent {
 export interface StepStartedEvent {
   baseEvent: BaseEvent | undefined;
   stepName: string;
+  subagentRunId?: string | undefined;
 }
 
 export interface StepFinishedEvent {
   baseEvent: BaseEvent | undefined;
   stepName: string;
+  subagentRunId?: string | undefined;
 }
 
 export interface TextMessageChunkEvent {
@@ -164,6 +186,7 @@ export interface TextMessageChunkEvent {
   role?: string | undefined;
   delta?: string | undefined;
   name?: string | undefined;
+  subagentRunId?: string | undefined;
 }
 
 export interface ToolCallChunkEvent {
@@ -172,6 +195,54 @@ export interface ToolCallChunkEvent {
   toolCallName?: string | undefined;
   parentMessageId?: string | undefined;
   delta?: string | undefined;
+  subagentRunId?: string | undefined;
+}
+
+/**
+ * Subagent lifecycle. Field sets mirror the protocol schemas in
+ * @ag-ui/core (SubagentStartedEventSchema and friends).
+ */
+export interface SubagentStartedEvent {
+  baseEvent: BaseEvent | undefined;
+  subagentRunId: string;
+  name: string;
+  description?: string | undefined;
+  parentSubagentRunId?:
+    | string
+    | undefined;
+  /**
+   * Correlates the subagent with the tool call that spawned it, for the
+   * agents-as-tools pattern, without a consumer having to read raw_event.
+   */
+  parentToolCallId?: string | undefined;
+  parentMessageId?: string | undefined;
+}
+
+export interface SubagentFinishedEvent {
+  baseEvent: BaseEvent | undefined;
+  subagentRunId: string;
+  /** The subagent's completion payload, mirroring RunFinishedEvent.result. */
+  result?:
+    | any
+    | undefined;
+  /**
+   * Typed outcome, flattened like RunFinishedEvent's: "" (legacy success,
+   * field omitted on the JSON side), "success", or "suspended".
+   */
+  outcome: string;
+  /**
+   * Ids of the run-level interrupts this subagent directly owns; only
+   * meaningful when outcome == "suspended". May be empty for an ancestor
+   * suspended because a descendant interrupted.
+   */
+  interruptIds: string[];
+}
+
+export interface SubagentErrorEvent {
+  baseEvent: BaseEvent | undefined;
+  subagentRunId: string;
+  message: string;
+  code?: string | undefined;
 }
 
 export interface Event {
@@ -193,6 +264,9 @@ export interface Event {
   stepFinished?: StepFinishedEvent | undefined;
   textMessageChunk?: TextMessageChunkEvent | undefined;
   toolCallChunk?: ToolCallChunkEvent | undefined;
+  subagentStarted?: SubagentStartedEvent | undefined;
+  subagentFinished?: SubagentFinishedEvent | undefined;
+  subagentError?: SubagentErrorEvent | undefined;
 }
 
 function createBaseBaseEvent(): BaseEvent {
@@ -278,7 +352,7 @@ export const BaseEvent: MessageFns<BaseEvent> = {
 };
 
 function createBaseTextMessageStartEvent(): TextMessageStartEvent {
-  return { baseEvent: undefined, messageId: "", role: undefined, name: undefined };
+  return { baseEvent: undefined, messageId: "", role: undefined, name: undefined, subagentRunId: undefined };
 }
 
 export const TextMessageStartEvent: MessageFns<TextMessageStartEvent> = {
@@ -294,6 +368,9 @@ export const TextMessageStartEvent: MessageFns<TextMessageStartEvent> = {
     }
     if (message.name !== undefined) {
       writer.uint32(34).string(message.name);
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(42).string(message.subagentRunId);
     }
     return writer;
   },
@@ -337,6 +414,14 @@ export const TextMessageStartEvent: MessageFns<TextMessageStartEvent> = {
           message.name = reader.string();
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -357,12 +442,13 @@ export const TextMessageStartEvent: MessageFns<TextMessageStartEvent> = {
     message.messageId = object.messageId ?? "";
     message.role = object.role ?? undefined;
     message.name = object.name ?? undefined;
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
 
 function createBaseTextMessageContentEvent(): TextMessageContentEvent {
-  return { baseEvent: undefined, messageId: "", delta: "" };
+  return { baseEvent: undefined, messageId: "", delta: "", subagentRunId: undefined };
 }
 
 export const TextMessageContentEvent: MessageFns<TextMessageContentEvent> = {
@@ -375,6 +461,9 @@ export const TextMessageContentEvent: MessageFns<TextMessageContentEvent> = {
     }
     if (message.delta !== "") {
       writer.uint32(26).string(message.delta);
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(34).string(message.subagentRunId);
     }
     return writer;
   },
@@ -410,6 +499,14 @@ export const TextMessageContentEvent: MessageFns<TextMessageContentEvent> = {
           message.delta = reader.string();
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -429,12 +526,13 @@ export const TextMessageContentEvent: MessageFns<TextMessageContentEvent> = {
       : undefined;
     message.messageId = object.messageId ?? "";
     message.delta = object.delta ?? "";
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
 
 function createBaseTextMessageEndEvent(): TextMessageEndEvent {
-  return { baseEvent: undefined, messageId: "" };
+  return { baseEvent: undefined, messageId: "", subagentRunId: undefined };
 }
 
 export const TextMessageEndEvent: MessageFns<TextMessageEndEvent> = {
@@ -444,6 +542,9 @@ export const TextMessageEndEvent: MessageFns<TextMessageEndEvent> = {
     }
     if (message.messageId !== "") {
       writer.uint32(18).string(message.messageId);
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(26).string(message.subagentRunId);
     }
     return writer;
   },
@@ -471,6 +572,14 @@ export const TextMessageEndEvent: MessageFns<TextMessageEndEvent> = {
           message.messageId = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -489,12 +598,19 @@ export const TextMessageEndEvent: MessageFns<TextMessageEndEvent> = {
       ? BaseEvent.fromPartial(object.baseEvent)
       : undefined;
     message.messageId = object.messageId ?? "";
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
 
 function createBaseToolCallStartEvent(): ToolCallStartEvent {
-  return { baseEvent: undefined, toolCallId: "", toolCallName: "", parentMessageId: undefined };
+  return {
+    baseEvent: undefined,
+    toolCallId: "",
+    toolCallName: "",
+    parentMessageId: undefined,
+    subagentRunId: undefined,
+  };
 }
 
 export const ToolCallStartEvent: MessageFns<ToolCallStartEvent> = {
@@ -510,6 +626,9 @@ export const ToolCallStartEvent: MessageFns<ToolCallStartEvent> = {
     }
     if (message.parentMessageId !== undefined) {
       writer.uint32(34).string(message.parentMessageId);
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(42).string(message.subagentRunId);
     }
     return writer;
   },
@@ -553,6 +672,14 @@ export const ToolCallStartEvent: MessageFns<ToolCallStartEvent> = {
           message.parentMessageId = reader.string();
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -573,12 +700,13 @@ export const ToolCallStartEvent: MessageFns<ToolCallStartEvent> = {
     message.toolCallId = object.toolCallId ?? "";
     message.toolCallName = object.toolCallName ?? "";
     message.parentMessageId = object.parentMessageId ?? undefined;
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
 
 function createBaseToolCallArgsEvent(): ToolCallArgsEvent {
-  return { baseEvent: undefined, toolCallId: "", delta: "" };
+  return { baseEvent: undefined, toolCallId: "", delta: "", subagentRunId: undefined };
 }
 
 export const ToolCallArgsEvent: MessageFns<ToolCallArgsEvent> = {
@@ -591,6 +719,9 @@ export const ToolCallArgsEvent: MessageFns<ToolCallArgsEvent> = {
     }
     if (message.delta !== "") {
       writer.uint32(26).string(message.delta);
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(34).string(message.subagentRunId);
     }
     return writer;
   },
@@ -626,6 +757,14 @@ export const ToolCallArgsEvent: MessageFns<ToolCallArgsEvent> = {
           message.delta = reader.string();
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -645,12 +784,13 @@ export const ToolCallArgsEvent: MessageFns<ToolCallArgsEvent> = {
       : undefined;
     message.toolCallId = object.toolCallId ?? "";
     message.delta = object.delta ?? "";
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
 
 function createBaseToolCallEndEvent(): ToolCallEndEvent {
-  return { baseEvent: undefined, toolCallId: "" };
+  return { baseEvent: undefined, toolCallId: "", subagentRunId: undefined };
 }
 
 export const ToolCallEndEvent: MessageFns<ToolCallEndEvent> = {
@@ -660,6 +800,9 @@ export const ToolCallEndEvent: MessageFns<ToolCallEndEvent> = {
     }
     if (message.toolCallId !== "") {
       writer.uint32(18).string(message.toolCallId);
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(26).string(message.subagentRunId);
     }
     return writer;
   },
@@ -687,6 +830,14 @@ export const ToolCallEndEvent: MessageFns<ToolCallEndEvent> = {
           message.toolCallId = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -705,12 +856,13 @@ export const ToolCallEndEvent: MessageFns<ToolCallEndEvent> = {
       ? BaseEvent.fromPartial(object.baseEvent)
       : undefined;
     message.toolCallId = object.toolCallId ?? "";
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
 
 function createBaseStateSnapshotEvent(): StateSnapshotEvent {
-  return { baseEvent: undefined, snapshot: undefined };
+  return { baseEvent: undefined, snapshot: undefined, subagentRunId: undefined };
 }
 
 export const StateSnapshotEvent: MessageFns<StateSnapshotEvent> = {
@@ -720,6 +872,9 @@ export const StateSnapshotEvent: MessageFns<StateSnapshotEvent> = {
     }
     if (message.snapshot !== undefined) {
       Value.encode(Value.wrap(message.snapshot), writer.uint32(18).fork()).join();
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(26).string(message.subagentRunId);
     }
     return writer;
   },
@@ -747,6 +902,14 @@ export const StateSnapshotEvent: MessageFns<StateSnapshotEvent> = {
           message.snapshot = Value.unwrap(Value.decode(reader, reader.uint32()));
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -765,12 +928,13 @@ export const StateSnapshotEvent: MessageFns<StateSnapshotEvent> = {
       ? BaseEvent.fromPartial(object.baseEvent)
       : undefined;
     message.snapshot = object.snapshot ?? undefined;
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
 
 function createBaseStateDeltaEvent(): StateDeltaEvent {
-  return { baseEvent: undefined, delta: [] };
+  return { baseEvent: undefined, delta: [], subagentRunId: undefined };
 }
 
 export const StateDeltaEvent: MessageFns<StateDeltaEvent> = {
@@ -780,6 +944,9 @@ export const StateDeltaEvent: MessageFns<StateDeltaEvent> = {
     }
     for (const v of message.delta) {
       JsonPatchOperation.encode(v!, writer.uint32(18).fork()).join();
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(26).string(message.subagentRunId);
     }
     return writer;
   },
@@ -807,6 +974,14 @@ export const StateDeltaEvent: MessageFns<StateDeltaEvent> = {
           message.delta.push(JsonPatchOperation.decode(reader, reader.uint32()));
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -825,6 +1000,7 @@ export const StateDeltaEvent: MessageFns<StateDeltaEvent> = {
       ? BaseEvent.fromPartial(object.baseEvent)
       : undefined;
     message.delta = object.delta?.map((e) => JsonPatchOperation.fromPartial(e)) || [];
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
@@ -890,7 +1066,7 @@ export const MessagesSnapshotEvent: MessageFns<MessagesSnapshotEvent> = {
 };
 
 function createBaseRawEvent(): RawEvent {
-  return { baseEvent: undefined, event: undefined, source: undefined };
+  return { baseEvent: undefined, event: undefined, source: undefined, subagentRunId: undefined };
 }
 
 export const RawEvent: MessageFns<RawEvent> = {
@@ -903,6 +1079,9 @@ export const RawEvent: MessageFns<RawEvent> = {
     }
     if (message.source !== undefined) {
       writer.uint32(26).string(message.source);
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(34).string(message.subagentRunId);
     }
     return writer;
   },
@@ -938,6 +1117,14 @@ export const RawEvent: MessageFns<RawEvent> = {
           message.source = reader.string();
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -957,12 +1144,13 @@ export const RawEvent: MessageFns<RawEvent> = {
       : undefined;
     message.event = object.event ?? undefined;
     message.source = object.source ?? undefined;
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
 
 function createBaseCustomEvent(): CustomEvent {
-  return { baseEvent: undefined, name: "", value: undefined };
+  return { baseEvent: undefined, name: "", value: undefined, subagentRunId: undefined };
 }
 
 export const CustomEvent: MessageFns<CustomEvent> = {
@@ -975,6 +1163,9 @@ export const CustomEvent: MessageFns<CustomEvent> = {
     }
     if (message.value !== undefined) {
       Value.encode(Value.wrap(message.value), writer.uint32(26).fork()).join();
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(34).string(message.subagentRunId);
     }
     return writer;
   },
@@ -1010,6 +1201,14 @@ export const CustomEvent: MessageFns<CustomEvent> = {
           message.value = Value.unwrap(Value.decode(reader, reader.uint32()));
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1029,6 +1228,7 @@ export const CustomEvent: MessageFns<CustomEvent> = {
       : undefined;
     message.name = object.name ?? "";
     message.value = object.value ?? undefined;
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
@@ -1436,7 +1636,7 @@ export const RunErrorEvent: MessageFns<RunErrorEvent> = {
 };
 
 function createBaseStepStartedEvent(): StepStartedEvent {
-  return { baseEvent: undefined, stepName: "" };
+  return { baseEvent: undefined, stepName: "", subagentRunId: undefined };
 }
 
 export const StepStartedEvent: MessageFns<StepStartedEvent> = {
@@ -1446,6 +1646,9 @@ export const StepStartedEvent: MessageFns<StepStartedEvent> = {
     }
     if (message.stepName !== "") {
       writer.uint32(18).string(message.stepName);
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(26).string(message.subagentRunId);
     }
     return writer;
   },
@@ -1473,6 +1676,14 @@ export const StepStartedEvent: MessageFns<StepStartedEvent> = {
           message.stepName = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1491,12 +1702,13 @@ export const StepStartedEvent: MessageFns<StepStartedEvent> = {
       ? BaseEvent.fromPartial(object.baseEvent)
       : undefined;
     message.stepName = object.stepName ?? "";
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
 
 function createBaseStepFinishedEvent(): StepFinishedEvent {
-  return { baseEvent: undefined, stepName: "" };
+  return { baseEvent: undefined, stepName: "", subagentRunId: undefined };
 }
 
 export const StepFinishedEvent: MessageFns<StepFinishedEvent> = {
@@ -1506,6 +1718,9 @@ export const StepFinishedEvent: MessageFns<StepFinishedEvent> = {
     }
     if (message.stepName !== "") {
       writer.uint32(18).string(message.stepName);
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(26).string(message.subagentRunId);
     }
     return writer;
   },
@@ -1533,6 +1748,14 @@ export const StepFinishedEvent: MessageFns<StepFinishedEvent> = {
           message.stepName = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1551,12 +1774,20 @@ export const StepFinishedEvent: MessageFns<StepFinishedEvent> = {
       ? BaseEvent.fromPartial(object.baseEvent)
       : undefined;
     message.stepName = object.stepName ?? "";
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
 
 function createBaseTextMessageChunkEvent(): TextMessageChunkEvent {
-  return { baseEvent: undefined, messageId: undefined, role: undefined, delta: undefined, name: undefined };
+  return {
+    baseEvent: undefined,
+    messageId: undefined,
+    role: undefined,
+    delta: undefined,
+    name: undefined,
+    subagentRunId: undefined,
+  };
 }
 
 export const TextMessageChunkEvent: MessageFns<TextMessageChunkEvent> = {
@@ -1575,6 +1806,9 @@ export const TextMessageChunkEvent: MessageFns<TextMessageChunkEvent> = {
     }
     if (message.name !== undefined) {
       writer.uint32(42).string(message.name);
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(50).string(message.subagentRunId);
     }
     return writer;
   },
@@ -1626,6 +1860,14 @@ export const TextMessageChunkEvent: MessageFns<TextMessageChunkEvent> = {
           message.name = reader.string();
           continue;
         }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1647,6 +1889,7 @@ export const TextMessageChunkEvent: MessageFns<TextMessageChunkEvent> = {
     message.role = object.role ?? undefined;
     message.delta = object.delta ?? undefined;
     message.name = object.name ?? undefined;
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
@@ -1658,6 +1901,7 @@ function createBaseToolCallChunkEvent(): ToolCallChunkEvent {
     toolCallName: undefined,
     parentMessageId: undefined,
     delta: undefined,
+    subagentRunId: undefined,
   };
 }
 
@@ -1677,6 +1921,9 @@ export const ToolCallChunkEvent: MessageFns<ToolCallChunkEvent> = {
     }
     if (message.delta !== undefined) {
       writer.uint32(42).string(message.delta);
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(50).string(message.subagentRunId);
     }
     return writer;
   },
@@ -1728,6 +1975,14 @@ export const ToolCallChunkEvent: MessageFns<ToolCallChunkEvent> = {
           message.delta = reader.string();
           continue;
         }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1749,6 +2004,315 @@ export const ToolCallChunkEvent: MessageFns<ToolCallChunkEvent> = {
     message.toolCallName = object.toolCallName ?? undefined;
     message.parentMessageId = object.parentMessageId ?? undefined;
     message.delta = object.delta ?? undefined;
+    message.subagentRunId = object.subagentRunId ?? undefined;
+    return message;
+  },
+};
+
+function createBaseSubagentStartedEvent(): SubagentStartedEvent {
+  return {
+    baseEvent: undefined,
+    subagentRunId: "",
+    name: "",
+    description: undefined,
+    parentSubagentRunId: undefined,
+    parentToolCallId: undefined,
+    parentMessageId: undefined,
+  };
+}
+
+export const SubagentStartedEvent: MessageFns<SubagentStartedEvent> = {
+  encode(message: SubagentStartedEvent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.baseEvent !== undefined) {
+      BaseEvent.encode(message.baseEvent, writer.uint32(10).fork()).join();
+    }
+    if (message.subagentRunId !== "") {
+      writer.uint32(18).string(message.subagentRunId);
+    }
+    if (message.name !== "") {
+      writer.uint32(26).string(message.name);
+    }
+    if (message.description !== undefined) {
+      writer.uint32(34).string(message.description);
+    }
+    if (message.parentSubagentRunId !== undefined) {
+      writer.uint32(42).string(message.parentSubagentRunId);
+    }
+    if (message.parentToolCallId !== undefined) {
+      writer.uint32(50).string(message.parentToolCallId);
+    }
+    if (message.parentMessageId !== undefined) {
+      writer.uint32(58).string(message.parentMessageId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SubagentStartedEvent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSubagentStartedEvent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.baseEvent = BaseEvent.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.description = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.parentSubagentRunId = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.parentToolCallId = reader.string();
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.parentMessageId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  create<I extends Exact<DeepPartial<SubagentStartedEvent>, I>>(base?: I): SubagentStartedEvent {
+    return SubagentStartedEvent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SubagentStartedEvent>, I>>(object: I): SubagentStartedEvent {
+    const message = createBaseSubagentStartedEvent();
+    message.baseEvent = (object.baseEvent !== undefined && object.baseEvent !== null)
+      ? BaseEvent.fromPartial(object.baseEvent)
+      : undefined;
+    message.subagentRunId = object.subagentRunId ?? "";
+    message.name = object.name ?? "";
+    message.description = object.description ?? undefined;
+    message.parentSubagentRunId = object.parentSubagentRunId ?? undefined;
+    message.parentToolCallId = object.parentToolCallId ?? undefined;
+    message.parentMessageId = object.parentMessageId ?? undefined;
+    return message;
+  },
+};
+
+function createBaseSubagentFinishedEvent(): SubagentFinishedEvent {
+  return { baseEvent: undefined, subagentRunId: "", result: undefined, outcome: "", interruptIds: [] };
+}
+
+export const SubagentFinishedEvent: MessageFns<SubagentFinishedEvent> = {
+  encode(message: SubagentFinishedEvent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.baseEvent !== undefined) {
+      BaseEvent.encode(message.baseEvent, writer.uint32(10).fork()).join();
+    }
+    if (message.subagentRunId !== "") {
+      writer.uint32(18).string(message.subagentRunId);
+    }
+    if (message.result !== undefined) {
+      Value.encode(Value.wrap(message.result), writer.uint32(26).fork()).join();
+    }
+    if (message.outcome !== "") {
+      writer.uint32(34).string(message.outcome);
+    }
+    for (const v of message.interruptIds) {
+      writer.uint32(42).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SubagentFinishedEvent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSubagentFinishedEvent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.baseEvent = BaseEvent.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.result = Value.unwrap(Value.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.outcome = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.interruptIds.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  create<I extends Exact<DeepPartial<SubagentFinishedEvent>, I>>(base?: I): SubagentFinishedEvent {
+    return SubagentFinishedEvent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SubagentFinishedEvent>, I>>(object: I): SubagentFinishedEvent {
+    const message = createBaseSubagentFinishedEvent();
+    message.baseEvent = (object.baseEvent !== undefined && object.baseEvent !== null)
+      ? BaseEvent.fromPartial(object.baseEvent)
+      : undefined;
+    message.subagentRunId = object.subagentRunId ?? "";
+    message.result = object.result ?? undefined;
+    message.outcome = object.outcome ?? "";
+    message.interruptIds = object.interruptIds?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseSubagentErrorEvent(): SubagentErrorEvent {
+  return { baseEvent: undefined, subagentRunId: "", message: "", code: undefined };
+}
+
+export const SubagentErrorEvent: MessageFns<SubagentErrorEvent> = {
+  encode(message: SubagentErrorEvent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.baseEvent !== undefined) {
+      BaseEvent.encode(message.baseEvent, writer.uint32(10).fork()).join();
+    }
+    if (message.subagentRunId !== "") {
+      writer.uint32(18).string(message.subagentRunId);
+    }
+    if (message.message !== "") {
+      writer.uint32(26).string(message.message);
+    }
+    if (message.code !== undefined) {
+      writer.uint32(34).string(message.code);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SubagentErrorEvent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSubagentErrorEvent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.baseEvent = BaseEvent.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.message = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.code = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  create<I extends Exact<DeepPartial<SubagentErrorEvent>, I>>(base?: I): SubagentErrorEvent {
+    return SubagentErrorEvent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SubagentErrorEvent>, I>>(object: I): SubagentErrorEvent {
+    const message = createBaseSubagentErrorEvent();
+    message.baseEvent = (object.baseEvent !== undefined && object.baseEvent !== null)
+      ? BaseEvent.fromPartial(object.baseEvent)
+      : undefined;
+    message.subagentRunId = object.subagentRunId ?? "";
+    message.message = object.message ?? "";
+    message.code = object.code ?? undefined;
     return message;
   },
 };
@@ -1773,6 +2337,9 @@ function createBaseEvent(): Event {
     stepFinished: undefined,
     textMessageChunk: undefined,
     toolCallChunk: undefined,
+    subagentStarted: undefined,
+    subagentFinished: undefined,
+    subagentError: undefined,
   };
 }
 
@@ -1831,6 +2398,15 @@ export const Event: MessageFns<Event> = {
     }
     if (message.toolCallChunk !== undefined) {
       ToolCallChunkEvent.encode(message.toolCallChunk, writer.uint32(146).fork()).join();
+    }
+    if (message.subagentStarted !== undefined) {
+      SubagentStartedEvent.encode(message.subagentStarted, writer.uint32(154).fork()).join();
+    }
+    if (message.subagentFinished !== undefined) {
+      SubagentFinishedEvent.encode(message.subagentFinished, writer.uint32(162).fork()).join();
+    }
+    if (message.subagentError !== undefined) {
+      SubagentErrorEvent.encode(message.subagentError, writer.uint32(170).fork()).join();
     }
     return writer;
   },
@@ -1986,6 +2562,30 @@ export const Event: MessageFns<Event> = {
           message.toolCallChunk = ToolCallChunkEvent.decode(reader, reader.uint32());
           continue;
         }
+        case 19: {
+          if (tag !== 154) {
+            break;
+          }
+
+          message.subagentStarted = SubagentStartedEvent.decode(reader, reader.uint32());
+          continue;
+        }
+        case 20: {
+          if (tag !== 162) {
+            break;
+          }
+
+          message.subagentFinished = SubagentFinishedEvent.decode(reader, reader.uint32());
+          continue;
+        }
+        case 21: {
+          if (tag !== 170) {
+            break;
+          }
+
+          message.subagentError = SubagentErrorEvent.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2051,6 +2651,15 @@ export const Event: MessageFns<Event> = {
       : undefined;
     message.toolCallChunk = (object.toolCallChunk !== undefined && object.toolCallChunk !== null)
       ? ToolCallChunkEvent.fromPartial(object.toolCallChunk)
+      : undefined;
+    message.subagentStarted = (object.subagentStarted !== undefined && object.subagentStarted !== null)
+      ? SubagentStartedEvent.fromPartial(object.subagentStarted)
+      : undefined;
+    message.subagentFinished = (object.subagentFinished !== undefined && object.subagentFinished !== null)
+      ? SubagentFinishedEvent.fromPartial(object.subagentFinished)
+      : undefined;
+    message.subagentError = (object.subagentError !== undefined && object.subagentError !== null)
+      ? SubagentErrorEvent.fromPartial(object.subagentError)
       : undefined;
     return message;
   },

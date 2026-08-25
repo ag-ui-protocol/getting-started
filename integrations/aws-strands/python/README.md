@@ -37,7 +37,7 @@ The integration has three main layers:
 - **Configuration** – `StrandsAgentConfig` + `ToolBehavior` + `PredictStateMapping` let you describe tool-specific quirks declaratively (skip message snapshots, emit state, stream args, send confirm actions, etc.).
 - **Transport helpers** – `create_strands_app` and `add_strands_fastapi_endpoint` expose the agent via SSE. They are thin shells over the shared `ag_ui.encoder.EventEncoder`.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for diagrams and a deeper dive.
+See [ARCHITECTURE.md](../ARCHITECTURE.md) for diagrams and a deeper dive.
 
 ## Key Files
 
@@ -69,11 +69,47 @@ You can also use the helper functions `add_strands_fastapi_endpoint` and `add_pi
     add_ping(app, "/ping")
 ```
 
+## Securing the endpoint
+
+`create_strands_app` remains backward-compatible with earlier releases: when no
+CORS option is supplied it installs permissive wildcard CORS and emits a
+`FutureWarning`. Choose the intended policy explicitly to silence the warning:
+
+- Prefer an exact browser allowlist, e.g. `create_strands_app(agui_agent, origins=["http://localhost:3000"])`.
+- Pass `cors_enabled=False` for same-origin or server-to-server deployments that need no CORS middleware.
+- Pass `origins=["*"]` (or `cors_enabled=True`) to explicitly retain wildcard CORS for local development.
+- The implicit wildcard fallback will be removed in a future release.
+- The agent route has no authentication unless you pass an `auth` dependency:
+
+```python
+import os
+from fastapi import Header, HTTPException
+
+def require_token(authorization: str | None = Header(default=None)) -> None:
+    if authorization != f"Bearer {os.environ['AGENT_TOKEN']}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+app = create_strands_app(
+    agui_agent,
+    origins=["https://app.example"],
+    auth=require_token,
+)
+```
+
+The same `auth` argument is accepted by `add_strands_fastapi_endpoint` and is
+evaluated before JSON decoding or model validation. The ping endpoint is left
+unauthenticated so load balancer and AgentCore health probes keep working.
+
+Agent POST requests must send a JSON-compatible `Content-Type`: either
+`application/json` or an `application/*+json` media type. Requests with a
+missing or non-JSON `Content-Type` are rejected with HTTP 415 before the agent
+runs.
+
 Requests to the AC endpoint must be authenticated. You can configure your agent runtime to accept JWT bearer tokens (via Amazon Cognito) or use SigV4. See [Set up authentication](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-agui.html) in the AgentCore documentation.
 
 For details on how AgentCore handles AG-UI requests, event streaming, and error formatting, see the [AG-UI protocol contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-agui-protocol-contract.html).
 
-To deploy, use the [AgentCore Starter Toolkit](https://github.com/awslabs/bedrock-agentcore-starter-toolkit):
+To deploy, use the [AgentCore Starter Toolkit](https://github.com/aws/bedrock-agentcore-starter-toolkit):
 
 ```bash
 pip install bedrock-agentcore-starter-toolkit

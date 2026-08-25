@@ -14,6 +14,28 @@ public static class AGUIChatMessageExtensions
     private static readonly ChatRole s_developerChatRole = new("developer");
 
     /// <summary>
+    /// <see cref="ChatMessage.AdditionalProperties"/> key carrying <see
+    /// cref="AGUIMessage.SubagentRunId"/> across the round trip.
+    /// <see cref="ChatMessage"/> has no concept of delegated work, and AGUIChatClient
+    /// sends request messages through <see cref="AsAGUIMessages"/>, so without this a
+    /// subagent-attributed message handed back to the client silently returns to the
+    /// agent as the parent's on the next turn. Same approach the binary content parts
+    /// already use for their AG-UI-only "filename".
+    /// </summary>
+    private const string SubagentRunIdKey = "agui.subagentRunId";
+
+    private static ChatMessage WithSubagentRunId(ChatMessage message, string? subagentRunId)
+    {
+        if (subagentRunId is not null)
+        {
+            message.AdditionalProperties ??= new AdditionalPropertiesDictionary();
+            message.AdditionalProperties[SubagentRunIdKey] = subagentRunId;
+        }
+
+        return message;
+    }
+
+    /// <summary>
     /// Converts a sequence of <see cref="AGUIMessage"/> instances to <see cref="ChatMessage"/> instances.
     /// </summary>
     /// <param name="aguiMessages">The AG-UI messages to convert.</param>
@@ -28,6 +50,32 @@ public static class AGUIChatMessageExtensions
         // the reconstructed history valid. Only the current run is buffered, so this stays cheap.
         List<AIContent>? pendingToolCallContents = null;
         string? pendingToolCallId = null;
+        // The buffered run's owner — the FIRST owner in the run.
+        //
+        // Parallel tool calls from DIFFERENT subagents lose the second owner here, because
+        // AG-UI attributes per message and this merges the run into one ChatMessage.
+        //
+        // That is a current limitation, NOT an inherent conflict. The provider constraint
+        // (microsoft/agent-framework#2699) is ADJACENCY — each assistant tool_calls message
+        // must be immediately followed by the results for its own call ids — and merging is
+        // only one way to satisfy it. Interleaving satisfies it too, and is in fact the
+        // shape that issue names as correct:
+        //   assistant(tc1), tool(tc1), assistant(tc2), tool(tc2)
+        // which would also preserve per-message attribution.
+        //
+        // Splitting the run on owner change was implemented and reverted because it split
+        // WITHOUT reordering the results, producing
+        // assistant(tc1), assistant(tc2), tool(tc1), tool(tc2) — the exact invalid shape.
+        // Doing it properly means interleaving, which changes this method's output for
+        // non-subagent parallel calls as well, so it is a deliberate decision rather than a
+        // drive-by fix. PNI-293 carries the analysis.
+        string? pendingToolCallSubagentRunId = null;
+        // Whether the run's owner has been captured yet. A separate flag rather than
+        // "pendingToolCallSubagentRunId is still null", because the PARENT is an owner too
+        // and its owner IS null: capturing the first non-null value promoted a later
+        // subagent onto a run the parent opened, attributing the parent's own tool call to
+        // it.
+        var pendingToolCallOwnerCaptured = false;
 
         foreach (var message in aguiMessages)
         {
@@ -35,6 +83,14 @@ public static class AGUIChatMessageExtensions
             {
                 pendingToolCallContents ??= new List<AIContent>();
                 pendingToolCallId ??= message.Id;
+                // First owner in the run wins, whoever that is. Splitting the run when the
+                // owner changes was tried and reverted: see the note on
+                // pendingToolCallSubagentRunId.
+                if (!pendingToolCallOwnerCaptured)
+                {
+                    pendingToolCallSubagentRunId = message.SubagentRunId;
+                    pendingToolCallOwnerCaptured = true;
+                }
 
                 if (!string.IsNullOrEmpty(toolCallAssistant.Content))
                 {
@@ -59,9 +115,13 @@ public static class AGUIChatMessageExtensions
             // Any non-(assistant-with-tool-calls) message ends the current run; flush it first.
             if (pendingToolCallContents is not null)
             {
-                yield return new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId };
+                yield return WithSubagentRunId(
+                    new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId },
+                    pendingToolCallSubagentRunId);
                 pendingToolCallContents = null;
                 pendingToolCallId = null;
+                pendingToolCallSubagentRunId = null;
+                pendingToolCallOwnerCaptured = false;
             }
 
             var role = MapChatRole(message.Role);
@@ -106,7 +166,9 @@ public static class AGUIChatMessageExtensions
                     }
                 }
 
-                yield return new ChatMessage(role, contents) { MessageId = message.Id, AuthorName = authorName };
+                yield return WithSubagentRunId(
+                    new ChatMessage(role, contents) { MessageId = message.Id, AuthorName = authorName },
+                    message.SubagentRunId);
             }
             else if (message is AGUIToolMessage toolMessage)
             {
@@ -115,10 +177,9 @@ public static class AGUIChatMessageExtensions
                     new FunctionResultContent(toolMessage.ToolCallId ?? string.Empty, toolMessage.Content)
                 };
 
-                yield return new ChatMessage(role, contents)
-                {
-                    MessageId = message.Id
-                };
+                yield return WithSubagentRunId(
+                    new ChatMessage(role, contents) { MessageId = message.Id },
+                    message.SubagentRunId);
             }
             else
             {
@@ -131,17 +192,18 @@ public static class AGUIChatMessageExtensions
                     _ => string.Empty,
                 };
 
-                yield return new ChatMessage(role, text)
-                {
-                    MessageId = message.Id
-                };
+                yield return WithSubagentRunId(
+                    new ChatMessage(role, text) { MessageId = message.Id },
+                    message.SubagentRunId);
             }
         }
 
         // Flush any trailing assistant-tool-call run.
         if (pendingToolCallContents is not null)
         {
-            yield return new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId };
+            yield return WithSubagentRunId(
+                new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId },
+                pendingToolCallSubagentRunId);
         }
     }
 
@@ -244,7 +306,14 @@ public static class AGUIChatMessageExtensions
                     {
                         Id = functionResult.CallId,
                         ToolCallId = functionResult.CallId,
-                        Content = SerializeFunctionResult(functionResult, message.Text)
+                        Content = SerializeFunctionResult(functionResult, message.Text),
+                        // Restored here as well as at the end of the loop: this branch
+                        // yields directly (one message per result) and so never reaches
+                        // the shared Id/SubagentRunId assignment below.
+                        SubagentRunId =
+                            message.AdditionalProperties?.TryGetValue(SubagentRunIdKey, out string? toolSubagentRunId) == true
+                                ? toolSubagentRunId
+                                : null,
                     };
                 }
 
@@ -259,6 +328,15 @@ public static class AGUIChatMessageExtensions
             }
 
             aguiMessage.Id = message.MessageId;
+            // Null-only, not IsNullOrEmpty: an empty string is a valid opaque id that the
+            // schemas accept, and treating it as absent silently converted it to parent
+            // attribution on the next turn.
+            if (message.AdditionalProperties?.TryGetValue(SubagentRunIdKey, out string? subagentRunId) == true
+                && subagentRunId is not null)
+            {
+                aguiMessage.SubagentRunId = subagentRunId;
+            }
+
             yield return aguiMessage;
         }
     }

@@ -17,4 +17,11 @@ public sealed class ReasoningEndEvent : BaseEvent
     /// </summary>
     [JsonPropertyName("messageId")]
     public string MessageId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the subagent that produced this event, absent when the parent agent
+    /// produced it directly.
+    /// </summary>
+    [JsonPropertyName("subagentRunId")]
+    public string? SubagentRunId { get; set; }
 }

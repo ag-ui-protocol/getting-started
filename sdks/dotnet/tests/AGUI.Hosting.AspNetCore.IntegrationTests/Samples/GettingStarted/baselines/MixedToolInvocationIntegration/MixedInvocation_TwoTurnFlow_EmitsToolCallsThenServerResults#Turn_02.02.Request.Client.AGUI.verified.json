@@ -16,7 +16,13 @@
             "name": "get_user_location",
             "arguments": "{}"
           }
-        },
+        }
+      ],
+      "id": "call_Id_1"
+    },
+    {
+      "role": "assistant",
+      "toolCalls": [
         {
           "id": "call_Id_2",
           "type": "function",
@@ -25,7 +31,8 @@
             "arguments": "{\u0022city\u0022:\u0022Paris\u0022}"
           }
         }
-      ]
+      ],
+      "id": "call_Id_2"
     },
     {
       "role": "tool",

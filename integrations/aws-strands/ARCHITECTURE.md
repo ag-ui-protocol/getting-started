@@ -132,12 +132,13 @@ Helper utilities:
 
 The transport layer is intentionally lightweight:
 
-- `add_strands_fastapi_endpoint(app, agent, path)` registers a POST route that:
+- `add_strands_fastapi_endpoint(app, agent, path, auth=None)` registers a POST route that:
   - Accepts a `RunAgentInput` body.
+  - Evaluates the optional authentication dependency before parsing and validating that body.
   - Instantiates `EventEncoder` using the requester's `Accept` header to choose between SSE (`text/event-stream`) and newline-delimited JSON.
   - Streams whatever `StrandsAgent.run` yields, automatically encoding every AG-UI event.
   - Sends a `RunErrorEvent` with `code="ENCODING_ERROR"` if serialization fails mid-stream.
-- `create_strands_app(agent, path="/")` bootstraps a FastAPI application, adds permissive CORS middleware (allowing any origin/method/header so AG-UI localhost builds can connect), and mounts the agent route.
+- `create_strands_app(agent, path="/", ping_path="/ping", origins=None, auth=None, allow_methods=None, allow_headers=None, cors_enabled=None)` bootstraps a FastAPI application and mounts the agent route. For backward compatibility, an implicit wildcard CORS configuration remains available with a `FutureWarning`; callers can pass an exact `origins` allowlist, explicitly acknowledge wildcard access, or disable CORS with `cors_enabled=False`. An optional `auth` dependency guards the agent route (the ping route stays open for health probes).
 
 ### Packaging Surface (`src/ag_ui_strands/__init__.py`)
 
@@ -188,7 +189,7 @@ Behaviors the Python adapter does not currently implement, added to match TypeSc
 - **Multi-agent orchestrator mode** (`_runOrchestrator`): accepts a Strands `Graph` or `Swarm` in place of a single `Agent` and drives its `.stream()` directly. Per-thread caching, session managers, and proxy-tool sync are bypassed because orchestrators are stateless per invocation.
 - **`THREAD_BUSY` guard**: `_activeRunsByThread` rejects concurrent runs on the same thread with `RUN_ERROR { code: "THREAD_BUSY" }`. The TS SDK throws `"Agent is already processing an invocation"` if this isn't caught up front; Python's SDK has no equivalent collision.
 - **`AbortController` wiring**: the Strands `.stream()` call receives a `cancelSignal`; the transport's disconnect listener fires it so Bedrock stops streaming when the HTTP client drops.
-- **Request-boundary validation** (`addStrandsExpressEndpoint`): returns `415` for non-JSON `Content-Type`, `400` for bodies that fail the shared Zod `RunAgentInputSchema`, and normalizes snake_case top-level keys (`thread_id`, `run_id`, `parent_run_id`, `forwarded_props`) into camelCase before validating. FastAPI's Pydantic layer handles the equivalent on the Python side.
+- **Request-boundary validation** (`addStrandsExpressEndpoint`): returns `415` for non-JSON `Content-Type`, `400` for bodies that fail the shared Zod `RunAgentInputSchema`, and normalizes snake_case top-level keys (`thread_id`, `run_id`, `parent_run_id`, `forwarded_props`) into camelCase before validating. Python mirrors the media-type boundary in FastAPI: `_require_json_content_type` rejects missing or non-JSON-compatible `Content-Type` values with HTTP `415` before body/model validation, while Pydantic still handles the request body shape validation.
 - **Client-disconnect handling**: HTTP/1.1 `res.close` and HTTP/2 `req.aborted` both trigger `iterator.return()`, firing the agent generator's `finally` so the `_activeRunsByThread` slot releases and the Bedrock stream aborts.
 - **Protobuf content negotiation**: only selected when `Accept` explicitly contains `application/vnd.ag-ui.event+proto`; `*/*` or omitted Accept falls back to SSE.
 - **Capabilities endpoint** (`addCapabilities`, `DEFAULT_CAPABILITIES`, `capabilitiesFor`): optional `GET /capabilities` returning a static matrix of supported event families, transports, and protocol features so frontends don't have to probe empirically.
@@ -226,9 +227,9 @@ The repository includes seven runnable FastAPI apps that showcase different feat
 
 The TypeScript package ships the same seven Python examples under the matching filenames (`agentic-chat.ts`, `agentic-chat-reasoning.ts`, `agentic-chat-multimodal.ts`, `backend-tool-rendering.ts`, `shared-state.ts`, `agentic-generative-ui.ts`, `human-in-the-loop.ts`) plus one TypeScript-only addition:
 
-| Module                          | Focus                                                              |
-| ------------------------------- | ------------------------------------------------------------------ |
-| `tool-based-generative-ui.ts`   | Frontend-rendered tool (haiku card) auto-registered as a proxy tool — exercises the `TOOL_CALL_*` stream the dojo's `tool_based_generative_ui` page consumes. No Python equivalent. |
+| Module                        | Focus                                                                                                                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tool-based-generative-ui.ts` | Frontend-rendered tool (haiku card) auto-registered as a proxy tool — exercises the `TOOL_CALL_*` stream the dojo's `tool_based_generative_ui` page consumes. No Python equivalent. |
 
 Each file is self-contained and can be run standalone (`pnpm <name>` from `examples/`). `examples/server/server.ts` is a "dojo" that mounts all eight at the paths the Python reference server uses, so both implementations can be driven by the same curl payloads.
 

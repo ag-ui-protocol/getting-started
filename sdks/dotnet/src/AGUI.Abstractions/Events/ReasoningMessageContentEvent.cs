@@ -23,4 +23,11 @@ public sealed class ReasoningMessageContentEvent : BaseEvent
     /// </summary>
     [JsonPropertyName("delta")]
     public string Delta { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the subagent that produced this event, absent when the parent agent
+    /// produced it directly.
+    /// </summary>
+    [JsonPropertyName("subagentRunId")]
+    public string? SubagentRunId { get; set; }
 }
