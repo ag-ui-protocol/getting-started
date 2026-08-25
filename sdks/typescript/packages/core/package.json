@@ -27,8 +27,8 @@
     "link:global": "pnpm link --global",
     "unlink:global": "pnpm unlink --global"
   },
-  "dependencies": {
-    "zod": "^3.22.4"
+  "peerDependencies": {
+    "zod": ">=3.25.0 <4"
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^4.0.18",
@@ -37,7 +37,8 @@
     "@arethetypeswrong/cli": "^0.17.4",
     "vitest": "^4.0.18",
     "tsdown": "^0.20.1",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "zod": "3.25.76"
   },
   "exports": {
     ".": {

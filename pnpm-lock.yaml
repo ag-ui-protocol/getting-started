@@ -403,9 +403,6 @@ importers:
       '@a2a-js/sdk':
         specifier: ^0.2.2
         version: 0.2.5
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -425,6 +422,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -436,10 +436,6 @@ importers:
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
 
   integrations/adk-middleware/typescript:
-    dependencies:
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -456,6 +452,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -467,10 +466,6 @@ importers:
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
 
   integrations/ag2/typescript:
-    dependencies:
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -487,6 +482,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -498,10 +496,6 @@ importers:
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
 
   integrations/agno/typescript:
-    dependencies:
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -521,6 +515,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -645,12 +642,6 @@ importers:
       '@anthropic-ai/sdk':
         specifier: '>=0.50.0'
         version: 0.57.0
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
-      zod:
-        specifier: 3.25.76
-        version: 3.25.76
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -664,6 +655,9 @@ importers:
       '@types/node':
         specifier: ^20.11.19
         version: 20.19.21
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsup:
         specifier: ^8.0.2
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.6)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.4)
@@ -676,12 +670,11 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
 
   integrations/claude-managed-agents/typescript:
-    dependencies:
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -704,6 +697,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -757,10 +753,6 @@ importers:
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
 
   integrations/community/spring-ai/typescript:
-    dependencies:
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -780,6 +772,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -791,10 +786,6 @@ importers:
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
 
   integrations/crew-ai/typescript:
-    dependencies:
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -814,6 +805,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -825,13 +819,6 @@ importers:
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
 
   integrations/langchain/typescript:
-    dependencies:
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
-      zod:
-        specifier: 3.25.76
-        version: 3.25.76
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -854,6 +841,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -863,6 +853,9 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
 
   integrations/langgraph/typescript:
     dependencies:
@@ -881,9 +874,6 @@ importers:
       partial-json:
         specifier: ^0.1.7
         version: 0.1.7
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -903,6 +893,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -914,10 +907,6 @@ importers:
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
 
   integrations/langroid/typescript:
-    dependencies:
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -934,6 +923,9 @@ importers:
       jest:
         specifier: ^29.7.0
         version: 29.7.0(@types/node@20.19.21)(babel-plugin-macros@3.1.0)
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       ts-jest:
         specifier: ^29.1.2
         version: 29.4.6(@babel/core@7.29.7)(@jest/transform@29.7.0)(@jest/types@29.6.3)(babel-jest@29.7.0(@babel/core@7.29.7))(jest-util@29.7.0)(jest@29.7.0(@types/node@20.19.21)(babel-plugin-macros@3.1.0))(typescript@5.9.3)
@@ -945,10 +937,6 @@ importers:
         version: 5.9.3
 
   integrations/llama-index/typescript:
-    dependencies:
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -968,6 +956,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -989,12 +980,6 @@ importers:
       fast-json-patch:
         specifier: ^3.1.1
         version: 3.1.1
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
-      zod:
-        specifier: 3.25.76
-        version: 3.25.76
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -1026,6 +1011,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -1035,6 +1023,9 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
 
   integrations/mastra/typescript/examples:
     dependencies:
@@ -1071,10 +1062,6 @@ importers:
         version: 5.9.3
 
   integrations/pydantic-ai/typescript:
-    dependencies:
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -1094,6 +1081,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -1109,9 +1099,6 @@ importers:
       '@ag-ui/client':
         specifier: workspace:*
         version: link:../../../sdks/typescript/packages/client
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
@@ -1125,6 +1112,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -1140,9 +1130,6 @@ importers:
       '@ag-ui/client':
         specifier: workspace:*
         version: link:../../../sdks/typescript/packages/client
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
@@ -1156,6 +1143,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -1171,12 +1161,6 @@ importers:
       ai:
         specifier: ^4.3.16
         version: 4.3.19(react@19.2.3)(zod@3.25.76)
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
-      zod:
-        specifier: 3.25.76
-        version: 3.25.76
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -1196,6 +1180,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -1205,6 +1192,9 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
 
   integrations/watsonx/typescript:
     devDependencies:
@@ -1247,12 +1237,6 @@ importers:
       ai:
         specifier: ^4.3.16
         version: 4.3.19(react@19.2.3)(zod@3.25.76)
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
-      zod:
-        specifier: 3.25.76
-        version: 3.25.76
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -1269,6 +1253,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -1382,9 +1369,6 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.0.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
@@ -1398,6 +1382,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -1413,9 +1400,6 @@ importers:
       '@ag-ui/client':
         specifier: workspace:*
         version: link:../../sdks/typescript/packages/client
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
     devDependencies:
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
@@ -1429,6 +1413,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -1566,9 +1553,6 @@ importers:
       fast-json-patch:
         specifier: ^3.1.1
         version: 3.1.1
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
       untruncate-json:
         specifier: ^0.0.1
         version: 0.0.1
@@ -1594,6 +1578,9 @@ importers:
       publint:
         specifier: ^0.3.12
         version: 0.3.17
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
@@ -1605,10 +1592,6 @@ importers:
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
 
   sdks/typescript/packages/core:
-    dependencies:
-      zod:
-        specifier: 3.25.76
-        version: 3.25.76
     devDependencies:
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
@@ -1631,6 +1614,9 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
 
   sdks/typescript/packages/encoder:
     dependencies:
@@ -8578,6 +8564,7 @@ packages:
   eslint@9.37.0:
     resolution: {integrity: sha512-XyLmROnACWqSxiGYArdef1fItQd47weqB7iwtfr9JHwRrqIXZdcFMvvEcL9xHCmL0SNsOvF0c42lWyM1U5dgig==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'

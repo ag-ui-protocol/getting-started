@@ -39,10 +39,12 @@
     "@types/uuid": "^10.0.0",
     "compare-versions": "^6.1.1",
     "fast-json-patch": "^3.1.1",
-    "rxjs": "7.8.1",
     "untruncate-json": "^0.0.1",
-    "uuid": "^11.1.0",
-    "zod": "^3.22.4"
+    "uuid": "^11.1.0"
+  },
+  "peerDependencies": {
+    "rxjs": ">=7.8.0 <8",
+    "zod": ">=3.25.0 <4"
   },
   "devDependencies": {
     "@types/node": "^20.11.19",
@@ -52,7 +54,8 @@
     "@arethetypeswrong/cli": "^0.17.4",
     "vitest": "^4.0.18",
     "tsdown": "^0.20.1",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "rxjs": "7.8.1"
   },
   "exports": {
     ".": {

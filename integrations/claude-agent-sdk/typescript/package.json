@@ -29,15 +29,14 @@
     "link:global": "pnpm link --global",
     "unlink:global": "pnpm unlink --global"
   },
-  "dependencies": {
-    "rxjs": "7.8.1"
-  },
+  "dependencies": {},
   "peerDependencies": {
     "@ag-ui/client": ">=0.0.42",
     "@ag-ui/core": ">=0.0.42",
     "@anthropic-ai/claude-agent-sdk": "^0.2.58",
     "@anthropic-ai/sdk": ">=0.50.0",
-    "zod": ">=3.0.0"
+    "zod": ">=3.25.0 <4",
+    "rxjs": ">=7.8.0 <8"
   },
   "devDependencies": {
     "@ag-ui/client": "workspace:*",
@@ -47,6 +46,8 @@
     "tsup": "^8.0.2",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "rxjs": "7.8.1",
+    "zod": "3.25.76"
   }
 }
