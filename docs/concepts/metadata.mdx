@@ -16,11 +16,11 @@ typed that consumers are required to carry.
 
 Four places, all optional:
 
-| Carries `metadata` | Notes                                                                          |
-| ------------------ | ------------------------------------------------------------------------------ |
-| Every event        | Declared once on the base event, so all event types have it                    |
-| Every message      | All seven roles: developer, system, assistant, user, tool, activity, reasoning |
-| Every tool call    | A tool call is not a message — see [Tool calls](#tool-calls)                   |
+| Carries `metadata` | Notes                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| Every event        | Declared once on the base event, so all event types have it                        |
+| Every message      | All seven roles: developer, system, assistant, user, tool, activity, reasoning     |
+| Every tool call    | A tool call is not a message — see [Tool calls](#tool-calls)                       |
 | Every resume entry | A request field, so nothing merges into it — see [Resume entries](#resume-entries) |
 
 ## Shape
@@ -46,11 +46,12 @@ The object itself is either **absent or an object — never `null`**. An empty
 object is valid and means "nothing to say", which is the same as omitting it.
 
 <Note>
-  Producers must not emit `"metadata": null`. Consumers are more forgiving and
-  read it as absent, because some serializers emit `null` for any unset optional
-  field — Pydantic's `model_dump_json()` does this without `exclude_none=True`.
-  Note the asymmetry: a `null` **value under a key** is meaningful data and is
-  always preserved. Only a `null` standing in for the whole object is ignored.
+  Producers never emit `"metadata": null`: an optional field with no value is
+  omitted from the JSON entirely, in every official SDK. The TypeScript client
+  enforces this and rejects a `null` metadata object — unlike some older
+  optional fields, metadata has no legacy producers to tolerate. Note the
+  asymmetry: a `null` **value under a key** is meaningful data and is always
+  preserved. Only a `null` standing in for the whole object is invalid.
 </Note>
 
 ## The reserved key
@@ -141,16 +142,15 @@ merges into that message like any other message-building event.
 
 ## Resume entries
 
-Each entry in `RunAgentInput.resume` — the per-interrupt response a client
-sends back after a run finished with an interrupt outcome — carries its own
-metadata. It holds envelope data about the response, such as a signature
-proving the human decision was not tampered with, or routing keys; the answer
-the agent asked for belongs in `payload`.
+Each entry in `RunAgentInput.resume` — the per-interrupt response a client sends
+back after a run finished with an interrupt outcome — carries its own metadata.
+It holds envelope data about the response, such as a signature proving the human
+decision was not tampered with, or routing keys; the answer the agent asked for
+belongs in `payload`.
 
 A resume entry is a request field, not something assembled from a stream, so
 there are **no merge semantics** — nothing accumulates into it. See
-[Interrupts](/concepts/interrupts#resuming-a-run) for the full resume
-contract.
+[Interrupts](/concepts/interrupts#resuming-a-run) for the full resume contract.
 
 ## Transports
 
@@ -194,13 +194,13 @@ calls and resume entries. `mergeMetadata(existing, incoming)` is exported from
 `@ag-ui/core` if you are assembling messages yourself, along with
 `AGUI_METADATA_KEY` for the reserved key.
 
-**Python** — `metadata: Optional[Dict[str, Any]]`. `EventEncoder` serializes
-with `exclude_none=True`, so an absent object is omitted rather than emitted as
-`null`. `Metadata` and `AGUI_METADATA_KEY` are exported from `ag_ui.core`.
+**Python** — `metadata: Optional[Dict[str, Any]]`. The base model omits any
+unset optional field on every serialization path, so an absent object is omitted
+rather than emitted as `null` — no `exclude_none=True` needed. `Metadata` and
+`AGUI_METADATA_KEY` are exported from `ag_ui.core`.
 
-**.NET** — `JsonElement? Metadata` on `BaseEvent`, `AGUIMessage`,
-`AGUIToolCall` and `AGUIResume`, with `AGUIMetadata.ReservedKey` for the
-reserved key.
+**.NET** — `JsonElement? Metadata` on `BaseEvent`, `AGUIMessage`, `AGUIToolCall`
+and `AGUIResume`, with `AGUIMetadata.ReservedKey` for the reserved key.
 
 It is a **wire-level field**. It round-trips faithfully through JSON and
 protobuf, so a server reading `RunAgentInput` or a client decoding the stream

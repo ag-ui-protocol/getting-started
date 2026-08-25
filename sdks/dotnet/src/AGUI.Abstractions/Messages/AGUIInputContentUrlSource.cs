@@ -13,6 +13,5 @@ public sealed class AGUIInputContentUrlSource : AGUIInputContentSource
 #pragma warning restore CA1056
 
     [JsonPropertyName("mimeType")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MimeType { get; set; }
 }

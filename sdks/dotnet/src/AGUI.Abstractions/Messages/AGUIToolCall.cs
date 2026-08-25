@@ -16,7 +16,6 @@ public sealed class AGUIToolCall
     public AGUIToolCallFunction Function { get; set; } = new();
 
     [JsonPropertyName("encryptedValue")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? EncryptedValue { get; set; }
 
     /// <summary>
@@ -28,6 +27,5 @@ public sealed class AGUIToolCall
     /// share one parent.
     /// </remarks>
     [JsonPropertyName("metadata")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Metadata { get; set; }
 }

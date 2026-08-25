@@ -253,6 +253,10 @@ function Recipe() {
     if (!agentState?.recipe) {
       setAgentState(INITIAL_STATE);
     }
+    // DEFERRED (PNI-307): mount-only by design — this seeds the agent state
+    // exactly once. Adding `agentState?.recipe`/`setAgentState` would re-seed
+    // INITIAL_STATE whenever the agent clears its recipe mid-session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [recipe, setRecipe] = useState(INITIAL_STATE.recipe);
@@ -311,16 +315,18 @@ function Recipe() {
   }
 
   if (newChangedKeys.length > 0) {
-    // eslint-disable-next-line react-hooks/refs -- see the note on the ref above
     changedKeysRef.current = newChangedKeys;
   } else if (!isLoading) {
-    // eslint-disable-next-line react-hooks/refs -- see the note on the ref above
     changedKeysRef.current = [];
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- see the note on the ref above
     setRecipe(newRecipeState);
+    // DEFERRED (PNI-307): the dep is deliberately the serialized snapshot, not
+    // `newRecipeState` — the object is rebuilt every render, so depending on
+    // its identity would re-run the sync (and clear the Ping described in the
+    // NOTE above) on every render instead of only when the content changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(newRecipeState)]);
 
   const handleTitleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -483,7 +489,6 @@ function Recipe() {
 
       {/* Dietary Preferences */}
       <div className="section-container relative">
-        {/* eslint-disable-next-line react-hooks/refs -- see the note on the ref above */}
         {changedKeysRef.current.includes("special_preferences") && <Ping />}
         <h2 className="section-title">Dietary Preferences</h2>
         <div className="dietary-options">
@@ -504,7 +509,6 @@ function Recipe() {
 
       {/* Ingredients */}
       <div className="section-container relative">
-        {/* eslint-disable-next-line react-hooks/refs -- see the note on the ref above */}
         {changedKeysRef.current.includes("ingredients") && <Ping />}
         <div className="section-header">
           <h2 className="section-title">Ingredients</h2>
@@ -552,7 +556,6 @@ function Recipe() {
 
       {/* Instructions */}
       <div className="section-container relative">
-        {/* eslint-disable-next-line react-hooks/refs -- see the note on the ref above */}
         {changedKeysRef.current.includes("instructions") && <Ping />}
         <div className="section-header">
           <h2 className="section-title">Instructions</h2>

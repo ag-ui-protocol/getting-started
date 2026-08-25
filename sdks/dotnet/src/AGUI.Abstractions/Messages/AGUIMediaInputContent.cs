@@ -10,6 +10,5 @@ public abstract class AGUIMediaInputContent : AGUIInputContent
     public AGUIInputContentSource Source { get; set; } = null!;
 
     [JsonPropertyName("metadata")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Metadata { get; set; }
 }

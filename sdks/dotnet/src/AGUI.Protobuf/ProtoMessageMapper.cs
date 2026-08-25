@@ -516,14 +516,24 @@ internal static class ProtoMessageMapper
         // Mirrors proto.ts: legacy binary parts are encoded as a document whose metadata
         // carries the { legacyBinary, filename, id } object so the original shape can be
         // recovered by consumers that understand the flag.
+        //
+        // A field with no value is left out of the struct rather than written as
+        // NullValue — proto.ts hands `undefined` to Struct.wrap, and ts-proto's encoder
+        // skips undefined entries. Writing NullValue here would put a `null` on the binary
+        // wire that no TypeScript producer emits.
         var metadata = new Struct();
         metadata.Fields["legacyBinary"] = new Value { BoolValue = true };
-        metadata.Fields["filename"] = binary.Filename is null
-            ? new Value { NullValue = NullValue.NullValue }
-            : new Value { StringValue = binary.Filename };
-        metadata.Fields["id"] = binary.Id is null
-            ? new Value { NullValue = NullValue.NullValue }
-            : new Value { StringValue = binary.Id };
+
+        if (binary.Filename is not null)
+        {
+            metadata.Fields["filename"] = new Value { StringValue = binary.Filename };
+        }
+
+        if (binary.Id is not null)
+        {
+            metadata.Fields["id"] = new Value { StringValue = binary.Id };
+        }
+
         return new Value { StructValue = metadata };
     }
 

@@ -17,6 +17,7 @@ import { createModel } from "./model-factory";
 import { createA2UIDynamicSchemaAgent } from "./api/a2ui-dynamic-schema";
 import { createA2UIFixedSchemaAgent } from "./api/a2ui-fixed-schema";
 import { createA2UIRecoveryAgent } from "./api/a2ui-recovery";
+import { createMultiAgentGraphAgent } from "./api/multi-agent";
 
 function mountAgent(
   app: express.Express,
@@ -342,6 +343,12 @@ Do not respond with plain text — always use the tool.`,
       description: "Haiku generator with frontend-rendered tool",
     }),
   );
+
+  /* ---------------- multi-agent ---------------- */
+  // A Graph orchestrator rather than a single Agent: the adapter detects the
+  // missing `.model` accessor and drives `.stream()` instead of cloning a
+  // per-thread agent.
+  mountAgent(app, "/multi-agent", await createMultiAgentGraphAgent());
 
   /* ---------------- a2ui (auto-injected tool) ---------------- */
   // Both demos are PLAIN Strands agents with NO a2ui tool wiring (each in its

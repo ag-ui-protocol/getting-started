@@ -159,6 +159,11 @@ export const FlightCard = createReactComponent(FlightCardApi, ({ props }) => {
       {/* Header: airline + price */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {/* DEFERRED (PNI-307): plain <img> kept to preserve the exact
+              request and layout semantics for this agent-provided remote URL;
+              converting to next/image (sizing, loading and src handling
+              differ) is out of scope for this behavior-preserving pass. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={props.airlineLogo as string}
             alt={props.airline as string}
@@ -284,6 +289,9 @@ export const TeamMemberCard = createReactComponent(TeamMemberCardApi, ({ props }
     <div style={cardStyle}>
       <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
         {props.avatarUrl ? (
+          /* DEFERRED (PNI-307): plain <img> kept — agent-provided remote URL;
+             see the flight-card note above. */
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={props.avatarUrl as string}
             alt={props.name as string}

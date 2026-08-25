@@ -8,6 +8,11 @@ namespace AGUI.Abstractions;
 /// from the user or application. Carries structured fields from the AG-UI interrupt.
 /// </summary>
 // Keep in sync with sdks/typescript/packages/core/src/types.ts
+// Unlike the AG-UI wire types, this content type is registered onto caller-owned
+// JsonSerializerOptions via AGUIJsonUtilities.RegisterInterruptContentTypes, so it cannot
+// inherit the DefaultIgnoreCondition that AGUIJsonSerializerContext bakes into the wire
+// types. Its per-property [JsonIgnore(WhenWritingNull)] attributes are therefore
+// load-bearing, not redundant — do not remove them.
 public sealed class InterruptRequestContent : Microsoft.Extensions.AI.InputRequestContent
 {
     /// <summary>

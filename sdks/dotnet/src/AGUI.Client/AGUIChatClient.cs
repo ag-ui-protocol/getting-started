@@ -174,7 +174,7 @@ public sealed class AGUIChatClient : DelegatingChatClient
         return new FunctionInvokingChatClient(handler);
     }
 
-    private static JsonSerializerOptions CombineJsonSerializerOptions(JsonSerializerOptions? jsonSerializerOptions)
+    internal static JsonSerializerOptions CombineJsonSerializerOptions(JsonSerializerOptions? jsonSerializerOptions)
     {
         if (jsonSerializerOptions == null)
         {
@@ -183,9 +183,20 @@ public sealed class AGUIChatClient : DelegatingChatClient
 
         var combinedOptions = new JsonSerializerOptions(jsonSerializerOptions);
 
-        if (!combinedOptions.TypeInfoResolverChain.Any(r => r == AGUIJsonSerializerContext.Default))
+        // AGUIJsonUtilities.DefaultTypeInfoResolver rather than the bare context: the
+        // context's DefaultIgnoreCondition belongs to its own options and would not follow it
+        // here, so AG-UI types resolved through the caller's options would start writing null
+        // for fields that have no value. The resolver carries the rule with the metadata.
+        //
+        // The condition is "is it already first", not "is it present anywhere". Anything ahead
+        // of it wins for AG-UI types, and two configurations a caller can plausibly arrive at
+        // would otherwise silently reintroduce the nulls: a chain that already holds the bare
+        // AGUIJsonSerializerContext, and a chain that holds this resolver behind a resolver
+        // that answers for any type. Inserting at the front is idempotent, so calling this
+        // twice does not stack duplicates.
+        if (combinedOptions.TypeInfoResolverChain.FirstOrDefault() != AGUIJsonUtilities.DefaultTypeInfoResolver)
         {
-            combinedOptions.TypeInfoResolverChain.Insert(0, AGUIJsonSerializerContext.Default);
+            combinedOptions.TypeInfoResolverChain.Insert(0, AGUIJsonUtilities.DefaultTypeInfoResolver);
         }
 
         return combinedOptions;

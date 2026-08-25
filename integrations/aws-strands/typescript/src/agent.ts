@@ -62,6 +62,110 @@ const LOG_PREFIX = "[@ag-ui/aws-strands]";
 const uuid = (): string => randomUUID();
 
 /**
+ * Events the RAW fallback deliberately stays silent about.
+ *
+ * Two groups, both of which would be noise rather than new information:
+ *
+ * 1. Lifecycle/plumbing brackets. The TS SDK surfaces hook brackets the Python
+ *    `stream_async` generator never emits, so these are the TS counterpart of
+ *    Python's `init_event_loop` / `start_event_loop` / `start` skips: they carry
+ *    no payload of their own and only bracket work already reported by mapped
+ *    events.
+ *
+ * 2. Payload-carrying events whose payload is *already* on the wire under a
+ *    mapped AG-UI event. Forwarding these as RAW duplicates content the client
+ *    has seen — the same class of bug as Python re-emitting `ModelMessageEvent`
+ *    after the text has already streamed:
+ *      - `agentResultEvent`  — terminal result; already `RUN_FINISHED`.
+ *      - `modelMessageEvent` — the assembled assistant message, already streamed
+ *                              as `TEXT_MESSAGE_CONTENT` / `TOOL_CALL_*`.
+ *      - `toolResultEvent`   — already mapped from `afterToolCallEvent` to
+ *                              `TOOL_CALL_RESULT`.
+ *      - `messageAddedEvent` — framework-side history bookkeeping; the client's
+ *                              history comes from `MESSAGES_SNAPSHOT`.
+ *
+ * Deliberately NOT skipped — these carry information no mapped AG-UI event
+ * conveys, which is exactly what the RAW fallback exists for (issue #2291):
+ *   - `modelMetadataEvent`  — token usage and latency metrics, which the AG-UI
+ *                             event set has no equivalent for.
+ *   - `modelRedactionEvent` — a guardrail redaction notice. Losing it silently
+ *                             would leave a client unable to tell redacted
+ *                             output from an ordinary short answer.
+ *
+ * Everything else falls through to a RAW event.
+ */
+const RAW_SKIPPED_EVENT_KINDS = new Set<string>([
+  // 1. Lifecycle / plumbing brackets.
+  "initializedEvent",
+  "beforeInvocationEvent",
+  "afterInvocationEvent",
+  "beforeModelCallEvent",
+  "afterModelCallEvent",
+  "beforeToolsEvent",
+  "afterToolsEvent",
+  "beforeToolCallEvent",
+  "modelMessageStartEvent",
+  "modelMessageStopEvent",
+  // 2. Payloads already represented by a mapped AG-UI event.
+  "agentResultEvent",
+  "modelMessageEvent",
+  "toolResultEvent",
+  "messageAddedEvent",
+]);
+
+/**
+ * Context keys Strands hangs off its events that are never model output.
+ *
+ * `agent` is a live `LocalAgent` — system prompt, full message history, model
+ * configuration — and `invocationState` transitively holds the same. Hook events
+ * define a `toJSON()` that drops both, but the model-layer events that reach the
+ * RAW fallback after unwrapping (`modelMetadataEvent` and friends) do not, so
+ * the keys are stripped by name rather than trusted to `toJSON()`.
+ *
+ * Mirrors `_RAW_INVOCATION_STATE_KEYS` in the Python adapter.
+ */
+const RAW_STRIPPED_EVENT_KEYS = new Set<string>([
+  "agent",
+  "invocationState",
+  "requestState",
+]);
+
+/**
+ * Reduce a Strands event to a JSON-safe RAW payload, or `undefined` to drop it.
+ *
+ * Two passes, both mandatory:
+ *  1. Drop the context keys above, so no agent internals reach a client.
+ *  2. Round-trip through JSON, so what we emit is plain data an in-process
+ *     consumer cannot follow back to a live object.
+ *
+ * Anything that will not serialize is dropped rather than coerced. Coercing
+ * unserializable values to strings is precisely how an agent's internals would
+ * end up on the wire, so it is never an option here.
+ */
+function sanitizeRawEvent(event: unknown): unknown | undefined {
+  if (!event || typeof event !== "object") return undefined;
+
+  const payload: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(event as Record<string, unknown>)) {
+    if (RAW_STRIPPED_EVENT_KEYS.has(key)) continue;
+    payload[key] = value;
+  }
+  if (Object.keys(payload).length === 0) return undefined;
+
+  try {
+    const serialized = JSON.stringify(payload);
+    if (serialized === undefined) return undefined;
+    const decoded = JSON.parse(serialized) as Record<string, unknown>;
+    // A nested `toJSON()` could reintroduce a stripped key; strip once more on
+    // the decoded, plain-data copy.
+    for (const key of RAW_STRIPPED_EVENT_KEYS) delete decoded[key];
+    return decoded;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Structural interface for a Strands multi-agent orchestrator (Graph/Swarm).
  * TypeScript-only: the Python SDK currently has no orchestrator equivalent.
  */
@@ -1505,6 +1609,13 @@ export class StrandsAgent {
           // (type: 'modelStreamUpdateEvent', event: ModelStreamEvent) before
           // yielding them from `agent.stream()`. Unwrap once so the dispatch
           // below operates on the inner event shape.
+          // `contentBlockEvent` is the assembled form of deltas that have
+          // already streamed, so it must never reach the RAW fallback (see
+          // `isAssembledContentBlock`). The wrapper kind has to be captured
+          // BEFORE unwrapping, because unwrapping is exactly what erases it —
+          // the bare block's own `type` is `textBlock` / `reasoningBlock` /
+          // whatever the SDK adds next.
+          const isAssembledBlock = isAssembledContentBlock(next.value);
           const event = unwrapStrandsEvent(next.value);
           const kind = getEventKind(event);
 
@@ -1711,7 +1822,19 @@ export class StrandsAgent {
                 }
               }
             }
-            continue;
+
+            // Only the delta kinds handled above are consumed here. Anything
+            // else falls through to the RAW fallback: Bedrock citations reach
+            // the adapter as `citationsDelta` inside this event, so an
+            // unconditional continue is what kept them off the wire.
+            const handled: ReadonlyArray<string> = [
+              "textDelta",
+              "reasoningContentDelta",
+              "toolUseInputDelta",
+            ];
+            if (handled.includes((delta as { type: string }).type)) {
+              continue;
+            }
           }
 
           // Reasoning signature (verification token) — not exposed to UI.
@@ -2282,8 +2405,44 @@ export class StrandsAgent {
             };
             continue;
           }
-          // Ignore events we don't translate (BeforeInvocationEvent,
-          // ModelStreamEventHook wrappers, etc.).
+
+          // Terminal fallback: anything the dispatch above does not translate
+          // is forwarded verbatim as RAW rather than dropped without a trace
+          // (issue #2291) — provider extensions this adapter predates, Bedrock
+          // citations among them, arrive here. Mirrors the Python adapter's
+          // terminal `else`, and matches what every other streaming adapter
+          // (LangGraph, watsonx, a2a) already does. The lifecycle brackets in
+          // `RAW_SKIPPED_EVENT_KINDS` stay silent, as they do in Python.
+          if (kind && RAW_SKIPPED_EVENT_KINDS.has(kind)) continue;
+          // An assembled content block duplicates content already on the wire,
+          // whatever kind of block it turned out to be. Keyed on the wrapper
+          // rather than on a list of block names so a block type added by a
+          // future SDK release is covered the day it ships.
+          if (isAssembledBlock) {
+            this._log.debug(
+              `${LOG_PREFIX} Skipping assembled content block for RAW ` +
+                `forwarding; its content already streamed ` +
+                `(threadId=${inputData.threadId}, block=${kind ?? "unknown"})`,
+            );
+            continue;
+          }
+          const rawPayload = sanitizeRawEvent(event);
+          if (rawPayload === undefined) {
+            this._log.warn(
+              `${LOG_PREFIX} Dropping unserializable Strands event from RAW ` +
+                `forwarding (threadId=${inputData.threadId}, kind=${kind ?? "unknown"})`,
+            );
+            continue;
+          }
+          this._log.debug(
+            `${LOG_PREFIX} Unmapped Strands event forwarded as RAW ` +
+              `(threadId=${inputData.threadId}, kind=${kind ?? "unknown"})`,
+          );
+          yield {
+            type: EventType.RAW,
+            event: rawPayload,
+            source: "strands",
+          } as unknown as BaseEvent;
         }
       } finally {
         // Consumer bailed (client disconnect, frontend-tool halt, error).
@@ -3098,6 +3257,32 @@ function getEventKind(event: unknown): string | undefined {
     return typeof t === "string" ? t : undefined;
   }
   return undefined;
+}
+
+/**
+ * True if `event` is a `ContentBlockEvent` — an assembled content block.
+ *
+ * `Agent.stream()` yields one of these for EVERY completed content block: any
+ * value from `model.streamAggregated` that is not a `ModelStreamEvent` gets
+ * wrapped as `new ContentBlockEvent({ contentBlock })`. A content block is by
+ * construction the assembled form of deltas the adapter has *already* streamed
+ * — `textBlock` is the finished text of a turn that went out chunk by chunk as
+ * `TEXT_MESSAGE_CONTENT`, `reasoningBlock` the finished reasoning that went out
+ * as `REASONING_MESSAGE_CONTENT`.
+ *
+ * The dispatch chain translates only `toolUseBlock`, so with a terminal RAW
+ * fallback in place every other block kind would fall through and re-deliver
+ * the whole assistant message a second time, immediately after it streamed.
+ * That is the same duplication the Python adapter's explicit
+ * `ModelMessageEvent` skip prevents.
+ *
+ * Tested against the real `ContentBlockEvent` / `TextBlock` / `ReasoningBlock`
+ * classes rather than object literals — see `raw-content-block.test.ts`.
+ *
+ * Must be evaluated before `unwrapStrandsEvent`, which discards the wrapper.
+ */
+function isAssembledContentBlock(event: unknown): boolean {
+  return getEventKind(event) === "contentBlockEvent";
 }
 
 /**

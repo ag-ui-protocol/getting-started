@@ -215,12 +215,20 @@ const DocumentEditor = () => {
   // NOTE (PNI-272): these effects read from the TipTap editor across the run
   // lifecycle and are kept exactly as they were; the rule's remedy would change
   // commit timing and the editor integration's shape.
+  //
+  // DEFERRED (PNI-307): the exhaustive-deps suppressions on all four effects
+  // below are deliberate for the same reason. Each effect is keyed to exactly
+  // one lifecycle signal (`isLoading` flips, agent document updates, editor
+  // text changes) and reads everything else as a snapshot at that moment.
+  // Adding the "missing" deps re-runs editor syncs mid-stream and can wipe or
+  // re-set TipTap content while a run is writing to it. Do not widen these
+  // dep arrays without regression tests for the run lifecycle.
   useEffect(() => {
     if (isLoading) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentDocument(editor?.getText() || "");
     }
     editor?.setEditable(!isLoading);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
 
   useEffect(() => {
@@ -234,6 +242,7 @@ const DocumentEditor = () => {
       }
     }
     wasRunning.current = isLoading;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
 
   useEffect(() => {
@@ -248,21 +257,21 @@ const DocumentEditor = () => {
         editor?.commands.setContent(markdown);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentState?.document]);
 
   const text = editor?.getText() || "";
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPlaceholderVisible(text.length === 0);
 
     if (!isLoading) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentDocument(text);
       setAgentState({
         document: text,
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
 
   // TODO(steve): Remove this when all agents have been updated to use write_document tool.

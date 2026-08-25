@@ -89,6 +89,12 @@ export const featureConfig: FeatureConfig[] = [
     tags: ["Chat", "Multi-agent architecture", "Streaming", "Subgraphs"],
   }),
   createFeatureConfig({
+    id: "multi_agent",
+    name: "Multi-Agent",
+    description: "Watch a graph of specialist agents hand work down a pipeline",
+    tags: ["Chat", "Multi-agent architecture", "Streaming"],
+  }),
+  createFeatureConfig({
     id: "a2a_chat",
     name: "A2A Chat",
     description: "Chat with your Copilot and call frontend tools",

@@ -15,10 +15,8 @@ public sealed class RunStartedEvent : BaseEvent
     public string RunId { get; set; } = string.Empty;
 
     [JsonPropertyName("parentRunId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ParentRunId { get; set; }
 
     [JsonPropertyName("input")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public RunAgentInput? Input { get; set; }
 }

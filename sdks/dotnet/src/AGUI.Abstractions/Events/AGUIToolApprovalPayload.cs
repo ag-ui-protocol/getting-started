@@ -6,6 +6,5 @@ namespace AGUI.Abstractions;
 public sealed class AGUIToolApprovalPayload
 {
     [JsonPropertyName("toolCall")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AGUIToolCallInfo? ToolCall { get; set; }
 }

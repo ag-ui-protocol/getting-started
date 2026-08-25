@@ -13,7 +13,6 @@ public sealed class AGUIResume
     public string Status { get; set; } = ResumeStatus.Resolved;
 
     [JsonPropertyName("payload")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Payload { get; set; }
 
     /// <summary>
@@ -29,6 +28,5 @@ public sealed class AGUIResume
     /// cref="AGUIMetadata.ReservedKey"/>.
     /// </remarks>
     [JsonPropertyName("metadata")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Metadata { get; set; }
 }
