@@ -144,6 +144,7 @@ class BaseMessage(MetadataMixin):
     content: Optional[str] = None
     name: Optional[str] = None
     encrypted_value: Optional[str] = None
+    subagent_run_id: Optional[str] = None
 
 
 class DeveloperMessage(BaseMessage):
@@ -296,6 +297,7 @@ class ToolMessage(MetadataMixin):
     tool_call_id: str
     error: Optional[str] = None
     encrypted_value: Optional[str] = None
+    subagent_run_id: Optional[str] = None
 
 
 class ActivityMessage(MetadataMixin):
@@ -307,6 +309,7 @@ class ActivityMessage(MetadataMixin):
     role: Literal["activity"] = "activity"  # pyright: ignore[reportIncompatibleVariableOverride]
     activity_type: str
     content: Dict[str, Any]
+    subagent_run_id: Optional[str] = None
 
 
 class ReasoningMessage(MetadataMixin):
@@ -318,6 +321,7 @@ class ReasoningMessage(MetadataMixin):
     role: Literal["reasoning"] = "reasoning"  # pyright: ignore[reportIncompatibleVariableOverride]
     content: str
     encrypted_value: Optional[str] = None
+    subagent_run_id: Optional[str] = None
 
 
 Message = Annotated[
@@ -366,6 +370,11 @@ class Interrupt(ConfiguredBaseModel):
     response_schema: Optional[Dict[str, Any]] = None
     expires_at: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    # The subagent whose work raised this interrupt, when it was raised inside
+    # one — None for a root-raised interrupt. Attribution lives per interrupt
+    # rather than on the run outcome because one run can carry interrupts from
+    # several subagents.
+    subagent_run_id: Optional[str] = None
 
 
 ResumeStatus = Literal["resolved", "cancelled"]

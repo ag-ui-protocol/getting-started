@@ -20,6 +20,7 @@ Events in the protocol are categorized by their purpose:
 | Tool Call Events        | Manage tool executions by agents        |
 | State Management Events | Synchronize state between agents and UI |
 | Activity Events         | Represent ongoing activity progress     |
+| Subagent Events         | Track subagents and attribute their output |
 | Special Events          | Support custom functionality            |
 | Draft Events            | Proposed events under development       |
 
@@ -47,6 +48,10 @@ on the final event of a message rather than having to know it up front.
 See [Metadata](/concepts/metadata) for the full rules: the reserved `ag-ui` key,
 which events do and do not merge, how tool calls carry their own, and how the
 object behaves across transports.
+
+Most events additionally accept an optional `subagentRunId`, identifying the
+subagent that produced them. An event without it belongs to the parent agent.
+See [Subagents](/concepts/subagents).
 
 ## Lifecycle Events
 
@@ -718,6 +723,80 @@ Use cases:
   `ReasoningMessage` to preserve context for follow-up turns
 - **Tool call reasoning**: Attach encrypted reasoning to a tool call to capture
   why the agent chose specific arguments or how it interpreted results
+
+## Subagent Events
+
+Subagent events let an agent report that it has delegated work to a child agent,
+so a frontend can tell which subagent produced which output. Without them, three
+subagents streaming concurrently arrive as one undifferentiated stream.
+
+Attribution is carried by an optional `subagentRunId` on most other events; these
+three bracket the subagent's activity and give it a name to display.
+
+`subagentRunId` identifies **one invocation**, not a reusable subagent
+definition — running the same subagent twice yields two different values. See
+[Subagents](/concepts/subagents) for the full model, including nesting,
+concurrency, and the rules clients enforce.
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Client
+
+    Note over Agent,Client: Subagent begins
+    Agent->>Client: SubagentStarted
+
+    Note over Agent,Client: Attributed output
+    Agent->>Client: TextMessageStart / Content / End
+
+    Note over Agent,Client: Subagent concludes
+    alt Success
+        Agent->>Client: SubagentFinished
+    else Failure
+        Agent->>Client: SubagentError
+    end
+```
+
+### SubagentStarted
+
+Announces a new subagent invocation.
+
+| Property              | Description                                              |
+| --------------------- | -------------------------------------------------------- |
+| `subagentRunId`       | Opaque identifier for this invocation                    |
+| `name`                | The subagent's declared name or type, for display        |
+| `description`         | Optional human-readable description                      |
+| `parentSubagentRunId` | Optional enclosing subagent, when subagents nest         |
+| `parentToolCallId`    | Optional tool call that spawned this subagent            |
+| `parentMessageId`     | Optional message that held that tool call               |
+
+### SubagentFinished
+
+Marks a subagent invocation as complete.
+
+| Property        | Description                                                 |
+| --------------- | ----------------------------------------------------------- |
+| `subagentRunId` | Matches ID from SubagentStarted                             |
+| `result`        | Optional completion payload, mirroring `RunFinished.result`  |
+| `outcome`       | Optional discriminated union: `{ type: "success" }` or `{ type: "suspended", interruptIds?: string[] }`. Omitted means success (the legacy reading). `suspended` says the subagent is checkpointed mid-flight awaiting outside input — the run then ends with an interrupt outcome, and `interruptIds` names the run-level interrupts whose answers resume this subagent. |
+
+### SubagentError
+
+Marks a subagent invocation as failed.
+
+| Property        | Description                     |
+| --------------- | ------------------------------- |
+| `subagentRunId` | Matches ID from SubagentStarted |
+| `message`       | Human-readable error message    |
+| `code`          | Optional error code             |
+
+<Note>
+  `StateSnapshot` and `StateDelta` are attributable, but attribution on them is
+  **provenance, not ownership**: it records which subagent produced the update.
+  State stays run-scoped and an attributed snapshot or delta is applied to the
+  run's one state document, exactly as an unattributed one is. There is no
+  per-subagent state.
+</Note>
 
 ## Deprecated Events
 

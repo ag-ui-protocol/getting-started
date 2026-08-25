@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock
+import socket
+from unittest.mock import patch
 
 import pytest
+
+from tests.url_response_stub import stub_response
 
 from ag_ui_strands.utils import _fetch_url_bytes, _mime_to_format
 
@@ -17,13 +20,19 @@ from ag_ui_strands.utils import _fetch_url_bytes, _mime_to_format
 class TestFetchUrlBytesEncoding:
     """Verify that URLs with non-ASCII characters are percent-encoded."""
 
-    @patch("ag_ui_strands.utils.urllib.request.urlopen")
+    @pytest.fixture(autouse=True)
+    def _public_dns(self):
+        """Resolve every test host to a public address so the fetch policy allows it."""
+        with patch(
+            "ag_ui_strands.utils.socket.getaddrinfo",
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))],
+        ):
+            yield
+
+    @patch("ag_ui_strands.utils._open_url")
     def test_ascii_url_unchanged(self, mock_urlopen):
         """A plain ASCII URL should be passed through without modification."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = b"data"
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp = stub_response(b"data")
         mock_urlopen.return_value = mock_resp
 
         result = _fetch_url_bytes("https://example.com/path/file.txt")
@@ -32,13 +41,10 @@ class TestFetchUrlBytesEncoding:
         called_url = mock_urlopen.call_args[0][0]
         assert called_url == "https://example.com/path/file.txt"
 
-    @patch("ag_ui_strands.utils.urllib.request.urlopen")
+    @patch("ag_ui_strands.utils._open_url")
     def test_chinese_filename_is_percent_encoded(self, mock_urlopen):
         """Chinese characters in the URL path must be percent-encoded."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = b"content"
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp = stub_response(b"content")
         mock_urlopen.return_value = mock_resp
 
         url = "https://cdn.example.com/docs/大模型学习路线.txt"
@@ -52,13 +58,10 @@ class TestFetchUrlBytesEncoding:
         # .txt extension should remain intact
         assert called_url.endswith(".txt")
 
-    @patch("ag_ui_strands.utils.urllib.request.urlopen")
+    @patch("ag_ui_strands.utils._open_url")
     def test_chinese_query_string_is_encoded(self, mock_urlopen):
         """Non-ASCII characters in query string must also be percent-encoded."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = b"ok"
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp = stub_response(b"ok")
         mock_urlopen.return_value = mock_resp
 
         url = "https://example.com/doc/file.txt?name=大模型"
@@ -77,13 +80,10 @@ class TestFetchUrlBytesEncoding:
             "redirect=http://x.com/?a=b",
         ],
     )
-    @patch("ag_ui_strands.utils.urllib.request.urlopen")
+    @patch("ag_ui_strands.utils._open_url")
     def test_ascii_query_string_unchanged(self, mock_urlopen, query):
         """ASCII query strings with RFC 3986 allowed chars must not be rewritten."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = b"ok"
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp = stub_response(b"ok")
         mock_urlopen.return_value = mock_resp
 
         url = f"https://example.com/file.txt?{query}"
@@ -102,13 +102,10 @@ class TestFetchUrlBytesEncoding:
             ("50%off.pdf", "50%25off.pdf"),
         ],
     )
-    @patch("ag_ui_strands.utils.urllib.request.urlopen")
+    @patch("ag_ui_strands.utils._open_url")
     def test_path_percent_encoding(self, mock_urlopen, path, expected_path):
         """Valid %HH escapes are preserved; stray % becomes %25."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = b"ok"
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp = stub_response(b"ok")
         mock_urlopen.return_value = mock_resp
 
         _fetch_url_bytes(f"https://example.com/{path}")
@@ -116,7 +113,7 @@ class TestFetchUrlBytesEncoding:
         called_url = mock_urlopen.call_args[0][0]
         assert called_url == f"https://example.com/{expected_path}"
 
-    @patch("ag_ui_strands.utils.urllib.request.urlopen")
+    @patch("ag_ui_strands.utils._open_url")
     def test_network_error_returns_none(self, mock_urlopen):
         """Network errors should return None, not raise."""
         mock_urlopen.side_effect = OSError("Connection refused")

@@ -1,4 +1,4 @@
-"""AG-UI Dojo server for AWS Strands Integration 2.
+"""AG-UI Dojo server for the AWS Strands integration.
 
 Simple server running all example agents.
 """
@@ -15,13 +15,18 @@ src_dir = Path(__file__).parent.parent.parent / "src"
 if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
-# Suppress OpenTelemetry warnings
-os.environ["OTEL_SDK_DISABLED"] = "true"
-os.environ["OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"] = "all"
-
-# Load environment variables
-env_path = Path(__file__).parent.parent.parent / '.env'
+# Load environment variables from examples/.env, which is where the README tells
+# the operator to put them. One `parent` fewer than the api modules use, because
+# this file sits one directory shallower than they do.
+env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(dotenv_path=env_path)
+
+# Quieten OpenTelemetry warnings by default. AFTER load_dotenv and via
+# `setdefault`, so a value the operator set either in the environment or in
+# examples/.env survives; still before the api imports below, which is what has
+# to happen for the setting to take effect at all.
+os.environ.setdefault("OTEL_SDK_DISABLED", "true")
+os.environ.setdefault("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "all")
 
 # Import agent apps
 from .api import (
@@ -34,12 +39,15 @@ from .api import (
     agentic_generative_ui_app,
     backend_tool_rendering_app,
     human_in_the_loop_app,
+    interrupt_app,
     multi_agent_app,
+    predictive_state_updates_app,
     shared_state_app,
+    tool_based_generative_ui_app,
 )
 
 # Create main app
-app = FastAPI(title='AWS Strands Integration 2 - Dojo')
+app = FastAPI(title='AWS Strands - AG-UI Dojo')
 
 # Add CORS.
 # Origins come from CORS_ALLOW_ORIGINS (comma-separated) and default to the "*"
@@ -68,12 +76,15 @@ app.mount('/backend-tool-rendering', backend_tool_rendering_app, 'Backend Tool R
 app.mount('/agentic-generative-ui', agentic_generative_ui_app, 'Agentic Generative UI')
 app.mount('/shared-state', shared_state_app, 'Shared State')
 app.mount('/human-in-the-loop', human_in_the_loop_app, 'Human in the Loop')
+app.mount('/interrupt', interrupt_app, 'Interrupt')
+app.mount('/predictive-state-updates', predictive_state_updates_app, 'Predictive State Updates')
+app.mount('/tool-based-generative-ui', tool_based_generative_ui_app, 'Tool Based Generative UI')
 app.mount('/multi-agent', multi_agent_app, 'Multi Agent')
 
 @app.get("/")
 def root():
     return {
-        "message": "AWS Strands Integration 2 - AG-UI Dojo",
+        "message": "AWS Strands - AG-UI Dojo",
         "endpoints": {
             "a2ui_dynamic_schema": "/a2ui-dynamic-schema",
             "a2ui_fixed_schema": "/a2ui-fixed-schema",
@@ -85,6 +96,9 @@ def root():
             "agentic_generative_ui": "/agentic-generative-ui",
             "shared_state": "/shared-state",
             "human_in_the_loop": "/human-in-the-loop",
+            "interrupt": "/interrupt",
+            "predictive_state_updates": "/predictive-state-updates",
+            "tool_based_generative_ui": "/tool-based-generative-ui",
             "multi_agent": "/multi-agent"
         }
     }

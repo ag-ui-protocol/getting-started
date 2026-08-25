@@ -62,6 +62,7 @@ public sealed class AGUIMessageJsonConverter : JsonConverter<AGUIMessage>
             Id = jsonElement.TryGetProperty("id", out var idProp) ? idProp.GetString() : null,
             Name = jsonElement.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null,
             EncryptedValue = jsonElement.TryGetProperty("encryptedValue", out var encProp) ? encProp.GetString() : null,
+            SubagentRunId = jsonElement.TryGetProperty("subagentRunId", out var subagentProp) ? subagentProp.GetString() : null,
             // An explicit null is read as absent, matching the TypeScript and
             // Python schemas — producers that serialize unset optionals as null
             // must still round-trip.
@@ -170,6 +171,14 @@ public sealed class AGUIMessageJsonConverter : JsonConverter<AGUIMessage>
         if (user.EncryptedValue is not null)
         {
             writer.WriteString("encryptedValue", user.EncryptedValue);
+        }
+
+        // Written explicitly because this role is hand-serialized for its polymorphic
+        // content, so it does not inherit the base's properties the way the
+        // source-generated roles do.
+        if (user.SubagentRunId is not null)
+        {
+            writer.WriteString("subagentRunId", user.SubagentRunId);
         }
 
         if (user.Metadata is { } metadata)

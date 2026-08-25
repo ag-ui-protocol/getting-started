@@ -23,7 +23,7 @@ namespace AGUI.Server.IntegrationTests.Samples.GettingStarted;
 ///
 /// Beyond the standard layer-2 baseline capture, this test validates the parallel-tool-result
 /// conversion contract in BOTH directions:
-///   * Outbound (<see cref="AGUIChatMessageExtensions.AsAGUIMessages"/>): a tool
+///   * Outbound (<see cref="AGUIChatMessageExtensions.AsAGUIMessages(IEnumerable{ChatMessage}, JsonSerializerOptions)"/>): a tool
 ///     <see cref="ChatMessage"/> carrying multiple <see cref="FunctionResultContent"/>s must
 ///     emit one <see cref="AGUIToolMessage"/> per result, each keyed on its call id.
 ///   * Inbound (<see cref="AGUIChatMessageExtensions.AsChatMessages"/>): consecutive AG-UI tool
@@ -76,7 +76,7 @@ public sealed class Step12_ParallelToolCallsTest : IntegrationTestBase<Step12_Pa
         // back to AG-UI. Both results must survive as distinct AGUIToolMessages keyed on
         // their call ids (the response side keys TOOL_CALL_RESULT.messageId on the call id too).
         var toolMessages = serverResponse.Messages.Where(m => m.Role == ChatRole.Tool).ToList();
-        var aguiToolMessages = toolMessages.AsAGUIMessages().OfType<AGUIToolMessage>().ToList();
+        var aguiToolMessages = toolMessages.AsAGUIMessages(s_jsonOptions).OfType<AGUIToolMessage>().ToList();
 
         Assert.Equal(2, aguiToolMessages.Count);
         Assert.Equal(

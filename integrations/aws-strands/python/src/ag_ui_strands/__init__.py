@@ -17,7 +17,12 @@ from .a2ui_tool import (
     plan_a2ui_injection,
 )
 from .client_proxy_tool import create_proxy_tool, sync_proxy_tools
-from .utils import create_strands_app
+from .utils import (
+    DEFAULT_URL_FETCH_POLICY,
+    UrlFetchPolicy,
+    UrlFetchPolicyError,
+    create_strands_app,
+)
 from .endpoint import add_strands_fastapi_endpoint, add_ping
 from .config import (
     StrandsAgentConfig,
@@ -50,6 +55,9 @@ __all__ = [
     "create_proxy_tool",
     "sync_proxy_tools",
     "create_strands_app",
+    "UrlFetchPolicy",
+    "UrlFetchPolicyError",
+    "DEFAULT_URL_FETCH_POLICY",
     "add_strands_fastapi_endpoint",
     "add_ping",
     "StrandsAgentConfig",

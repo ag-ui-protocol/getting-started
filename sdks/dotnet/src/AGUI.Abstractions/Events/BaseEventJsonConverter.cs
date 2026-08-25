@@ -51,6 +51,9 @@ public sealed class BaseEventJsonConverter : JsonConverter<BaseEvent>
             AGUIEventTypes.Custom => jsonElement.Deserialize(options.GetTypeInfo(typeof(CustomEvent))) as CustomEvent,
             AGUIEventTypes.Raw => jsonElement.Deserialize(options.GetTypeInfo(typeof(RawEvent))) as RawEvent,
             AGUIEventTypes.MessagesSnapshot => jsonElement.Deserialize(options.GetTypeInfo(typeof(MessagesSnapshotEvent))) as MessagesSnapshotEvent,
+            AGUIEventTypes.SubagentStarted => jsonElement.Deserialize(options.GetTypeInfo(typeof(SubagentStartedEvent))) as SubagentStartedEvent,
+            AGUIEventTypes.SubagentFinished => jsonElement.Deserialize(options.GetTypeInfo(typeof(SubagentFinishedEvent))) as SubagentFinishedEvent,
+            AGUIEventTypes.SubagentError => jsonElement.Deserialize(options.GetTypeInfo(typeof(SubagentErrorEvent))) as SubagentErrorEvent,
             _ => throw new JsonException($"Unknown BaseEvent type discriminator: '{discriminator}'")
         };
 
@@ -143,6 +146,15 @@ public sealed class BaseEventJsonConverter : JsonConverter<BaseEvent>
                 break;
             case MessagesSnapshotEvent messagesSnapshot:
                 JsonSerializer.Serialize(writer, messagesSnapshot, options.GetTypeInfo(typeof(MessagesSnapshotEvent)));
+                break;
+            case SubagentStartedEvent subagentStarted:
+                JsonSerializer.Serialize(writer, subagentStarted, options.GetTypeInfo(typeof(SubagentStartedEvent)));
+                break;
+            case SubagentFinishedEvent subagentFinished:
+                JsonSerializer.Serialize(writer, subagentFinished, options.GetTypeInfo(typeof(SubagentFinishedEvent)));
+                break;
+            case SubagentErrorEvent subagentError:
+                JsonSerializer.Serialize(writer, subagentError, options.GetTypeInfo(typeof(SubagentErrorEvent)));
                 break;
             default:
                 throw new InvalidOperationException($"Unknown event type: {value.GetType().Name}");

@@ -11,8 +11,8 @@ This package exposes a lightweight wrapper that lets any `@strands-agents/sdk` `
 ## Quick Start
 
 The `examples/` package ships a "dojo" server that mounts every demo on a
-single port, plus seven standalone servers — one per feature — that you can
-run independently.
+single port, plus ten standalone servers, one per feature, that you can run
+independently.
 
 ```bash
 # from the repo root
@@ -33,21 +33,30 @@ pnpm backend-tool-rendering
 pnpm shared-state
 pnpm agentic-generative-ui
 pnpm human-in-the-loop
+pnpm interrupt
+pnpm predictive-state-updates
+pnpm tool-based-generative-ui
 ```
 
 The dojo exposes:
 
-| Route                      | Description                                                              |
-| -------------------------- | ------------------------------------------------------------------------ |
-| `/agentic-chat`            | Baseline chat; frontend tools auto-registered from `RunAgentInput.tools` |
-| `/agentic-chat-reasoning`  | Reasoning / thinking event streaming                                     |
-| `/agentic-chat-multimodal` | Multimodal image / document analysis                                     |
-| `/backend-tool-rendering`  | Backend-executed tools (`get_weather`, `render_chart`)                   |
-| `/shared-state`            | Shared recipe state (`stateFromArgs`)                                    |
-| `/agentic-generative-ui`   | Async-generator tool streams `STATE_SNAPSHOT`s + `PredictState`          |
-| `/human-in-the-loop`       | Frontend proxy tool with halt-after-call                                 |
+| Route                       | Description                                                              |
+| --------------------------- | ------------------------------------------------------------------------ |
+| `/agentic-chat`             | Baseline chat; frontend tools auto-registered from `RunAgentInput.tools` |
+| `/agentic-chat-reasoning`   | Reasoning / thinking event streaming                                     |
+| `/agentic-chat-multimodal`  | Multimodal image / document analysis                                     |
+| `/backend-tool-rendering`   | Backend-executed tools (`get_weather`, `render_chart`)                   |
+| `/shared-state`             | Shared recipe state (`stateFromArgs`)                                    |
+| `/agentic-generative-ui`    | Async-generator tool streams `STATE_SNAPSHOT`s + `PredictState`          |
+| `/human-in-the-loop`        | Frontend proxy tool with halt-after-call                                 |
+| `/interrupt`                | Backend tool pauses itself to ask the user for a meeting time            |
+| `/predictive-state-updates` | Frontend write tool whose streaming args paint `state.document`          |
+| `/tool-based-generative-ui` | Frontend-rendered tool (`generate_haiku`)                                |
+| `/a2ui-dynamic-schema`      | A2UI surfaces composed on the fly (auto-injected tool)                   |
+| `/a2ui-fixed-schema`        | A2UI from fixed-layout backend tools                                     |
+| `/a2ui-recovery`            | A2UI validate-and-retry recovery loop                                    |
 
-Each standalone file under `examples/server/api/*.ts` follows the same pattern: build a Strands `Agent`, wrap it in a `StrandsAgent`, hand it to `createStrandsApp`, listen.
+Most files under `examples/server/api/*.ts` follow the same pattern: build a Strands `Agent`, wrap it in a `StrandsAgent`, hand it to `createStrandsApp`, listen. The three a2ui files export a factory instead and are mounted only by `server.ts`, so they have no standalone script.
 
 ## Architecture Overview
 

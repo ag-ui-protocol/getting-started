@@ -234,6 +234,107 @@ describe("metadata-only continuation chunks", () => {
     expect(last.metadata).toEqual({ tokens: 7 });
   });
 
+  // Attribution on the synthesized zero-delta event follows the same rule as
+  // the delta path: the incoming chunk's tag first, the opener's owner as
+  // fallback. Without it, a subagent lane's usage/finish-reason event reaches
+  // subscribers and telemetry unattributed even though the stream is valid.
+  it("keeps the opener's subagent attribution on a metadata-only text chunk", async () => {
+    const out = await runTransform([
+      {
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "m1",
+        delta: "Hello",
+        subagentRunId: "s1",
+      } as TextMessageChunkEvent,
+      {
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "m1",
+        metadata: { usage: { output: 340 } },
+      } as TextMessageChunkEvent,
+    ]);
+
+    const last = out[out.length - 1] as TextMessageContentEvent;
+    expect(last.type).toBe(EventType.TEXT_MESSAGE_CONTENT);
+    expect(last.delta).toBe("");
+    expect(last.subagentRunId).toBe("s1");
+    expect(last.metadata).toEqual({ usage: { output: 340 } });
+  });
+
+  it("prefers the metadata-only chunk's own tag over the opener's", async () => {
+    const out = await runTransform([
+      {
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "m1",
+        delta: "Hello",
+        subagentRunId: "s1",
+      } as TextMessageChunkEvent,
+      {
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "m1",
+        metadata: { finishReason: "stop" },
+        subagentRunId: "s1",
+      } as TextMessageChunkEvent,
+    ]);
+
+    const last = out[out.length - 1] as TextMessageContentEvent;
+    expect(last.subagentRunId).toBe("s1");
+  });
+
+  it("keeps subagent attribution on a metadata-only tool call chunk", async () => {
+    const out = await runTransform([
+      {
+        type: EventType.TOOL_CALL_CHUNK,
+        toolCallId: "tc1",
+        toolCallName: "search",
+        delta: "{}",
+        subagentRunId: "s1",
+      } as ToolCallChunkEvent,
+      {
+        type: EventType.TOOL_CALL_CHUNK,
+        toolCallId: "tc1",
+        metadata: { latencyMs: 12 },
+      } as ToolCallChunkEvent,
+    ]);
+
+    const last = out[out.length - 1] as ToolCallArgsEvent;
+    expect(last.type).toBe(EventType.TOOL_CALL_ARGS);
+    expect(last.subagentRunId).toBe("s1");
+  });
+
+  it("keeps subagent attribution on a metadata-only reasoning chunk", async () => {
+    const out = await runTransform([
+      {
+        type: EventType.REASONING_MESSAGE_CHUNK,
+        messageId: "r1",
+        delta: "thinking",
+        subagentRunId: "s1",
+      } as ReasoningMessageChunkEvent,
+      {
+        type: EventType.REASONING_MESSAGE_CHUNK,
+        messageId: "r1",
+        metadata: { tokens: 7 },
+      } as ReasoningMessageChunkEvent,
+    ]);
+
+    const last = out[out.length - 1] as ReasoningMessageContentEvent;
+    expect(last.type).toBe(EventType.REASONING_MESSAGE_CONTENT);
+    expect(last.subagentRunId).toBe("s1");
+  });
+
+  it("leaves a parent lane's metadata-only event untagged", async () => {
+    const out = await runTransform([
+      { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", delta: "x" } as TextMessageChunkEvent,
+      {
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "m1",
+        metadata: { finishReason: "stop" },
+      } as TextMessageChunkEvent,
+    ]);
+
+    const last = out[out.length - 1] as TextMessageContentEvent;
+    expect(last.subagentRunId).toBeUndefined();
+  });
+
   it("emits nothing extra for a continuation chunk with neither delta nor metadata", async () => {
     const out = await runTransform([
       { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", delta: "x" } as TextMessageChunkEvent,

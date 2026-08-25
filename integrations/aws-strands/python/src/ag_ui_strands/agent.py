@@ -536,7 +536,12 @@ from .config import (
     maybe_await,
     normalize_predict_state,
 )
-from .utils import convert_agui_content_to_strands, flatten_content_to_text
+from .utils import (
+    UrlFetchPolicy,
+    _FetchBudget,
+    convert_agui_content_to_strands,
+    flatten_content_to_text,
+)
 
 
 def _resume_fingerprint(resume_entries: list[ResumeEntry]) -> str:
@@ -912,7 +917,10 @@ def _build_snapshot_messages(input_messages: List[Any]) -> List[Any]:
     return out
 
 
-def _build_strands_history(input_messages: List[Any]) -> List[Dict[str, Any]]:
+def _build_strands_history(
+    input_messages: List[Any],
+    url_fetch_policy: "UrlFetchPolicy | None" = None,
+) -> List[Dict[str, Any]]:
     """Convert ``RunAgentInput.messages`` to Strands native ``Messages``.
 
     Strands has only ``user`` and ``assistant`` roles; tool calls and
@@ -921,8 +929,13 @@ def _build_strands_history(input_messages: List[Any]) -> List[Dict[str, Any]]:
     before invoking ``stream_async(None)`` ensures the LLM sees the
     real conversation state — including frontend tool results — rather
     than a fresh prompt that re-fires the same tool every turn.
+
+    Every URL content source in *input_messages* is fetched under
+    *url_fetch_policy* and shares one budget, so the ceilings bound the whole
+    history rather than each attachment separately.
     """
     out: List[Dict[str, Any]] = []
+    fetch_budget = _FetchBudget(url_fetch_policy)
     pending_tool_results: List[Dict[str, Any]] = []
 
     def flush_tool_results() -> None:
@@ -958,7 +971,9 @@ def _build_strands_history(input_messages: List[Any]) -> List[Dict[str, Any]]:
                     for item in content
                 )
                 if has_media:
-                    blocks = convert_agui_content_to_strands(content)
+                    blocks = convert_agui_content_to_strands(
+                        content, url_fetch_policy, fetch_budget
+                    )
                     if isinstance(blocks, list) and blocks:
                         out.append({"role": "user", "content": blocks})
                         continue
@@ -2796,7 +2811,11 @@ class StrandsAgent:
                                 for item in msg.content
                             )
                             if has_media:
-                                user_message = convert_agui_content_to_strands(msg.content)
+                                user_message = await asyncio.to_thread(
+                                    convert_agui_content_to_strands,
+                                    msg.content,
+                                    self.config.url_fetch_policy,
+                                )
                                 if not user_message:
                                     # All content blocks failed conversion — fall back to text
                                     user_message = flatten_content_to_text(msg.content) or ""
@@ -3048,7 +3067,11 @@ class StrandsAgent:
             # on top, rather than short-circuiting them.
             resume_prompt: str | List[Dict[str, Any]] | list[InterruptResponseContent] | None = user_message
             if replay_history:
-                native_history = _build_strands_history(input_data.messages)
+                native_history = await asyncio.to_thread(
+                    _build_strands_history,
+                    input_data.messages,
+                    self.config.url_fetch_policy,
+                )
                 # Apply ``state_context_builder`` to the last user-text
                 # message in the reconciled history rather than to the
                 # synthetic ``user_message`` string. This matches what the

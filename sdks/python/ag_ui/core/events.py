@@ -107,6 +107,9 @@ class EventType(str, Enum):
     REASONING_MESSAGE_CHUNK = "REASONING_MESSAGE_CHUNK"
     REASONING_END = "REASONING_END"
     REASONING_ENCRYPTED_VALUE = "REASONING_ENCRYPTED_VALUE"
+    SUBAGENT_STARTED = "SUBAGENT_STARTED"
+    SUBAGENT_FINISHED = "SUBAGENT_FINISHED"
+    SUBAGENT_ERROR = "SUBAGENT_ERROR"
 
 
 class BaseEvent(MetadataMixin):
@@ -129,6 +132,7 @@ class TextMessageStartEvent(BaseEvent):
     message_id: str
     role: TextMessageRole = "assistant"
     name: Optional[str] = None
+    subagent_run_id: Optional[str] = None
 
 
 class TextMessageContentEvent(BaseEvent):
@@ -138,6 +142,7 @@ class TextMessageContentEvent(BaseEvent):
     type: Literal[EventType.TEXT_MESSAGE_CONTENT] = EventType.TEXT_MESSAGE_CONTENT  # pyright: ignore[reportIncompatibleVariableOverride]
     message_id: str
     delta: str
+    subagent_run_id: Optional[str] = None
 
 
 class TextMessageEndEvent(BaseEvent):
@@ -146,6 +151,7 @@ class TextMessageEndEvent(BaseEvent):
     """
     type: Literal[EventType.TEXT_MESSAGE_END] = EventType.TEXT_MESSAGE_END  # pyright: ignore[reportIncompatibleVariableOverride]
     message_id: str
+    subagent_run_id: Optional[str] = None
 
 class TextMessageChunkEvent(BaseEvent):
     """
@@ -156,6 +162,7 @@ class TextMessageChunkEvent(BaseEvent):
     role: Optional[TextMessageRole] = None
     delta: Optional[str] = None
     name: Optional[str] = None
+    subagent_run_id: Optional[str] = None
 
 class ThinkingTextMessageStartEvent(BaseEvent):
     """
@@ -184,6 +191,7 @@ class ToolCallStartEvent(BaseEvent):
     tool_call_id: str
     tool_call_name: str
     parent_message_id: Optional[str] = None
+    subagent_run_id: Optional[str] = None
 
 
 class ToolCallArgsEvent(BaseEvent):
@@ -193,6 +201,7 @@ class ToolCallArgsEvent(BaseEvent):
     type: Literal[EventType.TOOL_CALL_ARGS] = EventType.TOOL_CALL_ARGS  # pyright: ignore[reportIncompatibleVariableOverride]
     tool_call_id: str
     delta: str
+    subagent_run_id: Optional[str] = None
 
 
 class ToolCallEndEvent(BaseEvent):
@@ -201,6 +210,7 @@ class ToolCallEndEvent(BaseEvent):
     """
     type: Literal[EventType.TOOL_CALL_END] = EventType.TOOL_CALL_END  # pyright: ignore[reportIncompatibleVariableOverride]
     tool_call_id: str
+    subagent_run_id: Optional[str] = None
 
 class ToolCallChunkEvent(BaseEvent):
     """
@@ -211,6 +221,7 @@ class ToolCallChunkEvent(BaseEvent):
     tool_call_name: Optional[str] = None
     parent_message_id: Optional[str] = None
     delta: Optional[str] = None
+    subagent_run_id: Optional[str] = None
 
 class ToolCallResultEvent(BaseEvent):
     """
@@ -221,6 +232,7 @@ class ToolCallResultEvent(BaseEvent):
     tool_call_id: str
     content: str
     role: Optional[Literal["tool"]] = None
+    subagent_run_id: Optional[str] = None
 
 class ThinkingStartEvent(BaseEvent):
     """
@@ -241,6 +253,7 @@ class StateSnapshotEvent(BaseEvent):
     """
     type: Literal[EventType.STATE_SNAPSHOT] = EventType.STATE_SNAPSHOT  # pyright: ignore[reportIncompatibleVariableOverride]
     snapshot: State
+    subagent_run_id: Optional[str] = None
 
 
 class StateDeltaEvent(BaseEvent):
@@ -249,6 +262,7 @@ class StateDeltaEvent(BaseEvent):
     """
     type: Literal[EventType.STATE_DELTA] = EventType.STATE_DELTA  # pyright: ignore[reportIncompatibleVariableOverride]
     delta: List[Any]  # JSON Patch (RFC 6902)
+    subagent_run_id: Optional[str] = None
 
 
 class MessagesSnapshotEvent(BaseEvent):
@@ -267,6 +281,7 @@ class ActivitySnapshotEvent(BaseEvent):
     activity_type: str
     content: Any
     replace: bool = True
+    subagent_run_id: Optional[str] = None
 
 
 class ActivityDeltaEvent(BaseEvent):
@@ -276,6 +291,7 @@ class ActivityDeltaEvent(BaseEvent):
     message_id: str
     activity_type: str
     patch: List[Any]
+    subagent_run_id: Optional[str] = None
 
 
 class RawEvent(BaseEvent):
@@ -285,6 +301,7 @@ class RawEvent(BaseEvent):
     type: Literal[EventType.RAW] = EventType.RAW  # pyright: ignore[reportIncompatibleVariableOverride]
     event: Any
     source: Optional[str] = None
+    subagent_run_id: Optional[str] = None
 
 
 class CustomEvent(BaseEvent):
@@ -294,6 +311,7 @@ class CustomEvent(BaseEvent):
     type: Literal[EventType.CUSTOM] = EventType.CUSTOM  # pyright: ignore[reportIncompatibleVariableOverride]
     name: str
     value: Any
+    subagent_run_id: Optional[str] = None
 
 
 class RunStartedEvent(BaseEvent):
@@ -347,6 +365,7 @@ class StepStartedEvent(BaseEvent):
     """
     type: Literal[EventType.STEP_STARTED] = EventType.STEP_STARTED  # pyright: ignore[reportIncompatibleVariableOverride]
     step_name: str
+    subagent_run_id: Optional[str] = None
 
 
 class StepFinishedEvent(BaseEvent):
@@ -355,6 +374,7 @@ class StepFinishedEvent(BaseEvent):
     """
     type: Literal[EventType.STEP_FINISHED] = EventType.STEP_FINISHED  # pyright: ignore[reportIncompatibleVariableOverride]
     step_name: str
+    subagent_run_id: Optional[str] = None
 
 
 # Text message role for reasoning messages (aligned with ReasoningMessage.role)
@@ -370,6 +390,7 @@ class ReasoningStartEvent(BaseEvent):
     """
     type: Literal[EventType.REASONING_START] = EventType.REASONING_START  # pyright: ignore[reportIncompatibleVariableOverride]
     message_id: str
+    subagent_run_id: Optional[str] = None
 
 
 class ReasoningMessageStartEvent(BaseEvent):
@@ -379,6 +400,7 @@ class ReasoningMessageStartEvent(BaseEvent):
     type: Literal[EventType.REASONING_MESSAGE_START] = EventType.REASONING_MESSAGE_START  # pyright: ignore[reportIncompatibleVariableOverride]
     message_id: str
     role: ReasoningMessageRole
+    subagent_run_id: Optional[str] = None
 
 
 class ReasoningMessageContentEvent(BaseEvent):
@@ -388,6 +410,7 @@ class ReasoningMessageContentEvent(BaseEvent):
     type: Literal[EventType.REASONING_MESSAGE_CONTENT] = EventType.REASONING_MESSAGE_CONTENT  # pyright: ignore[reportIncompatibleVariableOverride]
     message_id: str
     delta: str
+    subagent_run_id: Optional[str] = None
 
 
 class ReasoningMessageEndEvent(BaseEvent):
@@ -396,6 +419,7 @@ class ReasoningMessageEndEvent(BaseEvent):
     """
     type: Literal[EventType.REASONING_MESSAGE_END] = EventType.REASONING_MESSAGE_END  # pyright: ignore[reportIncompatibleVariableOverride]
     message_id: str
+    subagent_run_id: Optional[str] = None
 
 
 class ReasoningMessageChunkEvent(BaseEvent):
@@ -405,6 +429,7 @@ class ReasoningMessageChunkEvent(BaseEvent):
     type: Literal[EventType.REASONING_MESSAGE_CHUNK] = EventType.REASONING_MESSAGE_CHUNK  # pyright: ignore[reportIncompatibleVariableOverride]
     message_id: Optional[str] = None
     delta: Optional[str] = None
+    subagent_run_id: Optional[str] = None
 
 
 class ReasoningEndEvent(BaseEvent):
@@ -413,6 +438,7 @@ class ReasoningEndEvent(BaseEvent):
     """
     type: Literal[EventType.REASONING_END] = EventType.REASONING_END  # pyright: ignore[reportIncompatibleVariableOverride]
     message_id: str
+    subagent_run_id: Optional[str] = None
 
 
 class ReasoningEncryptedValueEvent(BaseEvent):
@@ -423,6 +449,67 @@ class ReasoningEncryptedValueEvent(BaseEvent):
     subtype: ReasoningEncryptedValueSubtype
     entity_id: str
     encrypted_value: str
+    subagent_run_id: Optional[str] = None
+
+
+class SubagentStartedEvent(BaseEvent):
+    """Event indicating a subagent has started within the run."""
+    type: Literal[EventType.SUBAGENT_STARTED] = EventType.SUBAGENT_STARTED  # pyright: ignore[reportIncompatibleVariableOverride]
+    subagent_run_id: str
+    name: str
+    description: Optional[str] = None
+    parent_subagent_run_id: Optional[str] = None
+    # Link back to the tool call (and its message) that spawned this subagent,
+    # for the agents-as-tools pattern (e.g. deepagents `task`).
+    parent_tool_call_id: Optional[str] = None
+    parent_message_id: Optional[str] = None
+
+
+class SubagentFinishedSuccessOutcome(ConfiguredBaseModel):
+    """Outcome variant signalling that a subagent completed its work."""
+
+    type: Literal["success"] = "success"
+
+
+class SubagentFinishedSuspendedOutcome(ConfiguredBaseModel):
+    """Outcome variant signalling that a subagent is paused awaiting outside input.
+
+    The subagent's stream segment closes for THIS run (the run itself ends
+    with an interrupt outcome); on resume the same ``subagent_run_id`` is
+    re-announced as a continuation of the suspended invocation.
+    ``interrupt_ids`` names the run-level interrupts this subagent directly
+    owns — it MAY be empty or omitted for an ancestor suspended because a
+    descendant interrupted.
+    """
+
+    type: Literal["suspended"] = "suspended"
+    interrupt_ids: Optional[List[str]] = None
+
+
+# Mirrors RunFinishedOutcome one level down. An omitted outcome means legacy
+# success; without the distinction a paused subagent was indistinguishable
+# from a completed one.
+SubagentFinishedOutcome = Annotated[
+    Union[SubagentFinishedSuccessOutcome, SubagentFinishedSuspendedOutcome],
+    Field(discriminator="type"),
+]
+
+
+class SubagentFinishedEvent(BaseEvent):
+    """Event indicating a subagent has finished."""
+    type: Literal[EventType.SUBAGENT_FINISHED] = EventType.SUBAGENT_FINISHED  # pyright: ignore[reportIncompatibleVariableOverride]
+    subagent_run_id: str
+    # The subagent's completion payload, mirroring RunFinishedEvent.result.
+    result: Optional[Any] = None
+    outcome: Optional[SubagentFinishedOutcome] = None
+
+
+class SubagentErrorEvent(BaseEvent):
+    """Event indicating a subagent has errored (independent of the run)."""
+    type: Literal[EventType.SUBAGENT_ERROR] = EventType.SUBAGENT_ERROR  # pyright: ignore[reportIncompatibleVariableOverride]
+    subagent_run_id: str
+    message: str
+    code: Optional[str] = None
 
 
 Event = Annotated[
@@ -460,6 +547,9 @@ Event = Annotated[
         ReasoningMessageChunkEvent,
         ReasoningEndEvent,
         ReasoningEncryptedValueEvent,
+        SubagentStartedEvent,
+        SubagentFinishedEvent,
+        SubagentErrorEvent,
     ],
     Field(discriminator="type")
 ]

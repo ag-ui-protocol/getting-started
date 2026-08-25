@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AGUI.Client;
 using Microsoft.Extensions.AI;
 
@@ -18,12 +19,25 @@ public static class SampleClient
         CancellationToken cancellationToken = default)
     {
         var bytes = imageBytes ?? PlaceholderPng;
+        var image = new DataContent(bytes, "image/png")
+        {
+            Name = "ag-ui-logo.png",
+            AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                ["metadata"] = JsonSerializer.SerializeToElement(new
+                {
+                    filename = "ag-ui-logo.png",
+                    detail = "high",
+                    providerHint = new { quality = "original" }
+                })
+            }
+        };
         var messages = new List<ChatMessage>
         {
             new(ChatRole.User,
             [
                 new TextContent("Describe this image"),
-                new DataContent(bytes, "image/png"),
+                image,
             ]),
         };
         messagesPerTurn?.Add(messages.ToList());

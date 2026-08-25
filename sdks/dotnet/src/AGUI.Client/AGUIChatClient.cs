@@ -327,7 +327,7 @@ public sealed class AGUIChatClient : DelegatingChatClient
             {
                 ThreadId = threadId,
                 RunId = string.IsNullOrEmpty(providedInput?.RunId) ? AGUIIdGenerator.NewRunId() : providedInput!.RunId,
-                Messages = messagesList.AsAGUIMessages().ToList(),
+                Messages = messagesList.AsAGUIMessages(jsonSerializerOptions).ToList(),
             };
 
             // Tracks whether the caller hand-supplied Resume via RawRepresentationFactory.

@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.AI;
 
 namespace AGUI.Abstractions;
@@ -12,6 +14,28 @@ namespace AGUI.Abstractions;
 public static class AGUIChatMessageExtensions
 {
     private static readonly ChatRole s_developerChatRole = new("developer");
+
+    /// <summary>
+    /// <see cref="ChatMessage.AdditionalProperties"/> key carrying <see
+    /// cref="AGUIMessage.SubagentRunId"/> across the round trip.
+    /// <see cref="ChatMessage"/> has no concept of delegated work, and AGUIChatClient
+    /// sends request messages through <see cref="AsAGUIMessages"/>, so without this a
+    /// subagent-attributed message handed back to the client silently returns to the
+    /// agent as the parent's on the next turn. Same approach the binary content parts
+    /// already use for their AG-UI-only "filename".
+    /// </summary>
+    private const string SubagentRunIdKey = "agui.subagentRunId";
+
+    private static ChatMessage WithSubagentRunId(ChatMessage message, string? subagentRunId)
+    {
+        if (subagentRunId is not null)
+        {
+            message.AdditionalProperties ??= new AdditionalPropertiesDictionary();
+            message.AdditionalProperties[SubagentRunIdKey] = subagentRunId;
+        }
+
+        return message;
+    }
 
     /// <summary>
     /// Converts a sequence of <see cref="AGUIMessage"/> instances to <see cref="ChatMessage"/> instances.
@@ -28,6 +52,32 @@ public static class AGUIChatMessageExtensions
         // the reconstructed history valid. Only the current run is buffered, so this stays cheap.
         List<AIContent>? pendingToolCallContents = null;
         string? pendingToolCallId = null;
+        // The buffered run's owner — the FIRST owner in the run.
+        //
+        // Parallel tool calls from DIFFERENT subagents lose the second owner here, because
+        // AG-UI attributes per message and this merges the run into one ChatMessage.
+        //
+        // That is a current limitation, NOT an inherent conflict. The provider constraint
+        // (microsoft/agent-framework#2699) is ADJACENCY — each assistant tool_calls message
+        // must be immediately followed by the results for its own call ids — and merging is
+        // only one way to satisfy it. Interleaving satisfies it too, and is in fact the
+        // shape that issue names as correct:
+        //   assistant(tc1), tool(tc1), assistant(tc2), tool(tc2)
+        // which would also preserve per-message attribution.
+        //
+        // Splitting the run on owner change was implemented and reverted because it split
+        // WITHOUT reordering the results, producing
+        // assistant(tc1), assistant(tc2), tool(tc1), tool(tc2) — the exact invalid shape.
+        // Doing it properly means interleaving, which changes this method's output for
+        // non-subagent parallel calls as well, so it is a deliberate decision rather than a
+        // drive-by fix. PNI-293 carries the analysis.
+        string? pendingToolCallSubagentRunId = null;
+        // Whether the run's owner has been captured yet. A separate flag rather than
+        // "pendingToolCallSubagentRunId is still null", because the PARENT is an owner too
+        // and its owner IS null: capturing the first non-null value promoted a later
+        // subagent onto a run the parent opened, attributing the parent's own tool call to
+        // it.
+        var pendingToolCallOwnerCaptured = false;
 
         foreach (var message in aguiMessages)
         {
@@ -35,6 +85,14 @@ public static class AGUIChatMessageExtensions
             {
                 pendingToolCallContents ??= new List<AIContent>();
                 pendingToolCallId ??= message.Id;
+                // First owner in the run wins, whoever that is. Splitting the run when the
+                // owner changes was tried and reverted: see the note on
+                // pendingToolCallSubagentRunId.
+                if (!pendingToolCallOwnerCaptured)
+                {
+                    pendingToolCallSubagentRunId = message.SubagentRunId;
+                    pendingToolCallOwnerCaptured = true;
+                }
 
                 if (!string.IsNullOrEmpty(toolCallAssistant.Content))
                 {
@@ -59,9 +117,13 @@ public static class AGUIChatMessageExtensions
             // Any non-(assistant-with-tool-calls) message ends the current run; flush it first.
             if (pendingToolCallContents is not null)
             {
-                yield return new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId };
+                yield return WithSubagentRunId(
+                    new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId },
+                    pendingToolCallSubagentRunId);
                 pendingToolCallContents = null;
                 pendingToolCallId = null;
+                pendingToolCallSubagentRunId = null;
+                pendingToolCallOwnerCaptured = false;
             }
 
             var role = MapChatRole(message.Role);
@@ -76,6 +138,9 @@ public static class AGUIChatMessageExtensions
                     {
                         case AGUITextInputContent textInput:
                             contents.Add(new TextContent(textInput.Text));
+                            break;
+                        case AGUIMediaInputContent mediaInput:
+                            contents.Add(ConvertMediaInputContent(mediaInput));
                             break;
                         case AGUIBinaryInputContent binaryInput:
                             if (binaryInput.Url is not null)
@@ -106,7 +171,9 @@ public static class AGUIChatMessageExtensions
                     }
                 }
 
-                yield return new ChatMessage(role, contents) { MessageId = message.Id, AuthorName = authorName };
+                yield return WithSubagentRunId(
+                    new ChatMessage(role, contents) { MessageId = message.Id, AuthorName = authorName },
+                    message.SubagentRunId);
             }
             else if (message is AGUIToolMessage toolMessage)
             {
@@ -115,10 +182,9 @@ public static class AGUIChatMessageExtensions
                     new FunctionResultContent(toolMessage.ToolCallId ?? string.Empty, toolMessage.Content)
                 };
 
-                yield return new ChatMessage(role, contents)
-                {
-                    MessageId = message.Id
-                };
+                yield return WithSubagentRunId(
+                    new ChatMessage(role, contents) { MessageId = message.Id },
+                    message.SubagentRunId);
             }
             else
             {
@@ -131,27 +197,103 @@ public static class AGUIChatMessageExtensions
                     _ => string.Empty,
                 };
 
-                yield return new ChatMessage(role, text)
-                {
-                    MessageId = message.Id
-                };
+                yield return WithSubagentRunId(
+                    new ChatMessage(role, text) { MessageId = message.Id },
+                    message.SubagentRunId);
             }
         }
 
         // Flush any trailing assistant-tool-call run.
         if (pendingToolCallContents is not null)
         {
-            yield return new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId };
+            yield return WithSubagentRunId(
+                new ChatMessage(ChatRole.Assistant, pendingToolCallContents) { MessageId = pendingToolCallId },
+                pendingToolCallSubagentRunId);
         }
+    }
+
+    private static AIContent ConvertMediaInputContent(AGUIMediaInputContent mediaInput)
+    {
+        AIContent content = mediaInput.Source switch
+        {
+            AGUIInputContentDataSource dataSource =>
+                new DataContent(Convert.FromBase64String(dataSource.Value), dataSource.MimeType),
+            AGUIInputContentUrlSource urlSource =>
+                CreateUriContent(mediaInput, urlSource),
+            _ => throw new NotSupportedException(
+                $"Input content source type '{mediaInput.Source?.Type ?? "<null>"}' is not supported.")
+        };
+
+        ApplyMediaMetadata(content, mediaInput.Metadata);
+        return content;
+    }
+
+    private static void ApplyMediaMetadata(AIContent content, JsonElement? metadata)
+    {
+        if (metadata is not { } value)
+        {
+            return;
+        }
+
+        content.AdditionalProperties = new AdditionalPropertiesDictionary
+        {
+            ["metadata"] = value.Clone()
+        };
+
+        if (content is DataContent dataContent &&
+            value.ValueKind == JsonValueKind.Object &&
+            value.TryGetProperty("filename", out var filename) &&
+            filename.ValueKind == JsonValueKind.String)
+        {
+            dataContent.Name = filename.GetString();
+        }
+    }
+
+    private static UriContent CreateUriContent(
+        AGUIMediaInputContent mediaInput,
+        AGUIInputContentUrlSource urlSource)
+    {
+        var content = new UriContent(new Uri(urlSource.Value, UriKind.RelativeOrAbsolute), urlSource.MimeType);
+        if (urlSource.MimeType is null &&
+            string.Equals(content.MediaType, "application/octet-stream", StringComparison.OrdinalIgnoreCase))
+        {
+            content.MediaType = mediaInput switch
+            {
+                AGUIImageInputContent => "image/*",
+                AGUIAudioInputContent => "audio/*",
+                AGUIVideoInputContent => "video/*",
+                _ => content.MediaType
+            };
+        }
+
+        return content;
     }
 
     /// <summary>
     /// Converts a sequence of <see cref="ChatMessage"/> instances to <see cref="AGUIMessage"/> instances.
     /// </summary>
     /// <param name="chatMessages">The chat messages to convert.</param>
+    /// <param name="jsonSerializerOptions">The options used to serialize message content.</param>
     /// <returns>A sequence of <see cref="AGUIMessage"/> instances.</returns>
-    public static IEnumerable<AGUIMessage> AsAGUIMessages(this IEnumerable<ChatMessage> chatMessages)
+    public static IEnumerable<AGUIMessage> AsAGUIMessages(
+        this IEnumerable<ChatMessage> chatMessages,
+        JsonSerializerOptions jsonSerializerOptions)
     {
+#if NET7_0_OR_GREATER
+        ArgumentNullException.ThrowIfNull(chatMessages);
+        ArgumentNullException.ThrowIfNull(jsonSerializerOptions);
+#else
+        if (chatMessages is null)
+        {
+            throw new ArgumentNullException(nameof(chatMessages));
+        }
+
+        if (jsonSerializerOptions is null)
+        {
+            throw new ArgumentNullException(nameof(jsonSerializerOptions));
+        }
+#endif
+
         foreach (var message in chatMessages)
         {
             AGUIMessage aguiMessage;
@@ -167,20 +309,27 @@ public static class AGUIChatMessageExtensions
                             parts.Add(new AGUITextInputContent { Text = textContent.Text ?? string.Empty });
                             break;
                         case DataContent dataContent:
-                            parts.Add(new AGUIBinaryInputContent
-                            {
-                                MimeType = dataContent.MediaType ?? string.Empty,
-                                Data = dataContent.Data is { Length: > 0 } ? Convert.ToBase64String(dataContent.Data.ToArray()) : null,
-                                Filename = dataContent.AdditionalProperties?.TryGetValue("filename", out string? fn) == true ? fn : null
-                            });
+                            parts.Add(ConvertMediaContent(
+                                dataContent.MediaType,
+                                new AGUIInputContentDataSource
+                                {
+                                    Value = Convert.ToBase64String(dataContent.Data.ToArray()),
+                                    MimeType = dataContent.MediaType ?? string.Empty
+                                },
+                                dataContent.AdditionalProperties,
+                                jsonSerializerOptions,
+                                dataContent.Name));
                             break;
                         case UriContent uriContent:
-                            parts.Add(new AGUIBinaryInputContent
-                            {
-                                MimeType = uriContent.MediaType ?? string.Empty,
-                                Url = uriContent.Uri?.ToString(),
-                                Filename = uriContent.AdditionalProperties?.TryGetValue("filename", out string? fn2) == true ? fn2 : null
-                            });
+                            parts.Add(ConvertMediaContent(
+                                uriContent.MediaType,
+                                new AGUIInputContentUrlSource
+                                {
+                                    Value = uriContent.Uri?.ToString() ?? string.Empty,
+                                    MimeType = uriContent.MediaType
+                                },
+                                uriContent.AdditionalProperties,
+                                jsonSerializerOptions));
                             break;
                         default:
                             parts.Add(new AGUITextInputContent { Text = content.ToString() ?? string.Empty });
@@ -213,7 +362,7 @@ public static class AGUIChatMessageExtensions
                                 Arguments = fc.Arguments is not null
                                     ? JsonSerializer.Serialize(
                                         fc.Arguments,
-                                        AGUIJsonSerializerContext.Default.GetTypeInfo(typeof(IDictionary<string, object?>))!)
+                                        jsonSerializerOptions.GetTypeInfo(typeof(IDictionary<string, object?>)))
                                     : string.Empty
                             }
                         });
@@ -244,7 +393,14 @@ public static class AGUIChatMessageExtensions
                     {
                         Id = functionResult.CallId,
                         ToolCallId = functionResult.CallId,
-                        Content = SerializeFunctionResult(functionResult, message.Text)
+                        Content = SerializeFunctionResult(functionResult, message.Text, jsonSerializerOptions),
+                        // Restored here as well as at the end of the loop: this branch
+                        // yields directly (one message per result) and so never reaches
+                        // the shared Id/SubagentRunId assignment below.
+                        SubagentRunId =
+                            message.AdditionalProperties?.TryGetValue(SubagentRunIdKey, out string? toolSubagentRunId) == true
+                                ? toolSubagentRunId
+                                : null,
                     };
                 }
 
@@ -259,8 +415,126 @@ public static class AGUIChatMessageExtensions
             }
 
             aguiMessage.Id = message.MessageId;
+            // Null-only, not IsNullOrEmpty: an empty string is a valid opaque id that the
+            // schemas accept, and treating it as absent silently converted it to parent
+            // attribution on the next turn.
+            if (message.AdditionalProperties?.TryGetValue(SubagentRunIdKey, out string? subagentRunId) == true
+                && subagentRunId is not null)
+            {
+                aguiMessage.SubagentRunId = subagentRunId;
+            }
+
             yield return aguiMessage;
         }
+    }
+
+    private static AGUIMediaInputContent ConvertMediaContent(
+        string? mediaType,
+        AGUIInputContentSource source,
+        AdditionalPropertiesDictionary? additionalProperties,
+        JsonSerializerOptions jsonSerializerOptions,
+        string? filename = null)
+    {
+        AGUIMediaInputContent content = GetMediaTypeKind(mediaType) switch
+        {
+            MediaTypeKind.Image => new AGUIImageInputContent(),
+            MediaTypeKind.Audio => new AGUIAudioInputContent(),
+            MediaTypeKind.Video => new AGUIVideoInputContent(),
+            _ => new AGUIDocumentInputContent()
+        };
+
+        content.Source = source;
+        content.Metadata = ConvertAdditionalProperties(
+            additionalProperties,
+            filename,
+            jsonSerializerOptions);
+        return content;
+    }
+
+    private static MediaTypeKind GetMediaTypeKind(string? mediaType)
+    {
+        if (!MediaTypeHeaderValue.TryParse(mediaType, out var parsed) ||
+            parsed.MediaType is not { } parsedMediaType)
+        {
+            return MediaTypeKind.Other;
+        }
+
+        var mediaTypeSpan = parsedMediaType.AsSpan();
+        var separator = mediaTypeSpan.IndexOf('/');
+        if (separator <= 0)
+        {
+            return MediaTypeKind.Other;
+        }
+
+        var topLevelType = mediaTypeSpan.Slice(0, separator);
+        if (topLevelType.Equals("image".AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            return MediaTypeKind.Image;
+        }
+
+        if (topLevelType.Equals("audio".AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            return MediaTypeKind.Audio;
+        }
+
+        return topLevelType.Equals("video".AsSpan(), StringComparison.OrdinalIgnoreCase)
+            ? MediaTypeKind.Video
+            : MediaTypeKind.Other;
+    }
+
+    private static JsonElement? ConvertAdditionalProperties(
+        AdditionalPropertiesDictionary? additionalProperties,
+        string? filename,
+        JsonSerializerOptions jsonSerializerOptions)
+    {
+        if ((additionalProperties is null || additionalProperties.Count == 0) &&
+            string.IsNullOrEmpty(filename))
+        {
+            return null;
+        }
+
+        if (additionalProperties?.Count == 1 &&
+            additionalProperties.TryGetValue("metadata", out JsonElement preservedMetadata))
+        {
+            if (string.IsNullOrEmpty(filename) ||
+                preservedMetadata.ValueKind != JsonValueKind.Object ||
+                preservedMetadata.TryGetProperty("filename", out _))
+            {
+                return preservedMetadata.Clone();
+            }
+
+            var metadataObject = JsonObject.Create(preservedMetadata)!;
+            metadataObject["filename"] = filename;
+            return JsonSerializer.SerializeToElement(
+                metadataObject,
+                AGUIJsonSerializerContext.Default.JsonObject);
+        }
+
+        IDictionary<string, object?> metadata = new Dictionary<string, object?>();
+        if (additionalProperties is not null)
+        {
+            foreach (var property in additionalProperties)
+            {
+                metadata[property.Key] = property.Value;
+            }
+        }
+
+        if (!string.IsNullOrEmpty(filename) && !metadata.ContainsKey("filename"))
+        {
+            metadata["filename"] = filename;
+        }
+
+        return JsonSerializer.SerializeToElement(
+            metadata,
+            jsonSerializerOptions.GetTypeInfo(typeof(IDictionary<string, object?>)));
+    }
+
+    private enum MediaTypeKind
+    {
+        Other,
+        Image,
+        Audio,
+        Video
     }
 
     /// <summary>
@@ -276,7 +550,10 @@ public static class AGUIChatMessageExtensions
         string.Equals(role, AGUIRoles.Tool, StringComparison.OrdinalIgnoreCase) ? ChatRole.Tool :
         throw new InvalidOperationException($"Unknown chat role: {role}");
 
-    private static string SerializeFunctionResult(FunctionResultContent functionResult, string? fallbackText)
+    private static string SerializeFunctionResult(
+        FunctionResultContent functionResult,
+        string? fallbackText,
+        JsonSerializerOptions jsonSerializerOptions)
     {
         switch (functionResult.Result)
         {
@@ -287,9 +564,9 @@ public static class AGUIChatMessageExtensions
             case IDictionary<string, object?>:
                 return JsonSerializer.Serialize(
                     functionResult.Result,
-                    AGUIJsonSerializerContext.Default.GetTypeInfo(typeof(IDictionary<string, object?>))!);
+                    jsonSerializerOptions.GetTypeInfo(typeof(IDictionary<string, object?>)));
             case not null:
-                var resultTypeInfo = AGUIJsonSerializerContext.Default.GetTypeInfo(functionResult.Result.GetType());
+                var resultTypeInfo = jsonSerializerOptions.GetTypeInfo(functionResult.Result.GetType());
                 return resultTypeInfo is not null
                     ? JsonSerializer.Serialize(functionResult.Result, resultTypeInfo)
                     : functionResult.Result.ToString() ?? string.Empty;
