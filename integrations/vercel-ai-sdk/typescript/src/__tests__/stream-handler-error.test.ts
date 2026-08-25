@@ -13,10 +13,13 @@ import {
   eventsOfType,
   finishStop,
   finishToolCalls,
+  fsFinish,
+  fsFinishStep,
   makeInput,
   makeMockModel,
   responseMetadata,
   streamStart,
+  type FullStreamPart,
 } from "./helpers";
 import { StreamHandler } from "../stream-handler";
 import type { BaseEvent } from "@ag-ui/client";
@@ -95,7 +98,7 @@ describe("StreamHandler — error & cancel handling", () => {
   });
 
   it("tool-error pushes a ToolMessage with `error` field and emits TOOL_CALL_RESULT", async () => {
-    async function* parts(): AsyncIterable<unknown> {
+    async function* parts(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       yield { type: "start-step", request: {}, warnings: [] };
       yield { type: "tool-input-start", id: "tc-err", toolName: "broken" };
@@ -115,20 +118,8 @@ describe("StreamHandler — error & cancel handling", () => {
         error: new Error("boom"),
         dynamic: true,
       };
-      yield {
-        type: "finish-step",
-        response: {},
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        providerMetadata: undefined,
-      };
-      yield {
-        type: "finish",
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-      };
+      yield fsFinishStep();
+      yield fsFinish();
     }
 
     const events = await collectEvents(parts());
@@ -143,7 +134,7 @@ describe("StreamHandler — error & cancel handling", () => {
 
   it("synthesizes a missing TOOL_CALL_RESULT in the cleanup phase when none arrived", async () => {
     // Stream has a tool-call but no tool-result and no tool-error follow-up.
-    async function* parts(): AsyncIterable<unknown> {
+    async function* parts(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       yield { type: "start-step", request: {}, warnings: [] };
       yield { type: "tool-input-start", id: "tc-orphan", toolName: "noop" };
@@ -155,20 +146,8 @@ describe("StreamHandler — error & cancel handling", () => {
         input: {},
         dynamic: true,
       };
-      yield {
-        type: "finish-step",
-        response: {},
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        providerMetadata: undefined,
-      };
-      yield {
-        type: "finish",
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-      };
+      yield fsFinishStep();
+      yield fsFinish();
     }
 
     const events = await collectEvents(parts());
@@ -218,26 +197,14 @@ describe("StreamHandler — error & cancel handling", () => {
   it("does NOT synthesize a missing tool result for tool calls already covered by input messages", async () => {
     // Drive the handler with a stream that contains an assistant tool-call
     // but the corresponding tool result is in the input messages already.
-    async function* parts(): AsyncIterable<unknown> {
+    async function* parts(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       yield { type: "start-step", request: {}, warnings: [] };
       yield { type: "text-start", id: "t-final" };
       yield { type: "text-delta", id: "t-final", text: "ok" };
       yield { type: "text-end", id: "t-final" };
-      yield {
-        type: "finish-step",
-        response: {},
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        providerMetadata: undefined,
-      };
-      yield {
-        type: "finish",
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-      };
+      yield fsFinishStep();
+      yield fsFinish();
     }
 
     const events = await collectEvents(parts(), {
@@ -334,7 +301,7 @@ describe("StreamHandler — error & cancel handling", () => {
   });
 
   it("emits RUN_ERROR + completes (no MESSAGES_SNAPSHOT, no RUN_FINISHED) when the for-await throws", async () => {
-    async function* badStream(): AsyncIterable<unknown> {
+    async function* badStream(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       throw new Error("synchronous fatal");
     }
@@ -349,7 +316,7 @@ describe("StreamHandler — error & cancel handling", () => {
   it("stops emitting events after the subscriber unsubscribes mid-stream", async () => {
     const collected: BaseEvent[] = [];
     let yieldedCount = 0;
-    async function* parts(): AsyncIterable<unknown> {
+    async function* parts(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       yieldedCount++;
       yield { type: "text-start", id: "t" };
@@ -360,12 +327,12 @@ describe("StreamHandler — error & cancel handling", () => {
       yieldedCount++;
       yield { type: "text-end", id: "t" };
       yieldedCount++;
-      yield { type: "finish", finishReason: "stop", rawFinishReason: undefined, totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+      yield fsFinish();
     }
 
     const observable = new Observable<BaseEvent>((subscriber: Subscriber<BaseEvent>) => {
       const handler = new StreamHandler(makeInput(), subscriber);
-      handler.process(parts() as AsyncIterable<never>);
+      handler.process(parts());
     });
 
     await new Promise<void>((resolve) => {

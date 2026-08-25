@@ -15,9 +15,13 @@ import {
   eventsOfType,
   finishStop,
   finishToolCalls,
+  fsFinish,
+  fsFinishStep,
+  fsUsage,
   makeMockModel,
   responseMetadata,
   streamStart,
+  type FullStreamPart,
 } from "./helpers";
 
 const weatherTool = {
@@ -287,26 +291,14 @@ describe("StreamHandler — multi-step", () => {
 
 describe("StreamHandler — step-boundary hygiene", () => {
   it("closes an open text message at a step boundary when text-end is missing", async () => {
-    async function* parts(): AsyncIterable<unknown> {
+    async function* parts(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       yield { type: "start-step", request: {}, warnings: [] };
       yield { type: "text-start", id: "t-open" };
       yield { type: "text-delta", id: "t-open", text: "cut off" };
       // Provider omitted text-end before finishing the step.
-      yield {
-        type: "finish-step",
-        response: {},
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        providerMetadata: undefined,
-      };
-      yield {
-        type: "finish",
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-      };
+      yield fsFinishStep();
+      yield fsFinish();
     }
 
     const events = await collectEvents(parts());
@@ -323,38 +315,19 @@ describe("StreamHandler — step-boundary hygiene", () => {
     // Reasoning part ids restart per step on providers that key them by
     // content-block index, so an unclosed reasoning would otherwise swallow
     // the next step's reasoning under the stale id.
-    async function* parts(): AsyncIterable<unknown> {
+    async function* parts(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       yield { type: "start-step", request: {}, warnings: [] };
       yield { type: "reasoning-start", id: "0" };
       yield { type: "reasoning-delta", id: "0", text: "step one thinking" };
       // Provider omitted reasoning-end before finishing the step.
-      yield {
-        type: "finish-step",
-        response: {},
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        providerMetadata: undefined,
-      };
+      yield fsFinishStep();
       yield { type: "start-step", request: {}, warnings: [] };
       yield { type: "reasoning-start", id: "0" };
       yield { type: "reasoning-delta", id: "0", text: "step two thinking" };
       yield { type: "reasoning-end", id: "0" };
-      yield {
-        type: "finish-step",
-        response: {},
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        providerMetadata: undefined,
-      };
-      yield {
-        type: "finish",
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        totalUsage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 },
-      };
+      yield fsFinishStep();
+      yield fsFinish(fsUsage({ inputTokens: 2, outputTokens: 2, totalTokens: 4 }));
     }
 
     const events = await collectEvents(parts());
@@ -376,38 +349,19 @@ describe("StreamHandler — step-boundary hygiene", () => {
   it("does not reuse a per-step-constant text part id across steps", async () => {
     // Chat-completions-style providers restart text part ids every step
     // (a constant "0"), so step 2's id collides with step 1's snapshot message.
-    async function* parts(): AsyncIterable<unknown> {
+    async function* parts(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       yield { type: "start-step", request: {}, warnings: [] };
       yield { type: "text-start", id: "0" };
       yield { type: "text-delta", id: "0", text: "step one" };
       yield { type: "text-end", id: "0" };
-      yield {
-        type: "finish-step",
-        response: {},
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        providerMetadata: undefined,
-      };
+      yield fsFinishStep();
       yield { type: "start-step", request: {}, warnings: [] };
       yield { type: "text-start", id: "0" };
       yield { type: "text-delta", id: "0", text: "step two" };
       yield { type: "text-end", id: "0" };
-      yield {
-        type: "finish-step",
-        response: {},
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        providerMetadata: undefined,
-      };
-      yield {
-        type: "finish",
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        totalUsage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 },
-      };
+      yield fsFinishStep();
+      yield fsFinish(fsUsage({ inputTokens: 2, outputTokens: 2, totalTokens: 4 }));
     }
 
     const events = await collectEvents(parts());

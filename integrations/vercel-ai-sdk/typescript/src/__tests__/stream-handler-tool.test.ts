@@ -14,9 +14,13 @@ import {
   eventsOfType,
   finishStop,
   finishToolCalls,
+  fsFinish,
+  fsFinishStep,
+  fsUsage,
   makeMockModel,
   responseMetadata,
   streamStart,
+  type FullStreamPart,
 } from "./helpers";
 
 const weatherTool = {
@@ -337,7 +341,7 @@ describe("StreamHandler — tool streaming", () => {
   it("treats tool-output-denied as a TOOL_CALL_RESULT with content 'denied' and an error field", async () => {
     // tool-output-denied isn't easy to provoke via streamText (it's a static
     // tool path). Drive the handler directly with a minimal async iterable.
-    async function* parts(): AsyncIterable<unknown> {
+    async function* parts(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       yield { type: "start-step", request: {}, warnings: [] };
       yield { type: "tool-input-start", id: "tc-1", toolName: "danger" };
@@ -354,15 +358,8 @@ describe("StreamHandler — tool streaming", () => {
         toolCallId: "tc-1",
         toolName: "danger",
       };
-      yield {
-        type: "finish-step",
-        response: {},
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        providerMetadata: undefined,
-      };
-      yield { type: "finish", finishReason: "stop", rawFinishReason: undefined, totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+      yield fsFinishStep();
+      yield fsFinish();
     }
 
     const events = await collectEvents(parts());
@@ -422,7 +419,7 @@ describe("StreamHandler — client-side tool calls stay pending", () => {
     // Frontend tools are converted without an execute function, so the stream
     // legitimately ends without a tool-result: the AG-UI client executes the
     // call and supplies the result on the next run.
-    async function* parts(): AsyncIterable<unknown> {
+    async function* parts(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       yield { type: "start-step", request: {}, warnings: [] };
       yield { type: "tool-input-start", id: "tc-fe", toolName: "change_background" };
@@ -434,20 +431,8 @@ describe("StreamHandler — client-side tool calls stay pending", () => {
         toolName: "change_background",
         input: { color: "blue" },
       };
-      yield {
-        type: "finish-step",
-        response: {},
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        finishReason: "tool-calls",
-        rawFinishReason: undefined,
-        providerMetadata: undefined,
-      };
-      yield {
-        type: "finish",
-        finishReason: "tool-calls",
-        rawFinishReason: undefined,
-        totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-      };
+      yield fsFinishStep("tool-calls");
+      yield fsFinish(fsUsage({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }), "tool-calls");
     }
 
     const events = await collectEvents(parts(), {
@@ -471,16 +456,11 @@ describe("StreamHandler — client-side tool calls stay pending", () => {
   });
 
   it("still synthesizes a result for a tool NOT defined in input.tools", async () => {
-    async function* parts(): AsyncIterable<unknown> {
+    async function* parts(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       yield { type: "start-step", request: {}, warnings: [] };
       yield { type: "tool-call", toolCallId: "tc-srv", toolName: "server_only", input: {} };
-      yield {
-        type: "finish",
-        finishReason: "tool-calls",
-        rawFinishReason: undefined,
-        totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-      };
+      yield fsFinish(fsUsage({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }), "tool-calls");
     }
 
     const events = await collectEvents(parts(), {
@@ -503,17 +483,12 @@ describe("StreamHandler — unterminated tool input", () => {
   it("emits TOOL_CALL_END in the cleanup phase for a tool input left open at stream end", async () => {
     // e.g. @ai-sdk/openai chat-completions: generation truncated by max
     // tokens mid-arguments emits tool-input-start but never tool-input-end.
-    async function* parts(): AsyncIterable<unknown> {
+    async function* parts(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       yield { type: "start-step", request: {}, warnings: [] };
       yield { type: "tool-input-start", id: "tc-trunc", toolName: "get_weather" };
       yield { type: "tool-input-delta", id: "tc-trunc", delta: '{"city":"To' };
-      yield {
-        type: "finish",
-        finishReason: "length",
-        rawFinishReason: undefined,
-        totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-      };
+      yield fsFinish(fsUsage({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }), "length");
     }
 
     const events = await collectEvents(parts());
@@ -530,26 +505,14 @@ describe("StreamHandler — unterminated tool input", () => {
 
 describe("StreamHandler — tool argument serialization", () => {
   it("serializes a string tool-call input as valid JSON arguments", async () => {
-    async function* parts(): AsyncIterable<unknown> {
+    async function* parts(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       yield { type: "start-step", request: {}, warnings: [] };
       // Bare tool-call whose parsed input is a JSON string, with no streamed
       // input parts (so ARGS is synthesized from the input value).
       yield { type: "tool-call", toolCallId: "tc-str", toolName: "echo", input: "Tokyo" };
-      yield {
-        type: "finish-step",
-        response: {},
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        finishReason: "tool-calls",
-        rawFinishReason: undefined,
-        providerMetadata: undefined,
-      };
-      yield {
-        type: "finish",
-        finishReason: "tool-calls",
-        rawFinishReason: undefined,
-        totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-      };
+      yield fsFinishStep("tool-calls");
+      yield fsFinish(fsUsage({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }), "tool-calls");
     }
 
     const events = await collectEvents(parts());

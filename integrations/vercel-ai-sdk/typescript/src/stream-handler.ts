@@ -48,19 +48,40 @@ function jsonStringifyToolArgs(value: unknown): string {
   }
 }
 
-// AG-UI's usage mapper reads the flat AI SDK key names
-// (`inputTokens`/`outputTokens`/`totalTokens`/`reasoningTokens`/
-// `cachedInputTokens`). v7 keeps the first three flat but moved the cached-input
-// and reasoning counts into `inputTokenDetails`/`outputTokenDetails`, so lift
-// those two before mapping — otherwise the two counts users most want to see
-// (cache savings, reasoning spend) would silently read as "not reported".
-// Values are passed through untouched: the mapper drops anything non-finite.
-function flattenAiSdkUsage(usage: LanguageModelUsage | undefined): unknown {
+// The five counts AG-UI's TokenUsage can carry, under the flat AI SDK key
+// names its usage mapper reads.
+interface FlatAiSdkUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  cachedInputTokens?: number;
+  reasoningTokens?: number;
+}
+
+// TokenUsageSchema types every count as a non-negative integer, so anything
+// else has to be dropped here: tokenUsageFromAiSdkUsage only guards against
+// non-finite values, and a fractional or negative count surviving into the
+// event fails RunFinishedEventSchema — killing the run's final event on a
+// validating transport. Declared as `number | undefined` (what the AI SDK
+// promises) but guarded at runtime, since the value is really a provider's.
+function intOrUndefined(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+// v7 keeps `inputTokens`/`outputTokens`/`totalTokens` flat but moved the
+// cached-input and reasoning counts into `inputTokenDetails`/
+// `outputTokenDetails`, so lift those two before mapping — otherwise the two
+// counts users most want to see (cache savings, reasoning spend) would
+// silently read as "not reported".
+function flattenAiSdkUsage(usage: LanguageModelUsage | undefined): FlatAiSdkUsage | undefined {
   if (!usage) return undefined;
-  const flat: Record<string, unknown> = { ...usage };
-  flat.cachedInputTokens ??= usage.inputTokenDetails?.cacheReadTokens;
-  flat.reasoningTokens ??= usage.outputTokenDetails?.reasoningTokens;
-  return flat;
+  return {
+    inputTokens: intOrUndefined(usage.inputTokens),
+    outputTokens: intOrUndefined(usage.outputTokens),
+    totalTokens: intOrUndefined(usage.totalTokens),
+    cachedInputTokens: intOrUndefined(usage.inputTokenDetails?.cacheReadTokens),
+    reasoningTokens: intOrUndefined(usage.outputTokenDetails?.reasoningTokens),
+  };
 }
 
 interface ToolCallPart {
@@ -242,19 +263,19 @@ export class StreamHandler {
       case "tool-input-end":
         return this.onToolInputEnd(part);
       case "tool-call":
-        return this.onToolCall(part as unknown as ToolCallPart);
+        return this.onToolCall(part as ToolCallPart);
       case "tool-result":
-        return this.onToolResult(part as unknown as ToolResultPart);
+        return this.onToolResult(part as ToolResultPart);
       case "tool-error":
-        return this.onToolError(part as unknown as ToolErrorPart);
+        return this.onToolError(part as ToolErrorPart);
       case "tool-output-denied":
-        return this.onToolOutputDenied(part as unknown as ToolOutputDeniedPart);
+        return this.onToolOutputDenied(part as ToolOutputDeniedPart);
       case "tool-approval-request":
-        return this.onToolApprovalRequest(part as unknown as ToolApprovalRequestPart);
+        return this.onToolApprovalRequest(part as ToolApprovalRequestPart);
       case "tool-approval-response":
-        return this.onToolApprovalResponse(part as unknown as ToolApprovalResponsePart);
+        return this.onToolApprovalResponse(part as ToolApprovalResponsePart);
       case "custom":
-        return this.onCustom(part as unknown as CustomPart);
+        return this.onCustom(part as CustomPart);
       case "start-step":
         return this.onStartStep();
       case "finish-step":

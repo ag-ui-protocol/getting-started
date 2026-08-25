@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventType, type CustomEvent } from "@ag-ui/client";
-import { collectEvents, eventsOfType } from "./helpers";
+import type { TypedToolCall, ToolSet } from "ai";
+import { collectEvents, eventsOfType, fromParts } from "./helpers";
 
-/** Feed fullStream-vocabulary parts straight into the handler. */
-async function* fromParts(parts: unknown[]): AsyncIterable<unknown> {
-  for (const part of parts) yield part;
-}
+// The handler forwards an approval part's `toolCall` through untouched, and
+// the assertions below pin the exact object that lands on CUSTOM.value — so
+// the fixture stays a deliberately minimal stub (no `type`, no `input`)
+// rather than a full v7 TypedToolCall, and casts once here to say so.
+const stubToolCall = (toolCallId: string, toolName: string): TypedToolCall<ToolSet> =>
+  ({ toolCallId, toolName }) as unknown as TypedToolCall<ToolSet>;
 
 describe("StreamHandler — v7 approval & custom parts", () => {
   it("maps a tool-approval-request part to a CUSTOM event", async () => {
@@ -14,7 +17,7 @@ describe("StreamHandler — v7 approval & custom parts", () => {
         {
           type: "tool-approval-request",
           approvalId: "ap-1",
-          toolCall: { toolCallId: "tc-1", toolName: "get_weather" },
+          toolCall: stubToolCall("tc-1", "get_weather"),
         },
       ]),
     );
@@ -31,7 +34,7 @@ describe("StreamHandler — v7 approval & custom parts", () => {
         {
           type: "tool-approval-response",
           approvalId: "ap-1",
-          toolCall: { toolCallId: "tc-1", toolName: "get_weather" },
+          toolCall: stubToolCall("tc-1", "get_weather"),
           approved: false,
           reason: "user denied",
         },
@@ -71,7 +74,7 @@ describe("StreamHandler — v7 approval & custom parts", () => {
         {
           type: "tool-approval-response",
           approvalId: "ap-2",
-          toolCall: { toolCallId: "tc-2", toolName: "get_weather" },
+          toolCall: stubToolCall("tc-2", "get_weather"),
           approved: true,
         },
       ]),
@@ -91,7 +94,12 @@ describe("StreamHandler — v7 approval & custom parts", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const events = await collectEvents(
-        fromParts([{ type: "reasoning-file", file: { mediaType: "text/plain" } }]),
+        fromParts([
+          {
+            type: "reasoning-file",
+            file: { mediaType: "text/plain", base64: "", uint8Array: new Uint8Array() },
+          },
+        ]),
       );
       expect(eventsOfType(events, EventType.CUSTOM)).toHaveLength(0);
       expect(warn).not.toHaveBeenCalled();

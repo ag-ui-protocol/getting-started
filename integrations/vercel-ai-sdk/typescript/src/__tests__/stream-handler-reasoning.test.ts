@@ -11,9 +11,12 @@ import {
   collectEvents,
   eventsOfType,
   finishStop,
+  fsFinish,
+  fsFinishStep,
   makeMockModel,
   responseMetadata,
   streamStart,
+  type FullStreamPart,
 } from "./helpers";
 
 describe("StreamHandler — reasoning", () => {
@@ -196,7 +199,7 @@ describe("StreamHandler — reasoning", () => {
     // Drive the handler directly to bypass AI SDK's invariant enforcement —
     // verifies our defensive close logic runs even if a misbehaving provider
     // skips reasoning-end.
-    async function* parts(): AsyncIterable<unknown> {
+    async function* parts(): AsyncIterable<FullStreamPart> {
       yield { type: "start" };
       yield { type: "start-step", request: {}, warnings: [] };
       yield { type: "reasoning-start", id: "r-leak" };
@@ -205,15 +208,8 @@ describe("StreamHandler — reasoning", () => {
       yield { type: "text-start", id: "t1" };
       yield { type: "text-delta", id: "t1", text: "Done." };
       yield { type: "text-end", id: "t1" };
-      yield {
-        type: "finish-step",
-        response: {},
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        finishReason: "stop",
-        rawFinishReason: undefined,
-        providerMetadata: undefined,
-      };
-      yield { type: "finish", finishReason: "stop", rawFinishReason: undefined, totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+      yield fsFinishStep();
+      yield fsFinish();
     }
 
     const events = await collectEvents(parts());

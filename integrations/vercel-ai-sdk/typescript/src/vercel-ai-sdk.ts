@@ -47,10 +47,8 @@ function contextToSystemMessages(context: RunAgentInput["context"]): ModelMessag
  * Provider/model labels for the token-usage entry on RUN_FINISHED. A
  * `LanguageModel` is either a provider instance (which names both) or a bare
  * model-id string routed through the gateway, where only the id is known.
- *
- * @internal
  */
-export function resolveModelIdentity(model: LanguageModel): {
+function resolveModelIdentity(model: LanguageModel): {
   provider?: string;
   model?: string;
 } {

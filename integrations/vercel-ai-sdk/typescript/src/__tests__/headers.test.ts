@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventType } from "@ag-ui/client";
+import type {
+  LanguageModelUsage,
+  StepResultPerformance,
+  TextStreamPart,
+  ToolSet,
+} from "ai";
 import { VercelAISDKAgent } from "../index";
 import { RunAgentInput } from "@ag-ui/client";
 import { firstValueFrom, toArray } from "rxjs";
@@ -16,7 +22,32 @@ vi.mock("ai", async (importOriginal) => {
       // Minimal v7-shaped result: run() only consumes `fullStream`. A real
       // stream (not just call interception) keeps these tests on the
       // successful RUN_FINISHED path instead of silently exercising RUN_ERROR.
-      async function* fullStream(): AsyncIterable<unknown> {
+      //
+      // Written out longhand rather than via ./helpers' builders: this factory
+      // is hoisted above the imports, so it can only reference types (erased)
+      // and not values. The annotation still pins it to the v7 contract.
+      const usage: LanguageModelUsage = {
+        inputTokens: 1,
+        inputTokenDetails: {
+          noCacheTokens: 1,
+          cacheReadTokens: undefined,
+          cacheWriteTokens: undefined,
+        },
+        outputTokens: 1,
+        outputTokenDetails: { textTokens: 1, reasoningTokens: undefined },
+        totalTokens: 2,
+      };
+      const performance: StepResultPerformance = {
+        effectiveOutputTokensPerSecond: 0,
+        outputTokensPerSecond: undefined,
+        inputTokensPerSecond: undefined,
+        effectiveTotalTokensPerSecond: 0,
+        stepTimeMs: 0,
+        responseTimeMs: 0,
+        toolExecutionMs: {},
+        timeToFirstOutputMs: undefined,
+      };
+      async function* fullStream(): AsyncIterable<TextStreamPart<ToolSet>> {
         yield { type: "start" };
         yield { type: "start-step", request: {}, warnings: [] };
         yield { type: "text-start", id: "t1" };
@@ -24,8 +55,9 @@ vi.mock("ai", async (importOriginal) => {
         yield { type: "text-end", id: "t1" };
         yield {
           type: "finish-step",
-          response: {},
-          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+          response: { id: "step-1", modelId: "test-model", timestamp: new Date(0) },
+          usage,
+          performance,
           finishReason: "stop",
           rawFinishReason: undefined,
           providerMetadata: undefined,
@@ -34,7 +66,7 @@ vi.mock("ai", async (importOriginal) => {
           type: "finish",
           finishReason: "stop",
           rawFinishReason: undefined,
-          totalUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+          totalUsage: usage,
         };
       }
       return { fullStream: fullStream() };
