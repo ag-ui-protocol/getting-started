@@ -59,7 +59,9 @@ class TestEvents(unittest.TestCase):
             timestamp=1648214400000
         )
         self.assertEqual(event.message_id, "msg_123")
-        self.assertEqual(event.role, "assistant")
+        # An absent role MEANS assistant — schema prose; the default is
+        # documentation and is not materialised (as in TypeScript).
+        self.assertIsNone(event.role)
         
         # Test serialization
         serialized = event.model_dump(by_alias=True)
@@ -170,7 +172,9 @@ class TestEvents(unittest.TestCase):
             delta=delta,
             timestamp=1648214400000
         )
-        self.assertEqual(event.delta, delta)
+        # Patch entries parse into typed operation models now (recorded
+        # difference: richer attribute access, identical serialization).
+        self.assertEqual([op.model_dump(exclude_none=True) for op in event.delta], delta)
         
         # Test serialization
         serialized = event.model_dump(by_alias=True)
@@ -221,14 +225,18 @@ class TestEvents(unittest.TestCase):
         self.assertEqual(event.message_id, "msg_activity")
         self.assertEqual(event.activity_type, "PLAN")
         self.assertEqual(event.content, content)
-        self.assertTrue(event.replace)
+        # Absent means replace-the-snapshot; the prose default is not
+        # materialised.
+        self.assertIsNone(event.replace)
 
         serialized = event.model_dump(by_alias=True)
         self.assertEqual(serialized["type"], "ACTIVITY_SNAPSHOT")
         self.assertEqual(serialized["messageId"], "msg_activity")
         self.assertEqual(serialized["activityType"], "PLAN")
         self.assertEqual(serialized["content"], content)
-        self.assertTrue(serialized["replace"])
+        # An optional field with no value is left out entirely rather than
+        # written as null, so "absent means replace" is what reaches the wire.
+        self.assertNotIn("replace", serialized)
 
         event_replace_false = ActivitySnapshotEvent(
             message_id="msg_activity",
@@ -252,7 +260,8 @@ class TestEvents(unittest.TestCase):
 
         self.assertEqual(event.message_id, "msg_activity")
         self.assertEqual(event.activity_type, "PLAN")
-        self.assertEqual(event.patch, patch)
+        # As with StateDelta: typed operation models, identical wire form.
+        self.assertEqual([op.model_dump(exclude_none=True) for op in event.patch], patch)
 
         serialized = event.model_dump(by_alias=True)
         self.assertEqual(serialized["type"], "ACTIVITY_DELTA")
@@ -585,7 +594,9 @@ class TestEvents(unittest.TestCase):
             name="research-agent",
         )
         self.assertEqual(event.name, "research-agent")
-        self.assertEqual(event.role, "assistant")
+        # An absent role MEANS assistant — schema prose; the default is
+        # documentation and is not materialised (as in TypeScript).
+        self.assertIsNone(event.role)
 
         serialized = event.model_dump(by_alias=True)
         self.assertEqual(serialized["name"], "research-agent")

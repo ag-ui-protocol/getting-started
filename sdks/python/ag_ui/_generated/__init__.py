@@ -3,7 +3,7 @@
 # Regenerate: pnpm --filter @ag-ui/spec generate
 
 """
-Generated models, alongside the handwritten ones. Non-public: nothing in
-ag_ui imports or re-exports this package, and its shape follows the schema
-rather than the handwritten API.
+The generated protocol models: the internal source ag_ui.core re-exports.
+Regenerate with `pnpm --filter @ag-ui/spec generate`; the shape follows the
+schema.
 """

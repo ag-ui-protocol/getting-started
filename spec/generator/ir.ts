@@ -48,6 +48,8 @@ export interface ObjectDefinition {
   fields: Field[];
   /** Whether the spec closes this object (unevaluatedProperties: false). */
   closed: boolean;
+  /** The mixins this object composes (allOf refs, transitively), in order. */
+  composedMixins: string[];
 }
 
 export interface UnionDefinition {
@@ -327,6 +329,7 @@ function flattenObject(
   const path = `#/$defs/${name}`;
   const fields = new Map<string, Field>();
   const required = new Set<string>();
+  const composedMixins: string[] = [];
 
   const collectRequired = (node: Json): void => {
     for (const entry of (node.required as string[] | undefined) ?? []) {
@@ -349,6 +352,7 @@ function flattenObject(
           "allOf member is not a mixin reference",
         );
       }
+      if (!composedMixins.includes(target)) composedMixins.push(target);
       collectFields(defs[target], `#/$defs/${target}`);
     }
     for (const [fieldName, child] of Object.entries(
@@ -400,6 +404,7 @@ function flattenObject(
     description: requireString(def.description, path, "description"),
     fields: [...fields.values()],
     closed: def.unevaluatedProperties === false,
+    composedMixins,
   };
 }
 

@@ -167,9 +167,27 @@ function fieldArguments(field: Field, pyName: string): string[] {
 }
 
 function emitObject(definition: ObjectDefinition): string {
-  const lines: string[] = [`class ${definition.name}(GeneratedBaseModel):`];
+  // Real inheritance, because Python consumers isinstance-check against the
+  // bases: events subclass BaseEvent and the name-bearing messages subclass
+  // BaseMessage, each redeclaring its flattened fields (a redeclaration
+  // narrows in place, pydantic-style). Attributable contributes fields only.
+  const base = definition.composedMixins.includes("BaseEvent")
+    ? "BaseEvent"
+    : definition.composedMixins.includes("BaseMessage")
+      ? "BaseMessage"
+      : "GeneratedBaseModel";
+  const lines: string[] = [`class ${definition.name}(${base}):`];
   lines.push(docstring(definition.description, "    "));
   lines.push("");
+  // A field that dodges a Python keyword (from_) would leak its dodge into
+  // plain dumps, handing "from_" to code that feeds a JSON Patch library.
+  // Serialising by alias restores the RFC member name; it is safe here
+  // because every other field's alias differs from its name only by casing
+  // that these one-word fields do not have.
+  if (definition.fields.some((field) => pythonName(field.name).endsWith("_"))) {
+    lines.push('    model_config = ConfigDict(serialize_by_alias=True)');
+    lines.push("");
+  }
 
   for (const field of definition.fields) {
     const pyName = pythonName(field.name);
@@ -181,37 +199,26 @@ function emitObject(definition: ObjectDefinition): string {
       field.type.kind === "array" && field.type.itemsDescription !== undefined
         ? `${field.description} Each item: ${field.type.itemsDescription}`
         : field.description;
-    const value = args.length > 0 ? ` = Field(${args.join(", ")})` : "";
+    // A single-value literal is a const, not a schema default: the only
+    // possible value is supplied so constructors never have to spell the
+    // discriminator, exactly as the hand-written models always worked.
+    // (Schema DEFAULTS stay documentation and are never materialised.)
+    const constValue =
+      field.required && field.type.kind === "literal"
+        ? field.type.enumRef === PY_ENUM
+          ? `${PY_ENUM}.${field.type.value}`
+          : `"${escapeString(field.type.value)}"`
+        : undefined;
+    const value =
+      args.length > 0
+        ? ` = Field(${args.join(", ")})`
+        : constValue !== undefined
+          ? ` = ${constValue}`
+          : "";
     lines.push(`    ${pyName}: ${annotation}${value}`);
     lines.push(docstring(description, "    "));
   }
 
-  // An Optional annotation accepts an explicit null, which the schema does
-  // not: on this wire null is not how absence is spelled. Required fields
-  // reject null through their type; optional fields need a guard — except the
-  // any-JSON ones, where null is data. (A wildcard validator is not an
-  // option: pydantic forbids before-validators on discriminator fields.)
-  const nullGuarded = definition.fields
-    .filter(
-      (field) =>
-        !field.required && field.type.kind !== "any" && !refIsAny(field.type),
-    )
-    .map((field) => pythonName(field.name));
-  if (nullGuarded.length > 0) {
-    lines.push("");
-    lines.push(
-      `    @field_validator(${nullGuarded
-        .map((name) => `"${name}"`)
-        .join(", ")}, mode="before")`,
-    );
-    lines.push("    @classmethod");
-    lines.push("    def _reject_null(cls, value: Any) -> Any:");
-    lines.push("        if value is None:");
-    lines.push(
-      '            raise ValueError("null is not a value here; omit the field instead")',
-    );
-    lines.push("        return value");
-  }
   return lines.join("\n");
 }
 
@@ -288,42 +295,78 @@ function emitDefinition(definition: Definition): string {
   }
 }
 
-const BASE_MODEL = `class GeneratedBaseModel(BaseModel):
+const OMITTABLE_KEYS_CACHE_ATTR = "_agui_omittable_keys";
+
+const BASE_MODEL = `_OMITTABLE_KEYS_CACHE_ATTR = "${OMITTABLE_KEYS_CACHE_ATTR}"
+
+
+class GeneratedBaseModel(BaseModel):
     """
-    The generated base model. Wire names are camelCase behind snake_case
-    attributes; unknown fields are kept, not dropped, so a boundary that wants
-    to warn about them can still see them and a re-serialising intermediary
-    does not lose them; and serialization omits fields that were never given
-    a value — the default is omission, so no model has to remember it, while
-    an explicit null that IS the data (a JSON Patch add of null) survives.
-    Explicit null is rejected wherever the schema has no null: required
-    fields reject it through their type, and each model guards its optional
-    fields, because on this wire null is not how absence is spelled.
+    The generated base model — the public SDK's ergonomics, not a wire
+    artifact. Wire names are camelCase behind snake_case attributes, and both
+    spellings populate a model, because Python callers construct with the
+    attribute names. Unknown fields are kept, not dropped, so a boundary that
+    wants to warn about them can still see them and a re-serialising
+    intermediary does not lose them. Coercion is pydantic's default: the
+    strict contract is the specification's validation corpus, not this class.
+
+    Serialization omits every optional field that has no value instead of
+    writing it out as JSON \`\`null\`\`. Pydantic's default is to include it, which
+    made this SDK the only AG-UI producer that put \`\`null\`\` on the wire where
+    TypeScript simply left the key out. Omission is applied here, in the base
+    model, so it holds on every serialization path (\`\`model_dump\`\`,
+    \`\`model_dump_json\`\`, nesting inside another model, and any
+    \`\`TypeAdapter\`\`) rather than depending on each call site remembering
+    \`\`exclude_none=True\`\`.
+
+    "Has no value" means a field that is declared optional *and* defaults to
+    \`\`None\`\` — exactly the set the contract lets a producer leave out. Nulls
+    that carry meaning are untouched: a required field (CUSTOM.value, say), a
+    \`\`None\`\` inside a \`\`dict\`\`/\`\`list\`\` value, and any extra field all
+    serialize as \`\`null\`\`.
     """
 
     model_config = ConfigDict(
         extra="allow",
         alias_generator=to_camel,
-        # Wire names only: accepting the snake_case attribute name as input
-        # would invent meaning for a key the wire never defined — an unknown
-        # message_id must land in the extras, not populate messageId.
-        validate_by_alias=True,
-        validate_by_name=False,
-        # No lax coercion: the schema's "false" is not False and its "42" is
-        # not 42. (Strict ints also reject 1.0, where JSON Schema accepts a
-        # zero-fraction float — the rarer, safer direction.)
-        strict=True,
+        populate_by_name=True,
     )
 
-    def model_dump(self, **kwargs: Any) -> Any:
-        kwargs.setdefault("exclude_unset", True)
-        kwargs.setdefault("by_alias", True)
-        return super().model_dump(**kwargs)
+    @classmethod
+    def _omittable_keys(cls) -> FrozenSet[str]:
+        """
+        The serialized keys that may be dropped when their value is \`\`None\`\`.
 
-    def model_dump_json(self, **kwargs: Any) -> str:
-        kwargs.setdefault("exclude_unset", True)
-        kwargs.setdefault("by_alias", True)
-        return super().model_dump_json(**kwargs)`;
+        Both the field name and its alias are included, because the caller
+        chooses between them with \`\`by_alias\`\`. Cached per class in the class's
+        own \`\`__dict__\`\` so a subclass never inherits its parent's answer.
+        """
+        cached = cls.__dict__.get(_OMITTABLE_KEYS_CACHE_ATTR)
+        if cached is None:
+            keys = set()
+            for name, field in cls.model_fields.items():
+                if not field.is_required() and field.default is None:
+                    keys.add(name)
+                    if field.alias is not None:
+                        keys.add(field.alias)
+                    if field.serialization_alias is not None:
+                        keys.add(field.serialization_alias)
+            cached = frozenset(keys)
+            setattr(cls, _OMITTABLE_KEYS_CACHE_ATTR, cached)
+        return cached
+
+    @model_serializer(mode="wrap")
+    def _omit_fields_without_value(self, handler: SerializerFunctionWrapHandler):
+        # Deliberately unannotated return: annotating it (\`\`Dict[str, Any]\`\`, say)
+        # makes Pydantic replace the model's serialization JSON schema with a bare
+        # \`\`{"type": "object"}\`\`. Left off, the handler's own schema is kept.
+        serialized = handler(self)
+        omittable = type(self)._omittable_keys()
+        return {
+            key: value
+            for key, value in serialized.items()
+            if value is not None or key not in omittable
+        }`;
 
 export function emitModels(model: ProtocolModel): string {
   anyAliasNames = new Set<string>();
@@ -346,19 +389,29 @@ export function emitModels(model: ProtocolModel): string {
 
   const imports = [
     "from enum import Enum",
-    "from typing import Annotated, Any, Dict, List, Literal, Optional, Union",
+    "from typing import Annotated, Any, Dict, FrozenSet, List, Literal, Optional, Union",
     "",
-    "from pydantic import BaseModel, ConfigDict, Field, field_validator",
+    "from pydantic import BaseModel, ConfigDict, Field, model_serializer",
     "from pydantic.alias_generators import to_camel",
+    "from pydantic.functional_serializers import SerializerFunctionWrapHandler",
   ].join("\n");
 
-  return [
-    banner(model),
-    imports,
-    BASE_MODEL,
-    ...model.definitions.map(emitDefinition),
-    "",
-  ].join("\n\n\n");
+  // The mixin shapes become real classes (BaseEvent, BaseMessage,
+  // Attributable): the hand-written SDK's public hierarchy, which consumers
+  // isinstance-check against. Inserted immediately before the first
+  // definition that inherits one, after the aliases and enums they depend on.
+  const mixinClasses = model.mixinShapes.map((shape) =>
+    emitObject({ ...shape, composedMixins: [] }),
+  );
+  const emitted = model.definitions.map(emitDefinition);
+  const firstInheritor = model.definitions.findIndex(
+    (definition) =>
+      definition.kind === "object" && definition.composedMixins.length > 0,
+  );
+  const insertAt = firstInheritor === -1 ? emitted.length : firstInheritor;
+  emitted.splice(insertAt, 0, ...mixinClasses);
+
+  return [banner(model), imports, BASE_MODEL, ...emitted, ""].join("\n\n\n");
 }
 
 export function emitPythonVersion(model: ProtocolModel): string {
@@ -379,7 +432,7 @@ export function emitPythonInit(model: ProtocolModel): string {
   return [
     banner(model),
     docstring(
-      "Generated models, alongside the handwritten ones. Non-public: nothing in ag_ui imports or re-exports this package, and its shape follows the schema rather than the handwritten API.",
+      "The generated protocol models: the internal source ag_ui.core re-exports. Regenerate with `pnpm --filter @ag-ui/spec generate`; the shape follows the schema.",
       "",
     ),
     "",

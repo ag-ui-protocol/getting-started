@@ -138,7 +138,10 @@ function parseTypeScript(): Model {
 
 function parsePython(): Model {
   const raw = new Map<string, { parent?: string; fields: Shape }>();
-  for (const file of ["events.py", "types.py"]) {
+  // Since PNI-213 the Python SDK's protocol source IS the generated models,
+  // so this column now verifies the generated output against the schema
+  // rather than revealing hand-written divergence — same as TypeScript.
+  for (const file of ["../_generated/models.py"]) {
     const source = readFileSync(
       join(REPO, "sdks/python/ag_ui/core", file),
       "utf8",
@@ -165,11 +168,19 @@ function parsePython(): Model {
         // rows of noise.
         const isDiscriminator =
           /^\s*Literal\[/.test(annotation) && fallback !== undefined;
+        // `= Field(...)` without a default= is constraint wiring (min_length,
+        // aliases), not a default: the field stays mandatory.
+        const isBareFieldCall =
+          fallback !== undefined &&
+          /^Field\(/.test(fallback.trim()) &&
+          !/\bdefault(_factory)?\s*=/.test(fallback);
         fields.set(snakeToCamel(field), {
           // Pydantic v2 dropped v1's implicit None default, so an annotation with
           // no default is mandatory — including a bare `Any`.
           presence:
-            fallback === undefined || isDiscriminator ? "required" : "optional",
+            fallback === undefined || isDiscriminator || isBareFieldCall
+              ? "required"
+              : "optional",
           nullable:
             annotation.includes("Optional[") || annotation.includes("| None"),
         });

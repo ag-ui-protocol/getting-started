@@ -1,12 +1,13 @@
 """
-The generated models against the fixture corpus, and against the handwritten
-models they sit alongside.
+The generated models — the public SDK's source since PNI-213 — against the
+fixture corpus.
 
-The fixtures are the behavioural contract, so the generated validators must
-agree with them wherever the semantics are meant to coincide. The one
-deliberate divergence is closure: the spec is strict and the generated models
-are tolerant (unknown fields survive for the strip-and-warn middleware), so a
-fixture rejected only by ``unevaluatedProperties`` is expected to parse.
+The fixtures are the behavioural contract, so the models must agree with them
+wherever the semantics are meant to coincide. The models are the TOLERANT
+layer, though (the strict contract is the spec's own validation corpus), so a
+recorded set of invalid fixtures is expected to parse: unknown keys survive
+for the strip-and-warn layer, an explicit null on an optional field means
+absent, and a const field's only legal value fills in when omitted.
 """
 
 import json
@@ -17,7 +18,6 @@ from pydantic import TypeAdapter, ValidationError
 
 from ag_ui._generated import models as generated
 from ag_ui._generated import version as generated_version
-from ag_ui.core import events as handwritten
 
 FIXTURES = (
     Path(__file__).resolve().parents[3] / "spec" / "draft" / "fixtures"
@@ -25,7 +25,10 @@ FIXTURES = (
 
 GENERATED_EVENT = TypeAdapter(generated.Event)
 GENERATED_MESSAGE = TypeAdapter(generated.Message)
-HANDWRITTEN_EVENT = TypeAdapter(handwritten.Event)
+
+# What the wire (encoder) form of a dump looks like: the EventEncoder
+# serializes with by_alias and exclude_none, exactly as it always has.
+WIRE_DUMP = {"by_alias": True, "exclude_none": True}
 
 
 def collect(kind):
@@ -48,14 +51,32 @@ def collect(kind):
     return entries
 
 
-def expectation_keyword(name):
-    """The keyword an invalid fixture's .expect.json pins."""
-    path = FIXTURES / (name.removesuffix(".json") + ".expect.json")
-    return json.loads(path.read_text())["keyword"]
-
-
 def adapter_for(anchor):
     return TypeAdapter(getattr(generated, anchor))
+
+
+# The invalid fixtures the tolerant layer accepts, each one a recorded
+# tolerance rather than an oversight. Three classes:
+#   unknown-keys — closure belongs to the spec; unknown fields survive here.
+#   null-means-absent — idiomatic Python passes None for optionals; the
+#     encoder's exclude_none keeps it off the wire.
+#   const-fills-in — a field with exactly one legal value defaults to it,
+#     so nothing is invented by accepting its omission.
+TOLERATED_INVALID = {
+    "MessagesSnapshotEvent/invalid/message-metadata-null.json": "null-means-absent",
+    "ReasoningMessageStartEvent/invalid/role-missing.json": "const-fills-in",
+    "RunFinishedEvent/invalid/outcome-null.json": "null-means-absent",
+    "RunFinishedEvent/invalid/outcome-success-carrying-interrupts.json": "unknown-keys",
+    "SubagentErrorEvent/invalid/code-null.json": "null-means-absent",
+    "SubagentFinishedEvent/invalid/outcome-null.json": "null-means-absent",
+    "SubagentFinishedEvent/invalid/outcome-success-carrying-interrupt-ids.json": "unknown-keys",
+    "SubagentStartedEvent/invalid/description-null.json": "null-means-absent",
+    "TextMessageContentEvent/invalid/metadata-null.json": "null-means-absent",
+    "TextMessageContentEvent/invalid/subagent-run-id-null.json": "null-means-absent",
+    "TextMessageEndEvent/invalid/unknown-property.json": "unknown-keys",
+    "ToolCallChunkEvent/invalid/parent-message-id-null.json": "null-means-absent",
+    "ToolCallStartEvent/invalid/parent-message-id-null.json": "null-means-absent",
+}
 
 
 class GeneratedModelsAgainstFixtures(unittest.TestCase):
@@ -64,30 +85,32 @@ class GeneratedModelsAgainstFixtures(unittest.TestCase):
             with self.subTest(name):
                 adapter_for(anchor).validate_python(document)
 
-    def test_invalid_fixtures_fail(self):
+    def test_invalid_fixtures_fail_except_the_recorded_tolerances(self):
+        # Exactly the recorded set parses — an entry that stops parsing is a
+        # tolerance silently lost, an unlisted one that parses is a tolerance
+        # silently gained; both fail here.
         for name, anchor, document in collect("invalid"):
-            # Closure is the spec's; the tolerant layer accepts unknown keys.
-            if expectation_keyword(name) == "unevaluatedProperties":
-                continue
             with self.subTest(name):
-                with self.assertRaises(ValidationError):
+                try:
                     adapter_for(anchor).validate_python(document)
+                except ValidationError:
+                    self.assertNotIn(name, TOLERATED_INVALID)
+                else:
+                    self.assertIn(name, TOLERATED_INVALID)
 
     def test_valid_event_fixtures_parse_through_the_union(self):
-        event_anchors = {
-            definition
-            for definition in dir(generated)
-            if definition.endswith("Event")
-        }
+        event_types = {value.value for value in generated.EventType}
         for name, anchor, document in collect("valid"):
-            if anchor not in event_anchors:
+            if not isinstance(document, dict):
+                continue
+            if document.get("type") not in event_types:
                 continue
             with self.subTest(name):
                 GENERATED_EVENT.validate_python(document)
 
     def test_message_fixtures_parse_through_the_union(self):
         for name, anchor, document in collect("valid"):
-            if anchor not in ("UserMessage", "ToolMessage"):
+            if not anchor.endswith("Message"):
                 continue
             with self.subTest(name):
                 GENERATED_MESSAGE.validate_python(document)
@@ -104,151 +127,79 @@ class GeneratedModelsAgainstFixtures(unittest.TestCase):
                 parsed = adapter_for(anchor).validate_python(probed)
                 self.assertEqual(parsed.model_dump()["xPassthroughProbe"], 1)
 
-    def test_serialization_never_emits_null_for_an_absent_field(self):
-        # The reason this target exists: omission is the default. A field that
-        # simply has no value is left out, not spelled null — while a null the
-        # input actually carried (null as data, on an any-JSON field) is kept.
+    def test_wire_dump_never_emits_null_for_an_absent_field(self):
+        # The encoder form (by_alias, exclude_none) is the wire: a field that
+        # has no value is left out, never spelled null. An explicit null that
+        # IS data on a required field is the encoder's job to restore — see
+        # TestWireNullParity in test_encoder.py.
         for name, anchor, document in collect("valid"):
             with self.subTest(name):
                 parsed = adapter_for(anchor).validate_python(document)
-                dumped = json.loads(parsed.model_dump_json())
+                dumped = json.loads(parsed.model_dump_json(**WIRE_DUMP))
                 for key, value in dumped.items():
-                    if value is None:
-                        self.assertTrue(
-                            isinstance(document, dict)
-                            and document.get(key) is None
-                            and key in document,
-                            f"{key} serialized as null without a null input",
-                        )
+                    self.assertIsNotNone(value, f"{key} reached the wire as null")
 
 
-# The handwritten models do not know these events yet: they land with the
-# subagent PR (#2350). Until it merges they exist in the schema and the
-# generated models only, which is expected.
-# Every place the handwritten JSON is allowed to differ from the generated
-# JSON, recorded as (event type, field) -> why. The handwritten models apply
-# schema defaults at parse time (the schema treats a default as
-# documentation, so the generated models do not), which makes the handwritten
-# dump carry a key the input never had.
-RECORDED_DIVERGENCES = {
-    ("TEXT_MESSAGE_START", "role"): "handwritten applies the default 'assistant'",
-    ("ACTIVITY_SNAPSHOT", "replace"): "handwritten applies the default True",
-    ("STATE_DELTA", "delta"): (
-        "handwritten serializes with exclude_none, which drops a JSON Patch "
-        "add/replace/test value of null; the generated models keep it — null "
-        "there is data, not absence"
-    ),
-    ("CUSTOM", "value"): (
-        "handwritten exclude_none drops an explicit null payload; the "
-        "generated models keep it — on an any-JSON field null is data"
-    ),
-    ("TEXT_MESSAGE_END", "rawEvent"): (
-        "handwritten exclude_none drops an explicit null rawEvent; the "
-        "generated models keep it — on an any-JSON field null is data"
-    ),
-}
-
-# Schema-valid documents the handwritten models reject outright, each a
-# required-ness divergence RECONCILIATION.md already records.
-RECORDED_HANDWRITTEN_REJECTIONS = {
-    "RunStartedEvent/valid/with-input.json": (
-        "handwritten RunAgentInput requires tools and context; the schema "
-        "makes them optional"
-    ),
-}
-
-
-class GeneratedAgainstHandwritten(unittest.TestCase):
-    def test_same_json_for_the_same_input(self):
-        event_types = {value.value for value in generated.EventType}
-        for name, anchor, document in collect("valid"):
-            if not isinstance(document, dict):
-                continue
-            if document.get("type") not in event_types:
-                continue
-            with self.subTest(name):
-                try:
-                    parsed = HANDWRITTEN_EVENT.validate_python(document)
-                except ValidationError:
-                    self.assertIn(name, RECORDED_HANDWRITTEN_REJECTIONS)
-                    continue
-                ours = json.loads(
-                    GENERATED_EVENT.validate_python(document).model_dump_json()
-                )
-                theirs = json.loads(
-                    parsed.model_dump_json(by_alias=True, exclude_none=True)
-                )
-                for key in set(ours) | set(theirs):
-                    # Presence matters: an omitted key and an explicit null
-                    # must not compare equal, or data loss hides.
-                    if (
-                        (key in ours) == (key in theirs)
-                        and ours.get(key) == theirs.get(key)
-                    ):
-                        continue
-                    divergence = (document["type"], key)
-                    self.assertIn(
-                        divergence,
-                        RECORDED_DIVERGENCES,
-                        f"{name}: unrecorded difference on {key!r}: "
-                        f"generated {ours.get(key)!r} vs handwritten {theirs.get(key)!r}",
-                    )
-
-
-class WireFidelity(unittest.TestCase):
+class PublicErgonomics(unittest.TestCase):
     """
-    The config choices that keep the generated models honest about the wire,
-    each pinned so a silent regression (strict off, name-based validation on,
-    exclude_none back) fails here rather than nowhere.
+    The config choices that make the generated models the PUBLIC models,
+    pinned so a silent regression to the old wire-fidelity config (strict on,
+    alias-only population, null rejection) fails here rather than in every
+    downstream integration.
     """
 
-    def test_no_lax_coercion(self):
-        # The schema's "false" is not False and its "42" is not 42.
-        for document in (
-            {
-                "type": "ACTIVITY_SNAPSHOT",
-                "messageId": "m",
-                "activityType": "p",
-                "content": {},
-                "replace": "false",
-            },
+    def test_snake_case_and_alias_both_populate(self):
+        by_name = generated.TextMessageStartEvent(message_id="m1")
+        by_alias = generated.TextMessageStartEvent.model_validate(
+            {"type": "TEXT_MESSAGE_START", "messageId": "m1"}
+        )
+        self.assertEqual(by_name.message_id, by_alias.message_id)
+
+    def test_discriminators_default_so_constructors_never_spell_them(self):
+        event = generated.RunFinishedEvent(thread_id="t", run_id="r")
+        self.assertEqual(event.type, generated.EventType.RUN_FINISHED)
+        call = generated.ToolCall(
+            id="c1", function=generated.FunctionCall(name="f", arguments="{}")
+        )
+        self.assertEqual(call.type, "function")
+
+    def test_schema_defaults_stay_documentation(self):
+        # An absent role MEANS assistant and an absent replace MEANS replace —
+        # normative prose, never materialised (as in TypeScript since
+        # PNI-212).
+        self.assertIsNone(generated.TextMessageStartEvent(message_id="m").role)
+        self.assertIsNone(
+            generated.ActivitySnapshotEvent(
+                message_id="m", activity_type="a", content={}
+            ).replace
+        )
+
+    def test_explicit_none_means_absent(self):
+        event = generated.TextMessageStartEvent(message_id="m", name=None)
+        self.assertNotIn("name", json.loads(event.model_dump_json(**WIRE_DUMP)))
+
+    def test_lax_coercion_is_the_public_layer(self):
+        # pydantic's default coercion, as the hand-written models always had:
+        # the STRICT contract is the spec's validation corpus, not this class.
+        event = GENERATED_EVENT.validate_python(
             {
                 "type": "TEXT_MESSAGE_CONTENT",
                 "messageId": "m",
                 "delta": "d",
                 "timestamp": "42",
-            },
-        ):
-            with self.subTest(document["type"]):
-                with self.assertRaises(ValidationError):
-                    GENERATED_EVENT.validate_python(document)
+            }
+        )
+        self.assertEqual(event.timestamp, 42)
 
-    def test_snake_case_is_not_a_wire_name(self):
-        # An unknown message_id must not populate messageId — the tolerant
-        # layer keeps unknown keys, it does not invent meaning for them.
-        with self.assertRaises(ValidationError):
-            GENERATED_EVENT.validate_python(
-                {"type": "TEXT_MESSAGE_END", "message_id": "m"}
-            )
-        event = GENERATED_EVENT.validate_python(
-            {"type": "TEXT_MESSAGE_END", "messageId": "m", "message_id": "other"}
-        )
-        self.assertEqual(event.message_id, "m")
-        self.assertEqual(event.model_dump()["message_id"], "other")
-
-    def test_null_as_data_survives_serialization(self):
-        # exclude_unset, not exclude_none: an explicit null on an any-JSON
-        # field is data and must come out the other side.
-        custom = GENERATED_EVENT.validate_python(
-            {"type": "CUSTOM", "name": "n", "value": None}
-        )
-        self.assertIn("value", json.loads(custom.model_dump_json()))
-        delta = GENERATED_EVENT.validate_python(
-            {"type": "STATE_DELTA", "delta": [{"op": "add", "path": "/x", "value": None}]}
-        )
-        operation = json.loads(delta.model_dump_json())["delta"][0]
-        self.assertIn("value", operation)
-        self.assertIsNone(operation["value"])
+    def test_the_hierarchy_supports_isinstance(self):
+        event = generated.StepStartedEvent(step_name="s")
+        self.assertIsInstance(event, generated.BaseEvent)
+        message = generated.UserMessage(id="1", content="hi")
+        self.assertIsInstance(message, generated.BaseMessage)
+        # Tool/activity/reasoning messages do not compose BaseMessage — the
+        # schema says so, and the hand-written hierarchy said the same.
+        tool = generated.ToolMessage(id="1", content="c", tool_call_id="tc")
+        self.assertNotIsInstance(tool, generated.BaseMessage)
 
 
 class GeneratedPackageShape(unittest.TestCase):

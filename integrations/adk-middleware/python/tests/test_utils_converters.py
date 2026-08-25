@@ -14,7 +14,6 @@ from ag_ui.core import (
     ToolCall,
     FunctionCall,
     TextInputContent,
-    BinaryInputContent,
     ImageInputContent,
     AudioInputContent,
     VideoInputContent,
@@ -22,6 +21,9 @@ from ag_ui.core import (
     InputContentDataSource,
     InputContentUrlSource,
 )
+# The legacy binary part left ag_ui.core in 1.0; the boundary-local type in
+# the converters module is what this middleware still reads.
+from ag_ui_adk.utils.converters import BinaryInputContent
 from google.adk.events import Event as ADKEvent
 from google.genai import types
 
@@ -61,7 +63,10 @@ class TestConvertAGUIMessagesToADK:
         """Test converting a multimodal UserMessage with inline base64 binary data."""
         raw = b"fake-image-bytes"
         b64 = base64.b64encode(raw).decode("ascii")
-        user_msg = UserMessage(
+        # The 1.0 content union no longer admits binary parts, so a message
+        # carrying one cannot be built through validation; model_construct
+        # mirrors how legacy shapes reach this lenient boundary.
+        user_msg = UserMessage.model_construct(
             id="user_mm_1",
             role="user",
             content=[
@@ -80,7 +85,10 @@ class TestConvertAGUIMessagesToADK:
     
     def test_convert_user_message_multimodal_id_only_ignored(self):
         """Test that BinaryInputContent with id only is ignored."""
-        user_msg = UserMessage(
+        # The 1.0 content union no longer admits binary parts, so a message
+        # carrying one cannot be built through validation; model_construct
+        # mirrors how legacy shapes reach this lenient boundary.
+        user_msg = UserMessage.model_construct(
             id="user_id_only",
             role="user",
             content=[
@@ -97,7 +105,10 @@ class TestConvertAGUIMessagesToADK:
     
     def test_convert_user_message_multimodal_broken_base64_ignored(self):
         """Test that broken base64 data is ignored."""
-        user_msg = UserMessage(
+        # The 1.0 content union no longer admits binary parts, so a message
+        # carrying one cannot be built through validation; model_construct
+        # mirrors how legacy shapes reach this lenient boundary.
+        user_msg = UserMessage.model_construct(
             id="user_broken_b64_ignored",
             role="user",
             content=[
@@ -115,7 +126,10 @@ class TestConvertAGUIMessagesToADK:
     def test_convert_user_message_multimodal_file_data_url_ignored(self):
         """Test that BinaryInputContent with URL is currently ignored (data supported only)."""
 
-        user_msg = UserMessage(
+        # The 1.0 content union no longer admits binary parts, so a message
+        # carrying one cannot be built through validation; model_construct
+        # mirrors how legacy shapes reach this lenient boundary.
+        user_msg = UserMessage.model_construct(
             id="user_mm_2",
             role="user",
             content=[

@@ -5,48 +5,83 @@
 
 
 from enum import Enum
-from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, Dict, FrozenSet, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 from pydantic.alias_generators import to_camel
+from pydantic.functional_serializers import SerializerFunctionWrapHandler
+
+
+_OMITTABLE_KEYS_CACHE_ATTR = "_agui_omittable_keys"
 
 
 class GeneratedBaseModel(BaseModel):
     """
-    The generated base model. Wire names are camelCase behind snake_case
-    attributes; unknown fields are kept, not dropped, so a boundary that wants
-    to warn about them can still see them and a re-serialising intermediary
-    does not lose them; and serialization omits fields that were never given
-    a value — the default is omission, so no model has to remember it, while
-    an explicit null that IS the data (a JSON Patch add of null) survives.
-    Explicit null is rejected wherever the schema has no null: required
-    fields reject it through their type, and each model guards its optional
-    fields, because on this wire null is not how absence is spelled.
+    The generated base model — the public SDK's ergonomics, not a wire
+    artifact. Wire names are camelCase behind snake_case attributes, and both
+    spellings populate a model, because Python callers construct with the
+    attribute names. Unknown fields are kept, not dropped, so a boundary that
+    wants to warn about them can still see them and a re-serialising
+    intermediary does not lose them. Coercion is pydantic's default: the
+    strict contract is the specification's validation corpus, not this class.
+
+    Serialization omits every optional field that has no value instead of
+    writing it out as JSON ``null``. Pydantic's default is to include it, which
+    made this SDK the only AG-UI producer that put ``null`` on the wire where
+    TypeScript simply left the key out. Omission is applied here, in the base
+    model, so it holds on every serialization path (``model_dump``,
+    ``model_dump_json``, nesting inside another model, and any
+    ``TypeAdapter``) rather than depending on each call site remembering
+    ``exclude_none=True``.
+
+    "Has no value" means a field that is declared optional *and* defaults to
+    ``None`` — exactly the set the contract lets a producer leave out. Nulls
+    that carry meaning are untouched: a required field (CUSTOM.value, say), a
+    ``None`` inside a ``dict``/``list`` value, and any extra field all
+    serialize as ``null``.
     """
 
     model_config = ConfigDict(
         extra="allow",
         alias_generator=to_camel,
-        # Wire names only: accepting the snake_case attribute name as input
-        # would invent meaning for a key the wire never defined — an unknown
-        # message_id must land in the extras, not populate messageId.
-        validate_by_alias=True,
-        validate_by_name=False,
-        # No lax coercion: the schema's "false" is not False and its "42" is
-        # not 42. (Strict ints also reject 1.0, where JSON Schema accepts a
-        # zero-fraction float — the rarer, safer direction.)
-        strict=True,
+        populate_by_name=True,
     )
 
-    def model_dump(self, **kwargs: Any) -> Any:
-        kwargs.setdefault("exclude_unset", True)
-        kwargs.setdefault("by_alias", True)
-        return super().model_dump(**kwargs)
+    @classmethod
+    def _omittable_keys(cls) -> FrozenSet[str]:
+        """
+        The serialized keys that may be dropped when their value is ``None``.
 
-    def model_dump_json(self, **kwargs: Any) -> str:
-        kwargs.setdefault("exclude_unset", True)
-        kwargs.setdefault("by_alias", True)
-        return super().model_dump_json(**kwargs)
+        Both the field name and its alias are included, because the caller
+        chooses between them with ``by_alias``. Cached per class in the class's
+        own ``__dict__`` so a subclass never inherits its parent's answer.
+        """
+        cached = cls.__dict__.get(_OMITTABLE_KEYS_CACHE_ATTR)
+        if cached is None:
+            keys = set()
+            for name, field in cls.model_fields.items():
+                if not field.is_required() and field.default is None:
+                    keys.add(name)
+                    if field.alias is not None:
+                        keys.add(field.alias)
+                    if field.serialization_alias is not None:
+                        keys.add(field.serialization_alias)
+            cached = frozenset(keys)
+            setattr(cls, _OMITTABLE_KEYS_CACHE_ATTR, cached)
+        return cached
+
+    @model_serializer(mode="wrap")
+    def _omit_fields_without_value(self, handler: SerializerFunctionWrapHandler):
+        # Deliberately unannotated return: annotating it (``Dict[str, Any]``, say)
+        # makes Pydantic replace the model's serialization JSON schema with a bare
+        # ``{"type": "object"}``. Left off, the handler's own schema is kept.
+        serialized = handler(self)
+        omittable = type(self)._omittable_keys()
+        return {
+            key: value
+            for key, value in serialized.items()
+            if value is not None or key not in omittable
+        }
 
 
 class EventType(str, Enum):
@@ -112,14 +147,96 @@ by TOOL_CALL_RESULT rather than streamed as text.
 """
 
 
-class TextMessageStartEvent(GeneratedBaseModel):
+class Attributable(GeneratedBaseModel):
+    """
+    Composed into everything that can belong to a subagent's work: the
+    events that describe content or progress, the message types, and each
+    interrupt. Run-scoped events omit it — RUN_STARTED, RUN_FINISHED and
+    RUN_ERROR describe the run itself and MESSAGES_SNAPSHOT is
+    conversation-wide, so none of them can belong to one subagent. A tool
+    call omits it too and inherits its containing message's attribution.
+    """
+
+    subagent_run_id: Optional[SubagentRunId] = Field(default=None)
+    """
+    The subagent invocation this belongs to. Absent means the parent agent
+    produced it directly.
+    """
+
+
+class BaseEvent(GeneratedBaseModel):
+    """
+    The fields every event carries, whatever its type. Composed into each
+    event definition rather than repeated, so a change here reaches every
+    event at once.
+    """
+
+    type: EventType
+    """
+    Which event this is. Each event definition narrows this to a single
+    value.
+    """
+    timestamp: Optional[int] = Field(default=None, ge=-9007199254740991, le=9007199254740991)
+    """
+    When the event was created. Bounded to the range JSON numbers survive a
+    round trip in, so the value a consumer reads is the value the producer
+    wrote. Deliberately not a float. The unit is not constrained here,
+    because it never has been stated normatively; every SDK that sets it in
+    practice uses milliseconds since the Unix epoch, and a producer choosing
+    another unit will be misread by consumers even though it validates.
+    Nothing in the protocol computes with this value.
+    """
+    raw_event: Optional[Any] = Field(default=None)
+    """
+    The provider-native event this one was translated from, carried verbatim
+    for debugging and for consumers that need detail the protocol does not
+    model. Any JSON value.
+    """
+    metadata: Optional[Metadata] = Field(default=None)
+    """Extra information attached to this event."""
+
+
+class BaseMessage(GeneratedBaseModel):
+    """
+    The fields shared by the developer, system, assistant and user messages.
+    Deliberately excludes content, because a user message's content may be
+    an array while the others are strings, and composition here intersects
+    rather than overrides: a base that constrained content to a string would
+    make an array content invalid. The tool, activity and reasoning messages
+    do not compose this, because they carry no name.
+    """
+
+    subagent_run_id: Optional[SubagentRunId] = Field(default=None)
+    """
+    The subagent invocation this belongs to. Absent means the parent agent
+    produced it directly.
+    """
+    id: str
+    """Identifies the message within the conversation."""
+    role: str
+    """
+    Who the message is from. Each message definition narrows this to a
+    single value.
+    """
+    name: Optional[str] = Field(default=None)
+    """An optional display name for the author."""
+    encrypted_value: Optional[str] = Field(default=None)
+    """
+    A provider's opaque artefact belonging to this message, stored by a
+    consumer and returned on a later turn.
+    """
+    metadata: Optional[Metadata] = Field(default=None)
+    """Extra information attached to this message."""
+
+
+class TextMessageStartEvent(BaseEvent):
     """
     Opens a streamed text message. The content arrives as
     TEXT_MESSAGE_CONTENT events and the message closes with
     TEXT_MESSAGE_END.
     """
 
-    type: Literal[EventType.TEXT_MESSAGE_START]
+    type: Literal[EventType.TEXT_MESSAGE_START] = EventType.TEXT_MESSAGE_START
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -164,18 +281,11 @@ class TextMessageStartEvent(GeneratedBaseModel):
     several participants in one role.
     """
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", "role", "name", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class TextMessageContentEvent(GeneratedBaseModel):
+class TextMessageContentEvent(BaseEvent):
     """Appends a fragment to a streamed text message."""
 
-    type: Literal[EventType.TEXT_MESSAGE_CONTENT]
+    type: Literal[EventType.TEXT_MESSAGE_CONTENT] = EventType.TEXT_MESSAGE_CONTENT
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -212,18 +322,11 @@ class TextMessageContentEvent(GeneratedBaseModel):
     rejecting them would kill runs that are working correctly.
     """
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class TextMessageEndEvent(GeneratedBaseModel):
+class TextMessageEndEvent(BaseEvent):
     """Closes a streamed text message."""
 
-    type: Literal[EventType.TEXT_MESSAGE_END]
+    type: Literal[EventType.TEXT_MESSAGE_END] = EventType.TEXT_MESSAGE_END
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -254,15 +357,8 @@ class TextMessageEndEvent(GeneratedBaseModel):
     message_id: str
     """The message being closed."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class TextMessageChunkEvent(GeneratedBaseModel):
+class TextMessageChunkEvent(BaseEvent):
     """
     A shorthand that stands in for a start, content and end sequence, for
     producers that cannot know in advance where a message begins. Every
@@ -271,7 +367,7 @@ class TextMessageChunkEvent(GeneratedBaseModel):
     question the prose specification answers.
     """
 
-    type: Literal[EventType.TEXT_MESSAGE_CHUNK]
+    type: Literal[EventType.TEXT_MESSAGE_CHUNK] = EventType.TEXT_MESSAGE_CHUNK
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -311,21 +407,14 @@ class TextMessageChunkEvent(GeneratedBaseModel):
     name: Optional[str] = Field(default=None)
     """An optional display name for the author."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", "message_id", "role", "delta", "name", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class ToolCallStartEvent(GeneratedBaseModel):
+class ToolCallStartEvent(BaseEvent):
     """
     Opens a tool call. The arguments arrive as TOOL_CALL_ARGS events and the
     call closes with TOOL_CALL_END.
     """
 
-    type: Literal[EventType.TOOL_CALL_START]
+    type: Literal[EventType.TOOL_CALL_START] = EventType.TOOL_CALL_START
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -366,18 +455,11 @@ class ToolCallStartEvent(GeneratedBaseModel):
     did not attribute it to one.
     """
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", "parent_message_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class ToolCallArgsEvent(GeneratedBaseModel):
+class ToolCallArgsEvent(BaseEvent):
     """Appends a fragment of a tool call's arguments."""
 
-    type: Literal[EventType.TOOL_CALL_ARGS]
+    type: Literal[EventType.TOOL_CALL_ARGS] = EventType.TOOL_CALL_ARGS
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -414,18 +496,11 @@ class ToolCallArgsEvent(GeneratedBaseModel):
     itself JSON. May be the empty string.
     """
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class ToolCallEndEvent(GeneratedBaseModel):
+class ToolCallEndEvent(BaseEvent):
     """Closes a tool call, meaning its arguments are complete."""
 
-    type: Literal[EventType.TOOL_CALL_END]
+    type: Literal[EventType.TOOL_CALL_END] = EventType.TOOL_CALL_END
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -456,22 +531,15 @@ class ToolCallEndEvent(GeneratedBaseModel):
     tool_call_id: str
     """The call being closed."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class ToolCallChunkEvent(GeneratedBaseModel):
+class ToolCallChunkEvent(BaseEvent):
     """
     A shorthand that stands in for a tool call's start, args and end
     sequence. Every field is optional for the same reason as
     TEXT_MESSAGE_CHUNK.
     """
 
-    type: Literal[EventType.TOOL_CALL_CHUNK]
+    type: Literal[EventType.TOOL_CALL_CHUNK] = EventType.TOOL_CALL_CHUNK
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -508,21 +576,14 @@ class ToolCallChunkEvent(GeneratedBaseModel):
     delta: Optional[str] = Field(default=None)
     """A fragment of the arguments. May be the empty string."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", "tool_call_id", "tool_call_name", "parent_message_id", "delta", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class ToolCallResultEvent(GeneratedBaseModel):
+class ToolCallResultEvent(BaseEvent):
     """
     Carries what a tool returned. Mints a tool message rather than appending
     to an existing one, which is why it has its own messageId.
     """
 
-    type: Literal[EventType.TOOL_CALL_RESULT]
+    type: Literal[EventType.TOOL_CALL_RESULT] = EventType.TOOL_CALL_RESULT
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -565,13 +626,6 @@ class ToolCallResultEvent(GeneratedBaseModel):
     so a producer may leave it out.
     """
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", "role", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
-
 
 State = Any
 """
@@ -580,13 +634,13 @@ it, so an object, an array, a string and a number are all valid.
 """
 
 
-class StateSnapshotEvent(GeneratedBaseModel):
+class StateSnapshotEvent(BaseEvent):
     """
     Replaces the agent state wholesale. Sent when a delta cannot express the
     change, or to resynchronise a consumer.
     """
 
-    type: Literal[EventType.STATE_SNAPSHOT]
+    type: Literal[EventType.STATE_SNAPSHOT] = EventType.STATE_SNAPSHOT
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -617,13 +671,6 @@ class StateSnapshotEvent(GeneratedBaseModel):
     snapshot: State
     """The complete new state."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
-
 
 JsonPointer = Annotated[str, Field(pattern=r"^(/([^/~]|~[01])*)*$")]
 """
@@ -637,7 +684,7 @@ a tilde followed by anything other than 0 or 1, is not a JSON Pointer.
 class AddOperation(GeneratedBaseModel):
     """Inserts value at path. RFC 6902 section 4.1."""
 
-    op: Literal["add"]
+    op: Literal["add"] = "add"
     """Discriminator for the add operation."""
     path: JsonPointer
     """Where to insert the value."""
@@ -651,7 +698,7 @@ class AddOperation(GeneratedBaseModel):
 class RemoveOperation(GeneratedBaseModel):
     """Removes the value at path. RFC 6902 section 4.2."""
 
-    op: Literal["remove"]
+    op: Literal["remove"] = "remove"
     """Discriminator for the remove operation."""
     path: JsonPointer
     """What to remove."""
@@ -660,7 +707,7 @@ class RemoveOperation(GeneratedBaseModel):
 class ReplaceOperation(GeneratedBaseModel):
     """Replaces the value at path. RFC 6902 section 4.3."""
 
-    op: Literal["replace"]
+    op: Literal["replace"] = "replace"
     """Discriminator for the replace operation."""
     path: JsonPointer
     """What to replace."""
@@ -671,7 +718,9 @@ class ReplaceOperation(GeneratedBaseModel):
 class MoveOperation(GeneratedBaseModel):
     """Moves the value at from to path. RFC 6902 section 4.4."""
 
-    op: Literal["move"]
+    model_config = ConfigDict(serialize_by_alias=True)
+
+    op: Literal["move"] = "move"
     """Discriminator for the move operation."""
     from_: JsonPointer = Field(alias="from")
     """Where the value is moved from."""
@@ -682,7 +731,9 @@ class MoveOperation(GeneratedBaseModel):
 class CopyOperation(GeneratedBaseModel):
     """Copies the value at from to path. RFC 6902 section 4.5."""
 
-    op: Literal["copy"]
+    model_config = ConfigDict(serialize_by_alias=True)
+
+    op: Literal["copy"] = "copy"
     """Discriminator for the copy operation."""
     from_: JsonPointer = Field(alias="from")
     """Where the value is copied from."""
@@ -693,7 +744,7 @@ class CopyOperation(GeneratedBaseModel):
 class TestOperation(GeneratedBaseModel):
     """Asserts that the value at path equals value. RFC 6902 section 4.6."""
 
-    op: Literal["test"]
+    op: Literal["test"] = "test"
     """Discriminator for the test operation."""
     path: JsonPointer
     """What to compare."""
@@ -729,10 +780,10 @@ says nothing about it.
 """
 
 
-class StateDeltaEvent(GeneratedBaseModel):
+class StateDeltaEvent(BaseEvent):
     """Changes the agent state incrementally."""
 
-    type: Literal[EventType.STATE_DELTA]
+    type: Literal[EventType.STATE_DELTA] = EventType.STATE_DELTA
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -768,15 +819,8 @@ class StateDeltaEvent(GeneratedBaseModel):
     applier.
     """
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class DeveloperMessage(GeneratedBaseModel):
+class DeveloperMessage(BaseMessage):
     """Instructions from the application developer."""
 
     subagent_run_id: Optional[SubagentRunId] = Field(default=None)
@@ -786,7 +830,7 @@ class DeveloperMessage(GeneratedBaseModel):
     """
     id: str
     """Identifies the message within the conversation."""
-    role: Literal["developer"]
+    role: Literal["developer"] = "developer"
     """
     Who the message is from. Each message definition narrows this to a
     single value.
@@ -806,15 +850,8 @@ class DeveloperMessage(GeneratedBaseModel):
     nothing.
     """
 
-    @field_validator("subagent_run_id", "name", "encrypted_value", "metadata", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class SystemMessage(GeneratedBaseModel):
+class SystemMessage(BaseMessage):
     """Instructions from the system."""
 
     subagent_run_id: Optional[SubagentRunId] = Field(default=None)
@@ -824,7 +861,7 @@ class SystemMessage(GeneratedBaseModel):
     """
     id: str
     """Identifies the message within the conversation."""
-    role: Literal["system"]
+    role: Literal["system"] = "system"
     """
     Who the message is from. Each message definition narrows this to a
     single value.
@@ -840,13 +877,6 @@ class SystemMessage(GeneratedBaseModel):
     """Extra information attached to this message."""
     content: str
     """The instructions. Required."""
-
-    @field_validator("subagent_run_id", "name", "encrypted_value", "metadata", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
 
 class FunctionCall(GeneratedBaseModel):
@@ -875,7 +905,7 @@ class ToolCall(GeneratedBaseModel):
     Identifies the call. The answering tool message carries this as its
     toolCallId.
     """
-    type: Literal["function"]
+    type: Literal["function"] = "function"
     """The only kind of call the protocol models."""
     function: FunctionCall
     """What is being called, and with what."""
@@ -888,15 +918,8 @@ class ToolCall(GeneratedBaseModel):
     and merging them would make the result depend on their order.
     """
 
-    @field_validator("encrypted_value", "metadata", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class AssistantMessage(GeneratedBaseModel):
+class AssistantMessage(BaseMessage):
     """
     A message from the agent. Content is optional because a turn may consist
     only of tool calls.
@@ -909,7 +932,7 @@ class AssistantMessage(GeneratedBaseModel):
     """
     id: str
     """Identifies the message within the conversation."""
-    role: Literal["assistant"]
+    role: Literal["assistant"] = "assistant"
     """
     Who the message is from. Each message definition narrows this to a
     single value.
@@ -928,18 +951,11 @@ class AssistantMessage(GeneratedBaseModel):
     tool_calls: Optional[List[ToolCall]] = Field(default=None)
     """The tool calls this turn made."""
 
-    @field_validator("subagent_run_id", "name", "encrypted_value", "metadata", "content", "tool_calls", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
-
 
 class TextInputContent(GeneratedBaseModel):
     """A text part."""
 
-    type: Literal["text"]
+    type: Literal["text"] = "text"
     """Discriminator."""
     text: str
     """The text."""
@@ -948,7 +964,7 @@ class TextInputContent(GeneratedBaseModel):
 class InputContentDataSource(GeneratedBaseModel):
     """Bytes carried inline."""
 
-    type: Literal["data"]
+    type: Literal["data"] = "data"
     """Discriminator."""
     value: str
     """
@@ -966,7 +982,7 @@ class InputContentDataSource(GeneratedBaseModel):
 class InputContentUrlSource(GeneratedBaseModel):
     """Bytes referenced by URL, fetched by whoever needs them."""
 
-    type: Literal["url"]
+    type: Literal["url"] = "url"
     """Discriminator."""
     value: str
     """
@@ -979,13 +995,6 @@ class InputContentUrlSource(GeneratedBaseModel):
     response can say.
     """
 
-    @field_validator("mime_type", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
-
 
 InputContentSource = Annotated[
     Union[InputContentDataSource, InputContentUrlSource],
@@ -997,7 +1006,7 @@ InputContentSource = Annotated[
 class ImageInputContent(GeneratedBaseModel):
     """An image part."""
 
-    type: Literal["image"]
+    type: Literal["image"] = "image"
     """Discriminator."""
     source: InputContentSource
     """Where the image comes from."""
@@ -1012,7 +1021,7 @@ class ImageInputContent(GeneratedBaseModel):
 class AudioInputContent(GeneratedBaseModel):
     """An audio part."""
 
-    type: Literal["audio"]
+    type: Literal["audio"] = "audio"
     """Discriminator."""
     source: InputContentSource
     """Where the audio comes from."""
@@ -1026,7 +1035,7 @@ class AudioInputContent(GeneratedBaseModel):
 class VideoInputContent(GeneratedBaseModel):
     """A video part."""
 
-    type: Literal["video"]
+    type: Literal["video"] = "video"
     """Discriminator."""
     source: InputContentSource
     """Where the video comes from."""
@@ -1040,7 +1049,7 @@ class VideoInputContent(GeneratedBaseModel):
 class DocumentInputContent(GeneratedBaseModel):
     """A document part."""
 
-    type: Literal["document"]
+    type: Literal["document"] = "document"
     """Discriminator."""
     source: InputContentSource
     """Where the document comes from."""
@@ -1058,7 +1067,7 @@ InputContent = Annotated[
 """One part of a multimodal user message. Discriminated by type."""
 
 
-class UserMessage(GeneratedBaseModel):
+class UserMessage(BaseMessage):
     """A message from the person using the application."""
 
     subagent_run_id: Optional[SubagentRunId] = Field(default=None)
@@ -1068,7 +1077,7 @@ class UserMessage(GeneratedBaseModel):
     """
     id: str
     """Identifies the message within the conversation."""
-    role: Literal["user"]
+    role: Literal["user"] = "user"
     """
     Who the message is from. Each message definition narrows this to a
     single value.
@@ -1088,13 +1097,6 @@ class UserMessage(GeneratedBaseModel):
     a multimodal message.
     """
 
-    @field_validator("subagent_run_id", "name", "encrypted_value", "metadata", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
-
 
 class ToolMessage(GeneratedBaseModel):
     """
@@ -1109,7 +1111,7 @@ class ToolMessage(GeneratedBaseModel):
     """
     id: str
     """Identifies the message."""
-    role: Literal["tool"]
+    role: Literal["tool"] = "tool"
     """
     Fixed. Declared here rather than inherited, because this message does
     not compose BaseMessage.
@@ -1128,13 +1130,6 @@ class ToolMessage(GeneratedBaseModel):
     metadata: Optional[Metadata] = Field(default=None)
     """Extra information attached to this message."""
 
-    @field_validator("subagent_run_id", "error", "encrypted_value", "metadata", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
-
 
 class ActivityMessage(GeneratedBaseModel):
     """
@@ -1151,7 +1146,7 @@ class ActivityMessage(GeneratedBaseModel):
     """
     id: str
     """Identifies the message."""
-    role: Literal["activity"]
+    role: Literal["activity"] = "activity"
     """
     Fixed. Declared here rather than inherited, because this message does
     not compose BaseMessage.
@@ -1165,13 +1160,6 @@ class ActivityMessage(GeneratedBaseModel):
     """The activity's payload, open by key."""
     metadata: Optional[Metadata] = Field(default=None)
     """Extra information attached to this message."""
-
-    @field_validator("subagent_run_id", "metadata", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
 
 class ReasoningMessage(GeneratedBaseModel):
@@ -1187,7 +1175,7 @@ class ReasoningMessage(GeneratedBaseModel):
     """
     id: str
     """Identifies the message."""
-    role: Literal["reasoning"]
+    role: Literal["reasoning"] = "reasoning"
     """
     Fixed. Declared here rather than inherited, because this message does
     not compose BaseMessage.
@@ -1199,13 +1187,6 @@ class ReasoningMessage(GeneratedBaseModel):
     metadata: Optional[Metadata] = Field(default=None)
     """Extra information attached to this message."""
 
-    @field_validator("subagent_run_id", "encrypted_value", "metadata", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
-
 
 Message = Annotated[
     Union[DeveloperMessage, SystemMessage, AssistantMessage, UserMessage, ToolMessage, ActivityMessage, ReasoningMessage],
@@ -1214,7 +1195,7 @@ Message = Annotated[
 """Any message in a conversation. Discriminated by role."""
 
 
-class MessagesSnapshotEvent(GeneratedBaseModel):
+class MessagesSnapshotEvent(BaseEvent):
     """
     The complete set of messages the producer owns, in order.
     Conversation-wide rather than a plain overwrite: a consumer may keep
@@ -1225,7 +1206,7 @@ class MessagesSnapshotEvent(GeneratedBaseModel):
     contains, through the messages themselves.
     """
 
-    type: Literal[EventType.MESSAGES_SNAPSHOT]
+    type: Literal[EventType.MESSAGES_SNAPSHOT] = EventType.MESSAGES_SNAPSHOT
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -1251,21 +1232,14 @@ class MessagesSnapshotEvent(GeneratedBaseModel):
     messages: List[Message]
     """The messages the producer is declaring, in order."""
 
-    @field_validator("timestamp", "metadata", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class ActivitySnapshotEvent(GeneratedBaseModel):
+class ActivitySnapshotEvent(BaseEvent):
     """
     Reports structured progress that is not conversation content, such as a
     step a UI renders as its own widget.
     """
 
-    type: Literal[EventType.ACTIVITY_SNAPSHOT]
+    type: Literal[EventType.ACTIVITY_SNAPSHOT] = EventType.ACTIVITY_SNAPSHOT
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -1312,18 +1286,11 @@ class ActivitySnapshotEvent(GeneratedBaseModel):
     in the prose.
     """
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", "replace", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class ActivityDeltaEvent(GeneratedBaseModel):
+class ActivityDeltaEvent(BaseEvent):
     """Changes an activity message's content incrementally."""
 
-    type: Literal[EventType.ACTIVITY_DELTA]
+    type: Literal[EventType.ACTIVITY_DELTA] = EventType.ACTIVITY_DELTA
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -1358,21 +1325,14 @@ class ActivityDeltaEvent(GeneratedBaseModel):
     patch: JsonPatch
     """The change, as an RFC 6902 patch against the activity's content."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class RawEvent(GeneratedBaseModel):
+class RawEvent(BaseEvent):
     """
     Passes a provider-native event through untranslated, for consumers that
     need detail the protocol does not model.
     """
 
-    type: Literal[EventType.RAW]
+    type: Literal[EventType.RAW] = EventType.RAW
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -1408,21 +1368,14 @@ class RawEvent(GeneratedBaseModel):
     source: Optional[str] = Field(default=None)
     """Which provider or framework the event came from."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", "source", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class CustomEvent(GeneratedBaseModel):
+class CustomEvent(BaseEvent):
     """
     The protocol's extension point for an application's own events. Anything
     a consumer does with one is outside the protocol.
     """
 
-    type: Literal[EventType.CUSTOM]
+    type: Literal[EventType.CUSTOM] = EventType.CUSTOM
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -1458,13 +1411,6 @@ class CustomEvent(GeneratedBaseModel):
     value: Any
     """The payload. Any JSON value, and required."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
-
 
 class Tool(GeneratedBaseModel):
     """A tool the agent may call."""
@@ -1486,13 +1432,6 @@ class Tool(GeneratedBaseModel):
     Extra information about the tool, for consumers that attach their own
     rendering or routing information to it.
     """
-
-    @field_validator("metadata", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
 
 class Context(GeneratedBaseModel):
@@ -1521,13 +1460,6 @@ class ResumeEntry(GeneratedBaseModel):
     Envelope information about the response, such as signatures or routing
     keys, as opposed to payload, which is the answer itself.
     """
-
-    @field_validator("metadata", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
 
 class RunAgentInput(GeneratedBaseModel):
@@ -1564,18 +1496,11 @@ class RunAgentInput(GeneratedBaseModel):
     continues from one.
     """
 
-    @field_validator("parent_run_id", "tools", "context", "resume", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class RunStartedEvent(GeneratedBaseModel):
+class RunStartedEvent(BaseEvent):
     """Opens a run. Run-scoped, so it carries no subagent attribution."""
 
-    type: Literal[EventType.RUN_STARTED]
+    type: Literal[EventType.RUN_STARTED] = EventType.RUN_STARTED
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -1613,13 +1538,6 @@ class RunStartedEvent(GeneratedBaseModel):
     did not make the request can still see what the agent was asked.
     """
 
-    @field_validator("timestamp", "metadata", "parent_run_id", "input", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
-
 
 class RunFinishedSuccessOutcome(GeneratedBaseModel):
     """
@@ -1629,7 +1547,7 @@ class RunFinishedSuccessOutcome(GeneratedBaseModel):
     be a contradiction, not an extension.
     """
 
-    type: Literal["success"]
+    type: Literal["success"] = "success"
     """Discriminator."""
 
 
@@ -1680,13 +1598,6 @@ class Interrupt(GeneratedBaseModel):
     metadata: Optional[Metadata] = Field(default=None)
     """Extra information attached to this interrupt."""
 
-    @field_validator("subagent_run_id", "message", "tool_call_id", "response_schema", "expires_at", "metadata", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
-
 
 class RunFinishedInterruptOutcome(GeneratedBaseModel):
     """
@@ -1694,7 +1605,7 @@ class RunFinishedInterruptOutcome(GeneratedBaseModel):
     starting a new run whose resume entries answer these interrupts.
     """
 
-    type: Literal["interrupt"]
+    type: Literal["interrupt"] = "interrupt"
     """Discriminator."""
     interrupts: List[Interrupt] = Field(min_length=1)
     """
@@ -1740,21 +1651,14 @@ class TokenUsage(GeneratedBaseModel):
     cached_input_tokens: Optional[int] = Field(default=None, ge=0, le=9007199254740991)
     """Prompt tokens served from a provider cache."""
 
-    @field_validator("provider", "model", "input_tokens", "output_tokens", "total_tokens", "reasoning_tokens", "cached_input_tokens", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class RunFinishedEvent(GeneratedBaseModel):
+class RunFinishedEvent(BaseEvent):
     """
     Closes a run that did not fail. Run-scoped, so it carries no subagent
     attribution.
     """
 
-    type: Literal[EventType.RUN_FINISHED]
+    type: Literal[EventType.RUN_FINISHED] = EventType.RUN_FINISHED
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -1795,22 +1699,15 @@ class RunFinishedEvent(GeneratedBaseModel):
     totals sums across the entries.
     """
 
-    @field_validator("timestamp", "metadata", "outcome", "usage", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class RunErrorEvent(GeneratedBaseModel):
+class RunErrorEvent(BaseEvent):
     """
     Ends a run that failed. Run-scoped, so it carries no subagent
     attribution; a subagent that fails without ending the run reports
     SUBAGENT_ERROR instead.
     """
 
-    type: Literal[EventType.RUN_ERROR]
+    type: Literal[EventType.RUN_ERROR] = EventType.RUN_ERROR
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -1846,21 +1743,14 @@ class RunErrorEvent(GeneratedBaseModel):
     more model calls before dying.
     """
 
-    @field_validator("timestamp", "metadata", "code", "usage", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class StepStartedEvent(GeneratedBaseModel):
+class StepStartedEvent(BaseEvent):
     """
     Opens a named step within a run, for producers whose frameworks have a
     step concept worth surfacing.
     """
 
-    type: Literal[EventType.STEP_STARTED]
+    type: Literal[EventType.STEP_STARTED] = EventType.STEP_STARTED
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -1894,18 +1784,11 @@ class StepStartedEvent(GeneratedBaseModel):
     same name.
     """
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class StepFinishedEvent(GeneratedBaseModel):
+class StepFinishedEvent(BaseEvent):
     """Closes a named step."""
 
-    type: Literal[EventType.STEP_FINISHED]
+    type: Literal[EventType.STEP_FINISHED] = EventType.STEP_FINISHED
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -1936,21 +1819,14 @@ class StepFinishedEvent(GeneratedBaseModel):
     step_name: str
     """The step being closed."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class ReasoningStartEvent(GeneratedBaseModel):
+class ReasoningStartEvent(BaseEvent):
     """
     Opens a span of reasoning. A span may contain several reasoning
     messages.
     """
 
-    type: Literal[EventType.REASONING_START]
+    type: Literal[EventType.REASONING_START] = EventType.REASONING_START
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -1981,18 +1857,11 @@ class ReasoningStartEvent(GeneratedBaseModel):
     message_id: str
     """The span being opened."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class ReasoningMessageStartEvent(GeneratedBaseModel):
+class ReasoningMessageStartEvent(BaseEvent):
     """Opens a streamed reasoning message."""
 
-    type: Literal[EventType.REASONING_MESSAGE_START]
+    type: Literal[EventType.REASONING_MESSAGE_START] = EventType.REASONING_MESSAGE_START
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -2022,24 +1891,17 @@ class ReasoningMessageStartEvent(GeneratedBaseModel):
     """
     message_id: str
     """The reasoning message this stream builds."""
-    role: Literal["reasoning"]
+    role: Literal["reasoning"] = "reasoning"
     """
     Fixed, and required rather than defaulted. The requirement is inherited
     from the SDKs rather than chosen.
     """
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class ReasoningMessageContentEvent(GeneratedBaseModel):
+class ReasoningMessageContentEvent(BaseEvent):
     """Appends a fragment to a streamed reasoning message."""
 
-    type: Literal[EventType.REASONING_MESSAGE_CONTENT]
+    type: Literal[EventType.REASONING_MESSAGE_CONTENT] = EventType.REASONING_MESSAGE_CONTENT
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -2072,18 +1934,11 @@ class ReasoningMessageContentEvent(GeneratedBaseModel):
     delta: str
     """The fragment to append. May be the empty string."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class ReasoningMessageEndEvent(GeneratedBaseModel):
+class ReasoningMessageEndEvent(BaseEvent):
     """Closes a streamed reasoning message."""
 
-    type: Literal[EventType.REASONING_MESSAGE_END]
+    type: Literal[EventType.REASONING_MESSAGE_END] = EventType.REASONING_MESSAGE_END
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -2114,21 +1969,14 @@ class ReasoningMessageEndEvent(GeneratedBaseModel):
     message_id: str
     """The reasoning message being closed."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class ReasoningMessageChunkEvent(GeneratedBaseModel):
+class ReasoningMessageChunkEvent(BaseEvent):
     """
     A shorthand that stands in for a reasoning message's start, content and
     end sequence.
     """
 
-    type: Literal[EventType.REASONING_MESSAGE_CHUNK]
+    type: Literal[EventType.REASONING_MESSAGE_CHUNK] = EventType.REASONING_MESSAGE_CHUNK
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -2164,18 +2012,11 @@ class ReasoningMessageChunkEvent(GeneratedBaseModel):
     delta: Optional[str] = Field(default=None)
     """The fragment to append. May be the empty string."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", "message_id", "delta", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class ReasoningEndEvent(GeneratedBaseModel):
+class ReasoningEndEvent(BaseEvent):
     """Closes a span of reasoning."""
 
-    type: Literal[EventType.REASONING_END]
+    type: Literal[EventType.REASONING_END] = EventType.REASONING_END
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -2206,26 +2047,19 @@ class ReasoningEndEvent(GeneratedBaseModel):
     message_id: str
     """The span being closed."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
-
 
 ReasoningEncryptedValueSubtype = Literal["tool-call", "message"]
 """Whether a REASONING_ENCRYPTED_VALUE belongs to a message or to a tool call."""
 
 
-class ReasoningEncryptedValueEvent(GeneratedBaseModel):
+class ReasoningEncryptedValueEvent(BaseEvent):
     """
     Carries a provider's opaque, encrypted reasoning artefact, which a
     consumer stores and returns on a later turn without being able to read
     it.
     """
 
-    type: Literal[EventType.REASONING_ENCRYPTED_VALUE]
+    type: Literal[EventType.REASONING_ENCRYPTED_VALUE] = EventType.REASONING_ENCRYPTED_VALUE
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -2266,15 +2100,8 @@ class ReasoningEncryptedValueEvent(GeneratedBaseModel):
     encrypted_value: str
     """The provider's opaque artefact."""
 
-    @field_validator("timestamp", "metadata", "subagent_run_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class SubagentStartedEvent(GeneratedBaseModel):
+class SubagentStartedEvent(BaseEvent):
     """
     Announces that a subagent invocation has begun. Everything the subagent
     produces afterwards is attributed by carrying its subagentRunId, so a
@@ -2284,7 +2111,7 @@ class SubagentStartedEvent(GeneratedBaseModel):
     attribution to an enclosing subagent is parentSubagentRunId.
     """
 
-    type: Literal[EventType.SUBAGENT_STARTED]
+    type: Literal[EventType.SUBAGENT_STARTED] = EventType.SUBAGENT_STARTED
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -2330,18 +2157,11 @@ class SubagentStartedEvent(GeneratedBaseModel):
     parent_message_id: Optional[str] = Field(default=None)
     """The message that held the spawning tool call."""
 
-    @field_validator("timestamp", "metadata", "description", "parent_subagent_run_id", "parent_tool_call_id", "parent_message_id", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
-
 
 class SubagentFinishedSuccessOutcome(GeneratedBaseModel):
     """The subagent completed its work. Equivalent to an absent outcome."""
 
-    type: Literal["success"]
+    type: Literal["success"] = "success"
     """Discriminator."""
 
 
@@ -2352,7 +2172,7 @@ class SubagentFinishedSuspendedOutcome(GeneratedBaseModel):
     the interrupts are answered.
     """
 
-    type: Literal["suspended"]
+    type: Literal["suspended"] = "suspended"
     """Discriminator."""
     interrupt_ids: Optional[List[str]] = Field(default=None)
     """
@@ -2360,13 +2180,6 @@ class SubagentFinishedSuspendedOutcome(GeneratedBaseModel):
     absent: a subagent suspended because a descendant interrupted owns no
     interrupt of its own. Each item: An Interrupt.id.
     """
-
-    @field_validator("interrupt_ids", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
 
 SubagentFinishedOutcome = Annotated[
@@ -2379,13 +2192,13 @@ level down.
 """
 
 
-class SubagentFinishedEvent(GeneratedBaseModel):
+class SubagentFinishedEvent(BaseEvent):
     """
     Ends a subagent invocation's segment of this run, either because the
     work completed or because it is suspended awaiting outside input.
     """
 
-    type: Literal[EventType.SUBAGENT_FINISHED]
+    type: Literal[EventType.SUBAGENT_FINISHED] = EventType.SUBAGENT_FINISHED
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -2422,22 +2235,15 @@ class SubagentFinishedEvent(GeneratedBaseModel):
     value rather than being inferred from a later interrupt.
     """
 
-    @field_validator("timestamp", "metadata", "outcome", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
-
-class SubagentErrorEvent(GeneratedBaseModel):
+class SubagentErrorEvent(BaseEvent):
     """
     Reports that a subagent invocation failed. The run may continue: a
     parent agent is free to handle a failed subagent, which is why this is
     not RUN_ERROR.
     """
 
-    type: Literal[EventType.SUBAGENT_ERROR]
+    type: Literal[EventType.SUBAGENT_ERROR] = EventType.SUBAGENT_ERROR
     """
     Which event this is. Each event definition narrows this to a single
     value.
@@ -2466,13 +2272,6 @@ class SubagentErrorEvent(GeneratedBaseModel):
     """What went wrong, for a person to read."""
     code: Optional[str] = Field(default=None)
     """A machine-readable error code. An open string."""
-
-    @field_validator("timestamp", "metadata", "code", mode="before")
-    @classmethod
-    def _reject_null(cls, value: Any) -> Any:
-        if value is None:
-            raise ValueError("null is not a value here; omit the field instead")
-        return value
 
 
 Event = Annotated[

@@ -20,7 +20,6 @@ from ag_ui.core.types import (
     ImageInputPart,
     AudioInputPart,
     DocumentInputPart,
-    BinaryInputContent,
 )
 
 
@@ -232,20 +231,6 @@ class TestBaseTypes(unittest.TestCase):
         serialized = msg.model_dump(by_alias=True)
         self.assertEqual(serialized["content"][0]["type"], "document")
         self.assertEqual(serialized["content"][0]["metadata"]["provider"], "anthropic")
-
-    def test_binary_input_requires_payload_source(self):
-        """Binary content must specify at least one delivery channel"""
-        with self.assertRaises(ValidationError):
-            BinaryInputContent(mime_type="image/png")
-
-    def test_binary_input_emits_deprecation_warning(self):
-        """BinaryInputContent should emit deprecation warnings"""
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            BinaryInputContent(mime_type="image/png", url="https://example.com/image.png")
-
-            self.assertTrue(any(w.category is DeprecationWarning for w in caught))
-
 
     def test_message_union_deserialization(self):
         """Test that the Message union correctly deserializes to the appropriate type"""

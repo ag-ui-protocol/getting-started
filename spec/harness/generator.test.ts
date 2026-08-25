@@ -110,35 +110,35 @@ describe("the generator", () => {
     expect(model.mixins).toEqual(["Attributable", "BaseEvent", "BaseMessage"]);
   });
 
-  it("keeps the generated Python directory out of the package's reachable surface", () => {
-    // Python has not moved onto the generated models yet: the ag_ui package
-    // modules are the public entries, and nothing outside the generated
-    // directory referencing them means nothing exports them. Not by import
-    // syntax — by path: every route to a module has to name the module's
-    // path, so the scan flags any reference instead of enumerating syntaxes.
-    // (TypeScript inverted with PNI-212: its generated directory IS the
-    // internal source, gated by the surface test below instead.)
-    const root = join(PY_OUTPUT_DIR, "..");
-    const pattern = /_generated\b/;
-    const offenders: string[] = [];
-    const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const path = join(dir, entry.name);
-        if (entry.isDirectory()) {
-          if (path !== PY_OUTPUT_DIR && entry.name !== "__pycache__") {
-            walk(path);
-          }
-          continue;
-        }
-        if (!/\.py$/.test(entry.name)) continue;
-        if (pattern.test(readFileSync(path, "utf8"))) {
-          offenders.push(relative(root, path));
-        }
-      }
-    };
-    expect(existsSync(root)).toBe(true);
-    walk(root);
-    expect(offenders).toEqual([]);
+  it("keeps the generated Python as the only protocol source in ag_ui", () => {
+    // The inverse gate since PNI-213 (mirroring the TypeScript one below):
+    // the generated models are the internal source, the package must consume
+    // them, and hand-written protocol declarations must not return. Scanned
+    // by shape: a pydantic model declaring protocol semantics outside the
+    // generated directory would subclass BaseModel or declare wire fields.
+    const packageDir = join(PY_OUTPUT_DIR, "..", "core");
+    const events = readFileSync(join(packageDir, "events.py"), "utf8");
+    const types = readFileSync(join(packageDir, "types.py"), "utf8");
+    expect(events).toContain("from ag_ui._generated.models import");
+    expect(types).toContain("from ag_ui._generated.models import");
+    // No hand-written module may re-declare the protocol surface: an
+    // EventType enum or a pydantic event class outside generated/ is a
+    // duplicate. (capabilities.py is not protocol and may keep its models.)
+    for (const [name, content] of [
+      ["events.py", events],
+      ["types.py", types],
+    ] as const) {
+      expect(
+        /class\s+\w+\((BaseModel|ConfiguredBaseModel|MetadataMixin|BaseEvent|BaseMessage)\)/.test(
+          content,
+        ),
+        `${name} re-declares protocol models that belong to the generated source`,
+      ).toBe(false);
+      expect(
+        /class\s+EventType\b/.test(content),
+        `${name} re-declares EventType`,
+      ).toBe(false);
+    }
   });
 
   it("keeps the generated TypeScript as the only protocol source in core", () => {
