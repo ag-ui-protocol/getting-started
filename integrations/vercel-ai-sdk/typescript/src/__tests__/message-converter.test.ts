@@ -28,7 +28,7 @@ describe("convertMessagesToVercelAISDKMessages", () => {
     expect(result).toEqual([{ role: "user", content: "hi there" }]);
   });
 
-  it("joins user message of text-only parts into a single string", () => {
+  it("keeps text-only user parts as separate text parts without inserting separators", () => {
     const result = convertMessagesToVercelAISDKMessages([
       {
         id: "u1",
@@ -39,7 +39,22 @@ describe("convertMessagesToVercelAISDKMessages", () => {
         ],
       },
     ]);
-    expect(result).toEqual([{ role: "user", content: "first\nsecond" }]);
+    expect(result).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "first" },
+          { type: "text", text: "second" },
+        ],
+      },
+    ]);
+  });
+
+  it("converts a single text part to a one-element parts array, never a bare string", () => {
+    const result = convertMessagesToVercelAISDKMessages([
+      { id: "u1", role: "user", content: [{ type: "text", text: "hi" }] },
+    ]);
+    expect(result).toEqual([{ role: "user", content: [{ type: "text", text: "hi" }] }]);
   });
 
   it("converts user image part with data source to a data URL", () => {
@@ -292,7 +307,15 @@ describe("convertMessagesToVercelAISDKMessages", () => {
         ],
       },
     ]);
-    expect(result).toEqual([{ role: "user", content: "  indented code\n\n   " }]);
+    expect(result).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "  indented code\n" },
+          { type: "text", text: "   " },
+        ],
+      },
+    ]);
   });
 
   it("marks a failed tool result as error-text output", () => {

@@ -1,6 +1,5 @@
 import type {
   Message,
-  InputContent,
   InputContentDataSource,
   InputContentUrlSource,
 } from "@ag-ui/core";
@@ -34,18 +33,11 @@ function toUserContent(content: Message["content"]): string | UserPart[] {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
 
-  const hasNonText = content.some((part) => part.type !== "text");
-
-  if (!hasNonText) {
-    type TextInput = Extract<InputContent, { type: "text" }>;
-    // Text is user-provided; pass it through verbatim (no trimming or
-    // dropping of whitespace-only parts), matching the mixed-content branch.
-    return content
-      .filter((part): part is TextInput => part.type === "text")
-      .map((part) => part.text)
-      .join("\n");
-  }
-
+  // Array content always converts to a parts array, even when every part is
+  // text and even for a single part: joining text parts would alter the user's
+  // input by introducing separators and losing part boundaries. Text is
+  // user-provided and passes through verbatim, with no trimming and no
+  // dropping of whitespace-only parts.
   const parts: UserPart[] = [];
   for (const part of content) {
     switch (part.type) {
