@@ -45,8 +45,11 @@ describe("StreamHandler — error & cancel handling", () => {
       { type: "error", error: new Error("simulated provider error") },
       {
         type: "finish",
-        finishReason: "error",
-        usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+        finishReason: { unified: "error", raw: "error" },
+        usage: {
+          inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 2, text: 2, reasoning: undefined },
+        },
       },
     ]);
     const events = await collectEvents(streamText({ model, prompt: "hi" }).fullStream);
