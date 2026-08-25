@@ -46,3 +46,10 @@ node_modules
 *.a
 *.lib
 *.wasm
+
+# VS Code
+*.lscache
+
+# actionlint linter binary (dev tool, do not commit)
+/actionlint
+.idea/

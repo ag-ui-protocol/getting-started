@@ -2,6 +2,7 @@
 
 Covers basic merging, tool deduplication, and the orphaned-tools fix for #1412.
 """
+import unittest
 import pytest
 from unittest.mock import MagicMock
 
@@ -53,7 +54,7 @@ def tool_name(t):
     return t.get("name") if isinstance(t, dict) else getattr(t, "name", None)
 
 
-class TestLanggraphDefaultMergeState:
+class TestLanggraphDefaultMergeState(unittest.TestCase):
 
     def test_basic_merge_messages_appended(self):
         agent = make_agent()

@@ -1,0 +1,351 @@
+﻿[
+  {
+    "type": "RUN_STARTED",
+    "threadId": "thread_Id_2",
+    "runId": "run_Id_2"
+  },
+  {
+    "type": "TEXT_MESSAGE_START",
+    "messageId": "chatcmpl-Id_2",
+    "role": "assistant",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ""
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": "I\u0027m",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "I\u0027m"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " doing",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " doing"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " well",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " well"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": ",",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ","
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " thanks",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " thanks"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " \u2014",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u2014"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " ready",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ready"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " to",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " to"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " help",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " help"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": ".",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "."
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " What",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " What"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " can",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " can"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " I",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " I"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " do",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " do"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " for",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " for"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " you",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " you"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " today",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " today"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": "?",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "?"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_END",
+    "messageId": "chatcmpl-Id_2"
+  },
+  {
+    "type": "RUN_FINISHED",
+    "threadId": "thread_Id_2",
+    "runId": "run_Id_2",
+    "outcome": {
+      "type": "success"
+    },
+    "usage": [
+      {
+        "inputTokens": 30,
+        "outputTokens": 28,
+        "totalTokens": 58,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0
+      }
+    ]
+  }
+]

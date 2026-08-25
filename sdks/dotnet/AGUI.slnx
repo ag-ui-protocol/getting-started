@@ -1,0 +1,59 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AGUI.Abstractions/AGUI.Abstractions.csproj" />
+    <Project Path="src/AGUI.A2UI/AGUI.A2UI.csproj" />
+    <Project Path="src/AGUI.A2UI.Toolkit/AGUI.A2UI.Toolkit.csproj" />
+    <Project Path="src/AGUI.Client/AGUI.Client.csproj" />
+    <Project Path="src/AGUI.Formatting/AGUI.Formatting.csproj" />
+    <Project Path="src/AGUI.Server/AGUI.Server.csproj" />
+    <Project Path="src/AGUI.Protobuf/AGUI.Protobuf.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AGUI.Abstractions.UnitTests/AGUI.Abstractions.UnitTests.csproj" />
+    <Project Path="tests/AGUI.A2UI.UnitTests/AGUI.A2UI.UnitTests.csproj" />
+    <Project Path="tests/AGUI.Client.UnitTests/AGUI.Client.UnitTests.csproj" />
+    <Project Path="tests/AGUI.Formatting.UnitTests/AGUI.Formatting.UnitTests.csproj" />
+    <Project Path="tests/AGUI.Server.UnitTests/AGUI.Server.UnitTests.csproj" />
+    <Project Path="tests/AGUI.Protobuf.UnitTests/AGUI.Protobuf.UnitTests.csproj" />
+    <Project Path="tests/AGUI.Hosting.AspNetCore.IntegrationTests/AGUI.Hosting.AspNetCore.IntegrationTests.csproj" />
+    <Project Path="tests/CrossLanguage.TestServer/CrossLanguage.TestServer.csproj" />
+    <Project Path="tests/AGUI.CrossLanguage.IntegrationTests/AGUI.CrossLanguage.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/samples/AGUIClientServer/">
+    <Project Path="samples/AGUIClientServer/AGUIDojoServer/AGUIDojoServer.csproj" />
+    <Project Path="samples/AGUIClientServer/AGUIDojoServerConsoleClient/AGUIDojoServerConsoleClient.csproj" />
+  </Folder>
+  <Folder Name="/samples/GettingStarted/">
+    <Project Path="samples/GettingStarted/Step01_GettingStarted/Step01_GettingStarted.Server/Step01_GettingStarted.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step01_GettingStarted/Step01_GettingStarted.Client/Step01_GettingStarted.Client.csproj" />
+    <Project Path="samples/GettingStarted/Step02_BackendTools/Step02_BackendTools.Server/Step02_BackendTools.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step02_BackendTools/Step02_BackendTools.Client/Step02_BackendTools.Client.csproj" />
+    <Project Path="samples/GettingStarted/Step03_FrontendTools/Step03_FrontendTools.Server/Step03_FrontendTools.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step03_FrontendTools/Step03_FrontendTools.Client/Step03_FrontendTools.Client.csproj" />
+    <Project Path="samples/GettingStarted/Step04_HumanInLoop/Step04_HumanInLoop.Server/Step04_HumanInLoop.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step04_HumanInLoop/Step04_HumanInLoop.Client/Step04_HumanInLoop.Client.csproj" />
+    <Project Path="samples/GettingStarted/Step05_StateManagement/Step05_StateManagement.Server/Step05_StateManagement.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step05_StateManagement/Step05_StateManagement.Client/Step05_StateManagement.Client.csproj" />
+    <Project Path="samples/GettingStarted/Step06_RawEvents/Step06_RawEvents.Server/Step06_RawEvents.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step06_RawEvents/Step06_RawEvents.Client/Step06_RawEvents.Client.csproj" />
+    <Project Path="samples/GettingStarted/Step07_ThinkingEvents/Step07_ThinkingEvents.Server/Step07_ThinkingEvents.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step07_ThinkingEvents/Step07_ThinkingEvents.Client/Step07_ThinkingEvents.Client.csproj" />
+    <Project Path="samples/GettingStarted/Step08_MultimodalMessages/Step08_MultimodalMessages.Server/Step08_MultimodalMessages.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step08_MultimodalMessages/Step08_MultimodalMessages.Client/Step08_MultimodalMessages.Client.csproj" />
+    <Project Path="samples/GettingStarted/Step09_InterruptsApproval/Step09_InterruptsApproval.Server/Step09_InterruptsApproval.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step09_InterruptsApproval/Step09_InterruptsApproval.Client/Step09_InterruptsApproval.Client.csproj" />
+    <Project Path="samples/GettingStarted/Step10_InterruptsUserInput/Step10_InterruptsUserInput.Server/Step10_InterruptsUserInput.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step10_InterruptsUserInput/Step10_InterruptsUserInput.Client/Step10_InterruptsUserInput.Client.csproj" />
+    <Project Path="samples/GettingStarted/Step11_Serialization/Step11_Serialization.Server/Step11_Serialization.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step11_Serialization/Step11_Serialization.Client/Step11_Serialization.Client.csproj" />
+    <Project Path="samples/GettingStarted/Step12_ParallelToolCalls/Step12_ParallelToolCalls.Server/Step12_ParallelToolCalls.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step12_ParallelToolCalls/Step12_ParallelToolCalls.Client/Step12_ParallelToolCalls.Client.csproj" />
+    <Project Path="samples/GettingStarted/Step13_Protobuf/Step13_Protobuf.Server/Step13_Protobuf.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step13_Protobuf/Step13_Protobuf.Client/Step13_Protobuf.Client.csproj" />
+    <Project Path="samples/GettingStarted/Step14_Telemetry/Step14_Telemetry.Server/Step14_Telemetry.Server.csproj" />
+    <Project Path="samples/GettingStarted/Step14_Telemetry/Step14_Telemetry.Client/Step14_Telemetry.Client.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/AGUI.Samples.Shared/AGUI.Samples.Shared.csproj" />
+  </Folder>
+</Solution>

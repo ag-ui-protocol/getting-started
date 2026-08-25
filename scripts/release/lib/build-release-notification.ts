@@ -46,7 +46,7 @@
  *   detected packages or was intended. Same safe over-report direction; true
  *   per-lane attribution needs the build job to emit per-lane results.
  *
- * Failure model — TWO INDEPENDENT LANES (npm + PyPI):
+ * Failure model — FOUR INDEPENDENT LANES (npm + PyPI + NuGet + Maven Central):
  *
  *   - dry-run → no post (entirely suppressed).
  *
@@ -172,6 +172,29 @@ export interface BuildReleaseNotificationInput {
   pyBuildResult: JobResult;
   /** needs.build.outputs.py_packages — the published PyPI package set. */
   pyPackages: PublishedPackage[];
+  /**
+   * NUGET_INTENDED — "true" when the notify job determined a NuGet release was
+   * intended. Same role as npmIntended/pyIntended: build-failure fallback only.
+   */
+  nugetIntended: string;
+  /** needs.publish-dotnet.result mapped to the NuGet lane. */
+  nugetResult: JobResult;
+  /** needs.build.result mapped to the NuGet lane. */
+  nugetBuildResult: JobResult;
+  /** needs.build.outputs.dotnet_packages — the published NuGet package set. */
+  nugetPackages: PublishedPackage[];
+  /**
+   * MAVEN_INTENDED — "true" when the notify job determined a Maven Central
+   * release was intended. Same role as the other intent gates: build-failure
+   * fallback only.
+   */
+  mavenIntended: string;
+  /** needs.publish-maven.result mapped to the Maven Central lane. */
+  mavenResult: JobResult;
+  /** needs.build.result mapped to the Maven Central lane. */
+  mavenBuildResult: JobResult;
+  /** needs.build.outputs.java_packages — the published Maven package set. */
+  mavenPackages: PublishedPackage[];
   /** needs.build.outputs.scope. Reserved for future use; not rendered today. */
   scope: string;
   /** inputs.dry_run — true on a dry-run dispatch. */
@@ -182,6 +205,10 @@ export interface BuildReleaseNotificationInput {
   npmOrgUrl: string;
   /** Base URL for PyPI project pages (https://pypi.org/project). */
   pyBaseUrl: string;
+  /** Base URL for NuGet package pages (https://www.nuget.org/packages). */
+  nugetBaseUrl: string;
+  /** Base URL for Maven Central artifact pages (https://central.sonatype.com/artifact). */
+  mavenBaseUrl: string;
 }
 
 export interface BuildReleaseNotificationResult {
@@ -259,6 +286,8 @@ export function buildReleaseNotification(
   // gate is the detected package set (tsPackages / pyPackages).
   const npmIntended = input.npmIntended === "true";
   const pyIntended = input.pyIntended === "true";
+  const nugetIntended = input.nugetIntended === "true";
+  const mavenIntended = input.mavenIntended === "true";
 
   const lines: string[] = [];
 
@@ -396,6 +425,58 @@ export function buildReleaseNotification(
     // the npm lane (and vice-versa) when the other lane also detected packages
     // or was intended.
     lines.push(`🔴 *ag-ui PyPI release failed* · <${input.runUrl}|View run>`);
+  }
+
+  // --- NuGet lane (stable only — canary already short-circuited above) ---
+  if (
+    input.mode === "stable" &&
+    input.nugetResult === "success" &&
+    input.nugetPackages.length > 0
+  ) {
+    const count = input.nugetPackages.length;
+    const names = renderNameList(input.nugetPackages.map((p) => p.name));
+    const flagship = input.nugetPackages[0].name;
+    lines.push(
+      `📦 *ag-ui release* · ${pluralize(count, "NuGet package")} published ` +
+        `(${names}) · ` +
+        `<${input.nugetBaseUrl}/${flagship}/|NuGet>`,
+    );
+  } else if (
+    (input.nugetResult === "failure" || input.nugetBuildResult === "failure") &&
+    (input.nugetPackages.length > 0 ||
+      (input.nugetBuildResult === "failure" && nugetIntended))
+  ) {
+    lines.push(`🔴 *ag-ui NuGet release failed* · <${input.runUrl}|View run>`);
+  }
+
+  // --- Maven Central lane ------------------------------------------------
+  // The Maven lane is stable-only by construction (Maven Central has no canary
+  // channel and the build job rejects a prerelease dispatch that resolves to a
+  // Maven scope), so the mode === "prerelease" early-return above never has a
+  // real Maven publish to suppress. The mode === "stable" gate is still
+  // required, symmetric with the other lanes, so a degraded empty MODE cannot
+  // claim a success.
+  if (
+    input.mode === "stable" &&
+    input.mavenResult === "success" &&
+    input.mavenPackages.length > 0
+  ) {
+    const count = input.mavenPackages.length;
+    const names = renderNameList(input.mavenPackages.map((p) => p.name));
+    const flagship = input.mavenPackages[0].name;
+    lines.push(
+      `☕ *ag-ui release* · ${pluralize(count, "Maven package")} published ` +
+        `(${names}) · ` +
+        `<${input.mavenBaseUrl}/com.ag-ui.community/${flagship}|Maven Central>`,
+    );
+  } else if (
+    (input.mavenResult === "failure" || input.mavenBuildResult === "failure") &&
+    (input.mavenPackages.length > 0 ||
+      (input.mavenBuildResult === "failure" && mavenIntended))
+  ) {
+    lines.push(
+      `🔴 *ag-ui Maven Central release failed* · <${input.runUrl}|View run>`,
+    );
   }
 
   if (lines.length === 0) {

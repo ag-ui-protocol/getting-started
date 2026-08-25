@@ -15,7 +15,11 @@ import {
 } from "@ag-ui/aws-strands/server";
 import { createModel } from "./model-factory";
 import { createA2UIDynamicSchemaAgent } from "./api/a2ui-dynamic-schema";
+import { createA2UIFixedSchemaAgent } from "./api/a2ui-fixed-schema";
 import { createA2UIRecoveryAgent } from "./api/a2ui-recovery";
+import { createInterruptAgent } from "./api/interrupt";
+import { createMultiAgentGraphAgent } from "./api/multi-agent";
+import { createPredictiveStateUpdatesAgent } from "./api/predictive-state-updates";
 
 function mountAgent(
   app: express.Express,
@@ -318,6 +322,21 @@ async function main(): Promise<void> {
     }),
   );
 
+  /* ---------------- interrupt ---------------- */
+  // `schedule_meeting` pauses itself mid-body by calling the tool context's
+  // `interrupt()`, and resumes with the time the user picked. See ./api/interrupt.
+  mountAgent(app, "/interrupt", await createInterruptAgent());
+
+  /* ---------------- predictive-state-updates ---------------- */
+  // `write_document` is a FRONTEND tool; the predictState mapping tells the UI
+  // to paint `state.document` from its streaming args. See
+  // ./api/predictive-state-updates.
+  mountAgent(
+    app,
+    "/predictive-state-updates",
+    await createPredictiveStateUpdatesAgent(),
+  );
+
   /* ---------------- tool-based-generative-ui ---------------- */
   const haikuAgent = new Agent({
     model: await createModel(),
@@ -342,6 +361,12 @@ Do not respond with plain text — always use the tool.`,
     }),
   );
 
+  /* ---------------- multi-agent ---------------- */
+  // A Graph orchestrator rather than a single Agent: the adapter detects the
+  // missing `.model` accessor and drives `.stream()` instead of cloning a
+  // per-thread agent.
+  mountAgent(app, "/multi-agent", await createMultiAgentGraphAgent());
+
   /* ---------------- a2ui (auto-injected tool) ---------------- */
   // Both demos are PLAIN Strands agents with NO a2ui tool wiring (each in its
   // own file under ./agents). The CopilotKit runtime sends `injectA2UITool`;
@@ -349,6 +374,13 @@ Do not respond with plain text — always use the tool.`,
   // `generate_a2ui` (which runs the toolkit's validate→retry recovery loop).
   mountAgent(app, "/a2ui-dynamic-schema", await createA2UIDynamicSchemaAgent());
   mountAgent(app, "/a2ui-recovery", await createA2UIRecoveryAgent());
+
+  /* ---------------- a2ui (fixed schema, direct backend tools) ---------------- */
+  // Unlike the auto-injected demos above, the fixed-schema agent wires its OWN
+  // backend tools (search_flights / search_hotels) that return a fixed-layout
+  // a2ui_operations envelope. The runtime's A2UIMiddleware paints it directly;
+  // no generate_a2ui injection (see route.ts + STRANDS_A2UI_INJECT_AGENTS).
+  mountAgent(app, "/a2ui-fixed-schema", await createA2UIFixedSchemaAgent());
 
   const port = Number(process.env.PORT ?? 8022);
   const host = process.env.HOST ?? "0.0.0.0";

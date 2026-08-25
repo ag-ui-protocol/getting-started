@@ -32,7 +32,8 @@
                   },
                   "quickstart/clients"
                 ]
-              }
+              },
+              "talk-to-us"
             ]
           },
           {
@@ -43,11 +44,13 @@
               "concepts/agents",
               "concepts/middleware",
               "concepts/messages",
+              "concepts/metadata",
               "concepts/reasoning",
               "concepts/state",
               "concepts/interrupts",
               "concepts/serialization",
               "concepts/tools",
+              "concepts/subagents",
               "concepts/capabilities",
               "concepts/generative-ui-specs"
             ]
@@ -66,7 +69,7 @@
               "development/updates",
               "development/roadmap",
               "development/contributing",
-              "talk-to-us"
+              "support"
             ]
           }
         ]
@@ -119,6 +122,36 @@
                 "pages": ["sdk/python/encoder/overview"]
               }
             ]
+          },
+          {
+            "group": ".NET",
+            "pages": [
+              {
+                "group": "AGUI.Abstractions",
+                "pages": [
+                  "sdk/dotnet/abstractions/overview",
+                  "sdk/dotnet/abstractions/types",
+                  "sdk/dotnet/abstractions/events",
+                  "sdk/dotnet/abstractions/multimodal-inputs"
+                ]
+              },
+              {
+                "group": "AGUI.Client",
+                "pages": [
+                  "sdk/dotnet/client/overview",
+                  "sdk/dotnet/client/chat-client",
+                  "sdk/dotnet/client/transport"
+                ]
+              },
+              {
+                "group": "AGUI.Server",
+                "pages": [
+                  "sdk/dotnet/hosting/overview",
+                  "sdk/dotnet/hosting/endpoints",
+                  "sdk/dotnet/hosting/extensibility"
+                ]
+              }
+            ]
           }
         ]
       }
@@ -134,6 +167,11 @@
           "anchor": "Python SDK",
           "href": "https://docs.ag-ui.com/sdk/python/core/overview",
           "icon": "python"
+        },
+        {
+          "anchor": ".NET SDK",
+          "href": "https://docs.ag-ui.com/sdk/dotnet/abstractions/overview",
+          "icon": "/logo/dotnet.svg"
         }
       ]
     }

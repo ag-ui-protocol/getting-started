@@ -6,6 +6,8 @@ import type { BuildReleaseNotificationInput } from "./lib/build-release-notifica
 const RUN_URL = "https://github.com/ag-ui-protocol/ag-ui/actions/runs/123";
 const NPM_ORG_URL = "https://www.npmjs.com/org/ag-ui";
 const PY_BASE_URL = "https://pypi.org/project";
+const NUGET_BASE_URL = "https://www.nuget.org/packages";
+const MAVEN_BASE_URL = "https://central.sonatype.com/artifact";
 
 // A neutral baseline where nothing has acted. Each test overrides only the
 // fields relevant to its truth-table row.
@@ -23,11 +25,21 @@ function base(
     pyResult: "skipped",
     pyBuildResult: "skipped",
     pyPackages: [],
+    nugetIntended: "false",
+    nugetResult: "skipped",
+    nugetBuildResult: "skipped",
+    nugetPackages: [],
+    mavenIntended: "false",
+    mavenResult: "skipped",
+    mavenBuildResult: "skipped",
+    mavenPackages: [],
     scope: "",
     dryRun: false,
     runUrl: RUN_URL,
     npmOrgUrl: NPM_ORG_URL,
     pyBaseUrl: PY_BASE_URL,
+    nugetBaseUrl: NUGET_BASE_URL,
+    mavenBaseUrl: MAVEN_BASE_URL,
     ...overrides,
   };
 }
@@ -38,6 +50,12 @@ function ts(...names: string[]): { name: string; version: string }[] {
 }
 function py(...names: string[]): { name: string; version: string }[] {
   return names.map((name) => ({ name, version: "0.0.11" }));
+}
+function nuget(...names: string[]): { name: string; version: string }[] {
+  return names.map((name) => ({ name, version: "0.0.1" }));
+}
+function maven(...names: string[]): { name: string; version: string }[] {
+  return names.map((name) => ({ name, version: "0.1.0" }));
 }
 
 // ---- dry-run ----------------------------------------------------------------
@@ -117,6 +135,20 @@ test("suppresses prerelease (canary) PyPI failure — no post (both lanes suppre
       pyIntended: "true",
       pyResult: "failure",
       pyBuildResult: "success",
+    }),
+  );
+  assert.equal(r.shouldPost, false);
+  assert.equal(r.message, "");
+});
+
+test("suppresses prerelease (canary) NuGet failure — no post", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "prerelease",
+      nugetIntended: "true",
+      nugetResult: "failure",
+      nugetBuildResult: "success",
+      nugetPackages: nuget("AGUI.Client"),
     }),
   );
   assert.equal(r.shouldPost, false);
@@ -627,6 +659,75 @@ test("build-python failure WITHOUT intent → NO post (routine PR flake)", () =>
   assert.equal(r.message, "");
 });
 
+// ---- NuGet lane: stable success/failure -------------------------------------
+test("NuGet success → count + names + link to first package", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "stable",
+      nugetResult: "success",
+      nugetBuildResult: "success",
+      nugetPackages: nuget("AGUI.Client", "AGUI.Server"),
+    }),
+  );
+  assert.equal(r.shouldPost, true);
+  assert.equal(
+    r.message,
+    "📦 *ag-ui release* · 2 NuGet packages published (AGUI.Client, AGUI.Server) · " +
+      `<${NUGET_BASE_URL}/AGUI.Client/|NuGet>`,
+  );
+});
+
+test("NuGet success links to first package for a single-package publish", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "stable",
+      nugetResult: "success",
+      nugetBuildResult: "success",
+      nugetPackages: nuget("AGUI.Client"),
+    }),
+  );
+  assert.equal(r.shouldPost, true);
+  assert.match(r.message, /1 NuGet package published/);
+  assert.match(
+    r.message,
+    /<https:\/\/www\.nuget\.org\/packages\/AGUI\.Client\/\|NuGet>/,
+  );
+});
+
+test("NuGet publish failure with detected packages → lane-level red alert", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "stable",
+      nugetIntended: "false",
+      nugetResult: "failure",
+      nugetBuildResult: "success",
+      nugetPackages: nuget("AGUI.Client"),
+    }),
+  );
+  assert.equal(r.shouldPost, true);
+  assert.equal(
+    r.message,
+    `🔴 *ag-ui NuGet release failed* · <${RUN_URL}|View run>`,
+  );
+});
+
+test("early build failure on intended NuGet release → NuGet failure line", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "stable",
+      nugetIntended: "true",
+      nugetResult: "skipped",
+      nugetBuildResult: "failure",
+      nugetPackages: [],
+    }),
+  );
+  assert.equal(r.shouldPost, true);
+  assert.equal(
+    r.message,
+    `🔴 *ag-ui NuGet release failed* · <${RUN_URL}|View run>`,
+  );
+});
+
 test("python release intended (pyIntended='true', pyBuildResult='failure') → PyPI red ALERT", () => {
   const r = buildReleaseNotification(
     base({
@@ -852,4 +953,195 @@ test("npm success with many packages → name list truncates with '+N more'", ()
   assert.match(r.message, /7 npm packages published/);
   // Concise: do not dump all 7 names; cap and summarize the remainder.
   assert.match(r.message, /\+\d+ more/);
+});
+
+// ---------------------------------------------------------------------------
+// Maven Central lane. Mirrors the NuGet lane rows — the Maven lane is a fourth
+// INDEPENDENT lane with the same success/failure/neutral truth table.
+// ---------------------------------------------------------------------------
+
+test("Maven success renders count, names and a Maven Central link", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "stable",
+      mavenResult: "success",
+      mavenBuildResult: "success",
+      mavenPackages: maven("java-core", "java-client", "java-server"),
+    }),
+  );
+  assert.equal(r.shouldPost, true);
+  assert.match(r.message, /3 Maven packages published/);
+  assert.match(r.message, /java-core, java-client, java-server/);
+  assert.match(
+    r.message,
+    /<https:\/\/central\.sonatype\.com\/artifact\/com\.ag-ui\.community\/java-core\|Maven Central>/,
+  );
+});
+
+test("Maven success with EMPTY package set → no Maven success line (no false success)", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "stable",
+      mavenResult: "success",
+      mavenBuildResult: "success",
+      mavenPackages: [],
+    }),
+  );
+  assert.equal(r.shouldPost, false);
+  assert.equal(r.message, "");
+});
+
+test("Maven success but mode not stable (defensive) → no Maven success line", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "",
+      mavenResult: "success",
+      mavenBuildResult: "success",
+      mavenPackages: maven("java-core"),
+    }),
+  );
+  assert.equal(r.shouldPost, false);
+  assert.equal(r.message, "");
+});
+
+test("Maven publish failure with detected packages → lane-level red alert", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "stable",
+      mavenIntended: "false",
+      mavenResult: "failure",
+      mavenBuildResult: "success",
+      mavenPackages: maven("java-core"),
+    }),
+  );
+  assert.equal(r.shouldPost, true);
+  assert.equal(
+    r.message,
+    `🔴 *ag-ui Maven Central release failed* · <${RUN_URL}|View run>`,
+  );
+});
+
+test("early build failure on intended Maven release → Maven failure line", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "stable",
+      mavenIntended: "true",
+      mavenResult: "skipped",
+      mavenBuildResult: "failure",
+      mavenPackages: [],
+    }),
+  );
+  assert.equal(r.shouldPost, true);
+  assert.equal(
+    r.message,
+    `🔴 *ag-ui Maven Central release failed* · <${RUN_URL}|View run>`,
+  );
+});
+
+test("build failure with NO Maven intent and no detected packages → Maven lane silent", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "stable",
+      mavenIntended: "false",
+      mavenResult: "skipped",
+      mavenBuildResult: "failure",
+      mavenPackages: [],
+    }),
+  );
+  assert.equal(r.shouldPost, false);
+  assert.equal(r.message, "");
+});
+
+test("cancelled Maven lane is neutral — never a failure line", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "stable",
+      mavenIntended: "true",
+      mavenResult: "cancelled",
+      mavenBuildResult: "cancelled",
+      mavenPackages: maven("java-core"),
+    }),
+  );
+  assert.equal(r.shouldPost, false);
+  assert.equal(r.message, "");
+});
+
+test("canary (prerelease) fully suppresses the Maven lane", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "prerelease",
+      mavenIntended: "true",
+      mavenResult: "failure",
+      mavenBuildResult: "failure",
+      mavenPackages: maven("java-core"),
+    }),
+  );
+  assert.equal(r.shouldPost, false);
+  assert.equal(r.message, "");
+});
+
+test("dry-run suppresses the Maven lane", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "stable",
+      dryRun: true,
+      mavenResult: "success",
+      mavenBuildResult: "success",
+      mavenPackages: maven("java-core"),
+    }),
+  );
+  assert.equal(r.shouldPost, false);
+  assert.equal(r.message, "");
+});
+
+test("all four lanes can succeed together — one line each, Maven last", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "stable",
+      npmResult: "success",
+      buildResult: "success",
+      tsPackages: ts("@ag-ui/core"),
+      tsGroups: { latest: ["@ag-ui/core"] },
+      pyResult: "success",
+      pyBuildResult: "success",
+      pyPackages: py("ag-ui-protocol"),
+      nugetResult: "success",
+      nugetBuildResult: "success",
+      nugetPackages: nuget("AGUI.Client"),
+      mavenResult: "success",
+      mavenBuildResult: "success",
+      mavenPackages: maven("java-core"),
+    }),
+  );
+  assert.equal(r.shouldPost, true);
+  const lines = r.message.split("\n");
+  assert.equal(lines.length, 4);
+  assert.match(lines[0], /npm package published/);
+  assert.match(lines[1], /PyPI package published/);
+  assert.match(lines[2], /NuGet package published/);
+  assert.match(lines[3], /Maven package published/);
+});
+
+test("a Maven-only failure does not red the other lanes", () => {
+  const r = buildReleaseNotification(
+    base({
+      mode: "stable",
+      npmResult: "success",
+      buildResult: "success",
+      tsPackages: ts("@ag-ui/core"),
+      tsGroups: { latest: ["@ag-ui/core"] },
+      mavenIntended: "true",
+      mavenResult: "failure",
+      mavenBuildResult: "success",
+      mavenPackages: maven("java-core"),
+    }),
+  );
+  assert.equal(r.shouldPost, true);
+  const lines = r.message.split("\n");
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /npm package published/);
+  assert.equal(
+    lines[1],
+    `🔴 *ag-ui Maven Central release failed* · <${RUN_URL}|View run>`,
+  );
 });

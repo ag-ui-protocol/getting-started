@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AGUI.Protobuf</RootNamespace>
+    <PackageId>AGUI.Protobuf</PackageId>
+    <Description>Protobuf encoding, decoding, and event stream formatting for AG-UI binary transports.</Description>
+    <PackageTags>$(PackageTags);protobuf;binary;codec;transport;serialization</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(SignAssembly)' != 'true'">
+    <InternalsVisibleTo Include="AGUI.Protobuf.UnitTests" />
+    <InternalsVisibleTo Include="CrossLanguage.TestServer" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AGUI.Abstractions\AGUI.Abstractions.csproj" />
+    <ProjectReference Include="..\AGUI.Formatting\AGUI.Formatting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- The canonical AG-UI proto schema lives in the TypeScript proto package; reference it
+         directly (rather than copying) so the .NET codec can never drift from the wire contract. -->
+    <AGUIProtoRoot>$(MSBuildThisFileDirectory)..\..\..\typescript\packages\proto\src\proto</AGUIProtoRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Protobuf Include="$(AGUIProtoRoot)\events.proto;$(AGUIProtoRoot)\types.proto;$(AGUIProtoRoot)\patch.proto" ProtoRoot="$(AGUIProtoRoot)" GrpcServices="None" Access="Internal" />
+  </ItemGroup>
+
+</Project>

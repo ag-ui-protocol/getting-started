@@ -1,0 +1,72 @@
+{
+  "fixtures": [
+    {
+      "match": { "userMessage": "I am duaa" },
+      "response": { "content": "Hello duaa! How can I assist you today?" }
+    },
+    {
+      "match": { "userMessage": "capital of France" },
+      "response": { "content": "The capital of France is Paris." }
+    },
+    {
+      "match": { "userMessage": "What was my first question" },
+      "response": {
+        "content": "Your first question was about the capital of France."
+      }
+    },
+    {
+      "match": { "userMessage": "weather in Paris", "sequenceIndex": 0 },
+      "response": {
+        "toolCalls": [
+          {
+            "name": "get_weather",
+            "arguments": "{\"location\":\"Paris\"}"
+          }
+        ]
+      }
+    },
+    {
+      "match": { "userMessage": "weather in Paris", "sequenceIndex": 1 },
+      "response": {
+        "content": "It is currently 72°F and sunny in Paris."
+      }
+    },
+
+    { "match": { "userMessage": "Weather in San Francisco", "sequenceIndex": 0 },
+      "response": { "toolCalls": [
+        { "name": "get_weather", "arguments": "{\"location\":\"San Francisco\"}" }
+      ] } },
+    { "match": { "userMessage": "Weather in San Francisco", "sequenceIndex": 1 },
+      "response": { "content": "It is 65°F and foggy in San Francisco." } },
+
+    { "match": { "userMessage": "Weather in New York", "sequenceIndex": 0 },
+      "response": { "toolCalls": [
+        { "name": "get_weather", "arguments": "{\"location\":\"New York\"}" }
+      ] } },
+    { "match": { "userMessage": "Weather in New York", "sequenceIndex": 1 },
+      "response": { "content": "It is 50°F and overcast in New York." } },
+
+    { "match": { "userMessage": "counting down" },
+      "response": { "content": "counting down:\n10\n9\n8\n7\n6\n5\n4\n3\n2\n1\n\u2713" } },
+
+    { "match": { "userMessage": "my name is Alex" },
+      "response": { "content": "Hello Alex! Nice to meet you. How can I help you today?" } },
+    { "match": { "userMessage": "What is my name" },
+      "response": { "content": "Your name is Alex!" } },
+
+    { "match": { "userMessage": "background color to blue" },
+      "response": { "toolCalls": [
+        { "name": "change_background", "arguments": "{\"background\":\"blue\"}" }
+      ] } },
+
+    { "match": { "userMessage": "haiku about the moon" },
+      "response": { "toolCalls": [
+        { "name": "generate_haiku",
+          "arguments": "{\"japanese\":[\"\u6708\u306e\u5149\",\"\u9759\u304b\u306b\u843d\u3061\u308b\",\"\u591c\u306e\u9bae\"],\"english\":[\"Moonlight gently\",\"falls upon the silent night\",\"crisp and luminous\"],\"image_name\":\"moon.png\"}"
+        }
+      ] } }
+  ]
+}
+
+
+

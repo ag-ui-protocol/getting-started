@@ -13,7 +13,7 @@
     "start": "nx run-many -t start",
     "lint": "nx run-many -t lint",
     "format": "prettier --write \"**/*.{ts,tsx,md,mdx}\"",
-    "check-types": "nx run-many -t check-types",
+    "check-types": "node ./scripts/check-types.mjs",
     "test": "nx run-many -t test",
     "test:coverage": "nx run-many -t test:coverage",
     "test:watch": "nx run-many -t test && nx watch --all -- nx run-many -t test",
@@ -27,12 +27,15 @@
     "test:exports": "nx run-many -t test:exports"
   },
   "devDependencies": {
+    "@eslint/js": "^9.37.0",
     "@nx/js": "22.5.0",
+    "eslint": "^9.37.0",
     "nx": "^22.4.5",
     "prettier": "^3.5.3",
     "semver": "^7.7.3",
     "tsx": "^4.20.6",
-    "typescript": "5.8.2"
+    "typescript": "5.8.2",
+    "typescript-eslint": "^8.48.1"
   },
   "packageManager": "pnpm@10.33.4",
   "engines": {
@@ -40,6 +43,9 @@
   },
   "version": "0.0.1",
   "pnpm": {
+    "patchedDependencies": {
+      "@copilotkit/aimock@1.37.4": "patches/@copilotkit__aimock@1.37.4.patch"
+    },
     "overrides": {
       "langium": "3.2.0",
       "@copilotkit/runtime>@ag-ui/a2ui-middleware": "0.0.8",
@@ -48,7 +54,8 @@
       "zod": "3.25.76",
       "@strands-agents/sdk>zod": "^4.4.3",
       "@ag-ui/aws-strands>zod": "^4.4.3",
-      "@ag-ui/aws-strands-examples>zod": "^4.4.3"
+      "@ag-ui/aws-strands-examples>zod": "^4.4.3",
+      "hono": "4.12.27"
     }
   }
 }

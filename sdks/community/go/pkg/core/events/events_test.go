@@ -239,12 +239,35 @@ func TestMessageEvents(t *testing.T) {
 		assert.Equal(t, EventTypeTextMessageStart, event.Type())
 		assert.Equal(t, messageID, event.MessageID)
 		assert.Equal(t, &role, event.Role)
+		assert.Empty(t, event.Name)
 		assert.NoError(t, event.Validate())
 
 		// Test without role
 		event2 := NewTextMessageStartEvent(messageID)
 		assert.Nil(t, event2.Role)
 		assert.NoError(t, event2.Validate())
+
+		// Test with name
+		name := "research-agent"
+		event3 := NewTextMessageStartEvent(messageID, WithRole("assistant"), WithName(name))
+		assert.Equal(t, name, event3.Name)
+		assert.NoError(t, event3.Validate())
+
+		jsonData, err := event3.ToJSON()
+		require.NoError(t, err)
+
+		var decoded map[string]interface{}
+		require.NoError(t, json.Unmarshal(jsonData, &decoded))
+		assert.Equal(t, name, decoded["name"])
+
+		// Test that omitting the name keeps it off the wire
+		jsonData, err = event2.ToJSON()
+		require.NoError(t, err)
+
+		decoded = map[string]interface{}{}
+		require.NoError(t, json.Unmarshal(jsonData, &decoded))
+		_, hasName := decoded["name"]
+		assert.False(t, hasName, "expected \"name\" to be omitted when unset")
 
 		// Test validation error
 		event.MessageID = ""

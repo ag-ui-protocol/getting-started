@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import { AbstractAgent } from "../agent";
 import { DebugLogger } from "@/debug-logger";
 import {
@@ -7,12 +7,11 @@ import {
   RunAgentInput,
   RunStartedEvent,
   RunFinishedEvent,
-  RunErrorEvent,
   TextMessageStartEvent,
   TextMessageContentEvent,
   TextMessageEndEvent,
 } from "@ag-ui/core";
-import { Observable, of, Subject } from "rxjs";
+import { Observable, of } from "rxjs";
 
 // Mock uuid module
 vi.mock("uuid", () => ({
@@ -40,26 +39,8 @@ class TestAgent extends AbstractAgent {
     this.eventsToEmit = events;
   }
 
-  run(input: RunAgentInput): Observable<BaseEvent> {
+  run(_input: RunAgentInput): Observable<BaseEvent> {
     return of(...this.eventsToEmit);
-  }
-}
-
-class ErrorTestAgent extends AbstractAgent {
-  run(input: RunAgentInput): Observable<BaseEvent> {
-    return new Observable((subscriber) => {
-      subscriber.next({
-        type: EventType.RUN_STARTED,
-        threadId: "thread-1",
-        runId: "run-1",
-      } as RunStartedEvent);
-      subscriber.next({
-        type: EventType.RUN_ERROR,
-        message: "Something went wrong",
-        code: "test-error",
-      } as RunErrorEvent);
-      subscriber.complete();
-    });
   }
 }
 
@@ -126,7 +107,7 @@ describe("Agent construction debug config", () => {
 });
 
 describe("Agent run lifecycle logging", () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: MockInstance<typeof console.debug>;
 
   beforeEach(() => {
     debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
@@ -262,7 +243,7 @@ describe("Agent run lifecycle logging", () => {
 });
 
 describe("Agent run error logging", () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: MockInstance<typeof console.debug>;
 
   beforeEach(() => {
     debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
@@ -307,7 +288,7 @@ describe("Agent run error logging", () => {
 });
 
 describe("Agent pipeline integration", () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: MockInstance<typeof console.debug>;
 
   beforeEach(() => {
     debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});

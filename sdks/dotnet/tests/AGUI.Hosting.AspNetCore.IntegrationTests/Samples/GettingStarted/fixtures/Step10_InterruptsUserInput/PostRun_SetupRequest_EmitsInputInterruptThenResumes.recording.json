@@ -1,0 +1,64 @@
+[
+  [
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "interruptRequest",
+          "reason": "input_required",
+          "message": "What username would you like to use?",
+          "responseSchema": {
+            "type": "object",
+            "properties": {
+              "response": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "response"
+            ]
+          },
+          "requestId": "call_n6cAo4sk0jhy50JDnXNYr12A"
+        }
+      ],
+      "responseId": "chatcmpl-DrjDI0zBMWksKGCizsbR0KjJ9Y70A",
+      "modelId": "gpt-5-mini-2025-08-07"
+    }
+  ],
+  [
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Your account has been created with the username johndoe42."
+        }
+      ],
+      "responseId": "chatcmpl-DrjDL879tUhRW8drvuKwGHqML0TXu",
+      "messageId": "chatcmpl-DrjDL879tUhRW8drvuKwGHqML0TXu",
+      "createdAt": "2026-06-17T11:59:19+00:00",
+      "finishReason": "stop",
+      "modelId": "gpt-5-mini-2025-08-07"
+    },
+    {
+      "contents": [
+        {
+          "$type": "usage",
+          "details": {
+            "inputTokenCount": 247,
+            "outputTokenCount": 215,
+            "totalTokenCount": 462,
+            "cachedInputTokenCount": 0,
+            "reasoningTokenCount": 192,
+            "additionalCounts": {
+              "InputTokenDetails.AudioTokenCount": 0,
+              "OutputTokenDetails.AudioTokenCount": 0,
+              "OutputTokenDetails.AcceptedPredictionTokenCount": 0,
+              "OutputTokenDetails.RejectedPredictionTokenCount": 0
+            }
+          }
+        }
+      ]
+    }
+  ]
+]

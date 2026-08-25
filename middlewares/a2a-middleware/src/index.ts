@@ -105,7 +105,7 @@ export class A2AMiddlewareAgent extends AbstractAgent {
 
     return stream
       .pipe(
-        transformChunks(this.debug),
+        transformChunks(this.debugLogger),
         applyAndProcessEvents,
         tap(markTextMessageAsPending),
       )

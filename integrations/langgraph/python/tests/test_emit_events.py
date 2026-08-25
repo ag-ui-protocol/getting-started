@@ -3,6 +3,7 @@
 AG-UI LangGraph uses un-prefixed event names ("manually_emit_message" etc.).
 Downstream subclasses may override CustomEventNames to add their own prefix.
 """
+import unittest
 import pytest
 from unittest.mock import MagicMock
 
@@ -11,7 +12,7 @@ from ag_ui.core import EventType
 from ag_ui_langgraph.types import CustomEventNames, LangGraphEventTypes
 
 
-class TestCustomEventNamesValues:
+class TestCustomEventNamesValues(unittest.TestCase):
     """Verify CustomEventNames enum values match what the ag-ui LangGraph handler emits."""
 
     def test_manually_emit_message_name(self):
@@ -27,7 +28,7 @@ class TestCustomEventNamesValues:
         assert CustomEventNames.Exit == "exit"
 
 
-class TestHandleSingleEventCustomEvents:
+class TestHandleSingleEventCustomEvents(unittest.IsolatedAsyncioTestCase):
     """Test that _handle_single_event correctly processes custom emit events.
 
     These tests use a minimal LangGraphAgent with mock graph, exercising

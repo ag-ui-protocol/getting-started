@@ -9,13 +9,13 @@ license = "MIT"
 readme = "README.md"
 requires-python = ">=3.12,<4.0"
 dependencies = [
-    "agno>=2.0.0",
+    "agno[agui,google]>=2.6.19",
     "httpx>=0.27.0",
     "openai>=1.99.1",
     "yfinance>=0.2.63",
     "fastapi>=0.116.1",
     "uvicorn>=0.35.0",
-    "ag-ui-protocol>=0.1.8",
+    "ag-ui-protocol>=0.1.19",
     "dotenv (>=0.9.9,<0.10.0)",
 ]
 authors = [

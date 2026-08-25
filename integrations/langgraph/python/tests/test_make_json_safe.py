@@ -2,6 +2,7 @@
 import json
 import threading
 import unittest
+import uuid
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -218,3 +219,44 @@ class TestMakeJsonSafe(unittest.TestCase):
         assert parsed["tool_call"]["args"] == {"url": "https://example.com"}
         assert "runtime" not in parsed["tool_call"]
         assert "config" not in parsed["tool_call"]
+
+    def test_uuid_value(self):
+        """Test that UUID values are converted to their canonical string form."""
+        test_uuid = uuid.UUID("550e8400-e29b-41d4-a716-446655440000")
+        result = make_json_safe(test_uuid)
+        assert result == "550e8400-e29b-41d4-a716-446655440000"
+        assert isinstance(result, str)
+
+    def test_uuid_as_dict_key(self):
+        """Test that UUID keys in dicts are converted to strings.
+
+        This is the critical case: json.dumps raises TypeError when dict keys
+        are not str/int/float/bool/None. make_json_safe must convert UUID keys
+        to strings so downstream json.dumps succeeds.
+        """
+        test_uuid = uuid.UUID("550e8400-e29b-41d4-a716-446655440000")
+        data = {test_uuid: "some_value", "normal_key": 42}
+        result = make_json_safe(data)
+        assert "550e8400-e29b-41d4-a716-446655440000" in result
+        assert result["550e8400-e29b-41d4-a716-446655440000"] == "some_value"
+        assert result["normal_key"] == 42
+        # Verify full round-trip through json.dumps
+        json_str = json.dumps(result)
+        parsed = json.loads(json_str)
+        assert parsed["550e8400-e29b-41d4-a716-446655440000"] == "some_value"
+
+    def test_uuid_in_nested_dict(self):
+        """Test UUID keys in nested structures."""
+        uid1 = uuid.UUID("11111111-1111-1111-1111-111111111111")
+        uid2 = uuid.UUID("22222222-2222-2222-2222-222222222222")
+        data = {"outer": {uid1: {"inner": {uid2: "deep_value"}}}}
+        result = make_json_safe(data)
+        json_str = json.dumps(result)
+        parsed = json.loads(json_str)
+        assert parsed["outer"]["11111111-1111-1111-1111-111111111111"]["inner"]["22222222-2222-2222-2222-222222222222"] == "deep_value"
+
+    def test_uuid_in_list(self):
+        """Test UUID values in lists are converted to strings."""
+        uid = uuid.UUID("550e8400-e29b-41d4-a716-446655440000")
+        result = make_json_safe([uid, "hello", 42])
+        assert result == ["550e8400-e29b-41d4-a716-446655440000", "hello", 42]

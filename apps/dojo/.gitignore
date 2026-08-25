@@ -145,3 +145,7 @@ vite.config.ts.timestamp-*
 # Mastra files
 .mastra
 .env.local
+
+# Local interrupt remote-resume demo sqlite (OSS-380)
+.mastra-demo.db*
+src/mastra/public/

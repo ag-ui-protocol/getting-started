@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { of, lastValueFrom } from "rxjs";
+import { of } from "rxjs";
 import { AbstractAgent } from "../agent";
 import type { BaseEvent, RunAgentInput } from "@ag-ui/core";
-import { AGUIError, EventType } from "@ag-ui/core";
+import { EventType } from "@ag-ui/core";
 
 class StubAgent extends AbstractAgent {
   public received?: RunAgentInput;
-  protected run(input: RunAgentInput) {
+  run(input: RunAgentInput) {
     this.received = input;
-    return of<BaseEvent>(
+    return of(
       { type: EventType.RUN_STARTED, threadId: input.threadId, runId: input.runId } as BaseEvent,
       { type: EventType.RUN_FINISHED, threadId: input.threadId, runId: input.runId } as BaseEvent,
     );

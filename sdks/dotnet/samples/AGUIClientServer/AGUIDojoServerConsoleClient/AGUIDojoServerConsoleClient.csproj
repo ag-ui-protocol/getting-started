@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net10.0</TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <IsAotCompatible>false</IsAotCompatible>
+    <!-- Sample code: console host with no synchronization context, so ConfigureAwait noise is suppressed. -->
+    <NoWarn>$(NoWarn);CA2007</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\AGUI.Abstractions\AGUI.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\AGUI.Client\AGUI.Client.csproj" />
+  </ItemGroup>
+
+</Project>

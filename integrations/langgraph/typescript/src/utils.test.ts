@@ -13,7 +13,7 @@ import {
   VideoInputContent,
   DocumentInputContent,
 } from "@ag-ui/client";
-import { aguiMessagesToLangChain, langchainMessagesToAgui } from "./utils";
+import { aguiMessagesToLangChain, langchainMessagesToAgui, resolveReasoningContent } from "./utils";
 
 describe("Multimodal Message Conversion", () => {
   describe("aguiMessagesToLangChain", () => {
@@ -378,5 +378,59 @@ describe("Multimodal Message Conversion", () => {
       expect(content).toHaveLength(1);
       expect(content[0].type).toBe("text");
     });
+  });
+});
+
+describe("resolveReasoningContent - DeepSeek-style reasoning_content", () => {
+  it("should return LangGraphReasoning when reasoning_content is a non-empty string", () => {
+    const eventData = {
+      chunk: {
+        content: null,
+        additional_kwargs: { reasoning_content: "thinking step by step" },
+      },
+    };
+
+    const result = resolveReasoningContent(eventData);
+
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe("text");
+    expect(result!.text).toBe("thinking step by step");
+    expect(result!.index).toBe(0);
+  });
+
+  it("should return null when reasoning_content is empty string", () => {
+    const eventData = {
+      chunk: {
+        content: null,
+        additional_kwargs: { reasoning_content: "" },
+      },
+    };
+
+    expect(resolveReasoningContent(eventData)).toBeNull();
+  });
+
+  it("should return null when reasoning_content is not present", () => {
+    const eventData = {
+      chunk: {
+        content: null,
+        additional_kwargs: { some_other_key: "value" },
+      },
+    };
+
+    expect(resolveReasoningContent(eventData)).toBeNull();
+  });
+
+  it("should prioritize content block formats over additional_kwargs.reasoning_content", () => {
+    const eventData = {
+      chunk: {
+        content: [{ type: "thinking", thinking: "from content block" }],
+        additional_kwargs: { reasoning_content: "from additional_kwargs" },
+      },
+    };
+
+    const result = resolveReasoningContent(eventData);
+
+    expect(result).not.toBeNull();
+    expect(result!.text).toBe("from content block");
   });
 });

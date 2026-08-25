@@ -1,0 +1,25 @@
+[project]
+name = "server"
+version = "0.1.0"
+description = "Example usage of the AG-UI adapter for Claude Managed Agents"
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "ag-ui-claude-managed-agents",
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+]
+
+[tool.uv.sources]
+ag-ui-claude-managed-agents = { path = "../", editable = true }
+
+[project.scripts]
+dev = "server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+include = ["server.py", "agents.py", "setup.py"]

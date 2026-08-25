@@ -264,8 +264,9 @@ export function langchainMessagesToAgui(messages: LangGraphMessage[]): Message[]
         });
         break;
       }
-      case "generic":
       case "ai": {
+        // "generic" messages are treated the same as "ai" — LangGraph
+        // emits them for non-chat models that don't set a specific type.
         // Surface reasoning content blocks as standalone ReasoningMessages
         // placed BEFORE the assistant message (matching streaming order), so a
         // client with no persistent checkpoint can round-trip them.
@@ -308,9 +309,41 @@ export function langchainMessagesToAgui(messages: LangGraphMessage[]): Message[]
           role: "tool",
           content: stringifyIfNeeded(resolveMessageContent(message.content)),
           toolCallId: message.tool_call_id,
+          // A LangChain tool result signals failure only through `status`, with no
+          // error text. Restore AG-UI's `error` so the failure survives the round
+          // trip; the value is a fixed sentinel (#2305) because the original text is
+          // not recoverable from the flag alone.
+          ...(message.status === "error" ? { error: "error" } : {}),
         });
         break;
       default:
+        if ((message as any).type === "generic") {
+          // Re-enter the "ai" branch for generic messages
+          const aiMsg = message as any;
+          if (Array.isArray(aiMsg.content)) {
+            aiMsg.content.forEach((block: any, index: number) => {
+              if (isReasoningBlock(block)) {
+                const reasoningMsg = reasoningBlockToAguiMessage(block, aiMsg.id, index);
+                if (reasoningMsg) out.push(reasoningMsg);
+              }
+            });
+          }
+          const aiContent = resolveMessageContent(aiMsg.content);
+          out.push({
+            id: aiMsg.id,
+            role: "assistant",
+            content: aiContent ? stringifyIfNeeded(aiContent) : '',
+            toolCalls: aiMsg.tool_calls?.map((tc: any) => ({
+              id: tc.id!,
+              type: "function",
+              function: {
+                name: tc.name,
+                arguments: JSON.stringify(tc.args ?? {}),
+              },
+            })),
+          });
+          break;
+        }
         throw new Error("message type returned from LangGraph is not supported.");
     }
   }
@@ -407,6 +440,9 @@ export function aguiMessagesToLangChain(messages: Message[]): LangGraphMessage[]
           type: message.role,
           tool_call_id: message.toolCallId,
           id: message.id,
+          // Carry the AG-UI failure signal onto LangChain's tool-result status, so a
+          // client-reported tool failure is not delivered to the model as a success.
+          status: message.error ? "error" : "success",
         } as LangGraphMessage);
         break;
       default:
@@ -501,6 +537,16 @@ export function resolveReasoningContent(eventData: any): LangGraphReasoning | nu
       type: 'text',
       text: data.text,
       index: data.index ?? 0,
+    }
+  }
+
+  // DeepSeek-style format: additional_kwargs.reasoning_content (plain string)
+  const reasoningContent = eventData.chunk?.additional_kwargs?.reasoning_content
+  if (reasoningContent && typeof reasoningContent === 'string') {
+    return {
+      type: 'text',
+      text: reasoningContent,
+      index: 0,
     }
   }
 

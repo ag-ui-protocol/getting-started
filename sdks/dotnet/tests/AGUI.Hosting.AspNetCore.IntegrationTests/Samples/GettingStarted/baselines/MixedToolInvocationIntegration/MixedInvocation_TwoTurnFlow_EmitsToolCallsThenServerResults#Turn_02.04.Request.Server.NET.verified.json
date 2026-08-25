@@ -1,0 +1,82 @@
+﻿{
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Two things, please: (1) what city am I in right now, and (2) what\u0027s the weather in Paris? Call get_user_location for #1 and get_weather for #2."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "get_user_location",
+          "arguments": {},
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        },
+        {
+          "$type": "toolApprovalRequest",
+          "toolCall": {
+            "$type": "functionCall",
+            "name": "get_weather",
+            "arguments": {
+              "city": "Paris"
+            },
+            "informationalOnly": false,
+            "callId": "call_Id_2"
+          },
+          "requestId": "approval_Id_1"
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "contents": [
+        {
+          "$type": "functionResult",
+          "result": "\u0022Tokyo, Japan\u0022",
+          "callId": "call_Id_1"
+        }
+      ],
+      "messageId": "call_Id_1"
+    },
+    {
+      "role": "user",
+      "contents": [
+        {
+          "$type": "toolApprovalResponse",
+          "approved": true,
+          "toolCall": {
+            "$type": "functionCall",
+            "name": "get_weather",
+            "arguments": {
+              "city": "Paris"
+            },
+            "informationalOnly": false,
+            "callId": "call_Id_2"
+          },
+          "requestId": "approval_Id_1"
+        }
+      ]
+    }
+  ],
+  "options": {
+    "tools": [
+      {
+        "type": "ApprovalRequiredAIFunction",
+        "name": "get_user_location",
+        "description": ""
+      },
+      {
+        "type": "ReflectionAIFunction",
+        "name": "get_weather",
+        "description": "Gets the current weather for a given city."
+      }
+    ]
+  }
+}

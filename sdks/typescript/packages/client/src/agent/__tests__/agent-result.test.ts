@@ -58,7 +58,7 @@ class TestAgent extends AbstractAgent {
     this.eventsToEmit = events;
   }
 
-  run(input: RunAgentInput): Observable<BaseEvent> {
+  run(_input: RunAgentInput): Observable<BaseEvent> {
     return of(...this.eventsToEmit);
   }
 }
@@ -70,7 +70,7 @@ class StreamingTestAgent extends AbstractAgent {
     this.eventSubject = subject;
   }
 
-  run(input: RunAgentInput): Observable<BaseEvent> {
+  run(_input: RunAgentInput): Observable<BaseEvent> {
     if (!this.eventSubject) {
       throw new Error("eventSubject not set");
     }
@@ -373,9 +373,11 @@ describe("Agent Result", () => {
       const activityMessage = agent.messages.find((message) => message.id === "activity-ops");
 
       expect(activityMessage).toBeTruthy();
-      expect(activityMessage?.role).toBe("activity");
-      expect(activityMessage?.activityType).toBe("PLAN");
-      expect(activityMessage?.content).toEqual({
+      if (activityMessage?.role !== "activity") {
+        throw new Error(`Expected activity message, got role ${activityMessage?.role}`);
+      }
+      expect(activityMessage.activityType).toBe("PLAN");
+      expect(activityMessage.content).toEqual({
         operations: [firstOperation, secondOperation],
       });
 

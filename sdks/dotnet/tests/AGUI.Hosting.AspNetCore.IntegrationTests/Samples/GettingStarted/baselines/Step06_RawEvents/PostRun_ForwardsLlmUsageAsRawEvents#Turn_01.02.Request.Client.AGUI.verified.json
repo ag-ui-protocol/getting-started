@@ -1,0 +1,10 @@
+﻿{
+  "threadId": "thread_Id_1",
+  "runId": "run_Id_1",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Tell me about ag-ui raw events"
+    }
+  ]
+}

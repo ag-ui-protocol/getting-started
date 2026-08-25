@@ -4,7 +4,7 @@ import 'package:test/test.dart';
 void main() {
   group('AG-UI SDK', () {
     test('has correct version', () {
-      expect(agUiVersion, '0.2.0');
+      expect(agUiVersion, '0.3.0');
     });
 
     test('can initialize', () {

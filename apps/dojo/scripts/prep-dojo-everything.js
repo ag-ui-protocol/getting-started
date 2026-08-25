@@ -70,9 +70,9 @@ const ALL_TARGETS = {
     cwd: path.join(integrationsRoot, "agno/python/examples"),
   },
   "crew-ai": {
-    command: "poetry install",
+    command: "uv sync",
     name: "CrewAI",
-    cwd: path.join(integrationsRoot, "crew-ai/python"),
+    cwd: path.join(integrationsRoot, "crew-ai/python/examples"),
   },
   'langroid': {
     command: 'uv sync',
@@ -144,6 +144,22 @@ const ALL_TARGETS = {
     name: "Claude Agent SDK (TypeScript)",
     cwd: path.join(integrationsRoot, "claude-agent-sdk/typescript"),
   },
+  "claude-managed-agents-dotnet": {
+    command:
+      "dotnet restore AGUIDojoServer/AGUIDojoServer.csproj && dotnet build AGUIDojoServer/AGUIDojoServer.csproj",
+    name: "Claude Managed Agents (.NET)",
+    cwd: path.join(integrationsRoot, "claude-managed-agents/dotnet/examples"),
+  },
+  "claude-managed-agents-python": {
+    command: "uv sync",
+    name: "Claude Managed Agents (Python)",
+    cwd: path.join(integrationsRoot, "claude-managed-agents/python/examples"),
+  },
+  "claude-managed-agents-typescript": {
+    command: "pnpm install",
+    name: "Claude Managed Agents (TypeScript)",
+    cwd: path.join(integrationsRoot, "claude-managed-agents/typescript"),
+  },
   "microsoft-agent-framework-python": {
     command: "uv sync",
     name: "Microsoft Agent Framework (Python)",
@@ -153,6 +169,11 @@ const ALL_TARGETS = {
     command: "dotnet restore AGUIDojoServer/AGUIDojoServer.csproj && dotnet build AGUIDojoServer/AGUIDojoServer.csproj",
     name: "Microsoft Agent Framework (.NET)",
     cwd: path.join(integrationsRoot, "microsoft-agent-framework/dotnet/examples"),
+  },
+  "ag-ui-dotnet": {
+    command: "dotnet restore AGUIDojoServer/AGUIDojoServer.csproj && dotnet build AGUIDojoServer/AGUIDojoServer.csproj",
+    name: "AG-UI .NET SDK",
+    cwd: path.join(gitRoot, "sdks/dotnet/samples/AGUIClientServer"),
   },
 };
 

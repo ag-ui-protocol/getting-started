@@ -1,5 +1,16 @@
 /**
  * A LangGraph implementation of the human-in-the-loop agent.
+ *
+ * AG-UI interrupt protocol note:
+ *   The @ag-ui/langgraph integration now supports the AG-UI standard
+ *   interrupt protocol. Clients can resume execution by sending
+ *   RunAgentInput.resume = [ResumeEntry({interruptId, status:"resolved",
+ *   payload})] instead of the legacy forwardedProps.command.resume. When a
+ *   single resolved entry is provided, interrupt() receives the payload
+ *   verbatim — so this example's existing code works with both the old and
+ *   new protocol without changes. See the "Resuming via AG-UI standard
+ *   resume[]" section in the integration README for details on cancelled
+ *   and multi-entry resume shapes.
  */
 
 import { ChatOpenAI } from "@langchain/openai";

@@ -1,0 +1,27 @@
+# Interrupt (Suspend / Resume)
+
+Demonstrates **native interrupt-based Human-in-the-Loop** built on a framework's
+own suspend/resume primitive, bridged onto AG-UI's `on_interrupt` event and
+rendered with CopilotKit's v2 `useInterrupt` hook.
+
+## Flow
+
+1. The user asks the agent to book a meeting.
+2. The agent calls a backend tool (`schedule_meeting`) that **suspends its own
+   execution** mid-tool, emitting the meeting context to the frontend.
+3. The adapter surfaces this as a CUSTOM `on_interrupt` event. `useInterrupt`
+   captures it and renders an in-chat time picker.
+4. The user picks a slot (or cancels). `resolve(...)` sends the choice back and
+   **resumes the suspended tool**, which returns a confirmation the agent
+   summarizes.
+
+## Mastra notes
+
+This is wired for both **Mastra (Local)** and the remote **Mastra** integration.
+Mastra's tool `suspend()` is the native HITL primitive; the `@ag-ui/mastra`
+adapter bridges `tool-call-suspended` to `on_interrupt`. The interrupt value
+keeps Mastra's own shape (the renderer reads `event.value.suspendPayload`).
+Resume works for local agents (via the agent resume stream) and for remote
+agents (round-tripped over `@mastra/client-js`' `resumeStream`). Remote resume
+requires the remote Mastra instance to have storage configured, since the
+suspended run's snapshot is loaded from storage on resume.

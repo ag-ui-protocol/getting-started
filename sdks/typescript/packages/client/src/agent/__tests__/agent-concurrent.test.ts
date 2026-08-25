@@ -1,4 +1,4 @@
-import { Observable, Subject } from "rxjs";
+import { Observable } from "rxjs";
 import { AbstractAgent } from "../agent";
 import {
   BaseEvent,
@@ -14,7 +14,6 @@ import {
   ToolCallEndEvent,
   StepStartedEvent,
   StepFinishedEvent,
-  Message,
   AssistantMessage,
 } from "@ag-ui/core";
 
@@ -34,7 +33,7 @@ class ConcurrentTestAgent extends AbstractAgent {
     this.currentEventIndex = 0;
   }
 
-  run(input: RunAgentInput): Observable<BaseEvent> {
+  run(_input: RunAgentInput): Observable<BaseEvent> {
     return new Observable((subscriber) => {
       // Emit all the pre-configured events
       for (const event of this.eventsToEmit) {

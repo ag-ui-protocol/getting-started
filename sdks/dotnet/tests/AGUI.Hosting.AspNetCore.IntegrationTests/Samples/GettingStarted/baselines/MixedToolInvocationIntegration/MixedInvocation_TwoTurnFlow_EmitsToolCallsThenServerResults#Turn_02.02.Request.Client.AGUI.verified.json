@@ -1,0 +1,54 @@
+﻿{
+  "threadId": "thread_Id_1",
+  "runId": "run_Id_2",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Two things, please: (1) what city am I in right now, and (2) what\u0027s the weather in Paris? Call get_user_location for #1 and get_weather for #2."
+    },
+    {
+      "role": "assistant",
+      "toolCalls": [
+        {
+          "id": "call_Id_1",
+          "type": "function",
+          "function": {
+            "name": "get_user_location",
+            "arguments": "{}"
+          }
+        }
+      ],
+      "id": "call_Id_1"
+    },
+    {
+      "role": "assistant",
+      "toolCalls": [
+        {
+          "id": "call_Id_2",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\u0022city\u0022:\u0022Paris\u0022}"
+          }
+        }
+      ],
+      "id": "call_Id_2"
+    },
+    {
+      "role": "tool",
+      "content": "\u0022Tokyo, Japan\u0022",
+      "toolCallId": "call_Id_1",
+      "id": "call_Id_1"
+    }
+  ],
+  "tools": [
+    {
+      "name": "get_user_location",
+      "description": "Gets the user\u0027s current city via GPS.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

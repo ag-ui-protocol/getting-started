@@ -1,0 +1,8 @@
+#nullable enable
+AGUI.Protobuf.ProtobufEventStreamFormatter
+AGUI.Protobuf.ProtobufEventStreamFormatter.ProtobufEventStreamFormatter() -> void
+AGUI.Protobuf.ProtobufEventStreamFormatter.CanRead(string? contentType) -> bool
+AGUI.Protobuf.ProtobufEventStreamFormatter.MediaType.get -> string!
+AGUI.Protobuf.ProtobufEventStreamFormatter.ReadAsync(System.IO.Stream! body, System.Threading.CancellationToken cancellationToken) -> System.Collections.Generic.IAsyncEnumerable<AGUI.Abstractions.BaseEvent!>!
+AGUI.Protobuf.ProtobufEventStreamFormatter.WriteAsync(System.Collections.Generic.IAsyncEnumerable<AGUI.Abstractions.BaseEvent!>! events, System.IO.Stream! output, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+const AGUI.Protobuf.ProtobufEventStreamFormatter.ProtobufMediaType = "application/vnd.ag-ui.event+proto" -> string!

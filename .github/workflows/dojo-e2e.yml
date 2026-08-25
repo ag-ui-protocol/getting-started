@@ -13,6 +13,7 @@ on:
       - ".github/workflows/dojo-e2e.yml"
       - "sdks/python/**"
       - "sdks/typescript/**"
+      - "sdks/dotnet/**"
   pull_request:
     branches: [main]
     paths:
@@ -24,9 +25,18 @@ on:
       - ".github/workflows/dojo-e2e.yml"
       - "sdks/python/**"
       - "sdks/typescript/**"
+      - "sdks/dotnet/**"
 
 permissions:
   contents: read
+
+# Pinned Python build toolchain — see .github/python-toolchain.env, which is the
+# single place these two values are recorded, along with the green run they came
+# from. Change one, change them all: the python-toolchain-pins job in
+# lint-release-workflows.yml fails if any workflow's literal disagrees with that file.
+env:
+  UV_VERSION: "0.12.1"
+  PYTHON_VERSION: "3.12"
 
 jobs:
   check-generated-files:
@@ -34,20 +44,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           lfs: true
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: "22"
+          node-version-file: ".node-version"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
         with:
           version: 10.33.4
+
+      # Mirrors the `test:crewai-config` package script; run via npx (no install)
+      # to match the generate step below. Guards the CrewAI Flows + Conversational
+      # Flows dojo config that ships with this column.
+      - name: Validate CrewAI dojo config (Flows + Conversational Flows)
+        working-directory: apps/dojo
+        run: npx tsx --test src/crewai.test.ts
 
       - name: Validate agentFilesMapper and regenerate files.json
         working-directory: apps/dojo
@@ -70,6 +87,37 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
+
+  event-trace-unit:
+    name: dojo / event-trace-unit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+        with:
+          version: 10.33.4
+
+      - name: Install event trace test dependencies
+        working-directory: apps/dojo/e2e
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Run event trace unit tests
+        working-directory: apps/dojo/e2e
+        run: pnpm test:event-trace-unit
+
+      - name: Type-check event trace harness
+        working-directory: apps/dojo/e2e
+        run: pnpm check:event-trace-types
 
   dojo:
     name: dojo / ${{ matrix.suite }}
@@ -94,6 +142,10 @@ jobs:
             wait_on: http://localhost:9999,tcp:localhost:8002
           - suite: crew-ai
             test_path: tests/crewAITests
+            services: ["dojo", "crew-ai"]
+            wait_on: http://localhost:9999,tcp:localhost:8003
+          - suite: crewai-conversational-flows
+            test_path: tests/crewAIConversationalFlowsTests
             services: ["dojo", "crew-ai"]
             wait_on: http://localhost:9999,tcp:localhost:8003
           - suite: langroid
@@ -168,6 +220,10 @@ jobs:
             test_path: tests/microsoftAgentFrameworkDotnetTests
             services: ["dojo", "microsoft-agent-framework-dotnet"]
             wait_on: http://localhost:9999,tcp:localhost:8016
+          - suite: ag-ui-dotnet
+            test_path: tests/agUiDotnetTests
+            services: ["dojo", "ag-ui-dotnet"]
+            wait_on: http://localhost:9999,tcp:localhost:8023
           # - suite: vercel-ai-sdk
           #   test_path: tests/vercelAISdkTests
           #   services: ["dojo"]
@@ -175,7 +231,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: true
           persist-credentials: false
@@ -193,22 +249,22 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22"
+          node-version-file: ".node-version"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 10.33.4
 
       # Now that pnpm is available, cache its store to speed installs
       - name: Resolve pnpm store path
         id: pnpm-store
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
 
       - name: Cache pnpm store
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ${{ env.STORE_PATH }}
           key: ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -216,20 +272,25 @@ jobs:
             ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pnpm-store-
 
       - name: Cache Python dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: |
             ~/.cache/pip
             ~/.cache/pypoetry
             ~/.cache/uv
             **/.venv
-          key: ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pydeps-${{ matrix.suite }}-${{ hashFiles('**/poetry.lock', '**/pyproject.toml') }}
+          # The toolchain segments keep a venv built by one uv/Python from being
+          # restored into a job expecting another — including via restore-keys,
+          # which would otherwise reach past them on a key miss. Note the limit:
+          # this path also captures Poetry-built venvs, and Poetry is installed at
+          # `version: latest` below, so a Poetry upgrade is NOT reflected in the key.
+          key: ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pydeps-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ matrix.suite }}-${{ hashFiles('**/poetry.lock', '**/pyproject.toml') }}
           restore-keys: |
-            ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pydeps-${{ matrix.suite }}-
-            ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pydeps-
+            ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pydeps-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ matrix.suite }}-
+            ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pydeps-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-
 
       - name: Cache Next.js build
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ${{ github.workspace }}/apps/dojo/.next/cache
           key: ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('apps/dojo/src/**/*.ts', 'apps/dojo/src/**/*.tsx', 'apps/dojo/src/**/*.js', 'apps/dojo/src/**/*.jsx') }}
@@ -237,20 +298,31 @@ jobs:
             ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-
 
       - name: Install Poetry
-        uses: snok/install-poetry@76e04a911780d5b312d89783f7b1cd627778900a  # v1.4.1
+        uses: snok/install-poetry@a783c322200f0519c7926aa6faa857c4e23e9263  # v1.4.2
         with:
           version: latest
           virtualenvs-create: true
           virtualenvs-in-project: true
 
+      # uv itself is only invoked indirectly here — the example apps under
+      # integrations/*/python/examples are synced by
+      # apps/dojo/scripts/prep-dojo-everything.js. Those syncs are deliberately
+      # not frozen (the script is shared with local dev, where relocking is
+      # wanted), so this pin is what keeps the interpreter and resolver stable
+      # across e2e runs.
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Set up .NET SDK
-        if: ${{ contains(join(matrix.services, ','), 'microsoft-agent-framework-dotnet') }}
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9  # v4.3.1
+        if: ${{ contains(join(matrix.services, ','), 'microsoft-agent-framework-dotnet') || contains(join(matrix.services, ','), 'ag-ui-dotnet') }}
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
         with:
-          dotnet-version: "9.0.x"
+          dotnet-version: |
+            9.0.x
+            10.0.x
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -261,7 +333,7 @@ jobs:
         run: node ./scripts/prep-dojo-everything.js --only ${{ join(matrix.services, ',') }}
       - name: Cache Playwright browsers
         id: cache-playwright
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-playwright-${{ hashFiles('apps/dojo/e2e/package.json') }}
@@ -272,15 +344,19 @@ jobs:
         working-directory: apps/dojo/e2e
         run: pnpm install --ignore-scripts
 
+      # Neither --with-deps nor install-deps: both shell out to apt, and apt on the
+      # runners cannot always reach azure.archive.ubuntu.com — it can retry for long
+      # enough to burn this job's whole timeout before a test runs. Chromium's system
+      # libraries are already present on the Ubuntu runner image, so downloading the
+      # browser is all this job needs.
+      #
+      # No cache-hit guard either. actions/cache only reports cache-hit: true on an
+      # exact key match, so any change to apps/dojo/e2e/package.json restores the
+      # browsers via restore-keys and still reports a miss. On such a restore the
+      # browsers are already in ~/.cache/ms-playwright and this returns in seconds.
       - name: Install Playwright browsers
         working-directory: apps/dojo/e2e
-        if: steps.cache-playwright.outputs.cache-hit != 'true'
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Install Playwright system dependencies
-        working-directory: apps/dojo/e2e
-        if: steps.cache-playwright.outputs.cache-hit == 'true'
-        run: pnpm exec playwright install-deps chromium
+        run: pnpm exec playwright install chromium
 
       - name: Create langgraph stub .env files
         if: ${{ contains(join(matrix.services, ','), 'langgraph-platform-python') || contains(join(matrix.services, ','), 'langgraph-platform-typescript') }}
@@ -309,7 +385,7 @@ jobs:
           echo "OPENAI_API_KEY=${OPENAI_API_KEY}" > .env
 
       - name: Run dojo+agents
-        uses: JarvusInnovations/background-action@2428e7b970a846423095c79d43f759abf979a635  # v1.0.7
+        uses: JarvusInnovations/background-action@1f5e5fa2462e48a95f97b54b4842d076d1008e3b  # v2.0.0
         if: ${{ join(matrix.services, ',') != '' && contains(join(matrix.services, ','), 'dojo') }}
         env:
           # Backend tool-rendering demos call the live open-meteo API, which

@@ -253,6 +253,10 @@ function Recipe() {
     if (!agentState?.recipe) {
       setAgentState(INITIAL_STATE);
     }
+    // DEFERRED (PNI-307): mount-only by design — this seeds the agent state
+    // exactly once. Adding `agentState?.recipe`/`setAgentState` would re-seed
+    // INITIAL_STATE whenever the agent clears its recipe mid-session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [recipe, setRecipe] = useState(INITIAL_STATE.recipe);
@@ -275,17 +279,28 @@ function Recipe() {
 
   const newRecipeState = { ...recipe };
   const newChangedKeys = [];
+  // NOTE (PNI-272): this stays a ref, written and read within the same render,
+  // and the `setRecipe` sync below stays in an effect. Converting either to a
+  // render-phase state update loses the Ping entirely whenever the agent's final
+  // recipe change arrives with `isLoading` already false: the retry render sees
+  // the recipe already synchronised and `!isLoading`, clears the changed keys and
+  // commits without ever showing the indicator. The ref writes the value the same
+  // render reads, so the indicator always commits at least once.
   const changedKeysRef = useRef<string[]>([]);
 
+  // Iterating Recipe by dynamic key needs an index-signature view of it. The
+  // casts are repeated per access rather than hoisted: hoisting would read
+  // `agentState.recipe` once per render where this reads it per key, which is
+  // observable if that property is ever accessor- or Proxy-backed.
   for (const key in recipe) {
     if (
       agentState &&
       agentState.recipe &&
-      (agentState.recipe as any)[key] !== undefined &&
-      (agentState.recipe as any)[key] !== null
+      (agentState.recipe as unknown as Record<string, unknown>)[key] !== undefined &&
+      (agentState.recipe as unknown as Record<string, unknown>)[key] !== null
     ) {
-      let agentValue = (agentState.recipe as any)[key];
-      const recipeValue = (recipe as any)[key];
+      let agentValue = (agentState.recipe as unknown as Record<string, unknown>)[key];
+      const recipeValue = (recipe as unknown as Record<string, unknown>)[key];
 
       // Check if agentValue is a string and replace \n with actual newlines
       if (typeof agentValue === "string") {
@@ -293,7 +308,7 @@ function Recipe() {
       }
 
       if (JSON.stringify(agentValue) !== JSON.stringify(recipeValue)) {
-        (newRecipeState as any)[key] = agentValue;
+        (newRecipeState as unknown as Record<string, unknown>)[key] = agentValue;
         newChangedKeys.push(key);
       }
     }
@@ -307,6 +322,11 @@ function Recipe() {
 
   useEffect(() => {
     setRecipe(newRecipeState);
+    // DEFERRED (PNI-307): the dep is deliberately the serialized snapshot, not
+    // `newRecipeState` — the object is rebuilt every render, so depending on
+    // its identity would re-run the sync (and clear the Ping described in the
+    // NOTE above) on every render instead of only when the content changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(newRecipeState)]);
 
   const handleTitleChange = (event: React.ChangeEvent<HTMLInputElement>) => {

@@ -72,7 +72,7 @@ export 'src/encoder/client_codec.dart';
 // export 'src/transport.dart';
 
 /// SDK version
-const String agUiVersion = '0.2.0';
+const String agUiVersion = '0.3.0';
 
 /// Initialize the AG-UI SDK
 void initAgUI() {

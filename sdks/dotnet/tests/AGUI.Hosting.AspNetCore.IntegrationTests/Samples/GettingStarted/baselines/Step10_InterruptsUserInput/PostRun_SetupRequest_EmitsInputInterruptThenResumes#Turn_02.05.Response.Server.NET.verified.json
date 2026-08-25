@@ -1,0 +1,34 @@
+﻿[
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "Your account has been created with the username johndoe42."
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "finishReason": "stop",
+    "modelId": "gpt-5-mini-2025-08-07"
+  },
+  {
+    "contents": [
+      {
+        "$type": "usage",
+        "details": {
+          "inputTokenCount": 247,
+          "outputTokenCount": 215,
+          "cachedInputTokenCount": 0,
+          "reasoningTokenCount": 192,
+          "additionalCounts": {
+            "InputTokenDetails.AudioTokenCount": 0,
+            "OutputTokenDetails.AudioTokenCount": 0,
+            "OutputTokenDetails.AcceptedPredictionTokenCount": 0,
+            "OutputTokenDetails.RejectedPredictionTokenCount": 0
+          }
+        }
+      }
+    ]
+  }
+]

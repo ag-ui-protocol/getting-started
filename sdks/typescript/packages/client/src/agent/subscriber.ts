@@ -31,6 +31,9 @@ import {
   ReasoningMessageEndEvent,
   ReasoningEndEvent,
   ReasoningEncryptedValueEvent,
+  SubagentStartedEvent,
+  SubagentFinishedEvent,
+  SubagentErrorEvent,
 } from "@ag-ui/core";
 import { AbstractAgent } from "./agent";
 import { structuredClone_ } from "@/utils";
@@ -92,6 +95,16 @@ export interface AgentSubscriber {
     params: { event: StepFinishedEvent } & AgentSubscriberParams,
   ): MaybePromise<AgentStateMutation | void>;
 
+  onSubagentStartedEvent?(
+    params: { event: SubagentStartedEvent } & AgentSubscriberParams,
+  ): MaybePromise<AgentStateMutation | void>;
+  onSubagentFinishedEvent?(
+    params: { event: SubagentFinishedEvent } & AgentSubscriberParams,
+  ): MaybePromise<AgentStateMutation | void>;
+  onSubagentErrorEvent?(
+    params: { event: SubagentErrorEvent } & AgentSubscriberParams,
+  ): MaybePromise<AgentStateMutation | void>;
+
   onTextMessageStartEvent?(
     params: { event: TextMessageStartEvent } & AgentSubscriberParams,
   ): MaybePromise<AgentStateMutation | void>;
@@ -113,6 +126,9 @@ export interface AgentSubscriber {
       event: ToolCallArgsEvent;
       toolCallBuffer: string;
       toolCallName: string;
+      // DEFERRED (PNI-272): narrowing this to `unknown` would force casts in
+      // every consumer's subscriber callback. Public API decision, not lint.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       partialToolCallArgs: Record<string, any>;
     } & AgentSubscriberParams,
   ): MaybePromise<AgentStateMutation | void>;
@@ -120,6 +136,8 @@ export interface AgentSubscriber {
     params: {
       event: ToolCallEndEvent;
       toolCallName: string;
+      // DEFERRED (PNI-272): see `partialToolCallArgs` above.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       toolCallArgs: Record<string, any>;
     } & AgentSubscriberParams,
   ): MaybePromise<AgentStateMutation | void>;

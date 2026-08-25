@@ -10,7 +10,24 @@ on:
       - "integrations/adk-middleware/python/**"
       - "integrations/aws-strands/python/**"
       - "integrations/langroid/python/**"
+      - "integrations/crew-ai/python/**"
+      - "integrations/claude-managed-agents/python/**"
+      # agent-spec and claude-agent-sdk have no test lane, but they ship
+      # committed lockfiles that the `lockfiles` job below verifies.
+      - "integrations/agent-spec/python/**"
+      - "integrations/claude-agent-sdk/python/**"
+      # Globs, not another hand-maintained list: the lockfiles job discovers locks
+      # repo-wide, so a new package outside the paths above must still trigger it.
+      - "**/uv.lock"
+      - "**/pyproject.toml"
+      # ...but not the examples/ apps. Their locks are deliberately out of scope for
+      # the lockfiles job (prep-dojo-everything.js relocks them on purpose), so an
+      # examples-only lockfile change would spin up every test lane to verify
+      # nothing. Negation must follow the two globs above to override them.
+      - "!examples/**"
+      - ".github/python-toolchain.env"
       - ".github/workflows/unit-python-sdk.yml"
+      - ".github/actions/**"
   pull_request:
     branches: [main]
     paths:
@@ -20,12 +37,32 @@ on:
       - "integrations/adk-middleware/python/**"
       - "integrations/aws-strands/python/**"
       - "integrations/langroid/python/**"
+      - "integrations/crew-ai/python/**"
+      - "integrations/claude-managed-agents/python/**"
+      - "integrations/agent-spec/python/**"
+      - "integrations/claude-agent-sdk/python/**"
+      - "**/uv.lock"
+      - "**/pyproject.toml"
+      # ...but not the examples/ apps. Their locks are deliberately out of scope for
+      # the lockfiles job (prep-dojo-everything.js relocks them on purpose), so an
+      # examples-only lockfile change would spin up every test lane to verify
+      # nothing. Negation must follow the two globs above to override them.
+      - "!examples/**"
+      - ".github/python-toolchain.env"
       - ".github/workflows/unit-python-sdk.yml"
-
-# Note: crew-ai uses Poetry (no uv.lock) — skipped for now.
+      - ".github/actions/**"
 
 permissions:
   contents: read
+
+# Pinned Python build toolchain. These two values must equal the ones recorded in
+# .github/python-toolchain.env, which also records the green run they came from.
+# GitHub cannot read a file into `env:`, which is why they are repeated here — and
+# the python-toolchain-pins job in lint-release-workflows.yml is what keeps the
+# repetition honest. That file's header records the alternative that was weighed.
+env:
+  UV_VERSION: "0.12.1"
+  PYTHON_VERSION: "3.12"
 
 jobs:
   python:
@@ -33,7 +70,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        # id so the lockfile assertion below can gate on this step's outcome — see
+        # the comment there for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -50,31 +90,57 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: sdks/python/.venv
-          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-${{ hashFiles('sdks/python/uv.lock') }}
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('sdks/python/uv.lock') }}
 
       - name: Install dependencies
         working-directory: sdks/python
-        run: uv sync
+        # --locked fails the build if uv.lock is out of step with
+        # pyproject.toml. Release bumps used to edit pyproject alone,
+        # leaving every released package's lock a version stale (#2313,
+        # #2314); this is what stops that drifting again unnoticed.
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: sdks/python
-        run: uv run python -m unittest discover tests -v
+        run: uv run --locked python -m unittest discover tests -v
+
+      - name: Assert no lockfile was rewritten
+        # Must run when the tests FAIL: a job that rewrote a lockfile and then failed
+        # its tests would otherwise skip this step and report only the test failure,
+        # losing the signal this guard exists to produce.
+        #
+        # !cancelled() rather than always(), because always() also fires on
+        # cancellation, and concurrency cancels supersede runs constantly here — each
+        # one would otherwise spend a step re-checking a job nobody is waiting on.
+        #
+        # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
+        # when an earlier step failed, including `Checkout code` — and this step is a
+        # local `uses:`, so with no repo on disk it dies with "Can't find 'action.yml'
+        # under .../assert-lockfiles-unchanged". That lands AFTER the real error and
+        # reads as though the guard itself is broken, which is precisely the misleading
+        # signal action.yml's header argues against.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
 
   langgraph-python:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        # id so the lockfile assertion below can gate on this step's outcome — see
+        # the comment there for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -91,31 +157,53 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: integrations/langgraph/python/.venv
-          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-langgraph-${{ hashFiles('integrations/langgraph/python/uv.lock') }}
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-langgraph-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/langgraph/python/uv.lock') }}
 
       - name: Install dependencies
         working-directory: integrations/langgraph/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/langgraph/python
-        run: uv run python -m unittest discover tests -v
+        run: uv run --locked python -m unittest discover tests -v
+
+      - name: Assert no lockfile was rewritten
+        # Must run when the tests FAIL: a job that rewrote a lockfile and then failed
+        # its tests would otherwise skip this step and report only the test failure,
+        # losing the signal this guard exists to produce.
+        #
+        # !cancelled() rather than always(), because always() also fires on
+        # cancellation, and concurrency cancels supersede runs constantly here — each
+        # one would otherwise spend a step re-checking a job nobody is waiting on.
+        #
+        # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
+        # when an earlier step failed, including `Checkout code` — and this step is a
+        # local `uses:`, so with no repo on disk it dies with "Can't find 'action.yml'
+        # under .../assert-lockfiles-unchanged". That lands AFTER the real error and
+        # reads as though the guard itself is broken, which is precisely the misleading
+        # signal action.yml's header argues against.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
 
   watsonx-python:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        # id so the lockfile assertion below can gate on this step's outcome — see
+        # the comment there for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -132,31 +220,53 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: integrations/watsonx/python/.venv
-          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-watsonx-${{ hashFiles('integrations/watsonx/python/uv.lock') }}
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-watsonx-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/watsonx/python/uv.lock') }}
 
       - name: Install dependencies
         working-directory: integrations/watsonx/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/watsonx/python
-        run: uv run python -m pytest tests/ -v
+        run: uv run --locked python -m pytest tests/ -v
+
+      - name: Assert no lockfile was rewritten
+        # Must run when the tests FAIL: a job that rewrote a lockfile and then failed
+        # its tests would otherwise skip this step and report only the test failure,
+        # losing the signal this guard exists to produce.
+        #
+        # !cancelled() rather than always(), because always() also fires on
+        # cancellation, and concurrency cancels supersede runs constantly here — each
+        # one would otherwise spend a step re-checking a job nobody is waiting on.
+        #
+        # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
+        # when an earlier step failed, including `Checkout code` — and this step is a
+        # local `uses:`, so with no repo on disk it dies with "Can't find 'action.yml'
+        # under .../assert-lockfiles-unchanged". That lands AFTER the real error and
+        # reads as though the guard itself is broken, which is precisely the misleading
+        # signal action.yml's header argues against.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
 
   adk-middleware-python:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        # id so the lockfile assertion below can gate on this step's outcome — see
+        # the comment there for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -173,31 +283,52 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: integrations/adk-middleware/python/.venv
-          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-adk-middleware-${{ hashFiles('integrations/adk-middleware/python/uv.lock') }}
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-adk-middleware-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/adk-middleware/python/uv.lock') }}
 
       - name: Install dependencies
         working-directory: integrations/adk-middleware/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/adk-middleware/python
-        run: uv run python -m pytest tests/ -v
+        run: uv run --locked python -m pytest tests/ -v
+
+      - name: Assert no lockfile was rewritten
+        # Must run when the tests FAIL: a job that rewrote a lockfile and then failed
+        # its tests would otherwise skip this step and report only the test failure,
+        # losing the signal this guard exists to produce.
+        #
+        # !cancelled() rather than always(), because always() also fires on
+        # cancellation, and concurrency cancels supersede runs constantly here — each
+        # one would otherwise spend a step re-checking a job nobody is waiting on.
+        #
+        # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
+        # when an earlier step failed, including `Checkout code` — and this step is a
+        # local `uses:`, so with no repo on disk it dies with "Can't find 'action.yml'
+        # under .../assert-lockfiles-unchanged". That lands AFTER the real error and
+        # reads as though the guard itself is broken, which is precisely the misleading
+        # signal action.yml's header argues against.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
 
   # Exercises the suite against google-adk 2.x. pyproject advertises
   # google-adk>=1.16.0,<3.0.0 ("compatible with 1.x and 2.x"), but the lockfile
   # resolves 1.x (see #1946), so CI never sees 2.x. The suite is currently red
   # under 2.x (#1947). This leg is INFORMATIONAL: the test step is
   # continue-on-error, so the job stays green and never blocks a merge, while a
-  # failing 2.x run is surfaced as a warning annotation and a job summary. Once
+  # failing 2.x run is surfaced as a warning annotation and a job summary. Note the
+  # install and force steps are NOT exempt: if forcing 2.x cannot resolve, this job
+  # fails. Once
   # the 2.x failures are burned down, drop the step's continue-on-error to make
   # this a required, blocking check.
   adk-middleware-python-adk-2x:
@@ -205,7 +336,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        # id so the lockfile assertion below can gate on this step's outcome — see
+        # the comment there for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -222,13 +356,14 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
         working-directory: integrations/adk-middleware/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Force google-adk 2.x
         working-directory: integrations/adk-middleware/python
@@ -254,12 +389,33 @@ jobs:
             echo "This leg runs the suite against \`google-adk>=2,<3\` and is allowed to fail until the 2.x failures are burned down. It does not block merges." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Assert no lockfile was rewritten
+        # Must run when the tests FAIL: a job that rewrote a lockfile and then failed
+        # its tests would otherwise skip this step and report only the test failure,
+        # losing the signal this guard exists to produce.
+        #
+        # !cancelled() rather than always(), because always() also fires on
+        # cancellation, and concurrency cancels supersede runs constantly here — each
+        # one would otherwise spend a step re-checking a job nobody is waiting on.
+        #
+        # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
+        # when an earlier step failed, including `Checkout code` — and this step is a
+        # local `uses:`, so with no repo on disk it dies with "Can't find 'action.yml'
+        # under .../assert-lockfiles-unchanged". That lands AFTER the real error and
+        # reads as though the guard itself is broken, which is precisely the misleading
+        # signal action.yml's header argues against.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
+
   aws-strands-python:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        # id so the lockfile assertion below can gate on this step's outcome — see
+        # the comment there for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -276,31 +432,124 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: integrations/aws-strands/python/.venv
-          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-aws-strands-${{ hashFiles('integrations/aws-strands/python/uv.lock') }}
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-aws-strands-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/aws-strands/python/uv.lock') }}
 
       - name: Install dependencies
         working-directory: integrations/aws-strands/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/aws-strands/python
-        run: uv run python -m pytest tests/ -v
+        run: uv run --locked python -m pytest tests/ -v
+
+      - name: Assert no lockfile was rewritten
+        # Must run when the tests FAIL: a job that rewrote a lockfile and then failed
+        # its tests would otherwise skip this step and report only the test failure,
+        # losing the signal this guard exists to produce.
+        #
+        # !cancelled() rather than always(), because always() also fires on
+        # cancellation, and concurrency cancels supersede runs constantly here — each
+        # one would otherwise spend a step re-checking a job nobody is waiting on.
+        #
+        # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
+        # when an earlier step failed, including `Checkout code` — and this step is a
+        # local `uses:`, so with no repo on disk it dies with "Can't find 'action.yml'
+        # under .../assert-lockfiles-unchanged". That lands AFTER the real error and
+        # reads as though the guard itself is broken, which is precisely the misleading
+        # signal action.yml's header argues against.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
+
+  # The locked lane above installs whatever uv.lock resolves, which is well above
+  # the floor pyproject.toml declares. That leaves the declared minimum asserted by
+  # nothing, and a floor nobody runs is a support claim nobody has checked.
+  #
+  # This lane installs the floor itself. It reads the version out of the manifest
+  # rather than repeating it, so raising the declared minimum moves this lane with
+  # it and the two cannot drift apart.
+  aws-strands-python-declared-floor:
+    name: aws-strands-python-declared-floor
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        # id so the lockfile assertion below can gate on this step's outcome. See
+        # that step for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Read the declared strands-agents floor
+        id: floor
+        working-directory: integrations/aws-strands/python
+        run: |
+          set -euo pipefail
+          floor=$(grep -oE '"strands-agents>=[0-9]+(\.[0-9]+)*"' pyproject.toml \
+            | grep -oE '[0-9]+(\.[0-9]+)*')
+          if [ -z "$floor" ]; then
+            echo "::error::No \`strands-agents>=\` floor found in pyproject.toml." \
+                 "This lane exists to test that floor, so it must not pass without one."
+            exit 1
+          fi
+          echo "version=$floor" >> "$GITHUB_OUTPUT"
+          echo "Declared floor: strands-agents==$floor"
+
+      - name: Install dependencies
+        working-directory: integrations/aws-strands/python
+        run: uv sync --locked
+
+      - name: Downgrade to the declared floor
+        working-directory: integrations/aws-strands/python
+        # The floor reaches the shell through the environment, not through template
+        # expansion. The value is read out of a file in the repository, so on a fork
+        # PR it is attacker-controllable, and expanding it inline would splice that
+        # content into the script itself.
+        env:
+          STRANDS_FLOOR: ${{ steps.floor.outputs.version }}
+        run: |
+          set -euo pipefail
+          uv pip install "strands-agents==${STRANDS_FLOOR}"
+          uv run --no-sync python -c \
+            "import importlib.metadata as m; print('strands-agents', m.version('strands-agents'))"
+
+      - name: Run tests at the declared floor
+        working-directory: integrations/aws-strands/python
+        run: uv run --no-sync python -m pytest tests/ -v
+
+      - name: Assert no lockfile was rewritten
+        # Same reasoning as the locked lane: this must run even when the tests fail,
+        # or a run that rewrote a lockfile and then went red would report only the
+        # test failure and lose this signal.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
+
 
   langroid-python:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        # id so the lockfile assertion below can gate on this step's outcome — see
+        # the comment there for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -317,21 +566,453 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: integrations/langroid/python/.venv
-          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-langroid-${{ hashFiles('integrations/langroid/python/uv.lock') }}
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-langroid-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/langroid/python/uv.lock') }}
 
       - name: Install dependencies
         working-directory: integrations/langroid/python
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run tests
         working-directory: integrations/langroid/python
-        run: uv run python -m unittest discover tests -v
+        run: uv run --locked python -m unittest discover tests -v
+
+      - name: Assert no lockfile was rewritten
+        # Must run when the tests FAIL: a job that rewrote a lockfile and then failed
+        # its tests would otherwise skip this step and report only the test failure,
+        # losing the signal this guard exists to produce.
+        #
+        # !cancelled() rather than always(), because always() also fires on
+        # cancellation, and concurrency cancels supersede runs constantly here — each
+        # one would otherwise spend a step re-checking a job nobody is waiting on.
+        #
+        # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
+        # when an earlier step failed, including `Checkout code` — and this step is a
+        # local `uses:`, so with no repo on disk it dies with "Can't find 'action.yml'
+        # under .../assert-lockfiles-unchanged". That lands AFTER the real error and
+        # reads as though the guard itself is broken, which is precisely the misleading
+        # signal action.yml's header argues against.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
+
+  crewai-python:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        # id so the lockfile assertion below can gate on this step's outcome — see
+        # the comment there for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect fork PR
+        id: fork-check
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" && \
+                "${GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME}" != "${{ github.repository }}" ]]; then
+            echo "prefix=fork-" >> "$GITHUB_OUTPUT"
+          else
+            echo "prefix=" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Load cached venv
+        id: cached-uv-dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: integrations/crew-ai/python/.venv
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-crewai-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/crew-ai/python/uv.lock') }}
+
+      - name: Install dependencies
+        working-directory: integrations/crew-ai/python
+        run: uv sync --locked
+
+      - name: Run tests
+        working-directory: integrations/crew-ai/python
+        run: uv run --locked python -m pytest tests/ -v
+
+      - name: Assert no lockfile was rewritten
+        # Must run when the tests FAIL: a job that rewrote a lockfile and then failed
+        # its tests would otherwise skip this step and report only the test failure,
+        # losing the signal this guard exists to produce.
+        #
+        # !cancelled() rather than always(), because always() also fires on
+        # cancellation, and concurrency cancels supersede runs constantly here — each
+        # one would otherwise spend a step re-checking a job nobody is waiting on.
+        #
+        # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
+        # when an earlier step failed, including `Checkout code` — and this step is a
+        # local `uses:`, so with no repo on disk it dies with "Can't find 'action.yml'
+        # under .../assert-lockfiles-unchanged". That lands AFTER the real error and
+        # reads as though the guard itself is broken, which is precisely the misleading
+        # signal action.yml's header argues against.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
+
+  # Both ends of the DECLARED litellm range, run against the full crewai suite.
+  #
+  # crewai capabilities are probed at runtime; litellm alone is version-ranged,
+  # because it is a direct dependency whose version this package controls and the
+  # alternative was probing litellm's private event-model registry to decide
+  # whether the OpenAI Responses channel is usable (see the litellm note in
+  # integrations/crew-ai/python/pyproject.toml). A declared range is only honest if
+  # both ends are exercised, which is what this matrix is for: the lockfile pins a
+  # single litellm well inside the range, so the `crewai-python` job above tests
+  # neither end.
+  #
+  # The two legs are deliberately NOT equally binding:
+  #   - floor is PINNED and BLOCKING: it is the exact version this package promises
+  #     to support. Pinned means litellm itself, not the whole graph, since its own
+  #     transitive ranges still resolve at install time.
+  #   - ceiling is UNPINNED and INFORMATIONAL (continue-on-error, same precedent as
+  #     the adk-middleware 2.x leg above). Its input moves whenever litellm
+  #     publishes, so making it blocking would let an upstream release turn every
+  #     Python PR in this repo red for a reason no author here can fix. It still
+  #     reports loudly, which is what "covers the upper boundary" has to mean for a
+  #     target that drifts.
+  # Note that neither leg gates a merge until its rendered job name is added to the
+  # branch's required status checks; "blocking" above describes the intent this
+  # workflow encodes, not a setting it can apply on its own.
+  #
+  # Neither leg caches a venv: each mutates the environment after `uv sync`, so a
+  # cached venv would be a hit or a miss depending on which leg wrote it last.
+  crewai-python-litellm-boundaries:
+    name: crewai-python-litellm-${{ matrix.bound }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Both ends report independently: one red boundary must not hide the other's
+      # result, which is the whole point of testing two.
+      fail-fast: false
+      matrix:
+        include:
+          # The floor declared in pyproject.toml, pinned exactly. Below it either
+          # litellm raises on the OpenAI Responses reasoning-summary delta types
+          # this bridge reads (<= 1.67), or its openai pin cannot co-exist with the
+          # one crewai requires (1.68.0 - 1.70.2). pyproject.toml carries the full
+          # measurement.
+          - bound: floor
+            spec: "litellm==1.70.4"
+            informational: false
+          # The newest litellm inside the declared major, resolved at install time.
+          - bound: ceiling
+            spec: "litellm>=1.70.4,<2"
+            informational: true
+
+    steps:
+      - name: Checkout code
+        # id so the lockfile assertion below can gate on this step's outcome — see
+        # the comment there for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: integrations/crew-ai/python
+        run: uv sync --locked
+
+      - name: Force litellm ${{ matrix.bound }}
+        working-directory: integrations/crew-ai/python
+        # --upgrade-package so the ceiling leg actually moves off the locked
+        # version instead of reporting the already-satisfied requirement as done.
+        # `uv pip` never writes uv.lock, which is what keeps the guard step below a
+        # real assertion rather than a formality.
+        #
+        # The resolved version is ASSERTED, not just printed: a spec that silently
+        # resolved to the locked litellm would otherwise report green while testing
+        # the same version the crewai-python job already covers, which is exactly
+        # the blind spot this matrix exists to remove.
+        run: |
+          set -euo pipefail
+          # Read the locked version BEFORE forcing anything. Hand-copying it into
+          # this file would leave the ceiling guard silently toothless the next
+          # time the lockfile is bumped past it.
+          locked=$(uv run --frozen python -c "import importlib.metadata as m; print(m.version('litellm'))")
+          uv pip install --upgrade-package litellm "$LITELLM_SPEC"
+          resolved=$(uv run --no-sync python -c "import importlib.metadata as m; print(m.version('litellm'))")
+          echo "litellm locked=$locked resolved=$resolved"
+          if [ "$BOUND" = "floor" ]; then
+            expected="${LITELLM_SPEC#litellm==}"
+            if [ "$resolved" != "$expected" ]; then
+              echo "::error::floor leg expected litellm $expected but resolved $resolved"
+              exit 1
+            fi
+          elif [ "$resolved" = "$locked" ]; then
+            # A warning, NOT a failure. The ceiling leg is declared non-gating, and
+            # this condition is reached by a routine lockfile bump rather than by
+            # anything wrong with the change under test. Failing here would make the
+            # leg block merges, which is exactly what the job header rules out.
+            echo "::warning title=ceiling leg is covering nothing::It resolved the locked litellm ($locked). Raise the lockfile or the declared upper bound so this leg tests something the crewai-python job does not."
+          fi
+        env:
+          LITELLM_SPEC: ${{ matrix.spec }}
+          BOUND: ${{ matrix.bound }}
+
+      - name: Run tests (litellm ${{ matrix.bound }})
+        id: boundary-tests
+        # Only the drifting ceiling leg is allowed to fail; see the job header.
+        continue-on-error: ${{ matrix.informational }}
+        working-directory: integrations/crew-ai/python
+        run: uv run --no-sync python -m pytest tests/ -v
+
+      - name: Report ${{ matrix.bound }} result
+        if: ${{ !cancelled() && matrix.informational && steps.boundary-tests.outcome == 'failure' }}
+        run: |
+          echo "::warning title=crewai suite is red on the newest litellm 1.x::Informational leg, does not block merges. See the job summary."
+          {
+            echo "### crewai-python: suite is red against the newest litellm 1.x"
+            echo
+            echo "This leg resolves \`$LITELLM_SPEC\` at install time, so a litellm release can turn it red with no change in this repo. It does not block merges."
+            echo
+            echo "Either fix the incompatibility, or lower the declared upper bound in \`integrations/crew-ai/python/pyproject.toml\` so the range stays honest."
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          LITELLM_SPEC: ${{ matrix.spec }}
+
+      - name: Assert no lockfile was rewritten
+        # Must run when the tests FAIL: a job that rewrote a lockfile and then failed
+        # its tests would otherwise skip this step and report only the test failure,
+        # losing the signal this guard exists to produce.
+        #
+        # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
+        # when an earlier step failed, including `Checkout code` — and this step is a
+        # local `uses:`, so with no repo on disk it dies with "Can't find 'action.yml'
+        # under .../assert-lockfiles-unchanged". That lands AFTER the real error and
+        # reads as though the guard itself is broken, which is precisely the misleading
+        # signal action.yml's header argues against.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
+
+  claude-managed-agents-python:
+    name: claude-managed-agents-python
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        # id so the lockfile assertion below can gate on this step's outcome — see
+        # the comment there for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect fork PR
+        id: fork-check
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" && \
+                "$HEAD_REPO" != "$BASE_REPO" ]]; then
+            echo "prefix=fork-" >> "$GITHUB_OUTPUT"
+          else
+            echo "prefix=" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REPO: ${{ github.repository }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Load cached venv
+        id: cached-uv-dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: integrations/claude-managed-agents/python/.venv
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-claude-managed-agents-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/claude-managed-agents/python/uv.lock') }}
+
+      - name: Install dependencies
+        working-directory: integrations/claude-managed-agents/python
+        run: uv sync --locked
+
+      - name: Run tests
+        working-directory: integrations/claude-managed-agents/python
+        run: uv run --locked python -m pytest tests/ -v
+
+      - name: Assert no lockfile was rewritten
+        # Must run when the tests FAIL: a job that rewrote a lockfile and then failed
+        # its tests would otherwise skip this step and report only the test failure,
+        # losing the signal this guard exists to produce.
+        #
+        # !cancelled() rather than always(), because always() also fires on
+        # cancellation, and concurrency cancels supersede runs constantly here — each
+        # one would otherwise spend a step re-checking a job nobody is waiting on.
+        #
+        # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
+        # when an earlier step failed, including `Checkout code` — and this step is a
+        # local `uses:`, so with no repo on disk it dies with "Can't find 'action.yml'
+        # under .../assert-lockfiles-unchanged". That lands AFTER the real error and
+        # reads as though the guard itself is broken, which is precisely the misleading
+        # signal action.yml's header argues against.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
+
+  # Every job above installs with `uv sync --locked`, which already fails when a
+  # lockfile disagrees with its pyproject — but only for the packages that have a
+  # test lane. agent-spec and claude-agent-sdk ship committed lockfiles with no
+  # lane at all, which is how the drift repaired in #2313 went unnoticed. This
+  # job checks every first-party **uv** lockfile in one place, and separately
+  # asserts that no first-party package is missing one.
+  #
+  # Two limits, stated because the step name would otherwise read as full coverage:
+  #   - poetry.lock is NOT checked. Four are committed
+  #     (adk-middleware, aws-strands, and two under examples/), but every package in
+  #     scripts/release/release.config.json builds with uv, so those files are stale
+  #     leftovers rather than a build input. Deleting them is a separate change.
+  #   - a package that never committed a lockfile is invisible to `find`, because
+  #     there is no lock to be out of date. The second step below closes that.
+  #
+  # The 13 examples/ lockfiles are deliberately out of scope, and this is a known
+  # gap rather than a clean bill of health: they are demo scaffolds synced by
+  # apps/dojo/scripts/prep-dojo-everything.js, which dojo-e2e runs and which
+  # syncs non-frozen (the script is shared with local dev, where relocking is the
+  # wanted behaviour). So dojo-e2e can still rewrite a committed example lockfile
+  # in CI. Five of the 13 are stale today, which is why closing this needs its own
+  # change: freezing them as-is turns dojo-e2e red, and relocking all 13
+  # pulls in dependency churn well beyond a toolchain pin.
+  lockfiles:
+    name: lockfiles
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Verify every first-party uv lockfile matches its manifest
+        run: |
+          set -euo pipefail
+          mapfile -t locks < <(
+            find . -name uv.lock \
+              -not -path "*/node_modules/*" \
+              -not -path "*/examples/*" \
+              -not -path "*/.venv/*" \
+              | sort
+          )
+          if [ ${#locks[@]} -eq 0 ]; then
+            echo "::error::No first-party uv.lock files found — the search is wrong, not the repo"
+            exit 1
+          fi
+          failed=""
+          for lock in "${locks[@]}"; do
+            dir=$(dirname "$lock")
+            echo "=== uv lock --check $dir"
+            if ! (cd "$dir" && uv lock --check); then
+              failed="${failed} ${dir}"
+            fi
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Lockfile(s) out of date with their pyproject.toml:${failed}"
+            echo "Run \`uv lock\` in each directory and commit the result."
+            exit 1
+          fi
+          echo "All ${#locks[@]} first-party uv lockfiles match their manifests."
+
+      # The step above can only check locks that exist. A released package with no
+      # lockfile at all passes it silently — which is the state ag-ui-a2ui-toolkit is
+      # in today, so this asserts the exception list rather than trusting `find`.
+      - name: Verify no first-party package is missing a lockfile
+        run: |
+          set -euo pipefail
+          # Packages knowingly without a uv.lock. Adding one here is a decision, not
+          # a workaround: it means nothing verifies that package's dependency graph.
+          #
+          # The single entry below is a PUBLISHED package, not an internal one:
+          # sdks/python/a2ui_toolkit is `ag-ui-a2ui-toolkit`, enrolled for release as
+          # sdk-py-a2ui-toolkit with "buildSystem": "uv" (release.config.json), so it
+          # ships to PyPI and users install it. relockPythonPackage
+          # (scripts/release/prepare-release.ts) early-returns for lock-less packages,
+          # so the release path will not grow one either — this waiver is permanent
+          # until something closes it deliberately.
+          #
+          # It is smaller than it reads: that pyproject.toml declares
+          # `dependencies = []`, so `uv lock` resolves one package (itself) and the
+          # committed lock would be near-empty. Nothing is going unverified today. The
+          # exposure is forward-looking — with no lock, the FIRST dependency anyone
+          # adds arrives unlocked and invisible to the step above.
+          #
+          # Tracked in PNI-279 with the release-behaviour and empty-array consequences
+          # of closing it written down:
+          # https://linear.app/copilotkit/issue/PNI-279
+          known_missing=(
+            "./sdks/python/a2ui_toolkit"
+          )
+          mapfile -t manifests < <(
+            find . -name pyproject.toml \
+              -not -path "*/node_modules/*" \
+              -not -path "*/examples/*" \
+              -not -path "*/.venv/*" \
+              | sort
+          )
+          if [ ${#manifests[@]} -eq 0 ]; then
+            echo "::error::No first-party pyproject.toml files found — the search is wrong"
+            exit 1
+          fi
+          missing=""
+          stale_exception=""
+          for manifest in "${manifests[@]}"; do
+            dir=$(dirname "$manifest")
+            # Only a manifest that declares a distribution is a package. A pyproject.toml
+            # holding nothing but tool config (ruff, pytest) needs no lockfile, and
+            # demanding one would fail this job with the remedy "add it to known_missing"
+            # — recording a non-package as a knowingly-unlocked package.
+            if ! grep -qE '^\[(project|tool\.poetry)\]' "$manifest"; then
+              continue
+            fi
+            excepted=""
+            for known in "${known_missing[@]}"; do
+              [ "$dir" = "$known" ] && excepted="yes"
+            done
+            if [ -f "$dir/uv.lock" ]; then
+              # An exception that grew a lockfile should leave the list, or the list
+              # rots into a permanent waiver.
+              [ -n "$excepted" ] && stale_exception="${stale_exception} ${dir}"
+            elif [ -z "$excepted" ]; then
+              missing="${missing} ${dir}"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Package(s) ship no uv.lock, so nothing verifies their dependencies:${missing}"
+            echo "Run \`uv lock\` there and commit it, or add it to known_missing in this step."
+            exit 1
+          fi
+          if [ -n "$stale_exception" ]; then
+            echo "::error::These are listed as known_missing but now have a uv.lock:${stale_exception}"
+            echo "Remove them from the list in this step."
+            exit 1
+          fi
+          echo "All ${#manifests[@]} first-party package(s) accounted for."

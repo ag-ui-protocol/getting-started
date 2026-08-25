@@ -1,0 +1,10 @@
+﻿{
+  "threadId": "thread_Id_1",
+  "runId": "run_Id_1",
+  "messages": [
+    {
+      "role": "user",
+      "content": "A farmer has chickens and rabbits. There are 20 heads and 56 legs in total. How many chickens and how many rabbits are there? Show your reasoning."
+    }
+  ]
+}

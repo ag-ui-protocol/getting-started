@@ -9,8 +9,7 @@ import {
   CopilotSidebar,
   CopilotChatConfigurationProvider,
 } from "@copilotkit/react-core/v2";
-import { CopilotKit,
-useLangGraphInterrupt } from "@copilotkit/react-core";
+import { CopilotKit, useLangGraphInterrupt } from "@copilotkit/react-core";
 import { useMobileView } from "@/utils/use-mobile-view";
 import { useMobileChat } from "@/utils/use-mobile-chat";
 import { useURLParams } from "@/contexts/url-params-context";
@@ -50,15 +49,15 @@ interface Itinerary {
   experiences?: Experience[];
 }
 
-type AvailableAgents = 'flights' | 'hotels' | 'experiences' | 'supervisor'
+type AvailableAgents = "flights" | "hotels" | "experiences" | "supervisor";
 
 interface TravelAgentState {
-  experiences: Experience[],
-  flights: Flight[],
-  hotels: Hotel[],
-  itinerary: Itinerary
-  planning_step: string
-  active_agent: AvailableAgents
+  experiences: Experience[];
+  flights: Flight[];
+  hotels: Hotel[];
+  itinerary: Itinerary;
+  planning_step: string;
+  active_agent: AvailableAgents;
 }
 
 const INITIAL_STATE: TravelAgentState = {
@@ -67,14 +66,22 @@ const INITIAL_STATE: TravelAgentState = {
   flights: [],
   hotels: [],
   planning_step: "start",
-  active_agent: 'supervisor'
+  active_agent: "supervisor",
 };
 
 interface InterruptEvent<TAgent extends AvailableAgents> {
   message: string;
-  options: TAgent extends 'flights' ? Flight[] : TAgent extends 'hotels' ? Hotel[] : never,
-  recommendation: TAgent extends 'flights' ? Flight : TAgent extends 'hotels' ? Hotel : never,
-  agent: TAgent
+  options: TAgent extends "flights"
+    ? Flight[]
+    : TAgent extends "hotels"
+      ? Hotel[]
+      : never;
+  recommendation: TAgent extends "flights"
+    ? Flight
+    : TAgent extends "hotels"
+      ? Hotel
+      : never;
+  agent: TAgent;
 }
 
 function InterruptHumanInTheLoop<TAgent extends AvailableAgents>({
@@ -89,33 +96,42 @@ function InterruptHumanInTheLoop<TAgent extends AvailableAgents>({
   // Format agent name with emoji
   const formatAgentName = (agent: string) => {
     switch (agent) {
-      case 'flights': return 'Flights Agent';
-      case 'hotels': return 'Hotels Agent';
-      case 'experiences': return 'Experiences Agent';
-      default: return `${agent} Agent`;
+      case "flights":
+        return "Flights Agent";
+      case "hotels":
+        return "Hotels Agent";
+      case "experiences":
+        return "Experiences Agent";
+      default:
+        return `${agent} Agent`;
     }
   };
 
-  const handleOptionSelect = (option: any) => {
+  const handleOptionSelect = (option: unknown) => {
     resolve(JSON.stringify(option));
   };
 
   return (
     <div className="interrupt-container">
-      <p>{formatAgentName(agent)}: {message}</p>
+      <p>
+        {formatAgentName(agent)}: {message}
+      </p>
 
       <div className="interrupt-options">
         {options.map((opt, idx) => {
-          if ('airline' in opt) {
-            const isRecommended = (recommendation as Flight).airline === opt.airline;
+          if ("airline" in opt) {
+            const isRecommended =
+              (recommendation as Flight).airline === opt.airline;
             // Flight options
             return (
               <button
                 key={idx}
-                className={`option-card flight-option ${isRecommended ? 'recommended' : ''}`}
+                className={`option-card flight-option ${isRecommended ? "recommended" : ""}`}
                 onClick={() => handleOptionSelect(opt)}
               >
-                {isRecommended && <span className="recommendation-badge">⭐ Recommended</span>}
+                {isRecommended && (
+                  <span className="recommendation-badge">⭐ Recommended</span>
+                )}
                 <div className="option-header">
                   <span className="airline-name">{opt.airline}</span>
                   <span className="price">{opt.price}</span>
@@ -123,9 +139,7 @@ function InterruptHumanInTheLoop<TAgent extends AvailableAgents>({
                 <div className="route-info">
                   {opt.departure} → {opt.arrival}
                 </div>
-                <div className="duration-info">
-                  {opt.duration}
-                </div>
+                <div className="duration-info">{opt.duration}</div>
               </button>
             );
           }
@@ -135,26 +149,24 @@ function InterruptHumanInTheLoop<TAgent extends AvailableAgents>({
           return (
             <button
               key={idx}
-              className={`option-card hotel-option ${isRecommended ? 'recommended' : ''}`}
+              className={`option-card hotel-option ${isRecommended ? "recommended" : ""}`}
               onClick={() => handleOptionSelect(opt)}
             >
-              {isRecommended && <span className="recommendation-badge">⭐ Recommended</span>}
+              {isRecommended && (
+                <span className="recommendation-badge">⭐ Recommended</span>
+              )}
               <div className="option-header">
                 <span className="hotel-name">{opt.name}</span>
                 <span className="rating">{opt.rating}</span>
               </div>
-              <div className="location-info">
-                📍 {opt.location}
-              </div>
-              <div className="price-info">
-                {opt.price_per_night}
-              </div>
+              <div className="location-info">📍 {opt.location}</div>
+              <div className="price-info">{opt.price_per_night}</div>
             </button>
           );
         })}
       </div>
     </div>
-  )
+  );
 }
 
 export default function Subgraphs({ params }: SubgraphsProps) {
@@ -168,11 +180,11 @@ export default function Subgraphs({ params }: SubgraphsProps) {
     setIsChatOpen,
     isDragging,
     chatHeight,
-    handleDragStart
+    handleDragStart,
   } = useMobileChat(defaultChatHeight);
 
-  const chatTitle = 'Travel Planning Assistant';
-  const chatDescription = 'Plan your perfect trip with AI specialists';
+  const chatTitle = "Travel Planning Assistant";
+  const chatDescription = "Plan your perfect trip with AI specialists";
 
   return (
     <CopilotKit
@@ -181,101 +193,129 @@ export default function Subgraphs({ params }: SubgraphsProps) {
       agent="subgraphs"
     >
       <CopilotChatConfigurationProvider agentId="subgraphs">
-      <div className="travel-planner-container">
-        <TravelPlanner />
-        {isMobile ? (
-          <>
-            {/* Chat Toggle Button */}
-            <div className="fixed bottom-0 left-0 right-0 z-50">
-              <div className="bg-gradient-to-t from-white via-white to-transparent h-6"></div>
+        <div className="travel-planner-container">
+          <TravelPlanner />
+          {isMobile ? (
+            <>
+              {/* Chat Toggle Button */}
+              <div className="fixed bottom-0 left-0 right-0 z-50">
+                <div className="bg-gradient-to-t from-white via-white to-transparent h-6"></div>
+                <div
+                  className="bg-white border-t border-gray-200 px-4 py-3 flex items-center justify-between cursor-pointer shadow-lg"
+                  onClick={() => {
+                    if (!isChatOpen) {
+                      setChatHeight(defaultChatHeight);
+                    }
+                    setIsChatOpen(!isChatOpen);
+                  }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div>
+                      <div className="font-medium text-gray-900">
+                        {chatTitle}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        {chatDescription}
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    className={`transform transition-transform duration-300 ${isChatOpen ? "rotate-180" : ""}`}
+                  >
+                    <svg
+                      className="w-6 h-6 text-gray-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 15l7-7 7 7"
+                      />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pull-Up Chat Container */}
               <div
-                className="bg-white border-t border-gray-200 px-4 py-3 flex items-center justify-between cursor-pointer shadow-lg"
-                onClick={() => {
-                  if (!isChatOpen) {
-                    setChatHeight(defaultChatHeight);
-                  }
-                  setIsChatOpen(!isChatOpen);
+                className={`fixed inset-x-0 bottom-0 z-40 bg-white rounded-t-2xl shadow-[0px_0px_20px_0px_rgba(0,0,0,0.15)] transform transition-all duration-300 ease-in-out flex flex-col ${
+                  isChatOpen ? "translate-y-0" : "translate-y-full"
+                } ${isDragging ? "transition-none" : ""}`}
+                style={{
+                  height: `${chatHeight}vh`,
+                  paddingBottom: "env(safe-area-inset-bottom)",
                 }}
               >
-                <div className="flex items-center gap-3">
-                  <div>
-                    <div className="font-medium text-gray-900">{chatTitle}</div>
-                    <div className="text-sm text-gray-500">{chatDescription}</div>
+                {/* Drag Handle Bar */}
+                <div
+                  className="flex justify-center pt-3 pb-2 flex-shrink-0 cursor-grab active:cursor-grabbing"
+                  onMouseDown={handleDragStart}
+                >
+                  <div className="w-12 h-1 bg-gray-400 rounded-full hover:bg-gray-500 transition-colors"></div>
+                </div>
+
+                {/* Chat Header */}
+                <div className="px-4 py-3 border-b border-gray-100 flex-shrink-0">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <h3 className="font-semibold text-gray-900">
+                        {chatTitle}
+                      </h3>
+                    </div>
+                    <button
+                      onClick={() => setIsChatOpen(false)}
+                      className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                    >
+                      <svg
+                        className="w-5 h-5 text-gray-500"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                    </button>
                   </div>
                 </div>
-                <div className={`transform transition-transform duration-300 ${isChatOpen ? 'rotate-180' : ''}`}>
-                  <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                  </svg>
-                </div>
-              </div>
-            </div>
 
-            {/* Pull-Up Chat Container */}
-            <div
-              className={`fixed inset-x-0 bottom-0 z-40 bg-white rounded-t-2xl shadow-[0px_0px_20px_0px_rgba(0,0,0,0.15)] transform transition-all duration-300 ease-in-out flex flex-col ${
-                isChatOpen ? 'translate-y-0' : 'translate-y-full'
-              } ${isDragging ? 'transition-none' : ''}`}
-              style={{
-                height: `${chatHeight}vh`,
-                paddingBottom: 'env(safe-area-inset-bottom)'
-              }}
-            >
-              {/* Drag Handle Bar */}
-              <div
-                className="flex justify-center pt-3 pb-2 flex-shrink-0 cursor-grab active:cursor-grabbing"
-                onMouseDown={handleDragStart}
-              >
-                <div className="w-12 h-1 bg-gray-400 rounded-full hover:bg-gray-500 transition-colors"></div>
-              </div>
-
-              {/* Chat Header */}
-              <div className="px-4 py-3 border-b border-gray-100 flex-shrink-0">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <h3 className="font-semibold text-gray-900">{chatTitle}</h3>
-                  </div>
-                  <button
-                    onClick={() => setIsChatOpen(false)}
-                    className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-                  >
-                    <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+                {/* Chat Content */}
+                <div className="flex-1 flex flex-col min-h-0 overflow-hidden pb-16">
+                  <CopilotSidebar
+                    agentId="subgraphs"
+                    defaultOpen={chatDefaultOpen}
+                    labels={{
+                      modalHeaderTitle: chatTitle,
+                    }}
+                  />
                 </div>
               </div>
 
-              {/* Chat Content */}
-              <div className="flex-1 flex flex-col min-h-0 overflow-hidden pb-16">
-                <CopilotSidebar
-                  agentId="subgraphs"
-                  defaultOpen={chatDefaultOpen}
-                  labels={{
-                    modalHeaderTitle: chatTitle,
-                  }}
+              {/* Backdrop */}
+              {isChatOpen && (
+                <div
+                  className="fixed inset-0 z-30"
+                  onClick={() => setIsChatOpen(false)}
                 />
-              </div>
-            </div>
-
-            {/* Backdrop */}
-            {isChatOpen && (
-              <div
-                className="fixed inset-0 z-30"
-                onClick={() => setIsChatOpen(false)}
-              />
-            )}
-          </>
-        ) : (
-          <CopilotSidebar
-            agentId="subgraphs"
-            defaultOpen={chatDefaultOpen}
-            labels={{
-              modalHeaderTitle: chatTitle,
-            }}
-          />
-        )}
-      </div>
+              )}
+            </>
+          ) : (
+            <CopilotSidebar
+              agentId="subgraphs"
+              defaultOpen={chatDefaultOpen}
+              labels={{
+                modalHeaderTitle: chatTitle,
+              }}
+            />
+          )}
+        </div>
       </CopilotChatConfigurationProvider>
     </CopilotKit>
   );
@@ -313,10 +353,16 @@ function TravelPlanner() {
     if (!agentState) {
       agent.setState(INITIAL_STATE);
     }
+    // DEFERRED (PNI-307): mount-only by design — seeds the travel state once.
+    // Adding `agent`/`agentState` would re-seed INITIAL_STATE if the agent
+    // state ever becomes falsy later within the same mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useLangGraphInterrupt({
-    render: ({ event, resolve }) => <InterruptHumanInTheLoop event={event} resolve={resolve} />,
+    render: ({ event, resolve }) => (
+      <InterruptHumanInTheLoop event={event} resolve={resolve} />
+    ),
   });
 
   // Current itinerary strip
@@ -336,7 +382,9 @@ function TravelPlanner() {
           {selectedFlight && (
             <div className="itinerary-item" data-testid="selected-flight">
               <span className="item-icon">✈️</span>
-              <span>{selectedFlight.airline} - {selectedFlight.price}</span>
+              <span>
+                {selectedFlight.airline} - {selectedFlight.price}
+              </span>
             </div>
           )}
           {selectedHotel && (
@@ -348,7 +396,9 @@ function TravelPlanner() {
           {hasExperiences && (
             <div className="itinerary-item">
               <span className="item-icon">🎯</span>
-              <span>{agentState?.experiences?.length ?? 0} experiences planned</span>
+              <span>
+                {agentState?.experiences?.length ?? 0} experiences planned
+              </span>
             </div>
           )}
         </div>
@@ -358,31 +408,43 @@ function TravelPlanner() {
 
   // Compact agent status - read active_agent from state instead of nodeName
   const AgentStatus = () => {
-    const activeAgent = agentState?.active_agent || 'supervisor';
+    const activeAgent = agentState?.active_agent || "supervisor";
 
     return (
       <div className="agent-status">
         <div className="status-label">Active Agent:</div>
         <div className="agent-indicators">
-          <div className={`agent-indicator ${activeAgent === 'supervisor' ? 'active' : ''}`} data-testid="supervisor-indicator">
+          <div
+            className={`agent-indicator ${activeAgent === "supervisor" ? "active" : ""}`}
+            data-testid="supervisor-indicator"
+          >
             <span>👨‍💼</span>
             <span>Supervisor</span>
           </div>
-          <div className={`agent-indicator ${activeAgent === 'flights' ? 'active' : ''}`} data-testid="flights-agent-indicator">
+          <div
+            className={`agent-indicator ${activeAgent === "flights" ? "active" : ""}`}
+            data-testid="flights-agent-indicator"
+          >
             <span>✈️</span>
             <span>Flights</span>
           </div>
-          <div className={`agent-indicator ${activeAgent === 'hotels' ? 'active' : ''}`} data-testid="hotels-agent-indicator">
+          <div
+            className={`agent-indicator ${activeAgent === "hotels" ? "active" : ""}`}
+            data-testid="hotels-agent-indicator"
+          >
             <span>🏨</span>
             <span>Hotels</span>
           </div>
-          <div className={`agent-indicator ${activeAgent === 'experiences' ? 'active' : ''}`} data-testid="experiences-agent-indicator">
+          <div
+            className={`agent-indicator ${activeAgent === "experiences" ? "active" : ""}`}
+            data-testid="experiences-agent-indicator"
+          >
             <span>🎯</span>
             <span>Experiences</span>
           </div>
         </div>
       </div>
-    )
+    );
   };
 
   // Travel details component
@@ -395,7 +457,10 @@ function TravelPlanner() {
             agentState!.flights.map((flight, index) => (
               <div key={index} className="detail-item">
                 <strong>{flight.airline}:</strong>
-                <span>{flight.departure} → {flight.arrival} ({flight.duration}) - {flight.price}</span>
+                <span>
+                  {flight.departure} → {flight.arrival} ({flight.duration}) -{" "}
+                  {flight.price}
+                </span>
               </div>
             ))
           ) : (
@@ -403,7 +468,8 @@ function TravelPlanner() {
           )}
           {agentState?.itinerary?.flight && (
             <div className="detail-tips">
-              <strong>Selected:</strong> {agentState.itinerary.flight.airline} - {agentState.itinerary.flight.price}
+              <strong>Selected:</strong> {agentState.itinerary.flight.airline} -{" "}
+              {agentState.itinerary.flight.price}
             </div>
           )}
         </div>
@@ -416,7 +482,9 @@ function TravelPlanner() {
             agentState!.hotels.map((hotel, index) => (
               <div key={index} className="detail-item">
                 <strong>{hotel.name}:</strong>
-                <span>{hotel.location} - {hotel.price_per_night} ({hotel.rating})</span>
+                <span>
+                  {hotel.location} - {hotel.price_per_night} ({hotel.rating})
+                </span>
               </div>
             ))
           ) : (
@@ -424,7 +492,8 @@ function TravelPlanner() {
           )}
           {agentState?.itinerary?.hotel && (
             <div className="detail-tips">
-              <strong>Selected:</strong> {agentState.itinerary.hotel.name} - {agentState.itinerary.hotel.price_per_night}
+              <strong>Selected:</strong> {agentState.itinerary.hotel.name} -{" "}
+              {agentState.itinerary.hotel.price_per_night}
             </div>
           )}
         </div>
@@ -438,8 +507,12 @@ function TravelPlanner() {
               <div key={index} className="activity-item">
                 <div className="activity-name">{experience.name}</div>
                 <div className="activity-category">{experience.type}</div>
-                <div className="activity-description">{experience.description}</div>
-                <div className="activity-meta">Location: {experience.location}</div>
+                <div className="activity-description">
+                  {experience.description}
+                </div>
+                <div className="activity-meta">
+                  Location: {experience.location}
+                </div>
               </div>
             ))
           ) : (
@@ -452,6 +525,9 @@ function TravelPlanner() {
 
   return (
     <div className="travel-content">
+      {/* NOTE (PNI-272): these three stay defined inside TravelPlanner. Hoisting
+          them to module scope gives React stable component identities, which
+          stops the remount-per-render these currently do — a behaviour change. */}
       <ItineraryStrip />
       <AgentStatus />
       <TravelDetails />

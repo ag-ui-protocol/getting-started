@@ -1,0 +1,46 @@
+﻿{
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "What are some fun things to do near me?"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "GetUserLocation",
+          "arguments": {},
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        }
+      ],
+      "messageId": "call_Id_1"
+    },
+    {
+      "role": "tool",
+      "contents": [
+        {
+          "$type": "functionResult",
+          "result": "\u0022Amsterdam, Netherlands (52.37\u00B0N, 4.90\u00B0E)\u0022",
+          "callId": "call_Id_1"
+        }
+      ],
+      "messageId": "call_Id_1"
+    }
+  ],
+  "options": {
+    "tools": [
+      {
+        "type": "ApprovalRequiredAIFunction",
+        "name": "GetUserLocation",
+        "description": ""
+      }
+    ]
+  }
+}

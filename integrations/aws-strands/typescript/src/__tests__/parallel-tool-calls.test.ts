@@ -7,12 +7,18 @@
  * Scenario B – New tool calls must not be suppressed by a pending tool result
  *              on continuation turns.
  * Scenario C – Backend tool results must not leak after halt flag is set.
+ * Scenario D – A stopStreamingAfterResult halt must drain sibling parallel
+ *              tool calls (emit TOOL_CALL_END) before RUN_FINISHED, so the
+ *              AG-UI client verifier does not reject with INCOMPLETE_STREAM.
  */
 
 import { describe, it, expect } from "vitest";
 import { ToolUseBlock, TextBlock, ToolResultBlock } from "@strands-agents/sdk";
 import type { AgentStreamEvent } from "@strands-agents/sdk";
 import { EventType } from "@ag-ui/core";
+import type { BaseEvent } from "@ag-ui/core";
+import { verifyEvents } from "@ag-ui/client";
+import { from, lastValueFrom, toArray } from "rxjs";
 
 import type { StrandsAgentConfig } from "../config";
 import {
@@ -257,5 +263,93 @@ describe("No backend result leak after halt", () => {
     expect(resultIds).toContain("st1");
     expect(resultIds).not.toContain("st2");
     expect(resultEvents).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario D – stopStreamingAfterResult halt drains stranded sibling calls
+// ---------------------------------------------------------------------------
+
+describe("stopStreamingAfterResult halt drains stranded parallel tool calls", () => {
+  // Repro of the showcase "Chain tools" crash: gpt-4o fans out several
+  // parallel tool calls in one turn; the streaming model opens TOOL_CALL_START
+  // for each, but the stopStreamingAfterResult tool (get_weather) returns and
+  // halts the stream before the siblings reach their contentBlockStop. Without
+  // a drain those siblings stay active at RUN_FINISHED and the client verifier
+  // rejects with INCOMPLETE_STREAM.
+  const config: StrandsAgentConfig = {
+    toolBehaviors: {
+      get_weather: { stopStreamingAfterResult: true },
+    },
+  };
+
+  // Interleaved streaming blocks: flights + dice open and emit START via their
+  // first toolUseInputDelta but never receive a blockStop; only get_weather
+  // closes (blockStop) and then returns its result, halting the stream.
+  function haltingStream(): AgentStreamEvent[] {
+    const weatherResult = new ToolResultBlock({
+      toolUseId: "st-weather",
+      status: "success",
+      content: [new TextBlock(JSON.stringify({ temp: 72 }))],
+    });
+    return [
+      stream.toolUseStart("st-flights", "get_flights"),
+      stream.toolUseDelta("{}"),
+      stream.toolUseStart("st-dice", "roll_dice"),
+      stream.toolUseDelta("{}"),
+      stream.toolUseStart("st-weather", "get_weather"),
+      stream.toolUseDelta("{}"),
+      stream.blockStop(),
+      {
+        type: "afterToolCallEvent",
+        toolUse: { toolUseId: "st-weather", name: "get_weather", input: {} },
+        result: weatherResult,
+      } as unknown as AgentStreamEvent,
+    ];
+  }
+
+  it("emits a TOOL_CALL_END for every started call, all before RUN_FINISHED", async () => {
+    const agent = scriptedStrandsAgent(haltingStream(), { config });
+    const events = await collect(agent);
+
+    const startIds = (
+      events.filter((e) => e.type === EventType.TOOL_CALL_START) as unknown as {
+        toolCallId: string;
+      }[]
+    ).map((e) => e.toolCallId);
+    const endIds = (
+      events.filter((e) => e.type === EventType.TOOL_CALL_END) as unknown as {
+        toolCallId: string;
+      }[]
+    ).map((e) => e.toolCallId);
+
+    // All three siblings started; all three must end.
+    expect(new Set(startIds)).toEqual(
+      new Set(["st-flights", "st-dice", "st-weather"]),
+    );
+    expect(new Set(endIds)).toEqual(new Set(startIds));
+
+    // Every TOOL_CALL_END precedes RUN_FINISHED (no still-active calls).
+    const runFinishedIdx = events.findIndex(
+      (e) => e.type === EventType.RUN_FINISHED,
+    );
+    expect(runFinishedIdx).toBeGreaterThanOrEqual(0);
+    const lastEndIdx = events.reduce(
+      (acc, e, i) => (e.type === EventType.TOOL_CALL_END ? i : acc),
+      -1,
+    );
+    expect(lastEndIdx).toBeLessThan(runFinishedIdx);
+  });
+
+  it("the AG-UI client verifier accepts the stream", async () => {
+    const agent = scriptedStrandsAgent(haltingStream(), { config });
+    const events = await collect(agent);
+
+    // verifyEvents throws (INCOMPLETE_STREAM) on RUN_FINISHED with active tool
+    // calls. lastValueFrom rejects if the operator errors.
+    const verified = await lastValueFrom(
+      from(events as BaseEvent[]).pipe(verifyEvents(), toArray()),
+    );
+    expect(verified.length).toBe(events.length);
   });
 });

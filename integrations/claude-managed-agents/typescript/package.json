@@ -1,0 +1,66 @@
+{
+  "name": "@ag-ui/claude-managed-agents",
+  "version": "0.0.1",
+  "description": "AG-UI integration for Claude Managed Agents (Anthropic hosted agent sessions)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ag-ui-protocol/ag-ui.git"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20.3.0"
+  },
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist/**",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "dev:examples": "tsx --watch examples/server.ts",
+    "setup:examples": "tsx examples/setup.ts",
+    "clean": "git clean -fdX --exclude=\"!.env\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:exports": "publint --strict && attw --pack",
+    "link:global": "pnpm link --global",
+    "unlink:global": "pnpm unlink --global"
+  },
+  "dependencies": {
+    "rxjs": "7.8.1"
+  },
+  "peerDependencies": {
+    "@ag-ui/core": ">=0.0.42",
+    "@ag-ui/client": ">=0.0.42",
+    "@anthropic-ai/sdk": ">=0.109.0"
+  },
+  "devDependencies": {
+    "@ag-ui/core": "workspace:*",
+    "@ag-ui/client": "workspace:*",
+    "@ag-ui/encoder": "workspace:*",
+    "@anthropic-ai/sdk": "^0.113.0",
+    "@types/node": "^20.11.19",
+    "publint": "^0.3.12",
+    "@arethetypeswrong/cli": "^0.17.4",
+    "tsx": "^4.20.6",
+    "vitest": "^4.0.18",
+    "tsdown": "^0.20.1",
+    "typescript": "^5.3.3"
+  },
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  }
+}

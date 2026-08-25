@@ -1,6 +1,11 @@
 import { EventType } from "@ag-ui/client";
 import { MastraAgent } from "../mastra";
-import { FakeLocalAgent, collectEvents, collectError, makeInput } from "./helpers";
+import {
+  FakeLocalAgent,
+  collectEvents,
+  collectError,
+  makeInput,
+} from "./helpers";
 
 /**
  * These tests lock in the contract between the @ag-ui/mastra adapter and
@@ -27,7 +32,17 @@ class StrictMemory {
   workingMemoryValue: string | undefined = undefined;
   getThreadByIdCalls: Array<{ threadId: string; resourceId?: string }> = [];
   saveThreadCalls: Array<{ thread: any }> = [];
-  getWorkingMemoryCalls: Array<{ threadId?: string; resourceId?: string; memoryConfig?: any }> = [];
+  getWorkingMemoryCalls: Array<{
+    threadId?: string;
+    resourceId?: string;
+    memoryConfig?: any;
+  }> = [];
+  updateWorkingMemoryCalls: Array<{
+    threadId?: string;
+    resourceId?: string;
+    workingMemory: string;
+    memoryConfig?: any;
+  }> = [];
 
   async getThreadById(args: { threadId: string; resourceId?: string }) {
     this.getThreadByIdCalls.push(args);
@@ -52,7 +67,11 @@ class StrictMemory {
     this.threads.set(args.thread.id, args.thread);
   }
 
-  async getWorkingMemory(opts: { threadId?: string; resourceId?: string; memoryConfig?: any }): Promise<string | undefined> {
+  async getWorkingMemory(opts: {
+    threadId?: string;
+    resourceId?: string;
+    memoryConfig?: any;
+  }): Promise<string | undefined> {
     this.getWorkingMemoryCalls.push(opts);
     // Mirror Mastra's real runtime: reject falsy resourceId the same way
     // getThreadById / saveThread do. Without this, a silent no-op would
@@ -66,10 +85,27 @@ class StrictMemory {
     }
     return this.workingMemoryValue;
   }
+
+  // The input.state -> working-memory sync writes through here (resource store).
+  // Mirror Mastra: reject a falsy resourceId the same way the read path does.
+  async updateWorkingMemory(args: {
+    threadId?: string;
+    resourceId?: string;
+    workingMemory: string;
+    memoryConfig?: any;
+  }): Promise<void> {
+    this.updateWorkingMemoryCalls.push(args);
+    if (!args.resourceId) {
+      const err = new Error("AGENT_MEMORY_MISSING_RESOURCE_ID");
+      (err as any).code = "AGENT_MEMORY_MISSING_RESOURCE_ID";
+      throw err;
+    }
+    this.workingMemoryValue = args.workingMemory;
+  }
 }
 
 describe("resourceId is always plumbed to Mastra Memory in the working-memory sync block", () => {
-  it("passes resourceId to both getThreadById and saveThread when syncing input.state", async () => {
+  it("passes resourceId to updateWorkingMemory when syncing input.state", async () => {
     const memory = new StrictMemory();
 
     // This mirrors the production flow:
@@ -77,75 +113,32 @@ describe("resourceId is always plumbed to Mastra Memory in the working-memory sy
     // The adapter constructs the agent with resourceId stored on `this`.
     const agent = new MastraAgent({
       agentId: "test-agent",
-      agent: new FakeLocalAgent({ memory: memory as any, streamChunks: [] }) as any,
+      agent: new FakeLocalAgent({
+        memory: memory as any,
+        streamChunks: [],
+      }) as any,
       resourceId: "resource-1",
     });
 
-    // input.state triggers the getThreadById -> saveThread path inside
-    // the "Sync AG-UI input state into Mastra's working memory" block in
-    // mastra.ts.
+    // input.state triggers the "Sync AG-UI input state into Mastra's working
+    // memory" block, which writes through memory.updateWorkingMemory (the
+    // resource-scoped store), forwarding resourceId. Without it Mastra's real
+    // Memory throws AGENT_MEMORY_MISSING_RESOURCE_ID.
     const events = await collectEvents(
       agent,
       makeInput({ state: { userName: "Alice" } }),
     );
 
-    // The adapter must have called getThreadById with resourceId.
-    expect(memory.getThreadByIdCalls.length).toBeGreaterThan(0);
-    for (const call of memory.getThreadByIdCalls) {
+    expect(memory.updateWorkingMemoryCalls.length).toBeGreaterThan(0);
+    for (const call of memory.updateWorkingMemoryCalls) {
       expect(call.resourceId).toBe("resource-1");
     }
+    // The client state is written to working memory verbatim (merged over the
+    // empty existing store).
+    expect(
+      JSON.parse(memory.updateWorkingMemoryCalls.at(-1)!.workingMemory),
+    ).toEqual({ userName: "Alice" });
 
-    // The adapter must also forward resourceId on the saveThread call.
-    // Without it, Mastra's real Memory.saveThread throws
-    // AGENT_MEMORY_MISSING_RESOURCE_ID.
-    expect(memory.saveThreadCalls.length).toBeGreaterThan(0);
-    for (const call of memory.saveThreadCalls) {
-      expect(call.thread.resourceId).toBe("resource-1");
-    }
-
-    // And the run should complete normally.
-    expect(events.some((e) => e.type === EventType.RUN_FINISHED)).toBe(true);
-  });
-
-  it("overrides a stale/missing resourceId on a thread returned from storage before saveThread", async () => {
-    // Pathological but load-bearing scenario: storage returns a thread whose
-    // `resourceId` is missing or stale (e.g. migrated data, foreign writer).
-    // The adapter's saveThread must NOT blindly persist the stale value via
-    // `...thread` spread — it must overwrite with the run's authoritative
-    // resourceId so downstream Mastra Memory.saveThread does not reject it
-    // and so ownership is normalized.
-    const memory = new StrictMemory();
-    memory.threads.set("thread-1", {
-      id: "thread-1",
-      title: "",
-      metadata: {},
-      // Stale / incorrect ownership: thread persisted without a resourceId
-      // (or with the wrong one). A naive `...thread` spread would carry this
-      // undefined through to saveThread and trip AGENT_MEMORY_MISSING_RESOURCE_ID.
-      resourceId: undefined,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    const agent = new MastraAgent({
-      agentId: "test-agent",
-      agent: new FakeLocalAgent({ memory: memory as any, streamChunks: [] }) as any,
-      resourceId: "resource-1",
-    });
-
-    const events = await collectEvents(
-      agent,
-      makeInput({ state: { userName: "Alice" } }),
-    );
-
-    // saveThread must have been called with resourceId = "resource-1",
-    // overriding the stale undefined on the retrieved thread.
-    expect(memory.saveThreadCalls.length).toBeGreaterThan(0);
-    for (const call of memory.saveThreadCalls) {
-      expect(call.thread.resourceId).toBe("resource-1");
-    }
-
-    // Run completes successfully because saveThread got a valid resourceId.
     expect(events.some((e) => e.type === EventType.RUN_FINISHED)).toBe(true);
   });
 
@@ -153,8 +146,8 @@ describe("resourceId is always plumbed to Mastra Memory in the working-memory sy
     // Red harness: construct an agent whose `this.resourceId` is the empty
     // string. The adapter uses `this.resourceId ?? input.threadId`, which
     // only falls back for null/undefined — empty-string passes through as
-    // the real resourceId. StrictMemory rejects it, surfacing the exact
-    // upstream sentinel a real Mastra deployment would.
+    // the real resourceId. StrictMemory rejects it on updateWorkingMemory,
+    // surfacing the exact upstream sentinel a real Mastra deployment would.
     //
     // This proves the harness CAN fail — so the green result in the first
     // test is meaningful, not a no-op. If the adapter ever stopped
@@ -163,7 +156,10 @@ describe("resourceId is always plumbed to Mastra Memory in the working-memory sy
     const memory = new StrictMemory();
     const agent = new MastraAgent({
       agentId: "test-agent",
-      agent: new FakeLocalAgent({ memory: memory as any, streamChunks: [] }) as any,
+      agent: new FakeLocalAgent({
+        memory: memory as any,
+        streamChunks: [],
+      }) as any,
       resourceId: "",
     });
 
@@ -173,9 +169,9 @@ describe("resourceId is always plumbed to Mastra Memory in the working-memory sy
     );
 
     expect(error.message).toContain("AGENT_MEMORY_MISSING_RESOURCE_ID");
-    // Confirm the failure originated at the first memory boundary.
-    expect(memory.getThreadByIdCalls.length).toBeGreaterThan(0);
-    expect(memory.getThreadByIdCalls[0].resourceId).toBe("");
+    // Confirm the failure originated at the working-memory sync boundary.
+    expect(memory.updateWorkingMemoryCalls.length).toBeGreaterThan(0);
+    expect(memory.updateWorkingMemoryCalls[0].resourceId).toBe("");
   });
 
   it("forwards resourceId to getWorkingMemory on run completion", async () => {
@@ -192,7 +188,10 @@ describe("resourceId is always plumbed to Mastra Memory in the working-memory sy
 
     const agent = new MastraAgent({
       agentId: "test-agent",
-      agent: new FakeLocalAgent({ memory: memory as any, streamChunks: [] }) as any,
+      agent: new FakeLocalAgent({
+        memory: memory as any,
+        streamChunks: [],
+      }) as any,
       resourceId: "resource-1",
     });
 
@@ -227,7 +226,10 @@ describe("resourceId is always plumbed to Mastra Memory in the working-memory sy
     // Construct WITHOUT resourceId so the fallback path is exercised.
     const agent = new MastraAgent({
       agentId: "test-agent",
-      agent: new FakeLocalAgent({ memory: memory as any, streamChunks: [] }) as any,
+      agent: new FakeLocalAgent({
+        memory: memory as any,
+        streamChunks: [],
+      }) as any,
     });
 
     const events = await collectEvents(

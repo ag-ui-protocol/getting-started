@@ -24,7 +24,11 @@ def prepare_wayflow_agent_input(input_data: RunAgentInput) -> Dict[str, Any]:
             case "assistant":
                 wm = Message(
                     message_type=MessageType.AGENT,
-                    content=m["content"],
+                    # .get: content is optional on an assistant message and is absent
+                    # from the dump when unset, not present as None. The system/user/
+                    # tool branches keep [] because content is required there, so a
+                    # missing key is a real error rather than an empty turn.
+                    content=m.get("content"),
                     tool_requests=[
                         ToolRequest(
                             name=tc["function"]["name"],

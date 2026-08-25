@@ -1,0 +1,48 @@
+﻿[
+  {
+    "role": "user",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "Please delete the file report-draft.txt"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "toolApprovalRequest",
+        "toolCall": {
+          "$type": "functionCall",
+          "name": "delete_file",
+          "arguments": {
+            "filename": "report-draft.txt"
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        },
+        "requestId": "ficc_Id_1"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "contents": [
+      {
+        "$type": "toolApprovalResponse",
+        "approved": true,
+        "toolCall": {
+          "$type": "functionCall",
+          "name": "delete_file",
+          "arguments": {
+            "filename": "report-draft.txt"
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        },
+        "requestId": "ficc_Id_1"
+      }
+    ]
+  }
+]

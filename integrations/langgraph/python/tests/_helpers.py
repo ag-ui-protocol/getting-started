@@ -14,11 +14,12 @@ from ag_ui.core import EventType
 from ag_ui_langgraph.agent import LangGraphAgent
 
 
-def make_agent(subgraph_names: Optional[Iterable[str]] = None) -> LangGraphAgent:
+def make_agent(subgraph_names: Optional[Iterable[str]] = None, **agent_kwargs) -> LangGraphAgent:
     """Return a ``LangGraphAgent`` backed by a mock graph; each name in
     ``subgraph_names`` becomes a node whose ``bound`` is a
     ``CompiledStateGraph`` mock (how the agent detects subgraphs at
-    construction)."""
+    construction). Extra keyword arguments are forwarded to ``LangGraphAgent``
+    (e.g. ``emit_interrupt_outcome=True``)."""
     graph = MagicMock(spec=CompiledStateGraph)
     graph.config_specs = []
     nodes = {}
@@ -28,7 +29,7 @@ def make_agent(subgraph_names: Optional[Iterable[str]] = None) -> LangGraphAgent
         node.bound = MagicMock(spec=CompiledStateGraph)
         nodes[name] = node
     graph.nodes = nodes
-    return LangGraphAgent(name="test", graph=graph)
+    return LangGraphAgent(name="test", graph=graph, **agent_kwargs)
 
 
 def _record_dispatch(agent: LangGraphAgent):

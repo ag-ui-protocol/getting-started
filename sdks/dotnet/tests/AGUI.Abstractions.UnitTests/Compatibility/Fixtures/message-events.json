@@ -1,0 +1,50 @@
+[
+  {
+    "type": "TEXT_MESSAGE_START",
+    "timestamp": 1234567890,
+    "messageId": "msg-1",
+    "role": "assistant"
+  },
+  {
+    "type": "TEXT_MESSAGE_START",
+    "messageId": "msg-1",
+    "role": "assistant"
+  },
+  {
+    "type": "TEXT_MESSAGE_START",
+    "messageId": "test-msg",
+    "role": "user"
+  },
+  {
+    "type": "TEXT_MESSAGE_START",
+    "messageId": "test-msg-developer",
+    "role": "developer"
+  },
+  {
+    "type": "TEXT_MESSAGE_START",
+    "messageId": "test-msg-system",
+    "role": "system"
+  },
+  {
+    "type": "TEXT_MESSAGE_START",
+    "messageId": "test-msg-named",
+    "role": "assistant",
+    "name": "TestAgent"
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "timestamp": 1234567890,
+    "messageId": "msg-1",
+    "delta": "Hello, how can I help you today?"
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg-1",
+    "delta": "Special chars: \ud83d\ude80 \u00f1 \u20ac \ud83d\ude0a \n\t\"'\\\\"
+  },
+  {
+    "type": "TEXT_MESSAGE_END",
+    "timestamp": 1234567890,
+    "messageId": "msg-1"
+  }
+]

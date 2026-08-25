@@ -7,6 +7,7 @@ on:
       - "sdks/typescript/**"
       - "typescript-sdk/**"
       - "integrations/**"
+      - "middlewares/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
@@ -18,6 +19,7 @@ on:
       - "sdks/typescript/**"
       - "typescript-sdk/**"
       - "integrations/**"
+      - "middlewares/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
@@ -33,40 +35,37 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
       - name: Detect fork PR
         id: fork-check
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" && \
-                "${GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME}" != "${{ github.repository }}" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && \
+                "$PR_HEAD_REPO" != "$GITHUB_REPOSITORY" ]]; then
             echo "prefix=fork-" >> "$GITHUB_OUTPUT"
           else
             echo "prefix=" >> "$GITHUB_OUTPUT"
           fi
         env:
-          GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+          # Passed via env rather than interpolated into the script: a fork's repo
+          # name is attacker-controlled text. GITHUB_EVENT_NAME and
+          # GITHUB_REPOSITORY are Actions built-ins, so nothing is expanded here.
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: "22"
-
-      - name: Install protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # v3.0.0
-        with:
-          version: "25.x"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          node-version-file: ".node-version"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
         with:
           version: 10.33.4
 
       - name: Setup pnpm cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -78,6 +77,12 @@ jobs:
 
       - name: Test Build
         run: pnpm run build
+
+      # A verification build must not rewrite tracked files (PNI-303): the proto
+      # generator is pinned via config.protocVersion and tsdown's exports
+      # rewriting is committed in canonical order, so any drift here is a bug.
+      - name: Verify build leaves the worktree clean
+        run: git diff --exit-code
 
       - name: Run tests
         run: pnpm run test

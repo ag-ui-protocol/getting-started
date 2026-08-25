@@ -1,0 +1,60 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- NuGet audit advisories (NU1901-NU1904) are surfaced as warnings but must not
+         fail the build: a newly-published advisory against a transitive dependency
+         would otherwise turn a previously-green build red with no code change. The
+         warnings stay visible in build output so the signal isn't lost. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);NU5128;CS8002;CS1591</NoWarn>
+    <TargetFrameworksCore>net10.0;net9.0;net8.0</TargetFrameworksCore>
+    <TargetFrameworks>$(TargetFrameworksCore);netstandard2.0;net472</TargetFrameworks>
+    <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
+    <IsPackable>false</IsPackable>
+    <IsPackable Condition="'$(MSBuildProjectName)' == 'AGUI.Abstractions' Or '$(MSBuildProjectName)' == 'AGUI.Formatting' Or '$(MSBuildProjectName)' == 'AGUI.Protobuf' Or '$(MSBuildProjectName)' == 'AGUI.Client' Or '$(MSBuildProjectName)' == 'AGUI.Server'">true</IsPackable>
+    <!-- Public members should not use oblivious types. Not done with all nullable annotations. -->
+    <NoWarn>$(NoWarn);RS0041</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IsPackable)' == 'true'">
+    <VersionPrefix Condition="'$(VersionPrefix)' == ''">0.0.5</VersionPrefix>
+    <Authors>AG-UI Protocol</Authors>
+    <Company>AG-UI Protocol</Company>
+    <Product>AG-UI .NET SDK</Product>
+    <Copyright>Copyright (c) AG-UI Protocol 2025</Copyright>
+    <PackageProjectUrl>https://github.com/ag-ui-protocol/ag-ui</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ag-ui-protocol/ag-ui</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReleaseNotes>Initial preview release of the AG-UI .NET SDK.</PackageReleaseNotes>
+    <PackageTags>ag-ui;agent;ai;llm;protocol</PackageTags>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <Deterministic>true</Deterministic>
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)AGUI.snk</AssemblyOriginatorKeyFile>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
+    <None Include="$(MSBuildThisFileDirectory)PACKAGE.md" Pack="true" PackagePath="\README.md" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\docs\logo\AG-UI logo_dark.png" Pack="true" PackagePath="\icon.png" />
+  </ItemGroup>
+
+  <PropertyGroup Condition=" '$(TargetFramework)' == 'netstandard2.0' OR '$(TargetFramework)' == 'net472' ">
+    <NoWarn>$(NoWarn);nullable</NoWarn>
+  </PropertyGroup>
+</Project>

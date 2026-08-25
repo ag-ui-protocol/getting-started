@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "Step04_HumanInLoop.Server": {
+      "commandName": "Project",
+      "applicationUrl": "http://localhost:5004"
+    }
+  }
+}

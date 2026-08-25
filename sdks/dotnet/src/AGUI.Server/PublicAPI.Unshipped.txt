@@ -1,0 +1,32 @@
+#nullable enable
+AGUI.Server.AGUIServerInstrumentation
+const AGUI.Server.AGUIServerInstrumentation.ActivitySourceName = "Experimental.AGUI.Server" -> string!
+AGUI.Server.ChatResponseUpdateAGUIExtensions
+static AGUI.Server.ChatResponseUpdateAGUIExtensions.AsAGUIEventStreamAsync(this System.Collections.Generic.IAsyncEnumerable<Microsoft.Extensions.AI.ChatResponseUpdate!>! updates, AGUI.Server.ChatRequestContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<AGUI.Abstractions.BaseEvent!>!
+AGUI.Server.AGUIToolCallArgumentFragment
+AGUI.Server.AGUIToolCallArgumentFragment.AGUIToolCallArgumentFragment() -> void
+AGUI.Server.AGUIToolCallArgumentFragment.Index.get -> int
+AGUI.Server.AGUIToolCallArgumentFragment.Index.init -> void
+AGUI.Server.AGUIToolCallArgumentFragment.ToolCallId.get -> string?
+AGUI.Server.AGUIToolCallArgumentFragment.ToolCallId.init -> void
+AGUI.Server.AGUIToolCallArgumentFragment.FunctionName.get -> string?
+AGUI.Server.AGUIToolCallArgumentFragment.FunctionName.init -> void
+AGUI.Server.AGUIToolCallArgumentFragment.ArgumentsDelta.get -> string!
+AGUI.Server.AGUIToolCallArgumentFragment.ArgumentsDelta.init -> void
+AGUI.Server.AGUIStreamOptions
+AGUI.Server.AGUIStreamOptions.AGUIStreamOptions() -> void
+AGUI.Server.AGUIStreamOptions.MapStreamingToolCallArguments(System.Func<Microsoft.Extensions.AI.ChatResponseUpdate!, System.Collections.Generic.IEnumerable<AGUI.Server.AGUIToolCallArgumentFragment!>?>! extractor) -> AGUI.Server.AGUIStreamOptions!
+AGUI.Server.AGUIStreamOptions.MapInterrupt(System.Func<Microsoft.Extensions.AI.AIContent!, AGUI.Abstractions.AGUIInterrupt?>! mapper) -> AGUI.Server.AGUIStreamOptions!
+AGUI.Server.AGUIStreamOptions.MapContent(System.Func<Microsoft.Extensions.AI.AIContent!, System.Collections.Generic.IEnumerable<AGUI.Abstractions.BaseEvent!>?>! mapper) -> AGUI.Server.AGUIStreamOptions!
+AGUI.Server.AGUIStreamOptions.MapCall(string! toolName, System.Func<Microsoft.Extensions.AI.FunctionCallContent!, System.Collections.Generic.IEnumerable<AGUI.Abstractions.BaseEvent!>!>! mapper) -> AGUI.Server.AGUIStreamOptions!
+AGUI.Server.AGUIStreamOptions.MapResult(string! toolName, System.Func<Microsoft.Extensions.AI.FunctionResultContent!, System.Collections.Generic.IEnumerable<AGUI.Abstractions.BaseEvent!>!>! mapper) -> AGUI.Server.AGUIStreamOptions!
+AGUI.Server.AGUIStreamOptions.MapResultAsStateDelta(string! toolName) -> AGUI.Server.AGUIStreamOptions!
+AGUI.Server.AGUIStreamOptions.MapResultAsStateSnapshot(string! toolName) -> AGUI.Server.AGUIStreamOptions!
+AGUI.Server.ChatRequestContext
+AGUI.Server.ChatRequestContext.Input.get -> AGUI.Abstractions.RunAgentInput!
+AGUI.Server.ChatRequestContext.Messages.get -> System.Collections.Generic.List<Microsoft.Extensions.AI.ChatMessage!>!
+AGUI.Server.ChatRequestContext.ChatOptions.get -> Microsoft.Extensions.AI.ChatOptions!
+AGUI.Server.RunAgentInputExtensions
+static AGUI.Server.RunAgentInputExtensions.ToChatRequestContext(this AGUI.Abstractions.RunAgentInput! input, System.Text.Json.JsonSerializerOptions! jsonSerializerOptions, AGUI.Server.AGUIStreamOptions? streamOptions = null) -> AGUI.Server.ChatRequestContext!
+static AGUI.Server.RunAgentInputExtensions.TryGetRunAgentInput(this Microsoft.Extensions.AI.ChatOptions! options, out AGUI.Abstractions.RunAgentInput? input) -> bool
+AGUI.Server.AGUIStreamOptions.WithUsageProvider(string? provider) -> AGUI.Server.AGUIStreamOptions!

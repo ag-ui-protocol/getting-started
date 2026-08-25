@@ -21,9 +21,29 @@ import {
   scriptedStrandsAgent,
   stream,
 } from "./helpers";
+import type { RunAgentInput } from "@ag-ui/core";
 
 function types(events: BaseEvent[]): string[] {
   return events.map((e) => e.type);
+}
+
+/**
+ * Run with the adapter's expected error logging captured instead of printed.
+ *
+ * `try`/`finally` because a rejecting run would otherwise skip the restore and
+ * leave `console.error` mocked for every test after it in this file, silencing
+ * failures that have nothing to do with the one that threw.
+ */
+async function collectQuietly(
+  agent: StrandsAgent,
+  input?: RunAgentInput,
+): Promise<BaseEvent[]> {
+  const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    return await collect(agent, input ?? minimalRunInput());
+  } finally {
+    spy.mockRestore();
+  }
 }
 
 describe("StrandsAgent.run — lifecycle", () => {
@@ -70,7 +90,10 @@ describe("StrandsAgent.run — lifecycle", () => {
     expect(final).toHaveProperty("foo", "bar");
   });
 
-  it("emits RUN_ERROR with STRANDS_ERROR code when the stream throws", async () => {
+  it("emits RUN_ERROR with STRANDS_FORCE_STOP code when the stream throws", async () => {
+    // The TS SDK has no ForceStopEvent, so a failed model cycle escapes
+    // `agent.stream()` as a throw. The throw is therefore the forced stop, and
+    // it reports under the code and message Python's `force_stop` branch uses.
     const agent = scriptedStrandsAgent([], {
       stubOverrides: {
         stream: async function* () {
@@ -78,22 +101,25 @@ describe("StrandsAgent.run — lifecycle", () => {
         } as unknown as import("@strands-agents/sdk").Agent["stream"],
       },
     });
-    const events = await collect(agent);
+    // The forced-stop path logs `error(prefix, e)` by design; capture it the
+    // way the neighbouring code-defect test does so the expected line does not
+    // reach the test output.
+    const events = await collectQuietly(agent);
     const last = events[events.length - 1] as unknown as {
       type: string;
       code: string;
       message: string;
     };
     expect(last.type).toBe(EventType.RUN_ERROR);
-    expect(last.code).toBe("STRANDS_ERROR");
+    expect(last.code).toBe("STRANDS_FORCE_STOP");
     expect(last.message).toBe("boom");
   });
 
   it("classifies TypeError thrown during run as ADAPTER_BUG (code defect)", async () => {
-    // STRANDS_ERROR is reserved for SDK/provider failures (Bedrock throttling,
-    // upstream 5xx). TypeError/ReferenceError indicate the adapter itself is
-    // broken — distinguishing the two lets operators tell "fix our code" from
-    // "retry against the SDK".
+    // STRANDS_FORCE_STOP is reserved for SDK/provider failures (Bedrock
+    // throttling, upstream 5xx). TypeError/ReferenceError indicate the adapter
+    // itself is broken. Distinguishing the two lets operators tell "fix our
+    // code" from "retry against the SDK".
     const agent = scriptedStrandsAgent([], {
       stubOverrides: {
         stream: async function* () {
@@ -101,9 +127,7 @@ describe("StrandsAgent.run — lifecycle", () => {
         } as unknown as import("@strands-agents/sdk").Agent["stream"],
       },
     });
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const events = await collect(agent);
-    spy.mockRestore();
+    const events = await collectQuietly(agent);
     const last = events[events.length - 1] as unknown as {
       type: string;
       code: string;
@@ -146,8 +170,7 @@ describe("StrandsAgent.run — lifecycle", () => {
     )._agentsByThread;
     byThread.set("thread-1", stub);
     byThread.set("default", stub);
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const events = await collect(
+    const events = await collectQuietly(
       agent,
       minimalRunInput({
         tools: [
@@ -159,7 +182,6 @@ describe("StrandsAgent.run — lifecycle", () => {
         ],
       }),
     );
-    spy.mockRestore();
     const error = events.find((e) => e.type === EventType.RUN_ERROR) as
       | { code: string }
       | undefined;

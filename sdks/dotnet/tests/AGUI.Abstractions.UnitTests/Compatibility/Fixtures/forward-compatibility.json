@@ -1,0 +1,73 @@
+[
+  {
+    "type": "RUN_STARTED",
+    "threadId": "t1",
+    "runId": "r1",
+    "futureField": "should be ignored",
+    "anotherFutureField": 42
+  },
+  {
+    "type": "TEXT_MESSAGE_START",
+    "messageId": "msg-1",
+    "role": "assistant",
+    "extraNested": {
+      "deep": {
+        "value": true
+      }
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg-1",
+    "delta": "hello",
+    "unknownArray": [1, 2, 3]
+  },
+  {
+    "type": "TOOL_CALL_START",
+    "toolCallId": "tc-1",
+    "toolCallName": "test",
+    "futureToolField": "extra"
+  },
+  {
+    "type": "STATE_SNAPSHOT",
+    "snapshot": { "key": "value" },
+    "additionalMetadata": { "version": 2 }
+  },
+  {
+    "type": "STATE_DELTA",
+    "delta": [{ "op": "add", "path": "/x", "value": 1 }],
+    "futureFlag": true
+  },
+  {
+    "type": "CUSTOM",
+    "name": "test",
+    "value": { "a": 1 },
+    "futureCustomField": "extra"
+  },
+  {
+    "type": "RAW",
+    "event": { "data": 1 },
+    "source": "test",
+    "futureRawField": [1, 2]
+  },
+  {
+    "type": "ACTIVITY_SNAPSHOT",
+    "messageId": "msg-1",
+    "activityType": "PLAN",
+    "content": { "tasks": [] },
+    "replace": true,
+    "futureActivityField": "extra"
+  },
+  {
+    "type": "RUN_FINISHED",
+    "threadId": "t1",
+    "runId": "r1",
+    "futureOutcome": "partial"
+  },
+  {
+    "type": "RUN_ERROR",
+    "message": "fail",
+    "code": "ERR",
+    "futureErrorDetails": { "stack": "..." }
+  }
+]

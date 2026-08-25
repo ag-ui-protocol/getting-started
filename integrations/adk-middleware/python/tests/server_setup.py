@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Test server for ADK middleware with AG-UI client."""
 
+import os
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -18,11 +19,18 @@ from google.adk.agents import Agent
 # Create FastAPI app
 app = FastAPI(title="ADK Middleware Test Server")
 
-# Add CORS middleware for browser-based AG-UI clients
+# Add CORS middleware for browser-based AG-UI clients.
+# Origins come from CORS_ALLOW_ORIGINS (comma-separated) and default to the "*"
+# wildcard for local testing. Credentials are only enabled for explicit,
+# non-wildcard origins — a wildcard can never be combined with
+# allow_credentials=True (any site could then read authenticated responses).
+_origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if o.strip()]
+cors_origins = _origins or ["*"]  # Configure appropriately for production
+is_wildcard = "*" in cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=bool(_origins) and not is_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -1,0 +1,5 @@
+# Raw per-turn fixtures captured by the AIMock recorder (AIMOCK_RECORD=true).
+# These are NOT loaded on replay and are not committed — curate the useful
+# captures into the named ../*.json fixtures, then delete the rest.
+*
+!.gitignore

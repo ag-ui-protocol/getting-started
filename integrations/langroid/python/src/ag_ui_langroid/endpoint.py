@@ -41,7 +41,10 @@ def add_langroid_fastapi_endpoint(
             media_type=encoder.get_content_type()
         )
 
-    @app.get(f"{path}/health")
+    # Strip any trailing slash so a root path ("/") yields "/health", not "//health".
+    health_path = f"{path.rstrip('/')}/health"
+
+    @app.get(health_path)
     def health():
         """Health check."""
         return {
@@ -53,15 +56,30 @@ def add_langroid_fastapi_endpoint(
         }
 
 
-def create_langroid_app(agent: LangroidAgent, path: str = "/") -> FastAPI:
-    """Create a FastAPI app with a single Langroid agent endpoint."""
+def create_langroid_app(
+    agent: LangroidAgent,
+    path: str = "/",
+    origins: list[str] | None = None,
+) -> FastAPI:
+    """Create a FastAPI app with a single Langroid agent endpoint.
+
+    Args:
+        agent: The Langroid agent to serve.
+        path: Path for the agent endpoint (default: "/").
+        origins: Allowed CORS origins. Defaults to ``["*"]`` (wildcard) for local
+            development. Credentials are only enabled when explicit, non-wildcard
+            origins are supplied — a wildcard origin can never be combined with
+            ``allow_credentials=True``.
+    """
     app = FastAPI(title=f"Langroid - {agent.name}")
-    
+
     # Add CORS middleware
+    cors_origins = origins or ["*"]
+    is_wildcard = "*" in cors_origins
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials=bool(origins) and not is_wildcard,
         allow_methods=["*"],
         allow_headers=["*"],
     )

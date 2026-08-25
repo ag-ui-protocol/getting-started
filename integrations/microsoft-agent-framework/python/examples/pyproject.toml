@@ -6,7 +6,8 @@ authors = [{ name = "Microsoft Agent Framework Team" }]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "agent-framework-ag-ui>=1.0.0b251117",
+    "agent-framework-ag-ui>=1.0.1",
+    "agent-framework-openai>=1.0.1",
     "python-dotenv>=1.0.0",
 ]
 

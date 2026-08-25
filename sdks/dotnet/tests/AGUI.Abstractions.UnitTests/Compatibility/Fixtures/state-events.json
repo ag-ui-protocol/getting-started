@@ -1,0 +1,89 @@
+[
+  {
+    "type": "STATE_SNAPSHOT",
+    "timestamp": 1234567890,
+    "snapshot": {
+      "counter": 42,
+      "items": ["apple", "banana", "cherry"],
+      "config": {
+        "enabled": true,
+        "maxRetries": 3
+      }
+    }
+  },
+  {
+    "type": "STATE_SNAPSHOT",
+    "snapshot": {}
+  },
+  {
+    "type": "STATE_SNAPSHOT",
+    "snapshot": {
+      "nullValue": null,
+      "emptyString": "",
+      "zero": 0,
+      "negativeNumber": -123,
+      "floatNumber": 3.14159,
+      "emptyArray": [],
+      "emptyObject": {},
+      "boolValues": {
+        "true": true,
+        "false": false
+      },
+      "dateString": "2023-01-15T10:30:00.000Z"
+    }
+  },
+  {
+    "type": "STATE_DELTA",
+    "timestamp": 1234567890,
+    "delta": [
+      {
+        "op": "add",
+        "path": "/counter",
+        "value": 42
+      },
+      {
+        "op": "add",
+        "path": "/items",
+        "value": ["apple", "banana", "cherry"]
+      }
+    ]
+  },
+  {
+    "type": "STATE_DELTA",
+    "delta": [
+      {
+        "op": "add",
+        "path": "/users/123",
+        "value": { "name": "John", "age": 30 }
+      },
+      {
+        "op": "remove",
+        "path": "/users/456"
+      },
+      {
+        "op": "replace",
+        "path": "/users/789/name",
+        "value": "Jane Doe"
+      },
+      {
+        "op": "move",
+        "from": "/users/old",
+        "path": "/users/new"
+      },
+      {
+        "op": "copy",
+        "from": "/templates/default",
+        "path": "/users/123/template"
+      },
+      {
+        "op": "test",
+        "path": "/users/123/active",
+        "value": true
+      }
+    ]
+  },
+  {
+    "type": "STATE_DELTA",
+    "delta": []
+  }
+]

@@ -1,0 +1,11 @@
+﻿[
+  {
+    "role": "user",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "A farmer has chickens and rabbits. There are 20 heads and 56 legs in total. How many chickens and how many rabbits are there? Show your reasoning."
+      }
+    ]
+  }
+]

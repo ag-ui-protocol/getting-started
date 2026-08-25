@@ -50,7 +50,7 @@ async function runScript(
   env: Record<string, string | undefined>,
 ): Promise<{ status: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn("pnpm", ["tsx", SCRIPT, ...args], {
+    const child = spawn("node", ["--import", "tsx", SCRIPT, ...args], {
       env: {
         ...process.env,
         ...env,
@@ -365,7 +365,7 @@ test(
       assert.equal(receivedUrl, "/v1/messages");
       assert.equal(receivedHeaders["x-api-key"], "sk-test-mock");
       assert.equal(receivedHeaders["anthropic-version"], "2023-06-01");
-      assert.equal(receivedBody.model, "claude-sonnet-4-20250514");
+      assert.equal(receivedBody.model, "claude-opus-4-8");
       assert.equal(receivedBody.max_tokens, 2048);
       assert.ok(Array.isArray(receivedBody.messages));
       assert.match(receivedBody.messages![0].content, /ag-ui/i);
@@ -456,6 +456,76 @@ test(
       assert.match(receivedPrompt, /@ag-ui\/core/);
       assert.match(receivedPrompt, /ag-ui-langgraph/);
       assert.match(receivedPrompt, /agent-user interaction protocol/i);
+    } finally {
+      await new Promise<void>((resolve) => server?.close(() => resolve()));
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "normalizes dotnet ecosystem bumps to a nuget prompt section",
+  { timeout: 30_000 },
+  async () => {
+    const http = await import("node:http");
+    const dir = mkTmp();
+    let server: import("node:http").Server | undefined;
+    let receivedPrompt = "";
+    try {
+      const accumulated = join(dir, "accumulated.json");
+      const output = join(dir, "ai-notes.md");
+      writeFileSync(
+        accumulated,
+        JSON.stringify([
+          {
+            scope: "sdk-dotnet",
+            name: "AGUI.Client",
+            path: "sdks/dotnet/src/AGUI.Client",
+            file: "sdks/dotnet/Directory.Build.props",
+            ecosystem: "dotnet",
+            oldVersion: "0.0.1",
+            newVersion: "0.1.0",
+          },
+        ]),
+      );
+
+      server = http.createServer((req, res) => {
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", () => {
+          receivedPrompt = JSON.parse(body).messages[0].content;
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ content: [{ type: "text", text: "ok" }] }));
+        });
+      });
+      await new Promise<void>((resolve) =>
+        server!.listen(0, "127.0.0.1", resolve),
+      );
+      const port = (server.address() as { port: number }).port;
+
+      await runScript(
+        [
+          "--accumulated",
+          accumulated,
+          "--output",
+          output,
+          "--version",
+          "0.1.0",
+        ],
+        {
+          ANTHROPIC_API_KEY: "sk-test-mock",
+          ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}/`,
+        },
+      );
+
+      assert.ok(
+        receivedPrompt.includes("### nuget\n- AGUI.Client"),
+        `prompt missing literal "### nuget" inventory heading with AGUI.Client line; got:\n${receivedPrompt}`,
+      );
+      assert.ok(
+        !receivedPrompt.includes("### dotnet"),
+        `prompt unexpectedly contains raw "### dotnet" heading — normalization failed`,
+      );
     } finally {
       await new Promise<void>((resolve) => server?.close(() => resolve()));
       rmSync(dir, { recursive: true, force: true });

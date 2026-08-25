@@ -26,10 +26,10 @@
  */
 
 import {
-  Agent,
   TextBlock,
   ToolResultBlock,
   ToolStreamEvent,
+  type Message as StrandsMessage,
   type Model,
   type Tool,
   type ToolContext,
@@ -368,9 +368,20 @@ export function classifyA2UISubagentError(
 }
 
 /**
- * Run the structured-output sub-agent once: bind a `render_a2ui` tool, invoke
- * the model with the (already error-augmented) prompt, and return the captured
- * `render_a2ui` args — or `null` if the model produced no call.
+ * Run a SINGLE forced `render_a2ui` model call and return the captured args —
+ * or `null` if the model produced no call.
+ *
+ * Mirrors the LangGraph adapter's single forced structured-output turn
+ * (`bind_tools([RENDER_A2UI_TOOL_DEF], tool_choice="render_a2ui")` + one
+ * `astream`): we call the model DIRECTLY (not a Strands `Agent`), so there is no
+ * agentic loop. The model emits exactly one `render_a2ui` tool call and we stop.
+ * A full `Agent` loop would EXECUTE the bound render tool and then fire a SECOND
+ * model call to continue the turn — and with the "render the surface" system
+ * prompt that continuation re-invokes render (or never settles on a terminal
+ * text turn). The sub-agent stream would then never end, so the outer
+ * `generate_a2ui` tool never returns its result and the run never emits
+ * RUN_FINISHED (the surface paints, but the call hangs). The forced single turn
+ * is the fix.
  */
 async function invokeRenderSubagent(
   model: Model,
@@ -385,65 +396,67 @@ async function invokeRenderSubagent(
      * model never emits `catalogId` (render schema omits it; host owns the
      * catalog), so without this the middleware's progressive paint falls back
      * to the basic catalog and the renderer throws "Catalog not found". The id
-     * matches what `buildA2UIEnvelope` stamps on the final surface.
+     * matches what `buildA2UIEnvelope` stamps on the final surface. Spliced into
+     * the EMITTED stream only — the captured args stay the model's own.
      */
     catalogId?: string;
   } = {},
 ): Promise<Record<string, unknown> | null> {
-  let captured: Record<string, unknown> | null = null;
-  const renderTool: Tool = {
-    name: RENDER_A2UI_TOOL_NAME,
-    description: RENDER_A2UI_TOOL_DEF.function.description,
-    toolSpec: {
-      name: RENDER_A2UI_TOOL_NAME,
-      description: RENDER_A2UI_TOOL_DEF.function.description,
-      inputSchema: RENDER_A2UI_TOOL_DEF.function
-        .parameters as Tool["toolSpec"]["inputSchema"],
-    },
-    // eslint-disable-next-line require-yield
-    async *stream(ctx: ToolContext): ToolStreamGenerator {
-      captured = (ctx.toolUse.input ?? {}) as Record<string, unknown>;
-      return new ToolResultBlock({
-        toolUseId: ctx.toolUse.toolUseId,
-        status: "success",
-        content: [new TextBlock("ok")],
-      });
-    },
-  };
-
-  const subagent = new Agent({
-    model,
-    tools: [renderTool],
-    systemPrompt: prompt,
-  });
   const emit = options.onStreamEvent;
   const catalogId = options.catalogId;
+  const renderSpec: Tool["toolSpec"] = {
+    name: RENDER_A2UI_TOOL_NAME,
+    description: RENDER_A2UI_TOOL_DEF.function.description,
+    inputSchema: RENDER_A2UI_TOOL_DEF.function
+      .parameters as Tool["toolSpec"]["inputSchema"],
+  };
+
+  let captured: Record<string, unknown> | null = null;
+  let accumulated = "";
   // Tracks the in-flight render_a2ui block between toolUseStart and blockStop.
   let liveRenderCallId: string | null = null;
-  let sawRenderStart = false;
   // Whether the host catalog id has been spliced into the streamed args for
   // the current call yet (reset per render start).
   let catalogPrefixed = false;
+
+  const finishCall = () => {
+    // The model streams render_a2ui's args as a JSON string (partial fragments
+    // reconstruct into the full object). Parse the accumulated RAW string — not
+    // the catalog-spliced stream — so the committed args are the model's own
+    // (catalogId is stamped by buildA2UIEnvelope).
+    try {
+      captured = accumulated.trim()
+        ? (JSON.parse(accumulated) as Record<string, unknown>)
+        : {};
+    } catch {
+      captured = {};
+    }
+  };
+
+  const aborted = () => !!options.cancelSignal?.aborted;
+  const abortError = () => {
+    const e = new Error("consumer disconnected; abandoning A2UI render");
+    e.name = "AbortError";
+    return e;
+  };
+
   try {
-    // Stream (not invoke) so the render_a2ui arg deltas can be surfaced to the
-    // AG-UI wire as they generate — the middleware's building/progressive-paint
-    // lifecycle depends on seeing them live.
-    const gen = subagent.stream(
-      messages as never,
-      options.cancelSignal ? { cancelSignal: options.cancelSignal } : undefined,
-    );
+    if (aborted()) throw abortError();
+    // Stream the MODEL directly (no Agent loop, no tool execution) so the
+    // render_a2ui arg deltas surface live for the middleware's progressive
+    // paint while guaranteeing a single forced turn.
+    const gen = model.stream(messages as unknown as StrandsMessage[], {
+      systemPrompt: prompt,
+      toolSpecs: [renderSpec],
+      toolChoice: { tool: { name: RENDER_A2UI_TOOL_NAME } },
+    });
     for await (const ev of gen) {
-      if (!emit) continue;
-      // Agent.stream() wraps raw model events in `modelStreamUpdateEvent`
-      // decorators (same unwrap the adapter's main loop performs).
-      const unwrapped =
-        ev &&
-        typeof ev === "object" &&
-        (ev as { type?: string }).type === "modelStreamUpdateEvent" &&
-        "event" in (ev as object)
-          ? (ev as { event: unknown }).event
-          : ev;
-      const e = unwrapped as {
+      // `model.stream` yields raw model events directly (no
+      // `modelStreamUpdateEvent` wrapper, unlike `Agent.stream`).
+      // Cooperative cancellation: `model.stream` has no cancelSignal option, so
+      // bail between events when the outer run is abandoned.
+      if (aborted()) throw abortError();
+      const e = ev as {
         type?: string;
         start?: { type?: string; toolUseId?: string; name?: string };
         delta?: { type?: string; input?: string };
@@ -456,16 +469,16 @@ async function invokeRenderSubagent(
         // blockStop must not leave an unclosed inner TOOL_CALL_START on the
         // wire, and a foreign tool's arg deltas must never attribute to it).
         if (liveRenderCallId) {
-          emit({ kind: "end", toolCallId: liveRenderCallId });
+          emit?.({ kind: "end", toolCallId: liveRenderCallId });
           liveRenderCallId = null;
         }
         if (e.start.name !== RENDER_A2UI_TOOL_NAME) continue;
         // `||` (not `??`): an empty-string toolUseId must take the fallback —
         // a falsy live id would disable every close/delta guard below.
         liveRenderCallId = e.start.toolUseId || `a2ui-render-${++a2uiRenderSeq}`;
-        sawRenderStart = true;
+        accumulated = "";
         catalogPrefixed = false;
-        emit({
+        emit?.({
           kind: "start",
           toolCallId: liveRenderCallId,
           toolCallName: RENDER_A2UI_TOOL_NAME,
@@ -477,6 +490,7 @@ async function invokeRenderSubagent(
         typeof e.delta.input === "string"
       ) {
         let delta = e.delta.input;
+        accumulated += delta;
         // Stamp the host catalog id into the FIRST chunk by splicing it right
         // after the opening brace, so the accumulated args become
         // `{"catalogId": "<id>", ...}` — valid JSON the middleware's progressive
@@ -491,22 +505,26 @@ async function invokeRenderSubagent(
             catalogPrefixed = true;
           }
         }
-        emit({ kind: "args", toolCallId: liveRenderCallId, delta });
+        emit?.({ kind: "args", toolCallId: liveRenderCallId, delta });
       } else if (liveRenderCallId && e?.type === "modelContentBlockStopEvent") {
-        emit({ kind: "end", toolCallId: liveRenderCallId });
+        emit?.({ kind: "end", toolCallId: liveRenderCallId });
+        finishCall();
         liveRenderCallId = null;
+        // Single forced turn: the render call is complete. Stop the stream so
+        // no continuation model call ever fires.
+        break;
       }
     }
   } catch (err) {
-    if (emit && liveRenderCallId) {
+    if (liveRenderCallId) {
       // The provider stream died mid-call: close the live synthetic call
       // before unwinding — an unclosed inner TOOL_CALL_START is a
       // wire-protocol violation, and the next recovery attempt would open a
       // fresh call on top of it.
-      emit({ kind: "end", toolCallId: liveRenderCallId });
+      emit?.({ kind: "end", toolCallId: liveRenderCallId });
       liveRenderCallId = null;
     }
-    if (classifyA2UISubagentError(err, !!options.cancelSignal?.aborted) === "rethrow") {
+    if (classifyA2UISubagentError(err, aborted()) === "rethrow") {
       throw err;
     }
     // A genuine model/network error must not crash the whole turn — the recovery
@@ -520,35 +538,11 @@ async function invokeRenderSubagent(
     );
     return null;
   }
-  if (emit) {
-    if (liveRenderCallId) {
-      // Stream ended without a blockStop for the live call — close it.
-      emit({ kind: "end", toolCallId: liveRenderCallId });
-      liveRenderCallId = null;
-    } else if (!sawRenderStart && captured !== null) {
-      // The provider invoked the bound render tool without emitting any
-      // content-block events: synthesize the full triplet so the middleware
-      // still sees components before the result (no bulk paint). NOTE: the
-      // Python adapter additionally handles a mid-call parsed-dict input
-      // shape; the TS SDK delivers tool input exclusively via
-      // toolUseInputDelta frames, so that fallback has no analog here.
-      const syntheticId = `a2ui-render-${++a2uiRenderSeq}`;
-      emit({
-        kind: "start",
-        toolCallId: syntheticId,
-        toolCallName: RENDER_A2UI_TOOL_NAME,
-      });
-      emit({
-        kind: "args",
-        toolCallId: syntheticId,
-        delta: JSON.stringify(
-          catalogId && captured
-            ? { ...(captured as Record<string, unknown>), catalogId }
-            : captured,
-        ),
-      });
-      emit({ kind: "end", toolCallId: syntheticId });
-    }
+  if (liveRenderCallId) {
+    // Stream ended without a blockStop for the live call — close + capture.
+    emit?.({ kind: "end", toolCallId: liveRenderCallId });
+    finishCall();
+    liveRenderCallId = null;
   }
   return captured;
 }

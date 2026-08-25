@@ -1,0 +1,284 @@
+---
+title: "AGUIChatClient"
+description: "IChatClient implementation for consuming AG-UI endpoints"
+---
+
+# AGUIChatClient
+
+`AGUIChatClient` is an `IChatClient` implementation for AG-UI. It converts
+`ChatMessage` values and `ChatOptions` into a `RunAgentInput`, sends that input
+to an AG-UI endpoint, and converts the returned event stream into
+`ChatResponseUpdate` values.
+
+```csharp
+using AGUI.Client;
+using Microsoft.Extensions.AI;
+```
+
+<Note>
+  The .NET client does not define an `AbstractAgent` equivalent. The integration
+  point is `Microsoft.Extensions.AI.IChatClient`.
+</Note>
+
+## Construction
+
+Create a client from an `AGUIChatClientOptions`. The simplest form builds the
+built-in HTTP transport from an `HttpClient` and the AG-UI endpoint URL:
+
+```csharp
+using AGUI.Client;
+using Microsoft.Extensions.AI;
+
+HttpClient httpClient = new();
+IChatClient client = new AGUIChatClient(new(httpClient, "https://api.example.com/agent"));
+```
+
+`AGUIChatClient` has a single constructor that takes `AGUIChatClientOptions`:
+
+```csharp
+new AGUIChatClient(AGUIChatClientOptions options);
+```
+
+`AGUIChatClientOptions` carries the transport and optional serializer settings:
+
+```csharp
+public sealed class AGUIChatClientOptions
+{
+    public AGUIChatClientOptions();
+    public AGUIChatClientOptions(HttpClient httpClient, string endpoint); // builds the HTTP transport
+    public required IAGUITransport Transport { get; init; }
+    public JsonSerializerOptions? JsonSerializerOptions { get; init; }
+}
+```
+
+Set `Transport` directly when you need a custom transport for tests or an
+alternative wire protocol. See [Transport](/sdk/dotnet/client/transport).
+Configured `JsonSerializerOptions` are also used when converting MEAI message
+content, including custom CLR values in `AIContent.AdditionalProperties`.
+
+## Streaming responses
+
+`GetStreamingResponseAsync` streams AG-UI output as MEAI
+`ChatResponseUpdate` objects:
+
+```csharp
+using AGUI.Client;
+using Microsoft.Extensions.AI;
+
+using HttpClient httpClient = new();
+IChatClient client = new AGUIChatClient(new(httpClient, "https://api.example.com/agent"));
+
+List<ChatMessage> messages =
+[
+    new(ChatRole.User, "Explain AG-UI in one paragraph"),
+];
+
+await foreach (ChatResponseUpdate update in client.GetStreamingResponseAsync(
+    messages,
+    options: null,
+    cancellationToken: CancellationToken.None))
+{
+    if (!string.IsNullOrEmpty(update.Text))
+    {
+        Console.Write(update.Text);
+    }
+}
+```
+
+Internally, the client converts the AG-UI event stream back into
+`ChatResponseUpdate` objects. Text events become text deltas, tool call events
+become MEAI tool call content, and lifecycle events remain available through
+`RawRepresentation`.
+
+## Non-streaming responses
+
+`GetResponseAsync` is also implemented. It consumes the streaming response and
+returns a final `ChatResponse`:
+
+```csharp
+ChatResponse response = await client.GetResponseAsync(
+    messages,
+    cancellationToken: CancellationToken.None);
+
+Console.WriteLine(response.Text);
+```
+
+## Statelessness and ConversationId
+
+`AGUIChatClient` is stateless. It sends the full message history on every turn
+and never surfaces a `ConversationId` on returned updates.
+
+This is intentional. In `Microsoft.Extensions.AI`, a non-null `ConversationId`
+signals a service-managed conversation. Agent wrappers may then send only the
+new message deltas on the next turn. That would truncate history when talking to
+a stateless AG-UI server.
+
+Use these identifiers instead:
+
+- `ChatResponseUpdate.ResponseId` is the AG-UI run id.
+- `update.RawRepresentation as RunStartedEvent` exposes the AG-UI `ThreadId`
+  and `RunId` from the `RUN_STARTED` event.
+- `update.AdditionalProperties["agui_thread_id"]` also contains the resolved
+  AG-UI thread id on the `RUN_STARTED` update.
+
+```csharp
+using AGUI.Abstractions;
+using Microsoft.Extensions.AI;
+
+static (string? ThreadId, string? RunId) GetAGUIIds(
+    IEnumerable<ChatResponseUpdate> updates)
+{
+    RunStartedEvent? started = updates
+        .Select(update => update.RawRepresentation)
+        .OfType<RunStartedEvent>()
+        .FirstOrDefault();
+
+    return (started?.ThreadId, started?.RunId);
+}
+```
+
+<Warning>
+  Do not use `ConversationId` as AG-UI conversation state. Pass full message
+  history each turn and use AG-UI thread/run ids for wire-level correlation.
+</Warning>
+
+## Thread continuity
+
+To keep a stable AG-UI thread, reuse the same `ChatOptions` instance across
+turns. The client pins the resolved thread id onto that options instance without
+setting `ConversationId`.
+
+For explicit continuation or branching, set `RunAgentInput.ThreadId` and
+`RunAgentInput.ParentRunId` through `ChatOptions.RawRepresentationFactory`.
+This is the AG-UI-native way to control wire-level fields:
+
+```csharp
+using AGUI.Abstractions;
+using Microsoft.Extensions.AI;
+
+List<ChatResponseUpdate> firstTurn = [];
+await foreach (ChatResponseUpdate update in client.GetStreamingResponseAsync(
+    [new ChatMessage(ChatRole.User, "Hello, tell me about serialization")],
+    cancellationToken: CancellationToken.None))
+{
+    firstTurn.Add(update);
+    Console.Write(update.Text);
+}
+
+RunStartedEvent? runStarted = firstTurn
+    .Select(update => update.RawRepresentation)
+    .OfType<RunStartedEvent>()
+    .FirstOrDefault();
+
+ChatOptions followUpOptions = new()
+{
+    RawRepresentationFactory = _ => new RunAgentInput
+    {
+        ThreadId = runStarted?.ThreadId ?? string.Empty,
+        ParentRunId = runStarted?.RunId,
+    },
+};
+
+await foreach (ChatResponseUpdate update in client.GetStreamingResponseAsync(
+    [new ChatMessage(ChatRole.User, "Tell me more about event compaction")],
+    followUpOptions,
+    CancellationToken.None))
+{
+    Console.Write(update.Text);
+}
+```
+
+<Tip>
+  Use `ParentRunId` when you want the next request to branch from a previous
+  run. Omit it when you only need to continue on the same thread.
+</Tip>
+
+## Interrupts and approvals
+
+When an AG-UI server finishes a run with an interrupt outcome, the client
+surfaces the pause as MEAI content:
+
+- Tool-call approvals become `ToolApprovalRequestContent`.
+- Other interrupts become `InterruptRequestContent`.
+
+The caller appends a response message and sends the next request. The client
+extracts `ToolApprovalResponseContent` and `InterruptResponseContent` from the
+latest message and sends them as `RunAgentInput.Resume`.
+
+```csharp
+using AGUI.Abstractions;
+using Microsoft.Extensions.AI;
+
+List<ChatMessage> messages =
+[
+    new(ChatRole.User, "Delete the generated files"),
+];
+
+ChatResponse firstResponse = await client.GetResponseAsync(
+    messages,
+    cancellationToken: CancellationToken.None);
+
+ToolApprovalRequestContent? approval = firstResponse.Messages
+    .SelectMany(message => message.Contents)
+    .OfType<ToolApprovalRequestContent>()
+    .FirstOrDefault();
+
+if (approval?.ToolCall is FunctionCallContent toolCall)
+{
+    messages.AddRange(firstResponse.Messages);
+    messages.Add(new ChatMessage(ChatRole.User,
+    [
+        new ToolApprovalResponseContent(approval.RequestId, approved: true, toolCall),
+    ]));
+
+    ChatResponse resumed = await client.GetResponseAsync(
+        messages,
+        cancellationToken: CancellationToken.None);
+
+    Console.WriteLine(resumed.Text);
+}
+```
+
+For non-tool interrupts, respond with `InterruptResponseContent`:
+
+```csharp
+using System.Text.Json;
+using AGUI.Abstractions;
+using Microsoft.Extensions.AI;
+
+static ChatMessage CreateInterruptResponse(InterruptRequestContent request)
+{
+    using JsonDocument payload = JsonDocument.Parse("""{"approved":true}""");
+
+    return new ChatMessage(ChatRole.User,
+    [
+        new InterruptResponseContent(request.RequestId)
+        {
+            Payload = payload.RootElement.Clone(),
+        },
+    ]);
+}
+```
+
+`InterruptResponseContent.Metadata` optionally carries envelope data about the
+response — a signature proving the decision was not tampered with, routing keys
+— as opposed to `Payload`, which is the answer the agent asked for. The client
+copies it onto the resume entry's `metadata`, and the hosting layer hands it
+back to the server pipeline on `InterruptResponseContent`; see
+[Metadata](/concepts/metadata#resume-entries).
+
+```csharp
+new InterruptResponseContent(request.RequestId)
+{
+    Payload = payload.RootElement.Clone(),
+    Metadata = JsonDocument.Parse(
+        """{"definitionId":"review-plan","key":"afterModel-review"}""")
+        .RootElement.Clone(),
+}
+```
+
+## Related references
+
+- [Transport](/sdk/dotnet/client/transport)
+- [Events](/sdk/dotnet/abstractions/events)
+- [Core protocol types](/sdk/dotnet/abstractions/types)

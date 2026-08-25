@@ -1,12 +1,7 @@
 import { Subject } from "rxjs";
 import { toArray } from "rxjs/operators";
 import { firstValueFrom } from "rxjs";
-import {
-  BaseEvent,
-  EventType,
-  Message,
-  RunAgentInput,
-} from "@ag-ui/core";
+import { BaseEvent, EventType, Message, RunAgentInput } from "@ag-ui/core";
 import { defaultApplyEvents } from "../default";
 import { AbstractAgent } from "@/agent";
 import { AgentStateMutation } from "@/agent/subscriber";
@@ -40,6 +35,14 @@ async function emitAndCollect(
   return updatesPromise;
 }
 
+/** Narrow a message to the activity role, failing the test otherwise. */
+function expectActivityMessage(message: Message | undefined) {
+  if (message?.role !== "activity") {
+    throw new Error(`Expected activity message, got role ${message?.role}`);
+  }
+  return message;
+}
+
 /** Shorthand: apply a single MESSAGES_SNAPSHOT and return the resulting messages. */
 async function applySnapshot(initial: Message[], snapshotMessages: Message[]): Promise<Message[]> {
   const updates = await emitAndCollect(initial, (events$) => {
@@ -48,7 +51,9 @@ async function applySnapshot(initial: Message[], snapshotMessages: Message[]): P
       messages: snapshotMessages,
     });
   });
-  return updates[0]?.messages!;
+  // Cast, not a non-null assertion on the optional chain: `?.` must keep
+  // returning undefined when there is no update, exactly as before.
+  return updates[0]?.messages as Message[];
 }
 
 describe("defaultApplyEvents with activity events", () => {
@@ -71,10 +76,10 @@ describe("defaultApplyEvents with activity events", () => {
 
     expect(updates.length).toBe(2);
 
-    const snapshotUpdate = updates[0];
-    expect(snapshotUpdate?.messages?.[0]?.role).toBe("activity");
-    expect(snapshotUpdate?.messages?.[0]?.activityType).toBe("PLAN");
-    expect(snapshotUpdate?.messages?.[0]?.content).toEqual({ tasks: ["search"] });
+    const snapshotMessage = expectActivityMessage(updates[0]?.messages?.[0]);
+    expect(snapshotMessage.role).toBe("activity");
+    expect(snapshotMessage.activityType).toBe("PLAN");
+    expect(snapshotMessage.content).toEqual({ tasks: ["search"] });
 
     const deltaUpdate = updates[1];
     expect(deltaUpdate?.messages?.[0]?.content).toEqual({ tasks: ["✓ search"] });
@@ -109,8 +114,13 @@ describe("defaultApplyEvents with activity events", () => {
 
     expect(updates.length).toBe(3);
     expect(updates[0]?.messages?.[0]?.content).toEqual({ operations: [] });
-    expect(updates[1]?.messages?.[0]?.content?.operations).toEqual([firstOperation]);
-    expect(updates[2]?.messages?.[0]?.content?.operations).toEqual([firstOperation, secondOperation]);
+    expect(expectActivityMessage(updates[1]?.messages?.[0]).content.operations).toEqual([
+      firstOperation,
+    ]);
+    expect(expectActivityMessage(updates[2]?.messages?.[0]).content.operations).toEqual([
+      firstOperation,
+      secondOperation,
+    ]);
   });
 
   it("does not replace existing activity message when replace is false", async () => {
@@ -150,7 +160,12 @@ describe("defaultApplyEvents with activity events", () => {
 
   it("replaces existing activity message when replace is true", async () => {
     const initial = [
-      { id: "activity-1", role: "activity" as const, activityType: "PLAN", content: { tasks: ["initial"] } },
+      {
+        id: "activity-1",
+        role: "activity" as const,
+        activityType: "PLAN",
+        content: { tasks: ["initial"] },
+      },
     ] as Message[];
 
     const updates = await emitAndCollect(initial, (events$) => {
@@ -421,21 +436,24 @@ describe("MESSAGES_SNAPSHOT preserves client-only messages", () => {
       [
         { id: "m1", role: "user", content: "create a dashboard" },
         { id: "asst-1", role: "assistant", content: "I'll create that for you" },
-        { id: "tool-stream", role: "tool", content: '{"a2ui": true}' },
-        { id: "act-1", role: "activity", activityType: "A2UI_SURFACE", content: { surface: "dashboard" } },
+        { id: "tool-stream", role: "tool", content: '{"a2ui": true}', toolCallId: "tc-stream" },
+        {
+          id: "act-1",
+          role: "activity",
+          activityType: "A2UI_SURFACE",
+          content: { surface: "dashboard" },
+        },
         { id: "asst-2", role: "assistant", content: "Here's your dashboard" },
       ] as Message[],
       [
         { id: "m1", role: "user", content: "create a dashboard" },
         { id: "asst-1", role: "assistant", content: "I'll create that for you" },
-        { id: "tool-canon", role: "tool", content: '{"a2ui": true}' },
+        { id: "tool-canon", role: "tool", content: '{"a2ui": true}', toolCallId: "tc-canon" },
         { id: "asst-2", role: "assistant", content: "Here's your dashboard" },
       ],
     );
 
-    expect(msgs.map((m) => m.id)).toEqual([
-      "m1", "asst-1", "act-1", "asst-2", "tool-canon",
-    ]);
+    expect(msgs.map((m) => m.id)).toEqual(["m1", "asst-1", "act-1", "asst-2", "tool-canon"]);
   });
 });
 
@@ -544,5 +562,83 @@ describe("MESSAGES_SNAPSHOT with snapshot-supplied reasoning", () => {
     expect(msgs.filter((m) => m.role === "reasoning").length).toBe(1);
     const reasoning = msgs.find((m) => m.id === "r1")! as { encryptedValue?: string };
     expect(reasoning.encryptedValue).toBe("enc-1");
+  });
+});
+
+describe("MESSAGES_SNAPSHOT with snapshot-supplied activity", () => {
+  // A snapshot is a snapshot of every message, so once it carries any activity
+  // the backend is declaring the complete activity set: entries it repeats are
+  // replaced and ones it leaves out are dropped. A snapshot that carries no
+  // activity says nothing about it, and the client's activity is preserved —
+  // the same all-or-nothing rule `snapshotHasReasoning` applies to reasoning.
+
+  it("replaces an existing activity message with the snapshot version", async () => {
+    const msgs = await applySnapshot(
+      [
+        { id: "m1", role: "user", content: "hello" },
+        { id: "act-1", role: "activity", activityType: "PLAN", content: { tasks: ["stale"] } },
+        { id: "a1", role: "assistant", content: "hi" },
+      ] as Message[],
+      [
+        { id: "m1", role: "user", content: "hello" },
+        { id: "act-1", role: "activity", activityType: "PLAN", content: { tasks: ["fresh"] } },
+        { id: "a1", role: "assistant", content: "hi" },
+      ] as Message[],
+    );
+
+    expect(msgs.filter((m) => m.role === "activity").length).toBe(1);
+    expect(msgs.map((m) => m.id)).toEqual(["m1", "act-1", "a1"]);
+    const activity = msgs.find((m) => m.id === "act-1")! as { content?: { tasks?: string[] } };
+    expect(activity.content?.tasks).toEqual(["fresh"]);
+  });
+
+  it("appends an activity message the client does not have yet", async () => {
+    const msgs = await applySnapshot(
+      [{ id: "m1", role: "user", content: "hello" }] as Message[],
+      [
+        { id: "m1", role: "user", content: "hello" },
+        { id: "act-1", role: "activity", activityType: "PLAN", content: { tasks: ["fresh"] } },
+      ] as Message[],
+    );
+
+    expect(msgs.map((m) => m.id)).toEqual(["m1", "act-1"]);
+    const activity = msgs.find((m) => m.id === "act-1")! as { content?: { tasks?: string[] } };
+    expect(activity.content?.tasks).toEqual(["fresh"]);
+  });
+
+  it("drops a local activity the snapshot leaves out once the snapshot carries activity", async () => {
+    const msgs = await applySnapshot(
+      [
+        { id: "m1", role: "user", content: "hello" },
+        { id: "act-gone", role: "activity", activityType: "PLAN", content: { tasks: ["gone"] } },
+        { id: "act-1", role: "activity", activityType: "PLAN", content: { tasks: ["stale"] } },
+      ] as Message[],
+      [
+        { id: "m1", role: "user", content: "hello" },
+        { id: "act-1", role: "activity", activityType: "PLAN", content: { tasks: ["fresh"] } },
+      ] as Message[],
+    );
+
+    expect(msgs.map((m) => m.id)).toEqual(["m1", "act-1"]);
+    const activity = msgs.find((m) => m.id === "act-1")! as { content?: { tasks?: string[] } };
+    expect(activity.content?.tasks).toEqual(["fresh"]);
+  });
+
+  it("keeps client activity when the snapshot carries none", async () => {
+    const msgs = await applySnapshot(
+      [
+        { id: "m1", role: "user", content: "hello" },
+        { id: "act-1", role: "activity", activityType: "PLAN", content: { tasks: ["local"] } },
+        { id: "a1", role: "assistant", content: "hi" },
+      ] as Message[],
+      [
+        { id: "m1", role: "user", content: "hello" },
+        { id: "a1", role: "assistant", content: "hi" },
+      ] as Message[],
+    );
+
+    expect(msgs.map((m) => m.id)).toEqual(["m1", "act-1", "a1"]);
+    const activity = msgs.find((m) => m.id === "act-1")! as { content?: { tasks?: string[] } };
+    expect(activity.content?.tasks).toEqual(["local"]);
   });
 });

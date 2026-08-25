@@ -34,3 +34,7 @@ build/
 
 # Coverage
 coverage/
+
+# Dart kernel snapshots. The compiler writes these next to their source, so
+# neither .dart_tool/ nor build/ above catches them.
+*.dill

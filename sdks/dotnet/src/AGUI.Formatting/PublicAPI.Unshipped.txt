@@ -1,0 +1,13 @@
+#nullable enable
+AGUI.Formatting.IAGUIEventStreamFormatter
+AGUI.Formatting.IAGUIEventStreamFormatter.CanRead(string? contentType) -> bool
+AGUI.Formatting.IAGUIEventStreamFormatter.MediaType.get -> string!
+AGUI.Formatting.IAGUIEventStreamFormatter.ReadAsync(System.IO.Stream! body, System.Threading.CancellationToken cancellationToken) -> System.Collections.Generic.IAsyncEnumerable<AGUI.Abstractions.BaseEvent!>!
+AGUI.Formatting.IAGUIEventStreamFormatter.WriteAsync(System.Collections.Generic.IAsyncEnumerable<AGUI.Abstractions.BaseEvent!>! events, System.IO.Stream! output, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+AGUI.Formatting.SseEventStreamFormatter
+AGUI.Formatting.SseEventStreamFormatter.SseEventStreamFormatter() -> void
+AGUI.Formatting.SseEventStreamFormatter.CanRead(string? contentType) -> bool
+AGUI.Formatting.SseEventStreamFormatter.MediaType.get -> string!
+AGUI.Formatting.SseEventStreamFormatter.ReadAsync(System.IO.Stream! body, System.Threading.CancellationToken cancellationToken) -> System.Collections.Generic.IAsyncEnumerable<AGUI.Abstractions.BaseEvent!>!
+AGUI.Formatting.SseEventStreamFormatter.WriteAsync(System.Collections.Generic.IAsyncEnumerable<AGUI.Abstractions.BaseEvent!>! events, System.IO.Stream! output, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+const AGUI.Formatting.SseEventStreamFormatter.ServerSentEventsMediaType = "text/event-stream" -> string!

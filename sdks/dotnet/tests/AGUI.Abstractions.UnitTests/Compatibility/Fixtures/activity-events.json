@@ -1,0 +1,32 @@
+[
+  {
+    "type": "ACTIVITY_SNAPSHOT",
+    "messageId": "msg_activity",
+    "activityType": "PLAN",
+    "content": {
+      "tasks": ["search"]
+    },
+    "replace": true
+  },
+  {
+    "type": "ACTIVITY_SNAPSHOT",
+    "messageId": "msg_activity",
+    "activityType": "PLAN",
+    "content": {
+      "tasks": []
+    },
+    "replace": false
+  },
+  {
+    "type": "ACTIVITY_DELTA",
+    "messageId": "msg_activity",
+    "activityType": "PLAN",
+    "patch": [
+      {
+        "op": "replace",
+        "path": "/tasks/0",
+        "value": "✓ search"
+      }
+    ]
+  }
+]

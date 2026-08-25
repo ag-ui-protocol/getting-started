@@ -4,6 +4,7 @@ export type Feature =
   | "agentic_chat"
   | "agentic_generative_ui"
   | "human_in_the_loop"
+  | "interrupt"
   | "predictive_state_updates"
   | "shared_state"
   | "tool_based_generative_ui"
@@ -11,6 +12,7 @@ export type Feature =
   | "agentic_chat_reasoning"
   | "agentic_chat_multimodal"
   | "subgraphs"
+  | "multi_agent"
   | "a2a_chat"
   | "vnext_chat"
   | "v1_agentic_chat"
@@ -19,7 +21,9 @@ export type Feature =
   | "a2ui_advanced"
   | "a2ui_recovery"
   | "crew_chat"
-  | "error_flow";
+  | "error_flow"
+  | "background_agents"
+  | "observational_memory";
 
 export interface MenuIntegrationConfig {
   id: string;

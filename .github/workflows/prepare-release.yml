@@ -24,6 +24,9 @@ on:
           - integration-aws-strands-ts
           - integration-claude-agent-sdk-py
           - integration-claude-agent-sdk-ts
+          - integration-claude-managed-agents-dotnet
+          - integration-claude-managed-agents-py
+          - integration-claude-managed-agents-ts
           - integration-cloudflare-agents
           - integration-crewai-py
           - integration-crewai-ts
@@ -43,6 +46,8 @@ on:
           - middleware-mcp-apps
           - sdk-py
           - sdk-py-a2ui-toolkit
+          - sdk-dotnet
+          - sdk-java
           - sdk-ts
           - sdk-ts-a2ui-toolkit
           - create-ag-ui-app
@@ -69,6 +74,14 @@ permissions:
 
 env:
   NX_VERBOSE_LOGGING: true
+  # Pinned Python build toolchain — see .github/python-toolchain.env. Kept in step
+  # across workflows by the python-toolchain-pins job in lint-release-workflows.yml.
+  # UV_VERSION is needed here because prepare-release.ts re-locks the packages it
+  # bumps (#2314), so this workflow does run uv — and its output lands in a COMMITTED
+  # lockfile, which makes an exact version load-bearing here in a way it is not
+  # elsewhere.
+  UV_VERSION: "0.12.1"
+  PYTHON_VERSION: "3.12"
 
 jobs:
   create-release-pr:
@@ -82,7 +95,7 @@ jobs:
     steps:
       - name: Find existing release/next PR (stacking target)
         id: existing
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -106,7 +119,7 @@ jobs:
             }
 
       - name: Checkout repo
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -114,19 +127,29 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: "10.33.4"
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22"
+          node-version-file: ".node-version"
 
       - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # prepare-release.ts re-locks any uv-managed Python package it bumps, so uv
+      # must be on PATH or the bump aborts rather than shipping a stale lock.
+      # The exact version matters here more than anywhere: this is the uv whose
+      # output lands in a committed lockfile.
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -173,7 +196,13 @@ jobs:
           SUMMARY=$(jq -r '.packages | map("\(.name)@\(.newVersion)") | join(", ")' /tmp/bump-result.json)
           echo "summary=$SUMMARY" >> "$GITHUB_OUTPUT"
 
-          FILES=$(jq -r '.packages[].file' /tmp/bump-result.json | tr '\n' ' ')
+          # Stage the files prepare-release.ts actually WROTE, not the packages'
+          # version SOURCES. For Maven those differ: the bump rewrites the
+          # reactor pom's version AND every module's <parent><version>, so
+          # staging only `.packages[].file` would commit a reactor the modules
+          # no longer resolve against. `.files` is the authoritative list;
+          # `.packages[].file` is the fallback for any older payload shape.
+          FILES=$(jq -r '(if (.files // []) | length > 0 then .files else [.packages[].file] end) | unique | .[]' /tmp/bump-result.json | tr '\n' ' ')
           echo "files=$FILES" >> "$GITHUB_OUTPUT"
 
       - name: Dry-run summary
@@ -194,10 +223,16 @@ jobs:
       - name: Mint devops-bot token
         id: app-token
         if: inputs.dry_run != true && steps.bump.outputs.changed_count != '0'
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: "3877599"
           private-key: ${{ secrets.DEVOPS_BOT_PRIVATE_KEY }}
+          # Scope the app token to only what this workflow uses, instead of
+          # inheriting the app installation's blanket permissions (zizmor
+          # github-app). contents:write pushes the release/next branch;
+          # pull-requests:write creates/updates the release PR.
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Configure git credentials for push
         if: inputs.dry_run != true && steps.bump.outputs.changed_count != '0'
@@ -252,11 +287,11 @@ jobs:
           {
             echo "## Accumulated Release"
             echo ""
-            echo "Merging this PR publishes the following to npm and PyPI:"
+            echo "Merging this PR publishes the following to npm, PyPI, NuGet, and Maven Central:"
             echo ""
             echo "| Package | Old | New | Registry |"
             echo "|---------|-----|-----|----------|"
-            jq -r '.[] | "| \(.name) | \(.oldVersion) | \(.newVersion) | \(if .ecosystem == "typescript" then "npm" else "PyPI" end) |"' /tmp/accumulated.json
+            jq -r '.[] | "| \(.name) | \(.oldVersion) | \(.newVersion) | \(if .ecosystem == "typescript" then "npm" elif .ecosystem == "dotnet" then "NuGet" elif .ecosystem == "maven" then "Maven Central" else "PyPI" end) |"' /tmp/accumulated.json
             echo ""
             echo "---"
             echo ""
@@ -276,7 +311,7 @@ jobs:
             echo "2. **CI runs on this PR** — tests, lint, type checks, build must pass before merge."
             echo "3. **When merged**, the \`release / publish\` workflow detects the version bumps and:"
             echo "   - Builds and tests all packages"
-            echo "   - Publishes to npm and PyPI"
+            echo "   - Publishes to npm, PyPI, NuGet, and Maven Central"
             echo "   - Creates per-package git tags"
             echo "   - Creates a GitHub Release"
             echo ""
@@ -293,7 +328,7 @@ jobs:
 
       - name: Create or update release PR
         if: inputs.dry_run != true && steps.bump.outputs.changed_count != '0'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           HAS_EXISTING: ${{ steps.existing.outputs.has_existing }}
           EXISTING_PR: ${{ steps.existing.outputs.pr_number }}

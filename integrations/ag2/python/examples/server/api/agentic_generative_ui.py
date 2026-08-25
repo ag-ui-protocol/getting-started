@@ -1,12 +1,16 @@
-"""Agentic Generative UI feature."""
+"""Agentic Generative UI feature.
+
+The plan lives in the run's shared state: tools update `ctx.variables` and
+emit STATE_SNAPSHOT events mid-run so the frontend renders progress live.
+"""
 
 from textwrap import dedent
 from typing import Literal
 
-from autogen import ConversableAgent, LLMConfig
-from autogen.ag_ui import AGUIStream
-from autogen.agentchat import ContextVariables, ReplyResult
-from autogen.tools import tool
+from ag_ui.core import StateSnapshotEvent
+from ag2 import Agent, Context, tool
+from ag2.ag_ui import AGUIEvent, AGUIStream
+from ag2.config import OpenAIConfig
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
@@ -30,75 +34,58 @@ class Plan(BaseModel):
     steps: list[Step] = Field(default_factory=list, description="The steps in the plan")
 
 
-@tool()
-async def create_plan(
-    context_variables: ContextVariables,
-    steps: list[str],
-) -> ReplyResult:
+@tool
+async def create_plan(ctx: Context, steps: list[str]) -> str:
     """Create a plan with multiple steps.
 
     Args:
         steps: List of step descriptions to create the plan.
-
-    Returns:
-        StateSnapshotEvent containing the initial state of the steps.
     """
-    plan: Plan = Plan(
-        steps=[Step(description=step) for step in steps],
-    )
-    context_variables.update(plan.model_dump())
-    return ReplyResult(
-        message="Plan created",
-        context_variables=context_variables,
-    )
+    plan = Plan(steps=[Step(description=step) for step in steps])
+    ctx.variables.update(plan.model_dump())
+    await ctx.send(AGUIEvent(StateSnapshotEvent(snapshot=ctx.variables)))
+    return "Plan created"
 
 
-@tool()
+@tool
 async def update_plan_step(
-    context_variables: ContextVariables,
+    ctx: Context,
     index: int,
     description: str | None = None,
     status: StepStatus | None = None,
-) -> ReplyResult:
+) -> str:
     """Update the plan with new steps or changes.
 
     Args:
         index: The index of the step to update.
         description: The new description for the step.
         status: The new status for the step.
-
-    Returns:
-        StateDeltaEvent containing the changes made to the plan.
     """
-    plan = Plan.model_validate(context_variables.data)
+    plan = Plan.model_validate(ctx.variables)
 
     if description is not None:
         plan.steps[index].description = description
     if status is not None:
         plan.steps[index].status = status
 
-    context_variables.update(plan.model_dump())
-
-    return ReplyResult(
-        message="Plan updated",
-        context_variables=context_variables,
-    )
+    ctx.variables.update(plan.model_dump())
+    await ctx.send(AGUIEvent(StateSnapshotEvent(snapshot=ctx.variables)))
+    return "Plan updated"
 
 
-agent = ConversableAgent(
+agent = Agent(
     name="planner",
-    system_message=dedent("""
-    You are a helpful assistant assisting with any task. 
+    prompt=dedent("""
+    You are a helpful assistant assisting with any task.
     When asked to do something, you MUST call the function `create_plan` (or `update_plan_step` where fits)
     that was provided to you.
     Do not offer to call the function/make a plan. Simply make the plan, even for unrealistic tasks like "take down the moon".
     If you called the function, you MUST NOT repeat the steps in your next response to the user.
-    Just give a very brief summary (one sentence) of what you did with some emojis. 
+    Just give a very brief summary (one sentence) of what you did with some emojis.
     Always say you actually did the steps, not merely generated them.
     """),
-    llm_config=LLMConfig({"model": "gpt-4o-mini", "stream": True}),
-    human_input_mode="NEVER",
-    functions=[create_plan, update_plan_step],
+    config=OpenAIConfig(model="gpt-4o-mini"),
+    tools=[create_plan, update_plan_step],
 )
 
 stream = AGUIStream(agent)

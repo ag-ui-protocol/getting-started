@@ -1,0 +1,26 @@
+﻿{
+  "threadId": "thread_Id_2",
+  "runId": "run_Id_2",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Please delete the file report-draft.txt"
+    }
+  ],
+  "resume": [
+    {
+      "interruptId": "ficc_Id_1",
+      "status": "resolved",
+      "payload": {
+        "approved": true,
+        "toolCall": {
+          "callId": "call_Id_1",
+          "name": "delete_file",
+          "arguments": {
+            "filename": "report-draft.txt"
+          }
+        }
+      }
+    }
+  ]
+}

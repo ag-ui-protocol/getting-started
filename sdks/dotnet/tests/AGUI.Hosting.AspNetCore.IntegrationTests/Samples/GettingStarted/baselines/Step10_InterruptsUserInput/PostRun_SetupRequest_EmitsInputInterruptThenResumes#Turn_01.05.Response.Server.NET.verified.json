@@ -1,0 +1,26 @@
+﻿[
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "interruptRequest",
+        "reason": "input_required",
+        "message": "What username would you like to use?",
+        "responseSchema": {
+          "type": "object",
+          "properties": {
+            "response": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "response"
+          ]
+        },
+        "requestId": "call_Id_1"
+      }
+    ],
+    "responseId": "chatcmpl-Id_1",
+    "modelId": "gpt-5-mini-2025-08-07"
+  }
+]

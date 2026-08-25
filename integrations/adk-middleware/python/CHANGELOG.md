@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-22
+
+### Added
+
+- **FEATURE**: A2UI (Agent-to-UI) generative-UI rendering for ADK agents (OSS-158, #1955)
+  - Adds a `render_a2ui` sub-agent tool (`A2UISubAgentTool`, `get_a2ui_tool()`) that lets an ADK agent emit A2UI v0.9 server-to-client operations (`createSurface` / `updateComponents` / `updateDataModel`), which the runtime detects and renders against a client-registered catalog. `plan_a2ui_injection()` decides when to auto-inject the `generate_a2ui` tool, giving ADK the same auto-injection behavior the AWS Strands middleware already has (Strands parity).
+  - Generation is wrapped in the `ag-ui-a2ui-toolkit` **recovery loop**: the model's free-form output is validated structurally and retried on structural errors up to a capped number of attempts; when recovery is exhausted the middleware surfaces a graceful A2UI **hard-failure envelope** rather than emitting a malformed tree.
+  - Reuses the A2A-free subset of Google's `a2ui-agent-sdk` for prompt construction and healing: `render_catalog_instructions()` wraps `render_as_llm_instructions` (renders the v0.9 envelope, common-types definitions, and catalog components into a prompt block), and `heal_json_arg()` wraps `parse_and_fix` (repairs smart quotes, trailing commas, and single-object wraps in the model's JSON). Validation deliberately stays on the toolkit's structural/lenient validator (not Google's strict `A2uiValidator`), because client-injected zod catalogs are not strict-resolvable.
+  - Import hygiene is enforced by `test_a2ui_import_hygiene.py`, which blocks `a2ui.a2a`, `a2ui.adk`, and `a2a` imports so the middleware stays A2A-free.
+  - **New dependencies**: `ag-ui-a2ui-toolkit>=0.0.3` and `a2ui-agent-sdk>=0.2.4,<0.3.0`. `a2ui-agent-sdk` floors `google-adk` at `>=1.28.1`, so the effective ADK floor is raised to `1.28.1` (the full `google-adk<3.0.0` range is retained — ADK 1.x and 2.x both supported).
+
 ### Changed
 
 - **PERFORMANCE**: Cache session reads per execution to cut redundant `get_session` round-trips (#1880, #1890, thanks @he-yufeng)

@@ -10,6 +10,7 @@ type TextMessageStartEvent struct {
 	*BaseEvent
 	MessageID string  `json:"messageId"`
 	Role      *string `json:"role,omitempty"`
+	Name      string  `json:"name,omitempty"`
 }
 
 // NewTextMessageStartEvent creates a new text message start event
@@ -33,6 +34,13 @@ type TextMessageStartOption func(*TextMessageStartEvent)
 func WithRole(role string) TextMessageStartOption {
 	return func(e *TextMessageStartEvent) {
 		e.Role = &role
+	}
+}
+
+// WithName sets the sender name for the message (e.g. a sub-agent author).
+func WithName(name string) TextMessageStartOption {
+	return func(e *TextMessageStartEvent) {
+		e.Name = name
 	}
 }
 
@@ -192,6 +200,7 @@ type TextMessageChunkEvent struct {
 	MessageID *string `json:"messageId,omitempty"`
 	Role      *string `json:"role,omitempty"`
 	Delta     *string `json:"delta,omitempty"`
+	Name      *string `json:"name,omitempty"`
 }
 
 // NewTextMessageChunkEvent creates a new text message chunk event
@@ -222,6 +231,12 @@ func (e *TextMessageChunkEvent) WithChunkDelta(delta string) *TextMessageChunkEv
 	return e
 }
 
+// WithChunkName sets the sender name for the chunk.
+func (e *TextMessageChunkEvent) WithChunkName(name string) *TextMessageChunkEvent {
+	e.Name = &name
+	return e
+}
+
 // Validate validates the text message chunk event
 func (e *TextMessageChunkEvent) Validate() error {
 	if err := e.BaseEvent.Validate(); err != nil {
@@ -229,8 +244,8 @@ func (e *TextMessageChunkEvent) Validate() error {
 	}
 
 	// At least one field should be present
-	if e.MessageID == nil && e.Role == nil && e.Delta == nil {
-		return fmt.Errorf("TextMessageChunkEvent validation failed: at least one of messageId, role, or delta must be present")
+	if e.MessageID == nil && e.Role == nil && e.Delta == nil && e.Name == nil {
+		return fmt.Errorf("TextMessageChunkEvent validation failed: at least one of messageId, role, delta, or name must be present")
 	}
 
 	return nil

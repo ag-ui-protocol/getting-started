@@ -6,7 +6,8 @@
         "toolCalls": [
           {
             "name": "updateWorkingMemory",
-            "arguments": "{\"memory\":{\"recipe\":{\"skill_level\":\"Intermediate\",\"special_preferences\":[],\"cooking_time\":\"45 min\",\"ingredients\":[{\"icon\":\"🍝\",\"name\":\"Pasta\",\"amount\":\"400g\"},{\"icon\":\"🧂\",\"name\":\"Salt\",\"amount\":\"1 tsp\"},{\"icon\":\"🫒\",\"name\":\"Olive Oil\",\"amount\":\"4 tbsp\"},{\"icon\":\"🧄\",\"name\":\"Garlic\",\"amount\":\"6 cloves\"},{\"icon\":\"🍅\",\"name\":\"Tomatoes\",\"amount\":\"2 cups\"}],\"instructions\":[\"Boil water and cook pasta until al dente\",\"Slice garlic thinly and sauté in olive oil\",\"Dice tomatoes and add to the pan\",\"Season with salt to taste\",\"Toss pasta with the sauce and serve\"]}}}"
+            "arguments": "{\"memory\":{\"recipe\":{\"skill_level\":\"Intermediate\",\"special_preferences\":[],\"cooking_time\":\"45 min\",\"ingredients\":[{\"icon\":\"🍝\",\"name\":\"Pasta\",\"amount\":\"400g\"},{\"icon\":\"🧂\",\"name\":\"Salt\",\"amount\":\"1 tsp\"},{\"icon\":\"🫒\",\"name\":\"Olive Oil\",\"amount\":\"4 tbsp\"},{\"icon\":\"🧄\",\"name\":\"Garlic\",\"amount\":\"6 cloves\"},{\"icon\":\"🍅\",\"name\":\"Tomatoes\",\"amount\":\"2 cups\"}],\"instructions\":[\"Boil water and cook pasta until al dente\",\"Slice garlic thinly and sauté in olive oil\",\"Dice tomatoes and add to the pan\",\"Season with salt to taste\",\"Toss pasta with the sauce and serve\"]}}}",
+            "id": "call_updateWorkingMemory_1"
           }
         ]
       }

@@ -83,6 +83,29 @@ describe("buildResumeArray", () => {
     expect(resume[1]).not.toHaveProperty("payload");
   });
 
+  it("carries metadata through on both statuses, and omits it when not given", () => {
+    const resume = buildResumeArray(interrupts, {
+      "int-1": {
+        status: "resolved",
+        payload: { approved: true },
+        metadata: { definitionId: "review-plan", key: "afterModel-review" },
+      },
+      "int-2": { status: "cancelled", metadata: { reason: "timeout" } },
+    });
+    expect(resume[0].metadata).toEqual({
+      definitionId: "review-plan",
+      key: "afterModel-review",
+    });
+    expect(resume[1].metadata).toEqual({ reason: "timeout" });
+
+    const bare = buildResumeArray(interrupts, {
+      "int-1": { status: "resolved" },
+      "int-2": { status: "cancelled" },
+    });
+    expect(bare[0]).not.toHaveProperty("metadata");
+    expect(bare[1]).not.toHaveProperty("metadata");
+  });
+
   it("throws when a response is missing for an open interrupt", () => {
     expect(() =>
       buildResumeArray(interrupts, {

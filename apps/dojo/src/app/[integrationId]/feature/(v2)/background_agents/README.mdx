@@ -1,0 +1,42 @@
+# 🛰️ Background Agents
+
+## What This Demo Shows
+
+This demo showcases how **Mastra Background Tasks** surface through AG-UI as
+**activity events**, so long-running work that runs *out of band* looks
+different from a normal streamed response.
+
+When the agent calls a background-eligible tool, the Mastra bridge maps the
+task lifecycle to AG-UI `ACTIVITY_SNAPSHOT` / `ACTIVITY_DELTA` events
+(`activityType: "mastra-background-task"`). A custom `renderActivityMessages`
+renderer draws a distinct **Background Task** card — separate from regular chat
+text and from normal tool renders.
+
+## How to Interact
+
+Ask the Copilot to research or investigate something:
+
+- "Research the Solana ecosystem for me."
+- "Investigate best practices for retrieval-augmented generation."
+
+The agent dispatches the work to a background task and keeps responding. You'll
+see a Background Task card appear with the tool name, the topic, and a live
+"Running" state.
+
+## ✨ What's Happening Technically
+
+- The tool is flagged `background: { enabled: true }`; the agent runs it via
+  Mastra's Background Task manager instead of blocking the agentic loop.
+- The bridge emits an `ACTIVITY_SNAPSHOT` when the task starts and
+  `ACTIVITY_DELTA` (JSON patches) as its state evolves. The Mastra `taskId`
+  round-trips as the activity `messageId`.
+- The normal tool-call render is suppressed for backgrounded calls — the work
+  shows up purely as an activity, which is the whole point: the stream *looks
+  different* when work runs in the background.
+- Background work is genuinely detached: its final result is delivered out of
+  band on a later turn, not on the dispatching stream. The card reflects the
+  live "running in background" state.
+
+The `content` shape (`taskId`, `toolName`, `status`, `args`, `outputs`,
+`result`, …) is a sensible default proposed by the AG-UI bridge and is intended
+to be co-designed with Mastra.

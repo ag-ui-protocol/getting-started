@@ -397,14 +397,37 @@ class ClaudeAgentAdapter:
                 ):
                     yield event
             
-            # Emit RUN_FINISHED — read THIS run's own result (keyed per-run, so a
-            # serialized peer on the same thread cannot have clobbered it). (Fix 4)
-            yield RunFinishedEvent(
-                type=EventType.RUN_FINISHED,
-                thread_id=thread_id,
-                run_id=run_id,
-                result=self._per_run_result.get(result_key, None),
-            )
+            # Terminal event — owned by run(), one per run. On a turn whose
+            # ResultMessage carried is_error (API failure, #2145) RUN_ERROR
+            # REPLACES RUN_FINISHED: AG-UI's verifyEvents rejects any event
+            # after RUN_ERROR, so the two terminals are mutually exclusive,
+            # matching the except paths below. The worker is NOT evicted here —
+            # the stream completed cleanly, so the CLI session stays reusable
+            # (unlike the exception paths).
+            run_result = self._per_run_result.get(result_key) or {}
+            if run_result.get("is_error"):
+                api_error_status = run_result.get("api_error_status")
+                logger.error(
+                    f"Run {run_id} on thread={thread_id} ended with an API error"
+                    + (f" (status {api_error_status})" if api_error_status is not None else "")
+                )
+                yield RunErrorEvent(
+                    type=EventType.RUN_ERROR,
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    message=run_result.get("result") or "The run ended with an API error.",
+                    code=str(api_error_status) if api_error_status is not None else None,
+                )
+            else:
+                # Emit RUN_FINISHED — read THIS run's own result (keyed per-run,
+                # so a serialized peer on the same thread cannot have clobbered
+                # it). (Fix 4)
+                yield RunFinishedEvent(
+                    type=EventType.RUN_FINISHED,
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    result=self._per_run_result.get(result_key, None),
+                )
             
         except asyncio.TimeoutError as e:
             logger.error(f"Query timeout in run for thread={thread_id}: {e}")
@@ -636,7 +659,8 @@ class ClaudeAgentAdapter:
         in_reasoning_block: bool = False
         reasoning_message_id: Optional[str] = None
         has_streamed_text: bool = False
-        
+        unstreamed_fallback_ids: set[str] = set()
+
         # Tool call streaming state
         current_tool_call_id: Optional[str] = None
         current_tool_call_name: Optional[str] = None
@@ -977,8 +1001,13 @@ class ClaudeAgentAdapter:
             
             # Handle complete messages
             if isinstance(message, (AssistantMessage, UserMessage)):
+                # msg_id (used below and passed to handle_tool_use_block()) —
+                # not current_message_id, which is only valid inside the
+                # streaming loop and is already None here.
+                msg_id = current_message_id or str(uuid.uuid4())
                 if isinstance(message, AssistantMessage):
-                    msg_id = current_message_id or str(uuid.uuid4())
+                    if current_message_id is None:
+                        unstreamed_fallback_ids.add(msg_id)
                     agui_msg = build_agui_assistant_message(message, msg_id)
                     if agui_msg:
                         upsert_message(agui_msg)
@@ -991,7 +1020,7 @@ class ClaudeAgentAdapter:
                             continue
                         updated_state, tool_events = await handle_tool_use_block(
                             block, message, thread_id, run_id, self._per_thread_state.get(thread_id),
-                            parent_message_id=current_message_id,
+                            parent_message_id=msg_id,
                         )
                         if tool_id:
                             processed_tool_ids.add(tool_id)
@@ -1040,10 +1069,10 @@ class ClaudeAgentAdapter:
                 is_error = getattr(message, 'is_error', None)
                 result_text = getattr(message, 'result', None)
                 
-                # Capture metadata for RunFinished event. Key per-run
+                # Capture metadata for the terminal event. Key per-run
                 # (thread_id, run_id) so a serialized peer on the same thread
                 # cannot clobber this run's result. (Fix 4)
-                self._per_run_result[(thread_id, run_id)] = {
+                run_result = {
                     "is_error": is_error,
                     "duration_ms": getattr(message, 'duration_ms', None),
                     "duration_api_ms": getattr(message, 'duration_api_ms', None),
@@ -1051,9 +1080,21 @@ class ClaudeAgentAdapter:
                     "total_cost_usd": getattr(message, 'total_cost_usd', None),
                     "usage": getattr(message, 'usage', None),
                     "structured_output": getattr(message, 'structured_output', None),
+                    # Best-effort: absent from ResultMessage on claude-agent-sdk
+                    # versions predating the field (including the current pin
+                    # floor), in which case RUN_ERROR.code is None.
+                    "api_error_status": getattr(message, 'api_error_status', None),
                 }
-                
-                if not has_streamed_text and result_text:
+                if is_error:
+                    # Thread the failure text to run(), which owns terminal
+                    # events and emits RUN_ERROR in place of RUN_FINISHED
+                    # (#2145). Added only on errored turns so the success-path
+                    # RunFinishedEvent.result payload (emitted verbatim) is
+                    # unchanged.
+                    run_result["result"] = result_text
+                self._per_run_result[(thread_id, run_id)] = run_result
+
+                if not has_streamed_text and result_text and not is_error:
                     result_msg_id = str(uuid.uuid4())
                     yield TextMessageStartEvent(type=EventType.TEXT_MESSAGE_START, thread_id=thread_id, run_id=run_id, message_id=result_msg_id, role="assistant")
                     yield TextMessageContentEvent(type=EventType.TEXT_MESSAGE_CONTENT, thread_id=thread_id, run_id=run_id, message_id=result_msg_id, delta=result_text)
@@ -1102,6 +1143,10 @@ class ClaudeAgentAdapter:
             )
 
         flush_pending_msg()
+
+        run_result = self._per_run_result.get((thread_id, run_id), {}) or {}
+        if run_result.get("is_error") and unstreamed_fallback_ids:
+            run_messages[:] = [m for m in run_messages if _get_msg_id(m) not in unstreamed_fallback_ids]
 
         # Emit MESSAGES_SNAPSHOT with input messages + new messages from this run
         if run_messages:

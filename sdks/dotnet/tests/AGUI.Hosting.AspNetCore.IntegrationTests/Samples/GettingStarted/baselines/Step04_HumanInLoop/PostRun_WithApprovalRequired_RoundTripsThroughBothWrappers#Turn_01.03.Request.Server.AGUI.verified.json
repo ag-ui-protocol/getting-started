@@ -1,0 +1,10 @@
+﻿{
+  "threadId": "thread_Id_1",
+  "runId": "run_Id_1",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Please approve expense report EXP-2024-001"
+    }
+  ]
+}

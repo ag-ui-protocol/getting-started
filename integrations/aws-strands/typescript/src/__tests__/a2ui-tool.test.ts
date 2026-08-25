@@ -410,6 +410,79 @@ describe("A2UI sub-agent streaming → synthetic inner TOOL_CALL events", () => 
   });
 });
 
+describe("generate_a2ui sub-agent — single forced render turn (hang regression)", () => {
+  const A2UI_STREAM_KEY = "__a2uiRenderStream";
+
+  it("drives ONE forced render_a2ui model call (no agentic continuation) and returns the envelope", async () => {
+    // A full Agent loop would execute the render tool and then fire a SECOND
+    // model call that never settles — the outer generate_a2ui would hang and
+    // the run would never emit RUN_FINISHED. The fix streams the MODEL directly
+    // for a single forced turn; this locks that contract in.
+    const toolChoices: unknown[] = [];
+    const fakeModel = {
+      modelId: "fake",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async *stream(_messages: unknown, opts?: any) {
+        toolChoices.push(opts?.toolChoice);
+        yield {
+          type: "modelContentBlockStartEvent",
+          start: { type: "toolUseStart", toolUseId: "r1", name: "render_a2ui" },
+        };
+        yield {
+          type: "modelContentBlockDeltaEvent",
+          delta: {
+            type: "toolUseInputDelta",
+            input:
+              '{"surfaceId":"s1","components":[{"id":"root","component":"Row"}]}',
+          },
+        };
+        yield { type: "modelContentBlockStopEvent" };
+      },
+    };
+
+    const tool = getA2UITools({ model: fakeModel as never });
+    const ctx = {
+      toolUse: { toolUseId: "tu-1", input: {} },
+      agent: { messages: [] },
+    };
+    const events: unknown[] = [];
+    // The tool RETURNS the ToolResultBlock (not yielded), so iterate manually
+    // to capture the generator return value.
+    const gen = (
+      tool as { stream: (c: unknown) => AsyncGenerator<unknown, unknown> }
+    ).stream(ctx);
+    let result: unknown;
+    for (;;) {
+      const step = await gen.next();
+      if (step.done) {
+        result = step.value;
+        break;
+      }
+      events.push(step.value);
+    }
+
+    // Single forced turn — the model is called exactly once, forced to render.
+    expect(toolChoices).toEqual([{ tool: { name: "render_a2ui" } }]);
+
+    // Synthetic inner render events were streamed (progressive paint).
+    const payloads = events
+      .map(
+        (e) =>
+          (e as { data?: Record<string, { kind?: string }> }).data?.[
+            A2UI_STREAM_KEY
+          ],
+      )
+      .filter(Boolean) as Array<{ kind?: string }>;
+    expect(payloads.some((p) => p.kind === "start")).toBe(true);
+    expect(payloads.some((p) => p.kind === "end")).toBe(true);
+
+    // The committed envelope reaches the outer loop (so the run can finish).
+    const ret = result as { content?: Array<{ text?: string }> };
+    const text = ret?.content?.[0]?.text ?? JSON.stringify(ret);
+    expect(text).toContain("a2ui_operations");
+  });
+});
+
 describe("classifyA2UISubagentError (cancel / adapter-bug vs recoverable)", () => {
   it("rethrows on an aborted signal regardless of error", () => {
     expect(classifyA2UISubagentError(new Error("any"), true)).toBe("rethrow");

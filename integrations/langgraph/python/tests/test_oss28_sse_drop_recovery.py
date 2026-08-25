@@ -61,6 +61,7 @@ def _make_input(messages, thread_id="t1", forwarded_props=None):
     inp.context = []
     inp.run_id = "run-1"
     inp.forwarded_props = forwarded_props or {}
+    inp.resume = None
     return inp
 
 

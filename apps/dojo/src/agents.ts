@@ -8,6 +8,14 @@ import { ServerStarterAgent } from "@ag-ui/server-starter";
 import { ServerStarterAllFeaturesAgent } from "@ag-ui/server-starter-all-features";
 import { MastraClient } from "@mastra/client-js";
 import { MastraAgent } from "@ag-ui/mastra";
+
+// pnpm may resolve separate @mastra/* installations for dojo vs @ag-ui/mastra,
+// which makes the client/agent types mismatch nominally on private fields. The
+// casts below are deliberate, but target these exact expected types rather than
+// widening to `any`.
+type RemoteAgentsOptions = Parameters<typeof MastraAgent.getRemoteAgents>[0];
+type LocalAgentsOptions = Parameters<typeof MastraAgent.getLocalAgents>[0];
+type MastraAgentOptions = ConstructorParameters<typeof MastraAgent>[0];
 // import { VercelAISDKAgent } from "@ag-ui/vercel-ai-sdk";
 // import { openai } from "@ai-sdk/openai";
 import { LangGraphAgent, LangGraphHttpAgent } from "@ag-ui/langgraph";
@@ -16,6 +24,12 @@ import { LlamaIndexAgent } from "@ag-ui/llamaindex";
 import { CrewAIAgent } from "@ag-ui/crewai";
 import getEnvVars from "./env";
 import { mastra } from "./mastra";
+import {
+  a2uiDynamicSchemaAgent,
+  a2uiRecoveryAgent,
+  a2uiInjectConfig,
+} from "./mastra/agents/a2ui";
+import { a2uiFixedSchemaAgent } from "./mastra/agents/a2ui-fixed";
 import { PydanticAIAgent } from "@ag-ui/pydantic-ai";
 import { ADKAgent } from "@ag-ui/adk";
 import { SpringAiAgent } from "@ag-ui/spring-ai";
@@ -30,6 +44,10 @@ import { Ag2Agent } from "@ag-ui/ag2";
 import { LangroidHttpAgent } from "@ag-ui/langroid";
 import { WatsonxAgent } from "@ag-ui/watsonx";
 import { A2UIMiddleware } from "@ag-ui/a2ui-middleware";
+import {
+  CREWAI_CONVERSATIONAL_AGENT_PATHS,
+  CREWAI_FLOW_AGENT_PATHS,
+} from "./crewai";
 
 const envVars = getEnvVars();
 
@@ -46,6 +64,52 @@ const A2UI_DOJO_CATALOG_ID = "https://a2ui.org/demos/dojo/dynamic_catalog.json";
 // middleware (the per-request clone copies construction-time `.use()`).
 export const ADK_A2UI_INJECT_AGENTS: string[] = ["a2ui_dynamic_schema"];
 
+// Per-agent A2UI inject whitelist for the AWS Strands integrations (TS + Py).
+// These demos are plain Strands agents with no a2ui tool of their own and rely
+// on the adapter auto-injecting `generate_a2ui`. `a2ui_fixed_schema` is
+// deliberately excluded: it wires its OWN backend tools (search_flights /
+// search_hotels) that return a fixed-layout envelope, so it must NOT get
+// `generate_a2ui` injected alongside them. Injection is applied per-agent here
+// (NOT integration-wide) and these agents are excluded from the runtime-level
+// a2ui config in route.ts to avoid double-applying the middleware.
+// `a2ui_advanced` runs the SAME backend agent as `a2ui_dynamic_schema` (the
+// demo is frontend-only: a custom progress renderer plus action handlers), so
+// it needs the same per-agent injection.
+export const STRANDS_A2UI_INJECT_AGENTS: string[] = [
+  "a2ui_dynamic_schema",
+  "a2ui_advanced",
+  "a2ui_recovery",
+];
+
+// Per-agent A2UI inject whitelist for the CrewAI integration. Its dynamic and
+// recovery demos wire no A2UI tool and rely on the adapter auto-injecting
+// `generate_a2ui` when it sees `injectA2UITool`; `a2ui_fixed_schema` wires its
+// own backend tools (search_flights / search_hotels) and must NOT get
+// `generate_a2ui` injected alongside them. Applied per-agent here and excluded
+// from the runtime-level a2ui config in route.ts to avoid double-applying.
+export const CREWAI_A2UI_INJECT_AGENTS: string[] = [
+  "a2ui_dynamic_schema",
+  "a2ui_recovery",
+];
+
+function createCrewAIIntegrationAgents<const T extends Record<string, string>>(
+  paths: T,
+) {
+  const agents = mapAgents(
+    (path) => new CrewAIAgent({ url: `${envVars.crewAiUrl}/${path}` }),
+    paths,
+  );
+  for (const id of CREWAI_A2UI_INJECT_AGENTS) {
+    (agents as Record<string, AbstractAgent>)[id]?.use(
+      new A2UIMiddleware({
+        injectA2UITool: true,
+        defaultCatalogId: A2UI_DOJO_CATALOG_ID,
+      }),
+    );
+  }
+  return agents;
+}
+
 export const agentsIntegrations = {
   "middleware-starter": async () => ({
     agentic_chat: new MiddlewareStarterAgent(),
@@ -57,6 +121,7 @@ export const agentsIntegrations = {
         new PydanticAIAgent({ url: `${envVars.pydanticAIUrl}/${path}` }),
       {
         agentic_chat: "agentic_chat",
+        agentic_chat_multimodal: "agentic_chat_multimodal",
         agentic_generative_ui: "agentic_generative_ui",
         human_in_the_loop: "human_in_the_loop",
         // TODO: Re-enable this once production builds no longer break
@@ -123,10 +188,12 @@ export const agentsIntegrations = {
     });
 
     return MastraAgent.getRemoteAgents({
-      // Cast needed: pnpm may resolve separate @mastra/client-js installations
-      // for dojo vs @ag-ui/mastra, causing nominal type mismatch on private fields
-      mastraClient: mastraClient as any,
+      mastraClient:
+        mastraClient as unknown as RemoteAgentsOptions["mastraClient"],
       resourceId: "mastra-agent-remote",
+      // Surface Observational Memory background work as AG-UI activity events
+      // for the `observational_memory` demo only (default OFF for all others).
+      observationalMemory: ["observational_memory"],
     }) as Promise<
       Record<
         | "agentic_chat"
@@ -134,24 +201,61 @@ export const agentsIntegrations = {
         | "agentic_chat_multimodal"
         | "backend_tool_rendering"
         | "human_in_the_loop"
-        | "tool_based_generative_ui",
+        | "interrupt"
+        | "shared_state"
+        | "tool_based_generative_ui"
+        | "a2ui_dynamic_schema"
+        | "a2ui_recovery"
+        | "a2ui_fixed_schema"
+        | "observational_memory",
         AbstractAgent
       >
     >;
   },
 
   "mastra-agent-local": async () => {
-    return MastraAgent.getLocalAgents({
-      // Cast needed: pnpm may resolve separate @mastra/core installations
-      // for dojo vs @ag-ui/mastra, causing nominal type mismatch on private fields
-      mastra: mastra as any,
+    const base = MastraAgent.getLocalAgents({
+      mastra: mastra as unknown as LocalAgentsOptions["mastra"],
       resourceId: "mastra-agent-local",
-    }) as Record<
+      // Surface Observational Memory background work as AG-UI activity events
+      // for the `observational_memory` demo only (default OFF for all others).
+      observationalMemory: ["observational_memory"],
+    });
+    // Override the A2UI agents with wrappers carrying the a2ui auto-inject
+    // config. The underlying agents wire NO tool — the bridge auto-injects
+    // `generate_a2ui` per run (pillar 1). Config MUST go through the constructor
+    // so the runtime's per-request `clone()` preserves it.
+    const wrapA2UI = (agent: unknown): AbstractAgent =>
+      new MastraAgent({
+        agent: agent as unknown as MastraAgentOptions["agent"],
+        resourceId: "mastra-agent-local",
+        a2ui: a2uiInjectConfig,
+      }) as unknown as AbstractAgent;
+    // Fixed-schema owns its own direct tools — opt OUT of auto-injection so the
+    // bridge never adds generate_a2ui alongside search_flights/search_hotels.
+    const wrapA2UIFixed = (agent: unknown): AbstractAgent =>
+      new MastraAgent({
+        agent: agent as unknown as MastraAgentOptions["agent"],
+        resourceId: "mastra-agent-local",
+        a2ui: { injectA2UITool: false },
+      }) as unknown as AbstractAgent;
+    return {
+      ...base,
+      a2ui_dynamic_schema: wrapA2UI(a2uiDynamicSchemaAgent),
+      a2ui_recovery: wrapA2UI(a2uiRecoveryAgent),
+      a2ui_fixed_schema: wrapA2UIFixed(a2uiFixedSchemaAgent),
+    } as Record<
       | "agentic_chat"
       | "backend_tool_rendering"
       | "human_in_the_loop"
+      | "interrupt"
       | "shared_state"
-      | "tool_based_generative_ui",
+      | "tool_based_generative_ui"
+      | "background_agents"
+      | "a2ui_dynamic_schema"
+      | "a2ui_recovery"
+      | "a2ui_fixed_schema"
+      | "observational_memory",
       AbstractAgent
     >;
   },
@@ -182,15 +286,6 @@ export const agentsIntegrations = {
         subgraphs: "subgraphs",
       },
     ),
-    // A2UI Chat with middleware
-    a2ui_chat: (() => {
-      const agent = new LangGraphAgent({
-        deploymentUrl: envVars.langgraphPythonUrl,
-        graphId: "a2ui_chat",
-      });
-      agent.use(new A2UIMiddleware({ injectA2UITool: true }));
-      return agent;
-    })(),
     a2ui_dynamic_schema: new LangGraphAgent({
       deploymentUrl: envVars.langgraphPythonUrl,
       graphId: "a2ui_dynamic_schema",
@@ -308,9 +403,14 @@ export const agentsIntegrations = {
       (path) => new AgnoAgent({ url: `${envVars.agnoUrl}/${path}/agui` }),
       {
         agentic_chat: "agentic_chat",
-        tool_based_generative_ui: "tool_based_generative_ui",
+        agentic_chat_reasoning: "agentic_chat_reasoning",
+        agentic_chat_multimodal: "agentic_chat_multimodal",
+        agentic_generative_ui: "agentic_generative_ui",
         backend_tool_rendering: "backend_tool_rendering",
         human_in_the_loop: "human_in_the_loop",
+        predictive_state_updates: "predictive_state_updates",
+        shared_state: "shared_state",
+        tool_based_generative_ui: "tool_based_generative_ui",
       },
     ),
 
@@ -333,6 +433,7 @@ export const agentsIntegrations = {
         new LlamaIndexAgent({ url: `${envVars.llamaIndexUrl}/${path}/run` }),
       {
         agentic_chat: "agentic_chat",
+        agentic_chat_multimodal: "agentic_chat_multimodal",
         human_in_the_loop: "human_in_the_loop",
         agentic_generative_ui: "agentic_generative_ui",
         shared_state: "shared_state",
@@ -340,22 +441,10 @@ export const agentsIntegrations = {
       },
     ),
 
-  crewai: async () =>
-    mapAgents(
-      (path) => new CrewAIAgent({ url: `${envVars.crewAiUrl}/${path}` }),
-      {
-        agentic_chat: "agentic_chat",
-        // TODO: Add agent for backend_tool_rendering
-        // backend_tool_rendering: "backend_tool_rendering",
-        human_in_the_loop: "human_in_the_loop",
-        tool_based_generative_ui: "tool_based_generative_ui",
-        agentic_generative_ui: "agentic_generative_ui",
-        shared_state: "shared_state",
-        predictive_state_updates: "predictive_state_updates",
-        crew_chat: "crew_chat",
-        error_flow: "error_flow",
-      },
-    ),
+  crewai: async () => createCrewAIIntegrationAgents(CREWAI_FLOW_AGENT_PATHS),
+
+  "crewai-conversational-flows": async () =>
+    createCrewAIIntegrationAgents(CREWAI_CONVERSATIONAL_AGENT_PATHS),
 
   "agent-spec-langgraph": async () =>
     mapAgents(
@@ -391,6 +480,7 @@ export const agentsIntegrations = {
         new HttpAgent({ url: `${envVars.agentFrameworkPythonUrl}/${path}` }),
       {
         agentic_chat: "agentic_chat",
+        agentic_chat_multimodal: "agentic_chat_multimodal",
         backend_tool_rendering: "backend_tool_rendering",
         human_in_the_loop: "human_in_the_loop",
         agentic_generative_ui: "agentic_generative_ui",
@@ -423,6 +513,31 @@ export const agentsIntegrations = {
         shared_state: "shared_state",
         tool_based_generative_ui: "tool_based_generative_ui",
         predictive_state_updates: "predictive_state_updates",
+        subgraphs: "subgraphs",
+      },
+    ),
+
+  "ag-ui-dotnet": async () =>
+    mapAgents(
+      (path) => new HttpAgent({ url: `${envVars.aguiDotnetUrl}/${path}` }),
+      {
+        agentic_chat: "agentic_chat",
+        v1_agentic_chat: "agentic_chat",
+        backend_tool_rendering: "backend_tool_rendering",
+        human_in_the_loop: "human_in_the_loop",
+        agentic_generative_ui: "agentic_generative_ui",
+        shared_state: "shared_state",
+        tool_based_generative_ui: "tool_based_generative_ui",
+        predictive_state_updates: "predictive_state_updates",
+        // A2UI: generate_a2ui is auto-injected and handled server-side by the .NET
+        // AGUI.A2UI adapter (subagent + recovery). The dojo runtime attaches the A2UI
+        // painting middleware (no client-side tool injection, since injectsA2UITool is
+        // false for this integration), so these are plain HttpAgents. Fixed-schema needs no
+        // generation tool at all — its search tools return the surface envelope directly.
+        a2ui_fixed_schema: "a2ui_fixed_schema",
+        a2ui_dynamic_schema: "a2ui_dynamic_schema",
+        a2ui_advanced: "a2ui_advanced",
+        a2ui_recovery: "a2ui_recovery",
       },
     ),
 
@@ -458,67 +573,103 @@ export const agentsIntegrations = {
     };
   },
 
-  "aws-strands": async () => ({
-    ...mapAgents(
-      (path) =>
-        new AWSStrandsAgent({ url: `${envVars.awsStrandsUrl}/${path}/` }),
-      {
-        agentic_chat: "agentic-chat",
-        agentic_chat_reasoning: "agentic-chat-reasoning",
-        agentic_chat_multimodal: "agentic-chat-multimodal",
-        // v1 page reuses the agentic-chat endpoint (menu advertises the
-        // feature; this mapping was missing).
-        v1_agentic_chat: "agentic-chat",
-        backend_tool_rendering: "backend-tool-rendering",
-        agentic_generative_ui: "agentic-generative-ui",
-        shared_state: "shared-state",
-        // A2UI demos: plain Strands agents with no a2ui wiring (the
-        // runtime sends `injectA2UITool` and the adapter injects generate_a2ui).
-        a2ui_dynamic_schema: "a2ui-dynamic-schema",
-        a2ui_recovery: "a2ui-recovery",
-      },
-    ),
-    human_in_the_loop: new AWSStrandsAgent({
-      url: `${envVars.awsStrandsUrl}/human-in-the-loop`,
-      debug: true,
-    }),
-  }),
+  "aws-strands": async () => {
+    const agents = {
+      ...mapAgents(
+        (path) =>
+          new AWSStrandsAgent({ url: `${envVars.awsStrandsUrl}/${path}/` }),
+        {
+          agentic_chat: "agentic-chat",
+          agentic_chat_reasoning: "agentic-chat-reasoning",
+          agentic_chat_multimodal: "agentic-chat-multimodal",
+          // v1 page reuses the agentic-chat endpoint (menu advertises the
+          // feature; this mapping was missing).
+          v1_agentic_chat: "agentic-chat",
+          backend_tool_rendering: "backend-tool-rendering",
+          agentic_generative_ui: "agentic-generative-ui",
+          shared_state: "shared-state",
+          predictive_state_updates: "predictive-state-updates",
+          tool_based_generative_ui: "tool-based-generative-ui",
+          interrupt: "interrupt",
+          multi_agent: "multi-agent",
+          // A2UI dynamic/recovery: plain Strands agents with no a2ui wiring;
+          // they get per-agent `generate_a2ui` injection below. fixed_schema
+          // wires its own backend tools, so it is NOT in the inject whitelist.
+          a2ui_dynamic_schema: "a2ui-dynamic-schema",
+          a2ui_fixed_schema: "a2ui-fixed-schema",
+          // Advanced reuses the dynamic-schema backend; the demo is frontend-only.
+          a2ui_advanced: "a2ui-dynamic-schema",
+          a2ui_recovery: "a2ui-recovery",
+        },
+      ),
+      human_in_the_loop: new AWSStrandsAgent({
+        url: `${envVars.awsStrandsUrl}/human-in-the-loop`,
+        debug: true,
+      }),
+    };
+    for (const id of STRANDS_A2UI_INJECT_AGENTS) {
+      (agents as Record<string, AbstractAgent>)[id]?.use(
+        new A2UIMiddleware({
+          injectA2UITool: true,
+          defaultCatalogId: A2UI_DOJO_CATALOG_ID,
+        }),
+      );
+    }
+    return agents;
+  },
 
-  "aws-strands-typescript": async () => ({
+  "aws-strands-typescript": async () => {
     // TS example server mounts every endpoint on hyphenated paths (matching the
     // Python reference server) so the same curl payloads drive both adapters.
     // v1_agentic_chat reuses the agentic-chat endpoint — the dojo page renders
     // the same agent via the v1 CopilotChat UI instead of the v2 shell.
-    ...mapAgents(
-      (path) =>
-        new AWSStrandsAgent({
-          url: `${envVars.awsStrandsTypescriptUrl}/${path}/`,
+    const agents = {
+      ...mapAgents(
+        (path) =>
+          new AWSStrandsAgent({
+            url: `${envVars.awsStrandsTypescriptUrl}/${path}/`,
+          }),
+        {
+          agentic_chat: "agentic-chat",
+          agentic_chat_reasoning: "agentic-chat-reasoning",
+          agentic_chat_multimodal: "agentic-chat-multimodal",
+          v1_agentic_chat: "agentic-chat",
+          backend_tool_rendering: "backend-tool-rendering",
+          agentic_generative_ui: "agentic-generative-ui",
+          shared_state: "shared-state",
+          predictive_state_updates: "predictive-state-updates",
+          tool_based_generative_ui: "tool-based-generative-ui",
+          interrupt: "interrupt",
+          multi_agent: "multi-agent",
+          // A2UI dynamic/recovery are auto-injected per-agent below;
+          // fixed_schema wires its own backend tools (no injection).
+          a2ui_dynamic_schema: "a2ui-dynamic-schema",
+          a2ui_fixed_schema: "a2ui-fixed-schema",
+          // Advanced reuses the dynamic-schema backend; the demo is frontend-only.
+          a2ui_advanced: "a2ui-dynamic-schema",
+          a2ui_recovery: "a2ui-recovery",
+        },
+      ),
+      human_in_the_loop: new AWSStrandsAgent({
+        url: `${envVars.awsStrandsTypescriptUrl}/human-in-the-loop`,
+        debug: true,
+      }),
+    };
+    for (const id of STRANDS_A2UI_INJECT_AGENTS) {
+      (agents as Record<string, AbstractAgent>)[id]?.use(
+        new A2UIMiddleware({
+          injectA2UITool: true,
+          defaultCatalogId: A2UI_DOJO_CATALOG_ID,
         }),
-      {
-        agentic_chat: "agentic-chat",
-        agentic_chat_reasoning: "agentic-chat-reasoning",
-        agentic_chat_multimodal: "agentic-chat-multimodal",
-        v1_agentic_chat: "agentic-chat",
-        backend_tool_rendering: "backend-tool-rendering",
-        agentic_generative_ui: "agentic-generative-ui",
-        shared_state: "shared-state",
-        tool_based_generative_ui: "tool-based-generative-ui",
-        // A2UI demos (auto-injected, see above). The example server mounts
-        // plain Strands agents (no a2ui wiring); the runtime sends
-        // `injectA2UITool` and the adapter injects `generate_a2ui` itself.
-        a2ui_dynamic_schema: "a2ui-dynamic-schema",
-        a2ui_recovery: "a2ui-recovery",
-      },
-    ),
-    human_in_the_loop: new AWSStrandsAgent({
-      url: `${envVars.awsStrandsTypescriptUrl}/human-in-the-loop`,
-      debug: true,
-    }),
-  }),
+      );
+    }
+    return agents;
+  },
 
   ag2: async () =>
     mapAgents((path) => new Ag2Agent({ url: `${envVars.ag2Url}/${path}` }), {
       agentic_chat: "agentic_chat",
+      agentic_chat_multimodal: "agentic_chat_multimodal",
       backend_tool_rendering: "backend_tool_rendering",
       human_in_the_loop: "human_in_the_loop",
       agentic_generative_ui: "agentic_generative_ui",
@@ -549,6 +700,48 @@ export const agentsIntegrations = {
         agentic_chat: "agentic_chat",
         backend_tool_rendering: "backend_tool_rendering",
         shared_state: "shared_state",
+        human_in_the_loop: "human_in_the_loop",
+        tool_based_generative_ui: "tool_based_generative_ui",
+      },
+    ),
+
+  "claude-managed-agents-dotnet": async () =>
+    mapAgents(
+      (path) =>
+        new HttpAgent({
+          url: `${envVars.claudeManagedAgentsDotnetUrl}/${path}`,
+        }),
+      {
+        agentic_chat: "agentic_chat",
+        backend_tool_rendering: "backend_tool_rendering",
+        human_in_the_loop: "human_in_the_loop",
+        tool_based_generative_ui: "tool_based_generative_ui",
+      },
+    ),
+
+  "claude-managed-agents-python": async () =>
+    mapAgents(
+      (path) =>
+        new HttpAgent({
+          url: `${envVars.claudeManagedAgentsPythonUrl}/${path}`,
+        }),
+      {
+        agentic_chat: "agentic_chat",
+        backend_tool_rendering: "backend_tool_rendering",
+        human_in_the_loop: "human_in_the_loop",
+        tool_based_generative_ui: "tool_based_generative_ui",
+      },
+    ),
+
+  "claude-managed-agents-typescript": async () =>
+    mapAgents(
+      (path) =>
+        new HttpAgent({
+          url: `${envVars.claudeManagedAgentsTypescriptUrl}/${path}`,
+        }),
+      {
+        agentic_chat: "agentic_chat",
+        backend_tool_rendering: "backend_tool_rendering",
         human_in_the_loop: "human_in_the_loop",
         tool_based_generative_ui: "tool_based_generative_ui",
       },

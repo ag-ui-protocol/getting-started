@@ -9,15 +9,25 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def create_model(openai_api: str = "responses"):
+def create_model(openai_api: str = "chat", reasoning: bool = False):
     """Create a Strands model based on MODEL_PROVIDER env var.
 
     Supported providers: openai (default), anthropic, gemini
 
-    ``openai_api`` selects the OpenAI API mode. The default Responses API
-    surfaces reasoning summaries but buffers tool-call argument deltas until
-    the call completes; pass ``"chat"`` for demos that need tool-call ARGUMENTS
-    to stream incrementally (e.g. A2UI progressive surface painting).
+    ``reasoning`` asks the provider for reasoning/thinking content. It is
+    off by default: reasoning blocks in an assistant turn are not replayable
+    across every provider's multi-turn history, so only demos that render
+    reasoning should turn it on. Selecting the OpenAI Responses API is a
+    separate axis (``openai_api``) because that choice also changes how
+    tool-call arguments stream.
+
+    ``openai_api`` selects the OpenAI API mode. The default Chat Completions
+    API streams tool-call ARGUMENTS incrementally and emits no reasoning
+    summaries, which is what most demos want. Pass ``"responses"`` only for
+    demos that deliberately showcase reasoning (e.g. agentic_chat_reasoning);
+    the Responses API surfaces reasoning summaries but buffers tool-call
+    argument deltas until the call completes, which defeats progressive A2UI
+    surface painting.
     """
     provider = os.getenv("MODEL_PROVIDER", "openai").lower()
 
@@ -50,9 +60,11 @@ def create_model(openai_api: str = "responses"):
                 "api_key": api_key,
             },
             model_id=os.getenv("MODEL_ID", "gpt-5.4"),
-            params={
-                "reasoning": {"effort": "medium", "summary": "auto"},
-            }
+            params=(
+                {"reasoning": {"effort": "medium", "summary": "auto"}}
+                if reasoning
+                else {}
+            ),
         )
     elif provider == "anthropic":
         api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -77,6 +89,14 @@ def create_model(openai_api: str = "responses"):
             # Top-level required config for strands' AnthropicModel (its
             # format_request reads self.config["max_tokens"] unconditionally).
             max_tokens=8192,
+            # Anthropic emits no thinking blocks unless extended thinking is
+            # requested, so without this the reasoning demo silently degrades
+            # to a plain answer on MODEL_PROVIDER=anthropic.
+            params=(
+                {"thinking": {"type": "enabled", "budget_tokens": 2000}}
+                if reasoning
+                else {}
+            ),
         )
     elif provider == "gemini":
         api_key = os.getenv("GOOGLE_API_KEY")

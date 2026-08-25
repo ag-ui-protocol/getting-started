@@ -1,6 +1,17 @@
 import { HttpAgent } from "@ag-ui/client";
+import type { AgentSubscriber, RunAgentInput } from "@ag-ui/client";
+import { reconcileLegacyResumeInterrupts } from "./interrupts";
 
 export * from './agent'
+export {
+  langGraphInterruptToAGUI,
+  langGraphInterruptsToAGUI,
+  buildLgCommandResumeFromAgui,
+  isLegacyCommandResume,
+  reconcileLegacyResumeInterrupts,
+  DEFAULT_RESUME_SENTINEL_CANCELLED,
+  DEFAULT_RESUME_SENTINEL_MAP,
+} from './interrupts'
 export {
   getA2UITools,
   A2UI_OPERATIONS_KEY,
@@ -17,4 +28,16 @@ export type {
   A2UIValidationCatalog,
   A2UIAttemptRecord,
 } from '@ag-ui/a2ui-toolkit'
-export class LangGraphHttpAgent extends HttpAgent {}
+export class LangGraphHttpAgent extends HttpAgent {
+  // Mirror LangGraphAgent: keep legacy forwardedProps.command.resume working
+  // when an upstream agent emits RUN_FINISHED.outcome=interrupt (which records
+  // pendingInterrupts on the base AbstractAgent). Harmless otherwise — with a
+  // plain RUN_FINISHED, pendingInterrupts stays empty and the bridge is a no-op.
+  protected async onInitialize(
+    input: RunAgentInput,
+    subscribers: AgentSubscriber[],
+  ) {
+    reconcileLegacyResumeInterrupts(this, input);
+    return super.onInitialize(input, subscribers);
+  }
+}

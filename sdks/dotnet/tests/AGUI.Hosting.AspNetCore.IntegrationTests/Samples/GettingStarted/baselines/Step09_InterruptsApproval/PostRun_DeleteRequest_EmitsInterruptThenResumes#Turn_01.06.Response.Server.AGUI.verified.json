@@ -1,0 +1,124 @@
+﻿[
+  {
+    "type": "RUN_STARTED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1"
+  },
+  {
+    "type": "TOOL_CALL_START",
+    "parentMessageId": "",
+    "toolCallId": "call_Id_1",
+    "toolCallName": "delete_file",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "toolApprovalRequest",
+          "toolCall": {
+            "$type": "functionCall",
+            "name": "delete_file",
+            "arguments": {
+              "filename": "report-draft.txt"
+            },
+            "informationalOnly": false,
+            "callId": "call_Id_1"
+          },
+          "requestId": "ficc_Id_1"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TOOL_CALL_ARGS",
+    "toolCallId": "call_Id_1",
+    "delta": "{\n  \u0022filename\u0022: \u0022report-draft.txt\u0022\n}",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "toolApprovalRequest",
+          "toolCall": {
+            "$type": "functionCall",
+            "name": "delete_file",
+            "arguments": {
+              "filename": "report-draft.txt"
+            },
+            "informationalOnly": false,
+            "callId": "call_Id_1"
+          },
+          "requestId": "ficc_Id_1"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TOOL_CALL_END",
+    "toolCallId": "call_Id_1",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "toolApprovalRequest",
+          "toolCall": {
+            "$type": "functionCall",
+            "name": "delete_file",
+            "arguments": {
+              "filename": "report-draft.txt"
+            },
+            "informationalOnly": false,
+            "callId": "call_Id_1"
+          },
+          "requestId": "ficc_Id_1"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "RUN_FINISHED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1",
+    "outcome": {
+      "type": "interrupt",
+      "interrupts": [
+        {
+          "id": "ficc_Id_1",
+          "reason": "tool_call",
+          "message": "Approval required for tool call: delete_file",
+          "toolCallId": "call_Id_1",
+          "responseSchema": {
+            "type": "object",
+            "properties": {
+              "approved": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "approved"
+            ]
+          }
+        }
+      ]
+    },
+    "usage": [
+      {
+        "inputTokens": 182,
+        "outputTokens": 155,
+        "totalTokens": 337,
+        "reasoningTokens": 128,
+        "cachedInputTokens": 0
+      }
+    ]
+  }
+]

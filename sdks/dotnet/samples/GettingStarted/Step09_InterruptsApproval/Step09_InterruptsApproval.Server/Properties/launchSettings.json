@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "Step09_InterruptsApproval.Server": {
+      "commandName": "Project",
+      "applicationUrl": "http://localhost:5009"
+    }
+  }
+}

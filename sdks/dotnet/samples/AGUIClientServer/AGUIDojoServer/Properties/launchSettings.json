@@ -1,0 +1,14 @@
+{
+  "profiles": {
+    "AGUIDojoServer": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "AZURE_OPENAI_ENDPOINT": "https://your-resource.cognitiveservices.azure.com/",
+        "AZURE_OPENAI_DEPLOYMENT_NAME": "your-deployment-name"
+      },
+      "applicationUrl": "http://localhost:5018"
+    }
+  }
+}

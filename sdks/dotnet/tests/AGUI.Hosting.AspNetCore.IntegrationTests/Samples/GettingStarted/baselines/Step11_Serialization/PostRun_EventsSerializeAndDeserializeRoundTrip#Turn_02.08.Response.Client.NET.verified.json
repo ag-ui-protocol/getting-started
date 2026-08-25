@@ -1,0 +1,65 @@
+﻿[
+  {
+    "role": "assistant",
+    "contents": [],
+    "additionalProperties": {
+      "agui_thread_id": "thread_Id_1"
+    },
+    "responseId": "run_Id_2",
+    "rawRepresentation": {
+      "type": "RUN_STARTED",
+      "threadId": "thread_Id_1",
+      "runId": "run_Id_2",
+      "parentRunId": "run_Id_1"
+    }
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "Event compaction reduces noise in an event stream. It merges TEXT_MESSAGE_CONTENT sequences into snapshots and collapses STATE_DELTA events into a final STATE_SNAPSHOT."
+      }
+    ],
+    "responseId": "run_Id_2",
+    "messageId": "guid_Id_2",
+    "rawRepresentation": {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "guid_Id_2",
+      "delta": "Event compaction reduces noise in an event stream. It merges TEXT_MESSAGE_CONTENT sequences into snapshots and collapses STATE_DELTA events into a final STATE_SNAPSHOT.",
+      "rawEvent": {
+        "authorName": null,
+        "role": "assistant",
+        "contents": [
+          {
+            "$type": "text",
+            "text": "Event compaction reduces noise in an event stream. It merges TEXT_MESSAGE_CONTENT sequences into snapshots and collapses STATE_DELTA events into a final STATE_SNAPSHOT.",
+            "annotations": null,
+            "additionalProperties": null
+          }
+        ],
+        "additionalProperties": null,
+        "responseId": null,
+        "messageId": "guid_Id_2",
+        "conversationId": null,
+        "finishReason": null,
+        "modelId": null,
+        "continuationToken": null
+      }
+    }
+  },
+  {
+    "role": "assistant",
+    "contents": [],
+    "responseId": "run_Id_2",
+    "finishReason": "stop",
+    "rawRepresentation": {
+      "type": "RUN_FINISHED",
+      "threadId": "thread_Id_1",
+      "runId": "run_Id_2",
+      "outcome": {
+        "type": "success"
+      }
+    }
+  }
+]

@@ -1,0 +1,745 @@
+[
+  [
+    {
+      "contents": [],
+      "rawRepresentation": {
+        "type": "STATE_SNAPSHOT",
+        "snapshot": {
+          "recipe": {
+            "title": "Spaghetti alla Carbonara (Classic Italian Carbonara)",
+            "cuisine": "Italian",
+            "ingredients": [
+              "400 g (14 oz) dried spaghetti",
+              "150 g (5 oz) guanciale (or pancetta if unavailable), cut into 1 cm/½ in strips",
+              "3 large eggs + 1 large egg yolk",
+              "100 g (1 cup) freshly grated Pecorino Romano (or a mix Pecorino/Parmesan)",
+              "Freshly ground black pepper, generous (to taste)",
+              "Salt (for the pasta water)",
+              "1–2 tablespoons pasta cooking water (reserved from boiling)",
+              "Optional: a handful chopped flat-leaf parsley for garnish"
+            ],
+            "steps": [
+              "Bring a large pot of water to a rolling boil. Salt it generously (it should taste like the sea). Add the spaghetti and cook until just shy of al dente according to package directions (about 8–9 minutes for most dried spaghetti).",
+              "While the pasta cooks, place the guanciale in a cold skillet, then set over medium heat. Cook gently, stirring occasionally, until the fat renders and the meat is crisp and golden (about 6–8 minutes). Remove from heat and keep the pan warm.",
+              "In a mixing bowl, whisk together the 3 whole eggs and the extra yolk with the grated Pecorino Romano until smooth. Add a very generous amount of freshly ground black pepper (at least ¼–½ teaspoon). The mixture should be thick and creamy.",
+              "When the pasta is about 1 minute from done, scoop out and reserve about 1 cup (240 ml) of the starchy cooking water, then drain the spaghetti.",
+              "Immediately add the hot drained spaghetti to the skillet with the guanciale (off the direct heat). Toss to coat the pasta in the rendered fat so it picks up flavor.",
+              "Pour the egg-and-cheese mixture over the hot pasta. Using tongs or a fork, toss continuously and vigorously so the eggs emulsify into a creamy sauce instead of scrambling. If the sauce seems too thick, add a tablespoon or two of the reserved pasta water at a time until you reach a silky, clingy consistency.",
+              "Continue tossing until the sauce coats every strand of spaghetti and the texture is smooth and glossy. Taste and adjust: add more black pepper and a little reserved pasta water if needed. Be careful with additional salt—the Pecorino and guanciale are already salty.",
+              "Divide the pasta among warmed plates or bowls. Finish with an extra sprinkle of grated Pecorino Romano and another crack of fresh black pepper.",
+              "Garnish with chopped parsley if using, and serve immediately. Carbonara is best enjoyed right away while luxuriously creamy."
+            ],
+            "prep_time_minutes": 10,
+            "cook_time_minutes": 15,
+            "skill_level": "intermediate"
+          }
+        }
+      }
+    },
+    {
+      "contents": [],
+      "responseId": "",
+      "messageId": "",
+      "createdAt": "1970-01-01T00:00:00+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ""
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Classic"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Sp"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "aghetti"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " alla"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Carbon"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "ara"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " combines"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " hot"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " spaghetti"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " with"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " crisp"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " gu"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "ancial"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "e"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " and"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " a"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " creamy"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " em"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "ulsion"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " of"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " eggs"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " and"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Pec"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "or"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "ino"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Romano"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ","
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " finished"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " with"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " plenty"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " of"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " black"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " pepper"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "."
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Toss"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " with"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " reserved"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " st"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "archy"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " pasta"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " water"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " to"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " achieve"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " a"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " silky"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " sauce"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " and"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " serve"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " immediately"
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "."
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "finishReason": "stop",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "usage",
+          "details": {
+            "inputTokenCount": 658,
+            "outputTokenCount": 188,
+            "totalTokenCount": 846,
+            "cachedInputTokenCount": 0,
+            "reasoningTokenCount": 128,
+            "additionalCounts": {
+              "InputTokenDetails.AudioTokenCount": 0,
+              "OutputTokenDetails.AudioTokenCount": 0,
+              "OutputTokenDetails.AcceptedPredictionTokenCount": 0,
+              "OutputTokenDetails.RejectedPredictionTokenCount": 0
+            }
+          }
+        }
+      ],
+      "responseId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "messageId": "chatcmpl-Drkt62kZ6DXTPaeG076S8XrjGyu5r",
+      "createdAt": "2026-06-17T13:46:32+00:00",
+      "finishReason": "stop",
+      "modelId": ""
+    }
+  ]
+]

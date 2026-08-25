@@ -11,7 +11,9 @@ For each example make sure to read the instructions on starting the associated A
 
 ### Basic 
 
-```rust
+```rust,no_run
+// no_run: this example connects to a live AG-UI backend (127.0.0.1:3001),
+// which is not available during `cargo test`. It is still compiled/type-checked.
 use std::error::Error;
 use ag_ui_client::{core::types::Message, Agent, HttpAgent, RunAgentParams};
 

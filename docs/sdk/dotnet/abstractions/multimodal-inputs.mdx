@@ -1,0 +1,299 @@
+---
+title: "Multimodal Inputs"
+description: "Use modality-specific user input parts with typed data and URL sources in AGUI.Abstractions"
+---
+
+# Multimodal Inputs
+
+`AGUIUserMessage.Content` accepts either plain text or an ordered array of
+multimodal content parts through the `AGUIUserContent` union.
+
+```csharp
+using System.Text.Json;
+using AGUI.Abstractions;
+
+var message = new AGUIUserMessage
+{
+    Id = "user-1",
+    Content =
+    [
+        new AGUITextInputContent
+        {
+            Text = "Summarize this PDF and screenshot"
+        },
+        new AGUIImageInputContent
+        {
+            Source = new AGUIInputContentUrlSource
+            {
+                Value = "https://example.com/screen.png",
+                MimeType = "image/png"
+            }
+        },
+        new AGUIDocumentInputContent
+        {
+            Source = new AGUIInputContentUrlSource
+            {
+                Value = "https://example.com/report.pdf",
+                MimeType = "application/pdf"
+            }
+        }
+    ]
+};
+```
+
+## User Message Content
+
+The AG-UI wire model for user messages is `content: string | InputContent[]`.
+In .NET, that is represented by `AGUIUserContent`.
+
+```csharp
+var plainText = new AGUIUserMessage
+{
+    Id = "user-1",
+    Content = "Hello"
+};
+
+var parts = new AGUIUserMessage
+{
+    Id = "user-2",
+    Content =
+    [
+        new AGUITextInputContent { Text = "Describe this image." },
+        new AGUIImageInputContent
+        {
+            Source = new AGUIInputContentUrlSource
+            {
+                Value = "https://example.com/image.png",
+                MimeType = "image/png"
+            }
+        }
+    ]
+};
+```
+
+`AGUIUserContent` has implicit conversions from `string`,
+`List<AGUIInputContent>`, and `AGUIInputContent[]`, supports collection
+expressions, and implements `IReadOnlyList<AGUIInputContent>` for normalized
+reads. When the stored value is a string, the read-only list facade exposes it
+as a single `AGUITextInputContent`.
+
+## Input Content Types
+
+All content parts derive from `AGUIInputContent` and use the JSON `type`
+discriminator.
+
+| C# type | JSON `type` | Properties |
+| ------- | ----------- | ---------- |
+| `AGUITextInputContent` | `text` | `text` |
+| `AGUIImageInputContent` | `image` | `source`, optional `metadata` |
+| `AGUIAudioInputContent` | `audio` | `source`, optional `metadata` |
+| `AGUIVideoInputContent` | `video` | `source`, optional `metadata` |
+| `AGUIDocumentInputContent` | `document` | `source`, optional `metadata` |
+| `AGUIBinaryInputContent` | `binary` | `mimeType`, optional `id`, `url`, `data`, `filename` |
+
+### Text
+
+```csharp
+var text = new AGUITextInputContent
+{
+    Text = "What issue do you see in this UI?"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"text"` | Content discriminator |
+| `Text` | `text` | `string` | Text content |
+
+### Media Parts
+
+Images, audio, video, and documents all derive from `AGUIMediaInputContent`.
+
+```csharp
+var image = new AGUIImageInputContent
+{
+    Source = new AGUIInputContentUrlSource
+    {
+        Value = "https://example.com/ui.png",
+        MimeType = "image/png"
+    },
+    Metadata = JsonDocument.Parse("""{"detail":"high"}""").RootElement.Clone()
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"image"`, `"audio"`, `"video"`, or `"document"` | Content discriminator |
+| `Source` | `source` | `AGUIInputContentSource` | Data or URL source |
+| `Metadata` | `metadata` | `JsonElement?` | Optional modality-specific metadata |
+
+When a server adapts an AG-UI request to Microsoft.Extensions.AI,
+`AGUIChatMessageExtensions.AsChatMessages()` maps data sources to `DataContent`
+and URL sources to `UriContent`. The source MIME type is preserved; when a URL
+source omits `mimeType`, `UriContent` infers it from the URL. If the URL does
+not have a recognized extension, the canonical discriminator supplies
+`image/*`, `audio/*`, or `video/*` so the modality is not lost.
+
+The complete `metadata` value is preserved under the MEAI content's
+`AdditionalProperties["metadata"]` key, including object-shaped values. For
+inline data, a string `metadata.filename` property is also assigned to
+`DataContent.Name` so file-capable providers receive the filename.
+
+In the client direction, `AsAGUIMessages(jsonSerializerOptions)` maps
+`DataContent` and `UriContent`
+to canonical media parts based on their MIME type and serializes their
+`AdditionalProperties` as the part's `metadata`. `DataContent.Name` is included
+as `metadata.filename` when that property is not already present.
+
+### Binary
+
+`AGUIBinaryInputContent` represents an arbitrary binary input part.
+
+```csharp
+var binary = new AGUIBinaryInputContent
+{
+    MimeType = "application/octet-stream",
+    Data = "AAECAwQ=",
+    Filename = "payload.bin"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"binary"` | Content discriminator |
+| `MimeType` | `mimeType` | `string` | MIME type |
+| `Id` | `id` | `string?` | Optional binary identifier |
+| `Url` | `url` | `string?` | Optional URL for the binary |
+| `Data` | `data` | `string?` | Optional inline base64 data |
+| `Filename` | `filename` | `string?` | Optional file name |
+
+## Source Types
+
+Media input parts use `AGUIInputContentSource`, a discriminator-based hierarchy
+with JSON field `type`.
+
+### Data Source
+
+Use `AGUIInputContentDataSource` for inline base64 payloads. `mimeType` is
+required.
+
+```csharp
+var source = new AGUIInputContentDataSource
+{
+    Value = "iVBORw0KGgo...",
+    MimeType = "image/png"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"data"` | Source discriminator |
+| `Value` | `value` | `string` | Inline base64 payload |
+| `MimeType` | `mimeType` | `string` | Payload MIME type |
+
+### URL Source
+
+Use `AGUIInputContentUrlSource` for HTTP(S) URLs or data URLs. `mimeType` is
+optional.
+
+```csharp
+var source = new AGUIInputContentUrlSource
+{
+    Value = "https://example.com/meeting.wav",
+    MimeType = "audio/wav"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"url"` | Source discriminator |
+| `Value` | `value` | `string` | URL or data URL |
+| `MimeType` | `mimeType` | `string?` | Optional MIME type |
+
+## Common Use Cases
+
+### Visual QA
+
+```csharp
+var message = new AGUIUserMessage
+{
+    Id = "q1",
+    Content =
+    [
+        new AGUITextInputContent
+        {
+            Text = "What issue do you see in this UI?"
+        },
+        new AGUIImageInputContent
+        {
+            Source = new AGUIInputContentUrlSource
+            {
+                Value = "https://example.com/ui.png",
+                MimeType = "image/png"
+            },
+            Metadata = JsonDocument.Parse("""{"detail":"high"}""").RootElement.Clone()
+        }
+    ]
+};
+```
+
+### Audio Transcription
+
+```csharp
+var message = new AGUIUserMessage
+{
+    Id = "q2",
+    Content =
+    [
+        new AGUITextInputContent
+        {
+            Text = "Transcribe this recording."
+        },
+        new AGUIAudioInputContent
+        {
+            Source = new AGUIInputContentUrlSource
+            {
+                Value = "https://example.com/meeting.wav",
+                MimeType = "audio/wav"
+            }
+        }
+    ]
+};
+```
+
+### Mixed Media Comparison
+
+```csharp
+var message = new AGUIUserMessage
+{
+    Id = "q3",
+    Content =
+    [
+        new AGUITextInputContent
+        {
+            Text = "Compare the screenshot with the spec."
+        },
+        new AGUIImageInputContent
+        {
+            Source = new AGUIInputContentDataSource
+            {
+                Value = "iVBORw0KGgo...",
+                MimeType = "image/png"
+            }
+        },
+        new AGUIDocumentInputContent
+        {
+            Source = new AGUIInputContentUrlSource
+            {
+                Value = "https://example.com/spec.pdf",
+                MimeType = "application/pdf"
+            }
+        }
+    ]
+};
+```
+
+<Tip>
+  Use plain string `Content` for simple text-only turns. Use multimodal parts
+  when order matters or when the user message includes media alongside text.
+</Tip>

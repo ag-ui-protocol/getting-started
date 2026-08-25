@@ -297,13 +297,13 @@ class TestContextSchemaIsolation(unittest.TestCase):
         graph.config_specs = []
         graph.get_input_jsonschema.return_value = {"properties": {"foo": {}}}
         graph.get_output_jsonschema.return_value = {"properties": {"bar": {}}}
-        cfg_obj = MagicMock()
-        cfg_obj.schema.return_value = {"properties": {"cfg": {}}}
-        graph.config_schema.return_value = cfg_obj
+        # Production now prefers the non-deprecated get_config_jsonschema().
+        graph.get_config_jsonschema.return_value = {"properties": {"cfg": {}}}
 
-        ctx_obj = MagicMock()
-        ctx_obj.schema.side_effect = ValueError("pydantic v2 schema gen failed")
-        graph.context_schema = MagicMock(return_value=ctx_obj)
+        # Production prefers get_context_jsonschema(); make it raise to exercise
+        # the inner context-specific warning path. context_schema stays present
+        # (default MagicMock attr is truthy) so the outer guard is satisfied.
+        graph.get_context_jsonschema.side_effect = ValueError("pydantic v2 schema gen failed")
 
         agent = LangGraphAgent(name="test", graph=graph)
 

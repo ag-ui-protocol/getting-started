@@ -1,0 +1,31 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "toolCallId": "call_YwVTo4jWOgDpRYnt0lpE3KZi"
+      },
+      "response": {
+        "content": "Here's what I found:\n\n- Madrid: Sunny. Temperature 72\u00b0F (\u224822\u00b0C); feels like 70\u00b0F (\u224821\u00b0C); humidity 50%; wind 10 mph.\n- Cairo: The local time is 2026-06-18 09:30 UTC.\n\nWould you like anything else?"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Tell me the current weather in Madrid and what time it is in Cairo right now."
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "name": "get_weather",
+            "arguments": "{\"city\": \"Madrid\"}",
+            "id": "call_Dvu0KoyNJiA8IrFfM3Tp4TQz"
+          },
+          {
+            "name": "get_current_time",
+            "arguments": "{\"timezone\": \"Africa/Cairo\"}",
+            "id": "call_YwVTo4jWOgDpRYnt0lpE3KZi"
+          }
+        ]
+      }
+    }
+  ]
+}

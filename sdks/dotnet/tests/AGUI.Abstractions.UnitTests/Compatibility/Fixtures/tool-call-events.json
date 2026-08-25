@@ -1,0 +1,41 @@
+[
+  {
+    "type": "TOOL_CALL_START",
+    "timestamp": 1234567890,
+    "toolCallId": "tool-1",
+    "toolCallName": "get_weather"
+  },
+  {
+    "type": "TOOL_CALL_START",
+    "toolCallId": "tool-1",
+    "toolCallName": "search_database",
+    "parentMessageId": "msg-123"
+  },
+  {
+    "type": "TOOL_CALL_ARGS",
+    "timestamp": 1234567890,
+    "toolCallId": "tool-1",
+    "delta": "{\"location\":\"San Francisco\"}"
+  },
+  {
+    "type": "TOOL_CALL_ARGS",
+    "toolCallId": "db-query-tool-123",
+    "delta": "{\"query\":\"SELECT * FROM users\",\"filters\":{\"age\":{\"min\":18,\"max\":65},\"status\":[\"active\",\"pending\"],\"location\":{\"country\":\"US\",\"states\":[\"CA\",\"NY\",\"TX\"]}},\"options\":{\"limit\":100,\"offset\":0,\"sort\":{\"field\":\"created_at\",\"order\":\"desc\"}}}"
+  },
+  {
+    "type": "TOOL_CALL_ARGS",
+    "toolCallId": "streaming-tool",
+    "delta": "{\"location\":\"San Fran"
+  },
+  {
+    "type": "TOOL_CALL_END",
+    "timestamp": 1234567890,
+    "toolCallId": "tool-1"
+  },
+  {
+    "type": "TOOL_CALL_RESULT",
+    "toolCallId": "tc-1",
+    "messageId": "msg-1",
+    "content": "{\"ok\":true}"
+  }
+]

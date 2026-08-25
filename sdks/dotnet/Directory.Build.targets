@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <AddPublicApiAnalyzers Condition=" '$(AddPublicApiAnalyzers)' == '' AND Exists('$(MSBuildProjectDirectory)\PublicAPI.Shipped.txt') ">true</AddPublicApiAnalyzers>
+    <AddPublicApiAnalyzers Condition=" '$(AddPublicApiAnalyzers)' == '' ">false</AddPublicApiAnalyzers>
+    <!-- RS0041: public API files are missing. RS0036: nullable annotation mismatch (problematic with source-generated code). -->
+    <NoWarn>$(NoWarn);RS0041;RS0036</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup Condition=" $(AddPublicApiAnalyzers) ">
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" ExcludeAssets="Compile" PrivateAssets="All" />
+  </ItemGroup>
+</Project>

@@ -31,7 +31,7 @@ def add_langgraph_fastapi_endpoint(app: FastAPI, agent: LangGraphAgent, path: st
             media_type=encoder.get_content_type()
         )
 
-    @app.get(f"{path}/health")
+    @app.get(f"{path.rstrip('/')}/health")
     def health():
         """Health check."""
         return {

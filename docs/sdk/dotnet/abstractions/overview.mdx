@@ -1,0 +1,122 @@
+---
+title: "Overview"
+description: "Protocol types in the AG-UI .NET SDK"
+---
+
+# AGUI.Abstractions
+
+`AGUI.Abstractions` is the protocol-types package for the AG-UI .NET SDK. It
+defines the shared event, message, tool, context, capability, interrupt, and
+serialization types used by AG-UI clients and servers.
+
+```bash
+dotnet add package AGUI.Abstractions
+```
+
+The package has no opinion about HTTP, ASP.NET Core, or a specific agent
+runtime. It is the .NET sibling of `@ag-ui/core`: stable wire types for the
+event stream and request payload.
+
+<Note>
+  `AGUI.Abstractions` targets `net10.0`, `net9.0`, `net8.0`,
+  `netstandard2.0`, and `net472`. It is AOT-compatible: serializable protocol
+  types are registered in the source-generated `AGUIJsonSerializerContext`.
+</Note>
+
+## SDK packages
+
+The .NET SDK is split into small packages so protocol types, wire formats,
+client code, and server code can be adopted independently.
+
+| Package | Use it for |
+| --- | --- |
+| `AGUI.Abstractions` | Protocol events, messages, tools, capabilities, interrupts, and JSON serialization. |
+| `AGUI.Formatting` | Event-stream formatter abstractions and Server-Sent Events support. |
+| `AGUI.Protobuf` | Protobuf event-stream formatting and binary protocol support. |
+| `AGUI.Client` | HTTP client and `IChatClient` implementation for consuming AG-UI endpoints. |
+| `AGUI.Server` | Framework-agnostic adapter from `ChatResponseUpdate` streams to AG-UI events. |
+
+## Wire formats and parity
+
+JSON over Server-Sent Events is the full-fidelity event stream.
+`AGUI.Formatting` defines the event-stream formatter contract and SSE support.
+`AGUI.Protobuf` adds binary event-stream formatting for the protocol subset
+supported by the shared proto schema.
+
+Protocol parity starts in `AGUI.Abstractions`. When the TypeScript reference SDK
+adds or changes a wire type, the matching .NET event, message, tool, or
+capability type should update alongside `AGUIJsonSerializerContext` and the
+compatibility fixtures. Public API tracking files should update whenever a
+protocol change adds or changes .NET types.
+
+```bash
+cd sdks/dotnet
+dotnet test tests/AGUI.Abstractions.UnitTests/
+dotnet test tests/AGUI.Formatting.UnitTests/
+dotnet test tests/AGUI.Protobuf.UnitTests/
+```
+
+## Types
+
+Core data structures that represent the building blocks of the protocol:
+
+- [RunAgentInput](/sdk/dotnet/abstractions/types#runagentinput) - Input payload
+  for running agents
+- [Message types](/sdk/dotnet/abstractions/types#message-types) - Conversation,
+  tool, activity, and reasoning messages
+- [AGUIContext](/sdk/dotnet/abstractions/types#context) - Contextual information
+  provided to agents
+- [AGUITool](/sdk/dotnet/abstractions/types#tool) - Tool definitions with JSON
+  Schema parameters
+- [AgentCapabilities](/sdk/dotnet/abstractions/types#agentcapabilities) -
+  Structured capability declarations
+
+<CardGroup cols={2}>
+  <Card
+    title="Types Reference"
+    icon="cube"
+    href="/sdk/dotnet/abstractions/types"
+    color="#3B82F6"
+    iconType="solid"
+  >
+    Complete documentation of the protocol types in `AGUI.Abstractions`
+  </Card>
+  <Card
+    title="Multimodal Inputs"
+    icon="image"
+    href="/sdk/dotnet/abstractions/multimodal-inputs"
+    color="#3B82F6"
+    iconType="solid"
+  >
+    User message content parts for text, image, audio, video, document, and binary input
+  </Card>
+</CardGroup>
+
+## Events
+
+Events power communication between agents and frontends:
+
+- [Lifecycle events](/sdk/dotnet/abstractions/events#lifecycle-events) - Run and
+  step tracking
+- [Text message events](/sdk/dotnet/abstractions/events#text-message-events) -
+  Assistant message streaming
+- [Tool call events](/sdk/dotnet/abstractions/events#tool-call-events) -
+  Function call lifecycle
+- [State management events](/sdk/dotnet/abstractions/events#state-management-events) -
+  Agent state and message snapshots
+- [Reasoning events](/sdk/dotnet/abstractions/events#reasoning-events) -
+  Reasoning stream support
+- [Activity events](/sdk/dotnet/abstractions/events#activity-events) -
+  Structured progress and transient UI state
+- [Special events](/sdk/dotnet/abstractions/events#special-events) - Raw and
+  custom events
+
+<Card
+  title="Events Reference"
+  icon="bolt"
+  href="/sdk/dotnet/abstractions/events"
+  color="#3B82F6"
+  iconType="solid"
+>
+  Complete documentation of all event types in `AGUI.Abstractions`
+</Card>

@@ -62,6 +62,25 @@ payload = message.model_dump(by_alias=True)
 
 > `BinaryInputContent` is deprecated. Use modality-specific input parts (`ImageInputPart`, `AudioInputPart`, `VideoInputPart`, `DocumentInputPart`) with `InputContentDataSource` or `InputContentUrlSource`.
 
+### Optional fields with no value are left out
+
+Serializing an AG-UI type omits every optional field that has no value instead of writing it as
+`null` — matching what a TypeScript producer puts on the wire. This is built into the base model, so
+it holds on every path (`model_dump`, `model_dump_json`, nesting inside another model, the
+`EventEncoder`) and you do not need to pass `exclude_none=True`:
+
+```python
+from ag_ui.core import ToolCallStartEvent
+
+ToolCallStartEvent(tool_call_id="tc_1", tool_call_name="search").model_dump_json(by_alias=True)
+# {"type":"TOOL_CALL_START","toolCallId":"tc_1","toolCallName":"search"}
+# note: no "parentMessageId": null
+```
+
+`null` as an actual value is untouched: a required field holding `None`, a `None` inside a `dict` or
+`list` (an individual metadata value, a JSON Patch `replace` with `null`), and any extra field all
+serialize as `null`.
+
 ## Packages
 
 - **`ag_ui.core`** – Types, events, and data models for AG-UI protocol

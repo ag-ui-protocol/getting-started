@@ -36,13 +36,15 @@ interface AgUiMessage {
 /**
  * Mirrors the regeneration decision logic from agent.ts prepareStream.
  * Returns true when the adapter WOULD enter the regeneration path.
+ * Updated to consider both forwardedProps.command.resume AND input.resume.
  */
 function shouldRegenerate(params: {
   agentStateMessages: LangGraphPlatformMessage[];
   inputMessages: AgUiMessage[];
   commandResume: unknown;
+  aguiResume?: unknown[];
 }): boolean {
-  const { agentStateMessages, inputMessages, commandResume } = params;
+  const { agentStateMessages, inputMessages, commandResume, aguiResume } = params;
 
   const stateNonSystemCount = agentStateMessages.filter(
     (m) => m.type !== "system",
@@ -52,8 +54,12 @@ function shouldRegenerate(params: {
   ).length;
 
   // Must match agent.ts:
-  //   if (!forwardedProps?.command?.resume && stateNonSystemCount > inputNonSystemCount)
-  return !commandResume && stateNonSystemCount > inputNonSystemCount;
+  //   const hasResume = aguiResume !== undefined || legacyResume !== undefined;
+  //   if (!hasResume && stateNonSystemCount > inputNonSystemCount)
+  const hasResume = aguiResume !== undefined && aguiResume.length > 0
+    ? true
+    : !!commandResume;
+  return !hasResume && stateNonSystemCount > inputNonSystemCount;
 }
 
 describe("Resume skips regeneration detection", () => {
@@ -210,6 +216,65 @@ describe("Resume skips regeneration detection", () => {
         agentStateMessages: threadStateMessages,
         inputMessages: frontendMessages,
         commandResume: 0,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("Resume skips regeneration detection — input.resume path", () => {
+  const threadStateMessages: LangGraphPlatformMessage[] = [
+    { id: "1", type: "human", content: "Schedule a meeting" },
+    { id: "2", type: "ai", content: "Sure, let me check calendars" },
+    { id: "3", type: "tool", content: '{"available": ["3pm","4pm"]}' },
+    { id: "4", type: "ai", content: "Pick a time" },
+    { id: "5", type: "human", content: "3pm please" },
+  ];
+
+  const frontendMessages: AgUiMessage[] = [
+    { id: "1", role: "user", content: "Schedule a meeting" },
+    { id: "5", role: "user", content: "3pm please" },
+  ];
+
+  it("should NOT regenerate when input.resume is set (AG-UI standard)", () => {
+    expect(
+      shouldRegenerate({
+        agentStateMessages: threadStateMessages,
+        inputMessages: frontendMessages,
+        commandResume: undefined,
+        aguiResume: [{ interruptId: "i1", status: "resolved", payload: { approved: true } }],
+      }),
+    ).toBe(false);
+  });
+
+  it("should NOT regenerate when both input.resume and command.resume are set", () => {
+    expect(
+      shouldRegenerate({
+        agentStateMessages: threadStateMessages,
+        inputMessages: frontendMessages,
+        commandResume: "legacy_value",
+        aguiResume: [{ interruptId: "i1", status: "resolved", payload: true }],
+      }),
+    ).toBe(false);
+  });
+
+  it("SHOULD regenerate when input.resume is empty array (treated as absent)", () => {
+    expect(
+      shouldRegenerate({
+        agentStateMessages: threadStateMessages,
+        inputMessages: frontendMessages,
+        commandResume: undefined,
+        aguiResume: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("SHOULD regenerate when input.resume is undefined and command.resume is not set", () => {
+    expect(
+      shouldRegenerate({
+        agentStateMessages: threadStateMessages,
+        inputMessages: frontendMessages,
+        commandResume: undefined,
+        aguiResume: undefined,
       }),
     ).toBe(true);
   });

@@ -4,8 +4,6 @@ import {
   State,
   RunAgentInput,
   BaseEvent,
-  ToolCall,
-  AssistantMessage,
   AgentCapabilities,
   Interrupt,
 } from "@ag-ui/core";
@@ -40,10 +38,15 @@ import {
   BackwardCompatibility_0_0_39,
   BackwardCompatibility_0_0_45,
   BackwardCompatibility_0_0_47,
+  BackwardCompatibility_0_0_57,
 } from "@/middleware";
 import packageJson from "../../package.json";
 
 export interface RunAgentResult {
+  // DEFERRED (PNI-272): tightening this to `unknown` is a breaking change for
+  // consumers of a published package, not a lint repair. Left for a deliberate
+  // API decision.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   result: any;
   newMessages: Message[];
 }
@@ -126,6 +129,11 @@ export abstract class AbstractAgent {
       this.middlewares.unshift(new BackwardCompatibility_0_0_47());
     }
 
+    // Auto-insert BackwardCompatibility_0_0_57 for backward compatibility with
+    // pre-subagent agents: strips subagentRunId and drops SUBAGENT_* lifecycle events.
+    if (compareVersions(this.maxVersion, "0.0.57") <= 0) {
+      this.middlewares.unshift(new BackwardCompatibility_0_0_57());
+    }
   }
 
   public subscribe(subscriber: AgentSubscriber) {
@@ -167,7 +175,7 @@ export abstract class AbstractAgent {
         threadId: this.threadId,
       });
 
-      let result: any = undefined;
+      let result: unknown = undefined;
       const currentMessageIds = new Set(this.messages.map((message) => message.id));
 
       const subscribers: AgentSubscriber[] = [
@@ -252,6 +260,9 @@ export abstract class AbstractAgent {
     }
   }
 
+  // `input` is part of the published signature: renaming it to `_input` changes
+  // the emitted .d.ts that consumers see, so the directive goes here instead.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   protected connect(input: RunAgentInput): Observable<BaseEvent> {
     throw new AGUIConnectNotImplementedError();
   }
@@ -263,7 +274,7 @@ export abstract class AbstractAgent {
       this.isRunning = true;
       this.agentId = this.agentId ?? uuidv4();
       const input = this.prepareRunAgentInput(parameters);
-      let result: any = undefined;
+      let result: unknown = undefined;
       const currentMessageIds = new Set(this.messages.map((message) => message.id));
 
       const subscribers: AgentSubscriber[] = [
@@ -379,6 +390,17 @@ export abstract class AbstractAgent {
 
   protected prepareRunAgentInput(parameters?: RunAgentParameters): RunAgentInput {
     const clonedMessages = structuredClone_(this.messages) as Message[];
+    // Egress chokepoint for the no-null rule on attribution (PNI-199 alignment):
+    // the verifier and reducer keep event-derived state clean, but messages also
+    // enter through the constructor's initialMessages and subscriber mutations,
+    // neither of which is schema-checked. A null tag must never be serialized
+    // onto the wire — the schemas forbid it, so a receiving agent would reject
+    // the whole run. Absent is the only spelling.
+    for (const message of clonedMessages) {
+      if ((message as { subagentRunId?: string | null }).subagentRunId === null) {
+        delete (message as { subagentRunId?: string | null }).subagentRunId;
+      }
+    }
     const messagesWithoutActivity = clonedMessages.filter((message) => message.role !== "activity");
 
     return {
@@ -424,6 +446,14 @@ export abstract class AbstractAgent {
     ) {
       if (onRunInitializedMutation.messages) {
         this.messages = onRunInitializedMutation.messages;
+        // This assignment lands AFTER prepareRunAgentInput sanitized the input,
+        // so the no-null rule must be re-applied here — a subscriber mutation is
+        // the one writer that can still put a null tag on the wire.
+        for (const message of onRunInitializedMutation.messages) {
+          if ((message as { subagentRunId?: string | null }).subagentRunId === null) {
+            delete (message as { subagentRunId?: string | null }).subagentRunId;
+          }
+        }
         input.messages = onRunInitializedMutation.messages;
         subscribers.forEach((subscriber) => {
           subscriber.onMessagesChanged?.({

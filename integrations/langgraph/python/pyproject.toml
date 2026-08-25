@@ -1,6 +1,6 @@
 [project]
 name = "ag-ui-langgraph"
-version = "0.0.42"
+version = "0.0.43"
 description = "Implementation of the AG-UI protocol for LangGraph."
 license = "MIT"
 license-files = ["LICENSE"]
@@ -14,7 +14,7 @@ dependencies = [
     "ag-ui-a2ui-toolkit>=0.0.4",
     "langchain>=1.2.0",
     "langchain-core>=0.3.0",
-    "langgraph>=0.3.25,<2",
+    "langgraph>=0.6.0,<2",
     "pydantic>=2.0.0",
 ]
 

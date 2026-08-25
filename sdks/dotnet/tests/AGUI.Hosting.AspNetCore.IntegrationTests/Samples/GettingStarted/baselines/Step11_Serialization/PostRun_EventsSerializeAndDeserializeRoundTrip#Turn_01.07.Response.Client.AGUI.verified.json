@@ -1,0 +1,67 @@
+﻿[
+  {
+    "type": "RUN_STARTED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1"
+  },
+  {
+    "type": "TEXT_MESSAGE_START",
+    "messageId": "guid_Id_1",
+    "role": "assistant",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "AG-UI events use a type discriminator for polymorphic serialization. Each event has a \u0027type\u0027 field that identifies its concrete type, enabling correct deserialization from JSON back to the proper .NET type.",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": null,
+      "messageId": "guid_Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": null,
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "guid_Id_1",
+    "delta": "AG-UI events use a type discriminator for polymorphic serialization. Each event has a \u0027type\u0027 field that identifies its concrete type, enabling correct deserialization from JSON back to the proper .NET type.",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "AG-UI events use a type discriminator for polymorphic serialization. Each event has a \u0027type\u0027 field that identifies its concrete type, enabling correct deserialization from JSON back to the proper .NET type.",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": null,
+      "messageId": "guid_Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": null,
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_END",
+    "messageId": "guid_Id_1"
+  },
+  {
+    "type": "RUN_FINISHED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1",
+    "outcome": {
+      "type": "success"
+    }
+  }
+]

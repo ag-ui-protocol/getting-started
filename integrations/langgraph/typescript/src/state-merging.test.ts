@@ -105,9 +105,9 @@ describe("langGraphDefaultMergeState", () => {
     const state = {
       messages: [{ id: "m1", type: "human" as const, content: "Hi", role: "user" }],
     };
-    const newMessages: LangGraphMessage[] = [
+    const newMessages = [
       { id: "m2", type: "ai" as const, content: "Hello", role: "assistant" },
-    ];
+    ] as unknown as LangGraphMessage[];
     const result = langGraphDefaultMergeState(state, newMessages, { tools: [] });
     expect(result.messages.some((m) => m.id === "m2")).toBe(true);
   });
@@ -120,10 +120,10 @@ describe("langGraphDefaultMergeState", () => {
   });
 
   it("should strip leading system message", () => {
-    const msgs: LangGraphMessage[] = [
+    const msgs = [
       { id: "s1", role: "system", content: "sys", type: "system" },
       { id: "h1", role: "user", content: "Hi", type: "human" },
-    ];
+    ] as unknown as LangGraphMessage[];
     const result = langGraphDefaultMergeState({ messages: [] }, msgs, { tools: [] });
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0].id).toBe("h1");

@@ -1,0 +1,151 @@
+name: unit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sdks/dotnet/**"
+      - "sdks/typescript/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/unit-dotnet-sdk.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "sdks/dotnet/**"
+      - "sdks/typescript/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/unit-dotnet-sdk.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dotnet:
+    name: dotnet / unit + integration
+    runs-on: depot-ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: sdks/dotnet
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # Step08_Multimodal integration test reads ag-ui-logo.png, which is
+          # stored via Git LFS. Without the real bytes the snapshot diff fails.
+          lfs: true
+          persist-credentials: false
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          # global.json pins the 10.0 SDK; the 8.0/9.0 runtimes are needed
+          # because the unit-test projects multi-target net8.0/net9.0/net10.0.
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      # Build the libraries across every target framework (net10/9/8 +
+      # netstandard2.0 + net472) so multi-target breakage is caught even
+      # though the test projects only execute on the .NET (Core) TFMs.
+      - name: Build libraries (all target frameworks)
+        run: |
+          dotnet build src/AGUI.Abstractions/AGUI.Abstractions.csproj -c Release
+          dotnet build src/AGUI.Formatting/AGUI.Formatting.csproj -c Release
+          dotnet build src/AGUI.Protobuf/AGUI.Protobuf.csproj -c Release
+          dotnet build src/AGUI.Client/AGUI.Client.csproj -c Release
+          dotnet build src/AGUI.Server/AGUI.Server.csproj -c Release
+          dotnet build src/AGUI.A2UI.Toolkit/AGUI.A2UI.Toolkit.csproj -c Release
+          dotnet build src/AGUI.A2UI/AGUI.A2UI.csproj -c Release
+
+      # Run the self-contained test projects directly rather than the whole
+      # AGUI.slnx: the AGUIDojoServer sample references a sibling agent-framework
+      # checkout that is not present in CI, so a solution-wide build would fail.
+      - name: Run unit tests
+        run: |
+          dotnet test tests/AGUI.Abstractions.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.Client.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.Formatting.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.Protobuf.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.Server.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.A2UI.UnitTests -c Release -p:SignAssembly=false
+
+      - name: Run integration tests
+        run: dotnet test tests/AGUI.Hosting.AspNetCore.IntegrationTests -c Release -p:SignAssembly=false
+
+  cross-language:
+    name: dotnet / cross-language (TS <-> C#)
+    runs-on: depot-ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          lfs: true
+          persist-credentials: false
+
+      - name: Detect fork PR
+        id: fork-check
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && \
+                "${GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME}" != "$GITHUB_REPOSITORY" ]]; then
+            echo "prefix=fork-" >> "$GITHUB_OUTPUT"
+          else
+            echo "prefix=" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+        with:
+          version: 10.33.4
+
+      - name: Setup pnpm cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ steps.fork-check.outputs.prefix }}${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The vitest suites import the @ag-ui/* workspace packages by their built
+      # entry points, so they must be compiled before the tests run (nx builds
+      # the transitive deps: core + encoder).
+      - name: Build TypeScript packages
+        run: pnpm exec nx run-many -t build -p @ag-ui/core @ag-ui/encoder @ag-ui/proto @ag-ui/client
+
+      # Phase 1: TypeScript @ag-ui/client HttpAgent drives the C# AG-UI servers
+      # (CrossLanguage.TestServer via LLMock, plus every GettingStarted Step
+      # sample in fake mode). The vitest globalSetup builds and spawns the
+      # required .NET servers; no LLM credentials are needed.
+      - name: Cross-language Phase 1 (TS client -> C# server)
+        run: pnpm --filter @ag-ui/cross-language-tests test
+
+      # Phase 2: C# AGUIChatClient drives the TypeScript fake-agent server.
+      - name: Cross-language Phase 2 (C# client -> TS server)
+        run: dotnet test tests/AGUI.CrossLanguage.IntegrationTests -c Release -p:SignAssembly=false
+        working-directory: sdks/dotnet

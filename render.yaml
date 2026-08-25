@@ -39,10 +39,10 @@ projects:
       - key: OPENAI_API_KEY
         sync: false
       region: virginia
-      buildCommand: poetry install
-      startCommand: poetry run dev
+      buildCommand: uv sync
+      startCommand: uv run dev
       autoDeployTrigger: commit
-      rootDir: integrations/crew-ai/python
+      rootDir: integrations/crew-ai/python/examples
     - type: web
       name: ag-ui-dojo-pydantic-ai
       runtime: python
@@ -409,6 +409,61 @@ projects:
       autoDeployTrigger: commit
       rootDir: integrations/claude-agent-sdk/typescript
     - type: web
+      name: ag-ui-dojo-claude-managed-agents-dotnet
+      runtime: docker
+      repo: https://github.com/ag-ui-protocol/ag-ui
+      plan: starter
+      # Single instance: the example server keeps thread↔session state in memory.
+      scaling:
+        minInstances: 1
+        maxInstances: 1
+      envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      region: virginia
+      dockerContext: .
+      dockerfilePath: ./integrations/claude-managed-agents/dotnet/examples/AGUIDojoServer/Dockerfile
+      autoDeployTrigger: commit
+      rootDir: .
+      buildFilter:
+        paths:
+        - integrations/claude-managed-agents/dotnet/**
+        - sdks/dotnet/**
+    - type: web
+      name: ag-ui-dojo-claude-managed-agents-python
+      runtime: python
+      repo: https://github.com/ag-ui-protocol/ag-ui
+      plan: standard
+      # Single instance: the example server keeps thread↔session state in memory.
+      scaling:
+        minInstances: 1
+        maxInstances: 1
+      envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      region: virginia
+      buildCommand: uv sync && uv run python setup.py
+      startCommand: uv run dev
+      autoDeployTrigger: commit
+      rootDir: integrations/claude-managed-agents/python/examples
+    - type: web
+      name: ag-ui-dojo-claude-managed-agents-typescript
+      runtime: node
+      repo: https://github.com/ag-ui-protocol/ag-ui
+      plan: standard
+      # Single instance: the example server keeps thread↔session state in memory.
+      scaling:
+        minInstances: 1
+        maxInstances: 1
+      envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      region: virginia
+      buildCommand: cd ../../.. && pnpm install && npx nx run @ag-ui/claude-managed-agents:build && cd integrations/claude-managed-agents/typescript && npx tsx examples/setup.ts
+      startCommand: npx tsx examples/server.ts
+      autoDeployTrigger: commit
+      rootDir: integrations/claude-managed-agents/typescript
+    - type: web
       name: ag-ui-dojo-app
       runtime: node
       repo: https://github.com/ag-ui-protocol/ag-ui
@@ -469,6 +524,12 @@ projects:
         value: https://ag-ui-dojo-claude-agent-sdk-python.onrender.com
       - key: CLAUDE_AGENT_SDK_TYPESCRIPT_URL
         value: https://ag-ui-dojo-claude-agent-sdk-typescript.onrender.com
+      - key: CLAUDE_MANAGED_AGENTS_DOTNET_URL
+        value: https://ag-ui-dojo-claude-managed-agents-dotnet.onrender.com
+      - key: CLAUDE_MANAGED_AGENTS_PYTHON_URL
+        value: https://ag-ui-dojo-claude-managed-agents-python.onrender.com
+      - key: CLAUDE_MANAGED_AGENTS_TYPESCRIPT_URL
+        value: https://ag-ui-dojo-claude-managed-agents-typescript.onrender.com
       - key: NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
         sync: false
       - key: NEXT_PUBLIC_POSTHOG_HOST

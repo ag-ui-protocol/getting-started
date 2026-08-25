@@ -1,7 +1,7 @@
 {
   "name": "@ag-ui/proto",
   "author": "Markus Ecker <markus.ecker@gmail.com>",
-  "version": "0.0.57",
+  "version": "0.0.58",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -14,10 +14,14 @@
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
+  "config": {
+    "protocVersion": "35.1"
+  },
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
     "lint": "eslint \"src/**/*.ts*\"",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "clean": "git clean -fdX --exclude=\"!.env\"",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -34,6 +38,7 @@
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^4.0.18",
+    "eslint": "^9.37.0",
     "publint": "^0.3.12",
     "@arethetypeswrong/cli": "^0.17.4",
     "vitest": "^4.0.18",

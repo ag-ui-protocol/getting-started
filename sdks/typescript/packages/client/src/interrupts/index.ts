@@ -1,5 +1,6 @@
 import type {
   Interrupt,
+  Metadata,
   ResumeEntry,
   RunFinishedEvent,
   RunFinishedOutcome,
@@ -15,8 +16,8 @@ export function isInterruptExpired(interrupt: Interrupt, now: Date = new Date())
 }
 
 type ResumeResponse =
-  | { status: "resolved"; payload?: unknown }
-  | { status: "cancelled" };
+  | { status: "resolved"; payload?: unknown; metadata?: Metadata }
+  | { status: "cancelled"; metadata?: Metadata };
 
 export function buildResumeArray(
   interrupts: Interrupt[],
@@ -37,11 +38,9 @@ export function buildResumeArray(
 
   return interrupts.map((i) => {
     const r = responses[i.id];
-    if (r.status === "resolved") {
-      const entry: ResumeEntry = { interruptId: i.id, status: "resolved" };
-      if (r.payload !== undefined) entry.payload = r.payload;
-      return entry;
-    }
-    return { interruptId: i.id, status: "cancelled" };
+    const entry: ResumeEntry = { interruptId: i.id, status: r.status };
+    if (r.status === "resolved" && r.payload !== undefined) entry.payload = r.payload;
+    if (r.metadata !== undefined) entry.metadata = r.metadata;
+    return entry;
   });
 }
