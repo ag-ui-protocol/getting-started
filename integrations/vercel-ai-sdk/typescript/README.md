@@ -21,7 +21,7 @@ Install the required peer dependencies along with at least one AI SDK provider:
 npm install @ag-ui/client rxjs ai @ai-sdk/openai
 ```
 
-The package targets `ai@^7.0.0` and requires `@ag-ui/client >=0.0.49` (for the reasoning events and multimodal content types it emits) and `rxjs`. Any AI SDK v7 provider package works (`@ai-sdk/openai`, `@ai-sdk/anthropic`, `@ai-sdk/google`, etc.) — pick whichever one matches the model you want to use.
+The package targets `ai@^7.0.0` and requires `@ag-ui/client >=0.0.58` (for the reasoning events, multimodal content types, and token-usage reporting it emits) and `rxjs`. Any AI SDK v7 provider package works (`@ai-sdk/openai`, `@ai-sdk/anthropic`, `@ai-sdk/google`, etc.) — pick whichever one matches the model you want to use.
 
 ## Quick Start
 
@@ -116,7 +116,7 @@ If a provider returns the tool input in one shot (no per-token streaming), the i
 
 ## Multi-step Agentic Loops
 
-Set `maxSteps` to allow more than one model step inside a single `runAgent` invocation:
+`maxSteps` sets AI SDK's step limit for a single `runAgent` invocation:
 
 ```ts
 import { VercelAISDKAgent } from "@ag-ui/vercel-ai-sdk";
@@ -135,12 +135,13 @@ import { stepCountIs } from "ai";
 // streamText({ ..., stopWhen: stepCountIs(maxSteps) })
 ```
 
-Whether a run actually takes a second step depends on the kind of tool call the model makes:
+With the current configuration surface, however, **every run is effectively single-step, whatever `maxSteps` is set to.**
 
-- **Provider/server-executed tools** — a tool call the AI SDK can resolve inside the same stream (the provider runs the tool and emits a `tool-result` part) satisfies the continuation condition. The model observes that result and can call again or answer, all within one `runAgent` invocation, up to `maxSteps` steps.
-- **AG-UI client tools** — tools passed via `RunAgentInput.tools` are converted *without* an `execute` function by design; they are executed by the client, not by the agent. Such a call produces no in-stream result, so `streamText` stops after that step no matter how high `maxSteps` is. The run finishes with the pending `TOOL_CALL_*` events, the AG-UI client executes the tool and sends the result back as a `tool` message, and the model observes it on the **next** `runAgent` call. The agentic loop is real, but for client tools it spans successive runs rather than steps within one run.
+`streamText` continues past a step in only two situations: every client-side tool call the step made has produced its output inside the stream — which in practice means the tool carried a local `execute` function — or a deferred provider-executed tool result is still pending. This agent can produce neither. `RunAgentInput.tools` is its only tool source, and `convertToolsToVercelAISDKTools` converts those *without* an `execute` function by design — they are executed by the AG-UI client, not by the agent — while the config surface (`model` / `maxSteps` / `toolChoice` / `headers`) offers no channel for execute-bearing or provider-defined tools. (A provider-executed tool whose `tool-result` arrives inside the same stream does not help either: it satisfies neither condition.)
 
-Only `RunAgentInput.tools` are forwarded to `streamText`, so in-run continuation is limited to tool results the provider produces server-side; raising `maxSteps` never advances past a client-side tool call.
+So a tool call produces no in-stream result, and the stream stops after that step no matter how high `maxSteps` is. The run finishes with the pending `TOOL_CALL_*` events, the AG-UI client executes the tool and sends the result back as a `tool` message, and the model observes it on the **next** `runAgent` call. The agentic loop is real — it just spans successive `runAgent` calls rather than steps within one run.
+
+`maxSteps` is therefore forward-compatibility plumbing: it takes effect only if executable tools reach `streamText` some other way, e.g. a subclass that overrides `run()` to add them.
 
 Each step gets its own `STEP_STARTED` and `STEP_FINISHED` event pair, and each step's assistant message gets its own UUID. Tool calls produced inside a step are linked back to that step's assistant message via `parentMessageId`, so a multi-step transcript reconstructs cleanly on the client.
 
@@ -170,6 +171,14 @@ const agent = new VercelAISDKAgent({
 No other provider's reasoning state is persisted. Other reasoning models — OpenAI's included — still stream their reasoning as the AG-UI reasoning events above, but nothing provider-specific is stored for them, so their reasoning turns are **not** replayed on the following run; the model continues from the visible message history alone. See [Limitations & Future Work](#limitations--future-work).
 
 Reasoning messages enter `MESSAGES_SNAPSHOT` as their own message entries (role `"reasoning"`), not folded into the assistant message.
+
+## Token Usage
+
+`RUN_FINISHED` carries an optional `usage` array of AG-UI `TokenUsage` entries. The integration reports a single entry, built from the aggregate `totalUsage` on the stream's terminal `finish` part — for a multi-step stream that is the sum across all steps, not a per-step breakdown.
+
+An entry carries `inputTokens`, `outputTokens`, `totalTokens`, `reasoningTokens`, and `cachedInputTokens`. AI SDK v7 nests the last two under `inputTokenDetails.cacheReadTokens` and `outputTokenDetails.reasoningTokens`; the integration lifts them back out so cache savings and reasoning spend stay visible. Entries are labelled with the provider and model id the agent was *configured* with, since the stream itself never names the model (a bare model-id string routed through the gateway yields the model label only).
+
+The field is omitted entirely when the provider reports no counts, rather than emitting a labels-only entry implying usage was measured. Runs that end in `RUN_ERROR` — stream errors and aborts — carry no usage.
 
 ## Provider Flexibility
 
