@@ -3,6 +3,7 @@
   "runId": "run_Id_2",
   "messages": [
     {
+      "id": "",
       "role": "user",
       "content": "Please setup my account"
     }

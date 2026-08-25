@@ -222,11 +222,8 @@ function emitObject(definition: ObjectDefinition): string {
   return lines.join("\n");
 }
 
-/** Whether a ref field ultimately names an any alias (resolved by caller). */
+/** The any-typed aliases, resolved once per emission (see emitPython). */
 let anyAliasNames = new Set<string>();
-function refIsAny(type: TypeExpr): boolean {
-  return type.kind === "ref" && anyAliasNames.has(type.name);
-}
 
 /** The Field(...) arguments a bare type's constraints need, field-agnostic. */
 function constraintArguments(type: TypeExpr): string[] {

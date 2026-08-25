@@ -1,10 +1,11 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildModel } from "../generator/ir";
 import { buildWireModel, emitProtoFiles } from "../generator/protobuf";
 import { FREEZE_PATH } from "../generator/generate";
 import {
+  DOTNET_MODELS_OUTPUT_DIR,
   DOTNET_OUTPUT_DIR,
   generateFiles,
   PROTO_OUTPUT_DIR,
@@ -31,6 +32,7 @@ describe("the generator", () => {
       PY_OUTPUT_DIR,
       PROTO_OUTPUT_DIR,
       DOTNET_OUTPUT_DIR,
+      DOTNET_MODELS_OUTPUT_DIR,
     ]) {
       const committed = readdirSync(dir)
         .filter((name) => name !== "__pycache__")

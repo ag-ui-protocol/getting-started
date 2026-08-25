@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
@@ -44,7 +45,13 @@ public sealed class SseEventStreamFormatter : IAGUIEventStreamFormatter
         var items = SseParser.Create(body, ItemParser).EnumerateAsync(cancellationToken);
         await foreach (var item in items.ConfigureAwait(false))
         {
-            yield return item.Data;
+            // An event this build has no model for is skipped rather than ending
+            // the stream: the protocol is open at the top, and the rest of the
+            // stream is still valid.
+            if (item.Data is not null)
+            {
+                yield return item.Data;
+            }
         }
     }
 
@@ -64,10 +71,20 @@ public sealed class SseEventStreamFormatter : IAGUIEventStreamFormatter
             cancellationToken);
     }
 
-    private static BaseEvent ItemParser(string type, ReadOnlySpan<byte> data)
+    private static BaseEvent? ItemParser(string type, ReadOnlySpan<byte> data)
     {
-        return JsonSerializer.Deserialize(data, AGUIJsonSerializerContext.Default.BaseEvent) ??
-            throw new InvalidOperationException("Failed to deserialize SSE item.");
+        try
+        {
+            return JsonSerializer.Deserialize(data, AGUIJsonSerializerContext.Default.BaseEvent) ??
+                throw new InvalidOperationException("Failed to deserialize SSE item.");
+        }
+        catch (AGUIUnknownEventTypeException unknown)
+        {
+            Trace.TraceWarning(
+                "[ag-ui] Skipped an event of unrecognised type '{0}'.",
+                unknown.EventType ?? "(unnamed)");
+            return null;
+        }
     }
 
     private static async IAsyncEnumerable<SseItem<BaseEvent>> WrapAsSseItems(

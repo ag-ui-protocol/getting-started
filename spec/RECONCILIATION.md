@@ -368,42 +368,42 @@ as optional.
 
 ## SubagentStartedEvent
 
-| field               | TypeScript | Python             | .NET | schema   |
-| ------------------- | ---------- | ------------------ | ---- | -------- |
-| description         | optional   | optional, nullable | —    | optional |
-| metadata            | optional   | optional, nullable | —    | optional |
-| name                | required   | required           | —    | required |
-| parentMessageId     | optional   | optional, nullable | —    | optional |
-| parentSubagentRunId | optional   | optional, nullable | —    | optional |
-| parentToolCallId    | optional   | optional, nullable | —    | optional |
-| rawEvent            | optional   | optional, nullable | —    | optional |
-| subagentRunId       | required   | required           | —    | required |
-| timestamp           | optional   | optional, nullable | —    | optional |
-| type                | required   | required           | —    | required |
+| field               | TypeScript | Python             | .NET               | schema   |
+| ------------------- | ---------- | ------------------ | ------------------ | -------- |
+| description         | optional   | optional, nullable | optional, nullable | optional |
+| metadata            | optional   | optional, nullable | optional, nullable | optional |
+| name                | required   | required           | optional           | required |
+| parentMessageId     | optional   | optional, nullable | optional, nullable | optional |
+| parentSubagentRunId | optional   | optional, nullable | optional, nullable | optional |
+| parentToolCallId    | optional   | optional, nullable | optional, nullable | optional |
+| rawEvent            | optional   | optional, nullable | optional, nullable | optional |
+| subagentRunId       | required   | required           | optional, nullable | required |
+| timestamp           | optional   | optional, nullable | optional, nullable | optional |
+| type                | required   | required           | required           | required |
 
 ## SubagentFinishedEvent
 
-| field         | TypeScript | Python             | .NET | schema   |
-| ------------- | ---------- | ------------------ | ---- | -------- |
-| metadata      | optional   | optional, nullable | —    | optional |
-| outcome       | optional   | optional, nullable | —    | optional |
-| rawEvent      | optional   | optional, nullable | —    | optional |
-| result        | optional   | optional, nullable | —    | optional |
-| subagentRunId | required   | required           | —    | required |
-| timestamp     | optional   | optional, nullable | —    | optional |
-| type          | required   | required           | —    | required |
+| field         | TypeScript | Python             | .NET               | schema   |
+| ------------- | ---------- | ------------------ | ------------------ | -------- |
+| metadata      | optional   | optional, nullable | optional, nullable | optional |
+| outcome       | optional   | optional, nullable | optional, nullable | optional |
+| rawEvent      | optional   | optional, nullable | optional, nullable | optional |
+| result        | optional   | optional, nullable | optional, nullable | optional |
+| subagentRunId | required   | required           | optional, nullable | required |
+| timestamp     | optional   | optional, nullable | optional, nullable | optional |
+| type          | required   | required           | required           | required |
 
 ## SubagentErrorEvent
 
-| field         | TypeScript | Python             | .NET | schema   |
-| ------------- | ---------- | ------------------ | ---- | -------- |
-| code          | optional   | optional, nullable | —    | optional |
-| message       | required   | required           | —    | required |
-| metadata      | optional   | optional, nullable | —    | optional |
-| rawEvent      | optional   | optional, nullable | —    | optional |
-| subagentRunId | required   | required           | —    | required |
-| timestamp     | optional   | optional, nullable | —    | optional |
-| type          | required   | required           | —    | required |
+| field         | TypeScript | Python             | .NET               | schema   |
+| ------------- | ---------- | ------------------ | ------------------ | -------- |
+| code          | optional   | optional, nullable | optional, nullable | optional |
+| message       | required   | required           | optional           | required |
+| metadata      | optional   | optional, nullable | optional, nullable | optional |
+| rawEvent      | optional   | optional, nullable | optional, nullable | optional |
+| subagentRunId | required   | required           | optional, nullable | required |
+| timestamp     | optional   | optional, nullable | optional, nullable | optional |
+| type          | required   | required           | required           | required |
 
 ## RunFinishedSuccessOutcome
 
@@ -420,16 +420,16 @@ as optional.
 
 ## SubagentFinishedSuccessOutcome
 
-| field | TypeScript | Python   | .NET | schema   |
-| ----- | ---------- | -------- | ---- | -------- |
-| type  | required   | required | —    | required |
+| field | TypeScript | Python   | .NET     | schema   |
+| ----- | ---------- | -------- | -------- | -------- |
+| type  | required   | required | required | required |
 
 ## SubagentFinishedSuspendedOutcome
 
-| field        | TypeScript | Python             | .NET | schema   |
-| ------------ | ---------- | ------------------ | ---- | -------- |
-| interruptIds | optional   | optional, nullable | —    | optional |
-| type         | required   | required           | —    | required |
+| field        | TypeScript | Python             | .NET               | schema   |
+| ------------ | ---------- | ------------------ | ------------------ | -------- |
+| interruptIds | optional   | optional, nullable | optional, nullable | optional |
+| type         | required   | required           | required           | required |
 
 ## Interrupt
 
@@ -441,7 +441,7 @@ as optional.
 | metadata       | optional   | optional, nullable | optional, nullable | optional |
 | reason         | required   | required           | optional           | required |
 | responseSchema | optional   | optional, nullable | optional, nullable | optional |
-| subagentRunId  | optional   | optional, nullable | —                  | optional |
+| subagentRunId  | optional   | optional, nullable | optional, nullable | optional |
 | toolCallId     | optional   | optional, nullable | optional, nullable | optional |
 
 ## ResumeEntry
@@ -475,7 +475,7 @@ as optional.
 | metadata       | optional   | optional, nullable | optional, nullable | optional |
 | name           | optional   | optional, nullable | optional, nullable | optional |
 | role           | required   | required           | required           | required |
-| subagentRunId  | optional   | optional, nullable | —                  | optional |
+| subagentRunId  | optional   | optional, nullable | optional, nullable | optional |
 
 ## SystemMessage
 
@@ -487,7 +487,7 @@ as optional.
 | metadata       | optional   | optional, nullable | optional, nullable | optional |
 | name           | optional   | optional, nullable | optional, nullable | optional |
 | role           | required   | required           | required           | required |
-| subagentRunId  | optional   | optional, nullable | —                  | optional |
+| subagentRunId  | optional   | optional, nullable | optional, nullable | optional |
 
 ## AssistantMessage
 
@@ -499,7 +499,7 @@ as optional.
 | metadata       | optional   | optional, nullable | optional, nullable | optional |
 | name           | optional   | optional, nullable | optional, nullable | optional |
 | role           | required   | required           | required           | required |
-| subagentRunId  | optional   | optional, nullable | —                  | optional |
+| subagentRunId  | optional   | optional, nullable | optional, nullable | optional |
 | toolCalls      | optional   | optional, nullable | optional, nullable | optional |
 
 ## UserMessage
@@ -512,7 +512,7 @@ as optional.
 | metadata       | optional   | optional, nullable | optional, nullable | optional |
 | name           | optional   | optional, nullable | optional, nullable | optional |
 | role           | required   | required           | required           | required |
-| subagentRunId  | optional   | optional, nullable | —                  | optional |
+| subagentRunId  | optional   | optional, nullable | optional, nullable | optional |
 
 ## ToolMessage
 
@@ -524,7 +524,7 @@ as optional.
 | id             | required   | required           | optional, nullable | required |
 | metadata       | optional   | optional, nullable | optional, nullable | optional |
 | role           | required   | required           | required           | required |
-| subagentRunId  | optional   | optional, nullable | —                  | optional |
+| subagentRunId  | optional   | optional, nullable | optional, nullable | optional |
 | toolCallId     | required   | required           | optional           | required |
 
 ## ActivityMessage
@@ -536,7 +536,7 @@ as optional.
 | id            | required   | required           | optional, nullable | required |
 | metadata      | optional   | optional, nullable | optional, nullable | optional |
 | role          | required   | required           | required           | required |
-| subagentRunId | optional   | optional, nullable | —                  | optional |
+| subagentRunId | optional   | optional, nullable | optional, nullable | optional |
 
 ## ReasoningMessage
 
@@ -547,7 +547,7 @@ as optional.
 | id             | required   | required           | optional, nullable | required |
 | metadata       | optional   | optional, nullable | optional, nullable | optional |
 | role           | required   | required           | required           | required |
-| subagentRunId  | optional   | optional, nullable | —                  | optional |
+| subagentRunId  | optional   | optional, nullable | optional, nullable | optional |
 
 ## ToolCall
 
@@ -632,17 +632,17 @@ as optional.
 
 | field       | TypeScript | Python             | .NET               | schema   |
 | ----------- | ---------- | ------------------ | ------------------ | -------- |
-| description | required   | required           | optional, nullable | required |
+| description | required   | required           | optional           | required |
 | metadata    | optional   | optional, nullable | optional, nullable | optional |
 | name        | required   | required           | optional           | required |
-| parameters  | optional   | optional, nullable | optional           | optional |
+| parameters  | optional   | optional, nullable | optional, nullable | optional |
 
 ## RunAgentInput
 
 | field          | TypeScript | Python             | .NET               | schema   |
 | -------------- | ---------- | ------------------ | ------------------ | -------- |
 | context        | optional   | optional, nullable | optional, nullable | optional |
-| forwardedProps | optional   | optional, nullable | optional           | optional |
+| forwardedProps | optional   | optional, nullable | optional, nullable | optional |
 | messages       | required   | required           | optional           | required |
 | parentRunId    | optional   | optional, nullable | optional, nullable | optional |
 | resume         | optional   | optional, nullable | optional, nullable | optional |

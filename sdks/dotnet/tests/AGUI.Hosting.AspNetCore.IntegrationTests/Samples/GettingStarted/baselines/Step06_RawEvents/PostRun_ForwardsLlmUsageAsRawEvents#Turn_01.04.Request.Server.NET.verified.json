@@ -7,7 +7,8 @@
           "$type": "text",
           "text": "Tell me about ag-ui raw events"
         }
-      ]
+      ],
+      "messageId": ""
     }
   ]
 }

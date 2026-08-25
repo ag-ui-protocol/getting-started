@@ -70,6 +70,60 @@ public sealed class FramingTest
         Assert.IsType<RunFinishedEvent>(decoded[4]);
     }
 
+    // The framed reader answers an unknown event the way the SSE reader does:
+    // the frame is skipped and the stream carries on.
+    [Fact]
+    public async Task ReadFramedAsync_SkipsAnUnknownEventArmAndKeepsReading()
+    {
+        var writer = new ArrayBufferWriter<byte>();
+        AGUIProtobuf.WriteFramed(new RunStartedEvent { ThreadId = "t", RunId = "r" }, writer);
+        WriteFrame(writer, new byte[] { 0xE2, 0x38, 0x00 }); // field 900, length-delimited, empty
+        AGUIProtobuf.WriteFramed(new RunFinishedEvent { ThreadId = "t", RunId = "r" }, writer);
+
+        using var stream = new MemoryStream(writer.WrittenSpan.ToArray());
+
+        var decoded = new List<BaseEvent>();
+        await foreach (var evt in AGUIProtobuf.ReadFramedAsync(stream).ConfigureAwait(false))
+        {
+            decoded.Add(evt);
+        }
+
+        Assert.Collection(
+            decoded,
+            evt => Assert.IsType<RunStartedEvent>(evt),
+            evt => Assert.IsType<RunFinishedEvent>(evt));
+    }
+
+    // Broken bytes are not an event from the future, and the reader must not
+    // swallow them: an envelope naming a known event it cannot read is fatal.
+    [Fact]
+    public async Task ReadFramedAsync_MalformedFrame_Throws()
+    {
+        var writer = new ArrayBufferWriter<byte>();
+        AGUIProtobuf.WriteFramed(new RunStartedEvent { ThreadId = "t", RunId = "r" }, writer);
+        WriteFrame(writer, new byte[] { 0x08, 0x01 }); // envelope field 1 as a varint
+
+        using var stream = new MemoryStream(writer.WrittenSpan.ToArray());
+
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+        {
+            await foreach (var _ in AGUIProtobuf.ReadFramedAsync(stream).ConfigureAwait(false))
+            {
+            }
+        });
+    }
+
+    private static void WriteFrame(ArrayBufferWriter<byte> writer, byte[] payload)
+    {
+        var prefix = writer.GetSpan(4);
+        prefix[0] = (byte)(payload.Length >> 24);
+        prefix[1] = (byte)(payload.Length >> 16);
+        prefix[2] = (byte)(payload.Length >> 8);
+        prefix[3] = (byte)payload.Length;
+        writer.Advance(4);
+        writer.Write(payload);
+    }
+
     [Fact]
     public async Task ReadFramedAsync_EmptyStream_YieldsNothing()
     {

@@ -438,9 +438,9 @@ function main(): void {
   header.push("");
   if (unread.length > 0) {
     header.push(
-      `Not found in any SDK source, so not compared: ${unread.join(", ")}. The three subagent`,
-      "events and `subagentRunId` land with #2350; until it merges they exist in the schema",
-      "and not in this branch's SDKs, which is expected.",
+      `Not found in any SDK source, so not compared: ${unread.join(", ")}. A definition`,
+      "reaching this list exists in the schema and in none of the SDKs, which is a gap to",
+      "close rather than a fact to record.",
     );
     header.push("");
   }

@@ -34,7 +34,7 @@ internal static class ProtoEventMapper
                     proto.SubagentRunId = e.SubagentRunId;
                 }
                 proto.MessageId = e.MessageId;
-                if (!string.IsNullOrEmpty(e.Role))
+                if (e.Role is not null)
                 {
                     proto.Role = e.Role;
                 }
@@ -579,8 +579,11 @@ internal static class ProtoEventMapper
                 return new Proto.Event { SubagentError = proto };
             }
             default:
-                throw new NotSupportedException(
-                    $"Event type '{evt.Type}' is not representable in the AG-UI protobuf wire format by this SDK.");
+                // An event model outside the schema-derived set: named the same
+                // way the JSON writer names one, never encoded as something else.
+                throw new AGUIUnknownEventTypeException(
+                    $"Event type '{evt.Type}' is not representable in the AG-UI protobuf wire format by this SDK.",
+                    evt.Type);
         }
     }
 
@@ -595,7 +598,7 @@ internal static class ProtoEventMapper
                 {
                     SubagentRunId = e.HasSubagentRunId ? e.SubagentRunId : null,
                     MessageId = e.MessageId,
-                    Role = e.HasRole ? AssertOneOf(e.Role, "role", "developer", "system", "assistant", "user") : string.Empty,
+                    Role = e.HasRole ? AssertOneOf(e.Role, "role", "developer", "system", "assistant", "user") : null,
                     Name = e.HasName ? e.Name : null,
                 };
                 ApplyBaseEvent(result, e.BaseEvent, Proto.EventType.TextMessageStart);
@@ -972,8 +975,11 @@ internal static class ProtoEventMapper
                 return result;
             }
             default:
-                throw new NotSupportedException(
-                    "The protobuf message does not contain a supported AG-UI event variant.");
+                // Either an empty envelope or a variant this build was not
+                // compiled against; the framed reader skips it, a caller
+                // decoding a single event sees it.
+                throw new AGUIUnknownEventTypeException(
+                    "The protobuf envelope carries no AG-UI event variant this SDK recognises.");
         }
     }
 

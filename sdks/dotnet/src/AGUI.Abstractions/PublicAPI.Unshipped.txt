@@ -1,11 +1,59 @@
-#nullable enable
-
-
-
+abstract AGUI.Abstractions.AGUIInputContent.Type.get -> string!
+abstract AGUI.Abstractions.AGUIInputContentSource.Type.get -> string!
+abstract AGUI.Abstractions.AGUIMessage.Role.get -> string!
+abstract AGUI.Abstractions.BaseEvent.Type.get -> string!
+abstract AGUI.Abstractions.RunFinishedOutcome.Type.get -> string!
+abstract AGUI.Abstractions.SubagentFinishedOutcome.Type.get -> string!
+AGUI.Abstractions.ActivityDeltaEvent
+AGUI.Abstractions.ActivityDeltaEvent.ActivityDeltaEvent() -> void
+AGUI.Abstractions.ActivityDeltaEvent.ActivityType.get -> string!
+AGUI.Abstractions.ActivityDeltaEvent.ActivityType.set -> void
+AGUI.Abstractions.ActivityDeltaEvent.MessageId.get -> string!
+AGUI.Abstractions.ActivityDeltaEvent.MessageId.set -> void
+AGUI.Abstractions.ActivityDeltaEvent.Patch.get -> System.Text.Json.JsonElement
+AGUI.Abstractions.ActivityDeltaEvent.Patch.set -> void
+AGUI.Abstractions.ActivityDeltaEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ActivityDeltaEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ActivitySnapshotEvent
+AGUI.Abstractions.ActivitySnapshotEvent.ActivitySnapshotEvent() -> void
+AGUI.Abstractions.ActivitySnapshotEvent.ActivityType.get -> string!
+AGUI.Abstractions.ActivitySnapshotEvent.ActivityType.set -> void
+AGUI.Abstractions.ActivitySnapshotEvent.Content.get -> System.Text.Json.JsonElement
+AGUI.Abstractions.ActivitySnapshotEvent.Content.set -> void
+AGUI.Abstractions.ActivitySnapshotEvent.MessageId.get -> string!
+AGUI.Abstractions.ActivitySnapshotEvent.MessageId.set -> void
+AGUI.Abstractions.ActivitySnapshotEvent.Replace.get -> bool?
+AGUI.Abstractions.ActivitySnapshotEvent.Replace.set -> void
+AGUI.Abstractions.ActivitySnapshotEvent.SubagentRunId.get -> string?
+AGUI.Abstractions.ActivitySnapshotEvent.SubagentRunId.set -> void
+AGUI.Abstractions.AgentCapabilities
+AGUI.Abstractions.AgentCapabilities.AgentCapabilities() -> void
+AGUI.Abstractions.AgentCapabilities.Custom.get -> System.Collections.Generic.IDictionary<string!, object?>?
+AGUI.Abstractions.AgentCapabilities.Custom.set -> void
+AGUI.Abstractions.AgentCapabilities.Execution.get -> AGUI.Abstractions.ExecutionCapabilities?
+AGUI.Abstractions.AgentCapabilities.Execution.set -> void
+AGUI.Abstractions.AgentCapabilities.HumanInTheLoop.get -> AGUI.Abstractions.HumanInTheLoopCapabilities?
+AGUI.Abstractions.AgentCapabilities.HumanInTheLoop.set -> void
+AGUI.Abstractions.AgentCapabilities.Identity.get -> AGUI.Abstractions.IdentityCapabilities?
+AGUI.Abstractions.AgentCapabilities.Identity.set -> void
+AGUI.Abstractions.AgentCapabilities.MultiAgent.get -> AGUI.Abstractions.MultiAgentCapabilities?
+AGUI.Abstractions.AgentCapabilities.MultiAgent.set -> void
+AGUI.Abstractions.AgentCapabilities.Multimodal.get -> AGUI.Abstractions.MultimodalCapabilities?
+AGUI.Abstractions.AgentCapabilities.Multimodal.set -> void
+AGUI.Abstractions.AgentCapabilities.Output.get -> AGUI.Abstractions.OutputCapabilities?
+AGUI.Abstractions.AgentCapabilities.Output.set -> void
+AGUI.Abstractions.AgentCapabilities.Reasoning.get -> AGUI.Abstractions.ReasoningCapabilities?
+AGUI.Abstractions.AgentCapabilities.Reasoning.set -> void
+AGUI.Abstractions.AgentCapabilities.State.get -> AGUI.Abstractions.StateCapabilities?
+AGUI.Abstractions.AgentCapabilities.State.set -> void
+AGUI.Abstractions.AgentCapabilities.Tools.get -> AGUI.Abstractions.ToolsCapabilities?
+AGUI.Abstractions.AgentCapabilities.Tools.set -> void
+AGUI.Abstractions.AgentCapabilities.Transport.get -> AGUI.Abstractions.TransportCapabilities?
+AGUI.Abstractions.AgentCapabilities.Transport.set -> void
 AGUI.Abstractions.AGUIActivityMessage
-AGUI.Abstractions.AGUIActivityMessage.AGUIActivityMessage() -> void
 AGUI.Abstractions.AGUIActivityMessage.ActivityType.get -> string!
 AGUI.Abstractions.AGUIActivityMessage.ActivityType.set -> void
+AGUI.Abstractions.AGUIActivityMessage.AGUIActivityMessage() -> void
 AGUI.Abstractions.AGUIActivityMessage.Content.get -> System.Text.Json.JsonElement
 AGUI.Abstractions.AGUIActivityMessage.Content.set -> void
 AGUI.Abstractions.AGUIAssistantMessage
@@ -20,18 +68,6 @@ AGUI.Abstractions.AGUIAssistantMessage.ToolCalls.get -> System.Collections.Gener
 AGUI.Abstractions.AGUIAssistantMessage.ToolCalls.set -> void
 AGUI.Abstractions.AGUIAudioInputContent
 AGUI.Abstractions.AGUIAudioInputContent.AGUIAudioInputContent() -> void
-AGUI.Abstractions.AGUIBinaryInputContent
-AGUI.Abstractions.AGUIBinaryInputContent.AGUIBinaryInputContent() -> void
-AGUI.Abstractions.AGUIBinaryInputContent.Data.get -> string?
-AGUI.Abstractions.AGUIBinaryInputContent.Data.set -> void
-AGUI.Abstractions.AGUIBinaryInputContent.Filename.get -> string?
-AGUI.Abstractions.AGUIBinaryInputContent.Filename.set -> void
-AGUI.Abstractions.AGUIBinaryInputContent.Id.get -> string?
-AGUI.Abstractions.AGUIBinaryInputContent.Id.set -> void
-AGUI.Abstractions.AGUIBinaryInputContent.MimeType.get -> string!
-AGUI.Abstractions.AGUIBinaryInputContent.MimeType.set -> void
-AGUI.Abstractions.AGUIBinaryInputContent.Url.get -> string?
-AGUI.Abstractions.AGUIBinaryInputContent.Url.set -> void
 AGUI.Abstractions.AGUIChatMessageExtensions
 AGUI.Abstractions.AGUIContext
 AGUI.Abstractions.AGUIContext.AGUIContext() -> void
@@ -93,110 +129,8 @@ AGUI.Abstractions.AGUIInterrupt.SubagentRunId.set -> void
 AGUI.Abstractions.AGUIInterrupt.ToolCallId.get -> string?
 AGUI.Abstractions.AGUIInterrupt.ToolCallId.set -> void
 AGUI.Abstractions.AGUIJsonSerializerContext
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIActivityMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIActivityMessage>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIAssistantMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIAssistantMessage>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIAudioInputContent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIAudioInputContent>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIBinaryInputContent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIBinaryInputContent>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIContext.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIContext>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIDeveloperMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIDeveloperMessage>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIDocumentInputContent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIDocumentInputContent>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIImageInputContent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIImageInputContent>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIInputContent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIInputContent>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIInputContentDataSource.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIInputContentDataSource>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIInputContentSource.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIInputContentSource>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIInputContentUrlSource.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIInputContentUrlSource>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIInterrupt.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIInterrupt>
 AGUI.Abstractions.AGUIJsonSerializerContext.AGUIJsonSerializerContext() -> void
 AGUI.Abstractions.AGUIJsonSerializerContext.AGUIJsonSerializerContext(System.Text.Json.JsonSerializerOptions! options) -> void
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIMessage>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIReasoningMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIReasoningMessage>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIResume.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIResume>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUISystemMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUISystemMessage>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUITextInputContent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUITextInputContent>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUITool.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUITool>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIToolApprovalPayload.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIToolApprovalPayload>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIToolApprovalResumePayload.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIToolApprovalResumePayload>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIToolCall.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIToolCall>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIToolCallFunction.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIToolCallFunction>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIToolCallInfo.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIToolCallInfo>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIToolMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIToolMessage>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIUserMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIUserMessage>
-AGUI.Abstractions.AGUIJsonSerializerContext.AGUIVideoInputContent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIVideoInputContent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ActivityDeltaEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ActivityDeltaEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ActivitySnapshotEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ActivitySnapshotEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.AgentCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AgentCapabilities>
-AGUI.Abstractions.AGUIJsonSerializerContext.BaseEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.BaseEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.Boolean.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<bool>
-AGUI.Abstractions.AGUIJsonSerializerContext.CustomEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.CustomEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ExecutionCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ExecutionCapabilities>
-AGUI.Abstractions.AGUIJsonSerializerContext.HumanInTheLoopCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.HumanInTheLoopCapabilities>
-AGUI.Abstractions.AGUIJsonSerializerContext.IDictionaryStringObject.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IDictionary<string, object>>
-AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUIContext.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUIContext>>
-AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUIInterrupt.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUIInterrupt>>
-AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUIMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUIMessage>>
-AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUIResume.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUIResume>>
-AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUITool.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUITool>>
-AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUIToolCall.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUIToolCall>>
-AGUI.Abstractions.AGUIJsonSerializerContext.IListString.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<string>>
-AGUI.Abstractions.AGUIJsonSerializerContext.IListSubAgentInfo.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.SubAgentInfo>>
-AGUI.Abstractions.AGUIJsonSerializerContext.IListTokenUsage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.TokenUsage>>
-AGUI.Abstractions.AGUIJsonSerializerContext.IdentityCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.IdentityCapabilities>
-AGUI.Abstractions.AGUIJsonSerializerContext.Int32.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<int>
-AGUI.Abstractions.AGUIJsonSerializerContext.Int64.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<long>
-AGUI.Abstractions.AGUIJsonSerializerContext.JsonElement.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Text.Json.JsonElement>
-AGUI.Abstractions.AGUIJsonSerializerContext.JsonObject.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Text.Json.Nodes.JsonObject>
-AGUI.Abstractions.AGUIJsonSerializerContext.MessagesSnapshotEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.MessagesSnapshotEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.MultiAgentCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.MultiAgentCapabilities>
-AGUI.Abstractions.AGUIJsonSerializerContext.MultimodalCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.MultimodalCapabilities>
-AGUI.Abstractions.AGUIJsonSerializerContext.MultimodalInputCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.MultimodalInputCapabilities>
-AGUI.Abstractions.AGUIJsonSerializerContext.MultimodalOutputCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.MultimodalOutputCapabilities>
-AGUI.Abstractions.AGUIJsonSerializerContext.NullableBoolean.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<bool?>
-AGUI.Abstractions.AGUIJsonSerializerContext.NullableInt32.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<int?>
-AGUI.Abstractions.AGUIJsonSerializerContext.NullableInt64.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<long?>
-AGUI.Abstractions.AGUIJsonSerializerContext.NullableJsonElement.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Text.Json.JsonElement?>
-AGUI.Abstractions.AGUIJsonSerializerContext.Object.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<object>
-AGUI.Abstractions.AGUIJsonSerializerContext.OutputCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.OutputCapabilities>
-AGUI.Abstractions.AGUIJsonSerializerContext.RawEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RawEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningCapabilities>
-AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningEncryptedValueEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningEncryptedValueEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningEndEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningEndEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningMessageChunkEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningMessageChunkEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningMessageContentEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningMessageContentEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningMessageEndEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningMessageEndEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningMessageStartEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningMessageStartEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningStartEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningStartEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.RunAgentInput.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunAgentInput>
-AGUI.Abstractions.AGUIJsonSerializerContext.RunErrorEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunErrorEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.RunFinishedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunFinishedEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.RunFinishedInterruptOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunFinishedInterruptOutcome>
-AGUI.Abstractions.AGUIJsonSerializerContext.RunFinishedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunFinishedOutcome>
-AGUI.Abstractions.AGUIJsonSerializerContext.RunFinishedSuccessOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunFinishedSuccessOutcome>
-AGUI.Abstractions.AGUIJsonSerializerContext.RunStartedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunStartedEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.StateCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.StateCapabilities>
-AGUI.Abstractions.AGUIJsonSerializerContext.StateDeltaEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.StateDeltaEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.StateSnapshotEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.StateSnapshotEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.StepFinishedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.StepFinishedEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.StepStartedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.StepStartedEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.String.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<string>
-AGUI.Abstractions.AGUIJsonSerializerContext.SubAgentInfo.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubAgentInfo>
-AGUI.Abstractions.AGUIJsonSerializerContext.SubagentErrorEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentErrorEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedOutcome>
-AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedSuccessOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedSuccessOutcome>
-AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedSuspendedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedSuspendedOutcome>
-AGUI.Abstractions.AGUIJsonSerializerContext.SubagentStartedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentStartedEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.TextMessageChunkEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TextMessageChunkEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.TextMessageContentEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TextMessageContentEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.TextMessageEndEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TextMessageEndEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.TextMessageStartEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TextMessageStartEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.TokenUsage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TokenUsage>
-AGUI.Abstractions.AGUIJsonSerializerContext.ToolCallArgsEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ToolCallArgsEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ToolCallChunkEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ToolCallChunkEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ToolCallEndEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ToolCallEndEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ToolCallResultEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ToolCallResultEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ToolCallStartEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ToolCallStartEvent>
-AGUI.Abstractions.AGUIJsonSerializerContext.ToolsCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ToolsCapabilities>
-AGUI.Abstractions.AGUIJsonSerializerContext.TransportCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TransportCapabilities>
 AGUI.Abstractions.AGUIJsonUtilities
 AGUI.Abstractions.AGUIMediaInputContent
 AGUI.Abstractions.AGUIMediaInputContent.AGUIMediaInputContent() -> void
@@ -206,7 +140,7 @@ AGUI.Abstractions.AGUIMediaInputContent.Source.get -> AGUI.Abstractions.AGUIInpu
 AGUI.Abstractions.AGUIMediaInputContent.Source.set -> void
 AGUI.Abstractions.AGUIMessage
 AGUI.Abstractions.AGUIMessage.AGUIMessage() -> void
-AGUI.Abstractions.AGUIMessage.Id.get -> string?
+AGUI.Abstractions.AGUIMessage.Id.get -> string!
 AGUI.Abstractions.AGUIMessage.Id.set -> void
 AGUI.Abstractions.AGUIMessage.Metadata.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.AGUIMessage.Metadata.set -> void
@@ -246,13 +180,13 @@ AGUI.Abstractions.AGUITextInputContent.Text.get -> string!
 AGUI.Abstractions.AGUITextInputContent.Text.set -> void
 AGUI.Abstractions.AGUITool
 AGUI.Abstractions.AGUITool.AGUITool() -> void
-AGUI.Abstractions.AGUITool.Description.get -> string?
+AGUI.Abstractions.AGUITool.Description.get -> string!
 AGUI.Abstractions.AGUITool.Description.set -> void
 AGUI.Abstractions.AGUITool.Metadata.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.AGUITool.Metadata.set -> void
 AGUI.Abstractions.AGUITool.Name.get -> string!
 AGUI.Abstractions.AGUITool.Name.set -> void
-AGUI.Abstractions.AGUITool.Parameters.get -> System.Text.Json.JsonElement
+AGUI.Abstractions.AGUITool.Parameters.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.AGUITool.Parameters.set -> void
 AGUI.Abstractions.AGUIToolApprovalPayload
 AGUI.Abstractions.AGUIToolApprovalPayload.AGUIToolApprovalPayload() -> void
@@ -303,15 +237,21 @@ AGUI.Abstractions.AGUIToolMessage.Error.get -> string?
 AGUI.Abstractions.AGUIToolMessage.Error.set -> void
 AGUI.Abstractions.AGUIToolMessage.ToolCallId.get -> string!
 AGUI.Abstractions.AGUIToolMessage.ToolCallId.set -> void
+AGUI.Abstractions.AGUIUnknownEventTypeException
+AGUI.Abstractions.AGUIUnknownEventTypeException.AGUIUnknownEventTypeException() -> void
+AGUI.Abstractions.AGUIUnknownEventTypeException.AGUIUnknownEventTypeException(string! message) -> void
+AGUI.Abstractions.AGUIUnknownEventTypeException.AGUIUnknownEventTypeException(string! message, string? eventType) -> void
+AGUI.Abstractions.AGUIUnknownEventTypeException.AGUIUnknownEventTypeException(string! message, System.Exception! innerException) -> void
+AGUI.Abstractions.AGUIUnknownEventTypeException.EventType.get -> string?
 AGUI.Abstractions.AGUIUserContent
 AGUI.Abstractions.AGUIUserContent.AGUIUserContent() -> void
-AGUI.Abstractions.AGUIUserContent.AGUIUserContent(System.Collections.Generic.IList<AGUI.Abstractions.AGUIInputContent!>! parts) -> void
 AGUI.Abstractions.AGUIUserContent.AGUIUserContent(string! text) -> void
+AGUI.Abstractions.AGUIUserContent.AGUIUserContent(System.Collections.Generic.IList<AGUI.Abstractions.AGUIInputContent!>! parts) -> void
 AGUI.Abstractions.AGUIUserContent.Count.get -> int
 AGUI.Abstractions.AGUIUserContent.GetEnumerator() -> System.Collections.Generic.IEnumerator<AGUI.Abstractions.AGUIInputContent!>!
 AGUI.Abstractions.AGUIUserContent.IsText.get -> bool
-AGUI.Abstractions.AGUIUserContent.Value.get -> object?
 AGUI.Abstractions.AGUIUserContent.this[int index].get -> AGUI.Abstractions.AGUIInputContent!
+AGUI.Abstractions.AGUIUserContent.Value.get -> object?
 AGUI.Abstractions.AGUIUserMessage
 AGUI.Abstractions.AGUIUserMessage.AGUIUserMessage() -> void
 AGUI.Abstractions.AGUIUserMessage.Content.get -> AGUI.Abstractions.AGUIUserContent
@@ -322,52 +262,6 @@ AGUI.Abstractions.AGUIUserMessage.Name.get -> string?
 AGUI.Abstractions.AGUIUserMessage.Name.set -> void
 AGUI.Abstractions.AGUIVideoInputContent
 AGUI.Abstractions.AGUIVideoInputContent.AGUIVideoInputContent() -> void
-AGUI.Abstractions.ActivityDeltaEvent
-AGUI.Abstractions.ActivityDeltaEvent.ActivityDeltaEvent() -> void
-AGUI.Abstractions.ActivityDeltaEvent.ActivityType.get -> string!
-AGUI.Abstractions.ActivityDeltaEvent.ActivityType.set -> void
-AGUI.Abstractions.ActivityDeltaEvent.MessageId.get -> string!
-AGUI.Abstractions.ActivityDeltaEvent.MessageId.set -> void
-AGUI.Abstractions.ActivityDeltaEvent.Patch.get -> System.Text.Json.JsonElement
-AGUI.Abstractions.ActivityDeltaEvent.Patch.set -> void
-AGUI.Abstractions.ActivityDeltaEvent.SubagentRunId.get -> string?
-AGUI.Abstractions.ActivityDeltaEvent.SubagentRunId.set -> void
-AGUI.Abstractions.ActivitySnapshotEvent
-AGUI.Abstractions.ActivitySnapshotEvent.ActivitySnapshotEvent() -> void
-AGUI.Abstractions.ActivitySnapshotEvent.ActivityType.get -> string!
-AGUI.Abstractions.ActivitySnapshotEvent.ActivityType.set -> void
-AGUI.Abstractions.ActivitySnapshotEvent.Content.get -> System.Text.Json.JsonElement
-AGUI.Abstractions.ActivitySnapshotEvent.Content.set -> void
-AGUI.Abstractions.ActivitySnapshotEvent.MessageId.get -> string!
-AGUI.Abstractions.ActivitySnapshotEvent.MessageId.set -> void
-AGUI.Abstractions.ActivitySnapshotEvent.Replace.get -> bool?
-AGUI.Abstractions.ActivitySnapshotEvent.Replace.set -> void
-AGUI.Abstractions.ActivitySnapshotEvent.SubagentRunId.get -> string?
-AGUI.Abstractions.ActivitySnapshotEvent.SubagentRunId.set -> void
-AGUI.Abstractions.AgentCapabilities
-AGUI.Abstractions.AgentCapabilities.AgentCapabilities() -> void
-AGUI.Abstractions.AgentCapabilities.Custom.get -> System.Collections.Generic.IDictionary<string!, object?>?
-AGUI.Abstractions.AgentCapabilities.Custom.set -> void
-AGUI.Abstractions.AgentCapabilities.Execution.get -> AGUI.Abstractions.ExecutionCapabilities?
-AGUI.Abstractions.AgentCapabilities.Execution.set -> void
-AGUI.Abstractions.AgentCapabilities.HumanInTheLoop.get -> AGUI.Abstractions.HumanInTheLoopCapabilities?
-AGUI.Abstractions.AgentCapabilities.HumanInTheLoop.set -> void
-AGUI.Abstractions.AgentCapabilities.Identity.get -> AGUI.Abstractions.IdentityCapabilities?
-AGUI.Abstractions.AgentCapabilities.Identity.set -> void
-AGUI.Abstractions.AgentCapabilities.MultiAgent.get -> AGUI.Abstractions.MultiAgentCapabilities?
-AGUI.Abstractions.AgentCapabilities.MultiAgent.set -> void
-AGUI.Abstractions.AgentCapabilities.Multimodal.get -> AGUI.Abstractions.MultimodalCapabilities?
-AGUI.Abstractions.AgentCapabilities.Multimodal.set -> void
-AGUI.Abstractions.AgentCapabilities.Output.get -> AGUI.Abstractions.OutputCapabilities?
-AGUI.Abstractions.AgentCapabilities.Output.set -> void
-AGUI.Abstractions.AgentCapabilities.Reasoning.get -> AGUI.Abstractions.ReasoningCapabilities?
-AGUI.Abstractions.AgentCapabilities.Reasoning.set -> void
-AGUI.Abstractions.AgentCapabilities.State.get -> AGUI.Abstractions.StateCapabilities?
-AGUI.Abstractions.AgentCapabilities.State.set -> void
-AGUI.Abstractions.AgentCapabilities.Tools.get -> AGUI.Abstractions.ToolsCapabilities?
-AGUI.Abstractions.AgentCapabilities.Tools.set -> void
-AGUI.Abstractions.AgentCapabilities.Transport.get -> AGUI.Abstractions.TransportCapabilities?
-AGUI.Abstractions.AgentCapabilities.Transport.set -> void
 AGUI.Abstractions.BaseEvent
 AGUI.Abstractions.BaseEvent.BaseEvent() -> void
 AGUI.Abstractions.BaseEvent.Metadata.get -> System.Text.Json.JsonElement?
@@ -563,7 +457,7 @@ AGUI.Abstractions.ResumeStatus
 AGUI.Abstractions.RunAgentInput
 AGUI.Abstractions.RunAgentInput.Context.get -> System.Collections.Generic.IList<AGUI.Abstractions.AGUIContext!>?
 AGUI.Abstractions.RunAgentInput.Context.set -> void
-AGUI.Abstractions.RunAgentInput.ForwardedProperties.get -> System.Text.Json.JsonElement
+AGUI.Abstractions.RunAgentInput.ForwardedProperties.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.RunAgentInput.ForwardedProperties.set -> void
 AGUI.Abstractions.RunAgentInput.Messages.get -> System.Collections.Generic.IList<AGUI.Abstractions.AGUIMessage!>!
 AGUI.Abstractions.RunAgentInput.Messages.set -> void
@@ -654,12 +548,6 @@ AGUI.Abstractions.StepStartedEvent.StepName.set -> void
 AGUI.Abstractions.StepStartedEvent.StepStartedEvent() -> void
 AGUI.Abstractions.StepStartedEvent.SubagentRunId.get -> string?
 AGUI.Abstractions.StepStartedEvent.SubagentRunId.set -> void
-AGUI.Abstractions.SubAgentInfo
-AGUI.Abstractions.SubAgentInfo.Description.get -> string?
-AGUI.Abstractions.SubAgentInfo.Description.set -> void
-AGUI.Abstractions.SubAgentInfo.Name.get -> string!
-AGUI.Abstractions.SubAgentInfo.Name.set -> void
-AGUI.Abstractions.SubAgentInfo.SubAgentInfo() -> void
 AGUI.Abstractions.SubagentErrorEvent
 AGUI.Abstractions.SubagentErrorEvent.Code.get -> string?
 AGUI.Abstractions.SubagentErrorEvent.Code.set -> void
@@ -686,6 +574,12 @@ AGUI.Abstractions.SubagentFinishedSuspendedOutcome
 AGUI.Abstractions.SubagentFinishedSuspendedOutcome.InterruptIds.get -> System.Collections.Generic.IList<string!>?
 AGUI.Abstractions.SubagentFinishedSuspendedOutcome.InterruptIds.set -> void
 AGUI.Abstractions.SubagentFinishedSuspendedOutcome.SubagentFinishedSuspendedOutcome() -> void
+AGUI.Abstractions.SubAgentInfo
+AGUI.Abstractions.SubAgentInfo.Description.get -> string?
+AGUI.Abstractions.SubAgentInfo.Description.set -> void
+AGUI.Abstractions.SubAgentInfo.Name.get -> string!
+AGUI.Abstractions.SubAgentInfo.Name.set -> void
+AGUI.Abstractions.SubAgentInfo.SubAgentInfo() -> void
 AGUI.Abstractions.SubagentStartedEvent
 AGUI.Abstractions.SubagentStartedEvent.Description.get -> string?
 AGUI.Abstractions.SubagentStartedEvent.Description.set -> void
@@ -731,7 +625,7 @@ AGUI.Abstractions.TextMessageStartEvent.MessageId.get -> string!
 AGUI.Abstractions.TextMessageStartEvent.MessageId.set -> void
 AGUI.Abstractions.TextMessageStartEvent.Name.get -> string?
 AGUI.Abstractions.TextMessageStartEvent.Name.set -> void
-AGUI.Abstractions.TextMessageStartEvent.Role.get -> string!
+AGUI.Abstractions.TextMessageStartEvent.Role.get -> string?
 AGUI.Abstractions.TextMessageStartEvent.Role.set -> void
 AGUI.Abstractions.TextMessageStartEvent.SubagentRunId.get -> string?
 AGUI.Abstractions.TextMessageStartEvent.SubagentRunId.set -> void
@@ -822,12 +716,6 @@ AGUI.Abstractions.TransportCapabilities.Streaming.set -> void
 AGUI.Abstractions.TransportCapabilities.TransportCapabilities() -> void
 AGUI.Abstractions.TransportCapabilities.Websocket.get -> bool?
 AGUI.Abstractions.TransportCapabilities.Websocket.set -> void
-abstract AGUI.Abstractions.AGUIInputContent.Type.get -> string!
-abstract AGUI.Abstractions.AGUIInputContentSource.Type.get -> string!
-abstract AGUI.Abstractions.AGUIMessage.Role.get -> string!
-abstract AGUI.Abstractions.BaseEvent.Type.get -> string!
-abstract AGUI.Abstractions.RunFinishedOutcome.Type.get -> string!
-abstract AGUI.Abstractions.SubagentFinishedOutcome.Type.get -> string!
 const AGUI.Abstractions.AGUIEventTypes.ActivityDelta = "ACTIVITY_DELTA" -> string!
 const AGUI.Abstractions.AGUIEventTypes.ActivitySnapshot = "ACTIVITY_SNAPSHOT" -> string!
 const AGUI.Abstractions.AGUIEventTypes.Custom = "CUSTOM" -> string!
@@ -862,7 +750,6 @@ const AGUI.Abstractions.AGUIEventTypes.ToolCallStart = "TOOL_CALL_START" -> stri
 const AGUI.Abstractions.AGUIInputContentSourceTypes.Data = "data" -> string!
 const AGUI.Abstractions.AGUIInputContentSourceTypes.Url = "url" -> string!
 const AGUI.Abstractions.AGUIInputContentTypes.Audio = "audio" -> string!
-const AGUI.Abstractions.AGUIInputContentTypes.Binary = "binary" -> string!
 const AGUI.Abstractions.AGUIInputContentTypes.Document = "document" -> string!
 const AGUI.Abstractions.AGUIInputContentTypes.Image = "image" -> string!
 const AGUI.Abstractions.AGUIInputContentTypes.Text = "text" -> string!
@@ -884,10 +771,11 @@ const AGUI.Abstractions.RunFinishedOutcomeTypes.Interrupt = "interrupt" -> strin
 const AGUI.Abstractions.RunFinishedOutcomeTypes.Success = "success" -> string!
 const AGUI.Abstractions.SubagentFinishedOutcomeTypes.Success = "success" -> string!
 const AGUI.Abstractions.SubagentFinishedOutcomeTypes.Suspended = "suspended" -> string!
+override AGUI.Abstractions.ActivityDeltaEvent.Type.get -> string!
+override AGUI.Abstractions.ActivitySnapshotEvent.Type.get -> string!
 override AGUI.Abstractions.AGUIActivityMessage.Role.get -> string!
 override AGUI.Abstractions.AGUIAssistantMessage.Role.get -> string!
 override AGUI.Abstractions.AGUIAudioInputContent.Type.get -> string!
-override AGUI.Abstractions.AGUIBinaryInputContent.Type.get -> string!
 override AGUI.Abstractions.AGUIDeveloperMessage.Role.get -> string!
 override AGUI.Abstractions.AGUIDocumentInputContent.Type.get -> string!
 override AGUI.Abstractions.AGUIImageInputContent.Type.get -> string!
@@ -910,8 +798,6 @@ override AGUI.Abstractions.AGUITextInputContent.Type.get -> string!
 override AGUI.Abstractions.AGUIToolMessage.Role.get -> string!
 override AGUI.Abstractions.AGUIUserMessage.Role.get -> string!
 override AGUI.Abstractions.AGUIVideoInputContent.Type.get -> string!
-override AGUI.Abstractions.ActivityDeltaEvent.Type.get -> string!
-override AGUI.Abstractions.ActivitySnapshotEvent.Type.get -> string!
 override AGUI.Abstractions.BaseEventJsonConverter.CanConvert(System.Type! typeToConvert) -> bool
 override AGUI.Abstractions.BaseEventJsonConverter.Read(ref System.Text.Json.Utf8JsonReader reader, System.Type! typeToConvert, System.Text.Json.JsonSerializerOptions! options) -> AGUI.Abstractions.BaseEvent!
 override AGUI.Abstractions.BaseEventJsonConverter.Write(System.Text.Json.Utf8JsonWriter! writer, AGUI.Abstractions.BaseEvent! value, System.Text.Json.JsonSerializerOptions! options) -> void
@@ -964,5 +850,107 @@ static AGUI.Abstractions.AGUIToolExtensions.AsAGUITools(this System.Collections.
 static AGUI.Abstractions.AGUIToolExtensions.AsAITools(this System.Collections.Generic.IList<AGUI.Abstractions.AGUITool!>! tools) -> System.Collections.Generic.IEnumerable<Microsoft.Extensions.AI.AITool!>!
 static AGUI.Abstractions.AGUIUserContent.Create(System.ReadOnlySpan<AGUI.Abstractions.AGUIInputContent!> parts) -> AGUI.Abstractions.AGUIUserContent
 static AGUI.Abstractions.AGUIUserContent.implicit operator AGUI.Abstractions.AGUIUserContent(AGUI.Abstractions.AGUIInputContent![]! parts) -> AGUI.Abstractions.AGUIUserContent
-static AGUI.Abstractions.AGUIUserContent.implicit operator AGUI.Abstractions.AGUIUserContent(System.Collections.Generic.List<AGUI.Abstractions.AGUIInputContent!>! parts) -> AGUI.Abstractions.AGUIUserContent
 static AGUI.Abstractions.AGUIUserContent.implicit operator AGUI.Abstractions.AGUIUserContent(string! text) -> AGUI.Abstractions.AGUIUserContent
+static AGUI.Abstractions.AGUIUserContent.implicit operator AGUI.Abstractions.AGUIUserContent(System.Collections.Generic.List<AGUI.Abstractions.AGUIInputContent!>! parts) -> AGUI.Abstractions.AGUIUserContent
+~AGUI.Abstractions.AGUIJsonSerializerContext.ActivityDeltaEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ActivityDeltaEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ActivitySnapshotEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ActivitySnapshotEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AgentCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AgentCapabilities>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIActivityMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIActivityMessage>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIAssistantMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIAssistantMessage>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIAudioInputContent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIAudioInputContent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIContext.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIContext>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIDeveloperMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIDeveloperMessage>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIDocumentInputContent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIDocumentInputContent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIImageInputContent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIImageInputContent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIInputContent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIInputContent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIInputContentDataSource.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIInputContentDataSource>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIInputContentSource.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIInputContentSource>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIInputContentUrlSource.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIInputContentUrlSource>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIInterrupt.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIInterrupt>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIMessage>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIReasoningMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIReasoningMessage>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIResume.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIResume>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUISystemMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUISystemMessage>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUITextInputContent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUITextInputContent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUITool.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUITool>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIToolApprovalPayload.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIToolApprovalPayload>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIToolApprovalResumePayload.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIToolApprovalResumePayload>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIToolCall.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIToolCall>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIToolCallFunction.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIToolCallFunction>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIToolCallInfo.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIToolCallInfo>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIToolMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIToolMessage>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIUserMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIUserMessage>
+~AGUI.Abstractions.AGUIJsonSerializerContext.AGUIVideoInputContent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.AGUIVideoInputContent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.BaseEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.BaseEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.Boolean.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<bool>
+~AGUI.Abstractions.AGUIJsonSerializerContext.CustomEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.CustomEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.DictionaryStringString.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.Dictionary<string, string>>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ExecutionCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ExecutionCapabilities>
+~AGUI.Abstractions.AGUIJsonSerializerContext.HumanInTheLoopCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.HumanInTheLoopCapabilities>
+~AGUI.Abstractions.AGUIJsonSerializerContext.IdentityCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.IdentityCapabilities>
+~AGUI.Abstractions.AGUIJsonSerializerContext.IDictionaryStringObject.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IDictionary<string, object>>
+~AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUIContext.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUIContext>>
+~AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUIInterrupt.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUIInterrupt>>
+~AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUIMessage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUIMessage>>
+~AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUIResume.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUIResume>>
+~AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUITool.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUITool>>
+~AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUIToolCall.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUIToolCall>>
+~AGUI.Abstractions.AGUIJsonSerializerContext.IListString.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<string>>
+~AGUI.Abstractions.AGUIJsonSerializerContext.IListSubAgentInfo.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.SubAgentInfo>>
+~AGUI.Abstractions.AGUIJsonSerializerContext.IListTokenUsage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.TokenUsage>>
+~AGUI.Abstractions.AGUIJsonSerializerContext.Int32.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<int>
+~AGUI.Abstractions.AGUIJsonSerializerContext.Int64.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<long>
+~AGUI.Abstractions.AGUIJsonSerializerContext.JsonElement.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Text.Json.JsonElement>
+~AGUI.Abstractions.AGUIJsonSerializerContext.JsonObject.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Text.Json.Nodes.JsonObject>
+~AGUI.Abstractions.AGUIJsonSerializerContext.MessagesSnapshotEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.MessagesSnapshotEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.MultiAgentCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.MultiAgentCapabilities>
+~AGUI.Abstractions.AGUIJsonSerializerContext.MultimodalCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.MultimodalCapabilities>
+~AGUI.Abstractions.AGUIJsonSerializerContext.MultimodalInputCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.MultimodalInputCapabilities>
+~AGUI.Abstractions.AGUIJsonSerializerContext.MultimodalOutputCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.MultimodalOutputCapabilities>
+~AGUI.Abstractions.AGUIJsonSerializerContext.NullableBoolean.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<bool?>
+~AGUI.Abstractions.AGUIJsonSerializerContext.NullableInt32.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<int?>
+~AGUI.Abstractions.AGUIJsonSerializerContext.NullableInt64.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<long?>
+~AGUI.Abstractions.AGUIJsonSerializerContext.NullableJsonElement.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Text.Json.JsonElement?>
+~AGUI.Abstractions.AGUIJsonSerializerContext.Object.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<object>
+~AGUI.Abstractions.AGUIJsonSerializerContext.OutputCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.OutputCapabilities>
+~AGUI.Abstractions.AGUIJsonSerializerContext.RawEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RawEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningCapabilities>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningEncryptedValueEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningEncryptedValueEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningEndEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningEndEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningMessageChunkEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningMessageChunkEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningMessageContentEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningMessageContentEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningMessageEndEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningMessageEndEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningMessageStartEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningMessageStartEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningStartEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningStartEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.RunAgentInput.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunAgentInput>
+~AGUI.Abstractions.AGUIJsonSerializerContext.RunErrorEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunErrorEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.RunFinishedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunFinishedEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.RunFinishedInterruptOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunFinishedInterruptOutcome>
+~AGUI.Abstractions.AGUIJsonSerializerContext.RunFinishedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunFinishedOutcome>
+~AGUI.Abstractions.AGUIJsonSerializerContext.RunFinishedSuccessOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunFinishedSuccessOutcome>
+~AGUI.Abstractions.AGUIJsonSerializerContext.RunStartedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.RunStartedEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.StateCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.StateCapabilities>
+~AGUI.Abstractions.AGUIJsonSerializerContext.StateDeltaEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.StateDeltaEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.StateSnapshotEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.StateSnapshotEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.StepFinishedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.StepFinishedEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.StepStartedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.StepStartedEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.String.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<string>
+~AGUI.Abstractions.AGUIJsonSerializerContext.SubagentErrorEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentErrorEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedOutcome>
+~AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedSuccessOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedSuccessOutcome>
+~AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedSuspendedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedSuspendedOutcome>
+~AGUI.Abstractions.AGUIJsonSerializerContext.SubAgentInfo.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubAgentInfo>
+~AGUI.Abstractions.AGUIJsonSerializerContext.SubagentStartedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentStartedEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.TextMessageChunkEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TextMessageChunkEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.TextMessageContentEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TextMessageContentEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.TextMessageEndEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TextMessageEndEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.TextMessageStartEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TextMessageStartEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.TokenUsage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TokenUsage>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ToolCallArgsEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ToolCallArgsEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ToolCallChunkEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ToolCallChunkEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ToolCallEndEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ToolCallEndEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ToolCallResultEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ToolCallResultEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ToolCallStartEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ToolCallStartEvent>
+~AGUI.Abstractions.AGUIJsonSerializerContext.ToolsCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ToolsCapabilities>
+~AGUI.Abstractions.AGUIJsonSerializerContext.TransportCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TransportCapabilities>

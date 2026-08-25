@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using AGUI.Abstractions;
 using Xunit;
 using Proto = AGUI.ProtocolBuffers;
@@ -6,7 +7,9 @@ using Proto = AGUI.ProtocolBuffers;
 namespace AGUI.Protobuf.UnitTests;
 
 // Every schema event crosses the binary transport, since the wire mappers are
-// generated from the same schema as the models.
+// generated from the same schema as the models. An envelope carrying a variant
+// this build was not compiled against is the one remaining gap, and it decodes
+// to an explicit unknown-event error rather than to some other event.
 public sealed class UnsupportedEventTest
 {
     public static TheoryData<BaseEvent> NewlyRepresentableEvents() => new()
@@ -82,6 +85,59 @@ public sealed class UnsupportedEventTest
             _ => null,
         };
         Assert.Equal("s1", subagentRunId);
+    }
+
+    // A newer producer's event reaches this build as an envelope whose only tag
+    // is one this SDK was not compiled against: the oneof reads as unset, and
+    // the frame is skippable because nothing about it is broken.
+    [Fact]
+    public void Decode_EnvelopeWithOnlyUnknownTags_ThrowsUnknownEventType()
+    {
+        // Field 900, length-delimited, empty payload: a variant far outside the
+        // envelope this build knows.
+        var bytes = new byte[] { 0xE2, 0x38, 0x00 };
+        Assert.Throws<AGUIUnknownEventTypeException>(() => AGUIProtobuf.Decode(bytes));
+    }
+
+    // Malformed input is not an event from the future, and the two must not
+    // share an answer: a reader may skip the unknown variant above, never these.
+    [Fact]
+    public void Decode_EmptyEnvelope_ThrowsInvalidData()
+    {
+        var bytes = Google.Protobuf.MessageExtensions.ToByteArray(new Proto.Event());
+        Assert.Throws<InvalidDataException>(() => AGUIProtobuf.Decode(bytes));
+    }
+
+    [Fact]
+    public void Decode_KnownTagWithUnreadablePayload_ThrowsInvalidData()
+    {
+        // Envelope field 1 (TEXT_MESSAGE_START) carried as a varint rather than
+        // a message: the parser cannot read it as the event the tag names, so
+        // the oneof stays unset even though the envelope names a known event.
+        var bytes = new byte[] { 0x08, 0x01 };
+        Assert.Throws<InvalidDataException>(() => AGUIProtobuf.Decode(bytes));
+    }
+
+    [Fact]
+    public void Decode_KnownTagCarriedAsGroup_ThrowsInvalidData()
+    {
+        // Envelope field 1 as a start group, then its end group: a shape no
+        // AG-UI encoder writes, and one the parser leaves the oneof unset for.
+        // The envelope still names a known event, so it is broken input rather
+        // than an event from the future.
+        var bytes = new byte[] { 0x0B, 0x0C };
+        Assert.Throws<InvalidDataException>(() => AGUIProtobuf.Decode(bytes));
+    }
+
+    // Every event arm of the envelope is a length-delimited message, so an
+    // unknown field of any other wire type is not an event this build has yet to
+    // learn about — it is broken bytes, and skipping it would lose a real event.
+    [Fact]
+    public void Decode_UnknownVarintOnly_ThrowsInvalidData()
+    {
+        // Field 900, varint, value 1.
+        var bytes = new byte[] { 0xE0, 0x38, 0x01 };
+        Assert.Throws<InvalidDataException>(() => AGUIProtobuf.Decode(bytes));
     }
 
     [Fact]

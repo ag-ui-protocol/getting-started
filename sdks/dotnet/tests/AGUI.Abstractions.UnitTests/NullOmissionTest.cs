@@ -33,6 +33,19 @@ namespace AGUI.Abstractions.UnitTests;
 /// </remarks>
 public sealed class NullOmissionTest
 {
+    /// <summary>
+    /// The one place a null is the contract rather than an oversight:
+    /// CUSTOM.value is REQUIRED and any JSON value — including null — is legal
+    /// for it. Omitting it would produce an event missing a field the schema
+    /// requires, which the TypeScript and Python validators reject, so the
+    /// property opts out of the context-wide omission and is always written.
+    /// Every other valueless property must still disappear.
+    /// </summary>
+    private static readonly HashSet<string> RequiredNullsThatMustBeWritten = new()
+    {
+        "CustomEvent/value",
+    };
+
     [Fact]
     public void EveryWireTypeOmitsPropertiesWithoutAValue()
     {
@@ -51,7 +64,11 @@ public sealed class NullOmissionTest
             using var document = JsonDocument.Parse(json);
             foreach (var path in NullOmissionProbe.FindNullPaths(document.RootElement))
             {
-                offenders.Add($"{type.Name}{path}");
+                var offender = $"{type.Name}{path}";
+                if (!RequiredNullsThatMustBeWritten.Contains(offender))
+                {
+                    offenders.Add(offender);
+                }
             }
         }
 
@@ -79,7 +96,11 @@ public sealed class NullOmissionTest
             using var document = JsonDocument.Parse(json);
             foreach (var path in NullOmissionProbe.FindNullPaths(document.RootElement))
             {
-                offenders.Add($"{type.Name}{path}");
+                var offender = $"{type.Name}{path}";
+                if (!RequiredNullsThatMustBeWritten.Contains(offender))
+                {
+                    offenders.Add(offender);
+                }
             }
         }
 
@@ -104,7 +125,11 @@ public sealed class NullOmissionTest
             using var document = JsonDocument.Parse(json);
             foreach (var path in NullOmissionProbe.FindNullPaths(document.RootElement))
             {
-                offenders.Add($"{type.Name}{path}");
+                var offender = $"{type.Name}{path}";
+                if (!RequiredNullsThatMustBeWritten.Contains(offender))
+                {
+                    offenders.Add(offender);
+                }
             }
         }
 

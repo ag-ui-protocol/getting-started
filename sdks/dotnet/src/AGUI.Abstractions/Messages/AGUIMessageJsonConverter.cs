@@ -59,7 +59,9 @@ public sealed class AGUIMessageJsonConverter : JsonConverter<AGUIMessage>
     {
         var userMessage = new AGUIUserMessage
         {
-            Id = jsonElement.TryGetProperty("id", out var idProp) ? idProp.GetString() : null,
+            // Required on every role, so the model's property is non-nullable: an
+            // empty id is schema-valid and stays empty, an absent one reads the same.
+            Id = jsonElement.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty,
             Name = jsonElement.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null,
             EncryptedValue = jsonElement.TryGetProperty("encryptedValue", out var encProp) ? encProp.GetString() : null,
             SubagentRunId = jsonElement.TryGetProperty("subagentRunId", out var subagentProp) ? subagentProp.GetString() : null,
@@ -101,8 +103,6 @@ public sealed class AGUIMessageJsonConverter : JsonConverter<AGUIMessage>
                             options.GetTypeInfo(typeof(AGUIVideoInputContent))) as AGUIVideoInputContent,
                         AGUIInputContentTypes.Document => element.Deserialize(
                             options.GetTypeInfo(typeof(AGUIDocumentInputContent))) as AGUIDocumentInputContent,
-                        AGUIInputContentTypes.Binary => element.Deserialize(
-                            options.GetTypeInfo(typeof(AGUIBinaryInputContent))) as AGUIBinaryInputContent,
                         _ => throw new JsonException($"Unknown InputContent type: '{contentType}'")
                     };
 

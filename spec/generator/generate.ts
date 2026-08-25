@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { format, resolveConfig } from "prettier";
 import { buildModel } from "./ir";
 import { emitDotnet } from "./dotnet";
+import { emitDotnetModels } from "./dotnet-models";
 import { buildWireModel, emitFreeze, emitProtoFiles } from "./protobuf";
 import { emitPython } from "./python";
 import { emitProtoTranslation } from "./proto-translation";
@@ -52,6 +53,17 @@ export const PROTO_PACKAGE_DIR = join(
 export const PROTO_OUTPUT_DIR = join(PROTO_PACKAGE_DIR, "src", "proto");
 
 export const FREEZE_PATH = join(HERE, "..", "draft", "proto-freeze.txt");
+
+export const DOTNET_MODELS_OUTPUT_DIR = join(
+  HERE,
+  "..",
+  "..",
+  "sdks",
+  "dotnet",
+  "src",
+  "AGUI.Abstractions",
+  "Generated",
+);
 
 export const DOTNET_OUTPUT_DIR = join(
   REPO_ROOT,
@@ -112,11 +124,16 @@ export async function generateFiles(): Promise<GeneratedOutput[]> {
     path: join(DOTNET_OUTPUT_DIR, file.name),
     content: file.content,
   }));
+  const dotnetModels = emitDotnetModels(model).map((file) => ({
+    path: join(DOTNET_MODELS_OUTPUT_DIR, file.name),
+    content: file.content,
+  }));
 
   return [
     ...typescript,
     ...python,
     ...protoFiles,
+    ...dotnetModels,
     translation,
     freeze,
     ...dotnet,

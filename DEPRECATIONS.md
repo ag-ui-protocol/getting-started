@@ -7,8 +7,8 @@ project's shim window. After the expiry date the shim may be removed in the
 next release, and the deprecated shape stops working entirely.
 
 The 1.0 contract (spec/draft/schema.json) does not describe any of these
-shapes, and since the SDKs moved onto the generated models neither the
-TypeScript nor the Python SDK declares them. They exist only as conversions
+shapes, and since the SDKs moved onto the generated models none of the three
+— TypeScript, Python, .NET — declares them. They exist only as conversions
 in the TypeScript client middleware layer: the
 always-on inbound boundary (`CompatibilityBoundary`) upgrades what arrives,
 and the version-gated `BackwardCompatibility_0_0_39`/`_0_0_47` middlewares

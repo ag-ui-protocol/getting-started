@@ -50,11 +50,7 @@ internal static class ProtoMessageMapper
                 {
                     foreach (var part in parts)
                     {
-                        var protoPart = ToProtoContentPart(part);
-                        if (protoPart is not null)
-                        {
-                            proto.ContentParts.Add(protoPart);
-                        }
+                        proto.ContentParts.Add(ToProtoContentPart(part));
                     }
                 }
                 else if (user.Content.Value is string text)
@@ -350,9 +346,9 @@ internal static class ProtoMessageMapper
             }
         }
 
-        if (input.ForwardedProperties.ValueKind != JsonValueKind.Undefined)
+        if (input.ForwardedProperties is not null)
         {
-            proto.ForwardedProps = ProtoValueConverter.ToValue(input.ForwardedProperties);
+            proto.ForwardedProps = ProtoValueConverter.ToValue(input.ForwardedProperties.Value);
         }
 
         if (input.Resume is not null)
@@ -374,9 +370,7 @@ internal static class ProtoMessageMapper
             RunId = proto.RunId,
             ParentRunId = proto.HasParentRunId ? proto.ParentRunId : null,
             State = ProtoValueConverter.ToJsonElementOrNull(proto.State),
-            ForwardedProperties = proto.ForwardedProps is null
-                ? default
-                : ProtoValueConverter.ToJsonElement(proto.ForwardedProps),
+            ForwardedProperties = ProtoValueConverter.ToJsonElementOrNull(proto.ForwardedProps),
         };
 
         foreach (var message in proto.Messages)
@@ -418,13 +412,13 @@ internal static class ProtoMessageMapper
         var proto = new Proto.Tool
         {
             Name = tool.Name,
-            Description = tool.Description ?? string.Empty,
+            Description = tool.Description,
             Metadata = ProtoValueConverter.ToStructOrNull(tool.Metadata),
         };
 
-        if (tool.Parameters.ValueKind != JsonValueKind.Undefined)
+        if (tool.Parameters is not null)
         {
-            proto.Parameters = ProtoValueConverter.ToValue(tool.Parameters);
+            proto.Parameters = ProtoValueConverter.ToValue(tool.Parameters.Value);
         }
 
         return proto;
@@ -436,9 +430,7 @@ internal static class ProtoMessageMapper
         {
             Name = proto.Name,
             Description = proto.Description,
-            Parameters = proto.Parameters is null
-                ? default
-                : ProtoValueConverter.ToJsonElement(proto.Parameters),
+            Parameters = ProtoValueConverter.ToJsonElementOrNull(proto.Parameters),
             Metadata = ProtoValueConverter.StructToJsonElementOrNull(proto.Metadata),
         };
     }
@@ -611,7 +603,7 @@ internal static class ProtoMessageMapper
         writer.WriteEndObject();
     }
 
-    private static Proto.InputContent? ToProtoContentPart(AGUIInputContent part)
+    private static Proto.InputContent ToProtoContentPart(AGUIInputContent part)
     {
         switch (part)
         {
@@ -656,27 +648,11 @@ internal static class ProtoMessageMapper
                         Metadata = ProtoValueConverter.ToValueOrNull(document.Metadata),
                     },
                 };
-            case AGUIBinaryInputContent binary:
-            {
-                // Legacy compatibility, predating the schema: the retired
-                // "binary" part rides as a document part with marker metadata.
-                var source = ToProtoBinarySource(binary);
-                if (source is null)
-                {
-                    return null;
-                }
-
-                return new Proto.InputContent
-                {
-                    Document = new Proto.DocumentInputPart
-                    {
-                        Source = source,
-                        Metadata = BuildBinaryMetadata(binary),
-                    },
-                };
-            }
             default:
-                return null;
+                // A part the wire has no arm for: dropping it would delete what
+                // the message says, which the TypeScript translation refuses too.
+                throw new NotSupportedException(
+                    $"Input content part '{part.Type}' is not representable in the AG-UI protobuf wire format by this SDK.");
         }
     }
 
@@ -776,54 +752,6 @@ internal static class ProtoMessageMapper
             default:
                 return null;
         }
-    }
-
-    private static Proto.InputContentSource? ToProtoBinarySource(AGUIBinaryInputContent binary)
-    {
-        if (binary.Data is not null)
-        {
-            return new Proto.InputContentSource
-            {
-                Data = new Proto.InputContentDataSource { Value = binary.Data, MimeType = binary.MimeType },
-            };
-        }
-
-        if (binary.Url is not null)
-        {
-            return new Proto.InputContentSource
-            {
-                Url = new Proto.InputContentUrlSource { Value = binary.Url, MimeType = binary.MimeType },
-            };
-        }
-
-        if (binary.Id is not null)
-        {
-            return new Proto.InputContentSource
-            {
-                Url = new Proto.InputContentUrlSource { Value = binary.Id, MimeType = binary.MimeType },
-            };
-        }
-
-        return null;
-    }
-
-    private static Value BuildBinaryMetadata(AGUIBinaryInputContent binary)
-    {
-        // A field with no value is omitted rather than written as an explicit
-        // null, the same rule the serializer context applies on the JSON side.
-        var metadata = new Struct();
-        metadata.Fields["legacyBinary"] = new Value { BoolValue = true };
-        if (binary.Filename is not null)
-        {
-            metadata.Fields["filename"] = new Value { StringValue = binary.Filename };
-        }
-
-        if (binary.Id is not null)
-        {
-            metadata.Fields["id"] = new Value { StringValue = binary.Id };
-        }
-
-        return new Value { StructValue = metadata };
     }
 
     private static Proto.JsonPatchOperationType ParseOperationType(string? op)

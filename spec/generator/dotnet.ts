@@ -25,12 +25,6 @@ const PROP_OVERRIDE: Record<string, string> = {
 };
 
 /**
- * Optional wire strings whose .NET model keeps a non-nullable string with an
- * empty default instead of a nullable property. Empty means absent on encode.
- */
-const EMPTY_MEANS_ABSENT = new Set(["TextMessageStartEvent.role"]);
-
-/**
  * Required arbitrary-JSON fields whose .NET model property is nullable
  * (JsonElement?) rather than a bare JsonElement.
  */
@@ -52,6 +46,16 @@ const NULLABLE_REQUIRED_STRINGS = new Set([
   "SubagentFinishedEvent.subagentRunId",
   "SubagentErrorEvent.subagentRunId",
   "SubagentErrorEvent.message",
+]);
+
+/**
+ * The union-valued event fields the wire flattens into sibling fields, each with
+ * bespoke encode and decode below. A union field not named here has no mapping
+ * at all, which is a generator gap rather than a shape the wire omits.
+ */
+const FLATTENED_UNION_FIELDS = new Set([
+  "RunFinishedEvent.outcome",
+  "SubagentFinishedEvent.outcome",
 ]);
 
 function pascalCase(name: string): string {
@@ -82,8 +86,9 @@ type Kind =
   | "requiredString"
   | "nullableRequiredString"
   | "optionalString"
-  | "emptyMeansAbsentString"
+  | "requiredInt"
   | "optionalInt"
+  | "requiredBool"
   | "optionalBool"
   | "requiredAny"
   | "nullableRequiredAny"
@@ -145,7 +150,6 @@ function classify(
     case "string":
     case "literal":
     case "stringEnum":
-      if (EMPTY_MEANS_ABSENT.has(key)) return "emptyMeansAbsentString";
       if (field.required) {
         return NULLABLE_REQUIRED_STRINGS.has(key)
           ? "nullableRequiredString"
@@ -153,9 +157,9 @@ function classify(
       }
       return "optionalString";
     case "integer":
-      return "optionalInt";
+      return field.required ? "requiredInt" : "optionalInt";
     case "boolean":
-      return "optionalBool";
+      return field.required ? "requiredBool" : "optionalBool";
     case "any":
       if (!field.required) return "optionalAny";
       return NULLABLE_REQUIRED_ANY.has(key)
@@ -168,9 +172,33 @@ function classify(
         resolved.items.kind === "ref"
           ? defs.get(resolved.items.name)
           : undefined;
-      if (items?.name === "JsonPatchOperation") return "patchArray";
-      if (items?.name === "Message") return "messageArray";
-      if (items?.name === "TokenUsage") return "usageArray";
+      if (items?.name === "JsonPatchOperation" || items?.name === "Message") {
+        // Both encode by enumerating the model's list and decode by adding into
+        // it, which a nullable property (an optional array) supports in neither
+        // direction. No such field exists today; one would need the mappers
+        // taught first.
+        if (!field.required) {
+          throw new Error(
+            `${key} is an optional ${items.name} array, which the .NET protobuf ` +
+              "mappers cannot carry — make it required or teach the mappers the " +
+              "nullable form",
+          );
+        }
+        return items.name === "Message" ? "messageArray" : "patchArray";
+      }
+      if (items?.name === "TokenUsage") {
+        // AddUsage writes nothing for an absent list and BuildUsage answers an
+        // empty repeated field with null, both of which a required list would
+        // contradict. No such field exists today.
+        if (field.required) {
+          throw new Error(
+            `${key} is a required TokenUsage array, which the .NET protobuf mappers ` +
+              "read as absent-or-null — make it optional or teach the mappers the " +
+              "required form",
+          );
+        }
+        return "usageArray";
+      }
       if (items?.name === "Interrupt") return "interruptArray";
       return "stringArray";
     }
@@ -178,7 +206,6 @@ function classify(
       const target = defs.get(resolved.name);
       if (target?.kind === "enum") {
         // Enums ride the wire as strings.
-        if (EMPTY_MEANS_ABSENT.has(key)) return "emptyMeansAbsentString";
         return field.required ? "requiredString" : "optionalString";
       }
       if (target?.name === "RunAgentInput") return "inputMessage";
@@ -207,8 +234,9 @@ function encodeField(
       ];
     case "optionalString":
       return [`if (${m} is not null)`, `{`, `    ${p} = ${m};`, `}`];
-    case "emptyMeansAbsentString":
-      return [`if (!string.IsNullOrEmpty(${m}))`, `{`, `    ${p} = ${m};`, `}`];
+    case "requiredInt":
+    case "requiredBool":
+      return [`${p} = ${m};`];
     case "optionalInt":
     case "optionalBool":
       return [`if (${m}.HasValue)`, `{`, `    ${p} = ${m}.Value;`, `}`];
@@ -281,8 +309,9 @@ function decodeField(plan: EventFieldPlan, proto: string): string | undefined {
       return `${plan.property} = ${guarded(p)},`;
     case "optionalString":
       return `${plan.property} = ${proto}.Has${plan.wireProperty} ? ${guarded(p)} : null,`;
-    case "emptyMeansAbsentString":
-      return `${plan.property} = ${proto}.Has${plan.wireProperty} ? ${guarded(p)} : string.Empty,`;
+    case "requiredInt":
+    case "requiredBool":
+      return `${plan.property} = ${p},`;
     case "optionalInt":
     case "optionalBool":
       return `${plan.property} = ${proto}.Has${plan.wireProperty} ? ${p} : null,`;
@@ -297,15 +326,345 @@ function decodeField(plan: EventFieldPlan, proto: string): string | undefined {
       // A required record must be present on the wire, as on the JSON path.
       return plan.field.required
         ? `${plan.property} = ProtoValueConverter.StructToJsonElementOrNull(${p}) ?? throw MissingRequiredField("${plan.field.name}"),`
-        : `${plan.property} = ProtoValueConverter.StructToJsonElementOrNull(${p}) ?? default,`;
+        : `${plan.property} = ProtoValueConverter.StructToJsonElementOrNull(${p}),`;
     case "usageArray":
       return `${plan.property} = BuildUsage(${p}),`;
     case "inputMessage":
-      return `${plan.property} = ${p} is null ? null : ProtoMessageMapper.FromProtoRunAgentInput(${p}),`;
+      return plan.field.required
+        ? `${plan.property} = ${p} is null ? throw MissingRequiredField("${plan.field.name}") : ProtoMessageMapper.FromProtoRunAgentInput(${p}),`
+        : `${plan.property} = ${p} is null ? null : ProtoMessageMapper.FromProtoRunAgentInput(${p}),`;
     case "skip":
       return undefined;
     default:
       return undefined;
+  }
+}
+
+/**
+ * What the hand-written parts of these mappers cover, field by field. The
+ * message role switch, the flattened outcome branches and the input-content
+ * arms are prose, not field-driven emission, so a field the schema gains
+ * changes nothing in the generated output: the drift gate stays green while the
+ * new field silently fails to cross the wire.
+ *
+ * This table is the contract. Every entry is a field the prose below maps in
+ * both directions, pinned with the required-ness and resolved kind the prose
+ * assumes: a schema that stops matching it fails generation, with the message
+ * saying what changed and where to go and map it.
+ */
+const MAPPED_FIELDS: Record<string, Record<string, string>> = {
+  DeveloperMessage: {
+    subagentRunId: "optional string",
+    id: "required string",
+    role: "required literal(developer)",
+    name: "optional string",
+    encryptedValue: "optional string",
+    metadata: "optional openMap",
+    content: "required string",
+  },
+  SystemMessage: {
+    subagentRunId: "optional string",
+    id: "required string",
+    role: "required literal(system)",
+    name: "optional string",
+    encryptedValue: "optional string",
+    metadata: "optional openMap",
+    content: "required string",
+  },
+  AssistantMessage: {
+    subagentRunId: "optional string",
+    id: "required string",
+    role: "required literal(assistant)",
+    name: "optional string",
+    encryptedValue: "optional string",
+    metadata: "optional openMap",
+    content: "optional string",
+    toolCalls: "optional ToolCall[]",
+  },
+  UserMessage: {
+    subagentRunId: "optional string",
+    id: "required string",
+    role: "required literal(user)",
+    name: "optional string",
+    encryptedValue: "optional string",
+    metadata: "optional openMap",
+    content: "required union",
+  },
+  ToolMessage: {
+    subagentRunId: "optional string",
+    id: "required string",
+    role: "required literal(tool)",
+    content: "required string",
+    toolCallId: "required string",
+    error: "optional string",
+    encryptedValue: "optional string",
+    metadata: "optional openMap",
+  },
+  ActivityMessage: {
+    subagentRunId: "optional string",
+    id: "required string",
+    role: "required literal(activity)",
+    activityType: "required string",
+    content: "required openMap",
+    metadata: "optional openMap",
+  },
+  ReasoningMessage: {
+    subagentRunId: "optional string",
+    id: "required string",
+    role: "required literal(reasoning)",
+    content: "required string",
+    encryptedValue: "optional string",
+    metadata: "optional openMap",
+  },
+  TextInputContent: {
+    type: "required literal(text)",
+    text: "required string",
+  },
+  ImageInputContent: {
+    type: "required literal(image)",
+    source: "required InputContentSource",
+    metadata: "optional any",
+  },
+  AudioInputContent: {
+    type: "required literal(audio)",
+    source: "required InputContentSource",
+    metadata: "optional any",
+  },
+  VideoInputContent: {
+    type: "required literal(video)",
+    source: "required InputContentSource",
+    metadata: "optional any",
+  },
+  DocumentInputContent: {
+    type: "required literal(document)",
+    source: "required InputContentSource",
+    metadata: "optional any",
+  },
+  InputContentDataSource: {
+    type: "required literal(data)",
+    value: "required string",
+    mimeType: "required string",
+  },
+  InputContentUrlSource: {
+    type: "required literal(url)",
+    value: "required string",
+    mimeType: "optional string",
+  },
+  ToolCall: {
+    id: "required string",
+    type: "required literal(function)",
+    function: "required FunctionCall",
+    encryptedValue: "optional string",
+    metadata: "optional openMap",
+  },
+  FunctionCall: {
+    name: "required string",
+    arguments: "required string",
+  },
+  Tool: {
+    name: "required string",
+    description: "required string",
+    parameters: "optional any",
+    metadata: "optional openMap",
+  },
+  Context: {
+    description: "required string",
+    value: "required string",
+  },
+  Interrupt: {
+    subagentRunId: "optional string",
+    id: "required string",
+    reason: "required string",
+    message: "optional string",
+    toolCallId: "optional string",
+    responseSchema: "optional openMap",
+    expiresAt: "optional string",
+    metadata: "optional openMap",
+  },
+  ResumeEntry: {
+    interruptId: "required string",
+    status: "required enum(resolved|cancelled)",
+    payload: "optional any",
+    metadata: "optional openMap",
+  },
+  RunAgentInput: {
+    threadId: "required string",
+    runId: "required string",
+    parentRunId: "optional string",
+    state: "optional any",
+    messages: "required Message[]",
+    tools: "optional Tool[]",
+    context: "optional Context[]",
+    forwardedProps: "optional any",
+    resume: "optional ResumeEntry[]",
+  },
+  RunFinishedSuccessOutcome: {
+    type: "required literal(success)",
+  },
+  RunFinishedInterruptOutcome: {
+    type: "required literal(interrupt)",
+    interrupts: "required Interrupt[]",
+  },
+  SubagentFinishedSuccessOutcome: {
+    type: "required literal(success)",
+  },
+  SubagentFinishedSuspendedOutcome: {
+    type: "required literal(suspended)",
+    interruptIds: "optional string[]",
+  },
+  AddOperation: {
+    op: "required literal(add)",
+    path: "required string",
+    value: "required any",
+  },
+  RemoveOperation: {
+    op: "required literal(remove)",
+    path: "required string",
+  },
+  ReplaceOperation: {
+    op: "required literal(replace)",
+    path: "required string",
+    value: "required any",
+  },
+  MoveOperation: {
+    op: "required literal(move)",
+    from: "required string",
+    path: "required string",
+  },
+  CopyOperation: {
+    op: "required literal(copy)",
+    from: "required string",
+    path: "required string",
+  },
+  TestOperation: {
+    op: "required literal(test)",
+    path: "required string",
+    value: "required any",
+  },
+  BaseEvent: {
+    type: "required EventType",
+    timestamp: "optional integer",
+    rawEvent: "optional any",
+    metadata: "optional openMap",
+  },
+  TokenUsage: {
+    provider: "optional string",
+    model: "optional string",
+    inputTokens: "optional integer",
+    outputTokens: "optional integer",
+    totalTokens: "optional integer",
+    reasoningTokens: "optional integer",
+    cachedInputTokens: "optional integer",
+  },
+};
+
+/**
+ * The unions whose members the hand-written prose switches over. A member the
+ * schema adds needs an arm of its own, which the field inventory below cannot
+ * notice on its own: an unmapped member is a missing branch, not a missing
+ * field.
+ */
+const MAPPED_UNIONS = [
+  "Message",
+  "JsonPatchOperation",
+  "InputContent",
+  "InputContentSource",
+  "RunFinishedOutcome",
+  "SubagentFinishedOutcome",
+];
+
+/**
+ * How MAPPED_FIELDS names a field's type: the alias-resolved kind, or the
+ * definition a reference lands on, so a field that keeps its name while
+ * changing shape does not pass for unchanged.
+ */
+function describeFieldType(
+  defs: Map<string, Definition>,
+  type: TypeExpr,
+): string {
+  const resolved = resolveAlias(defs, type);
+  if (resolved.kind === "array") {
+    return `${describeFieldType(defs, resolved.items)}[]`;
+  }
+  if (resolved.kind === "ref") return resolved.name;
+  // The vocabulary itself, since the hand-written prose spells the accepted
+  // values out (AssertOneOf) and a value the schema adds would otherwise reject
+  // there while the models advertise it.
+  if (resolved.kind === "literal") return `literal(${resolved.value})`;
+  if (resolved.kind === "stringEnum") {
+    return `enum(${resolved.values.join("|")})`;
+  }
+  return resolved.kind;
+}
+
+/**
+ * Every definition the hand-written mapper prose is responsible for. Mixins are
+ * looked up too: BaseEvent is not a definition of its own, but its fields ride
+ * every event through the hand-written BuildBaseEvent/ApplyBaseEvent pair.
+ */
+function assertMappedFieldsMatchTheSchema(
+  defs: Map<string, Definition>,
+  mixins: ObjectDefinition[],
+): void {
+  const shapeOf = (name: string): ObjectDefinition | undefined => {
+    const definition = defs.get(name);
+    if (definition?.kind === "object") return definition;
+    return mixins.find((mixin) => mixin.name === name);
+  };
+  const complaints: string[] = [];
+  for (const name of MAPPED_UNIONS) {
+    const union = defs.get(name);
+    if (union?.kind !== "union") {
+      complaints.push(`${name} is no longer a union in the schema`);
+      continue;
+    }
+    const unmapped = union.members.filter(
+      (member) => MAPPED_FIELDS[member] === undefined,
+    );
+    if (unmapped.length > 0) {
+      complaints.push(
+        `${name} gained the member${unmapped.length === 1 ? "" : "s"} ${unmapped.join(", ")}, ` +
+          "which the mapper prose has no arm for",
+      );
+    }
+  }
+  for (const [name, mapped] of Object.entries(MAPPED_FIELDS)) {
+    const definition = shapeOf(name);
+    if (definition === undefined) {
+      complaints.push(`${name} is no longer an object in the schema`);
+      continue;
+    }
+    const actual = new Map(
+      definition.fields.map((field) => [
+        field.name,
+        `${field.required ? "required" : "optional"} ${describeFieldType(defs, field.type)}`,
+      ]),
+    );
+    for (const [field, shape] of actual) {
+      const pinned = mapped[field];
+      if (pinned === undefined) {
+        complaints.push(
+          `${name} gained ${field}, which the mapper prose does not map`,
+        );
+      } else if (pinned !== shape) {
+        complaints.push(
+          `${name}.${field} is now ${shape}, where the mapper prose reads it as ${pinned}`,
+        );
+      }
+    }
+    for (const field of Object.keys(mapped)) {
+      if (!actual.has(field)) {
+        complaints.push(
+          `${name} no longer has ${field}, which MAPPED_FIELDS still claims`,
+        );
+      }
+    }
+  }
+  if (complaints.length > 0) {
+    throw new Error(
+      `the hand-written protobuf mappers are out of step with the schema: ${complaints.join("; ")} — ` +
+        "map the field in ProtoMessageMapper/ProtoEventMapper and update MAPPED_FIELDS",
+    );
   }
 }
 
@@ -350,6 +709,14 @@ export function emitDotnet(
           field.type.kind === "ref" &&
           defs.get(field.type.name)?.kind === "union"
         ) {
+          if (!FLATTENED_UNION_FIELDS.has(`${definition.name}.${field.name}`)) {
+            throw new Error(
+              `${definition.name}.${field.name} is a union the wire flattens, and this ` +
+                "emitter has no bespoke encode/decode for it — write one (see BuildOutcome) " +
+                "and add the field to FLATTENED_UNION_FIELDS, or the field would silently " +
+                "vanish from the .NET protobuf mappers",
+            );
+          }
           return [];
         }
         const kind = classify(defs, definition.name, field);
@@ -515,8 +882,11 @@ internal static class ProtoEventMapper
         {
 ${encodeCases}
             default:
-                throw new NotSupportedException(
-                    $"Event type '{evt.Type}' is not representable in the AG-UI protobuf wire format by this SDK.");
+                // An event model outside the schema-derived set: named the same
+                // way the JSON writer names one, never encoded as something else.
+                throw new AGUIUnknownEventTypeException(
+                    $"Event type '{evt.Type}' is not representable in the AG-UI protobuf wire format by this SDK.",
+                    evt.Type);
         }
     }
 
@@ -526,8 +896,11 @@ ${encodeCases}
         {
 ${decodeCases}
             default:
-                throw new NotSupportedException(
-                    "The protobuf message does not contain a supported AG-UI event variant.");
+                // Either an empty envelope or a variant this build was not
+                // compiled against; the framed reader skips it, a caller
+                // decoding a single event sees it.
+                throw new AGUIUnknownEventTypeException(
+                    "The protobuf envelope carries no AG-UI event variant this SDK recognises.");
         }
     }
 
@@ -994,9 +1367,21 @@ ${envelopeTags.map((tag) => `        known[${tag}] = true;`).join("\n")}
         return known;
     }
 
-    public static void AssertWellFormedEnvelope(ReadOnlySpan<byte> data)
+    /// <summary>
+    /// Rejects an envelope whose malformed shape would decode differently across runtimes,
+    /// and reports whether what it carries could be an event newer than this build.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> only when the envelope names no event this build knows and
+    /// carries at least one unknown length-delimited field — the shape every event arm of
+    /// the envelope has, and so the only shape a newer runtime's event can arrive in.
+    /// Anything else that leaves the decoder without an event is broken bytes rather than
+    /// a variant from the future, and the two are answered differently.
+    /// </returns>
+    public static bool AssertWellFormedEnvelope(ReadOnlySpan<byte> data)
     {
         int knownTags = 0;
+        int unknownEventArms = 0;
         int offset = 0;
         int groupDepth = 0;
 
@@ -1013,6 +1398,14 @@ ${envelopeTags.map((tag) => `        known[${tag}] = true;`).join("\n")}
 
             if (wireType == 3)
             {
+                // A group carrying a known event's field number still names that
+                // event, and counting it keeps a decoder that finds no readable
+                // event from mistaking these bytes for an event from the future.
+                if (groupDepth == 0 && field < (uint)KnownEnvelopeTags.Length && KnownEnvelopeTags[(int)field])
+                {
+                    knownTags += 1;
+                }
+
                 groupDepth += 1;
                 continue;
             }
@@ -1061,6 +1454,14 @@ ${envelopeTags.map((tag) => `        known[${tag}] = true;`).join("\n")}
                         throw new InvalidDataException("Invalid event: truncated payload.");
                     }
 
+                    if (groupDepth == 0
+                        && (field >= (uint)KnownEnvelopeTags.Length || !KnownEnvelopeTags[(int)field]))
+                    {
+                        // A length-delimited field this build does not know is
+                        // the shape a newer runtime's event arrives in.
+                        unknownEventArms += 1;
+                    }
+
                     if (groupDepth == 0)
                     {
                         // Events that can carry a nested oneof get their
@@ -1093,6 +1494,8 @@ ${envelopeScanCases}
         {
             throw new InvalidDataException("Invalid event: unbalanced group.");
         }
+
+        return knownTags == 0 && unknownEventArms > 0;
     }
 
     // The nested scans, one message level each, generated from the shared
@@ -1194,11 +1597,7 @@ internal static class ProtoMessageMapper
                 {
                     foreach (var part in parts)
                     {
-                        var protoPart = ToProtoContentPart(part);
-                        if (protoPart is not null)
-                        {
-                            proto.ContentParts.Add(protoPart);
-                        }
+                        proto.ContentParts.Add(ToProtoContentPart(part));
                     }
                 }
                 else if (user.Content.Value is string text)
@@ -1494,9 +1893,9 @@ internal static class ProtoMessageMapper
             }
         }
 
-        if (input.ForwardedProperties.ValueKind != JsonValueKind.Undefined)
+        if (input.ForwardedProperties is not null)
         {
-            proto.ForwardedProps = ProtoValueConverter.ToValue(input.ForwardedProperties);
+            proto.ForwardedProps = ProtoValueConverter.ToValue(input.ForwardedProperties.Value);
         }
 
         if (input.Resume is not null)
@@ -1518,9 +1917,7 @@ internal static class ProtoMessageMapper
             RunId = proto.RunId,
             ParentRunId = proto.HasParentRunId ? proto.ParentRunId : null,
             State = ProtoValueConverter.ToJsonElementOrNull(proto.State),
-            ForwardedProperties = proto.ForwardedProps is null
-                ? default
-                : ProtoValueConverter.ToJsonElement(proto.ForwardedProps),
+            ForwardedProperties = ProtoValueConverter.ToJsonElementOrNull(proto.ForwardedProps),
         };
 
         foreach (var message in proto.Messages)
@@ -1562,13 +1959,13 @@ internal static class ProtoMessageMapper
         var proto = new Proto.Tool
         {
             Name = tool.Name,
-            Description = tool.Description ?? string.Empty,
+            Description = tool.Description,
             Metadata = ProtoValueConverter.ToStructOrNull(tool.Metadata),
         };
 
-        if (tool.Parameters.ValueKind != JsonValueKind.Undefined)
+        if (tool.Parameters is not null)
         {
-            proto.Parameters = ProtoValueConverter.ToValue(tool.Parameters);
+            proto.Parameters = ProtoValueConverter.ToValue(tool.Parameters.Value);
         }
 
         return proto;
@@ -1580,9 +1977,7 @@ internal static class ProtoMessageMapper
         {
             Name = proto.Name,
             Description = proto.Description,
-            Parameters = proto.Parameters is null
-                ? default
-                : ProtoValueConverter.ToJsonElement(proto.Parameters),
+            Parameters = ProtoValueConverter.ToJsonElementOrNull(proto.Parameters),
             Metadata = ProtoValueConverter.StructToJsonElementOrNull(proto.Metadata),
         };
     }
@@ -1755,7 +2150,7 @@ internal static class ProtoMessageMapper
         writer.WriteEndObject();
     }
 
-    private static Proto.InputContent? ToProtoContentPart(AGUIInputContent part)
+    private static Proto.InputContent ToProtoContentPart(AGUIInputContent part)
     {
         switch (part)
         {
@@ -1800,27 +2195,11 @@ internal static class ProtoMessageMapper
                         Metadata = ProtoValueConverter.ToValueOrNull(document.Metadata),
                     },
                 };
-            case AGUIBinaryInputContent binary:
-            {
-                // Legacy compatibility, predating the schema: the retired
-                // "binary" part rides as a document part with marker metadata.
-                var source = ToProtoBinarySource(binary);
-                if (source is null)
-                {
-                    return null;
-                }
-
-                return new Proto.InputContent
-                {
-                    Document = new Proto.DocumentInputPart
-                    {
-                        Source = source,
-                        Metadata = BuildBinaryMetadata(binary),
-                    },
-                };
-            }
             default:
-                return null;
+                // A part the wire has no arm for: dropping it would delete what
+                // the message says, which the TypeScript translation refuses too.
+                throw new NotSupportedException(
+                    $"Input content part '{part.Type}' is not representable in the AG-UI protobuf wire format by this SDK.");
         }
     }
 
@@ -1922,54 +2301,6 @@ internal static class ProtoMessageMapper
         }
     }
 
-    private static Proto.InputContentSource? ToProtoBinarySource(AGUIBinaryInputContent binary)
-    {
-        if (binary.Data is not null)
-        {
-            return new Proto.InputContentSource
-            {
-                Data = new Proto.InputContentDataSource { Value = binary.Data, MimeType = binary.MimeType },
-            };
-        }
-
-        if (binary.Url is not null)
-        {
-            return new Proto.InputContentSource
-            {
-                Url = new Proto.InputContentUrlSource { Value = binary.Url, MimeType = binary.MimeType },
-            };
-        }
-
-        if (binary.Id is not null)
-        {
-            return new Proto.InputContentSource
-            {
-                Url = new Proto.InputContentUrlSource { Value = binary.Id, MimeType = binary.MimeType },
-            };
-        }
-
-        return null;
-    }
-
-    private static Value BuildBinaryMetadata(AGUIBinaryInputContent binary)
-    {
-        // A field with no value is omitted rather than written as an explicit
-        // null, the same rule the serializer context applies on the JSON side.
-        var metadata = new Struct();
-        metadata.Fields["legacyBinary"] = new Value { BoolValue = true };
-        if (binary.Filename is not null)
-        {
-            metadata.Fields["filename"] = new Value { StringValue = binary.Filename };
-        }
-
-        if (binary.Id is not null)
-        {
-            metadata.Fields["id"] = new Value { StringValue = binary.Id };
-        }
-
-        return new Value { StructValue = metadata };
-    }
-
     private static Proto.JsonPatchOperationType ParseOperationType(string? op)
     {
         switch (op)
@@ -2024,6 +2355,8 @@ ${(defs.get("JsonPatchOperation") as { members: string[] }).members
     }
 }
 `;
+
+  assertMappedFieldsMatchTheSchema(defs, model.mixinShapes);
 
   return [
     { name: "ProtoEventMapper.g.cs", content: eventMapper },

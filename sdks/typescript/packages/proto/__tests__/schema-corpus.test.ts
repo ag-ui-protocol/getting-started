@@ -156,8 +156,7 @@ describe("byte fixtures", () => {
 describe(".NET byte fixtures", () => {
   // The other direction of the cross-runtime proof: bytes the .NET runtime
   // committed (AGUI_WRITE_PROTO_BYTE_FIXTURES=1 over the same corpus) must
-  // decode here to the same materialised event. The .NET side skips the
-  // subagent events until #2350 gives them models.
+  // decode here to the same materialised event.
   const DOTNET_BYTES_DIR = join(
     REPO_ROOT,
     "sdks",

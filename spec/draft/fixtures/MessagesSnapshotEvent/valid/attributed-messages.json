@@ -6,6 +6,12 @@
       "role": "assistant",
       "content": "hi",
       "subagentRunId": "s1"
+    },
+    {
+      "id": "2",
+      "role": "user",
+      "content": "and you?",
+      "subagentRunId": "s1"
     }
   ]
 }

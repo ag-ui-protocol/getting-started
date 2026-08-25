@@ -56,9 +56,21 @@ internal static class WireGuards
         return known;
     }
 
-    public static void AssertWellFormedEnvelope(ReadOnlySpan<byte> data)
+    /// <summary>
+    /// Rejects an envelope whose malformed shape would decode differently across runtimes,
+    /// and reports whether what it carries could be an event newer than this build.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> only when the envelope names no event this build knows and
+    /// carries at least one unknown length-delimited field — the shape every event arm of
+    /// the envelope has, and so the only shape a newer runtime's event can arrive in.
+    /// Anything else that leaves the decoder without an event is broken bytes rather than
+    /// a variant from the future, and the two are answered differently.
+    /// </returns>
+    public static bool AssertWellFormedEnvelope(ReadOnlySpan<byte> data)
     {
         int knownTags = 0;
+        int unknownEventArms = 0;
         int offset = 0;
         int groupDepth = 0;
 
@@ -75,6 +87,14 @@ internal static class WireGuards
 
             if (wireType == 3)
             {
+                // A group carrying a known event's field number still names that
+                // event, and counting it keeps a decoder that finds no readable
+                // event from mistaking these bytes for an event from the future.
+                if (groupDepth == 0 && field < (uint)KnownEnvelopeTags.Length && KnownEnvelopeTags[(int)field])
+                {
+                    knownTags += 1;
+                }
+
                 groupDepth += 1;
                 continue;
             }
@@ -121,6 +141,14 @@ internal static class WireGuards
                     if (offset + (long)length > data.Length)
                     {
                         throw new InvalidDataException("Invalid event: truncated payload.");
+                    }
+
+                    if (groupDepth == 0
+                        && (field >= (uint)KnownEnvelopeTags.Length || !KnownEnvelopeTags[(int)field]))
+                    {
+                        // A length-delimited field this build does not know is
+                        // the shape a newer runtime's event arrives in.
+                        unknownEventArms += 1;
                     }
 
                     if (groupDepth == 0)
@@ -247,6 +275,8 @@ internal static class WireGuards
         {
             throw new InvalidDataException("Invalid event: unbalanced group.");
         }
+
+        return knownTags == 0 && unknownEventArms > 0;
     }
 
     // The nested scans, one message level each, generated from the shared

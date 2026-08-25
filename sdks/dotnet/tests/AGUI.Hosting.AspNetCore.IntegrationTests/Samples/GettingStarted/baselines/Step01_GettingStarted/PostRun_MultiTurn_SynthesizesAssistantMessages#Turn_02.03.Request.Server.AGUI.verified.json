@@ -3,6 +3,7 @@
   "runId": "run_Id_2",
   "messages": [
     {
+      "id": "",
       "role": "user",
       "content": "Hello"
     },
@@ -12,6 +13,7 @@
       "id": "chatcmpl-Id_1"
     },
     {
+      "id": "",
       "role": "user",
       "content": "How are you?"
     }

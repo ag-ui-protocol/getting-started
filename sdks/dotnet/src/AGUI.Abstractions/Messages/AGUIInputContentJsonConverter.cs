@@ -39,8 +39,6 @@ public sealed class AGUIInputContentJsonConverter : JsonConverter<AGUIInputConte
                 options.GetTypeInfo(typeof(AGUIVideoInputContent))) as AGUIVideoInputContent,
             AGUIInputContentTypes.Document => jsonElement.Deserialize(
                 options.GetTypeInfo(typeof(AGUIDocumentInputContent))) as AGUIDocumentInputContent,
-            AGUIInputContentTypes.Binary => jsonElement.Deserialize(
-                options.GetTypeInfo(typeof(AGUIBinaryInputContent))) as AGUIBinaryInputContent,
             _ => throw new JsonException($"Unknown AGUIInputContent type discriminator: '{discriminator}'")
         };
 
@@ -69,9 +67,6 @@ public sealed class AGUIInputContentJsonConverter : JsonConverter<AGUIInputConte
                 break;
             case AGUIDocumentInputContent document:
                 JsonSerializer.Serialize(writer, document, options.GetTypeInfo(typeof(AGUIDocumentInputContent)));
-                break;
-            case AGUIBinaryInputContent binary:
-                JsonSerializer.Serialize(writer, binary, options.GetTypeInfo(typeof(AGUIBinaryInputContent)));
                 break;
             default:
                 throw new JsonException($"Unknown AGUIInputContent type: {value.GetType().Name}");

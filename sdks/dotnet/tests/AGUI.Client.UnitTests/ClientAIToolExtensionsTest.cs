@@ -32,8 +32,8 @@ public sealed class ClientAIToolExtensionsTest
         Assert.Single(aguiTools);
         Assert.Equal("get_weather", aguiTools[0].Name);
         // Parameters should be a valid JSON schema element
-        Assert.NotEqual(default, aguiTools[0].Parameters);
-        Assert.Equal(JsonValueKind.Object, aguiTools[0].Parameters.ValueKind);
+        Assert.NotNull(aguiTools[0].Parameters);
+        Assert.Equal(JsonValueKind.Object, aguiTools[0].Parameters!.Value.ValueKind);
     }
 
     [Fact]

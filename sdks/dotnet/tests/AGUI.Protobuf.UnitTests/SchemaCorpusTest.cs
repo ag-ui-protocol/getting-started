@@ -133,11 +133,7 @@ public sealed class SchemaCorpusTest
         // Since TypeScript moved onto the generated validators (which treat a
         // schema default as documentation, not behaviour), its bytes carry no
         // materialised defaults — the only remaining normalisation is the
-        // wire's absent-vs-empty blindness on the input arrays. Nested
-        // subagentRunId now rides the TS bytes (Message.10 / Interrupt.8);
-        // this runtime ignores those slots until #2350 gives the models a
-        // property, and the fixture-parsed expectation lacks them the same
-        // way, so the comparison stays symmetric.
+        // wire's absent-vs-empty blindness on the input arrays.
         var expected = ParseFixture(path);
         MaterialiseWireArrays(expected);
 

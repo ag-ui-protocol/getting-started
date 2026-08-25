@@ -7,7 +7,8 @@
           "$type": "text",
           "text": "Hello, tell me about serialization"
         }
-      ]
+      ],
+      "messageId": ""
     },
     {
       "role": "assistant",
@@ -25,7 +26,8 @@
           "$type": "text",
           "text": "Tell me more about event compaction"
         }
-      ]
+      ],
+      "messageId": ""
     }
   ]
 }

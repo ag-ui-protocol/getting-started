@@ -21,6 +21,15 @@ public sealed class BaseEventJsonConverter : JsonConverter<BaseEvent>
             throw new JsonException("Missing required property 'type' for BaseEvent deserialization");
         }
 
+        // A required discriminator that is not a string is malformed input, not an
+        // event from the future: it must not reach the unknown-type path, which
+        // stream readers are allowed to skip.
+        if (discriminatorElement.ValueKind != JsonValueKind.String)
+        {
+            throw new JsonException(
+                $"Property 'type' for BaseEvent deserialization must be a string, not {discriminatorElement.ValueKind}");
+        }
+
         string? discriminator = discriminatorElement.GetString();
 
         BaseEvent? result = discriminator switch
@@ -56,7 +65,10 @@ public sealed class BaseEventJsonConverter : JsonConverter<BaseEvent>
             AGUIEventTypes.SubagentStarted => jsonElement.Deserialize(options.GetTypeInfo(typeof(SubagentStartedEvent))) as SubagentStartedEvent,
             AGUIEventTypes.SubagentFinished => jsonElement.Deserialize(options.GetTypeInfo(typeof(SubagentFinishedEvent))) as SubagentFinishedEvent,
             AGUIEventTypes.SubagentError => jsonElement.Deserialize(options.GetTypeInfo(typeof(SubagentErrorEvent))) as SubagentErrorEvent,
-            _ => throw new JsonException($"Unknown BaseEvent type discriminator: '{discriminator}'")
+            // A type this build has no model for: the stream reader skips it, a
+            // caller decoding a single event sees it.
+            _ => throw new AGUIUnknownEventTypeException(
+                $"Unknown BaseEvent type discriminator: '{discriminator}'", discriminator)
         };
 
         if (result == null)
@@ -165,7 +177,10 @@ public sealed class BaseEventJsonConverter : JsonConverter<BaseEvent>
                 JsonSerializer.Serialize(writer, subagentError, options.GetTypeInfo(typeof(SubagentErrorEvent)));
                 break;
             default:
-                throw new InvalidOperationException($"Unknown event type: {value.GetType().Name}");
+                // A model this converter has no case for: as on the read side,
+                // an event nothing recognises is named rather than guessed at.
+                throw new AGUIUnknownEventTypeException(
+                    $"Unknown event type: {value.GetType().Name}", value.Type);
         }
     }
 }

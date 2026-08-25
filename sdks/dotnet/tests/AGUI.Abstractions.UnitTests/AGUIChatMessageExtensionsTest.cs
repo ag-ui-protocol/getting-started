@@ -440,51 +440,6 @@ public sealed class AGUIChatMessageExtensionsTest
         Assert.Equal("tool-msg-1", chatMessage.MessageId);
     }
 
-    // https://github.com/microsoft/agent-framework/issues/3729
-    [Fact]
-    public void RunAgentInput_LegacyBinaryUserMessageContent_DeserializesAndMapsToChatContents()
-    {
-        var json = """
-            {
-              "threadId": "thread-1",
-              "runId": "run-1",
-              "messages": [
-                {
-                  "id": "m1",
-                  "role": "user",
-                  "content": [
-                    { "type": "text", "text": "What is in this image?" },
-                    {
-                      "type": "binary",
-                      "mimeType": "image/png",
-                      "filename": "pixel.png",
-                      "data": "AQIDBA=="
-                    }
-                  ]
-                }
-              ],
-              "context": []
-            }
-            """;
-
-        var input = JsonSerializer.Deserialize(json, AGUIJsonSerializerContext.Default.RunAgentInput);
-
-        Assert.NotNull(input);
-        var userMessage = Assert.IsType<AGUIUserMessage>(Assert.Single(input.Messages));
-        Assert.Equal(2, userMessage.Content.Count);
-        Assert.IsType<AGUITextInputContent>(userMessage.Content[0]);
-        var binaryContent = Assert.IsType<AGUIBinaryInputContent>(userMessage.Content[1]);
-        Assert.Equal("image/png", binaryContent.MimeType);
-
-        var chatMessage = Assert.Single(input.Messages.AsChatMessages().ToList());
-        Assert.Equal(ChatRole.User, chatMessage.Role);
-        Assert.IsType<TextContent>(chatMessage.Contents[0]);
-        var dataContent = Assert.IsType<DataContent>(chatMessage.Contents[1]);
-        Assert.Equal("image/png", dataContent.MediaType);
-        Assert.Equal("pixel.png", dataContent.AdditionalProperties?["filename"]);
-        Assert.Equal(System.Convert.FromBase64String("AQIDBA=="), dataContent.Data.ToArray());
-    }
-
     // https://github.com/ag-ui-protocol/ag-ui/issues/2447
     [Fact]
     public void RunAgentInput_CanonicalMultimodalContent_DeserializesAndMapsInOrder()

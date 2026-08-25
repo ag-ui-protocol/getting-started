@@ -7,7 +7,8 @@
           "$type": "text",
           "text": "What are some fun things to do near me?"
         }
-      ]
+      ],
+      "messageId": ""
     }
   ],
   "options": {
