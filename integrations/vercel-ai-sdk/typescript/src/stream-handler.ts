@@ -12,8 +12,9 @@ import {
   type ToolCall,
   type ToolMessage,
 } from "@ag-ui/client";
+import { tokenUsageFromAiSdkUsage, type TokenUsage } from "@ag-ui/core";
 import type { Subscriber } from "rxjs";
-import type { TextStreamPart, ToolSet } from "ai";
+import type { LanguageModelUsage, TextStreamPart, ToolSet } from "ai";
 
 function getErrorMessage(value: unknown): string {
   if (value instanceof Error) return value.message;
@@ -45,6 +46,21 @@ function jsonStringifyToolArgs(value: unknown): string {
   } catch {
     return "{}";
   }
+}
+
+// AG-UI's usage mapper reads the flat AI SDK key names
+// (`inputTokens`/`outputTokens`/`totalTokens`/`reasoningTokens`/
+// `cachedInputTokens`). v7 keeps the first three flat but moved the cached-input
+// and reasoning counts into `inputTokenDetails`/`outputTokenDetails`, so lift
+// those two before mapping — otherwise the two counts users most want to see
+// (cache savings, reasoning spend) would silently read as "not reported".
+// Values are passed through untouched: the mapper drops anything non-finite.
+function flattenAiSdkUsage(usage: LanguageModelUsage | undefined): unknown {
+  if (!usage) return undefined;
+  const flat: Record<string, unknown> = { ...usage };
+  flat.cachedInputTokens ??= usage.inputTokenDetails?.cacheReadTokens;
+  flat.reasoningTokens ??= usage.outputTokenDetails?.reasoningTokens;
+  return flat;
 }
 
 interface ToolCallPart {
@@ -117,10 +133,17 @@ export class StreamHandler {
   private seenToolCalls = new Set<string>();
   private openToolCallIds = new Set<string>();
   private emittedToolResults = new Set<string>();
+  // Aggregate usage for the whole run, reported once by the terminal `finish`
+  // part. Held until RUN_FINISHED, which is where AG-UI carries it.
+  private totalUsage?: LanguageModelUsage;
 
   constructor(
     private readonly input: RunAgentInput,
     private readonly subscriber: Subscriber<BaseEvent>,
+    // Labels for the usage entry. The stream never names the model, so the
+    // agent supplies what it was configured with; optional because a caller
+    // that doesn't know (or care) still gets the counts.
+    private readonly modelIdentity: { provider?: string; model?: string } = {},
   ) {
     this.finalMessages = [...input.messages];
     // Pre-seed: existing tool messages already account for prior tool calls.
@@ -160,10 +183,17 @@ export class StreamHandler {
       type: EventType.MESSAGES_SNAPSHOT,
       messages: this.finalMessages,
     });
+    // Omit `usage` when the provider reported no counts — an empty or
+    // labels-only entry would claim usage was measured when it wasn't.
+    const usageEntry: TokenUsage | undefined = tokenUsageFromAiSdkUsage(
+      flattenAiSdkUsage(this.totalUsage),
+      this.modelIdentity,
+    );
     this.emit({
       type: EventType.RUN_FINISHED,
       threadId: this.input.threadId,
       runId: this.input.runId,
+      ...(usageEntry ? { usage: [usageEntry] } : {}),
     });
     this.complete();
   }
@@ -229,6 +259,9 @@ export class StreamHandler {
         return this.onStartStep();
       case "finish-step":
         return this.onFinishStep();
+      case "finish":
+        this.totalUsage = part.totalUsage;
+        return;
       case "abort":
         // RUN_ERROR + complete is terminal; mirrors the thrown-error path
         // and prevents the cleanup phase from emitting a misleading
@@ -248,11 +281,10 @@ export class StreamHandler {
         });
         this.complete();
         return;
-      // Skip: lifecycle parts handled at RUN_*/STEP_* boundaries (start,
-      // finish), plus structural content parts not mapped to AG-UI events
+      // Skip: the run-open lifecycle part (RUN_STARTED is emitted by
+      // process()), plus structural content parts not mapped to AG-UI events
       // (source citations, generated files, raw provider chunks).
       case "start":
-      case "finish":
       case "source":
       case "file":
       case "reasoning-file":

@@ -43,6 +43,21 @@ function contextToSystemMessages(context: RunAgentInput["context"]): ModelMessag
   ];
 }
 
+/**
+ * Provider/model labels for the token-usage entry on RUN_FINISHED. A
+ * `LanguageModel` is either a provider instance (which names both) or a bare
+ * model-id string routed through the gateway, where only the id is known.
+ *
+ * @internal
+ */
+export function resolveModelIdentity(model: LanguageModel): {
+  provider?: string;
+  model?: string;
+} {
+  if (typeof model === "string") return { model };
+  return { provider: model.provider, model: model.modelId };
+}
+
 export class VercelAISDKAgent extends AbstractAgent {
   model: LanguageModel;
   maxSteps: number;
@@ -108,7 +123,7 @@ export class VercelAISDKAgent extends AbstractAgent {
           : {}),
       });
 
-      const handler = new StreamHandler(input, subscriber);
+      const handler = new StreamHandler(input, subscriber, resolveModelIdentity(this.model));
       handler.process(result.fullStream).catch((err) => {
         if (!subscriber.closed) subscriber.error(err);
       });
