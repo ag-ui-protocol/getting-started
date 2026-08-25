@@ -116,7 +116,7 @@ If a provider returns the tool input in one shot (no per-token streaming), the i
 
 ## Multi-step Agentic Loops
 
-Set `maxSteps` to let the model call tools, observe the results, and decide whether to call again — all inside a single `runAgent` invocation:
+Set `maxSteps` to allow more than one model step inside a single `runAgent` invocation:
 
 ```ts
 import { VercelAISDKAgent } from "@ag-ui/vercel-ai-sdk";
@@ -135,6 +135,13 @@ import { stepCountIs } from "ai";
 // streamText({ ..., stopWhen: stepCountIs(maxSteps) })
 ```
 
+Whether a run actually takes a second step depends on the kind of tool call the model makes:
+
+- **Provider/server-executed tools** — a tool call the AI SDK can resolve inside the same stream (the provider runs the tool and emits a `tool-result` part) satisfies the continuation condition. The model observes that result and can call again or answer, all within one `runAgent` invocation, up to `maxSteps` steps.
+- **AG-UI client tools** — tools passed via `RunAgentInput.tools` are converted *without* an `execute` function by design; they are executed by the client, not by the agent. Such a call produces no in-stream result, so `streamText` stops after that step no matter how high `maxSteps` is. The run finishes with the pending `TOOL_CALL_*` events, the AG-UI client executes the tool and sends the result back as a `tool` message, and the model observes it on the **next** `runAgent` call. The agentic loop is real, but for client tools it spans successive runs rather than steps within one run.
+
+Only `RunAgentInput.tools` are forwarded to `streamText`, so in-run continuation is limited to tool results the provider produces server-side; raising `maxSteps` never advances past a client-side tool call.
+
 Each step gets its own `STEP_STARTED` and `STEP_FINISHED` event pair, and each step's assistant message gets its own UUID. Tool calls produced inside a step are linked back to that step's assistant message via `parentMessageId`, so a multi-step transcript reconstructs cleanly on the client.
 
 The default is `maxSteps: 1` (a single LLM call, no automatic continuation).
@@ -149,7 +156,7 @@ REASONING_MESSAGE_CONTENT  (deltas)
 REASONING_MESSAGE_END    / REASONING_END
 ```
 
-For Anthropic models, the encrypted reasoning signature (`providerMetadata.anthropic.signature`) is auto-forwarded as a `REASONING_ENCRYPTED_VALUE` event and stored on the reasoning message; on the next run the message converter folds it back into the assistant turn as a signed reasoning part, so tool-use continuations with extended thinking replay correctly:
+Reasoning **replay across runs is currently Anthropic-only**. For Anthropic models the encrypted thinking signature (`providerMetadata.anthropic.signature`) is auto-forwarded as a `REASONING_ENCRYPTED_VALUE` event and stored on the reasoning message as `encryptedValue`; on the next run the message converter folds it back into the assistant turn as `providerOptions.anthropic.signature`, so tool-use continuations with extended thinking replay correctly:
 
 ```ts
 import { VercelAISDKAgent } from "@ag-ui/vercel-ai-sdk";
@@ -159,6 +166,8 @@ const agent = new VercelAISDKAgent({
   model: anthropic("claude-sonnet-4-5"),
 });
 ```
+
+No other provider's reasoning state is persisted. Other reasoning models — OpenAI's included — still stream their reasoning as the AG-UI reasoning events above, but nothing provider-specific is stored for them, so their reasoning turns are **not** replayed on the following run; the model continues from the visible message history alone. See [Limitations & Future Work](#limitations--future-work).
 
 Reasoning messages enter `MESSAGES_SNAPSHOT` as their own message entries (role `"reasoning"`), not folded into the assistant message.
 
@@ -211,6 +220,7 @@ import {
 
 - `RunAgentInput.context` is forwarded to the model as a leading system message (`streamText` has no request-context channel). `RunAgentInput.state` and `forwardedProps` are not consumed — the integration is stateless between runs and emits no `STATE_SNAPSHOT`/`STATE_DELTA` events.
 - The `source`, `file`, `reasoning-file`, and `raw` AI SDK stream parts are not currently mapped to AG-UI events. They may be exposed as `CUSTOM` events in a future release.
+- Reasoning continuity across runs is Anthropic-only. The stream handler persists just the Anthropic thinking signature (`providerMetadata.anthropic.signature` -> `ReasoningMessage.encryptedValue`), and the message converter replays it only as `providerOptions.anthropic` on the next run's assistant message. OpenAI's Responses-API reasoning metadata (`itemId`, `reasoningEncryptedContent`) is neither captured nor replayed, so OpenAI reasoning and tool continuations start each run without the previous turn's reasoning state. Capturing those fields — and generalising `encryptedValue` into per-provider reasoning metadata — is future work.
 - The tool-approval lifecycle is surfaced as `CUSTOM` events: `tool-approval-request` → `name: "tool_approval_request"`, and `tool-approval-response` → `name: "tool_approval_response"` (carrying the `approved` flag and optional `reason`). Clients are responsible for their own approval UX.
 - Provider `custom` stream parts are passed through as `CUSTOM` events whose `name` is the part's namespaced `kind` (e.g. `"acme.telemetry"`), with the provider metadata as the event `value`.
 - This package only covers the backend direction (AI SDK `streamText` -> AG-UI events). The reverse direction (AG-UI backend -> AI SDK `useChat` frontend) is intentionally out of scope and would ship as a separate package.
