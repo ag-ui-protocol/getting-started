@@ -106,6 +106,9 @@ ProcessedEvents = Union[
 
 logger = logging.getLogger(__name__)
 
+#: Events that close a run. The protocol allows exactly one of them per run.
+_TERMINAL_EVENT_TYPES = frozenset({EventType.RUN_FINISHED, EventType.RUN_ERROR})
+
 ROOT_SUBGRAPH_NAME = "root"
 
 
@@ -210,6 +213,56 @@ class LangGraphAgent:
             yield event_str
 
     async def _handle_stream_events(self, input: RunAgentInput) -> AsyncGenerator[ProcessedEvents, None]:
+        """Report a failed run as ``RUN_ERROR`` before letting it propagate.
+
+        ``concepts/events.mdx``: "The ``RunStarted`` and either
+        ``RunFinished`` or ``RunError`` events are mandatory, forming the
+        boundaries of an agent run."
+
+        ``_stream_run_events`` emits ``RUN_ERROR`` for one case only: an
+        upstream ``error`` event out of ``astream_events``. Anything *raised*
+        inside the run -- a provider fault, a checkpointer failure,
+        ``GraphRecursionError`` from Pregel, a bug in user middleware -- used
+        to leave the generator without one, so the stream ended with no
+        terminal event at all. A client rendering from the event stream
+        cannot tell that apart from a completed run: ``verifyEvents`` rejects
+        illegal events that are *sent*, and a stream that ends sends nothing
+        to reject (#2300).
+
+        The exception is still re-raised afterwards. Callers that treat a
+        raised failure as a failure keep working unchanged, and the traceback
+        is not swallowed on the way out -- ``TestAgetStateMidStreamError``
+        pins exactly that. The consumer receives the terminal event first
+        because it was yielded first.
+
+        A run that already emitted a terminal event is not given a second
+        one: the ``@ag-ui/client`` state machine rejects the second (#1892).
+
+        ``CancelledError`` is a ``BaseException`` and never reaches here. A
+        caller that walked away is not owed an error event.
+        """
+        emitted_terminal = False
+        try:
+            async for event in self._stream_run_events(input):
+                emitted_terminal = emitted_terminal or event.type in _TERMINAL_EVENT_TYPES
+                yield event
+        except Exception as error:
+            logger.exception(
+                "Run %s on thread %s ended with an unhandled exception",
+                input.run_id,
+                input.thread_id,
+            )
+            if not emitted_terminal:
+                yield self._dispatch_event(
+                    RunErrorEvent(
+                        type=EventType.RUN_ERROR,
+                        message=str(error) or type(error).__name__,
+                        code=type(error).__name__,
+                    )
+                )
+            raise
+
+    async def _stream_run_events(self, input: RunAgentInput) -> AsyncGenerator[ProcessedEvents, None]:
         thread_id = input.thread_id or str(uuid.uuid4())
         INITIAL_ACTIVE_RUN: RunMetadata = {
             "id": input.run_id,
