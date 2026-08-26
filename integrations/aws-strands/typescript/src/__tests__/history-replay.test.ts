@@ -227,4 +227,71 @@ describe("replayHistoryIntoStrands", () => {
     expect(calls[0]!.args).toBe("hello");
     expect(calls[0]!.messages).toHaveLength(0);
   });
+  it("carries a client-reported tool failure onto the toolResult status", async () => {
+    // AG-UI models the failure as ToolMessage.error; Bedrock models it as
+    // toolResult.status. Hardcoding "success" tells the model a failed
+    // frontend tool succeeded. Python parity: agent.py's _build_strands_history
+    // (#2317).
+    const { stub, calls } = recordingAgent();
+    const agent = makeAgent(stub);
+    await collect(
+      agent,
+      minimalRunInput({
+        messages: [
+          { id: "u1", role: "user", content: "do something" },
+          {
+            id: "a1",
+            role: "assistant",
+            content: "",
+            toolCalls: [
+              {
+                id: "tc1",
+                type: "function",
+                function: { name: "render_chart", arguments: "{}" },
+              },
+            ],
+          },
+          {
+            id: "t1",
+            role: "tool",
+            content: "tool failed: invalid id",
+            toolCallId: "tc1",
+            error: "invalid id",
+          },
+        ],
+      }),
+    );
+    const history = calls[0]!.messages as Array<{ content: unknown[] }>;
+    const block = history[2]!.content[0] as { status: string };
+    expect(block.status).toBe("error");
+  });
+
+  it("keeps a successful tool result on the success status", async () => {
+    const { stub, calls } = recordingAgent();
+    const agent = makeAgent(stub);
+    await collect(
+      agent,
+      minimalRunInput({
+        messages: [
+          { id: "u1", role: "user", content: "do something" },
+          {
+            id: "a1",
+            role: "assistant",
+            content: "",
+            toolCalls: [
+              {
+                id: "tc1",
+                type: "function",
+                function: { name: "render_chart", arguments: "{}" },
+              },
+            ],
+          },
+          { id: "t1", role: "tool", content: "ok", toolCallId: "tc1" },
+        ],
+      }),
+    );
+    const history = calls[0]!.messages as Array<{ content: unknown[] }>;
+    const block = history[2]!.content[0] as { status: string };
+    expect(block.status).toBe("success");
+  });
 });

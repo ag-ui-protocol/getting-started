@@ -244,6 +244,104 @@ export const protobufFixtures: ProtobufFixture[] = [
       value: { items: [1, 2, 3], ok: true },
     } as unknown as BaseEvent,
   },
+
+  // Subagent support (PNI-196 / PNI-197). Both SDKs must agree on the same wire
+  // bytes for the three lifecycle events and for `subagentRunId` attribution;
+  // before this, the TS encoder produced ZERO bytes for the lifecycle events and
+  // silently dropped `subagentRunId` from everything else, so a stream that worked
+  // over JSON lost all delegation over the binary transport.
+  {
+    name: "SUBAGENT_STARTED (all fields)",
+    byteParity: "strict",
+    event: {
+      type: EventType.SUBAGENT_STARTED,
+      timestamp: 1_700_000_000_000,
+      subagentRunId: "sub-1",
+      name: "researcher",
+      description: "digs through sources",
+      parentSubagentRunId: "sub-outer",
+      parentToolCallId: "call-9",
+      parentMessageId: "msg-3",
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "SUBAGENT_STARTED (required fields only)",
+    byteParity: "strict",
+    event: {
+      type: EventType.SUBAGENT_STARTED,
+      subagentRunId: "sub-1",
+      name: "researcher",
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "SUBAGENT_FINISHED (bare)",
+    byteParity: "strict",
+    event: {
+      type: EventType.SUBAGENT_FINISHED,
+      subagentRunId: "sub-1",
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "SUBAGENT_FINISHED (with result object)",
+    byteParity: "roundtrip",
+    event: {
+      type: EventType.SUBAGENT_FINISHED,
+      subagentRunId: "sub-1",
+      result: { answer: 42, notes: ["a", "b"] },
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "SUBAGENT_ERROR (with code)",
+    byteParity: "strict",
+    event: {
+      type: EventType.SUBAGENT_ERROR,
+      subagentRunId: "sub-1",
+      message: "the subagent exploded",
+      code: "E_BOOM",
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "TEXT_MESSAGE_CONTENT (attributed to a subagent)",
+    byteParity: "strict",
+    event: {
+      type: EventType.TEXT_MESSAGE_CONTENT,
+      messageId: "msg-1",
+      delta: "from the subagent",
+      subagentRunId: "sub-1",
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "TOOL_CALL_START (attributed to a subagent)",
+    byteParity: "strict",
+    event: {
+      type: EventType.TOOL_CALL_START,
+      toolCallId: "tc-1",
+      toolCallName: "search",
+      parentMessageId: "msg-1",
+      subagentRunId: "sub-1",
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "STEP_STARTED (attributed to a subagent)",
+    byteParity: "strict",
+    event: {
+      type: EventType.STEP_STARTED,
+      stepName: "research",
+      subagentRunId: "sub-1",
+    } as unknown as BaseEvent,
+  },
+  {
+    name: "MESSAGES_SNAPSHOT (mixed parent and subagent messages)",
+    byteParity: "roundtrip",
+    event: {
+      type: EventType.MESSAGES_SNAPSHOT,
+      messages: [
+        { id: "p1", role: "assistant", content: "parent speaking" },
+        { id: "s1", role: "assistant", content: "subagent speaking", subagentRunId: "sub-1" },
+        { id: "s2", role: "tool", content: "done", toolCallId: "tc-1", subagentRunId: "sub-2" },
+      ],
+    } as unknown as BaseEvent,
+  },
   // ---------------------------------------------------------------------
   // Metadata (PNI-198).
   //

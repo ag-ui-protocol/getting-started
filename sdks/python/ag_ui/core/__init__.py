@@ -43,6 +43,12 @@ from ag_ui.core.events import (
     RunFinishedOutcome,
     RunFinishedSuccessOutcome,
     RunFinishedInterruptOutcome,
+    SubagentStartedEvent,
+    SubagentFinishedEvent,
+    SubagentFinishedOutcome,
+    SubagentFinishedSuccessOutcome,
+    SubagentFinishedSuspendedOutcome,
+    SubagentErrorEvent,
     TokenUsage,
     Event
 )
@@ -150,6 +156,12 @@ __all__ = [
     "RunFinishedSuccessOutcome",
     "TokenUsage",
     "RunFinishedInterruptOutcome",
+    "SubagentStartedEvent",
+    "SubagentFinishedEvent",
+    "SubagentFinishedOutcome",
+    "SubagentFinishedSuccessOutcome",
+    "SubagentFinishedSuspendedOutcome",
+    "SubagentErrorEvent",
     "Event",
     # Types
     "FunctionCall",

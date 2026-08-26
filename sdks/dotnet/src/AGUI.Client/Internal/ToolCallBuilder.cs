@@ -13,6 +13,12 @@ internal sealed class ToolCallBuilder
     private readonly Dictionary<string, ToolCallState> _activeToolCalls = new();
     private readonly HashSet<string> _pendingToolCallIds = new(StringComparer.Ordinal);
     private readonly List<ChatResponseUpdate> _buffer = new();
+
+    // callId -> the message id the TypeScript reducer mints for the assistant message
+    // carrying that call (parentMessageId ?? toolCallId). Kept for the whole run: a
+    // call-scoped REASONING_ENCRYPTED_VALUE can arrive after the call flushed, and its
+    // update must join the same coalesced message.
+    private readonly Dictionary<string, string> _mintedMessageIds = new(StringComparer.Ordinal);
     private string? _conversationId;
     private string? _responseId;
 
@@ -32,7 +38,15 @@ internal sealed class ToolCallBuilder
                 $"Cannot send 'TOOL_CALL_START' event: A tool call with ID '{evt.ToolCallId}' is already in progress. Complete it with 'TOOL_CALL_END' first.");
         }
 
-        _activeToolCalls[evt.ToolCallId] = new ToolCallState(evt.ToolCallName);
+        // string.IsNullOrEmpty, not ??: the TypeScript reducer's fallback is a
+        // TRUTHINESS check (`if (parentMessageId)`), so an empty-string parent —
+        // which this SDK's own server emits for unset optionals on some paths —
+        // mints the toolCallId there. Keeping "" here put an empty messageId on
+        // the update and split the coalesced message (caught by the hosting
+        // baseline snapshots).
+        var mintedParent = string.IsNullOrEmpty(evt.ParentMessageId) ? null : evt.ParentMessageId;
+        _activeToolCalls[evt.ToolCallId] = new ToolCallState(evt.ToolCallName, mintedParent);
+        _mintedMessageIds[evt.ToolCallId] = mintedParent ?? evt.ToolCallId;
     }
 
     public void AppendArgs(ToolCallArgsEvent evt)
@@ -66,10 +80,25 @@ internal sealed class ToolCallBuilder
         {
             ConversationId = _conversationId,
             ResponseId = _responseId,
+            // The id the TypeScript reducer mints for the assistant message carrying
+            // this call (parentMessageId ?? toolCallId). Required for more than
+            // parity: ToChatResponse merges an update's AdditionalProperties into the
+            // CURRENT MESSAGE only when the update carries a message identity — an
+            // id-less update's properties are hoisted onto the ChatResponse, so a
+            // delegation whose output is only tool activity lost its attribution on
+            // the way back out through AsAGUIMessages.
+            MessageId = state.ParentMessageId ?? evt.ToolCallId,
             CreatedAt = DateTimeOffset.UtcNow,
             RawRepresentation = evt
         });
     }
+
+    /// <summary>
+    /// The message id minted for the assistant message carrying <paramref name="toolCallId"/>,
+    /// or null when the call was never started in this run.
+    /// </summary>
+    public string? MintedMessageIdFor(string toolCallId) =>
+        _mintedMessageIds.TryGetValue(toolCallId, out var id) ? id : null;
 
     public IReadOnlyList<ChatResponseUpdate> AddResult(string toolCallId, ChatResponseUpdate resultUpdate)
     {
@@ -141,6 +170,11 @@ internal sealed class ToolCallBuilder
                 {
                     ConversationId = update.ConversationId,
                     ResponseId = update.ResponseId,
+                    // The buffered call update's message identity must survive the
+                    // replacement, or the coalescer hoists this update's attribution
+                    // onto the ChatResponse and the approval comes back parent-owned
+                    // (see EndToolCall).
+                    MessageId = update.MessageId,
                     CreatedAt = update.CreatedAt,
                     RawRepresentation = update.RawRepresentation
                 });
@@ -170,6 +204,10 @@ internal sealed class ToolCallBuilder
         _activeToolCalls.Clear();
         _pendingToolCallIds.Clear();
         _buffer.Clear();
+        // Minted identities are per run like everything else here: entity ids are
+        // run-global, so a later run reusing a call id must not coalesce its
+        // call-scoped encrypted values under the previous run's parent message.
+        _mintedMessageIds.Clear();
     }
 
     private static IDictionary<string, object?>? DeserializeArguments(string argsJson, JsonSerializerOptions options)
@@ -185,12 +223,15 @@ internal sealed class ToolCallBuilder
 
     private sealed class ToolCallState
     {
-        public ToolCallState(string name)
+        public ToolCallState(string name, string? parentMessageId)
         {
             Name = name;
+            ParentMessageId = parentMessageId;
         }
 
         public string Name { get; }
+
+        public string? ParentMessageId { get; }
 
         public StringBuilder Arguments { get; } = new();
     }

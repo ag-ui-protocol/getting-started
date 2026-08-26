@@ -4,8 +4,12 @@
 namespace agui {
 
 void SseParser::feed(const std::string& chunk) {
-    // Check buffer size limit to prevent memory exhaustion
-    if (m_buffer.size() + chunk.size() > kMaxBufferSize) {
+    // Check buffer size limit to prevent memory exhaustion.
+    // m_currentData is included because processBuffer() erases consumed bytes
+    // from m_buffer, so a single unterminated event delivered as many small
+    // chunks would otherwise keep m_buffer small while the per-event
+    // accumulator grew without bound.
+    if (m_buffer.size() + m_currentData.size() + chunk.size() > kMaxBufferSize) {
         throw SseBufferExceededError(
             "SSE buffer size exceeded maximum limit of " + 
             std::to_string(kMaxBufferSize / (1024 * 1024)) + " MB");

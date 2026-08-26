@@ -7,7 +7,7 @@
  * the client.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { ToolUseBlock } from "@strands-agents/sdk";
 import type { AgentStreamEvent } from "@strands-agents/sdk";
 import { EventType, type RunAgentInput } from "@ag-ui/core";
@@ -18,6 +18,24 @@ import {
   scriptedStrandsAgent,
   stream,
 } from "./helpers";
+
+/**
+ * Run with the adapter's error logging captured instead of printed.
+ *
+ * The forced-stop path logs `error(prefix, e)` by design; leaving it on stderr
+ * buries a real failure in expected noise.
+ */
+async function collectQuietly(
+  agent: ReturnType<typeof scriptedStrandsAgent>,
+  input?: RunAgentInput,
+) {
+  const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    return await collect(agent, input ?? minimalRunInput());
+  } finally {
+    spy.mockRestore();
+  }
+}
 
 function frontendToolInput(): RunAgentInput {
   return minimalRunInput({
@@ -103,39 +121,29 @@ describe("continueAfterFrontendCall", () => {
     // assistant message is produced. Our adapter should treat that as a
     // clean end-of-stream (not RUN_ERROR) as long as we've already
     // decided to halt because of a frontend tool call.
+    //
+    // The frontend tool call alone arms the halt, and nothing follows it: an
+    // `afterToolCallEvent` breaks the consume loop outright, so a throw
+    // scripted after one is never reached and the swallow is never driven.
+    // The window this test is about is the one in between, halt armed and the
+    // SDK raising before its after-call event arrives, which is exactly how a
+    // halted Strands cycle behaves.
     const block = new ToolUseBlock({
       name: "set_color",
       toolUseId: "fe-99",
       input: { color: "red" },
     });
-    const preEvents: AgentStreamEvent[] = [
-      block as unknown as AgentStreamEvent,
-      // afterToolCallEvent fires before the throw, flipping pendingHalt.
-      {
-        type: "afterToolCallEvent",
-        toolUse: {
-          toolUseId: "fe-99",
-          name: "set_color",
-          input: { color: "red" },
-        },
-        tool: undefined,
-        result: {
-          toolUseId: "fe-99",
-          status: "success",
-          content: [{ text: "Forwarded to client" }],
-        },
-      } as unknown as AgentStreamEvent,
-    ];
     const agent = scriptedStrandsAgent([], {
       stubOverrides: {
         stream: async function* () {
-          for (const e of preEvents) yield e;
+          yield block as unknown as AgentStreamEvent;
           throw new Error("Stream ended without completing a message");
         } as unknown as import("@strands-agents/sdk").Agent["stream"],
       },
     });
     const events = await collect(agent, frontendToolInput());
     const k = events.map((e) => e.type);
+    expect(k).toContain(EventType.TOOL_CALL_START);
     expect(k).toContain(EventType.TOOL_CALL_END);
     expect(k).not.toContain(EventType.RUN_ERROR);
     expect(k[k.length - 1]).toBe(EventType.RUN_FINISHED);
@@ -184,7 +192,9 @@ describe("continueAfterFrontendCall", () => {
     // Tightness check: the stream-end swallow added for frontend-halt
     // parity (agent.ts `if (pendingHalt || haltEventStream)`) must NOT
     // mask real model failures. Stream throws outside a halt context →
-    // RUN_ERROR must flow back to the client.
+    // RUN_ERROR must flow back to the client. A provider failure escaping
+    // the Strands stream is this bridge's forced stop, so it carries the
+    // code Python reports one under.
     const agent = scriptedStrandsAgent([], {
       stubOverrides: {
         stream: async function* () {
@@ -192,13 +202,13 @@ describe("continueAfterFrontendCall", () => {
         } as unknown as import("@strands-agents/sdk").Agent["stream"],
       },
     });
-    const events = await collect(agent);
+    const events = await collectQuietly(agent);
     const k = events.map((e) => e.type);
     const err = events.find(
       (e) => e.type === EventType.RUN_ERROR,
     ) as unknown as { code?: string; message?: string } | undefined;
     expect(err).toBeDefined();
-    expect(err?.code).toBe("STRANDS_ERROR");
+    expect(err?.code).toBe("STRANDS_FORCE_STOP");
     expect(err?.message).toContain("Bedrock upstream 500");
     // And no false RUN_FINISHED — the error is the terminator.
     expect(k[k.length - 1]).toBe(EventType.RUN_ERROR);
@@ -218,9 +228,11 @@ describe("continueAfterFrontendCall", () => {
       },
     });
     // No frontend tools advertised — adapter has no reason to halt.
-    const events = await collect(agent);
+    const events = await collectQuietly(agent);
     const err = events.find((e) => e.type === EventType.RUN_ERROR);
     expect(err).toBeDefined();
-    expect((err as unknown as { code?: string }).code).toBe("STRANDS_ERROR");
+    expect((err as unknown as { code?: string }).code).toBe(
+      "STRANDS_FORCE_STOP",
+    );
   });
 });
