@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from ag_ui.core.events import Event, EventType, ToolCallResultEvent
 
@@ -44,6 +44,60 @@ class TestToolCallResultError(unittest.TestCase):
         event = self._base(error="")
         self.assertEqual(event.error, "")
         self.assertEqual(json.loads(event.model_dump_json(by_alias=True))["error"], "")
+
+    def test_a_non_string_error_is_rejected(self):
+        # The narrowing half of the field's source comment, which nothing pinned: before
+        # `error` was declared, extra="allow" let an `error` of ANY shape ride through as an
+        # extra, and declaring it as Optional[str] is what makes a non-string fail
+        # validation. Widening the annotation back to Optional[Any] leaves every other test
+        # in this suite green, so this is the only assertion standing between the declared
+        # type and a silent return to "anything goes".
+        adapter = TypeAdapter(Event)
+        for value in (42, {"code": "SearchTimeout"}, ["SearchTimeout"], True):
+            with self.subTest(error=value):
+                with self.assertRaises(ValidationError) as caught:
+                    adapter.validate_python(
+                        {
+                            "type": "TOOL_CALL_RESULT",
+                            "messageId": "msg_1",
+                            "toolCallId": "tc_1",
+                            "content": "",
+                            "error": value,
+                        }
+                    )
+                self.assertEqual(
+                    ["string_type"], [detail["type"] for detail in caught.exception.errors()]
+                )
+
+    def test_an_explicit_null_error_validates_and_is_re_emitted_as_omission(self):
+        # The other half of the same comment. Unlike the TypeScript schema, which rejects an
+        # explicit null on every new optional field, this SDK accepts one and reads it back
+        # as None — as it does for every optional field here. What the contract guarantees is
+        # not that a null is refused but that none is ever WRITTEN, so the re-emitted payload
+        # has to carry no `error` key at all rather than `"error": null`.
+        event = TypeAdapter(Event).validate_python(
+            {
+                "type": "TOOL_CALL_RESULT",
+                "messageId": "msg_1",
+                "toolCallId": "tc_1",
+                "content": "ok",
+                "error": None,
+            }
+        )
+        self.assertIsInstance(event, ToolCallResultEvent)
+        self.assertIsNone(event.error)
+
+        encoded = event.model_dump_json(by_alias=True)
+        self.assertNotIn('"error"', encoded)
+        self.assertEqual(
+            {
+                "type": "TOOL_CALL_RESULT",
+                "messageId": "msg_1",
+                "toolCallId": "tc_1",
+                "content": "ok",
+            },
+            json.loads(encoded),
+        )
 
     def test_round_trips_through_json(self):
         event = self._base(content="", error="boom")

@@ -33,12 +33,21 @@ public sealed class NullOmissionFixtureTest
         return data;
     }
 
+    /// <summary>
+    /// The number of fixture cases this SDK is held to.
+    /// </summary>
+    /// <remarks>
+    /// Pinned exactly, not as a floor. A floor cannot notice a deletion: under the previous
+    /// <c>&gt; 15</c> bound, with 33 cases present, deleting a case outright left this suite —
+    /// and the TypeScript and Python ones — green. Bump this deliberately when adding or
+    /// removing a case.
+    /// </remarks>
+    private const int ExpectedCaseCount = 34;
+
     [Fact]
-    public void FixtureCoversThisSdk()
+    public void FixtureStillCarriesEveryCaseThisSdkIsHeldTo()
     {
-        Assert.True(
-            NullOmissionFixture.CaseNames.Count > 15,
-            $"the fixture only has {NullOmissionFixture.CaseNames.Count} case(s) for .NET");
+        Assert.Equal(ExpectedCaseCount, NullOmissionFixture.CaseNames.Count);
     }
 
     [Theory]

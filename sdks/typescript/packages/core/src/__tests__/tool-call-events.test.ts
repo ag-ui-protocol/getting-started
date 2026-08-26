@@ -122,12 +122,14 @@ describe("ToolCallResultEventSchema — optional `error`", () => {
 
   it("declares `error` in the schema's own shape, not as a tolerated unknown key", () => {
     // BaseEventSchema is `.passthrough()`, so an undeclared `error` still comes
-    // back out of `.parse()` as an unrecognized key — which means none of the
-    // parse-and-read assertions below can fail on their own if the field is
-    // deleted from the schema. The schema's `shape` is the one runtime fact
-    // that can: it is the TypeScript analogue of the Python suite's
-    // `model_fields` check, and it is a compile error as well as a failed
-    // expectation once `error` is gone.
+    // back out of `.parse()` as an unrecognized key — which means the
+    // parse-and-read assertions below mostly cannot fail on their own if the
+    // field is deleted from the schema. Deleting `error` fails exactly two
+    // tests in this block at runtime: this one, and "rejects an explicit null"
+    // further down. This is the direct one — the schema's `shape` is the
+    // TypeScript analogue of the Python suite's `model_fields` check, and it is
+    // a compile error as well as a failed expectation once `error` is gone. The
+    // other is incidental, and says so where it sits.
     expect(Object.keys(ToolCallResultEventSchema.shape)).toContain("error");
 
     const errorField = ToolCallResultEventSchema.shape.error;
@@ -176,9 +178,11 @@ describe("ToolCallResultEventSchema — optional `error`", () => {
     // every optional field, `subagent_run_id` and `role` included — so the
     // guarantee is that nothing writes null, not that every SDK refuses one.
     //
-    // This is also the one runtime case here that fails on its own if the field
-    // is deleted: passthrough lets an undeclared `null` through instead of
-    // throwing.
+    // This is the second of the two tests in this block that fail at runtime if
+    // the field is deleted — passthrough lets an undeclared `null` through
+    // instead of throwing — but it fails incidentally, as a side effect of what
+    // it is really about. The declaration itself is pinned deliberately by the
+    // `shape` assertion at the top.
     expect(() => ToolCallResultEventSchema.parse({ ...base, error: null })).toThrow();
   });
 

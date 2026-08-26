@@ -268,6 +268,25 @@
       }
     },
     {
+      "name": "tool_call_start_for_the_call_that_fails",
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
+      "note": "Opens tc_3, the tool call whose result two cases below carries an error. Without it that case names a call the stream never starts. Like the tc_1 opening above it leaves parentMessageId out; unlike tc_1 no TOOL_CALL_END follows, because the call timed out rather than finishing.",
+      "input": {
+        "type": "TOOL_CALL_START",
+        "toolCallId": "tc_3",
+        "toolCallName": "search"
+      },
+      "expected": {
+        "type": "TOOL_CALL_START",
+        "toolCallId": "tc_3",
+        "toolCallName": "search"
+      }
+    },
+    {
       "name": "tool_call_result_without_role",
       "producedBy": [
         "typescript",
