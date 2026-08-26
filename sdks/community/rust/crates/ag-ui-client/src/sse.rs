@@ -82,10 +82,18 @@ impl SseEventProcessor {
         stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + 'static,
     ) -> impl Stream<Item = Result<SseEvent, AgUiClientError>> {
         let mut buffer = String::new();
+        // Set when a frame breaks the cap. Every later chunk is discarded, because the parser gave
+        // up partway through a frame and no offset after that is a known boundary.
+        let mut terminated = false;
 
         // Process the stream
         stream
             .map(move |chunk_result| {
+                // Nothing after an overflow can be trusted to start on a frame boundary.
+                if terminated {
+                    return Vec::new();
+                }
+
                 // Map reqwest errors
                 let chunk = match chunk_result {
                     Ok(chunk) => chunk,
@@ -97,16 +105,27 @@ impl SseEventProcessor {
                     Ok(text) => {
                         buffer.push_str(&text);
 
-                        // Process complete events from the buffer
-                        let (mut events, new_buffer) = process_raw_sse_events(&buffer);
+                        // Process complete events from the buffer, refusing any frame over the
+                        // cap before it is parsed.
+                        let (mut events, new_buffer, overflowed) =
+                            process_raw_sse_events_capped(&buffer, SSE_MAX_BUFFER_BYTES);
 
-                        if new_buffer.len() > SSE_MAX_BUFFER_BYTES {
-                            // No frame delimiter has arrived within the cap; drop the
-                            // partial frame rather than let the buffer grow unbounded.
+                        if overflowed {
+                            /*
+                             * End the stream rather than carry on from an arbitrary offset.
+                             *
+                             * The parser was inside the frame that broke the cap, and the bytes
+                             * after the point it gave up are the tail of that frame, not a new
+                             * one. Clearing the buffer and continuing reads that tail as a frame
+                             * of its own, so a sender could place anything it liked after the cap
+                             * and have it dispatched as an event. There is no offset that is known
+                             * to be a frame boundary, so there is nothing safe to resume from.
+                             */
+                            terminated = true;
                             buffer = String::new();
                             events.push(Err(AgUiClientError::SseParse {
                                 message: format!(
-                                    "SSE buffer exceeded {SSE_MAX_BUFFER_BYTES} bytes without a complete event"
+                                    "SSE frame exceeded {SSE_MAX_BUFFER_BYTES} bytes; ending the stream"
                                 ),
                             }));
                         } else {
@@ -129,11 +148,34 @@ impl SseEventProcessor {
 /// Returns a tuple of (events, new_buffer) where:
 /// - events: A vector of parsed events or errors
 /// - new_buffer: The remaining buffer that might contain incomplete events
+/// Only the tests parse without a limit; the stream always applies one.
+#[cfg(test)]
 fn process_raw_sse_events(buffer: &str) -> (Vec<Result<SseEvent, AgUiClientError>>, String) {
+    let (events, rest, _) = process_raw_sse_events_capped(buffer, usize::MAX);
+    (events, rest)
+}
+
+/// As [`process_raw_sse_events`], with a per-frame size limit.
+///
+/// The limit is applied to each frame *before* it is parsed, and to the incomplete remainder
+/// afterwards. Checking only the remainder is not the same thing: by then a frame larger than the
+/// limit has already been parsed and handed to the caller, so the cap can be stepped over by
+/// terminating the oversized frame instead of leaving it open.
+///
+/// The third element of the return is whether the limit was hit. On that path the remainder is
+/// dropped, because the parser is somewhere inside a frame it refused and no later offset is known
+/// to be a frame boundary.
+fn process_raw_sse_events_capped(
+    buffer: &str,
+    max_frame_bytes: usize,
+) -> (Vec<Result<SseEvent, AgUiClientError>>, String, bool) {
     let mut results = Vec::new();
     let mut rest = buffer;
 
     while let Some((frame_end, delimiter_len)) = find_frame_end(rest) {
+        if frame_end > max_frame_bytes {
+            return (results, String::new(), true);
+        }
         let frame = &rest[..frame_end];
         if !frame.is_empty() {
             results.push(parse_sse_event(frame));
@@ -141,8 +183,13 @@ fn process_raw_sse_events(buffer: &str) -> (Vec<Result<SseEvent, AgUiClientError
         rest = &rest[frame_end + delimiter_len..];
     }
 
-    // Whatever follows the last delimiter is an incomplete frame; keep buffering it.
-    (results, rest.to_string())
+    // Whatever follows the last delimiter is an incomplete frame; keep buffering it, unless it has
+    // already outgrown what any single frame is allowed to be.
+    if rest.len() > max_frame_bytes {
+        return (results, String::new(), true);
+    }
+
+    (results, rest.to_string(), false)
 }
 
 /// Length of the line terminator at `index`, if one starts there.
@@ -311,6 +358,64 @@ mod tests {
                 .iter()
                 .any(|r| matches!(r, Err(AgUiClientError::SseParse { .. }))),
             "expected an SseParse error once the buffer exceeded the cap"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_frame_larger_than_the_cap_is_refused_not_emitted() {
+        // The cap has to be decided before a frame is parsed. Checked afterwards, against only
+        // what is left over, a frame that is itself over the cap has already been emitted.
+        let oversized = "x".repeat(SSE_MAX_BUFFER_BYTES + 1);
+        let chunks: Vec<Result<Bytes, reqwest::Error>> =
+            vec![Ok(Bytes::from(format!("data: {oversized}\n\n")))];
+
+        let results: Vec<_> = SseEventProcessor::new(futures::stream::iter(chunks))
+            .collect::<Vec<_>>()
+            .await;
+
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Err(AgUiClientError::SseParse { .. }))),
+            "expected an SseParse error for a frame over the cap"
+        );
+        assert!(
+            !results.iter().any(|r| r.is_ok()),
+            "an over-cap frame must not be emitted as an event"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stream_ends_after_an_overflow_rather_than_resynchronizing() {
+        // Clearing the buffer on overflow forgets that the parser was inside a rejected frame, so
+        // the tail of that frame reads as a new one. Both the forged tail and the frame after it
+        // were emitted. Overflow now ends the stream.
+        let oversized = "y".repeat(SSE_MAX_BUFFER_BYTES + 1);
+        let chunks: Vec<Result<Bytes, reqwest::Error>> = vec![
+            Ok(Bytes::from(oversized)),
+            Ok(Bytes::from(
+                "data: forged tail\n\ndata: legitimate\n\n".to_string(),
+            )),
+        ];
+
+        let results: Vec<_> = SseEventProcessor::new(futures::stream::iter(chunks))
+            .collect::<Vec<_>>()
+            .await;
+
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Err(AgUiClientError::SseParse { .. }))),
+            "expected an SseParse error once the cap was exceeded"
+        );
+        let emitted: Vec<&str> = results
+            .iter()
+            .filter_map(|r| r.as_ref().ok())
+            .map(|e| e.data.as_str())
+            .collect();
+        assert!(
+            emitted.is_empty(),
+            "nothing may be emitted after an overflow, got {emitted:?}"
         );
     }
 
