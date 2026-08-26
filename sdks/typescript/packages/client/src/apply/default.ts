@@ -609,6 +609,28 @@ export const defaultApplyEvents = (
             const { messageId, toolCallId, content, role, error, subagentRunId } =
               event as ToolCallResultEvent;
 
+            // Narrow `error` on its type, not on nullishness. The cast above is
+            // an assertion, not validation — events reaching here have not
+            // necessarily been through `EventSchemas.parse` — so a producer can
+            // put any shape on the wire, and a serialized exception object is
+            // the natural thing a Python or LangChain producer emits. Nothing
+            // downstream re-validates: no production code parses
+            // `RunAgentInputSchema`, so a non-string that got past this point
+            // would simply reach every consumer of `agent.messages` as-is.
+            // `typeof === "string"` still keeps `""` — an empty string is a
+            // value the producer chose to send, not an absent one.
+            //
+            // Warn on the drop. Silently discarding it would leave a ToolMessage
+            // byte-identical to the one a successful call produces, so a
+            // reported failure would read back as a success with nothing in the
+            // logs to say otherwise.
+            if (error !== undefined && typeof error !== "string") {
+              console.warn(
+                `TOOL_CALL_RESULT: dropping non-string 'error' (${typeof error}) reported for ` +
+                  `tool call '${toolCallId}' — the failure will not reach 'agent.messages'`,
+              );
+            }
+
             const toolMessage: ToolMessage = {
               id: messageId,
               toolCallId,
@@ -617,13 +639,6 @@ export const defaultApplyEvents = (
               // Carry the event's `error` onto the message it accumulates into.
               // Without this the streamed message and the MESSAGES_SNAPSHOT
               // disagree about whether the call failed.
-              //
-              // Narrow on the type, not on nullishness: events reaching here have
-              // not necessarily been through `EventSchemas.parse`, so a producer
-              // sending e.g. `error: 42` would otherwise land a non-string on the
-              // message and only fail `RunAgentInputSchema` a full turn later.
-              // `typeof === "string"` still keeps `""` — an empty string is a
-              // value the producer chose to send, not an absent one.
               ...(typeof error === "string" && { error }),
               ...(subagentRunId != null && { subagentRunId }),
             };
