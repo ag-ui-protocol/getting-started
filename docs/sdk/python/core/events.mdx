@@ -348,22 +348,31 @@ class ToolCallResultEvent(BaseEvent):
 | `tool_call_id` | `str`                       | Matches the ID from the corresponding ToolCallStartEvent    |
 | `content`      | `str`                       | The actual result/output content from the tool execution    |
 | `role`         | `Optional[Literal["tool"]]` | Optional role identifier, typically "tool" for tool results |
-| `error`        | `Optional[str]`             | Failure detail; present only when the producer reports it   |
+| `error`        | `Optional[str]`             | Failure detail; a non-null string reports a failed call     |
 
-`error` is the event-side twin of `ToolMessage.error`. It lets a client render a
-failed tool call as it streams, instead of waiting for the `MESSAGES_SNAPSHOT`
+`error` is the event-side twin of `ToolMessage.error`. It lets a consumer render
+a failed tool call as it streams, instead of waiting for the `MESSAGES_SNAPSHOT`
 that carries the finished message.
 
-Failure is signalled by the presence of `error`, not by its truthiness: an empty
-string is a value the producer deliberately sent and the SDK preserves it, so
-`if event.error:` reads `""` as a success. Check `event.error is not None`
-instead. `content` and `error` are independent — a failed result conventionally
-leaves `content` empty and carries the detail in `error`, but the protocol does
-not require it, and a consumer must not infer failure from `content` alone.
-Absence does not yet prove success either: no producer populates `error` today,
-so an absent `error` covers both a call that succeeded and one that failed
-without reporting it. Treat a present `error` as a definite failure and an
-absent one as unreported.
+The call is reported as failed when `error` is a non-null string — `""` included,
+since a producer that sends it chose to, so `if event.error:` misreads a reported
+failure as a success. Test `event.error is not None`; validation constrains the
+field to `str` or `None`, so non-`None` already means a string. An explicit JSON
+`null` and an absent key both leave `event.error` as `None`, so the attribute
+cannot tell them apart — which is why the contract is stated on the value rather
+than on presence. `content` and `error` are independent — a failed result
+conventionally leaves `content` empty and carries the detail in `error`, but the
+protocol does not require it, and a consumer must not infer failure from
+`content` alone. An `error` of `None` reports nothing about failure, which is not
+the same as success.
+
+Declaring `error` narrows what the model accepts. `extra="allow"` used to let an
+`error` of any shape ride along as an extra field; a structured one now raises a
+`ValidationError`, which ends the run. (An explicit JSON null is the one value
+that still validates, to `None`.) A producer already sending a structured `error`
+must flatten it to a string.
+
+See [Events](/concepts/events#toolcallresult) for the language-neutral contract.
 
 ## State Management Events
 

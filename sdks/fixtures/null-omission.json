@@ -294,7 +294,7 @@
         "python",
         "dotnet"
       ],
-      "note": "The failure twin of the case above: when `error` IS set every SDK must carry it on the wire under that exact key. This case pins round-trip fidelity for a populated `error`, not null omission — the omission half is covered by the reflection-driven sweep each SDK runs over every optional field, and by the preceding case only insofar as it carries no `error` at all.",
+      "note": "The failure twin of the case above: when `error` IS set, every SDK listed here must carry it on the wire under that exact key, alongside the empty `content`. This case pins round-trip fidelity for a populated `error`, not null omission — Python and .NET cover the omission half with their own reflection sweeps over every optional field, TypeScript gets it from `JSON.stringify` dropping `undefined`, and the preceding case covers it here only insofar as it carries no `error` at all.",
       "input": {
         "type": "TOOL_CALL_RESULT",
         "messageId": "msg_7",
