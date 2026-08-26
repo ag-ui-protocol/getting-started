@@ -68,12 +68,39 @@ def stringify_if_needed(item: Any) -> str:
         return item
     return json.dumps(item)
 
+_AGUI_MEDIA_BY_MIME_PREFIX = (
+    ("image/", ImageInputContent, "image"),
+    ("audio/", AudioInputContent, "audio"),
+    ("video/", VideoInputContent, "video"),
+)
+
+
+def _agui_media_for_mime(mime_type: str):
+    """Pick the AG-UI content class and ``type`` literal for a mime type.
+
+    Anything that is not image/audio/video is a document. That default is the
+    point: a mime type this adapter has never heard of is still not a picture,
+    and calling it one is what makes a client try to decode it as one.
+    """
+    for prefix, content_class, type_literal in _AGUI_MEDIA_BY_MIME_PREFIX:
+        if mime_type.startswith(prefix):
+            return content_class, type_literal
+    return DocumentInputContent, "document"
+
+
 def convert_langchain_multimodal_to_agui(content: List[Dict[str, Any]]) -> List[Union[TextInputContent, ImageInputContent]]:
     """Convert LangChain's multimodal content to AG-UI format.
 
-    LangChain only supports ``text`` and ``image_url`` content blocks.
-    ``image_url`` blocks are converted to ``ImageInputContent`` with the
-    appropriate source type (data or URL).
+    LangChain only supports ``text`` and ``image_url`` content blocks, so
+    EVERYTHING media-shaped left for LangChain as ``image_url`` regardless of
+    what it actually was (see ``convert_agui_multimodal_to_langchain``). The
+    mime type carried in a data URL is therefore the only surviving record of
+    the original modality, and reading it is what keeps a PDF a PDF across the
+    round trip.
+
+    A ``data:`` URL is mapped back to the content class its mime type belongs
+    to. A bare ``https://`` URL announces no mime type, so there is nothing to
+    decide on and it stays an image — the case that has always worked.
     """
     agui_content: List[Union[TextInputContent, ImageInputContent]] = []
     for item in content:
@@ -95,8 +122,9 @@ def convert_langchain_multimodal_to_agui(content: List[Dict[str, Any]]) -> List[
                     data = parts[1] if len(parts) > 1 else ""
                     mime_type = header.split(":")[1].split(";")[0] if ":" in header else "image/png"
 
-                    agui_content.append(ImageInputContent(
-                        type="image",
+                    content_class, type_literal = _agui_media_for_mime(mime_type)
+                    agui_content.append(content_class(
+                        type=type_literal,
                         source=InputContentDataSource(
                             type="data",
                             value=data,
