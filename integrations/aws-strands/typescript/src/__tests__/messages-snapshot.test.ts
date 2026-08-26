@@ -252,6 +252,49 @@ describe("buildSnapshotMessages — standalone helper", () => {
     expect((out[0] as { id: string }).id.length).toBeGreaterThan(0);
   });
 
+  it("preserves error and encryptedValue on the tool echo", () => {
+    // This is an AG-UI -> AG-UI rebuild of the client's own message, so
+    // dropping its own fields loses the failure signal a MESSAGES_SNAPSHOT is
+    // supposed to make durable. Python parity: agent.py's
+    // _build_snapshot_messages (#2317).
+    const out = buildSnapshotMessages([
+      {
+        id: "t1",
+        role: "tool",
+        content: "tool failed: invalid id",
+        toolCallId: "tc1",
+        error: "invalid id",
+        encryptedValue: "enc",
+      } as never,
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toEqual({
+      id: "t1",
+      role: "tool",
+      content: "tool failed: invalid id",
+      toolCallId: "tc1",
+      error: "invalid id",
+      encryptedValue: "enc",
+    });
+  });
+
+  it("omits error and encryptedValue when the client did not set them", () => {
+    const out = buildSnapshotMessages([
+      {
+        id: "t1",
+        role: "tool",
+        content: "ok",
+        toolCallId: "tc1",
+      } as never,
+    ]);
+    expect(out[0]).toEqual({
+      id: "t1",
+      role: "tool",
+      content: "ok",
+      toolCallId: "tc1",
+    });
+  });
+
   it("drops developer / system / reasoning / activity roles", () => {
     const out = buildSnapshotMessages([
       { id: "s1", role: "system", content: "sys" } as never,

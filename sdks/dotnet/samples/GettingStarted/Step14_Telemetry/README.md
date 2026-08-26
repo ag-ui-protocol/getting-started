@@ -5,7 +5,7 @@ protocol changes — you compose standard middleware and subscribe to two activi
 
 - `Experimental.AGUI.Server` — the AG-UI **run** span (`agui.run`), one per run, tagged with
   `agui.thread_id`, `agui.run_id`, `agui.parent_run_id` (on a resume), `agui.run.outcome`
-  (`success` / `interrupt` / `error`), and `agui.events.count`.
+  (`success` / `interrupt` / `error` / `canceled`), and `agui.events.count`.
 - `Experimental.AGUI.Client` — `execute_tool` spans for client-side (frontend) tools that the
   `AGUIChatClient` invokes locally.
 - `Experimental.Microsoft.Extensions.AI` — the GenAI spans from `UseOpenTelemetry()`

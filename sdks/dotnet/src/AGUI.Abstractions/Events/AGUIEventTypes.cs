@@ -32,4 +32,7 @@ public static class AGUIEventTypes
     public const string Custom = "CUSTOM";
     public const string Raw = "RAW";
     public const string MessagesSnapshot = "MESSAGES_SNAPSHOT";
+    public const string SubagentStarted = "SUBAGENT_STARTED";
+    public const string SubagentFinished = "SUBAGENT_FINISHED";
+    public const string SubagentError = "SUBAGENT_ERROR";
 }

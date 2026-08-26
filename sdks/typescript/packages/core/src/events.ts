@@ -59,6 +59,9 @@ export enum EventType {
   REASONING_MESSAGE_CHUNK = "REASONING_MESSAGE_CHUNK",
   REASONING_END = "REASONING_END",
   REASONING_ENCRYPTED_VALUE = "REASONING_ENCRYPTED_VALUE",
+  SUBAGENT_STARTED = "SUBAGENT_STARTED",
+  SUBAGENT_FINISHED = "SUBAGENT_FINISHED",
+  SUBAGENT_ERROR = "SUBAGENT_ERROR",
 }
 
 export const BaseEventSchema = z
@@ -78,17 +81,20 @@ export const TextMessageStartEventSchema = BaseEventSchema.extend({
   messageId: z.string(),
   role: TextMessageRoleSchema.default("assistant"),
   name: z.string().optional(),
+  subagentRunId: z.string().optional(),
 });
 
 export const TextMessageContentEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.TEXT_MESSAGE_CONTENT),
   messageId: z.string(),
   delta: z.string(),
+  subagentRunId: z.string().optional(),
 });
 
 export const TextMessageEndEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.TEXT_MESSAGE_END),
   messageId: z.string(),
+  subagentRunId: z.string().optional(),
 });
 
 export const TextMessageChunkEventSchema = BaseEventSchema.extend({
@@ -97,6 +103,7 @@ export const TextMessageChunkEventSchema = BaseEventSchema.extend({
   role: TextMessageRoleSchema.optional(),
   delta: z.string().optional(),
   name: z.string().optional(),
+  subagentRunId: z.string().optional(),
 });
 
 /**
@@ -112,6 +119,11 @@ export const ThinkingTextMessageStartEventSchema = BaseEventSchema.extend({
 export const ThinkingTextMessageContentEventSchema = TextMessageContentEventSchema.omit({
   messageId: true,
   type: true,
+  // Not an attribution carrier: the deprecated THINKING_* family predates
+  // subagents and is excluded from the attribution table — Python and .NET
+  // declare no such field, and inheriting it here from the text schema made
+  // TypeScript silently accept what the other SDKs reject.
+  subagentRunId: true,
 }).extend({
   type: z.literal(EventType.THINKING_TEXT_MESSAGE_CONTENT),
 });
@@ -136,17 +148,20 @@ export const ToolCallStartEventSchema = BaseEventSchema.extend({
     .nullable()
     .optional()
     .transform((v) => v ?? undefined),
+  subagentRunId: z.string().optional(),
 });
 
 export const ToolCallArgsEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.TOOL_CALL_ARGS),
   toolCallId: z.string(),
   delta: z.string(),
+  subagentRunId: z.string().optional(),
 });
 
 export const ToolCallEndEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.TOOL_CALL_END),
   toolCallId: z.string(),
+  subagentRunId: z.string().optional(),
 });
 
 export const ToolCallResultEventSchema = BaseEventSchema.extend({
@@ -155,6 +170,7 @@ export const ToolCallResultEventSchema = BaseEventSchema.extend({
   toolCallId: z.string(),
   content: z.string(),
   role: z.literal("tool").optional(),
+  subagentRunId: z.string().optional(),
 });
 
 export const ToolCallChunkEventSchema = BaseEventSchema.extend({
@@ -168,6 +184,7 @@ export const ToolCallChunkEventSchema = BaseEventSchema.extend({
     .optional()
     .transform((v) => v ?? undefined),
   delta: z.string().optional(),
+  subagentRunId: z.string().optional(),
 });
 
 /**
@@ -188,11 +205,13 @@ export const ThinkingEndEventSchema = BaseEventSchema.extend({
 export const StateSnapshotEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.STATE_SNAPSHOT),
   snapshot: StateSchema,
+  subagentRunId: z.string().optional(),
 });
 
 export const StateDeltaEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.STATE_DELTA),
   delta: z.array(z.any()), // JSON Patch (RFC 6902)
+  subagentRunId: z.string().optional(),
 });
 
 export const MessagesSnapshotEventSchema = BaseEventSchema.extend({
@@ -206,6 +225,7 @@ export const ActivitySnapshotEventSchema = BaseEventSchema.extend({
   activityType: z.string(),
   content: z.record(z.any()),
   replace: z.boolean().optional().default(true),
+  subagentRunId: z.string().optional(),
 });
 
 export const ActivityDeltaEventSchema = BaseEventSchema.extend({
@@ -213,18 +233,21 @@ export const ActivityDeltaEventSchema = BaseEventSchema.extend({
   messageId: z.string(),
   activityType: z.string(),
   patch: z.array(z.any()),
+  subagentRunId: z.string().optional(),
 });
 
 export const RawEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.RAW),
   event: z.any(),
   source: z.string().optional(),
+  subagentRunId: z.string().optional(),
 });
 
 export const CustomEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.CUSTOM),
   name: z.string(),
   value: z.any(),
+  subagentRunId: z.string().optional(),
 });
 
 export const RunStartedEventSchema = BaseEventSchema.extend({
@@ -305,11 +328,13 @@ export const RunErrorEventSchema = BaseEventSchema.extend({
 export const StepStartedEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.STEP_STARTED),
   stepName: z.string(),
+  subagentRunId: z.string().optional(),
 });
 
 export const StepFinishedEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.STEP_FINISHED),
   stepName: z.string(),
+  subagentRunId: z.string().optional(),
 });
 
 // Schema for the encrypted signature subtype
@@ -321,34 +346,40 @@ export const ReasoningEncryptedValueSubtypeSchema = z.union([
 export const ReasoningStartEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.REASONING_START),
   messageId: z.string(),
+  subagentRunId: z.string().optional(),
 });
 
 export const ReasoningMessageStartEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.REASONING_MESSAGE_START),
   messageId: z.string(),
   role: z.literal("reasoning"),
+  subagentRunId: z.string().optional(),
 });
 
 export const ReasoningMessageContentEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.REASONING_MESSAGE_CONTENT),
   messageId: z.string(),
   delta: z.string(),
+  subagentRunId: z.string().optional(),
 });
 
 export const ReasoningMessageEndEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.REASONING_MESSAGE_END),
   messageId: z.string(),
+  subagentRunId: z.string().optional(),
 });
 
 export const ReasoningMessageChunkEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.REASONING_MESSAGE_CHUNK),
   messageId: z.string().optional(),
   delta: z.string().optional(),
+  subagentRunId: z.string().optional(),
 });
 
 export const ReasoningEndEventSchema = BaseEventSchema.extend({
   type: z.literal(EventType.REASONING_END),
   messageId: z.string(),
+  subagentRunId: z.string().optional(),
 });
 
 export const ReasoningEncryptedValueEventSchema = BaseEventSchema.extend({
@@ -356,6 +387,77 @@ export const ReasoningEncryptedValueEventSchema = BaseEventSchema.extend({
   subtype: ReasoningEncryptedValueSubtypeSchema,
   entityId: z.string(),
   encryptedValue: z.string(),
+  subagentRunId: z.string().optional(),
+});
+
+// No null tolerance anywhere on the subagent surface: these fields are new with
+// this PR, so no producer has ever legally written `null` for them — since
+// PNI-199 the Python and .NET SDKs omit valueless fields at the source, and the
+// three legacy tolerances (TOOL_CALL_START/CHUNK.parentMessageId,
+// RUN_FINISHED.outcome) stay a closed set awaiting their middleware shim
+// (PNI-207). Absent is the only spelling; an explicit null fails the parse,
+// exactly like `metadata`.
+
+export const SubagentStartedEventSchema = BaseEventSchema.extend({
+  type: z.literal(EventType.SUBAGENT_STARTED),
+  subagentRunId: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  parentSubagentRunId: z.string().optional(),
+  // Link back to the tool call (and the message that held it) that spawned this
+  // subagent, for the agents-as-tools pattern (e.g. deepagents `task`). Lets a
+  // consumer correlate the subagent to its spawning call without inspecting
+  // rawEvent.metadata.
+  parentToolCallId: z.string().optional(),
+  parentMessageId: z.string().optional(),
+});
+
+export const SubagentFinishedSuccessOutcomeSchema = z
+  .object({
+    type: z.literal("success"),
+  })
+  .strict();
+
+export const SubagentFinishedSuspendedOutcomeSchema = z
+  .object({
+    type: z.literal("suspended"),
+    // The ids of the run-level interrupts this subagent directly owns (see
+    // Interrupt.subagentRunId). MAY be empty or omitted: an ancestor subagent
+    // suspended because a DESCENDANT interrupted owns no interrupt itself.
+    interruptIds: z.array(z.string()).optional(),
+  })
+  .strict();
+
+// Mirrors RunFinishedOutcome one level down: a subagent's terminal closes its
+// stream segment for THIS run either because the work completed ("success")
+// or because the workflow is paused awaiting outside input ("suspended" — the
+// run ends with an interrupt outcome, and on resume the same subagentRunId is
+// re-announced as a continuation of the suspended invocation). An omitted
+// outcome means legacy success. Without this, a paused subagent was
+// indistinguishable from a completed one and every UI had to reverse-engineer
+// "waiting" from a later interrupt event.
+export const SubagentFinishedOutcomeSchema = z.discriminatedUnion("type", [
+  SubagentFinishedSuccessOutcomeSchema,
+  SubagentFinishedSuspendedOutcomeSchema,
+]);
+
+export const SubagentFinishedEventSchema = BaseEventSchema.extend({
+  type: z.literal(EventType.SUBAGENT_FINISHED),
+  subagentRunId: z.string(),
+  // The subagent's completion payload, mirroring RUN_FINISHED.result.
+  result: z.any().optional(),
+  // Strictly optional: absent means success (the legacy reading); an explicit
+  // null is rejected. RUN_FINISHED.outcome's null tolerance is legacy debt from
+  // producers that shipped before PNI-199 — this field is newer than the fix,
+  // so it never inherits the debt.
+  outcome: SubagentFinishedOutcomeSchema.optional(),
+});
+
+export const SubagentErrorEventSchema = BaseEventSchema.extend({
+  type: z.literal(EventType.SUBAGENT_ERROR),
+  subagentRunId: z.string(),
+  message: z.string(),
+  code: z.string().optional(),
 });
 
 export const EventSchemas = z.discriminatedUnion("type", [
@@ -392,6 +494,9 @@ export const EventSchemas = z.discriminatedUnion("type", [
   ReasoningMessageChunkEventSchema,
   ReasoningEndEventSchema,
   ReasoningEncryptedValueEventSchema,
+  SubagentStartedEventSchema,
+  SubagentFinishedEventSchema,
+  SubagentErrorEventSchema,
 ]);
 
 export type BaseEvent = z.infer<typeof BaseEventSchema>;
@@ -431,6 +536,9 @@ export type AGUIEventByType = {
   [EventType.REASONING_MESSAGE_CHUNK]: ReasoningMessageChunkEvent;
   [EventType.REASONING_END]: ReasoningEndEvent;
   [EventType.REASONING_ENCRYPTED_VALUE]: ReasoningEncryptedValueEvent;
+  [EventType.SUBAGENT_STARTED]: SubagentStartedEvent;
+  [EventType.SUBAGENT_FINISHED]: SubagentFinishedEvent;
+  [EventType.SUBAGENT_ERROR]: SubagentErrorEvent;
 };
 export type AGUIEventOf<T extends EventType> = AGUIEventByType[T];
 export type EventPayloadOf<T extends EventType> = Omit<AGUIEventOf<T>, keyof BaseEventFields>;
@@ -480,6 +588,9 @@ export type ReasoningEndEventProps = EventProps<typeof ReasoningEndEventSchema>;
 export type ReasoningEncryptedValueEventProps = EventProps<
   typeof ReasoningEncryptedValueEventSchema
 >;
+export type SubagentStartedEventProps = EventProps<typeof SubagentStartedEventSchema>;
+export type SubagentFinishedEventProps = EventProps<typeof SubagentFinishedEventSchema>;
+export type SubagentErrorEventProps = EventProps<typeof SubagentErrorEventSchema>;
 
 export type TextMessageStartEvent = z.infer<typeof TextMessageStartEventSchema>;
 export type TextMessageContentEvent = z.infer<typeof TextMessageContentEventSchema>;
@@ -508,6 +619,9 @@ export type TokenUsage = z.infer<typeof TokenUsageSchema>;
 export type RunFinishedOutcome = z.infer<typeof RunFinishedOutcomeSchema>;
 export type RunFinishedSuccessOutcome = z.infer<typeof RunFinishedSuccessOutcomeSchema>;
 export type RunFinishedInterruptOutcome = z.infer<typeof RunFinishedInterruptOutcomeSchema>;
+export type SubagentFinishedOutcome = z.infer<typeof SubagentFinishedOutcomeSchema>;
+export type SubagentFinishedSuccessOutcome = z.infer<typeof SubagentFinishedSuccessOutcomeSchema>;
+export type SubagentFinishedSuspendedOutcome = z.infer<typeof SubagentFinishedSuspendedOutcomeSchema>;
 export type RunErrorEvent = z.infer<typeof RunErrorEventSchema>;
 export type StepStartedEvent = z.infer<typeof StepStartedEventSchema>;
 export type StepFinishedEvent = z.infer<typeof StepFinishedEventSchema>;
@@ -519,3 +633,6 @@ export type ReasoningMessageChunkEvent = z.infer<typeof ReasoningMessageChunkEve
 export type ReasoningEndEvent = z.infer<typeof ReasoningEndEventSchema>;
 export type ReasoningEncryptedValueEvent = z.infer<typeof ReasoningEncryptedValueEventSchema>;
 export type ReasoningEncryptedValueSubtype = z.infer<typeof ReasoningEncryptedValueSubtypeSchema>;
+export type SubagentStartedEvent = z.infer<typeof SubagentStartedEventSchema>;
+export type SubagentFinishedEvent = z.infer<typeof SubagentFinishedEventSchema>;
+export type SubagentErrorEvent = z.infer<typeof SubagentErrorEventSchema>;

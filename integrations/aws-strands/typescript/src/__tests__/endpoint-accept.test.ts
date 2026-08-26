@@ -122,6 +122,35 @@ describe("addStrandsExpressEndpoint content negotiation", () => {
     }
   });
 
+  it("returns SSE when protobuf is listed but explicitly refused with q=0", async () => {
+    const { port, close } = await startApp();
+    try {
+      const ct = await postWithAccept(
+        port,
+        "application/vnd.ag-ui.event+proto;q=0, text/event-stream",
+      );
+      expect(ct.toLowerCase()).toContain("text/event-stream");
+      expect(ct.toLowerCase()).not.toContain(
+        "application/vnd.ag-ui.event+proto",
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  it("still selects protobuf at a low but non-zero q-factor", async () => {
+    const { port, close } = await startApp();
+    try {
+      const ct = await postWithAccept(
+        port,
+        "application/vnd.ag-ui.event+proto;q=0.1",
+      );
+      expect(ct.toLowerCase()).toContain("application/vnd.ag-ui.event+proto");
+    } finally {
+      await close();
+    }
+  });
+
   it("still honours protobuf when listed alongside SSE with a q-factor", async () => {
     const { port, close } = await startApp();
     try {

@@ -19,6 +19,8 @@ from ag_ui.core import RunAgentInput
 
 from strands.session import SessionManager
 
+from .utils import UrlFetchPolicy
+
 
 StatePayload = Dict[str, Any]
 
@@ -189,6 +191,16 @@ class StrandsAgentConfig:
     - ``recovery`` — recovery loop config. NOTE: keys are camelCase per the
       shared toolkit contract — e.g. ``{"maxAttempts": 5}`` (a snake_case
       ``max_attempts`` is silently ignored).
+    """
+    url_fetch_policy: Optional[UrlFetchPolicy] = None
+    """Policy applied to every server-side fetch of a URL content source.
+
+    ``None`` uses :data:`~ag_ui_strands.utils.DEFAULT_URL_FETCH_POLICY`, which
+    fetches only ``http``/``https``, refuses addresses outside the public
+    internet, and bounds both a single attachment and everything one run
+    fetches. A deployment whose attachments live on a private CDN or behind
+    split DNS passes ``UrlFetchPolicy(allow_private_networks=True)``; cloud
+    metadata endpoints stay blocked either way.
     """
 
 

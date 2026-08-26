@@ -24,7 +24,8 @@ public sealed class AGUIStreamOptions
 
     /// <summary>
     /// Sets the provider label applied to the token usage reported on the terminal
-    /// <see cref="RunFinishedEvent"/> (for example <c>"openai"</c> or <c>"anthropic"</c>).
+    /// <see cref="RunFinishedEvent"/> or <see cref="RunErrorEvent"/>
+    /// (for example <c>"openai"</c> or <c>"anthropic"</c>).
     /// </summary>
     /// <remarks>
     /// <see cref="ChatResponseUpdate.ModelId"/> supplies the model label automatically, but

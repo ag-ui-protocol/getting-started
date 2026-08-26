@@ -5,13 +5,13 @@
  * on the thread so the follow-up `resume[]` request is recognised as known
  * (rather than falling into the UNKNOWN_INTERRUPT_ID gate).
  */
+
 import { describe, it, expect, vi } from "vitest";
 import {
   EventType,
   type BaseEvent,
-  type RunAgentInput,
-  type ResumeEntry,
   type Interrupt as AguiInterrupt,
+  type ResumeEntry,
 } from "@ag-ui/core";
 import {
   AgentResult as StrandsAgentResult,
@@ -24,13 +24,28 @@ import {
 
 import { StrandsAgent } from "../agent";
 import {
+  captureStreamArgs,
   collect,
+  expectNoRunError,
+  finishedOf,
   minimalRunInput,
+  modelTurn,
   parkInterrupts,
+  realStrandsAgent,
+  recordingTool,
   scriptedAgent,
+  soleInterruptId,
   stream,
+  threadAgent,
 } from "./helpers";
 
+const TOOL = "confirm_delete";
+
+/**
+ * Wrap a pre-built `AgentResult` as an agent stream. Retained for the tests
+ * that pin adapter handling of a specific result shape, where constructing the
+ * shape directly is the point.
+ */
 function makeAgentResultStream(
   result: StrandsAgentResult,
   events: unknown[] = [],
@@ -39,18 +54,6 @@ function makeAgentResultStream(
     for (const e of events) yield e;
     return result;
   };
-}
-
-function strandsInterrupt(id: string, toolName: string): StrandsInterrupt {
-  // Mirrors the shape the adapter's own interruptOnCall hook produces:
-  // name prefixed with "ag_ui:tool_call:" and a structured reason object.
-  // The concrete class is internal; the adapter only reads .id / .name /
-  // .reason, so a plain object that matches the interface is sufficient.
-  return {
-    id,
-    name: `ag_ui:tool_call:${toolName}`,
-    reason: { tool_call: true, tool_name: toolName, tool_input: {}, tool_use_id: id },
-  } as unknown as StrandsInterrupt;
 }
 
 function buildAgentResult(interrupts: StrandsInterrupt[]): StrandsAgentResult {
@@ -65,63 +68,184 @@ function buildAgentResult(interrupts: StrandsInterrupt[]): StrandsAgentResult {
   });
 }
 
+function approvalAgent(options: { sessionManager?: unknown } = {}) {
+  const { tool, calls } = recordingTool(TOOL);
+  const built = realStrandsAgent(
+    [
+      modelTurn.toolUse({
+        toolUseId: "tu-1",
+        name: TOOL,
+        input: { target: "db" },
+      }),
+      modelTurn.text("done"),
+    ],
+    {
+      tools: [tool],
+      config: {
+        toolBehaviors: { [TOOL]: { interruptOnCall: true } },
+        ...(options.sessionManager
+          ? { sessionManagerProvider: () => options.sessionManager as never }
+          : {}),
+      },
+    },
+  );
+  return { ...built, calls };
+}
+
+const userTurn = () =>
+  minimalRunInput({
+    messages: [{ id: "u1", role: "user", content: "delete db" } as never],
+  });
+
+function pendingFor(agent: StrandsAgent, threadId = "thread-1") {
+  return (
+    agent as unknown as {
+      _pendingInterruptsByThread: Map<string, Map<string, AguiInterrupt>>;
+    }
+  )._pendingInterruptsByThread.get(threadId);
+}
+
+
 describe("StrandsAgent native interrupt bridge (Strands SDK 1.1.0+)", () => {
   it("emits RUN_FINISHED with outcome.interrupt when Strands stops for interrupt", async () => {
-    const interrupts = [strandsInterrupt("int-1", "confirm_delete")];
-    const stubAgent = scriptedAgent([], {
-      stream: makeAgentResultStream(buildAgentResult(interrupts)) as never,
-    });
-    const sa = new StrandsAgent({ agent: stubAgent, name: "t" });
-    (
-      sa as unknown as { _agentsByThread: Map<string, unknown> }
-    )._agentsByThread.set("thread-1", stubAgent);
+    const { agent } = approvalAgent();
+    const events = await collect(agent, userTurn());
 
-    const events = await collect(sa);
-    const finished = events.at(-1) as BaseEvent & {
-      outcome?: { type: string; interrupts?: unknown[] };
-    };
-    expect(finished.type).toBe(EventType.RUN_FINISHED);
+    const finished = finishedOf(events);
     expect(finished.outcome?.type).toBe("interrupt");
     expect(finished.outcome?.interrupts).toHaveLength(1);
-    const first = finished.outcome?.interrupts?.[0] as {
-      id: string;
-      reason: string;
-      message?: string;
-      metadata?: { strandsName?: string };
-    };
-    expect(first.id).toBe("int-1");
-    expect(first.reason).toBe("tool_call");
-    expect(first.message).toBe("Approve call to confirm_delete?");
-    expect(first.metadata?.strandsName).toBe("ag_ui:tool_call:confirm_delete");
 
-    // The interrupt is now pending on the thread.
-    const pending = (
-      sa as unknown as {
-        _pendingInterruptsByThread: Map<string, Map<string, AguiInterrupt>>;
-      }
-    )._pendingInterruptsByThread.get("thread-1");
-    expect(pending?.has("int-1")).toBe(true);
+    const first = finished.outcome!.interrupts![0];
+    expect(first.reason).toBe("tool_call");
+    expect(first.message).toBe(`Approve call to ${TOOL}?`);
+    expect(first.metadata?.strandsName).toBe(`ag_ui:tool_call:${TOOL}`);
+
+    // The adapter recorded the interrupt as pending under the id it reported.
+    expect(pendingFor(agent)?.has(first.id)).toBe(true);
   });
 
   it("checkpoints an interrupt before returning it to a resumable client", async () => {
-    const saveSnapshot = vi.fn().mockResolvedValue(undefined);
-    const stubAgent = scriptedAgent([], {
-      stream: makeAgentResultStream(
-        buildAgentResult([strandsInterrupt("int-1", "confirm_delete")]),
-      ) as never,
-      sessionManager: { saveSnapshot } as never,
-    });
-    const sa = new StrandsAgent({ agent: stubAgent, name: "t" });
-    (
-      sa as unknown as { _agentsByThread: Map<string, unknown> }
-    )._agentsByThread.set("thread-1", stubAgent);
+    const saveSnapshot = vi.fn();
+    const sessionManager = { initAgent: vi.fn(), saveSnapshot };
+    const { agent } = approvalAgent({ sessionManager });
 
-    await collect(sa);
-
-    expect(saveSnapshot).toHaveBeenCalledWith({
-      target: stubAgent,
-      isLatest: true,
+    // Record when the checkpoint lands relative to the events the client sees.
+    const seenAtSave: string[] = [];
+    const events: BaseEvent[] = [];
+    saveSnapshot.mockImplementation(async () => {
+      seenAtSave.push(...events.map((e) => e.type));
     });
+    for await (const e of agent.run(userTurn())) events.push(e);
+
+    expect(saveSnapshot).toHaveBeenCalledTimes(1);
+    // Identity, not deep equality: a structurally similar agent is not the
+    // agent whose interrupt state has to survive the restart.
+    expect(saveSnapshot.mock.calls[0][0].target).toBe(threadAgent(agent));
+    expect(saveSnapshot.mock.calls[0][0].isLatest).toBe(true);
+    // "before returning it": the run was already under way when the checkpoint
+    // fired, and no RUN_FINISHED had been yielded yet. The positive half
+    // matters: not.toContain alone holds on an empty array.
+    expect(seenAtSave).toContain(EventType.RUN_STARTED);
+    expect(seenAtSave).not.toContain(EventType.RUN_FINISHED);
+    expect(events.map((e) => e.type)).toContain(EventType.RUN_FINISHED);
+  });
+
+  it("accepts a matching resume[] and forwards InterruptResponseContent to Strands", async () => {
+    const { agent, calls } = approvalAgent();
+    const first = await collect(agent, userTurn());
+    const id = soleInterruptId(first);
+
+    // Not restored: each test builds its own agent, so the wrapper cannot
+    // outlive the assertions it was installed for.
+    const { calls: streamArgs } = captureStreamArgs(agent);
+    const events = await collect(
+      agent,
+      minimalRunInput({
+        runId: "run-2",
+        messages: [{ id: "u1", role: "user", content: "delete db" } as never],
+        resume: [
+          { interruptId: id, status: "resolved", payload: { approved: true } },
+        ] as never,
+      }),
+    );
+
+    expect(events.map((e) => e.type)).toContain(EventType.RUN_FINISHED);
+    expect(events.map((e) => e.type)).not.toContain(EventType.RUN_ERROR);
+
+    // Strands received InterruptResponseContent[] as its invoke args.
+    expect(streamArgs).toHaveLength(1);
+    const [forwarded] = streamArgs[0][0] as InterruptResponseContent[];
+    expect(forwarded).toBeInstanceOf(InterruptResponseContent);
+    expect(forwarded.interruptResponse.interruptId).toBe(id);
+    expect(forwarded.interruptResponse.response).toEqual({ approved: true });
+
+    // The approval actually took effect, and the pending set was cleared.
+    expect(calls).toHaveLength(1);
+    expect(pendingFor(agent)).toBeUndefined();
+  });
+
+  it("still emits UNKNOWN_INTERRUPT_ID when resume[] references an unknown id", async () => {
+    const { agent } = approvalAgent();
+    const first = await collect(agent, userTurn());
+    const known = soleInterruptId(first);
+
+    const events = await collect(
+      agent,
+      minimalRunInput({
+        runId: "run-2",
+        messages: [{ id: "u1", role: "user", content: "delete db" } as never],
+        resume: [
+          { interruptId: "unknown-id", status: "resolved" },
+          {
+            interruptId: known,
+            status: "resolved",
+            payload: { approved: true },
+          },
+        ] as never,
+      }),
+    );
+
+    expect(events.map((e) => e.type)).toEqual([
+      EventType.RUN_STARTED,
+      EventType.RUN_ERROR,
+    ]);
+    const err = events[1] as unknown as { code: string; message: string };
+    expect(err.code).toBe("UNKNOWN_INTERRUPT_ID");
+    expect(err.message).toContain("unknown-id");
+  });
+
+  it("forwards a cancelled resume as native InterruptResponseContent through Strands", async () => {
+    const { agent, calls } = approvalAgent();
+    const first = await collect(agent, userTurn());
+    const id = soleInterruptId(first);
+
+    const { calls: streamArgs } = captureStreamArgs(agent);
+    const second = await collect(
+      agent,
+      minimalRunInput({
+        runId: "run-2",
+        messages: [{ id: "u1", role: "user", content: "delete db" } as never],
+        resume: [{ interruptId: id, status: "cancelled" }] as never,
+      }),
+    );
+    expectNoRunError(second, "cancelled resume");
+
+    // All-cancelled resumes must still be forwarded to Strands as native
+    // InterruptResponseContent, not short-circuited with a synthetic
+    // RUN_FINISHED that bypasses stream()/native cleanup/hooks/session
+    // persistence.
+    expect(streamArgs).toHaveLength(1);
+    const [forwarded] = streamArgs[0][0] as InterruptResponseContent[];
+    expect(forwarded).toBeInstanceOf(InterruptResponseContent);
+    expect(forwarded.interruptResponse.interruptId).toBe(id);
+    expect(forwarded.interruptResponse.response).toEqual({
+      status: "cancelled",
+    });
+    expect(calls, "cancelled resume executed the tool").toEqual([]);
+    expect(
+      pendingFor(agent),
+      "cancelled resume left the interrupt pending",
+    ).toBeUndefined();
   });
 
   it("logs a debug trace when a paused result carries no interrupts", async () => {
@@ -159,126 +283,6 @@ describe("StrandsAgent native interrupt bridge (Strands SDK 1.1.0+)", () => {
           message.includes("reporting no pending interrupts"),
       ),
     ).toBe(true);
-  });
-
-  it("accepts a matching resume[] and forwards InterruptResponseContent to Strands", async () => {
-    let capturedArgs: unknown = null;
-    const stubAgent = scriptedAgent([], {
-      stream: ((args: unknown) => {
-        capturedArgs = args;
-        // After resume, Strands completes normally.
-        return (async function* () {
-          return new StrandsAgentResult({
-            stopReason: "endTurn",
-            lastMessage: StrandsMessage.fromMessageData({
-              role: "assistant",
-              content: [new TextBlock("done").toJSON()],
-            }),
-            invocationState: {},
-          });
-        })();
-      }) as never,
-    });
-    const sa = new StrandsAgent({ agent: stubAgent, name: "t" });
-    (
-      sa as unknown as { _agentsByThread: Map<string, unknown> }
-    )._agentsByThread.set("thread-1", stubAgent);
-    // Park the interrupt on the SDK's checkpoint, with the adapter's metadata
-    // record beside it, so the gate accepts the resume.
-    parkInterrupts(sa, "thread-1", [{ id: "int-7", reason: "tool_call" }]);
-    const input: RunAgentInput = minimalRunInput({
-      resume: [
-        {
-          interruptId: "int-7",
-          status: "resolved",
-          payload: { approved: true },
-        },
-      ],
-    });
-    const events = await collect(sa, input);
-
-    expect(events.map((e) => e.type)).toContain(EventType.RUN_FINISHED);
-    expect(events.map((e) => e.type)).not.toContain(EventType.RUN_ERROR);
-
-    // Strands received InterruptResponseContent[] as its invoke args.
-    expect(Array.isArray(capturedArgs)).toBe(true);
-    const [first] = capturedArgs as InterruptResponseContent[];
-    expect(first).toBeInstanceOf(InterruptResponseContent);
-    expect(first.interruptResponse.interruptId).toBe("int-7");
-    expect(first.interruptResponse.response).toEqual({ approved: true });
-
-    // The pending set was cleared once resume was accepted.
-    const cleared = (
-      sa as unknown as {
-        _pendingInterruptsByThread: Map<string, Map<string, AguiInterrupt>>;
-      }
-    )._pendingInterruptsByThread.get("thread-1");
-    expect(cleared).toBeUndefined();
-  });
-
-  it("still emits UNKNOWN_INTERRUPT when resume[] references an unknown id", async () => {
-    const stubAgent = scriptedAgent([]);
-    const sa = new StrandsAgent({ agent: stubAgent, name: "t" });
-    // One open interrupt, but the resume references a different id.
-    parkInterrupts(sa, "thread-1", [{ id: "known", reason: "tool_call" }]);
-
-    const events = await collect(
-      sa,
-      minimalRunInput({
-        resume: [
-          { interruptId: "unknown-id", status: "resolved" },
-          { interruptId: "known", status: "resolved", payload: { approved: true } },
-        ],
-      }),
-    );
-    expect(events.map((e) => e.type)).toEqual([
-      EventType.RUN_STARTED,
-      EventType.RUN_ERROR,
-    ]);
-    const err = events[1] as unknown as { code: string; message: string };
-    expect(err.code).toBe("UNKNOWN_INTERRUPT_ID");
-    expect(err.message).toContain("unknown-id");
-  });
-
-  it("forwards a cancelled resume as native InterruptResponseContent through Strands", async () => {
-    let capturedArgs: unknown = null;
-    const stubAgent = scriptedAgent([], {
-      stream: ((args: unknown) => {
-        capturedArgs = args;
-        return (async function* () {
-          return new StrandsAgentResult({
-            stopReason: "endTurn",
-            lastMessage: StrandsMessage.fromMessageData({
-              role: "assistant",
-              content: [new TextBlock("ok").toJSON()],
-            }),
-            invocationState: {},
-          });
-        })();
-      }) as never,
-    });
-    const sa = new StrandsAgent({ agent: stubAgent, name: "t" });
-    (
-      sa as unknown as { _agentsByThread: Map<string, unknown> }
-    )._agentsByThread.set("thread-1", stubAgent);
-    parkInterrupts(sa, "thread-1", [{ id: "ic", reason: "tool_call" }]);
-
-    await collect(
-      sa,
-      minimalRunInput({
-        resume: [{ interruptId: "ic", status: "cancelled" }],
-      }),
-    );
-
-    // All-cancelled resumes must still be forwarded to Strands as native
-    // InterruptResponseContent — not short-circuited with a synthetic
-    // RUN_FINISHED that bypasses stream()/native cleanup/hooks/session
-    // persistence.
-    expect(capturedArgs).not.toBeNull();
-    expect(Array.isArray(capturedArgs)).toBe(true);
-    const [first] = capturedArgs as InterruptResponseContent[];
-    expect(first.interruptResponse.interruptId).toBe("ic");
-    expect(first.interruptResponse.response).toEqual({ status: "cancelled" });
   });
 });
 

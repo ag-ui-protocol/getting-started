@@ -13,4 +13,11 @@ public sealed class ToolCallEndEvent : BaseEvent
 
     [JsonPropertyName("toolCallId")]
     public string ToolCallId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the subagent that produced this event, absent when the parent agent
+    /// produced it directly.
+    /// </summary>
+    [JsonPropertyName("subagentRunId")]
+    public string? SubagentRunId { get; set; }
 }

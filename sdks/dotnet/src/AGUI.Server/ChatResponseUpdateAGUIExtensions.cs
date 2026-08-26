@@ -11,6 +11,9 @@ namespace AGUI.Server;
 /// </summary>
 public static class ChatResponseUpdateAGUIExtensions
 {
+    private const string StreamingErrorCode = "StreamingError";
+    private const string StreamingErrorMessage = "An error occurred while streaming the agent response.";
+
     private static readonly JsonElement AGUIToolApprovalSchema =
         JsonDocument.Parse("""
             {
@@ -43,12 +46,13 @@ public static class ChatResponseUpdateAGUIExtensions
 
         return AGUIServerInstrumentation.ActivitySource.HasListeners()
             ? InstrumentedAsync(updates, context, cancellationToken)
-            : CoreAsync(updates, context, cancellationToken);
+            : HandleErrorsAsync(updates, context, cancellationToken);
     }
 
     private const string RunOutcomeSuccess = "success";
     private const string RunOutcomeInterrupt = "interrupt";
     private const string RunOutcomeError = "error";
+    private const string RunOutcomeCanceled = "canceled";
 
     private static async IAsyncEnumerable<BaseEvent> InstrumentedAsync(
         IAsyncEnumerable<ChatResponseUpdate> updates,
@@ -75,29 +79,62 @@ public static class ChatResponseUpdateAGUIExtensions
 
         var eventCount = 0;
         var outcome = RunOutcomeSuccess;
+        var terminalEventEmitted = false;
+        var usageTracker = new TokenUsageTracker();
 
-        var enumerator = CoreAsync(updates, context, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        var enumerator = CoreAsync(updates, context, usageTracker, cancellationToken).GetAsyncEnumerator(cancellationToken);
         try
         {
             while (true)
             {
-                BaseEvent current;
+                bool hasNext = false;
+                Exception? error = null;
                 try
                 {
-                    if (!await enumerator.MoveNextAsync().ConfigureAwait(false))
+                    if (!terminalEventEmitted)
                     {
-                        break;
+                        cancellationToken.ThrowIfCancellationRequested();
                     }
 
-                    current = enumerator.Current;
+                    hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
+                    if (!terminalEventEmitted)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    if (!terminalEventEmitted)
+                    {
+                        outcome = RunOutcomeCanceled;
+                    }
+
+                    throw;
                 }
                 catch (Exception ex)
                 {
-                    RecordError(activity, ex, eventCount);
-                    throw;
+                    error = ex;
                 }
 
+                if (error is not null)
+                {
+                    outcome = RunOutcomeError;
+                    eventCount++;
+                    terminalEventEmitted = true;
+                    RecordError(activity, error, eventCount);
+                    yield return CreateStreamingError(usageTracker.Build());
+                    yield break;
+                }
+
+                if (!hasNext)
+                {
+                    break;
+                }
+
+                var current = enumerator.Current;
+
                 eventCount++;
+                terminalEventEmitted = current is RunFinishedEvent or RunErrorEvent;
                 outcome = current switch
                 {
                     RunFinishedEvent { Outcome: RunFinishedInterruptOutcome } => RunOutcomeInterrupt,
@@ -112,11 +149,16 @@ public static class ChatResponseUpdateAGUIExtensions
         {
             await enumerator.DisposeAsync().ConfigureAwait(false);
 
-            if (activity is not null && activity.Status != ActivityStatusCode.Error)
+            if (activity is not null)
             {
+                if (!terminalEventEmitted && cancellationToken.IsCancellationRequested)
+                {
+                    outcome = RunOutcomeCanceled;
+                }
+
                 activity.SetTag("agui.run.outcome", outcome);
                 activity.SetTag("agui.events.count", eventCount);
-                if (outcome == RunOutcomeError)
+                if (outcome == RunOutcomeError && activity.Status != ActivityStatusCode.Error)
                 {
                     activity.SetStatus(ActivityStatusCode.Error);
                 }
@@ -137,9 +179,67 @@ public static class ChatResponseUpdateAGUIExtensions
         activity.SetStatus(ActivityStatusCode.Error, exception.Message);
     }
 
+    private static async IAsyncEnumerable<BaseEvent> HandleErrorsAsync(
+        IAsyncEnumerable<ChatResponseUpdate> updates,
+        ChatRequestContext context,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var usageTracker = new TokenUsageTracker();
+        var enumerator = CoreAsync(updates, context, usageTracker, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        try
+        {
+            while (true)
+            {
+                bool hasNext = false;
+                Exception? error = null;
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    error = ex;
+                }
+
+                if (error is not null)
+                {
+                    yield return CreateStreamingError(usageTracker.Build());
+                    yield break;
+                }
+
+                if (!hasNext)
+                {
+                    yield break;
+                }
+
+                yield return enumerator.Current;
+            }
+        }
+        finally
+        {
+            await enumerator.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private static RunErrorEvent CreateStreamingError(IList<TokenUsage>? usage) =>
+        // Keep exception details server-side; the wire error is stable and sanitized.
+        new()
+        {
+            Code = StreamingErrorCode,
+            Message = StreamingErrorMessage,
+            Usage = usage,
+        };
+
     private static async IAsyncEnumerable<BaseEvent> CoreAsync(
         IAsyncEnumerable<ChatResponseUpdate> updates,
         ChatRequestContext context,
+        TokenUsageTracker usageTracker,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var threadId = context.Input.ThreadId;
@@ -164,10 +264,6 @@ public static class ChatResponseUpdateAGUIExtensions
         // Includes both tool-approval interrupts (from ToolApprovalRequestContent) and
         // generic input interrupts (from InterruptRequestContent).
         List<AGUIInterrupt>? pendingInterrupts = null;
-
-        // Accumulate provider-reported token usage so the terminal RunFinished can
-        // carry one entry per (provider, model) for the whole run.
-        var usageTracker = new TokenUsageTracker();
 
         // Progressive tool-call argument streaming. MEAI coalesces tool-call arguments and
         // only attaches the typed FunctionCallContent once a call is complete, so without a
@@ -204,6 +300,11 @@ public static class ChatResponseUpdateAGUIExtensions
                 }
 
                 yield return rawEvent;
+                if (rawEvent is RunErrorEvent)
+                {
+                    yield break;
+                }
+
                 continue;
             }
 
@@ -365,6 +466,10 @@ public static class ChatResponseUpdateAGUIExtensions
                                 foreach (var mappedEvt in rawCallMapper(fcc))
                                 {
                                     yield return mappedEvt;
+                                    if (mappedEvt is RunErrorEvent)
+                                    {
+                                        yield break;
+                                    }
                                 }
                             }
 
@@ -412,6 +517,10 @@ public static class ChatResponseUpdateAGUIExtensions
                             foreach (var mappedEvt in callMapper(fcc))
                             {
                                 yield return mappedEvt;
+                                if (mappedEvt is RunErrorEvent)
+                                {
+                                    yield break;
+                                }
                             }
                         }
 
@@ -454,6 +563,10 @@ public static class ChatResponseUpdateAGUIExtensions
                             foreach (var mappedEvt in resultMapper(frc))
                             {
                                 yield return mappedEvt;
+                                if (mappedEvt is RunErrorEvent)
+                                {
+                                    yield break;
+                                }
                             }
                         }
                         break;
@@ -535,7 +648,7 @@ public static class ChatResponseUpdateAGUIExtensions
 
                     case UsageContent usageContent:
                         // Usage is metadata, not stream content — accumulate it for the
-                        // terminal RunFinished rather than emitting an event of its own.
+                        // terminal run event rather than emitting an event of its own.
                         usageTracker.Add(usageContent.Details, options.UsageProvider, chatResponse.ModelId);
                         break;
 
@@ -574,6 +687,10 @@ public static class ChatResponseUpdateAGUIExtensions
                                     }
 
                                     yield return evt;
+                                    if (evt is RunErrorEvent)
+                                    {
+                                        yield break;
+                                    }
                                 }
                             }
                         }

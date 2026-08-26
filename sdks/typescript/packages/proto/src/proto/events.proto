@@ -27,6 +27,9 @@ enum EventType {
   RUN_ERROR = 13;
   STEP_STARTED = 14;
   STEP_FINISHED = 15;
+  SUBAGENT_STARTED = 16;
+  SUBAGENT_FINISHED = 17;
+  SUBAGENT_ERROR = 18;
 }
 
 message BaseEvent {
@@ -46,17 +49,20 @@ message TextMessageStartEvent {
   string message_id = 2;
   optional string role = 3;
   optional string name = 4;
+  optional string subagent_run_id = 5;
 }
 
 message TextMessageContentEvent {
   BaseEvent base_event = 1;
   string message_id = 2;
   string delta = 3;
+  optional string subagent_run_id = 4;
 }
 
 message TextMessageEndEvent {
   BaseEvent base_event = 1;
   string message_id = 2;
+  optional string subagent_run_id = 3;
 }
 
 message ToolCallStartEvent {
@@ -64,27 +70,37 @@ message ToolCallStartEvent {
   string tool_call_id = 2;
   string tool_call_name = 3;
   optional string parent_message_id = 4;
+  optional string subagent_run_id = 5;
 }
 
 message ToolCallArgsEvent {
   BaseEvent base_event = 1;
   string tool_call_id = 2;
   string delta = 3;
+  optional string subagent_run_id = 4;
 }
 
 message ToolCallEndEvent {
   BaseEvent base_event = 1;
   string tool_call_id = 2;
+  optional string subagent_run_id = 3;
 }
 
+// StateSnapshotEvent / StateDeltaEvent carry subagent_run_id because they are
+// attributable: the protocol design lists them alongside the other standalone
+// events. Attribution here is PROVENANCE, not ownership -- it records which
+// subagent produced the update, while the state stays run-scoped and is applied
+// run-scoped. There is no per-subagent state.
 message StateSnapshotEvent {
   BaseEvent base_event = 1;
   google.protobuf.Value snapshot = 2;
+  optional string subagent_run_id = 3;
 }
 
 message StateDeltaEvent {
   BaseEvent base_event = 1;
   repeated JsonPatchOperation delta = 2;
+  optional string subagent_run_id = 3;
 }
 
 message MessagesSnapshotEvent {
@@ -96,12 +112,14 @@ message RawEvent {
   BaseEvent base_event = 1;
   google.protobuf.Value event = 2;
   optional string source = 3;
+  optional string subagent_run_id = 4;
 }
 
 message CustomEvent {
   BaseEvent base_event = 1;
   string name = 2;
   optional google.protobuf.Value value = 3;
+  optional string subagent_run_id = 4;
 }
 
 message RunStartedEvent {
@@ -142,11 +160,13 @@ message RunErrorEvent {
 message StepStartedEvent {
   BaseEvent base_event = 1;
   string step_name = 2;
+  optional string subagent_run_id = 3;
 }
 
 message StepFinishedEvent {
   BaseEvent base_event = 1;
   string step_name = 2;
+  optional string subagent_run_id = 3;
 }
 
 message TextMessageChunkEvent {
@@ -155,6 +175,7 @@ message TextMessageChunkEvent {
   optional string role = 3;
   optional string delta = 4;
   optional string name = 5;
+  optional string subagent_run_id = 6;
 }
 
 message ToolCallChunkEvent {
@@ -163,6 +184,42 @@ message ToolCallChunkEvent {
   optional string tool_call_name = 3;
   optional string parent_message_id = 4;
   optional string delta = 5;
+  optional string subagent_run_id = 6;
+}
+
+// Subagent lifecycle. Field sets mirror the protocol schemas in
+// @ag-ui/core (SubagentStartedEventSchema and friends).
+message SubagentStartedEvent {
+  BaseEvent base_event = 1;
+  string subagent_run_id = 2;
+  string name = 3;
+  optional string description = 4;
+  optional string parent_subagent_run_id = 5;
+  // Correlates the subagent with the tool call that spawned it, for the
+  // agents-as-tools pattern, without a consumer having to read raw_event.
+  optional string parent_tool_call_id = 6;
+  optional string parent_message_id = 7;
+}
+
+message SubagentFinishedEvent {
+  BaseEvent base_event = 1;
+  string subagent_run_id = 2;
+  // The subagent's completion payload, mirroring RunFinishedEvent.result.
+  optional google.protobuf.Value result = 3;
+  // Typed outcome, flattened like RunFinishedEvent's: "" (legacy success,
+  // field omitted on the JSON side), "success", or "suspended".
+  string outcome = 4;
+  // Ids of the run-level interrupts this subagent directly owns; only
+  // meaningful when outcome == "suspended". May be empty for an ancestor
+  // suspended because a descendant interrupted.
+  repeated string interrupt_ids = 5;
+}
+
+message SubagentErrorEvent {
+  BaseEvent base_event = 1;
+  string subagent_run_id = 2;
+  string message = 3;
+  optional string code = 4;
 }
 
 message Event {
@@ -185,5 +242,8 @@ message Event {
     StepFinishedEvent step_finished = 16;
     TextMessageChunkEvent text_message_chunk = 17;
     ToolCallChunkEvent tool_call_chunk = 18;
+    SubagentStartedEvent subagent_started = 19;
+    SubagentFinishedEvent subagent_finished = 20;
+    SubagentErrorEvent subagent_error = 21;
   }
 }
