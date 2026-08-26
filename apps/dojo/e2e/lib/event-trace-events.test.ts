@@ -213,6 +213,37 @@ test("retains the complete SSE response when a data frame is malformed", () => {
   );
 });
 
+test("drops auth-context metadata, whose presence varies by langgraph version", () => {
+  // Older langgraph stacks injected langgraph_auth_user_id: "" with no auth
+  // configured; newer ones omit the keys entirely. A trace recorded on either
+  // must match the other.
+  const normalized = normalizeEventTrace([
+    {
+      type: "STATE_SNAPSHOT",
+      rawEvent: {
+        data: {
+          metadata: {
+            graph_id: "agentic_chat",
+            langgraph_step: 1,
+            langgraph_auth_user: null,
+            langgraph_auth_user_id: "",
+            langgraph_auth_permissions: [],
+          },
+        },
+      },
+    },
+  ]);
+  const bare = normalizeEventTrace([
+    {
+      type: "STATE_SNAPSHOT",
+      rawEvent: {
+        data: { metadata: { graph_id: "agentic_chat", langgraph_step: 1 } },
+      },
+    },
+  ]);
+  assert.deepStrictEqual(normalized, bare);
+});
+
 test("drops LangSmith tracing env metadata, whose presence varies by environment", () => {
   // `langgraph dev` always exports LANGSMITH_LANGGRAPH_API_VARIANT=local_dev,
   // but it only reaches run metadata when a LangSmith key enabled tracing.

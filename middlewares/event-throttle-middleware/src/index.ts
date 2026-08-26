@@ -83,13 +83,28 @@ function mergeChunkMetadata(
   return { ...previous, ...next };
 }
 
-/** Return the coalescence key for a chunk event, or null if not coalescable. */
+/**
+ * Return the coalescence key for a chunk event, or null if not coalescable.
+ *
+ * Chunks are only merged within one subagent lane: coalescing across owners
+ * would erase the ownership contradiction the client verifier exists to
+ * reject (same entity id, two owners) and silently merge their metadata. An
+ * untagged continuation therefore does not coalesce into its tagged opener —
+ * it still coalesces with its untagged neighbours, and the chunk transform
+ * resolves its owner from the opener downstream.
+ *
+ * The key is JSON-encoded rather than delimiter-joined: owner and entity ids
+ * are unconstrained strings, so any separator could occur inside either
+ * component and alias two distinct (owner, id) pairs onto one key. JSON also
+ * keeps absent attribution (null) distinct from an explicit empty-string id.
+ */
 function chunkKey(
   event: BaseEvent,
 ): string | null {
-  if (isTextChunk(event)) return event.messageId ? `text:${event.messageId}` : null;
-  if (isToolCallChunk(event)) return event.toolCallId ? `tool:${event.toolCallId}` : null;
-  if (isReasoningChunk(event)) return event.messageId ? `reasoning:${event.messageId}` : null;
+  const owner = (event as { subagentRunId?: string }).subagentRunId ?? null;
+  if (isTextChunk(event)) return event.messageId ? JSON.stringify(["text", owner, event.messageId]) : null;
+  if (isToolCallChunk(event)) return event.toolCallId ? JSON.stringify(["tool", owner, event.toolCallId]) : null;
+  if (isReasoningChunk(event)) return event.messageId ? JSON.stringify(["reasoning", owner, event.messageId]) : null;
   return null;
 }
 

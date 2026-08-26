@@ -36,7 +36,7 @@ import { randomUUID } from "@ag-ui/client";
 import jsonpatch from "fast-json-patch";
 import { parsePartialJson } from "@ai-sdk/ui-utils";
 import { Observable } from "rxjs";
-import type { MastraClient } from "@mastra/client-js";
+import { MastraClient } from "@mastra/client-js";
 import {
   convertAGUIMessagesToMastra,
   GetLocalAgentsOptions,
@@ -582,6 +582,20 @@ export class MastraAgent extends AbstractAgent {
   useProcessedFinalText: boolean;
 
   /**
+   * Abort controllers for the currently in-flight runs — one per active
+   * subscription, so overlapping subscriptions on the same MastraAgent each
+   * get their own cancellation channel and none can orphan another's.
+   *
+   * Each controller is created in {@link run}, forwarded into Mastra as
+   * `abortSignal` for LOCAL agents (see {@link streamMastraAgent}), used to
+   * short-circuit the chunk-consumption loops for both local and remote, and
+   * fired from that subscription's Observable teardown so unsubscribing
+   * actually stops generation instead of billing the run to completion.
+   * {@link abortRun} fires all of them.
+   */
+  private readonly abortControllers = new Set<AbortController>();
+
+  /**
    * Suffix appended to a turn's base (Mastra-stored) messageId to key the
    * SEPARATE AG-UI message that carries assistant text streamed AFTER a tool
    * call in the same turn. See {@link continuationMessageId} and the ordering
@@ -663,9 +677,15 @@ export class MastraAgent extends AbstractAgent {
     const pendingInterrupts: Interrupt[] = [];
 
     return new Observable<BaseEvent>((subscriber) => {
-      // A failed run must still terminate the AG-UI stream: emit RUN_ERROR as
-      // the terminal event (mirrors LangGraph / AWS Strands) BEFORE surfacing
-      // the failure on the rxjs error channel, which callers already depend on.
+      /*
+       * A failed run still has to terminate the AG-UI stream.
+       *
+       * RUN_ERROR is the terminal event, mirroring LangGraph and AWS Strands, and it goes out
+       * before the failure is surfaced on the rxjs error channel that callers already depend on.
+       * Cancellation is deliberately not routed through here: an aborted run is settled by the
+       * abort listener, and reporting it as a run error would tell the caller their own stop was
+       * a failure.
+       */
       const failRun = (error: unknown) => {
         if (subscriber.closed) return;
         subscriber.next({
@@ -675,8 +695,75 @@ export class MastraAgent extends AbstractAgent {
               ? error.message
               : String(error ?? "Unknown error"),
         } as RunErrorEvent);
-        subscriber.error(error);
+        /*
+         * Yield before erroring, so RUN_ERROR is actually delivered.
+         *
+         * The client applies events through `concatMap(async …)`, and an rxjs error notification
+         * does not queue behind that — it propagates immediately and discards the async work still
+         * in flight. Erroring in the same tick as the `next` above therefore destroys the terminal
+         * event on its way through the pipeline: a caller on `runAgent` sees the run fail with no
+         * RUN_ERROR, while a test subscribing to `run()` directly sees both and looks fine.
+         *
+         * A macrotask rather than a microtask, because the subscriber callbacks the pipeline awaits
+         * settle across several microtasks and a single `queueMicrotask` can still land first.
+         */
+        setTimeout(() => {
+          if (subscriber.closed) return;
+          subscriber.error(error);
+        }, 0);
       };
+
+      // Cancellation channel for THIS subscription. The teardown below fires it
+      // so unsubscribing (or abortRun()) propagates into the Mastra stream.
+      const abortController = new AbortController();
+      this.abortControllers.add(abortController);
+
+
+      // Settle the Observable on cancellation. abortRun() has no subscription
+      // to close, and the consumption loops only notice the signal when the
+      // producer yields again — a gated or already-drained stream never does,
+      // which would leave the run open forever. Completing (rather than
+      // emitting RUN_FINISHED) is deliberate: the cancelled path skips flush(),
+      // so a text message may still be open and RUN_FINISHED would trip the
+      // AG-UI verifier's unfinished-message rule. Suppressing the trailing
+      // RUN_FINISHED on a cancelled run is tracked in #2417.
+      //
+      // On unsubscribe and on normal completion the subscriber is already
+      // closed, so this is a no-op there.
+      abortController.signal.addEventListener(
+        "abort",
+        () => {
+          if (subscriber.closed) return;
+          subscriber.complete();
+        },
+        { once: true },
+      );
+
+      // A caller-supplied `ClientOptions.abortSignal` (an outer request
+      // disconnect or timeout) has to cancel this run too. Chaining it into the
+      // run's controller keeps ONE cancellation channel, so both sources take
+      // the identical path: the per-run client stops the producer, the listener
+      // above settles the Observable, and neither onError nor RUN_FINISHED
+      // fires. Cloning the caller's signal into the per-run client instead
+      // would leave the two unlinked, and the outer one would abort a fetch
+      // nothing here was watching.
+      //
+      // Registered after the settle listener so an ALREADY-aborted caller
+      // signal still completes the subscriber rather than aborting into a
+      // listener that does not exist yet.
+      //
+      // The chain listener is scoped to this run's own signal, so it is removed
+      // when the run ends: a long-lived caller signal does not accumulate one
+      // listener per run.
+      const callerSignal = this.remoteClient?.options?.abortSignal;
+      if (callerSignal?.aborted) {
+        abortController.abort();
+      } else if (callerSignal) {
+        callerSignal.addEventListener("abort", () => abortController.abort(), {
+          once: true,
+          signal: abortController.signal,
+        });
+      }
 
       const run = async () => {
         const runStartedEvent: RunStartedEvent = {
@@ -784,6 +871,15 @@ export class MastraAgent extends AbstractAgent {
             },
             requestContext: resumeRequestContext,
           };
+          if (this.isLocalMastraAgent(this.agent)) {
+            // LOCAL ONLY (#2288). @mastra/client-js excludes `abortSignal`
+            // from its stream params (StreamParamsBase Omits it) and takes the
+            // fetch signal from construction-time ClientOptions.abortSignal,
+            // so a per-call signal would just be JSON-serialized into the POST
+            // body as `{}`. The remote resume below carries this run's signal
+            // on a per-run client instead — see remoteAgentForRun.
+            resumeOptions.abortSignal = abortController.signal;
+          }
           if (this.tracingOptions) {
             resumeOptions.tracingOptions = this.tracingOptions;
           }
@@ -847,7 +943,7 @@ export class MastraAgent extends AbstractAgent {
                 return;
               }
 
-              const hadError = await this.processFullStream(
+              const outcome = await this.processFullStream(
                 response.fullStream,
                 {
                   ...callbacks,
@@ -855,9 +951,12 @@ export class MastraAgent extends AbstractAgent {
                     failRun(error);
                   },
                 },
+                abortController.signal,
               );
 
-              if (!hadError) {
+              // Cancelled resumes are settled by the abort listener in run();
+              // errors have already gone out through onError.
+              if (outcome === "completed") {
                 await finishResume(
                   await this.resolveTraceId(response),
                   await this.resolveUsage(response),
@@ -869,8 +968,10 @@ export class MastraAgent extends AbstractAgent {
               // a processDataStream response (callback-based), so we drive it
               // through the same createChunkProcessor used by the remote
               // .stream() path — single source of truth for chunk handling.
-              const remoteAgent = this
-                .agent as unknown as Partial<RemoteResumableAgent>;
+              // Per-run client so this run's signal reaches the fetch (#2288).
+              const remoteAgent = this.remoteAgentForRun(
+                abortController.signal,
+              ) as unknown as Partial<RemoteResumableAgent>;
               if (typeof remoteAgent.resumeStream !== "function") {
                 failRun(
                   new Error(
@@ -908,6 +1009,11 @@ export class MastraAgent extends AbstractAgent {
               await response.processDataStream({
                 onChunk: async (chunk: any) => {
                   if (stopped) return;
+                  // Cancelled mid-resume: stop consuming (#2288).
+                  if (abortController.signal.aborted) {
+                    stopped = true;
+                    return;
+                  }
                   if (handleChunk(chunk)) stopped = true;
                 },
               });
@@ -921,6 +1027,9 @@ export class MastraAgent extends AbstractAgent {
               }
             }
           } catch (error) {
+            // Aborting the fetch rejects here. That is a cancellation, not a
+            // failure: the run is settled by the abort listener above.
+            if (abortController.signal.aborted) return;
             failRun(error);
           }
           return;
@@ -949,25 +1058,32 @@ export class MastraAgent extends AbstractAgent {
             pendingInterrupts,
           );
 
-          await this.streamMastraAgent(input, {
-            ...streamCallbacks,
-            onError: (error) => {
-              failRun(error);
-            },
-            onRunFinished: async (traceId, usage) => {
-              await this.emitWorkingMemorySnapshot(subscriber, input.threadId);
-              subscriber.next(
-                this.makeRunFinishedEvent(
+          await this.streamMastraAgent(
+            input,
+            {
+              ...streamCallbacks,
+              onError: (error) => {
+                failRun(error);
+              },
+              onRunFinished: async (traceId, usage) => {
+                await this.emitWorkingMemorySnapshot(
+                  subscriber,
                   input.threadId,
-                  input.runId,
-                  pendingInterrupts,
-                  traceId,
-                  usage,
-                ),
-              );
-              subscriber.complete();
+                );
+                subscriber.next(
+                  this.makeRunFinishedEvent(
+                    input.threadId,
+                    input.runId,
+                    pendingInterrupts,
+                    traceId,
+                    usage,
+                  ),
+                );
+                subscriber.complete();
+              },
             },
-          });
+            abortController.signal,
+          );
         } catch (error) {
           failRun(error);
         }
@@ -977,14 +1093,78 @@ export class MastraAgent extends AbstractAgent {
         failRun(err);
       });
 
-      return () => {};
+      // Teardown runs on unsubscribe AND on normal completion (RxJS closes the
+      // subscription either way), so it is the single place this run's
+      // controller is retired. Aborting an already-finished stream is a no-op,
+      // so this is safe on the completion path too.
+      return () => {
+        this.abortControllers.delete(abortController);
+        abortController.abort();
+      };
     });
+  }
+
+  /**
+   * Cancels every in-flight run on this agent, stopping generation at the
+   * Mastra side. Mirrors the teardown path so a programmatic abort and an
+   * unsubscribe behave identically.
+   */
+  public override abortRun(): void {
+    for (const controller of this.abortControllers) {
+      controller.abort();
+    }
+    this.abortControllers.clear();
+    super.abortRun();
   }
 
   isLocalMastraAgent(
     agent: LocalMastraAgent | RemoteMastraAgent,
   ): agent is LocalMastraAgent {
     return "getMemory" in agent;
+  }
+
+  /**
+   * The remote agent handle to use for a single run.
+   *
+   * `@mastra/client-js` takes the fetch signal from construction-time
+   * `ClientOptions.abortSignal` — its stream params Omit `abortSignal`, so a
+   * per-call signal is only JSON-serialized into the POST body and never
+   * reaches the wire. Cloning the client with this run's signal is what makes
+   * cancellation abort the underlying fetch and stop the server-side run,
+   * instead of only silencing our own consumption loop (#2288). The client also
+   * watches the signal to tear down `processDataStream`.
+   *
+   * Returns the shared handle unchanged when there is no signal, no agent id,
+   * or nothing cloneable to clone from — a `remoteClient` without real
+   * `ClientOptions` (a stand-in, or an agent wired up by hand rather than
+   * through `getRemoteAgents`) cannot produce a working per-run client, and the
+   * caller-supplied handle is the one that must keep being used. Remote
+   * cancellation stays best-effort in those cases rather than failing the run.
+   *
+   * `abortSignal` replaces any `ClientOptions.abortSignal` on the clone, which
+   * is safe because `run` chains a caller-supplied one into this run's
+   * controller: the signal passed here already fires whenever the caller's
+   * does, so the outer disconnect or timeout keeps being honoured.
+   */
+  private remoteAgentForRun(abortSignal?: AbortSignal): RemoteMastraAgent {
+    const shared = this.agent as RemoteMastraAgent;
+    const client = this.remoteClient;
+    if (!abortSignal || !this.agentId) return shared;
+    if (!client?.options?.baseUrl || typeof client.getAgent !== "function") {
+      return shared;
+    }
+    try {
+      return new MastraClient({ ...client.options, abortSignal }).getAgent(
+        this.agentId,
+      );
+    } catch (error) {
+      console.warn(
+        "[MastraAgent] Failed to bind the run's abort signal to a per-run client; " +
+          "falling back to the shared client (remote cancellation stays local-only):",
+        error,
+      );
+      return shared;
+    }
   }
 
   /**
@@ -2343,6 +2523,22 @@ export class MastraAgent extends AbstractAgent {
           ]);
           break;
         }
+        case "abort": {
+          // @mastra/core emits a first-class `abort` chunk (payload `{}`) when
+          // a run is cancelled via abortSignal, and closes the stream straight
+          // after. Recognized here purely so a cancelled run stops tripping the
+          // unknown-chunk warning below.
+          //
+          // `break` rather than a short-circuit: the caller distinguishes the
+          // outcomes, and this chunk alone does not say which one applies. When
+          // the run's own signal fired, the loop's cancellation check returns
+          // "cancelled" on the next turn and the abort listener in run()
+          // settles the Observable, with no flush and no RUN_FINISHED. When the
+          // abort came from Mastra's side with our signal untouched, the stream
+          // simply ends and the normal flush + RUN_FINISHED path runs, which is
+          // the case #2417 still covers.
+          break;
+        }
         default: {
           warnOnce(chunk.type, "Unrecognized stream chunk type");
           break;
@@ -2356,24 +2552,35 @@ export class MastraAgent extends AbstractAgent {
 
   /**
    * Processes a Mastra fullStream (async iterable) using createChunkProcessor.
-   * @returns true if processing stopped early (error chunk or malformed chunk).
+   *
+   * @returns `"completed"` when the stream ended on its own (the only outcome
+   * that should emit RUN_FINISHED), `"cancelled"` when the run's signal fired
+   * mid-stream, or `"error"` on an error or malformed chunk (already reported
+   * through onError).
    */
   private async processFullStream(
     stream: AsyncIterable<any>,
     callbacks: MastraAgentStreamOptions,
+    abortSignal: AbortSignal,
     clientToolNames: Set<string> = new Set(),
     initialState: Record<string, any> = {},
-  ): Promise<boolean> {
+  ): Promise<"completed" | "cancelled" | "error"> {
     const { handleChunk, flush } = this.createChunkProcessor(
       callbacks,
       clientToolNames,
       initialState,
     );
     for await (const chunk of stream) {
-      if (handleChunk(chunk)) return true;
+      // Cancelled (unsubscribe or abortRun): stop pulling from the source
+      // instead of draining it to completion (#2288). Reported distinctly from
+      // an error so the caller can tell "stopped on purpose" from "failed" —
+      // neither emits RUN_FINISHED, but only the error path has already
+      // reported itself through onError.
+      if (abortSignal.aborted) return "cancelled";
+      if (handleChunk(chunk)) return "error";
     }
     flush();
-    return false;
+    return "completed";
   }
 
   /**
@@ -2670,6 +2877,7 @@ export class MastraAgent extends AbstractAgent {
       onError,
       onRunFinished,
     }: MastraAgentStreamOptions,
+    abortSignal: AbortSignal,
   ): Promise<void> {
     const clientTools = tools.reduce(
       (acc, tool) => {
@@ -2768,6 +2976,9 @@ export class MastraAgent extends AbstractAgent {
           clientTools,
           requestContext,
           ...(a2uiToolsets ? { toolsets: a2uiToolsets } : {}),
+          // Cancellation from the run() Observable teardown (#2288). Honoured
+          // by @mastra/core, which stops generation and emits an `abort` chunk.
+          abortSignal,
         };
         // Pipe the background-task lifecycle into this run's fullStream (and
         // re-enter the loop on completion) when opted in. Only meaningful for
@@ -2793,7 +3004,7 @@ export class MastraAgent extends AbstractAgent {
         );
 
         if (response && typeof response === "object") {
-          const hadError = await this.processFullStream(
+          const outcome = await this.processFullStream(
             response.fullStream,
             {
               onMessageId,
@@ -2813,11 +3024,14 @@ export class MastraAgent extends AbstractAgent {
               onStateDelta,
               onError,
             },
+            abortSignal,
             clientToolNames,
             initialState,
           );
 
-          if (!hadError) {
+          // Cancelled runs are settled by the abort listener in run(); errors
+          // have already gone out through onError.
+          if (outcome === "completed") {
             const traceId = await this.resolveTraceId(response);
             const usage = await this.resolveUsage(response);
             await onRunFinished?.(traceId, usage);
@@ -2826,6 +3040,9 @@ export class MastraAgent extends AbstractAgent {
           throw new Error("Invalid response from local agent");
         }
       } catch (error) {
+        // A cancelled run can surface as a rejection (an aborted stream), which
+        // is not a failure to report.
+        if (abortSignal?.aborted) return;
         onError(error as Error);
       }
     } else {
@@ -2839,6 +3056,11 @@ export class MastraAgent extends AbstractAgent {
           runId,
           clientTools,
           requestContext,
+          // No `abortSignal` in the stream params: @mastra/client-js Omits it
+          // there and reads the fetch signal from construction-time
+          // `ClientOptions.abortSignal`, so a per-call signal would only be
+          // JSON-serialized into the POST body as `{}`. This run's signal is
+          // bound to a per-run client instead — see remoteAgentForRun (#2288).
         };
         if (this.tracingOptions) {
           streamOptions.tracingOptions = this.tracingOptions;
@@ -2851,7 +3073,8 @@ export class MastraAgent extends AbstractAgent {
             headers: this.headers,
           };
         }
-        const response = await this.agent.stream(
+        // Per-run client so this run's signal reaches the fetch (#2288).
+        const response = await this.remoteAgentForRun(abortSignal).stream(
           convertedMessages,
           streamOptions,
         );
@@ -2885,11 +3108,18 @@ export class MastraAgent extends AbstractAgent {
           await response.processDataStream({
             onChunk: async (chunk: any) => {
               if (stopped) return;
+              // Cancelled (unsubscribe or abortRun): stop consuming (#2288).
+              // The per-run client also aborts the underlying fetch, so the
+              // server stops producing rather than just going unread.
+              if (abortSignal.aborted) {
+                stopped = true;
+                return;
+              }
               if (handleChunk(chunk)) stopped = true;
             },
           });
-          if (!stopped) flush();
           if (!stopped) {
+            flush();
             const traceId = await this.resolveTraceId(response);
             const usage = await this.resolveUsage(response);
             await onRunFinished?.(traceId, usage);
@@ -2898,6 +3128,9 @@ export class MastraAgent extends AbstractAgent {
           throw new Error("Invalid response from remote agent");
         }
       } catch (error) {
+        // Aborting the fetch rejects here. That is a cancellation, not a
+        // failure: the run is settled by the abort listener in run().
+        if (abortSignal.aborted) return;
         if (!stopped) onError(error as Error);
       }
     }

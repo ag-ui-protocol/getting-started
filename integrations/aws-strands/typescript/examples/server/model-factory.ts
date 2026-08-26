@@ -79,6 +79,14 @@ export async function createModel(
     return new AnthropicModel({
       apiKey,
       modelId: process.env.MODEL_ID ?? "claude-sonnet-4-6",
+      // Anthropic emits no thinking blocks unless extended thinking is
+      // requested, so without this the reasoning demo silently degrades to a
+      // plain answer on MODEL_PROVIDER=anthropic.
+      ...(reasoning
+        ? {
+            params: { thinking: { type: "enabled", budget_tokens: 2000 } },
+          }
+        : {}),
     });
   }
 

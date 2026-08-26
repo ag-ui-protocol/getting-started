@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using AGUI.Abstractions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.AI;
@@ -41,5 +42,79 @@ public sealed class RunLifecycleIntegrationTest : IntegrationTestBase
                 var finished = Assert.IsType<RunFinishedEvent>(u.RawRepresentation);
                 Assert.Equal(u.ResponseId, finished.RunId);
             });
+    }
+
+    [Theory]
+    [InlineData(TransportFormat.Json, false, false)]
+    [InlineData(TransportFormat.Json, false, true)]
+    [InlineData(TransportFormat.Json, true, false)]
+    [InlineData(TransportFormat.Json, true, true)]
+    [InlineData(TransportFormat.Protobuf, false, false)]
+    [InlineData(TransportFormat.Protobuf, false, true)]
+    [InlineData(TransportFormat.Protobuf, true, false)]
+    [InlineData(TransportFormat.Protobuf, true, true)]
+    public async Task PostRun_StreamThrowsAfterUpdate_EmitsSanitizedRunErrorWithoutRunFinished(
+        TransportFormat format,
+        bool yieldThread,
+        bool providerCancellation)
+    {
+        var client = CreateClient(
+            (messages, options, ct) => EmitUpdateThenThrow(yieldThread, providerCancellation, ct),
+            format);
+
+        var updates = await CollectUpdates(client, [new ChatMessage(ChatRole.User, "Hi")]);
+
+        Assert.Collection(updates,
+            u => Assert.IsType<RunStartedEvent>(u.RawRepresentation),
+            u =>
+            {
+                Assert.Equal("partial", u.Text);
+                Assert.IsType<TextMessageContentEvent>(u.RawRepresentation);
+            },
+            u =>
+            {
+                var content = Assert.IsType<ErrorContent>(Assert.Single(u.Contents));
+                Assert.Equal("StreamingError", content.ErrorCode);
+                Assert.Equal("An error occurred while streaming the agent response.", content.Message);
+                var error = Assert.IsType<RunErrorEvent>(u.RawRepresentation);
+                var usage = Assert.Single(error.Usage!);
+                Assert.Equal("test-model", usage.Model);
+                Assert.Equal(7, usage.InputTokens);
+            },
+            u =>
+            {
+                var usage = Assert.IsType<UsageContent>(Assert.Single(u.Contents));
+                Assert.Equal("test-model", u.ModelId);
+                Assert.Equal(7, usage.Details.InputTokenCount);
+                Assert.IsType<RunErrorEvent>(u.RawRepresentation);
+            });
+        var aggregatedUsage = updates.ToChatResponse().Usage;
+        Assert.NotNull(aggregatedUsage);
+        Assert.Equal(7, aggregatedUsage.InputTokenCount);
+        Assert.DoesNotContain(updates, u => u.RawRepresentation is RunFinishedEvent);
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> EmitUpdateThenThrow(
+        bool yieldThread,
+        bool providerCancellation,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        yield return new ChatResponseUpdate(ChatRole.Assistant, "partial");
+        yield return new ChatResponseUpdate
+        {
+            ModelId = "test-model",
+            Contents = [new UsageContent(new UsageDetails { InputTokenCount = 7 })]
+        };
+        if (yieldThread)
+        {
+            await Task.Yield();
+        }
+
+        if (providerCancellation)
+        {
+            throw new OperationCanceledException("provider timeout");
+        }
+
+        throw new InvalidOperationException("sensitive provider failure details");
     }
 }

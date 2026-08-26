@@ -3,7 +3,11 @@
   "stream": [
     {
       "name": "run_started_without_parent_run_id_or_input",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "parentRunId and input are both optional and unset.",
       "input": {
         "type": "RUN_STARTED",
@@ -18,7 +22,11 @@
     },
     {
       "name": "run_started_with_fully_populated_input",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "RunAgentInput's own optional fields (parentRunId, resume) drop out too.",
       "input": {
         "type": "RUN_STARTED",
@@ -71,7 +79,11 @@
     },
     {
       "name": "run_started_input_with_bare_null_state_converges_on_omission",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "The state contract: optional, absent means no state, and a bare null reads as absent. All three SDKs re-emit it as omission \u2014 the one spelling every representation shares. Contrast with state_snapshot_that_is_entirely_null_stays_null: STATE_SNAPSHOT.snapshot is required, so its null is a value.",
       "input": {
         "type": "RUN_STARTED",
@@ -103,7 +115,11 @@
     },
     {
       "name": "step_started",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "Baseline: timestamp and rawEvent are optional on every event and unset here.",
       "input": {
         "type": "STEP_STARTED",
@@ -116,7 +132,11 @@
     },
     {
       "name": "text_message_start_without_name",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "input": {
         "type": "TEXT_MESSAGE_START",
         "messageId": "msg_1",
@@ -130,7 +150,11 @@
     },
     {
       "name": "text_message_content",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "input": {
         "type": "TEXT_MESSAGE_CONTENT",
         "messageId": "msg_1",
@@ -144,7 +168,11 @@
     },
     {
       "name": "text_message_end",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "input": {
         "type": "TEXT_MESSAGE_END",
         "messageId": "msg_1"
@@ -156,7 +184,10 @@
     },
     {
       "name": "text_message_chunk_with_nothing_set",
-      "producedBy": ["typescript", "python"],
+      "producedBy": [
+        "typescript",
+        "python"
+      ],
       "note": "Every field is optional. .NET does not implement the chunk events.",
       "input": {
         "type": "TEXT_MESSAGE_CHUNK"
@@ -167,7 +198,11 @@
     },
     {
       "name": "tool_call_start_without_parent_message_id",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "The original break: a .NET adapter emitted parentMessageId as null and TypeScript clients aborted on the first tool call.",
       "input": {
         "type": "TOOL_CALL_START",
@@ -182,7 +217,11 @@
     },
     {
       "name": "tool_call_args",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "input": {
         "type": "TOOL_CALL_ARGS",
         "toolCallId": "tc_1",
@@ -196,7 +235,11 @@
     },
     {
       "name": "tool_call_end",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "input": {
         "type": "TOOL_CALL_END",
         "toolCallId": "tc_1"
@@ -208,7 +251,10 @@
     },
     {
       "name": "tool_call_chunk_without_parent_message_id",
-      "producedBy": ["typescript", "python"],
+      "producedBy": [
+        "typescript",
+        "python"
+      ],
       "note": "Second tolerance patch site. .NET does not implement the chunk events.",
       "input": {
         "type": "TOOL_CALL_CHUNK",
@@ -223,7 +269,11 @@
     },
     {
       "name": "tool_call_result_without_role",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "input": {
         "type": "TOOL_CALL_RESULT",
         "messageId": "msg_2",
@@ -239,13 +289,20 @@
     },
     {
       "name": "state_snapshot_keeps_nulls_inside_the_snapshot",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "A null inside the state payload is a value, not an absent field, and must survive.",
       "input": {
         "type": "STATE_SNAPSHOT",
         "snapshot": {
           "selectedId": null,
-          "items": [null, 1],
+          "items": [
+            null,
+            1
+          ],
           "nested": {
             "cursor": null
           }
@@ -255,7 +312,10 @@
         "type": "STATE_SNAPSHOT",
         "snapshot": {
           "selectedId": null,
-          "items": [null, 1],
+          "items": [
+            null,
+            1
+          ],
           "nested": {
             "cursor": null
           }
@@ -264,7 +324,11 @@
     },
     {
       "name": "state_snapshot_that_is_entirely_null_stays_null",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "snapshot is required by the contract, so a null snapshot is a value the producer is asserting, not an absent field. Omitting it would drop a required key. Distinct from the omission cases above, and the reason the rule keys off optionality rather than off the value being null.",
       "input": {
         "type": "STATE_SNAPSHOT",
@@ -277,7 +341,11 @@
     },
     {
       "name": "raw_event_payload_that_is_entirely_null_stays_null",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "Same point for RAW.event, which is also required.",
       "input": {
         "type": "RAW",
@@ -290,7 +358,11 @@
     },
     {
       "name": "state_delta_keeps_a_null_patch_value",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "RFC 6902 replace-with-null is how a field gets cleared; dropping it would change the patch.",
       "input": {
         "type": "STATE_DELTA",
@@ -315,7 +387,11 @@
     },
     {
       "name": "messages_snapshot_with_sparse_messages",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "Each message leaves its unset optional fields out: name, encryptedValue, toolCalls, error.",
       "input": {
         "type": "MESSAGES_SNAPSHOT",
@@ -382,7 +458,11 @@
     },
     {
       "name": "assistant_message_tool_call_without_encrypted_value",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "Reaches one level deeper: ToolCall.encryptedValue is optional and unset.",
       "input": {
         "type": "MESSAGES_SNAPSHOT",
@@ -425,7 +505,11 @@
     },
     {
       "name": "activity_snapshot_with_replace_set",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "replace is stated explicitly: the SDKs disagree on whether an absent replace defaults to true on the wire, which is a separate question from null omission.",
       "input": {
         "type": "ACTIVITY_SNAPSHOT",
@@ -450,7 +534,11 @@
     },
     {
       "name": "activity_delta",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "input": {
         "type": "ACTIVITY_DELTA",
         "messageId": "msg_6",
@@ -478,7 +566,11 @@
     },
     {
       "name": "reasoning_message_chunk_with_nothing_set",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "Both fields are optional; nothing may be written for them.",
       "input": {
         "type": "REASONING_MESSAGE_CHUNK"
@@ -489,7 +581,11 @@
     },
     {
       "name": "raw_event_without_source",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "A null nested inside the opaque raw payload survives; the absent source does not appear.",
       "input": {
         "type": "RAW",
@@ -508,7 +604,11 @@
     },
     {
       "name": "custom_event_with_nulls_inside_the_value",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "input": {
         "type": "CUSTOM",
         "name": "ping",
@@ -526,7 +626,11 @@
     },
     {
       "name": "run_error_without_code",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "input": {
         "type": "RUN_ERROR",
         "message": "upstream timed out"
@@ -538,7 +642,11 @@
     },
     {
       "name": "run_finished_without_result_or_outcome",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "Third tolerance patch site: the Python SDK used to serialize this as outcome: null.",
       "input": {
         "type": "RUN_FINISHED",
@@ -553,7 +661,11 @@
     },
     {
       "name": "run_finished_with_success_outcome",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "input": {
         "type": "RUN_FINISHED",
         "threadId": "thread_1",
@@ -573,7 +685,11 @@
     },
     {
       "name": "run_finished_with_sparse_interrupt_and_a_null_metadata_value",
-      "producedBy": ["typescript", "python", "dotnet"],
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
       "note": "The interrupt leaves message, toolCallId, responseSchema and expiresAt out, while the null it carries inside metadata stays.",
       "input": {
         "type": "RUN_FINISHED",
@@ -605,6 +721,158 @@
               "metadata": {
                 "traceId": null
               }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "subagent_started_without_optional_parents",
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
+      "note": "description and all three parent links are optional and unset. The subagent surface postdates the omission fix, so unlike the three legacy tolerances nothing may write null here.",
+      "input": {
+        "type": "SUBAGENT_STARTED",
+        "subagentRunId": "sub_1",
+        "name": "researcher"
+      },
+      "expected": {
+        "type": "SUBAGENT_STARTED",
+        "subagentRunId": "sub_1",
+        "name": "researcher"
+      }
+    },
+    {
+      "name": "subagent_started_fully_populated",
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
+      "note": "Control: values that ARE set all survive.",
+      "input": {
+        "type": "SUBAGENT_STARTED",
+        "subagentRunId": "sub_1",
+        "name": "researcher",
+        "description": "digs",
+        "parentSubagentRunId": "sub_0",
+        "parentToolCallId": "call_1",
+        "parentMessageId": "msg_1"
+      },
+      "expected": {
+        "type": "SUBAGENT_STARTED",
+        "subagentRunId": "sub_1",
+        "name": "researcher",
+        "description": "digs",
+        "parentSubagentRunId": "sub_0",
+        "parentToolCallId": "call_1",
+        "parentMessageId": "msg_1"
+      }
+    },
+    {
+      "name": "subagent_finished_without_result_or_outcome",
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
+      "note": "Omitted outcome is the legacy success spelling; it must stay omitted, never null.",
+      "input": {
+        "type": "SUBAGENT_FINISHED",
+        "subagentRunId": "sub_1"
+      },
+      "expected": {
+        "type": "SUBAGENT_FINISHED",
+        "subagentRunId": "sub_1"
+      }
+    },
+    {
+      "name": "subagent_finished_suspended_without_interrupt_ids",
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
+      "note": "interruptIds is optional inside the suspended variant.",
+      "input": {
+        "type": "SUBAGENT_FINISHED",
+        "subagentRunId": "sub_1",
+        "outcome": {
+          "type": "suspended"
+        }
+      },
+      "expected": {
+        "type": "SUBAGENT_FINISHED",
+        "subagentRunId": "sub_1",
+        "outcome": {
+          "type": "suspended"
+        }
+      }
+    },
+    {
+      "name": "subagent_error_without_code",
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
+      "note": "code is optional and unset.",
+      "input": {
+        "type": "SUBAGENT_ERROR",
+        "subagentRunId": "sub_1",
+        "message": "boom"
+      },
+      "expected": {
+        "type": "SUBAGENT_ERROR",
+        "subagentRunId": "sub_1",
+        "message": "boom"
+      }
+    },
+    {
+      "name": "run_finished_interrupts_with_mixed_subagent_attribution",
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
+      "note": "Interrupt.subagentRunId set on one interrupt and unset on the other: the set one survives, the unset one is omitted rather than null.",
+      "input": {
+        "type": "RUN_FINISHED",
+        "threadId": "thread_1",
+        "runId": "run_1",
+        "outcome": {
+          "type": "interrupt",
+          "interrupts": [
+            {
+              "id": "int_1",
+              "reason": "approval",
+              "subagentRunId": "sub_1"
+            },
+            {
+              "id": "int_2",
+              "reason": "approval"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "type": "RUN_FINISHED",
+        "threadId": "thread_1",
+        "runId": "run_1",
+        "outcome": {
+          "type": "interrupt",
+          "interrupts": [
+            {
+              "id": "int_1",
+              "reason": "approval",
+              "subagentRunId": "sub_1"
+            },
+            {
+              "id": "int_2",
+              "reason": "approval"
             }
           ]
         }

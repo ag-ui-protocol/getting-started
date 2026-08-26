@@ -346,6 +346,49 @@ describe("error handling", () => {
     expect(error.message).toBe("Something went wrong");
   });
 
+  /*
+   * The public entry point, not `run()` directly.
+   *
+   * `runAgent` applies events through `concatMap(async …)` in the client, and an rxjs error
+   * notification does not queue behind that: it propagates at once and discards whatever async
+   * work is still in flight. Erroring the observable in the same tick as RUN_ERROR therefore
+   * deletes the terminal event on its way through, so a caller subscribing at the primary API
+   * sees the run fail with no RUN_ERROR at all. Tests that drive `run()` and collect from the
+   * raw observable cannot see this, which is why it survived.
+   */
+  it("delivers RUN_ERROR to a runAgent subscriber, and still rejects", async () => {
+    const fakeAgent = new FakeLocalAgent({ streamChunks: [] });
+    fakeAgent.stream = async () => {
+      throw new Error("Agent connection failed");
+    };
+
+    const agent = new MastraAgent({
+      agentId: "test-agent",
+      agent: fakeAgent as any,
+      resourceId: "resource-1",
+    });
+
+    const seen: string[] = [];
+    let runErrorMessage: string | undefined;
+
+    await expect(
+      agent.runAgent(
+        { runId: "run-1" },
+        {
+          onEvent: ({ event }) => {
+            seen.push(event.type);
+          },
+          onRunErrorEvent: ({ event }) => {
+            runErrorMessage = (event as any).message;
+          },
+        },
+      ),
+    ).rejects.toThrow("Agent connection failed");
+
+    expect(seen).toContain(EventType.RUN_ERROR);
+    expect(runErrorMessage).toBe("Agent connection failed");
+  });
+
   it("emits a terminal RUN_ERROR when local agent stream() throws", async () => {
     const fakeAgent = new FakeLocalAgent({ streamChunks: [] });
     fakeAgent.stream = async () => {

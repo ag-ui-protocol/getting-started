@@ -21,7 +21,9 @@ import asyncio
 import copy
 
 import pytest
-from ag_ui.core import EventType, RunAgentInput, Tool, ToolMessage, UserMessage
+from ag_ui.core import Context, EventType, RunAgentInput, Tool, ToolMessage, UserMessage
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from strands import Agent
 from strands.models.model import Model
 from strands.session.file_session_manager import FileSessionManager
@@ -30,7 +32,9 @@ from strands.tools.tools import PythonAgentTool
 from ag_ui_strands.agent import StrandsAgent
 from ag_ui_strands.client_proxy_tool import PROXY_RESULT_PLACEHOLDER
 from ag_ui_strands.config import StrandsAgentConfig, ToolBehavior
+from ag_ui_strands.endpoint import add_strands_fastapi_endpoint
 from ag_ui_strands.session_reconcile import AG_UI_WIRE_MAP_STATE_KEY
+from tests.endpoint_helpers import sse_payloads
 
 # Ceiling on model invocations. The halt should stop the loop after ONE, so any
 # regression trips this and fails loudly instead of hanging the suite.
@@ -181,6 +185,25 @@ async def test_halt_emits_run_finished_when_the_model_would_never_stop():
     assert model.calls == 1
     assert any(e.type == EventType.RUN_FINISHED for e in events)
     assert not any(e.type == EventType.RUN_ERROR for e in events)
+
+
+def test_endpoint_halt_keeps_request_context_scoped_to_each_stream_step():
+    """The endpoint pulls each SSE event in a new task context."""
+    model = _ScriptedModel(follow_ups=None)
+    adapter = _build(model)
+    app = FastAPI()
+    add_strands_fastapi_endpoint(app, adapter, "/")
+    input_data = _run_input("t-endpoint-context")
+    input_data.context = [Context(description="account", value="premium")]
+
+    response = TestClient(app).post(
+        "/", json=input_data.model_dump(by_alias=True, mode="json")
+    )
+    payloads = sse_payloads(response.text)
+
+    assert response.status_code == 200
+    assert payloads[-1]["type"] == EventType.RUN_FINISHED
+    assert not any(payload["type"] == EventType.RUN_ERROR for payload in payloads)
 
 
 @pytest.mark.asyncio

@@ -83,6 +83,10 @@ message Message {
   // Extra information, open by key. See BaseEvent.metadata in events.proto for
   // why this is a Struct.
   google.protobuf.Struct metadata = 9;
+  // Which subagent produced this message, absent for the parent's own. Carried
+  // per-message rather than on MessagesSnapshotEvent, since one snapshot mixes
+  // the parent's messages with those of every subagent that ran.
+  optional string subagent_run_id = 10;
 }
 
 message Interrupt {
@@ -93,4 +97,7 @@ message Interrupt {
   optional google.protobuf.Value response_schema = 5;
   optional string expires_at = 6;
   optional google.protobuf.Value metadata = 7;
+  // The subagent whose work raised this interrupt; absent for a root-raised
+  // interrupt.
+  optional string subagent_run_id = 8;
 }

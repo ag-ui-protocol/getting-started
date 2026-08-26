@@ -26,12 +26,14 @@ constant drifts (importing the constant would hide the drift).
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from unittest.mock import MagicMock
 
 import pytest
 from ag_ui.core import Context, EventType, RunAgentInput, Tool, UserMessage
 from strands.tools.registry import ToolRegistry
+from strands.hooks.registry import HookRegistry
 
 from ag_ui_strands.a2ui_tool import (
     A2UI_STREAM_KEY,
@@ -45,12 +47,16 @@ from ag_ui_strands.a2ui_tool import (
 from ag_ui_strands.agent import StrandsAgent
 from ag_ui_strands.config import StrandsAgentConfig
 from tests.interrupt_state_stub import InterruptStateStub
+from tests.hook_helpers import invoke_after_model_call, invoke_before_model_call
 
 GENERATE_A2UI_TOOL_NAME = "generate_a2ui"
 RENDER_A2UI_TOOL_NAME = "render_a2ui"
 A2UI_SCHEMA_CONTEXT_DESCRIPTION = (
     "A2UI Component Schema — available components for generating UI surfaces. "
     "Use these component names and properties when creating A2UI operations."
+)
+A2UI_RENDER_GUIDE_DESCRIPTION = (
+    "A2UI render tool usage guide — how to call render_a2ui with valid arguments."
 )
 A2UI_OPS_KEY = "a2ui_operations"
 
@@ -476,8 +482,13 @@ def _build_agent(thread_id: str, stream_events: list, config=None) -> StrandsAge
     # mock, spuriously tripping the "no session_manager" interrupt guard.
     mock_inner._interrupt_state = InterruptStateStub()
     mock_inner.messages = []
+    mock_inner.hooks = HookRegistry()
+    mock_inner.model_messages = []
 
     async def _stream(_msg):
+        invoke_before_model_call(mock_inner.hooks, mock_inner)
+        mock_inner.model_messages.append(copy.deepcopy(mock_inner.messages))
+        invoke_after_model_call(mock_inner.hooks, mock_inner)
         for event in stream_events:
             yield event
 
@@ -539,6 +550,46 @@ async def test_auto_inject_registers_generate_and_drops_render_across_turns():
     # "Refresh" means a REBUILT tool carrying turn-2 glue — reusing the turn-1
     # object would resolve `intent:"update"` priors against stale history.
     assert registry.registry[GENERATE_A2UI_TOOL_NAME] is not tool_turn1
+
+
+@pytest.mark.asyncio
+async def test_auto_inject_hides_stale_render_tool_context_from_both_models():
+    """The outer and recovery models must not be told to call the dropped tool."""
+    agent = _build_agent("thread-1", [])
+    instance = agent._agents_by_thread["thread-1"]
+    inp = _msg_input(
+        forwarded_props={"injectA2UITool": True},
+        tools=[RENDER_TOOL_INPUT],
+        context=[
+            Context(description=A2UI_SCHEMA_CONTEXT_DESCRIPTION, value="raw catalog"),
+            Context(description=A2UI_RENDER_GUIDE_DESCRIPTION, value="call render_a2ui"),
+            Context(description="account", value="premium"),
+        ],
+    )
+
+    await _collect(agent, inp)
+
+    assert set(instance.tool_registry.registry) == {GENERATE_A2UI_TOOL_NAME}
+    assert instance.model_messages == [[
+        {
+            "role": "user",
+            "content": [
+                {
+                    "text": (
+                        "Context provided by the application:\n"
+                        "- account: premium"
+                    )
+                }
+            ],
+        },
+        {"role": "user", "content": [{"text": "hi"}]},
+    ]]
+    assert instance.messages == [
+        {"role": "user", "content": [{"text": "hi"}]}
+    ]
+    generate_tool = instance.tool_registry.registry[GENERATE_A2UI_TOOL_NAME]
+    recovery_context = generate_tool._glue["state"]["ag-ui"]["context"]
+    assert [entry.description for entry in recovery_context] == ["account"]
 
 
 @pytest.mark.asyncio

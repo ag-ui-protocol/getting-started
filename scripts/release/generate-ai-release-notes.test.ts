@@ -365,7 +365,7 @@ test(
       assert.equal(receivedUrl, "/v1/messages");
       assert.equal(receivedHeaders["x-api-key"], "sk-test-mock");
       assert.equal(receivedHeaders["anthropic-version"], "2023-06-01");
-      assert.equal(receivedBody.model, "claude-sonnet-4-20250514");
+      assert.equal(receivedBody.model, "claude-opus-4-8");
       assert.equal(receivedBody.max_tokens, 2048);
       assert.ok(Array.isArray(receivedBody.messages));
       assert.match(receivedBody.messages![0].content, /ag-ui/i);

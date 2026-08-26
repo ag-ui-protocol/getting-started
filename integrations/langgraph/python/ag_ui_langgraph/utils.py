@@ -709,60 +709,64 @@ def make_json_safe(value: Any, _seen: set[int] | None = None) -> Any:
     if isinstance(value, UUID):
         return str(value)
 
-    # --- 3. Dicts ----------------------------------------------------------
-    if isinstance(value, dict):
-        _seen.add(obj_id)
-        # LangGraph/LangChain tool calls inject non-serializable runtime/config; skip them.
-        return {
-            make_json_safe(k, _seen): make_json_safe(v, _seen)
-            for k, v in value.items()
-            if k not in ("runtime", "config")
-        }
+    # PATH-scoped cycle detection: the id is on the seen-set only while this
+    # value's own subtree is being serialized, and is discarded on the way
+    # out. A global seen-set treated any SHARED reference (the same dict
+    # legitimately appearing twice — a DAG, not a cycle) as recursion; a
+    # langgraph 1.2.x interrupt payload carries exactly such sharing, and its
+    # second appearance serialized as the string "<recursive>", which crashed
+    # the dojo's interrupt renderer ('airline' in "<recursive>").
+    _seen.add(obj_id)
+    try:
+        # --- 3. Dicts ------------------------------------------------------
+        if isinstance(value, dict):
+            # LangGraph/LangChain tool calls inject non-serializable runtime/config; skip them.
+            return {
+                make_json_safe(k, _seen): make_json_safe(v, _seen)
+                for k, v in value.items()
+                if k not in ("runtime", "config")
+            }
 
-    # --- 4. Iterable containers -------------------------------------------
-    if isinstance(value, (list, tuple, set, frozenset)):
-        _seen.add(obj_id)
-        return [make_json_safe(v, _seen) for v in value]
+        # --- 4. Iterable containers ----------------------------------------
+        if isinstance(value, (list, tuple, set, frozenset)):
+            return [make_json_safe(v, _seen) for v in value]
 
-    # --- 5. Dataclasses ----------------------------------------------------
-    if is_dataclass(value):
-        _seen.add(obj_id)
-        # Skip runtime/config (LangGraph-injected, not serializable)
-        d = {f.name: getattr(value, f.name) for f in fields(value) if f.name not in ("runtime", "config")}
-        return make_json_safe(d, _seen)
+        # --- 5. Dataclasses --------------------------------------------------
+        if is_dataclass(value):
+            # Skip runtime/config (LangGraph-injected, not serializable)
+            d = {f.name: getattr(value, f.name) for f in fields(value) if f.name not in ("runtime", "config")}
+            return make_json_safe(d, _seen)
 
-    # --- 6. Pydantic-like models (v2: model_dump) -------------------------
-    if hasattr(value, "model_dump") and callable(getattr(value, "model_dump")):
-        _seen.add(obj_id)
-        try:
-            return make_json_safe(value.model_dump(), _seen)
-        except Exception:
-            # fall through to other options
-            pass
+        # --- 6. Pydantic-like models (v2: model_dump) -----------------------
+        if hasattr(value, "model_dump") and callable(getattr(value, "model_dump")):
+            try:
+                return make_json_safe(value.model_dump(), _seen)
+            except Exception:
+                # fall through to other options
+                pass
 
-    # --- 7. Pydantic v1-style / other libs with .dict() -------------------
-    if hasattr(value, "dict") and callable(getattr(value, "dict")):
-        _seen.add(obj_id)
-        try:
-            return make_json_safe(value.dict(), _seen)
-        except Exception:
-            pass
+        # --- 7. Pydantic v1-style / other libs with .dict() -----------------
+        if hasattr(value, "dict") and callable(getattr(value, "dict")):
+            try:
+                return make_json_safe(value.dict(), _seen)
+            except Exception:
+                pass
 
-    # --- 8. Generic "to_dict" pattern -------------------------------------
-    if hasattr(value, "to_dict") and callable(getattr(value, "to_dict")):
-        _seen.add(obj_id)
-        try:
-            return make_json_safe(value.to_dict(), _seen)
-        except Exception:
-            pass
+        # --- 8. Generic "to_dict" pattern -----------------------------------
+        if hasattr(value, "to_dict") and callable(getattr(value, "to_dict")):
+            try:
+                return make_json_safe(value.to_dict(), _seen)
+            except Exception:
+                pass
 
-    # --- 9. Generic Python objects with __dict__ --------------------------
-    if hasattr(value, "__dict__"):
-        _seen.add(obj_id)
-        try:
-            return make_json_safe(vars(value), _seen)
-        except Exception:
-            pass
+        # --- 9. Generic Python objects with __dict__ ------------------------
+        if hasattr(value, "__dict__"):
+            try:
+                return make_json_safe(vars(value), _seen)
+            except Exception:
+                pass
 
-    # --- 10. Last resort ---------------------------------------------------
-    return repr(value)
+        # --- 10. Last resort -------------------------------------------------
+        return repr(value)
+    finally:
+        _seen.discard(obj_id)

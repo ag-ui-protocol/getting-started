@@ -1,4 +1,5 @@
 import { AbstractAgent } from "../agent";
+import { HttpAgent } from "../http";
 import { AgentSubscriber } from "../subscriber";
 import {
   BaseEvent,
@@ -493,5 +494,125 @@ describe("Agent Mutations", () => {
       // subscriber3 doesn't have onNewToolCall method, so it shouldn't be called
       expect(subscriber3.onNewToolCall).toBeUndefined();
     });
+  });
+});
+
+describe("prepareRunAgentInput strips null attribution tags", () => {
+  class InputProbeAgent extends AbstractAgent {
+    run(): Observable<BaseEvent> {
+      return of();
+    }
+    probeInput() {
+      return this.prepareRunAgentInput({});
+    }
+  }
+
+  it("never serializes subagentRunId: null from seeded messages", () => {
+    // initialMessages and subscriber mutations are not schema-checked, and the
+    // schemas forbid null — a receiving agent would reject the whole run. The
+    // input assembly is the egress chokepoint (PNI-199 alignment).
+    const agent = new InputProbeAgent({
+      initialMessages: [
+        { id: "m1", role: "assistant", content: "x", subagentRunId: null } as never,
+        { id: "m2", role: "assistant", content: "y", subagentRunId: "s1" } as never,
+      ],
+    });
+
+    const input = agent.probeInput();
+    const byId = new Map(input.messages.map((m) => [m.id, m]));
+    expect("subagentRunId" in (byId.get("m1") as object)).toBe(false);
+    expect((byId.get("m2") as { subagentRunId?: string }).subagentRunId).toBe("s1");
+    expect(JSON.stringify(input)).not.toContain('"subagentRunId":null');
+  });
+});
+
+describe("onRunInitialized mutations cannot put a null tag on the wire", () => {
+  it("sanitizes messages assigned to input AFTER prepareRunAgentInput ran", async () => {
+    // The mutation assignment lands after the egress sanitizer, so it needs its
+    // own — reproduced sending {"subagentRunId":null} in the request body.
+    let sentInput: RunAgentInput | undefined;
+    class CaptureAgent extends AbstractAgent {
+      run(input: RunAgentInput): Observable<BaseEvent> {
+        sentInput = input;
+        return of(
+          { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+          { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+        ) as unknown as Observable<BaseEvent>;
+      }
+    }
+    const agent = new CaptureAgent({});
+    const subscriber: AgentSubscriber = {
+      onRunInitialized: () => ({
+        messages: [
+          { id: "m1", role: "user", content: "hello", subagentRunId: null } as never,
+        ],
+      }),
+    };
+
+    await agent.runAgent({}, subscriber);
+
+    expect(sentInput).toBeDefined();
+    expect(JSON.stringify(sentInput)).not.toContain('"subagentRunId":null');
+    expect("subagentRunId" in (sentInput!.messages[0] as object)).toBe(false);
+  });
+});
+
+describe("the terminal HTTP egress strips null tags from every later writer", () => {
+  // Middlewares and in-place input mutations run AFTER every upstream
+  // sanitizer; requestInit is the last point before the bytes leave.
+  class BodyProbeAgent extends HttpAgent {
+    public capturedBody: string | undefined;
+    probeBody(input: RunAgentInput) {
+      this.capturedBody = this.requestInit(input).body as string;
+      return this.capturedBody;
+    }
+  }
+
+  it("a middleware-replaced message list cannot serialize a null tag", () => {
+    const agent = new BodyProbeAgent({ url: "http://localhost/agent" });
+    const body = agent.probeBody({
+      threadId: "t",
+      runId: "r",
+      tools: [],
+      context: [],
+      state: {},
+      messages: [
+        { id: "m1", role: "user", content: "hello", subagentRunId: null } as never,
+        { id: "m2", role: "assistant", content: "x", subagentRunId: "s1" } as never,
+      ],
+    });
+    expect(body).not.toContain('"subagentRunId":null');
+    expect(body).toContain('"subagentRunId":"s1"');
+  });
+
+  it("an in-place onRunInitialized mutation cannot serialize a null tag", async () => {
+    let sentBody: string | undefined;
+    class CaptureHttpAgent extends HttpAgent {
+      run(input: RunAgentInput): Observable<BaseEvent> {
+        sentBody = this.requestInit(input).body as string;
+        return of(
+          { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+          { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+        ) as unknown as Observable<BaseEvent>;
+      }
+    }
+    const agent = new CaptureHttpAgent({ url: "http://localhost/agent" });
+    const subscriber: AgentSubscriber = {
+      onRunInitialized: ({ input }) => {
+        // Mutating the input directly, not returning messages — the round-4
+        // sanitizer never sees this write.
+        (input.messages as unknown[]).push({
+          id: "m1",
+          role: "user",
+          content: "hello",
+          subagentRunId: null,
+        });
+        return {};
+      },
+    };
+
+    await agent.runAgent({}, subscriber);
+    expect(sentBody).toBeDefined();
+    expect(sentBody).not.toContain('"subagentRunId":null');
   });
 });

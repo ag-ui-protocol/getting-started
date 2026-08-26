@@ -21,6 +21,15 @@ internal static class ProtoMessageMapper
             Metadata = ProtoValueConverter.ToStructOrNull(message.Metadata),
         };
 
+        // Set once from the base rather than per role: attribution applies to every
+        // message kind, and a MESSAGES_SNAPSHOT mixes the parent's messages with those of
+        // every subagent that ran, so losing it on one role would silently reparent that
+        // role's messages to the parent.
+        if (message.SubagentRunId is not null)
+        {
+            proto.SubagentRunId = message.SubagentRunId;
+        }
+
         switch (message)
         {
             case AGUIUserMessage user:
@@ -105,7 +114,15 @@ internal static class ProtoMessageMapper
 
     public static AGUIMessage FromProto(Proto.Message proto)
     {
+        // Applied here rather than inside each role branch below: the branches return
+        // six different concrete types, so a per-branch assignment is six chances to
+        // forget one and silently reparent that role's messages to the parent.
         var message = FromProtoCore(proto);
+        if (proto.HasSubagentRunId)
+        {
+            message.SubagentRunId = proto.SubagentRunId;
+        }
+
         message.Metadata = ProtoValueConverter.StructToJsonElementOrNull(proto.Metadata);
         return message;
     }
@@ -265,6 +282,11 @@ internal static class ProtoMessageMapper
             proto.Metadata = ProtoValueConverter.ToValue(interrupt.Metadata.Value);
         }
 
+        if (interrupt.SubagentRunId is not null)
+        {
+            proto.SubagentRunId = interrupt.SubagentRunId;
+        }
+
         return proto;
     }
 
@@ -279,6 +301,7 @@ internal static class ProtoMessageMapper
             ResponseSchema = ProtoValueConverter.ToJsonElementOrNull(proto.ResponseSchema),
             ExpiresAt = proto.HasExpiresAt ? proto.ExpiresAt : null,
             Metadata = ProtoValueConverter.ToJsonElementOrNull(proto.Metadata),
+            SubagentRunId = proto.HasSubagentRunId ? proto.SubagentRunId : null,
         };
     }
 

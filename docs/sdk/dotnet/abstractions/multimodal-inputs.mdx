@@ -127,6 +127,24 @@ var image = new AGUIImageInputContent
 | `Source` | `source` | `AGUIInputContentSource` | Data or URL source |
 | `Metadata` | `metadata` | `JsonElement?` | Optional modality-specific metadata |
 
+When a server adapts an AG-UI request to Microsoft.Extensions.AI,
+`AGUIChatMessageExtensions.AsChatMessages()` maps data sources to `DataContent`
+and URL sources to `UriContent`. The source MIME type is preserved; when a URL
+source omits `mimeType`, `UriContent` infers it from the URL. If the URL does
+not have a recognized extension, the canonical discriminator supplies
+`image/*`, `audio/*`, or `video/*` so the modality is not lost.
+
+The complete `metadata` value is preserved under the MEAI content's
+`AdditionalProperties["metadata"]` key, including object-shaped values. For
+inline data, a string `metadata.filename` property is also assigned to
+`DataContent.Name` so file-capable providers receive the filename.
+
+In the client direction, `AsAGUIMessages(jsonSerializerOptions)` maps
+`DataContent` and `UriContent`
+to canonical media parts based on their MIME type and serializes their
+`AdditionalProperties` as the part's `metadata`. `DataContent.Name` is included
+as `metadata.filename` when that property is not already present.
+
 ### Binary
 
 `AGUIBinaryInputContent` represents an arbitrary binary input part.

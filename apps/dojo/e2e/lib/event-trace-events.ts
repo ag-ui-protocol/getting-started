@@ -75,6 +75,18 @@ const ENVIRONMENT_VALUE_TOKENS = new Map([
 // golden trace. `revision_id` is a lowercase sibling from the same merge, but
 // it is too generic a name to drop wholesale — keep the prefix rule narrow.
 const TRACING_ENV_METADATA_PATTERN = /^(?:LANGSMITH|LANGCHAIN)_/;
+
+// Auth-context metadata whose PRESENCE varies by langgraph version: older
+// stacks (langgraph 1.1.x era) injected langgraph_auth_user_id: "" into run
+// metadata even with no auth configured; newer ones (1.2.x, pulled in by
+// integrations whose dependencies need it) omit the keys entirely when there
+// is no auth context. Same class of environmental noise as the tracing keys
+// above — a trace recorded on either stack must match the other.
+const AUTH_ENV_METADATA_KEYS = new Set([
+  "langgraph_auth_user",
+  "langgraph_auth_user_id",
+  "langgraph_auth_permissions",
+]);
 const APP_CONTEXT_PREFIX = "App Context:\n";
 
 const UUID_PATTERN =
@@ -250,6 +262,7 @@ export function normalizeEventTrace(
       Object.entries(value).flatMap(([key, child]) => {
         if (key === "timestamp" && path.length === 0) return [];
         if (TRACING_ENV_METADATA_PATTERN.test(key)) return [];
+        if (AUTH_ENV_METADATA_KEYS.has(key)) return [];
 
         const nextPath = [...path, key];
         let normalized: unknown;

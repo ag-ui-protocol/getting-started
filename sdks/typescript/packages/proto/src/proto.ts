@@ -5,6 +5,7 @@ import {
   EventType,
   Message,
   RunFinishedOutcome,
+  SubagentFinishedOutcome,
 } from "@ag-ui/core";
 import * as protoEvents from "./generated/events";
 import * as protoPatch from "./generated/patch";
@@ -299,6 +300,25 @@ export function encode(event: BaseEvent): Uint8Array {
     }
   }
 
+  // SubagentFinishedEvent: same flattening as RunFinishedEvent's outcome, one
+  // level down — `outcome` (string) plus `interrupt_ids` (repeated).
+  if (type === EventType.SUBAGENT_FINISHED) {
+    // == null: schema-invalid events still reach this flatten (encode falls back
+    // to the raw event when the parse fails), and a null outcome must degrade to
+    // the legacy encoding rather than crash on `.type`.
+    const outcome = rest.outcome as SubagentFinishedOutcome | null | undefined;
+    if (outcome == null) {
+      rest.outcome = "";
+      rest.interruptIds = [];
+    } else if (outcome.type === "suspended") {
+      rest.outcome = "suspended";
+      rest.interruptIds = outcome.interruptIds ?? [];
+    } else {
+      rest.outcome = "success";
+      rest.interruptIds = [];
+    }
+  }
+
   // Terminal events carry an optional `usage` array. protobuf has no optional
   // repeated field, so normalize to `[]` when absent — otherwise ts-proto's
   // `for (const v of message.usage)` iterates `undefined` and throws. Empty
@@ -400,6 +420,33 @@ export function decode(data: Uint8Array): BaseEvent {
       runFinished.outcome = { type: "success" };
     } else {
       delete runFinished.outcome;
+    }
+  }
+
+  // SubagentFinishedEvent: rebuild the nested `outcome` union from the flat
+  // proto fields, mirroring RunFinishedEvent above. Empty/missing decodes to
+  // `undefined` (legacy success).
+  if (decoded.type === EventType.SUBAGENT_FINISHED) {
+    const subagentFinished = decoded as LooseRecord;
+    const wireOutcome: string | undefined =
+      typeof subagentFinished.outcome === "string" && subagentFinished.outcome !== ""
+        ? subagentFinished.outcome
+        : undefined;
+    const wireInterruptIds: unknown[] = Array.isArray(subagentFinished.interruptIds)
+      ? subagentFinished.interruptIds
+      : [];
+
+    delete subagentFinished.interruptIds;
+
+    if (wireOutcome === "suspended") {
+      subagentFinished.outcome = {
+        type: "suspended",
+        ...(wireInterruptIds.length > 0 && { interruptIds: wireInterruptIds }),
+      };
+    } else if (wireOutcome === "success") {
+      subagentFinished.outcome = { type: "success" };
+    } else {
+      delete subagentFinished.outcome;
     }
   }
 
