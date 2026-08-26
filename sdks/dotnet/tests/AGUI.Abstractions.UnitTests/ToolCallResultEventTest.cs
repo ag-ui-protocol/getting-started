@@ -117,17 +117,27 @@ public sealed class ToolCallResultEventTest
     [Fact]
     public void Serialize_OmitsError_WhenNull()
     {
-        var evt = new ToolCallResultEvent
-        {
-            ToolCallId = "call-1",
-            MessageId = "msg-1",
-            Content = "ok"
-        };
+        // Asserted against a populated sibling, because the omission on its own is
+        // result-forced: a type that declared no error at all, or wrote it under some other
+        // key, would satisfy "no 'error' property" just as well as one that honours null.
+        // The populated event establishes that "error" is a key this type does write, so the
+        // absence below is the serializer omitting a null rather than the key never existing.
+        static string SerializeWithError(string? error) => JsonSerializer.Serialize(
+            new ToolCallResultEvent
+            {
+                ToolCallId = "call-1",
+                MessageId = "msg-1",
+                Content = "ok",
+                Error = error
+            },
+            AGUIJsonSerializerContext.Default.ToolCallResultEvent);
 
-        var json = JsonSerializer.Serialize(evt, AGUIJsonSerializerContext.Default.ToolCallResultEvent);
-        using var doc = JsonDocument.Parse(json);
+        using var populated = JsonDocument.Parse(SerializeWithError("boom"));
+        Assert.True(populated.RootElement.TryGetProperty("error", out var written));
+        Assert.Equal("boom", written.GetString());
 
-        Assert.False(doc.RootElement.TryGetProperty("error", out _));
+        using var omitted = JsonDocument.Parse(SerializeWithError(null));
+        Assert.False(omitted.RootElement.TryGetProperty("error", out _));
     }
 
     [Fact]
@@ -163,6 +173,16 @@ public sealed class ToolCallResultEventTest
         };
 
         var json = JsonSerializer.Serialize(evt, AGUIJsonSerializerContext.Default.ToolCallResultEvent);
+
+        // Pin the wire key before round-tripping. A round-trip through this SDK's own
+        // serializer agrees with itself under any spelling — renaming the JSON property to
+        // "err" leaves the round-trip green — so the key the other SDKs read is asserted
+        // here explicitly rather than being assumed.
+        using (var doc = JsonDocument.Parse(json))
+        {
+            Assert.Equal("boom", doc.RootElement.GetProperty("error").GetString());
+        }
+
         var deserialized = JsonSerializer.Deserialize(json, AGUIJsonSerializerContext.Default.ToolCallResultEvent);
 
         Assert.NotNull(deserialized);

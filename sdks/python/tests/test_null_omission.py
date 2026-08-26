@@ -9,7 +9,11 @@ Three tests, each doing a different job:
 * ``TestNullOmissionIsTheBaseModelsDoing`` reverts the setting on one class and shows the
   ``null`` come back, so a passing sweep can't be credited to something else.
 * ``TestNullOmissionCrossLanguageFixture`` runs the shared fixture that the TypeScript and
-  .NET SDKs run too, so all three are held to the same text.
+  .NET SDKs run too, so all three are held to the same text. Re-serializing a case is not on
+  its own enough to hold *this* SDK to it, because ``ConfiguredBaseModel`` uses
+  ``extra="allow"``: an undeclared key in a case's ``input`` survives validation as an extra
+  and is written straight back out, so the round-trip would pass for a field Python has never
+  heard of. Each case therefore also asserts that every key it expects is a declared field.
 """
 
 import enum
@@ -324,6 +328,31 @@ class TestNullOmissionCrossLanguageFixture(unittest.TestCase):
                 event = self.event_adapter.validate_python(payload)
                 encoded = encoder.encode(event)
                 self.assertEqual(expected, json.loads(encoded[len("data: ") : -len("\n\n")]))
+
+    def test_every_expected_key_is_a_declared_field(self):
+        """The keys a case expects are fields this SDK declares, not ``extra="allow"`` extras.
+
+        Without this, deleting a field from the model leaves its fixture case green: the
+        value rides through validation as an extra and is re-serialized unchanged. .NET gets
+        this for free (System.Text.Json drops unknown keys) and the TypeScript harness
+        asserts the same thing against the Zod variant's shape.
+        """
+        for name, payload, expected in self._cases():
+            with self.subTest(case=name):
+                model = type(self.event_adapter.validate_python(payload))
+                declared = set()
+                for field_name, field in model.model_fields.items():
+                    declared.add(field_name)
+                    if field.alias is not None:
+                        declared.add(field.alias)
+                undeclared = sorted(set(expected) - declared)
+                self.assertEqual(
+                    [],
+                    undeclared,
+                    f"case '{name}' expects {undeclared} on the wire, which "
+                    f"{model.__qualname__} does not declare — the round-trip only passes "
+                    f"because extra='allow' carried the key through",
+                )
 
 
 if __name__ == "__main__":

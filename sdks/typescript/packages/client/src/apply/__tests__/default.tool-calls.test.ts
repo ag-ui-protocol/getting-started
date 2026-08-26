@@ -1022,90 +1022,103 @@ describe("defaultApplyEvents with tool calls", () => {
     });
   });
 
+  /**
+   * Streams one completed tool call whose TOOL_CALL_RESULT carries `result`, and
+   * returns the ToolMessage that defaultApplyEvents accumulated for it.
+   */
+  const toolMessageFromResult = async (result: {
+    messageId: string;
+    content: string;
+    error?: string;
+  }): Promise<ToolMessage> => {
+    const events$ = new Subject<BaseEvent>();
+    const initialState = {
+      messages: [],
+      state: {},
+      threadId: "test-thread",
+      runId: "test-run",
+      tools: [],
+      context: [],
+    };
+
+    const agent = createAgent(initialState.messages);
+    const result$ = defaultApplyEvents(initialState, events$, agent, []);
+    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.TOOL_CALL_START,
+      toolCallId: "tool1",
+      toolCallName: "search",
+    } as ToolCallStartEvent);
+    events$.next({ type: EventType.TOOL_CALL_END, toolCallId: "tool1" } as ToolCallEndEvent);
+    events$.next({
+      ...result,
+      type: EventType.TOOL_CALL_RESULT,
+      toolCallId: "tool1",
+    } as ToolCallResultEvent);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    events$.complete();
+
+    const stateUpdates = await stateUpdatesPromise;
+    const finalMessages = stateUpdates[stateUpdates.length - 1].messages ?? [];
+    // Narrow with a type predicate rather than casting: the ToolMessage type is
+    // what the assertions below are checked against, and a cast would throw it
+    // away along with the compile-time half of every one of them.
+    const toolMessage = finalMessages.find((message): message is ToolMessage => {
+      return message.role === "tool";
+    });
+    if (toolMessage === undefined) {
+      throw new Error("defaultApplyEvents accumulated no tool message for the result event");
+    }
+    return toolMessage;
+  };
+
   it("carries TOOL_CALL_RESULT.error onto the tool message it accumulates into", async () => {
     // Without this the streamed message and the MESSAGES_SNAPSHOT disagree
     // about whether the call failed — the snapshot's ToolMessage has `error`,
     // the one built from the stream would not.
-    const events$ = new Subject<BaseEvent>();
-    const initialState = {
-      messages: [],
-      state: {},
-      threadId: "test-thread",
-      runId: "test-run",
-      tools: [],
-      context: [],
-    };
-
-    const agent = createAgent(initialState.messages);
-    const result$ = defaultApplyEvents(initialState, events$, agent, []);
-    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
-
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
-    events$.next({
-      type: EventType.TOOL_CALL_START,
-      toolCallId: "tool1",
-      toolCallName: "search",
-    } as ToolCallStartEvent);
-    events$.next({ type: EventType.TOOL_CALL_END, toolCallId: "tool1" } as ToolCallEndEvent);
-    events$.next({
-      type: EventType.TOOL_CALL_RESULT,
+    const toolMessage = await toolMessageFromResult({
       messageId: "res1",
-      toolCallId: "tool1",
       content: "",
       error: "SearchTimeout: upstream did not respond within 30s",
-    } as ToolCallResultEvent);
+    });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    events$.complete();
+    // Read through an annotated local: the annotation is the compile-time half
+    // of this assertion, so removing `error` from ToolMessage in @ag-ui/core
+    // fails the typecheck here rather than leaving the test green.
+    const error: string | undefined = toolMessage.error;
+    expect(error).toBe("SearchTimeout: upstream did not respond within 30s");
+  });
 
-    const stateUpdates = await stateUpdatesPromise;
-    const finalMessages = stateUpdates[stateUpdates.length - 1].messages ?? [];
-    const toolMessage = finalMessages.find((m) => m.role === "tool");
+  it("carries an empty-string TOOL_CALL_RESULT.error instead of dropping it", async () => {
+    // `""` is a value the producer deliberately sent: a failure it reported
+    // badly, not a success. defaultApplyEvents guards on `error != null`, and
+    // this is the only case in any SDK that holds the client to that spelling —
+    // a falsy guard would silently turn this failed call into a successful one.
+    const toolMessage = await toolMessageFromResult({
+      messageId: "res1",
+      content: "",
+      error: "",
+    });
 
-    expect(toolMessage).toBeDefined();
-    expect((toolMessage as any).error).toBe("SearchTimeout: upstream did not respond within 30s");
+    const error: string | undefined = toolMessage.error;
+    expect(error).toBe("");
+    expect(Object.keys(toolMessage)).toContain("error");
   });
 
   it("leaves `error` off the tool message when the event carries none", async () => {
-    const events$ = new Subject<BaseEvent>();
-    const initialState = {
-      messages: [],
-      state: {},
-      threadId: "test-thread",
-      runId: "test-run",
-      tools: [],
-      context: [],
-    };
+    const toolMessage = await toolMessageFromResult({ messageId: "res1", content: "sunny" });
 
-    const agent = createAgent(initialState.messages);
-    const result$ = defaultApplyEvents(initialState, events$, agent, []);
-    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
-
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
-    events$.next({
-      type: EventType.TOOL_CALL_START,
-      toolCallId: "tool1",
-      toolCallName: "search",
-    } as ToolCallStartEvent);
-    events$.next({ type: EventType.TOOL_CALL_END, toolCallId: "tool1" } as ToolCallEndEvent);
-    events$.next({
-      type: EventType.TOOL_CALL_RESULT,
-      messageId: "res1",
-      toolCallId: "tool1",
-      content: "sunny",
-    } as ToolCallResultEvent);
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    events$.complete();
-
-    const stateUpdates = await stateUpdatesPromise;
-    const finalMessages = stateUpdates[stateUpdates.length - 1].messages ?? [];
-    const toolMessage = finalMessages.find((m) => m.role === "tool");
-
-    expect(toolMessage).toBeDefined();
+    // The annotated read is what keeps this from being vacuous: it pins `error`
+    // as a real optional field of ToolMessage, so the absence asserted below
+    // means "no error was reported", not "ToolMessage has no such field".
+    const error: string | undefined = toolMessage.error;
+    expect(error).toBeUndefined();
     // The key is absent, not present-and-undefined: the message must serialize
     // identically to how it did before this field existed.
-    expect(Object.keys(toolMessage as object)).not.toContain("error");
+    expect(Object.keys(toolMessage)).not.toContain("error");
   });
 
   it("drops a non-string `error` instead of poisoning the message for the next turn", async () => {
