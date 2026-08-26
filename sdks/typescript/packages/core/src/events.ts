@@ -170,6 +170,11 @@ export const ToolCallResultEventSchema = BaseEventSchema.extend({
   toolCallId: z.string(),
   content: z.string(),
   role: z.literal("tool").optional(),
+  // The event-side twin of `ToolMessage.error`: set when the tool call failed,
+  // so a consumer can render the failure from the live stream instead of
+  // waiting for the MESSAGES_SNAPSHOT that carries the message. Absent means
+  // the call succeeded, exactly as before this field existed.
+  error: z.string().optional(),
   subagentRunId: z.string().optional(),
 });
 

@@ -24,6 +24,14 @@ public sealed class ToolCallResultEvent : BaseEvent
     public string? Role { get; set; }
 
     /// <summary>
+    /// Gets or sets the failure detail for this tool call, absent when the call succeeded.
+    /// The event-side twin of <see cref="AGUIToolMessage.Error"/>, so a consumer can render
+    /// the failure from the live stream instead of waiting for the messages snapshot.
+    /// </summary>
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
+    /// <summary>
     /// Gets or sets the subagent that produced this event, absent when the parent agent
     /// produced it directly.
     /// </summary>

@@ -232,6 +232,11 @@ class ToolCallResultEvent(BaseEvent):
     tool_call_id: str
     content: str
     role: Optional[Literal["tool"]] = None
+    # The event-side twin of ToolMessage.error: set when the tool call failed,
+    # so a consumer can render the failure from the live stream instead of
+    # waiting for the MESSAGES_SNAPSHOT that carries the message. Absent means
+    # the call succeeded, exactly as before this field existed.
+    error: Optional[str] = None
     subagent_run_id: Optional[str] = None
 
 class ThinkingStartEvent(BaseEvent):

@@ -339,6 +339,7 @@ class ToolCallResultEvent(BaseEvent):
     tool_call_id: str
     content: str
     role: Optional[Literal["tool"]] = None
+    error: Optional[str] = None
 ```
 
 | Property       | Type                        | Description                                                 |
@@ -347,6 +348,11 @@ class ToolCallResultEvent(BaseEvent):
 | `tool_call_id` | `str`                       | Matches the ID from the corresponding ToolCallStartEvent    |
 | `content`      | `str`                       | The actual result/output content from the tool execution    |
 | `role`         | `Optional[Literal["tool"]]` | Optional role identifier, typically "tool" for tool results |
+| `error`        | `Optional[str]`             | Failure detail when the call failed; absent when it succeeded |
+
+`error` is the event-side twin of `ToolMessage.error`. It lets a client render a
+failed tool call as it streams, instead of waiting for the `MESSAGES_SNAPSHOT`
+that carries the finished message.
 
 ## State Management Events
 

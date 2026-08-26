@@ -606,7 +606,7 @@ export const defaultApplyEvents = (
           applyMutation(mutation);
 
           if (mutation.stopPropagation !== true) {
-            const { messageId, toolCallId, content, role, subagentRunId } =
+            const { messageId, toolCallId, content, role, error, subagentRunId } =
               event as ToolCallResultEvent;
 
             const toolMessage: ToolMessage = {
@@ -614,6 +614,10 @@ export const defaultApplyEvents = (
               toolCallId,
               role: role || "tool",
               content: content,
+              // Carry the event's `error` onto the message it accumulates into.
+              // Without this the streamed message and the MESSAGES_SNAPSHOT
+              // disagree about whether the call failed.
+              ...(error != null && { error }),
               ...(subagentRunId != null && { subagentRunId }),
             };
 

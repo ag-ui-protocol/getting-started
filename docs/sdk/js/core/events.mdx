@@ -341,6 +341,7 @@ type ToolCallResultEvent = BaseEvent & {
   toolCallId: string
   content: string
   role?: "tool"
+  error?: string
 }
 ```
 
@@ -350,6 +351,11 @@ type ToolCallResultEvent = BaseEvent & {
 | `toolCallId` | `string`            | Matches the ID from the corresponding ToolCallStartEvent    |
 | `content`    | `string`            | The actual result/output content from the tool execution    |
 | `role`       | `"tool"` (optional) | Optional role identifier, typically "tool" for tool results |
+| `error`      | `string` (optional) | Failure detail when the call failed; absent when it succeeded |
+
+`error` is the event-side twin of `ToolMessage.error`. It lets a client render a
+failed tool call as it streams, instead of waiting for the `MESSAGES_SNAPSHOT`
+that carries the finished message.
 
 ## State Management Events
 

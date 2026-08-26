@@ -1019,4 +1019,90 @@ describe("defaultApplyEvents with tool calls", () => {
       }
     });
   });
+
+  it("carries TOOL_CALL_RESULT.error onto the tool message it accumulates into", async () => {
+    // Without this the streamed message and the MESSAGES_SNAPSHOT disagree
+    // about whether the call failed — the snapshot's ToolMessage has `error`,
+    // the one built from the stream would not.
+    const events$ = new Subject<BaseEvent>();
+    const initialState = {
+      messages: [],
+      state: {},
+      threadId: "test-thread",
+      runId: "test-run",
+      tools: [],
+      context: [],
+    };
+
+    const agent = createAgent(initialState.messages);
+    const result$ = defaultApplyEvents(initialState, events$, agent, []);
+    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.TOOL_CALL_START,
+      toolCallId: "tool1",
+      toolCallName: "search",
+    } as ToolCallStartEvent);
+    events$.next({ type: EventType.TOOL_CALL_END, toolCallId: "tool1" } as ToolCallEndEvent);
+    events$.next({
+      type: EventType.TOOL_CALL_RESULT,
+      messageId: "res1",
+      toolCallId: "tool1",
+      content: "",
+      error: "SearchTimeout: upstream did not respond within 30s",
+    } as ToolCallResultEvent);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    events$.complete();
+
+    const stateUpdates = await stateUpdatesPromise;
+    const finalMessages = stateUpdates[stateUpdates.length - 1].messages ?? [];
+    const toolMessage = finalMessages.find((m) => m.role === "tool");
+
+    expect(toolMessage).toBeDefined();
+    expect((toolMessage as any).error).toBe("SearchTimeout: upstream did not respond within 30s");
+  });
+
+  it("leaves `error` off the tool message when the event carries none", async () => {
+    const events$ = new Subject<BaseEvent>();
+    const initialState = {
+      messages: [],
+      state: {},
+      threadId: "test-thread",
+      runId: "test-run",
+      tools: [],
+      context: [],
+    };
+
+    const agent = createAgent(initialState.messages);
+    const result$ = defaultApplyEvents(initialState, events$, agent, []);
+    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.TOOL_CALL_START,
+      toolCallId: "tool1",
+      toolCallName: "search",
+    } as ToolCallStartEvent);
+    events$.next({ type: EventType.TOOL_CALL_END, toolCallId: "tool1" } as ToolCallEndEvent);
+    events$.next({
+      type: EventType.TOOL_CALL_RESULT,
+      messageId: "res1",
+      toolCallId: "tool1",
+      content: "sunny",
+    } as ToolCallResultEvent);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    events$.complete();
+
+    const stateUpdates = await stateUpdatesPromise;
+    const finalMessages = stateUpdates[stateUpdates.length - 1].messages ?? [];
+    const toolMessage = finalMessages.find((m) => m.role === "tool");
+
+    expect(toolMessage).toBeDefined();
+    // The key is absent, not present-and-undefined: the message must serialize
+    // identically to how it did before this field existed.
+    expect(Object.keys(toolMessage as object)).not.toContain("error");
+  });
 });
