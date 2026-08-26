@@ -294,7 +294,7 @@
         "python",
         "dotnet"
       ],
-      "note": "The failure twin of the case above: when `error` IS set every SDK must carry it on the wire under that exact key, so a consumer can render the failure from the stream rather than waiting for MESSAGES_SNAPSHOT. The preceding case pins the absent half.",
+      "note": "The failure twin of the case above: when `error` IS set every SDK must carry it on the wire under that exact key. This case pins round-trip fidelity for a populated `error`, not null omission — the omission half is covered by the reflection-driven sweep each SDK runs over every optional field, and by the preceding case only insofar as it carries no `error` at all.",
       "input": {
         "type": "TOOL_CALL_RESULT",
         "messageId": "msg_7",
