@@ -7,6 +7,7 @@ import {
   BaseEvent,
   EventType,
   Message,
+  MessagesSnapshotEvent,
   RunAgentInput,
   RunAgentInputSchema,
   RunStartedEvent,
@@ -1023,14 +1024,34 @@ describe("defaultApplyEvents with tool calls", () => {
   });
 
   /**
-   * Streams one completed tool call whose TOOL_CALL_RESULT carries `result`, and
-   * returns the ToolMessage that defaultApplyEvents accumulated for it.
+   * Narrows `messages` to the ToolMessage the reducer accumulated, throwing
+   * rather than casting: `ToolMessage` is the type the assertions below are
+   * checked against, and a cast would throw that away along with the
+   * compile-time half of every one of them.
    */
-  const toolMessageFromResult = async (result: {
+  const expectToolMessage = (messages: Message[]): ToolMessage => {
+    const toolMessage = messages.find((message): message is ToolMessage => {
+      return message.role === "tool";
+    });
+    if (toolMessage === undefined) {
+      throw new Error("defaultApplyEvents accumulated no tool message for the result event");
+    }
+    return toolMessage;
+  };
+
+  /**
+   * Streams one completed tool call whose TOOL_CALL_RESULT carries the given
+   * fields, and returns the messages defaultApplyEvents accumulated for it.
+   *
+   * `error` is `unknown` rather than `string` on purpose: the reducer's own
+   * `as ToolCallResultEvent` is an assertion, not validation, so the value a
+   * malformed producer puts on the wire has to be expressible here too.
+   */
+  const messagesFromResult = async (resultEvent: {
     messageId: string;
     content: string;
-    error?: string;
-  }): Promise<ToolMessage> => {
+    error?: unknown;
+  }): Promise<Message[]> => {
     const events$ = new Subject<BaseEvent>();
     const initialState = {
       messages: [],
@@ -1053,7 +1074,7 @@ describe("defaultApplyEvents with tool calls", () => {
     } as ToolCallStartEvent);
     events$.next({ type: EventType.TOOL_CALL_END, toolCallId: "tool1" } as ToolCallEndEvent);
     events$.next({
-      ...result,
+      ...resultEvent,
       type: EventType.TOOL_CALL_RESULT,
       toolCallId: "tool1",
     } as ToolCallResultEvent);
@@ -1062,18 +1083,15 @@ describe("defaultApplyEvents with tool calls", () => {
     events$.complete();
 
     const stateUpdates = await stateUpdatesPromise;
-    const finalMessages = stateUpdates[stateUpdates.length - 1].messages ?? [];
-    // Narrow with a type predicate rather than casting: the ToolMessage type is
-    // what the assertions below are checked against, and a cast would throw it
-    // away along with the compile-time half of every one of them.
-    const toolMessage = finalMessages.find((message): message is ToolMessage => {
-      return message.role === "tool";
-    });
-    if (toolMessage === undefined) {
-      throw new Error("defaultApplyEvents accumulated no tool message for the result event");
-    }
-    return toolMessage;
+    return stateUpdates[stateUpdates.length - 1].messages ?? [];
   };
+
+  /** As `messagesFromResult`, narrowed to the ToolMessage the result produced. */
+  const toolMessageFromResult = async (resultEvent: {
+    messageId: string;
+    content: string;
+    error?: unknown;
+  }): Promise<ToolMessage> => expectToolMessage(await messagesFromResult(resultEvent));
 
   it("carries TOOL_CALL_RESULT.error onto the tool message it accumulates into", async () => {
     // Without this the streamed message and the MESSAGES_SNAPSHOT disagree
@@ -1092,11 +1110,90 @@ describe("defaultApplyEvents with tool calls", () => {
     expect(error).toBe("SearchTimeout: upstream did not respond within 30s");
   });
 
+  it("agrees with the later MESSAGES_SNAPSHOT about whether the call failed", async () => {
+    // The invariant the branch exists for. A backend that streams a failed tool
+    // call and then re-sends the same message in a MESSAGES_SNAPSHOT must not
+    // make the reducer flip its account of that call: if the streamed message
+    // carried no `error`, the UI would read "succeeded" until the snapshot
+    // landed and then silently change its mind.
+    const failure = "SearchTimeout: upstream did not respond within 30s";
+
+    const events$ = new Subject<BaseEvent>();
+    const initialState = {
+      messages: [],
+      state: {},
+      threadId: "test-thread",
+      runId: "test-run",
+      tools: [],
+      context: [],
+    };
+
+    const agent = createAgent(initialState.messages);
+    const result$ = defaultApplyEvents(initialState, events$, agent, []);
+    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.TOOL_CALL_START,
+      toolCallId: "tool1",
+      toolCallName: "search",
+    } as ToolCallStartEvent);
+    events$.next({ type: EventType.TOOL_CALL_END, toolCallId: "tool1" } as ToolCallEndEvent);
+    events$.next({
+      type: EventType.TOOL_CALL_RESULT,
+      messageId: "res1",
+      toolCallId: "tool1",
+      content: "",
+      error: failure,
+    } as ToolCallResultEvent);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // The backend now re-sends the whole history, the failed tool call
+    // included. No id changes: this is the same message, twice.
+    events$.next({
+      type: EventType.MESSAGES_SNAPSHOT,
+      messages: [
+        {
+          id: "tool1",
+          role: "assistant",
+          toolCalls: [
+            { id: "tool1", type: "function", function: { name: "search", arguments: "" } },
+          ],
+        },
+        { id: "res1", role: "tool", toolCallId: "tool1", content: "", error: failure },
+      ],
+    } as MessagesSnapshotEvent);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    events$.complete();
+
+    const stateUpdates = await stateUpdatesPromise;
+
+    // The first update carrying a tool message is the one TOOL_CALL_RESULT
+    // produced — `emitUpdates` deep-clones each emission, so this is the
+    // message as the stream built it, not as the snapshot later left it.
+    const streamedUpdate = stateUpdates.find((update) =>
+      update.messages?.some((message) => message.role === "tool"),
+    );
+    if (streamedUpdate === undefined) {
+      throw new Error("defaultApplyEvents emitted no update carrying the streamed tool message");
+    }
+    const streamed = expectToolMessage(streamedUpdate.messages ?? []);
+    const snapshotted = expectToolMessage(stateUpdates[stateUpdates.length - 1].messages ?? []);
+
+    // Compare the field itself, not its truthiness: a streamed message with no
+    // `error` reads as a success the snapshot never described.
+    expect(streamed.error).toBe(snapshotted.error);
+    expect(streamed.error).toBe(failure);
+  });
+
   it("carries an empty-string TOOL_CALL_RESULT.error instead of dropping it", async () => {
     // `""` is a value the producer deliberately sent: a failure it reported
-    // badly, not a success. defaultApplyEvents guards on `error != null`, and
-    // this is the only case in any SDK that holds the client to that spelling —
-    // a falsy guard would silently turn this failed call into a successful one.
+    // badly, not a success. The reducer narrows on `typeof error === "string"`,
+    // which keeps `""` — a falsy guard (`error && { error }`) would silently
+    // turn this failed call into a successful one. The Python SDK pins the same
+    // spelling in `test_empty_string_error_survives_rather_than_being_dropped`.
     const toolMessage = await toolMessageFromResult({
       messageId: "res1",
       content: "",
@@ -1121,118 +1218,59 @@ describe("defaultApplyEvents with tool calls", () => {
     expect(Object.keys(toolMessage)).not.toContain("error");
   });
 
-  it("drops a non-string `error` instead of poisoning the message for the next turn", async () => {
-    // `defaultApplyEvents` receives events that have not necessarily been
-    // through `EventSchemas.parse` — the `as ToolCallResultEvent` cast inside is
-    // an assertion, not validation. A nullish check would let `error: 42` onto
-    // the `ToolMessage`, where it survives into `messages` and only blows up a
-    // full turn later inside `RunAgentInputSchema` ("Expected string, received
-    // number" at `messages.N.error`), far from the event that caused it.
-    //
-    // Spelled out as its own shape rather than cast: an unvalidated producer can
-    // put anything on the wire, and the whole point is that this reaches the
-    // reducer as a `BaseEvent` the reducer only *asserts* is a result event.
-    const malformedResult: BaseEvent & {
-      type: EventType.TOOL_CALL_RESULT;
-      messageId: string;
-      toolCallId: string;
-      content: string;
-      error: number;
-    } = {
-      type: EventType.TOOL_CALL_RESULT,
-      messageId: "res1",
-      toolCallId: "tool1",
-      content: "",
-      error: 42,
-    };
+  it("warns when it drops a non-string `error` rather than dropping it silently", async () => {
+    // A serialized exception object is the natural shape a Python or LangChain
+    // producer emits, and `defaultApplyEvents` receives events that have not
+    // necessarily been through `EventSchemas.parse` — the `as
+    // ToolCallResultEvent` inside is an assertion, not validation — so it
+    // arrives at the branch as-is. Dropping it is right; dropping it in silence
+    // is not, because the ToolMessage that survives is byte-identical to the
+    // one a successful call would have produced.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const toolMessage = await toolMessageFromResult({
+        messageId: "res1",
+        content: "",
+        error: { type: "ToolException", message: "upstream refused the connection" },
+      });
 
-    const events$ = new Subject<BaseEvent>();
-    const initialState = {
-      messages: [],
-      state: {},
-      threadId: "test-thread",
-      runId: "test-run",
-      tools: [],
-      context: [],
-    };
-
-    const agent = createAgent(initialState.messages);
-    const result$ = defaultApplyEvents(initialState, events$, agent, []);
-    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
-
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
-    events$.next({
-      type: EventType.TOOL_CALL_START,
-      toolCallId: "tool1",
-      toolCallName: "search",
-    } as ToolCallStartEvent);
-    events$.next({ type: EventType.TOOL_CALL_END, toolCallId: "tool1" } as ToolCallEndEvent);
-    events$.next(malformedResult);
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    events$.complete();
-
-    const stateUpdates = await stateUpdatesPromise;
-    const finalMessages = stateUpdates[stateUpdates.length - 1].messages ?? [];
-    const toolMessage = finalMessages.find((m): m is ToolMessage => m.role === "tool");
-
-    expect(toolMessage).toBeDefined();
-    expect(Object.keys(toolMessage as object)).not.toContain("error");
-
-    // And the history it accumulated into is still valid input for the next run.
-    const nextTurn = RunAgentInputSchema.safeParse({
-      threadId: "test-thread",
-      runId: "test-run-2",
-      state: {},
-      messages: finalMessages,
-      tools: [],
-      context: [],
-      forwardedProps: {},
-    });
-    expect(nextTurn.success).toBe(true);
+      expect(Object.keys(toolMessage)).not.toContain("error");
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("TOOL_CALL_RESULT"));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("tool1"));
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
-  it("keeps an empty-string `error` — a deliberately sent value, not an absent one", async () => {
-    // "" is falsy but present: a producer that reports a failure badly must not
-    // have it read back as a success.
-    const events$ = new Subject<BaseEvent>();
-    const initialState = {
-      messages: [],
-      state: {},
-      threadId: "test-thread",
-      runId: "test-run",
-      tools: [],
-      context: [],
-    };
+  it("drops a non-string `error` instead of putting it on `agent.messages`", async () => {
+    // Nothing in the client parses `RunAgentInputSchema` in production, so
+    // there is no later validation that would catch a non-string that got past
+    // this branch: it would simply reach every consumer of `agent.messages`.
+    // The safeParse below is this test pinning the shape the protocol
+    // declares — not a runtime check the client performs.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const finalMessages = await messagesFromResult({
+        messageId: "res1",
+        content: "",
+        error: 42,
+      });
 
-    const agent = createAgent(initialState.messages);
-    const result$ = defaultApplyEvents(initialState, events$, agent, []);
-    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+      const toolMessage = expectToolMessage(finalMessages);
+      expect(Object.keys(toolMessage)).not.toContain("error");
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
-    events$.next({
-      type: EventType.TOOL_CALL_START,
-      toolCallId: "tool1",
-      toolCallName: "search",
-    } as ToolCallStartEvent);
-    events$.next({ type: EventType.TOOL_CALL_END, toolCallId: "tool1" } as ToolCallEndEvent);
-    events$.next({
-      type: EventType.TOOL_CALL_RESULT,
-      messageId: "res1",
-      toolCallId: "tool1",
-      content: "",
-      error: "",
-    } as ToolCallResultEvent);
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    events$.complete();
-
-    const stateUpdates = await stateUpdatesPromise;
-    const finalMessages = stateUpdates[stateUpdates.length - 1].messages ?? [];
-    const toolMessage = finalMessages.find((m): m is ToolMessage => m.role === "tool");
-
-    expect(toolMessage).toBeDefined();
-    expect(Object.keys(toolMessage as object)).toContain("error");
-    expect(toolMessage?.error).toBe("");
+      const nextTurn = RunAgentInputSchema.safeParse({
+        threadId: "test-thread",
+        runId: "test-run-2",
+        state: {},
+        messages: finalMessages,
+        tools: [],
+        context: [],
+        forwardedProps: {},
+      });
+      expect(nextTurn.success).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
