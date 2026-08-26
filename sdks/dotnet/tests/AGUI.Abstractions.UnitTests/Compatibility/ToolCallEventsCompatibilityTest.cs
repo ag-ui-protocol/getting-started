@@ -80,6 +80,20 @@ public sealed class ToolCallEventsCompatibilityTest
         Assert.Equal("tc-1", typed.ToolCallId);
         Assert.Equal("msg-1", typed.MessageId);
         Assert.Equal("{\"ok\":true}", typed.Content);
+        // A payload produced before `error` existed leaves it absent, not empty.
+        Assert.Null(typed.Error);
+    }
+
+    [Fact]
+    public void ToolCallResult_WithError_DeserializesFromTypeScriptPayload()
+    {
+        var evt = FixtureLoader.DeserializeAsBaseEvent(_fixtures[7]);
+
+        var typed = Assert.IsType<ToolCallResultEvent>(evt);
+        Assert.Equal("tc-2", typed.ToolCallId);
+        Assert.Equal("msg-2", typed.MessageId);
+        Assert.Equal(string.Empty, typed.Content);
+        Assert.Equal("SearchTimeout: upstream did not respond within 30s", typed.Error);
     }
 
     [Fact]
