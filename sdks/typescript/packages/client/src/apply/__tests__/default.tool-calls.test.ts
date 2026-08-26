@@ -8,11 +8,13 @@ import {
   EventType,
   Message,
   RunAgentInput,
+  RunAgentInputSchema,
   RunStartedEvent,
   ToolCallArgsEvent,
   ToolCallEndEvent,
   ToolCallResultEvent,
   ToolCallStartEvent,
+  ToolMessage,
 } from "@ag-ui/core";
 import { defaultApplyEvents } from "../default";
 import { AbstractAgent } from "@/agent";
@@ -1104,5 +1106,120 @@ describe("defaultApplyEvents with tool calls", () => {
     // The key is absent, not present-and-undefined: the message must serialize
     // identically to how it did before this field existed.
     expect(Object.keys(toolMessage as object)).not.toContain("error");
+  });
+
+  it("drops a non-string `error` instead of poisoning the message for the next turn", async () => {
+    // `defaultApplyEvents` receives events that have not necessarily been
+    // through `EventSchemas.parse` — the `as ToolCallResultEvent` cast inside is
+    // an assertion, not validation. A nullish check would let `error: 42` onto
+    // the `ToolMessage`, where it survives into `messages` and only blows up a
+    // full turn later inside `RunAgentInputSchema` ("Expected string, received
+    // number" at `messages.N.error`), far from the event that caused it.
+    //
+    // Spelled out as its own shape rather than cast: an unvalidated producer can
+    // put anything on the wire, and the whole point is that this reaches the
+    // reducer as a `BaseEvent` the reducer only *asserts* is a result event.
+    const malformedResult: BaseEvent & {
+      type: EventType.TOOL_CALL_RESULT;
+      messageId: string;
+      toolCallId: string;
+      content: string;
+      error: number;
+    } = {
+      type: EventType.TOOL_CALL_RESULT,
+      messageId: "res1",
+      toolCallId: "tool1",
+      content: "",
+      error: 42,
+    };
+
+    const events$ = new Subject<BaseEvent>();
+    const initialState = {
+      messages: [],
+      state: {},
+      threadId: "test-thread",
+      runId: "test-run",
+      tools: [],
+      context: [],
+    };
+
+    const agent = createAgent(initialState.messages);
+    const result$ = defaultApplyEvents(initialState, events$, agent, []);
+    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.TOOL_CALL_START,
+      toolCallId: "tool1",
+      toolCallName: "search",
+    } as ToolCallStartEvent);
+    events$.next({ type: EventType.TOOL_CALL_END, toolCallId: "tool1" } as ToolCallEndEvent);
+    events$.next(malformedResult);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    events$.complete();
+
+    const stateUpdates = await stateUpdatesPromise;
+    const finalMessages = stateUpdates[stateUpdates.length - 1].messages ?? [];
+    const toolMessage = finalMessages.find((m): m is ToolMessage => m.role === "tool");
+
+    expect(toolMessage).toBeDefined();
+    expect(Object.keys(toolMessage as object)).not.toContain("error");
+
+    // And the history it accumulated into is still valid input for the next run.
+    const nextTurn = RunAgentInputSchema.safeParse({
+      threadId: "test-thread",
+      runId: "test-run-2",
+      state: {},
+      messages: finalMessages,
+      tools: [],
+      context: [],
+      forwardedProps: {},
+    });
+    expect(nextTurn.success).toBe(true);
+  });
+
+  it("keeps an empty-string `error` — a deliberately sent value, not an absent one", async () => {
+    // "" is falsy but present: a producer that reports a failure badly must not
+    // have it read back as a success.
+    const events$ = new Subject<BaseEvent>();
+    const initialState = {
+      messages: [],
+      state: {},
+      threadId: "test-thread",
+      runId: "test-run",
+      tools: [],
+      context: [],
+    };
+
+    const agent = createAgent(initialState.messages);
+    const result$ = defaultApplyEvents(initialState, events$, agent, []);
+    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.TOOL_CALL_START,
+      toolCallId: "tool1",
+      toolCallName: "search",
+    } as ToolCallStartEvent);
+    events$.next({ type: EventType.TOOL_CALL_END, toolCallId: "tool1" } as ToolCallEndEvent);
+    events$.next({
+      type: EventType.TOOL_CALL_RESULT,
+      messageId: "res1",
+      toolCallId: "tool1",
+      content: "",
+      error: "",
+    } as ToolCallResultEvent);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    events$.complete();
+
+    const stateUpdates = await stateUpdatesPromise;
+    const finalMessages = stateUpdates[stateUpdates.length - 1].messages ?? [];
+    const toolMessage = finalMessages.find((m): m is ToolMessage => m.role === "tool");
+
+    expect(toolMessage).toBeDefined();
+    expect(Object.keys(toolMessage as object)).toContain("error");
+    expect(toolMessage?.error).toBe("");
   });
 });

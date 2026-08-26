@@ -617,7 +617,14 @@ export const defaultApplyEvents = (
               // Carry the event's `error` onto the message it accumulates into.
               // Without this the streamed message and the MESSAGES_SNAPSHOT
               // disagree about whether the call failed.
-              ...(error != null && { error }),
+              //
+              // Narrow on the type, not on nullishness: events reaching here have
+              // not necessarily been through `EventSchemas.parse`, so a producer
+              // sending e.g. `error: 42` would otherwise land a non-string on the
+              // message and only fail `RunAgentInputSchema` a full turn later.
+              // `typeof === "string"` still keeps `""` — an empty string is a
+              // value the producer chose to send, not an absent one.
+              ...(typeof error === "string" && { error }),
               ...(subagentRunId != null && { subagentRunId }),
             };
 
