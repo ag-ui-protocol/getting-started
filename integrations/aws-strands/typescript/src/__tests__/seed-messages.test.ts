@@ -121,6 +121,60 @@ describe("convertMessagesForStrandsSeed", () => {
     ]);
   });
 
+  it("carries a client-reported tool failure onto the seeded toolResult status", async () => {
+    // Same rule as _buildStrandsHistory: the flag comes from ToolMessage.error,
+    // and each result is stamped independently.
+    const seed = await convertMessagesForStrandsSeed([
+      { id: "u", role: "user", content: "lookup" } as unknown as AguiMessage,
+      {
+        id: "a",
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "tc-1",
+            type: "function",
+            function: { name: "s1", arguments: "{}" },
+          },
+          {
+            id: "tc-2",
+            type: "function",
+            function: { name: "s2", arguments: "{}" },
+          },
+        ],
+      } as unknown as AguiMessage,
+      {
+        id: "t1",
+        role: "tool",
+        toolCallId: "tc-1",
+        content: "ok",
+      } as unknown as AguiMessage,
+      {
+        id: "t2",
+        role: "tool",
+        toolCallId: "tc-2",
+        content: "tool failed: invalid id",
+        error: "invalid id",
+      } as unknown as AguiMessage,
+    ]);
+    expect(seed[2].content).toEqual([
+      {
+        toolResult: {
+          toolUseId: "tc-1",
+          status: "success",
+          content: [{ text: "ok" }],
+        },
+      },
+      {
+        toolResult: {
+          toolUseId: "tc-2",
+          status: "error",
+          content: [{ text: "tool failed: invalid id" }],
+        },
+      },
+    ]);
+  });
+
   it("drops orphaned tool messages whose call id wasn't announced", async () => {
     const seed = await convertMessagesForStrandsSeed([
       { id: "u", role: "user", content: "hi" } as unknown as AguiMessage,

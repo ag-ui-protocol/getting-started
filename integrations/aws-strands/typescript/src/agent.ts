@@ -849,12 +849,22 @@ export function buildSnapshotMessages(
       out.push(assistant);
     } else {
       const toolCallId = (msg as { toolCallId?: string }).toolCallId ?? "";
-      out.push({
+      const { error, encryptedValue } = msg as {
+        error?: string;
+        encryptedValue?: string;
+      };
+      const tool = {
         id: msgId,
         role: "tool",
         content: _coerceText(msg.content),
         toolCallId,
-      } as AguiToolMessage);
+      } as AguiToolMessage;
+      // This is an AG-UI -> AG-UI rebuild of the client's own message, so
+      // preserve its error/encryptedValue on the snapshot echo instead of
+      // silently dropping the client's own fields.
+      if (error !== undefined) tool.error = error;
+      if (encryptedValue !== undefined) tool.encryptedValue = encryptedValue;
+      out.push(tool);
     }
   }
   return out;
@@ -960,7 +970,12 @@ async function _buildStrandsHistory(
             toolResult: {
               toolUseId: toolCallId,
               content: [_buildToolResultContent(msg.content)],
-              status: "success" as const,
+              // Carry the AG-UI failure signal onto Bedrock's toolResult status,
+              // so a client-reported tool failure is not asserted to the model as
+              // a success.
+              status: (msg as { error?: string }).error
+                ? ("error" as const)
+                : ("success" as const),
             },
           },
         ],
@@ -4044,7 +4059,9 @@ export async function convertMessagesForStrandsSeed(
       pendingToolResults.push({
         toolResult: {
           toolUseId: toolCallId,
-          status: "success" as const,
+          status: (msg as { error?: string }).error
+            ? ("error" as const)
+            : ("success" as const),
           content: [{ text: textContent }],
         },
       });
