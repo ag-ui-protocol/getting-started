@@ -188,6 +188,10 @@ function HaikuCard({ haiku }: { haiku: Partial<Haiku> }) {
       {haiku.image_name && (
         <div className="relative z-10 mt-8 pt-8 border-t border-slate-200 dark:border-slate-700">
           <div className="relative group overflow-hidden rounded-2xl shadow-xl">
+            {/* DEFERRED (PNI-307): plain <img> kept — next/image requires
+                explicit dimensions or `fill`, which changes this demo's
+                layout, and the E2E suites assert on this element. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               data-testid="haiku-image"
               src={`/images/${haiku.image_name}`}

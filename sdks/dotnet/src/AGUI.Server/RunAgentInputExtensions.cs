@@ -81,6 +81,7 @@ public static class RunAgentInputExtensions
                 genericResponses.Add(new InterruptResponseContent(resume.InterruptId)
                 {
                     Payload = resume.Payload,
+                    Metadata = resume.Metadata,
                 });
             }
 

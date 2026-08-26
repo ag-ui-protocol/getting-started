@@ -26,7 +26,7 @@ type Bump = {
   newVersion: string;
 };
 
-const MODEL = "claude-sonnet-4-20250514";
+const MODEL = "claude-opus-4-8";
 const ANTHROPIC_VERSION = "2023-06-01";
 const MAX_TOKENS = 2048;
 const DEFAULT_BASE = "https://api.anthropic.com/";

@@ -13,12 +13,10 @@ public sealed class RunErrorEvent : BaseEvent
     public string Message { get; set; } = string.Empty;
 
     [JsonPropertyName("code")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Code { get; set; }
 
     // Optional partial usage for a run that failed after one or more model calls
     // completed. Same numeric-only shape as RUN_FINISHED.
     [JsonPropertyName("usage")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IList<TokenUsage>? Usage { get; set; }
 }

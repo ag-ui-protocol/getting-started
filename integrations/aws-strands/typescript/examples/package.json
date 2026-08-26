@@ -11,6 +11,8 @@
     "agentic-generative-ui": "tsx --env-file-if-exists=.env server/api/agentic-generative-ui.ts",
     "backend-tool-rendering": "tsx --env-file-if-exists=.env server/api/backend-tool-rendering.ts",
     "human-in-the-loop": "tsx --env-file-if-exists=.env server/api/human-in-the-loop.ts",
+    "interrupt": "tsx --env-file-if-exists=.env server/api/interrupt.ts",
+    "predictive-state-updates": "tsx --env-file-if-exists=.env server/api/predictive-state-updates.ts",
     "shared-state": "tsx --env-file-if-exists=.env server/api/shared-state.ts",
     "tool-based-generative-ui": "tsx --env-file-if-exists=.env server/api/tool-based-generative-ui.ts"
   },
@@ -22,7 +24,7 @@
     "@strands-agents/sdk": "^1.1.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "cors": "^2.8.5",
-    "express": "^5.0.0",
+    "express": "5.1.0",
     "openai": "^6.0.0",
     "zod": "^4.4.3"
   },

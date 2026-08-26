@@ -5,6 +5,7 @@ import {
   EventType,
   Message,
   RunFinishedOutcome,
+  SubagentFinishedOutcome,
 } from "@ag-ui/core";
 import * as protoEvents from "./generated/events";
 import * as protoPatch from "./generated/patch";
@@ -202,6 +203,24 @@ function toCamelCase(str: string): string {
 /**
  * Encodes an event message to a protocol buffer binary format.
  */
+/**
+ * Narrows metadata to the object the wire format declares, or nothing.
+ *
+ * On the validated path the schema has already guaranteed this. On the fallback
+ * path below the event is unvalidated, and the generated `Struct.wrap` would
+ * quietly mangle anything else — an array becomes `{"0": …}`, a string becomes
+ * per-character keys, a number becomes `{}`. Dropping the value is the honest
+ * outcome for a shim whose contract is to warn and encode best-effort; the
+ * caller already gets a loud warning naming the validation failure.
+ *
+ * This deliberately differs from the .NET encoder, which throws on non-object
+ * metadata. .NET has no compatibility fallback to keep usable.
+ */
+const normalizeMetadata = (metadata: unknown): LooseRecord | undefined =>
+  typeof metadata === "object" && metadata !== null && !Array.isArray(metadata)
+    ? (metadata as LooseRecord)
+    : undefined;
+
 export function encode(event: BaseEvent): Uint8Array {
   /**
    * In previous versions of AG-UI, we didn't really validate the events
@@ -226,13 +245,26 @@ export function encode(event: BaseEvent): Uint8Array {
     validatedEvent = event;
   }
   const oneofField = toCamelCase(validatedEvent.type);
-  const { type, timestamp, rawEvent, ...rest } = validatedEvent as AGUIEvent as LooseRecord;
+  const { type, timestamp, rawEvent, metadata, ...rest } = validatedEvent as AGUIEvent as LooseRecord;
 
   // since protobuf does not support optional arrays, we need to ensure that the toolCalls array is always present
   if (type === EventType.MESSAGES_SNAPSHOT && Array.isArray(rest.messages)) {
     rest.messages = (rest.messages as Message[]).map((message) => {
       const untypedMessage = message as LooseRecord;
       const normalizedMessage: LooseRecord = { ...untypedMessage, contentParts: [] };
+
+      // Same normalisation as the base event below: these messages are
+      // unvalidated on the fallback path, so a null or non-object metadata would
+      // otherwise reach `Struct.wrap` and throw or be silently mangled.
+      normalizedMessage.metadata = normalizeMetadata(untypedMessage.metadata);
+
+      // Tool calls carry metadata of their own, and reach the same Struct.wrap.
+      if (Array.isArray(untypedMessage.toolCalls)) {
+        normalizedMessage.toolCalls = untypedMessage.toolCalls.map((toolCall: unknown) => ({
+          ...(toolCall as LooseRecord),
+          metadata: normalizeMetadata(asRecord(toolCall)?.metadata),
+        }));
+      }
 
       if (Array.isArray(untypedMessage.content)) {
         const contentParts = untypedMessage.content
@@ -268,6 +300,25 @@ export function encode(event: BaseEvent): Uint8Array {
     }
   }
 
+  // SubagentFinishedEvent: same flattening as RunFinishedEvent's outcome, one
+  // level down — `outcome` (string) plus `interrupt_ids` (repeated).
+  if (type === EventType.SUBAGENT_FINISHED) {
+    // == null: schema-invalid events still reach this flatten (encode falls back
+    // to the raw event when the parse fails), and a null outcome must degrade to
+    // the legacy encoding rather than crash on `.type`.
+    const outcome = rest.outcome as SubagentFinishedOutcome | null | undefined;
+    if (outcome == null) {
+      rest.outcome = "";
+      rest.interruptIds = [];
+    } else if (outcome.type === "suspended") {
+      rest.outcome = "suspended";
+      rest.interruptIds = outcome.interruptIds ?? [];
+    } else {
+      rest.outcome = "success";
+      rest.interruptIds = [];
+    }
+  }
+
   // Terminal events carry an optional `usage` array. protobuf has no optional
   // repeated field, so normalize to `[]` when absent — otherwise ts-proto's
   // `for (const v of message.usage)` iterates `undefined` and throws. Empty
@@ -294,6 +345,7 @@ export function encode(event: BaseEvent): Uint8Array {
         type: protoEvents.EventType[event.type as keyof typeof protoEvents.EventType],
         timestamp,
         rawEvent,
+        metadata: normalizeMetadata(metadata),
       },
       ...rest,
     },
@@ -314,6 +366,11 @@ export function decode(data: Uint8Array): BaseEvent {
   decoded.type = protoEvents.EventType[decoded.baseEvent.type];
   decoded.timestamp = decoded.baseEvent.timestamp;
   decoded.rawEvent = decoded.baseEvent.rawEvent;
+  // Struct decodes an absent object to undefined, so an event that carried no
+  // metadata stays without the key rather than gaining an empty one.
+  if (decoded.baseEvent.metadata !== undefined) {
+    decoded.metadata = decoded.baseEvent.metadata;
+  }
   delete decoded.baseEvent;
 
   // we want tool calls to be optional, so we need to remove them if they are empty
@@ -363,6 +420,33 @@ export function decode(data: Uint8Array): BaseEvent {
       runFinished.outcome = { type: "success" };
     } else {
       delete runFinished.outcome;
+    }
+  }
+
+  // SubagentFinishedEvent: rebuild the nested `outcome` union from the flat
+  // proto fields, mirroring RunFinishedEvent above. Empty/missing decodes to
+  // `undefined` (legacy success).
+  if (decoded.type === EventType.SUBAGENT_FINISHED) {
+    const subagentFinished = decoded as LooseRecord;
+    const wireOutcome: string | undefined =
+      typeof subagentFinished.outcome === "string" && subagentFinished.outcome !== ""
+        ? subagentFinished.outcome
+        : undefined;
+    const wireInterruptIds: unknown[] = Array.isArray(subagentFinished.interruptIds)
+      ? subagentFinished.interruptIds
+      : [];
+
+    delete subagentFinished.interruptIds;
+
+    if (wireOutcome === "suspended") {
+      subagentFinished.outcome = {
+        type: "suspended",
+        ...(wireInterruptIds.length > 0 && { interruptIds: wireInterruptIds }),
+      };
+    } else if (wireOutcome === "success") {
+      subagentFinished.outcome = { type: "success" };
+    } else {
+      delete subagentFinished.outcome;
     }
   }
 

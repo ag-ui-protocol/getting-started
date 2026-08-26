@@ -14,6 +14,8 @@ import {
   EventType,
   type Message,
   type MessagesSnapshotEvent,
+  type Metadata,
+  mergeMetadata,
   type RawEvent,
   type ReasoningEncryptedValueEvent,
   type ReasoningEndEvent,
@@ -30,12 +32,16 @@ import {
   type StateSnapshotEvent,
   type StepFinishedEvent,
   type StepStartedEvent,
+  type SubagentErrorEvent,
+  type SubagentFinishedEvent,
+  type SubagentStartedEvent,
   type TextMessageContentEvent,
   type TextMessageEndEvent,
   type TextMessageStartEvent,
   type ToolCallArgsEvent,
   type ToolCallEndEvent,
   type ToolCallResultEvent,
+  type ToolCall,
   type ToolCallStartEvent,
   type ToolMessage,
 } from "@ag-ui/core";
@@ -86,6 +92,43 @@ function resolveOrCreateAssistantMessage(
   const created: AssistantMessage = { id: toolCallId, role: "assistant", toolCalls: [] };
   messages.push(created);
   return created;
+}
+
+/**
+ * Folds an event's metadata into the thing that event builds, key by key, with
+ * the last write winning.
+ *
+ * The target is a message, or a tool call for the TOOL_CALL_* events — a tool
+ * call is not a message, and several can share one parent assistant message, so
+ * folding theirs into that parent would make the result depend on their relative
+ * order. Metadata on a run-, step- or state-level event belongs to that event
+ * and never reaches either.
+ *
+ * Values are cloned so the event payload can't alias into the message array and
+ * be mutated later through the caller's copy of the event.
+ *
+ * Returns whether anything changed, so callers only emit a mutation when it did.
+ *
+ * Known limitation, deliberately not fixed here. Handlers resolve their target
+ * before running subscribers, so a subscriber that returns a replacement
+ * `messages` array leaves that reference pointing into the discarded one and
+ * this write is lost. Review has raised it repeatedly; it is not fixed because
+ * the cure is worse than the disease. Re-resolving by id costs an O(n) scan on
+ * TEXT_MESSAGE_CONTENT, which fires per streamed token, to fix a case that needs
+ * a subscriber replacing the array from that specific hook — and the same
+ * staleness already loses the content append on `main`, so it is a pre-existing
+ * reducer issue rather than a metadata one. Fixing it belongs in its own change,
+ * conditional on `mutation.messages !== undefined` so the hot path pays nothing.
+ */
+function applyEventMetadata(
+  target: { metadata?: Metadata } | undefined,
+  event: BaseEvent,
+): boolean {
+  if (!target || event.metadata === undefined) {
+    return false;
+  }
+  target.metadata = mergeMetadata(target.metadata, structuredClone_(event.metadata));
+  return true;
 }
 
 export const defaultApplyEvents = (
@@ -165,13 +208,19 @@ export const defaultApplyEvents = (
           applyMutation(mutation);
 
           if (mutation.stopPropagation !== true) {
-            const { messageId, role = "assistant", name } = event as TextMessageStartEvent;
+            const {
+              messageId,
+              role = "assistant",
+              name,
+              subagentRunId,
+            } = event as TextMessageStartEvent;
 
             // Check if a message with this ID already exists (e.g., created by TOOL_CALL_START
             // with the same parentMessageId)
             const existingMessage = messages.find((m) => m.id === messageId);
+            let targetMessage = existingMessage;
 
-            if (!existingMessage) {
+            if (!targetMessage) {
               // Create a new message using properties from the event
               // Text messages can be developer, system, assistant, or user (not tool)
               const newMessage: Message = {
@@ -179,14 +228,20 @@ export const defaultApplyEvents = (
                 role: role,
                 content: "",
                 ...(name !== undefined && { name }),
+                ...(subagentRunId != null && { subagentRunId }),
               };
 
               // Add the new message to the messages array
               messages.push(newMessage);
-              applyMutation({ messages });
+              targetMessage = newMessage;
             }
             // If message already exists, we don't need to create a new one
             // The TEXT_MESSAGE_CONTENT events will update the existing message's content
+
+            const metadataChanged = applyEventMetadata(targetMessage, event);
+            if (!existingMessage || metadataChanged) {
+              applyMutation({ messages });
+            }
           }
           return emitUpdates();
         }
@@ -223,6 +278,7 @@ export const defaultApplyEvents = (
             const existingContent =
               typeof targetMessage.content === "string" ? targetMessage.content : "";
             targetMessage.content = `${existingContent}${delta}`;
+            applyEventMetadata(targetMessage, event);
             applyMutation({ messages });
           }
 
@@ -256,6 +312,13 @@ export const defaultApplyEvents = (
           );
           applyMutation(mutation);
 
+          // Merge before onNewMessage so subscribers see the completed message.
+          // An end event is where late-known values — token usage, finish
+          // reason — typically arrive.
+          if (mutation.stopPropagation !== true && applyEventMetadata(targetMessage, event)) {
+            applyMutation({ messages });
+          }
+
           await Promise.all(
             subscribers.map((subscriber) => {
               subscriber.onNewMessage?.({
@@ -288,7 +351,8 @@ export const defaultApplyEvents = (
           applyMutation(mutation);
 
           if (mutation.stopPropagation !== true) {
-            const { toolCallId, toolCallName, parentMessageId } = event as ToolCallStartEvent;
+            const { toolCallId, toolCallName, parentMessageId, subagentRunId } =
+              event as ToolCallStartEvent;
 
             // Applying a start event must be idempotent. The same start can
             // reach this reducer twice — a tool call already carried in
@@ -311,35 +375,47 @@ export const defaultApplyEvents = (
               // Update the existing entry instead of pushing a second one, and
               // leave `arguments` untouched — a start event carries none, so
               // the copy already in state holds the only streamed args.
-              if (existingToolCall.function.name !== toolCallName) {
+              const renamed = existingToolCall.function.name !== toolCallName;
+              if (renamed) {
                 console.warn(
                   `TOOL_CALL_START: tool call '${toolCallId}' already exists with name ` +
                     `'${existingToolCall.function.name}' — updating it to '${toolCallName}'`,
                 );
                 existingToolCall.function.name = toolCallName;
+              }
+
+              if (applyEventMetadata(existingToolCall, event) || renamed) {
                 applyMutation({ messages });
               }
 
               return emitUpdates();
             }
 
+            const preexistingIds = new Set(messages.map((m) => m.id));
             const targetMessage = resolveOrCreateAssistantMessage(
               messages,
               parentMessageId,
               toolCallId,
             );
+            const wasCreated = !preexistingIds.has(targetMessage.id);
+            if (wasCreated && subagentRunId != null && targetMessage.subagentRunId === undefined) {
+              targetMessage.subagentRunId = subagentRunId;
+            }
 
             targetMessage.toolCalls ??= [];
 
             // Add the new tool call
-            targetMessage.toolCalls.push({
+            const newToolCall: ToolCall = {
               id: toolCallId,
               type: "function",
               function: {
                 name: toolCallName,
                 arguments: "",
               },
-            });
+            };
+            targetMessage.toolCalls.push(newToolCall);
+
+            applyEventMetadata(newToolCall, event);
 
             applyMutation({ messages });
           }
@@ -402,6 +478,7 @@ export const defaultApplyEvents = (
           if (mutation.stopPropagation !== true) {
             // Append the arguments to the correct tool call by ID
             targetToolCall.function.arguments += delta;
+            applyEventMetadata(targetToolCall, event);
             applyMutation({ messages });
           }
 
@@ -457,6 +534,12 @@ export const defaultApplyEvents = (
           );
           applyMutation(mutation);
 
+          // Merge before onNewToolCall, for the same reason as TEXT_MESSAGE_END:
+          // an end event carries the values only known once the call is closed.
+          if (mutation.stopPropagation !== true && applyEventMetadata(targetToolCall, event)) {
+            applyMutation({ messages });
+          }
+
           await Promise.all(
             subscribers.map((subscriber) => {
               subscriber.onNewToolCall?.({
@@ -490,14 +573,18 @@ export const defaultApplyEvents = (
           applyMutation(mutation);
 
           if (mutation.stopPropagation !== true) {
-            const { messageId, toolCallId, content, role } = event as ToolCallResultEvent;
+            const { messageId, toolCallId, content, role, subagentRunId } =
+              event as ToolCallResultEvent;
 
             const toolMessage: ToolMessage = {
               id: messageId,
               toolCallId,
               role: role || "tool",
               content: content,
+              ...(subagentRunId != null && { subagentRunId }),
             };
+
+            applyEventMetadata(toolMessage, event);
 
             // Place the tool result immediately after the assistant message that
             // issued the matching tool call — not at the end. A result event can
@@ -624,7 +711,18 @@ export const defaultApplyEvents = (
           applyMutation(mutation);
 
           if (mutation.stopPropagation !== true) {
-            const { messages: newMessages } = event as MessagesSnapshotEvent;
+            const { messages: rawNewMessages } = event as MessagesSnapshotEvent;
+            // A runtime null tag reads as absent — it must not persist into state
+            // and ride the next run's serialized input (the schemas forbid null;
+            // this reducer also runs on unverified inputs).
+            const newMessages = rawNewMessages.map((m) => {
+              if ((m as { subagentRunId?: string | null }).subagentRunId !== null) return m;
+              // Spread + delete: Message is a union, so rest-destructuring is a
+              // tsc error (TS2700).
+              const copy = { ...m } as typeof m & { subagentRunId?: string | null };
+              delete copy.subagentRunId;
+              return copy as typeof m;
+            });
 
             // Edit-based merge: update existing messages with snapshot data while
             // preserving client-only messages the backend leaves out of the
@@ -712,25 +810,46 @@ export const defaultApplyEvents = (
               role: "activity",
               activityType: activityEvent.activityType,
               content: structuredClone_(activityEvent.content),
+              ...(activityEvent.subagentRunId != null && {
+                subagentRunId: activityEvent.subagentRunId,
+              }),
             };
 
             let createdMessage: ActivityMessage | undefined;
+            let mergeTarget: Message | undefined;
 
             if (existingIndex === -1) {
               messages.push(activityMessage);
               createdMessage = activityMessage;
+              mergeTarget = activityMessage;
             } else if (existingActivityMessage) {
               if (replace) {
+                // Spread carries the accumulated metadata across the replace —
+                // a snapshot replaces content, not the metadata built up so far.
+                // Attribution is the exception: a replace snapshot re-mints the
+                // activity, so it brings its own subagentRunId with it (D4: a
+                // creation event's tag transfers to the message it mints). Keeping
+                // the old owner here left a subagent's replacement parent-owned —
+                // and, in the other direction, a parent snapshot could never
+                // reclaim an activity a subagent had taken.
                 messages[existingIndex] = {
                   ...existingActivityMessage,
                   activityType: activityEvent.activityType,
                   content: structuredClone_(activityEvent.content),
+                  subagentRunId: activityEvent.subagentRunId,
                 };
+                if (activityEvent.subagentRunId == null) {
+                  delete (messages[existingIndex] as { subagentRunId?: string }).subagentRunId;
+                }
               }
+              mergeTarget = messages[existingIndex];
             } else if (replace) {
               messages[existingIndex] = activityMessage;
               createdMessage = activityMessage;
+              mergeTarget = activityMessage;
             }
+
+            applyEventMetadata(mergeTarget, activityEvent);
 
             applyMutation({ messages });
 
@@ -787,6 +906,13 @@ export const defaultApplyEvents = (
 
           if (mutation.stopPropagation !== true) {
             try {
+              // Metadata does not depend on the patch succeeding — a stale path
+              // should not cost the message its usage or trace keys — so merge
+              // it before attempting the patch and emit it either way.
+              if (applyEventMetadata(existingActivityMessage, activityEvent)) {
+                applyMutation({ messages });
+              }
+
               const baseContent = structuredClone_(existingActivityMessage.content ?? {});
 
               const result = jsonpatch.applyPatch(
@@ -797,6 +923,7 @@ export const defaultApplyEvents = (
               );
               const updatedContent = result.newDocument as ActivityMessage["content"];
 
+              // The spread carries the metadata merged above.
               messages[existingIndex] = {
                 ...existingActivityMessage,
                 content: structuredClone_(updatedContent),
@@ -876,7 +1003,16 @@ export const defaultApplyEvents = (
             // Check if the event contains input with messages
             if (runStartedEvent.input?.messages) {
               // Add messages that aren't already present (checked by ID)
-              for (const message of runStartedEvent.input.messages) {
+              for (const rawMessage of runStartedEvent.input.messages) {
+                // Same null-as-absent rule as the snapshot merge above.
+                let message = rawMessage;
+                if ((rawMessage as { subagentRunId?: string | null }).subagentRunId === null) {
+                  const copy = { ...rawMessage } as typeof rawMessage & {
+                    subagentRunId?: string | null;
+                  };
+                  delete copy.subagentRunId;
+                  message = copy as typeof rawMessage;
+                }
                 const existingMessage = messages.find((m) => m.id === message.id);
                 if (!existingMessage) {
                   messages.push(message);
@@ -923,7 +1059,18 @@ export const defaultApplyEvents = (
           // can't mutate the agent's tracked state through array aliasing.
           if (mutation.stopPropagation !== true) {
             agent.pendingInterrupts =
-              finishedParams.outcome === "interrupt" ? [...finishedParams.interrupts] : [];
+              finishedParams.outcome === "interrupt"
+                ? finishedParams.interrupts.map((interrupt) => {
+                    if ((interrupt as { subagentRunId?: string | null }).subagentRunId !== null) {
+                      return interrupt;
+                    }
+                    const copy = { ...interrupt } as typeof interrupt & {
+                      subagentRunId?: string | null;
+                    };
+                    delete copy.subagentRunId;
+                    return copy as typeof interrupt;
+                  })
+                : [];
           }
 
           return emitUpdates();
@@ -987,11 +1134,11 @@ export const defaultApplyEvents = (
         }
 
         case EventType.TEXT_MESSAGE_CHUNK: {
-          throw new Error("TEXT_MESSAGE_CHUNK must be tranformed before being applied");
+          throw new Error("TEXT_MESSAGE_CHUNK must be transformed before being applied");
         }
 
         case EventType.TOOL_CALL_CHUNK: {
-          throw new Error("TOOL_CALL_CHUNK must be tranformed before being applied");
+          throw new Error("TOOL_CALL_CHUNK must be transformed before being applied");
         }
 
         case EventType.THINKING_START: {
@@ -1049,16 +1196,23 @@ export const defaultApplyEvents = (
           applyMutation(mutation);
 
           if (mutation.stopPropagation !== true) {
-            const { messageId } = event as ReasoningMessageStartEvent;
+            const { messageId, subagentRunId } = event as ReasoningMessageStartEvent;
             const existingMessage = messages.find((m) => m.id === messageId);
+            let targetMessage = existingMessage;
 
-            if (!existingMessage) {
+            if (!targetMessage) {
               const newMessage: ReasoningMessage = {
                 id: messageId,
                 role: "reasoning",
                 content: "",
+                ...(subagentRunId != null && { subagentRunId }),
               };
               messages.push(newMessage);
+              targetMessage = newMessage;
+            }
+
+            const metadataChanged = applyEventMetadata(targetMessage, event);
+            if (!existingMessage || metadataChanged) {
               applyMutation({ messages });
             }
           }
@@ -1095,6 +1249,7 @@ export const defaultApplyEvents = (
             const existingContent =
               typeof targetMessage.content === "string" ? targetMessage.content : "";
             targetMessage.content = `${existingContent}${delta}`;
+            applyEventMetadata(targetMessage, event);
             applyMutation({ messages });
           }
           return emitUpdates();
@@ -1125,6 +1280,10 @@ export const defaultApplyEvents = (
               }),
           );
           applyMutation(mutation);
+
+          if (mutation.stopPropagation !== true && applyEventMetadata(targetMessage, event)) {
+            applyMutation({ messages });
+          }
 
           await Promise.all(
             subscribers.map((subscriber) => {
@@ -1163,6 +1322,13 @@ export const defaultApplyEvents = (
           return emitUpdates();
         }
 
+        // REASONING_ENCRYPTED_VALUE attaches an encrypted blob to an entity that
+        // already exists; it does not build one, so its metadata stays on the
+        // event, like REASONING_START and REASONING_END. That also keeps the
+        // compaction invariant intact: `compactEvents` buffers an event arriving
+        // mid-stream and flushes it *after* the END it originally preceded, so
+        // merging its metadata into the same entity would make a compacted
+        // replay disagree with the original stream.
         case EventType.REASONING_ENCRYPTED_VALUE: {
           const { subtype, entityId, encryptedValue } = event as ReasoningEncryptedValueEvent;
           const mutation = await runSubscribersWithMutation(
@@ -1207,6 +1373,60 @@ export const defaultApplyEvents = (
               currentMutation.messages = messages;
             }
           }
+          return emitUpdates();
+        }
+
+        case EventType.SUBAGENT_STARTED: {
+          const mutation = await runSubscribersWithMutation(
+            subscribers,
+            messages,
+            state,
+            (subscriber, messages, state) =>
+              subscriber.onSubagentStartedEvent?.({
+                event: event as SubagentStartedEvent,
+                messages,
+                state,
+                agent,
+                input,
+              }),
+          );
+          applyMutation(mutation);
+          return emitUpdates();
+        }
+
+        case EventType.SUBAGENT_FINISHED: {
+          const mutation = await runSubscribersWithMutation(
+            subscribers,
+            messages,
+            state,
+            (subscriber, messages, state) =>
+              subscriber.onSubagentFinishedEvent?.({
+                event: event as SubagentFinishedEvent,
+                messages,
+                state,
+                agent,
+                input,
+              }),
+          );
+          applyMutation(mutation);
+          return emitUpdates();
+        }
+
+        case EventType.SUBAGENT_ERROR: {
+          const mutation = await runSubscribersWithMutation(
+            subscribers,
+            messages,
+            state,
+            (subscriber, messages, state) =>
+              subscriber.onSubagentErrorEvent?.({
+                event: event as SubagentErrorEvent,
+                messages,
+                state,
+                agent,
+                input,
+              }),
+          );
+          applyMutation(mutation);
           return emitUpdates();
         }
       }

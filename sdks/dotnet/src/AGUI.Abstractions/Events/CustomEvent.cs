@@ -23,6 +23,12 @@ public sealed class CustomEvent : BaseEvent
     /// The custom event payload as a raw JSON element.
     /// </summary>
     [JsonPropertyName("value")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Value { get; set; }
+
+    /// <summary>
+    /// Gets or sets the subagent that produced this event, absent when the parent agent
+    /// produced it directly.
+    /// </summary>
+    [JsonPropertyName("subagentRunId")]
+    public string? SubagentRunId { get; set; }
 }

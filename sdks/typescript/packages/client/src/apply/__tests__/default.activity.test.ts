@@ -35,6 +35,14 @@ async function emitAndCollect(
   return updatesPromise;
 }
 
+/** Narrow a message to the activity role, failing the test otherwise. */
+function expectActivityMessage(message: Message | undefined) {
+  if (message?.role !== "activity") {
+    throw new Error(`Expected activity message, got role ${message?.role}`);
+  }
+  return message;
+}
+
 /** Shorthand: apply a single MESSAGES_SNAPSHOT and return the resulting messages. */
 async function applySnapshot(initial: Message[], snapshotMessages: Message[]): Promise<Message[]> {
   const updates = await emitAndCollect(initial, (events$) => {
@@ -68,10 +76,10 @@ describe("defaultApplyEvents with activity events", () => {
 
     expect(updates.length).toBe(2);
 
-    const snapshotUpdate = updates[0];
-    expect(snapshotUpdate?.messages?.[0]?.role).toBe("activity");
-    expect(snapshotUpdate?.messages?.[0]?.activityType).toBe("PLAN");
-    expect(snapshotUpdate?.messages?.[0]?.content).toEqual({ tasks: ["search"] });
+    const snapshotMessage = expectActivityMessage(updates[0]?.messages?.[0]);
+    expect(snapshotMessage.role).toBe("activity");
+    expect(snapshotMessage.activityType).toBe("PLAN");
+    expect(snapshotMessage.content).toEqual({ tasks: ["search"] });
 
     const deltaUpdate = updates[1];
     expect(deltaUpdate?.messages?.[0]?.content).toEqual({ tasks: ["✓ search"] });
@@ -106,8 +114,10 @@ describe("defaultApplyEvents with activity events", () => {
 
     expect(updates.length).toBe(3);
     expect(updates[0]?.messages?.[0]?.content).toEqual({ operations: [] });
-    expect(updates[1]?.messages?.[0]?.content?.operations).toEqual([firstOperation]);
-    expect(updates[2]?.messages?.[0]?.content?.operations).toEqual([
+    expect(expectActivityMessage(updates[1]?.messages?.[0]).content.operations).toEqual([
+      firstOperation,
+    ]);
+    expect(expectActivityMessage(updates[2]?.messages?.[0]).content.operations).toEqual([
       firstOperation,
       secondOperation,
     ]);
@@ -426,7 +436,7 @@ describe("MESSAGES_SNAPSHOT preserves client-only messages", () => {
       [
         { id: "m1", role: "user", content: "create a dashboard" },
         { id: "asst-1", role: "assistant", content: "I'll create that for you" },
-        { id: "tool-stream", role: "tool", content: '{"a2ui": true}' },
+        { id: "tool-stream", role: "tool", content: '{"a2ui": true}', toolCallId: "tc-stream" },
         {
           id: "act-1",
           role: "activity",
@@ -438,7 +448,7 @@ describe("MESSAGES_SNAPSHOT preserves client-only messages", () => {
       [
         { id: "m1", role: "user", content: "create a dashboard" },
         { id: "asst-1", role: "assistant", content: "I'll create that for you" },
-        { id: "tool-canon", role: "tool", content: '{"a2ui": true}' },
+        { id: "tool-canon", role: "tool", content: '{"a2ui": true}', toolCallId: "tc-canon" },
         { id: "asst-2", role: "assistant", content: "Here's your dashboard" },
       ],
     );

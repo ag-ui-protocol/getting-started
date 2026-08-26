@@ -6,9 +6,9 @@ import { EventType } from "@ag-ui/core";
 
 class StubAgent extends AbstractAgent {
   public received?: RunAgentInput;
-  protected run(input: RunAgentInput) {
+  run(input: RunAgentInput) {
     this.received = input;
-    return of<BaseEvent>(
+    return of(
       { type: EventType.RUN_STARTED, threadId: input.threadId, runId: input.runId } as BaseEvent,
       { type: EventType.RUN_FINISHED, threadId: input.threadId, runId: input.runId } as BaseEvent,
     );

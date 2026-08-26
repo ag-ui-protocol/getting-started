@@ -46,7 +46,8 @@ The hosting layer handles the protocol details for you:
 
 - Converts `RunAgentInput.Messages` into `ChatMessage` values
 - Translates `RunAgentInput.Resume` into MEAI approval and interrupt response
-  content
+  content, carrying payload — and, for non-tool interrupts, metadata — onto
+  `InterruptResponseContent`
 - Installs client-declared tools on `ChatOptions`
 - Stores the original input under
   `ChatOptions.AdditionalProperties[AGUIConstants.RunAgentInputKey]`

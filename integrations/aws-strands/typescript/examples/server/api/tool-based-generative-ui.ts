@@ -12,6 +12,7 @@
 import { Agent } from "@strands-agents/sdk";
 import { StrandsAgent } from "@ag-ui/aws-strands";
 import { createStrandsApp } from "@ag-ui/aws-strands/server";
+import { corsPolicyFromEnv } from "../cors";
 import { createModel } from "../model-factory";
 
 async function main(): Promise<void> {
@@ -35,10 +36,23 @@ Do not respond with plain text — always use the tool.`,
     description: "AWS Strands haiku generator with frontend-rendered tool",
   });
 
-  const app = await createStrandsApp(aguiAgent, { path: "/" });
+  // The one example here that demonstrates the cross-origin opt-in. Its
+  // siblings pass no `corsOrigin` and stay closed, and so could this one: the
+  // dojo reaches every example from its own Next route handler, server side,
+  // where CORS is not in the path at all. It carries the opt-in so the wiring
+  // is written down somewhere runnable, for whoever points a browser page
+  // straight at this server. `CORS_ALLOW_ORIGINS` (comma-separated) chooses
+  // the origins; see ../cors.ts.
+  const corsPolicy = corsPolicyFromEnv();
+
+  const app = await createStrandsApp(aguiAgent, {
+    path: "/",
+    corsOrigin: corsPolicy.origin,
+  });
   const port = Number(process.env.PORT ?? 8000);
   app.listen(port, () => {
     console.log(`Listening on http://localhost:${port}`);
+    console.log(`Browser origins allowed: ${corsPolicy.description}`);
   });
 }
 

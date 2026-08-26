@@ -53,6 +53,8 @@ public sealed class AGUIChatClientOptions
 
 Set `Transport` directly when you need a custom transport for tests or an
 alternative wire protocol. See [Transport](/sdk/dotnet/client/transport).
+Configured `JsonSerializerOptions` are also used when converting MEAI message
+content, including custom CLR values in `AIContent.AdditionalProperties`.
 
 ## Streaming responses
 
@@ -255,6 +257,23 @@ static ChatMessage CreateInterruptResponse(InterruptRequestContent request)
             Payload = payload.RootElement.Clone(),
         },
     ]);
+}
+```
+
+`InterruptResponseContent.Metadata` optionally carries envelope data about the
+response — a signature proving the decision was not tampered with, routing keys
+— as opposed to `Payload`, which is the answer the agent asked for. The client
+copies it onto the resume entry's `metadata`, and the hosting layer hands it
+back to the server pipeline on `InterruptResponseContent`; see
+[Metadata](/concepts/metadata#resume-entries).
+
+```csharp
+new InterruptResponseContent(request.RequestId)
+{
+    Payload = payload.RootElement.Clone(),
+    Metadata = JsonDocument.Parse(
+        """{"definitionId":"review-plan","key":"afterModel-review"}""")
+        .RootElement.Clone(),
 }
 ```
 

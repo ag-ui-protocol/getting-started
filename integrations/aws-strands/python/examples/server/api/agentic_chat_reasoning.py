@@ -25,7 +25,7 @@ load_dotenv(dotenv_path=env_path)
 # This demo is specifically about reasoning, so it opts into the OpenAI
 # Responses API, which is what surfaces reasoning summaries. Every other
 # demo uses the factory default (Chat Completions, no reasoning).
-model = create_model(openai_api="responses")
+model = create_model(openai_api="responses", reasoning=True)
 
 strands_agent = Agent(
     model=model,

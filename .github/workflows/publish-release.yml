@@ -237,17 +237,24 @@ jobs:
         with:
           node-version-file: ".node-version"
 
-      - name: Install protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # v3.0.0
-        with:
-          version: "25.x"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
+          # The publish job's copy of this step documents the same post-step
+          # failure and turns caching off, because `uv publish` never writes the
+          # cache. Here uv DOES write it — `uv build` runs for every Python
+          # scope — so the cache stays on and we only stop the post step from
+          # treating "nothing to cache" as an error.
+          #
+          # Without this, a scope with no Python packages (every sdk-ts,
+          # integration-*-ts and middleware-* canary) never invokes uv, so the
+          # cache dir is never created and the post step fails the `build` job
+          # after a completely green build. `publish` needs `build`, so it is
+          # skipped and nothing ships — while the logs show every package
+          # building fine.
+          ignore-nothing-to-cache: true
 
       - name: Setup Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
@@ -531,7 +538,7 @@ jobs:
       # of this file.
       - name: Set up JDK 17 (stable)
         if: steps.meta.outputs.mode == 'stable' && steps.detect_java.outputs.count != '0'
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961  # v5.7.0
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
         with:
           java-version: "17"
           distribution: "temurin"
@@ -1493,7 +1500,7 @@ jobs:
       # long-lived client secret is stored.
       - name: Azure login (OIDC)
         if: vars.SIGNING_PROVIDER == 'keyvault'
-        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca  # v3.0.1
+        uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c  # v3.0.2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -1730,7 +1737,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up JDK 17
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961  # v5.7.0
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
         with:
           java-version: "17"
           distribution: "temurin"

@@ -25,6 +25,7 @@
       }
     ],
     "responseId": "run_Id_1",
+    "messageId": "call_Id_1",
     "rawRepresentation": {
       "type": "TOOL_CALL_END",
       "toolCallId": "call_Id_1",
@@ -77,6 +78,7 @@
       }
     ],
     "responseId": "run_Id_1",
+    "messageId": "call_Id_2",
     "rawRepresentation": {
       "type": "TOOL_CALL_END",
       "toolCallId": "call_Id_2",
@@ -205,6 +207,7 @@
       }
     ],
     "responseId": "run_Id_2",
+    "messageId": "call_Id_2",
     "rawRepresentation": {
       "type": "TOOL_CALL_RESULT",
       "messageId": "call_Id_2",

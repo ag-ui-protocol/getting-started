@@ -12,7 +12,6 @@ public sealed class ToolCallStartEvent : BaseEvent
     public override string Type => AGUIEventTypes.ToolCallStart;
 
     [JsonPropertyName("parentMessageId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ParentMessageId { get; set; }
 
     [JsonPropertyName("toolCallId")]
@@ -20,4 +19,11 @@ public sealed class ToolCallStartEvent : BaseEvent
 
     [JsonPropertyName("toolCallName")]
     public string ToolCallName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the subagent that produced this event, absent when the parent agent
+    /// produced it directly.
+    /// </summary>
+    [JsonPropertyName("subagentRunId")]
+    public string? SubagentRunId { get; set; }
 }

@@ -119,12 +119,15 @@ describe("Orchestrator path", () => {
     expect(kinds).not.toContain(EventType.RUN_ERROR);
   });
 
-  it("failed node emits STEP_FINISHED (Py parity: error field ignored)", async () => {
+  it("failed node emits STEP_FINISHED and surfaces no error event", async () => {
     // Py control in /tmp/py-control/test_multiagent_error_parity.py proved
-    // the Py adapter does NOT branch on node failure — a node_stop with
+    // the Py adapter does NOT branch on node failure: a node_stop with
     // status=FAILED still yields STEP_FINISHED, no error surfaced. TS
-    // must match: the TS SDK's AfterNodeCallEvent has an optional `error`
-    // field, which we deliberately ignore.
+    // matches on the wire. The TS SDK's AfterNodeCallEvent has an optional
+    // `error` field that no AG-UI event carries, and the adapter neither
+    // translates nor logs it, so a node failure leaves no trace at all.
+    // orchestrator-real-graph.test.ts drives the same outcome through a real
+    // `Graph` whose node model throws.
     const stream = fakeOrchestrator([
       { type: "beforeNodeCallEvent", nodeId: "flaky" },
       {
@@ -136,6 +139,8 @@ describe("Orchestrator path", () => {
     ]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sa = new StrandsAgent({ agent: stream as any, name: "t" });
+    // No `console.error` spy: the adapter logs nothing for a node failure, so
+    // a spy here would silence real error output rather than an expected line.
     const events = await collect(sa);
     const kinds = events.map((e) => e.type);
     expect(kinds.filter((k) => k === EventType.STEP_STARTED)).toHaveLength(1);
@@ -242,7 +247,9 @@ describe("Orchestrator path", () => {
     for (let i = 0; i < 10; i++) {
       const step = await iter.next();
       if (step.done) break;
-      if ((step.value as { type: string }).type === EventType.TEXT_MESSAGE_CONTENT)
+      if (
+        (step.value as { type: string }).type === EventType.TEXT_MESSAGE_CONTENT
+      )
         break;
     }
     // Bail: emulates the SSE writer detecting client disconnect.

@@ -7,6 +7,7 @@ on:
       - "sdks/typescript/**"
       - "typescript-sdk/**"
       - "integrations/**"
+      - "middlewares/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
@@ -18,6 +19,7 @@ on:
       - "sdks/typescript/**"
       - "typescript-sdk/**"
       - "integrations/**"
+      - "middlewares/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
@@ -40,25 +42,22 @@ jobs:
       - name: Detect fork PR
         id: fork-check
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" && \
-                "${GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME}" != "${{ github.repository }}" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && \
+                "$PR_HEAD_REPO" != "$GITHUB_REPOSITORY" ]]; then
             echo "prefix=fork-" >> "$GITHUB_OUTPUT"
           else
             echo "prefix=" >> "$GITHUB_OUTPUT"
           fi
         env:
-          GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+          # Passed via env rather than interpolated into the script: a fork's repo
+          # name is attacker-controlled text. GITHUB_EVENT_NAME and
+          # GITHUB_REPOSITORY are Actions built-ins, so nothing is expanded here.
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version-file: ".node-version"
-
-      - name: Install protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # v3.0.0
-        with:
-          version: "25.x"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
@@ -78,6 +77,12 @@ jobs:
 
       - name: Test Build
         run: pnpm run build
+
+      # A verification build must not rewrite tracked files (PNI-303): the proto
+      # generator is pinned via config.protocVersion and tsdown's exports
+      # rewriting is committed in canonical order, so any drift here is a bug.
+      - name: Verify build leaves the worktree clean
+        run: git diff --exit-code
 
       - name: Run tests
         run: pnpm run test

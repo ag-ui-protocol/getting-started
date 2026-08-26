@@ -31,7 +31,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from ag_ui.core import Context, EventType, RunAgentInput, Tool, UserMessage
-from strands.interrupt import _InterruptState
 from strands.tools.registry import ToolRegistry
 
 from ag_ui_strands.a2ui_tool import (
@@ -45,6 +44,7 @@ from ag_ui_strands.a2ui_tool import (
 )
 from ag_ui_strands.agent import StrandsAgent
 from ag_ui_strands.config import StrandsAgentConfig
+from tests.interrupt_state_stub import InterruptStateStub
 
 GENERATE_A2UI_TOOL_NAME = "generate_a2ui"
 RENDER_A2UI_TOOL_NAME = "render_a2ui"
@@ -474,7 +474,7 @@ def _build_agent(thread_id: str, stream_events: list, config=None) -> StrandsAge
     mock_inner._session_manager = None
     # A bare MagicMock auto-vivifies `_interrupt_state.activated` as a truthy
     # mock, spuriously tripping the "no session_manager" interrupt guard.
-    mock_inner._interrupt_state = _InterruptState()
+    mock_inner._interrupt_state = InterruptStateStub()
     mock_inner.messages = []
 
     async def _stream(_msg):

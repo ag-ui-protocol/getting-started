@@ -39,7 +39,7 @@ class TestHandleSingleEventCustomEvents(unittest.IsolatedAsyncioTestCase):
         from ag_ui_langgraph.agent import LangGraphAgent
 
         mock_graph = MagicMock()
-        agent = LangGraphAgent(name="test", graph=mock_graph)
+        agent = LangGraphAgent(name="test", graph=mock_graph, emit_subagent_events=True)
         # Minimal active_run state required by _handle_single_event.
         # Each key is needed for a specific code path:
         #   id              — used as key in messages_in_process dict
@@ -115,6 +115,44 @@ class TestHandleSingleEventCustomEvents(unittest.IsolatedAsyncioTestCase):
         event_types = [e.type for e in events]
         assert EventType.STATE_SNAPSHOT in event_types
         assert agent.active_run["manually_emitted_state"] == {"counter": 42}
+
+    @pytest.mark.asyncio
+    async def test_manually_emit_state_inside_subagent_is_emitted_and_attributed(self):
+        """A subagent's explicit manually_emit_state IS recorded and emitted.
+
+        An audit revision dropped this payload when a subagent was active, on the
+        grounds that only the parent owns state. That rule is not in the protocol --
+        the design lists STATE_SNAPSHOT / STATE_DELTA as attributable -- and dropping
+        silently discarded a state write the caller had explicitly requested.
+
+        `manually_emit_state` means "set the run's state", and a subagent calling it
+        means it. The snapshot goes out and the dispatch chokepoint stamps
+        subagent_run_id on it, which is provenance: it records WHO wrote the state,
+        while the state itself remains run-scoped.
+        """
+        agent = self._make_agent()
+        agent.active_run["current_subagent_run_id"] = "tools:s1"
+        agent.active_run["active_subagents"] = {}
+        event = {
+            "event": LangGraphEventTypes.OnCustomEvent.value,
+            "name": CustomEventNames.ManuallyEmitState.value,
+            "data": {"counter": 42},
+        }
+        events = []
+        async for ev in agent._handle_single_event(event, {}):
+            events.append(ev)
+
+        event_types = [e.type for e in events]
+        assert EventType.STATE_SNAPSHOT in event_types
+        assert EventType.CUSTOM in event_types
+
+        snapshot = next(e for e in events if e.type == EventType.STATE_SNAPSHOT)
+        assert snapshot.subagent_run_id == "tools:s1", (
+            "the snapshot must carry the subagent's id as provenance"
+        )
+        assert agent.active_run["manually_emitted_state"] == {"counter": 42}, (
+            "an explicit state write must be recorded, not discarded"
+        )
 
     @pytest.mark.asyncio
     async def test_exit_event_produces_custom(self):

@@ -13,6 +13,7 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "types": ["vitest/globals"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]

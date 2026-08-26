@@ -38,8 +38,7 @@ public override string Type => AGUIEventTypes.RunStarted;
 [JsonPropertyName("threadId")]                          // required: init to string.Empty
 public string ThreadId { get; set; } = string.Empty;
 
-[JsonPropertyName("parentRunId")]                       // optional: WhenWritingNull
-[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+[JsonPropertyName("parentRunId")]                       // optional: no JsonIgnore needed
 public string? ParentRunId { get; set; }
 
 [JsonPropertyName("value")]                             // dynamic payload: JsonElement, never object
@@ -58,7 +57,15 @@ Folder `Messages/`, derive `AGUIInputContent`, discriminator is `type` keyed on 
 
 - `[JsonSerializable(typeof(T))]` for every new type — non-negotiable for AOT (no runtime reflection serializer).
 - `[JsonPropertyName("camelCase")]` on every serialized property (explicit even though the context sets `CamelCase`).
-- `[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]` on every optional/nullable property.
+- **No** `[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]` on optional properties. The
+  context sets `DefaultIgnoreCondition = WhenWritingNull` once, for every type it knows, and
+  `AGUIJsonUtilities.DefaultTypeInfoResolver` carries the same rule into caller-owned
+  `JsonSerializerOptions`. Repeating it per property is what let three `null`s onto the wire before
+  anyone noticed the pattern was optional. `NullOmissionTest` fails if the context-wide setting stops
+  doing the work, so a re-added attribute is not a harmless duplicate — it hides the regression.
+- A non-nullable `JsonElement` that the contract lets a producer leave out does need
+  `[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]` (see `AGUITool.Parameters`): it
+  is never `null`, so the null rule cannot reach it, and an unset `JsonElement` throws on write.
 - Required strings init to `string.Empty`; collections init to `[]`.
 - Serialize via the generated context: `AGUIJsonSerializerContext.Default.{Type}` (or `options.GetTypeInfo(typeof(T))` inside converters).
 - Dynamic/arbitrary payloads are `JsonElement` / `JsonElement?`.

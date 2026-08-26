@@ -148,6 +148,94 @@ async function runPrepareStream(
   ]);
 }
 
+async function runPrepareRegenerateStream(
+  agent: LangGraphAgent,
+  forwardedConfig: Record<string, unknown>,
+) {
+  (agent as any).assistant = MOCK_ASSISTANT;
+  (agent as any).getCheckpointByMessage = vi.fn().mockResolvedValue({
+    values: { messages: [] },
+    checkpoint: { checkpoint_id: "checkpoint-1" },
+    next: [],
+  });
+  (agent as any).client.threads.updateState.mockResolvedValue({
+    checkpoint: { checkpoint_id: "fork-1" },
+  });
+
+  return agent.prepareRegenerateStream(
+    {
+      threadId: "thread-1",
+      messageCheckpoint: { id: "message-1", type: "human", content: "hi" },
+      forwardedProps: { config: forwardedConfig },
+    } as any,
+    ["values"],
+  );
+}
+
+describe("prepareRegenerateStream payload", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("preserves context-schema values when regenerating", async () => {
+    const { agent, capturedPayload } = buildMockedAgent();
+    (agent as any).activeRun.schemaKeys = {
+      config: ["model"],
+      context: ["model"],
+    };
+
+    await runPrepareRegenerateStream(agent, {
+      configurable: { model: "gpt-5" },
+    });
+
+    expect(capturedPayload.value?.context).toEqual({ model: "gpt-5" });
+  });
+
+  it("warns when mixed configurable keys are dropped", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { agent, capturedPayload } = buildMockedAgent();
+    (agent as any).activeRun.schemaKeys = {
+      config: ["model", "thread_scoped"],
+      context: ["model"],
+    };
+
+    await runPrepareRegenerateStream(agent, {
+      configurable: { model: "gpt-5", thread_scoped: "value" },
+    });
+
+    expect(capturedPayload.value?.context).toEqual({ model: "gpt-5" });
+    expect(
+      (capturedPayload.value?.config as any)?.configurable,
+    ).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("thread_scoped"),
+    );
+  });
+
+  it("preserves forwarded x-* headers after context partitioning", async () => {
+    const { agent, capturedPayload } = buildMockedAgent();
+    agent.headers = {
+      "X-Trace-Id": "trace-1",
+      Authorization: "Bearer secret",
+    };
+    (agent as any).activeRun.schemaKeys = {
+      config: ["model"],
+      context: ["model"],
+    };
+
+    await runPrepareRegenerateStream(agent, {
+      configurable: { model: "gpt-5" },
+    });
+
+    expect((capturedPayload.value?.config as any)?.configurable).toEqual({
+      copilotkit_forwarded_headers: { "X-Trace-Id": "trace-1" },
+    });
+    expect(
+      (capturedPayload.value?.config as any)?.configurable,
+    ).not.toHaveProperty("model");
+  });
+});
+
 // ─── Part A: prepareStream payload shape ─────────────────────────────────────
 
 describe("prepareStream payload partitioning", () => {

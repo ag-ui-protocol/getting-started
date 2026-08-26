@@ -23,6 +23,12 @@ public sealed class RawEvent : BaseEvent
     /// Optional source identifier for the raw data.
     /// </summary>
     [JsonPropertyName("source")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Source { get; set; }
+
+    /// <summary>
+    /// Gets or sets the subagent that produced this event, absent when the parent agent
+    /// produced it directly.
+    /// </summary>
+    [JsonPropertyName("subagentRunId")]
+    public string? SubagentRunId { get; set; }
 }

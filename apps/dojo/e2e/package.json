@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Scheduled Playwright smoke tests for CopilotKit demo apps",
   "scripts": {
-    "postinstall": "playwright install --with-deps",
+    "postinstall": "playwright install chromium",
     "test": "playwright test",
     "check:event-trace-types": "tsc -p tsconfig.event-trace.json",
     "test:event-trace-unit": "tsx --test lib/event-trace-*.test.ts",

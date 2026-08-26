@@ -11,10 +11,8 @@ public sealed class AGUIDeveloperMessage : AGUIMessage
     public string Content { get; set; } = string.Empty;
 
     [JsonPropertyName("name")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Name { get; set; }
 
     [JsonPropertyName("encryptedValue")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? EncryptedValue { get; set; }
 }

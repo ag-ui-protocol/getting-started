@@ -19,7 +19,8 @@
           "informationalOnly": false,
           "callId": "call_Id_1"
         }
-      ]
+      ],
+      "messageId": "call_Id_1"
     },
     {
       "role": "tool",

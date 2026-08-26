@@ -15,7 +15,9 @@ import pytest
 
 from ag_ui.core import (
     AssistantMessage,
+    FunctionCall,
     SystemMessage,
+    ToolCall,
     ToolMessage,
     UserMessage,
 )
@@ -49,6 +51,32 @@ class TestPrepareLangGraphAgentInputs:
         )
         out = prepare_langgraph_agent_inputs(inp)
         assert out[0]["content"] == ""
+
+    def test_assistant_with_only_tool_calls_has_content_backfilled(self, make_input):
+        """An assistant turn that carries only tool calls has no content at all.
+
+        Distinct from the case above, which sets ``content=None`` explicitly: an
+        optional field with no value is absent from ``model_dump()`` output, not
+        present as ``None``. Reading it with ``[]`` raises ``KeyError`` on exactly
+        this shape, which is an ordinary tool-calling turn rather than an edge case.
+        """
+        inp = make_input(
+            messages=[
+                AssistantMessage(
+                    id="1",
+                    role="assistant",
+                    tool_calls=[
+                        ToolCall(
+                            id="tc1",
+                            function=FunctionCall(name="search", arguments="{}"),
+                        )
+                    ],
+                )
+            ]
+        )
+        out = prepare_langgraph_agent_inputs(inp)
+        assert out[0]["content"] == ""
+        assert out[0]["tool_calls"][0]["id"] == "tc1"
 
     def test_tool_message_error_key_is_stripped(self, make_input):
         inp = make_input(

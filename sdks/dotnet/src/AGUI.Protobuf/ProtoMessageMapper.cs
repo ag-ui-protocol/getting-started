@@ -18,7 +18,17 @@ internal static class ProtoMessageMapper
         {
             Id = message.Id ?? string.Empty,
             Role = message.Role,
+            Metadata = ProtoValueConverter.ToStructOrNull(message.Metadata),
         };
+
+        // Set once from the base rather than per role: attribution applies to every
+        // message kind, and a MESSAGES_SNAPSHOT mixes the parent's messages with those of
+        // every subagent that ran, so losing it on one role would silently reparent that
+        // role's messages to the parent.
+        if (message.SubagentRunId is not null)
+        {
+            proto.SubagentRunId = message.SubagentRunId;
+        }
 
         switch (message)
         {
@@ -103,6 +113,21 @@ internal static class ProtoMessageMapper
     }
 
     public static AGUIMessage FromProto(Proto.Message proto)
+    {
+        // Applied here rather than inside each role branch below: the branches return
+        // six different concrete types, so a per-branch assignment is six chances to
+        // forget one and silently reparent that role's messages to the parent.
+        var message = FromProtoCore(proto);
+        if (proto.HasSubagentRunId)
+        {
+            message.SubagentRunId = proto.SubagentRunId;
+        }
+
+        message.Metadata = ProtoValueConverter.StructToJsonElementOrNull(proto.Metadata);
+        return message;
+    }
+
+    private static AGUIMessage FromProtoCore(Proto.Message proto)
     {
         var id = string.IsNullOrEmpty(proto.Id) ? null : proto.Id;
 
@@ -200,6 +225,7 @@ internal static class ProtoMessageMapper
         {
             Id = toolCall.Id,
             Type = toolCall.Type,
+            Metadata = ProtoValueConverter.ToStructOrNull(toolCall.Metadata),
             Function = new Proto.ToolCall.Types.Function
             {
                 Name = toolCall.Function.Name,
@@ -219,6 +245,7 @@ internal static class ProtoMessageMapper
                 Name = proto.Function?.Name ?? string.Empty,
                 Arguments = proto.Function?.Arguments ?? string.Empty,
             },
+            Metadata = ProtoValueConverter.StructToJsonElementOrNull(proto.Metadata),
         };
     }
 
@@ -255,6 +282,11 @@ internal static class ProtoMessageMapper
             proto.Metadata = ProtoValueConverter.ToValue(interrupt.Metadata.Value);
         }
 
+        if (interrupt.SubagentRunId is not null)
+        {
+            proto.SubagentRunId = interrupt.SubagentRunId;
+        }
+
         return proto;
     }
 
@@ -269,6 +301,7 @@ internal static class ProtoMessageMapper
             ResponseSchema = ProtoValueConverter.ToJsonElementOrNull(proto.ResponseSchema),
             ExpiresAt = proto.HasExpiresAt ? proto.ExpiresAt : null,
             Metadata = ProtoValueConverter.ToJsonElementOrNull(proto.Metadata),
+            SubagentRunId = proto.HasSubagentRunId ? proto.SubagentRunId : null,
         };
     }
 
@@ -506,14 +539,24 @@ internal static class ProtoMessageMapper
         // Mirrors proto.ts: legacy binary parts are encoded as a document whose metadata
         // carries the { legacyBinary, filename, id } object so the original shape can be
         // recovered by consumers that understand the flag.
+        //
+        // A field with no value is left out of the struct rather than written as
+        // NullValue — proto.ts hands `undefined` to Struct.wrap, and ts-proto's encoder
+        // skips undefined entries. Writing NullValue here would put a `null` on the binary
+        // wire that no TypeScript producer emits.
         var metadata = new Struct();
         metadata.Fields["legacyBinary"] = new Value { BoolValue = true };
-        metadata.Fields["filename"] = binary.Filename is null
-            ? new Value { NullValue = NullValue.NullValue }
-            : new Value { StringValue = binary.Filename };
-        metadata.Fields["id"] = binary.Id is null
-            ? new Value { NullValue = NullValue.NullValue }
-            : new Value { StringValue = binary.Id };
+
+        if (binary.Filename is not null)
+        {
+            metadata.Fields["filename"] = new Value { StringValue = binary.Filename };
+        }
+
+        if (binary.Id is not null)
+        {
+            metadata.Fields["id"] = new Value { StringValue = binary.Id };
+        }
+
         return new Value { StructValue = metadata };
     }
 
