@@ -53,6 +53,8 @@ public sealed class AGUIChatClientOptions
 
 Set `Transport` directly when you need a custom transport for tests or an
 alternative wire protocol. See [Transport](/sdk/dotnet/client/transport).
+Configured `JsonSerializerOptions` are also used when converting MEAI message
+content, including custom CLR values in `AIContent.AdditionalProperties`.
 
 ## Streaming responses
 

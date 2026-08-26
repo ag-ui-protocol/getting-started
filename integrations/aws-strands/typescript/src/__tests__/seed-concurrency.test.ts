@@ -15,7 +15,8 @@
  * serialisation message misleadingly.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import dns from "node:dns";
 import type { BaseEvent } from "@ag-ui/core";
 import {
   expectCompletedRun,
@@ -23,6 +24,7 @@ import {
   modelTurn,
   realStrandsAgent,
 } from "./helpers";
+import { urlFetchTransport } from "../utils";
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -33,26 +35,32 @@ function deferred<T = void>() {
 }
 
 describe("seed build is outside _threadInitLock", () => {
-  const origFetch = globalThis.fetch;
   afterEach(() => {
-    globalThis.fetch = origFetch;
+    vi.restoreAllMocks();
   });
 
   it("concurrent cold-inits on different threads don't serialise on a slow seed", async () => {
     const firstFetch = deferred();
     const release = deferred();
 
+    // The fetch policy resolves the host before connecting, so the fixture
+    // host has to answer with a public address.
+    vi.spyOn(dns.promises, "lookup").mockResolvedValue([
+      { address: "93.184.216.34", family: 4 },
+    ] as never);
+
     // A's seed fetch parks until the test releases it, so A provably holds
     // whatever it is going to hold for as long as the test needs.
-    globalThis.fetch = (async (): Promise<Response> => {
+    vi.spyOn(urlFetchTransport, "request").mockImplementation(async () => {
       firstFetch.resolve();
       await release.promise;
-      // No Content-Type on the response, so the converter logs "No MIME type
+      // The fixture's source carries no mimeType, and the converter reads
+      // that rather than the response Content-Type, so it logs "No MIME type
       // provided" and drops the block harmlessly. The body is incidental.
-      return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]).buffer, {
+      return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
         status: 200,
-      }) as Response;
-    }) as typeof fetch;
+      });
+    });
 
     // One script cursor is shared across both threads, so the turns are
     // consumed in whatever order the threads reach the model. Nothing here

@@ -1,6 +1,13 @@
 /** Express endpoint utilities for AWS Strands integration. */
 
-import type { Express, Request, Response } from "express";
+import type {
+  Express,
+  NextFunction,
+  Request,
+  RequestHandler,
+  Response,
+} from "express";
+import { STATUS_CODES } from "http";
 import {
   EventType,
   RunAgentInputSchema,
@@ -9,9 +16,253 @@ import {
 } from "@ag-ui/core";
 import { EventEncoder } from "@ag-ui/encoder";
 import type { StrandsAgent } from "./agent";
+import { resolveLogger, type Logger } from "./logger";
+
+/**
+ * Guard for the agent route. Plain Express middleware: call `next()` to admit
+ * the request, or end the response yourself (`res.status(401).json(...)`) to
+ * reject it. Returning a promise is supported.
+ *
+ * TypeScript-only. The Python sibling's `create_strands_app` takes
+ * `(agent, path, ping_path, origins)` and has no auth parameter, so there is no
+ * FastAPI dependency this mirrors.
+ *
+ * The request must be admitted explicitly. A handler that neither calls
+ * `next()` nor answers the request leaves it pending, exactly as any other
+ * Express middleware would, so a callback-style check is free to call `next()`
+ * long after it returns.
+ *
+ * Failing closed is handled for you: a thrown error, a rejected promise, or
+ * `next(error)` answers the error's own `status` / `statusCode` when it carries
+ * a usable HTTP error code and `500` otherwise, with a generic body either way,
+ * logs the error through the adapter's logger, and never reaches the agent.
+ *
+ * `next("route")` and `next("router")` are Express control-flow signals rather
+ * than failures, and are forwarded as such: the agent does not run, and no
+ * error is answered.
+ *
+ * The return value is ignored, but a returned promise is awaited so that a
+ * rejection can fail closed. It is typed `unknown` rather than
+ * `void | Promise<void>` so that an existing Express `RequestHandler`, whose
+ * own declared return type is wider than that, is assignable here.
+ */
+export type StrandsAuthMiddleware = (
+  req: Request,
+  res: Response,
+  next: (error?: unknown) => void,
+) => unknown;
 
 export interface AddStrandsEndpointOptions {
   path: string;
+  /**
+   * Optional guard for this route. Omitted, the route is unauthenticated,
+   * which is the default and unchanged behaviour.
+   */
+  auth?: StrandsAuthMiddleware;
+  /**
+   * Optional route-scoped body parser. It is mounted after `auth` and before
+   * the agent handler, so an unauthenticated request can be rejected without
+   * first buffering or parsing its body. For example:
+   * `bodyParser: express.json({ limit: "50mb" })`.
+   *
+   * Omit this when the app has already populated `req.body`. In that case the
+   * caller owns the order of its app-wide middleware relative to this route.
+   */
+  bodyParser?: RequestHandler;
+}
+
+const ADD_STRANDS_ENDPOINT_OPTION_KEYS = [
+  "path",
+  "auth",
+  "bodyParser",
+] as const;
+
+const ADD_STRANDS_ENDPOINT_OPTION_KEY_SET = new Set<string>(
+  ADD_STRANDS_ENDPOINT_OPTION_KEYS,
+);
+
+function assertAddStrandsEndpointOptions(
+  options: unknown,
+): asserts options is AddStrandsEndpointOptions {
+  if (
+    typeof options !== "object" ||
+    options === null ||
+    Array.isArray(options)
+  ) {
+    throw new TypeError("addStrandsExpressEndpoint options must be an object.");
+  }
+
+  const values = options as Record<string, unknown>;
+  const unknown = Object.keys(values).filter(
+    (key) => !ADD_STRANDS_ENDPOINT_OPTION_KEY_SET.has(key),
+  );
+  if (unknown.length > 0) {
+    const plural = unknown.length === 1 ? "option" : "options";
+    throw new Error(
+      `addStrandsExpressEndpoint received unknown ${plural} ${unknown
+        .map((key) => `\`${key}\``)
+        .join(", ")}. A misspelled security option would be ignored and ` +
+        `silently leave the route without it. Valid options are ` +
+        `${ADD_STRANDS_ENDPOINT_OPTION_KEYS.map((key) => `\`${key}\``).join(", ")}.`,
+    );
+  }
+
+  if (typeof values.path !== "string") {
+    throw new TypeError(
+      "addStrandsExpressEndpoint option `path` must be a string.",
+    );
+  }
+  if (values.auth !== undefined && typeof values.auth !== "function") {
+    throw new TypeError(
+      "addStrandsExpressEndpoint option `auth` must be a function or undefined.",
+    );
+  }
+  if (
+    values.bodyParser !== undefined &&
+    typeof values.bodyParser !== "function"
+  ) {
+    throw new TypeError(
+      "addStrandsExpressEndpoint option `bodyParser` must be an Express request handler or undefined.",
+    );
+  }
+}
+
+/**
+ * Express control-flow signals a guard may pass to `next()`. Neither is a
+ * failure: `next("route")` skips the rest of this route, `next("router")`
+ * leaves the router. Express compares them as exact strings, so this does too.
+ */
+type ExpressControlSignal = "route" | "router";
+
+function isControlSignal(value: unknown): value is ExpressControlSignal {
+  return value === "route" || value === "router";
+}
+
+/**
+ * Status to answer for a failed guard.
+ *
+ * The guards worth reaching for signal failure by calling `next(err)` with a
+ * numeric status on the error: `express-jwt` sets `401`, and `passport` plus
+ * anything built on `http-errors` do the same. A flat `500` would answer for
+ * all of them and turn every rejected credential into a server fault, so an
+ * error's own `status` / `statusCode` wins when it is a usable HTTP error code.
+ * Anything else, including a non-integer, a success or redirect code, or no
+ * status at all, falls back to `500`: the guard did fail, and there is no
+ * status here worth trusting.
+ */
+function statusForAuthError(error: unknown): number {
+  if (typeof error !== "object" || error === null) return 500;
+  const carrier = error as { status?: unknown; statusCode?: unknown };
+  for (const candidate of [carrier.status, carrier.statusCode]) {
+    if (
+      typeof candidate === "number" &&
+      Number.isInteger(candidate) &&
+      candidate >= 400 &&
+      candidate <= 599
+    ) {
+      return candidate;
+    }
+  }
+  return 500;
+}
+
+/**
+ * Generic body for an honoured status: the reason phrase and nothing else.
+ *
+ * The error's own message never goes on the wire, for a `4xx` as much as for a
+ * `5xx`. A guard this adapter did not write decides what its errors say, and an
+ * auth failure's message routinely names internal detail (the JWKS endpoint it
+ * could not reach, a directory host, the id of a secret). Nothing in here can
+ * tell a safe message from a leaking one, and a guard that wants a specific
+ * body can always write it itself with `res.status(401).json(...)` instead of
+ * failing, so the failure path carries the status and no prose.
+ */
+function bodyForAuthStatus(status: number): { error: string } {
+  return { error: STATUS_CODES[status] ?? "Error" };
+}
+
+/**
+ * Wrap an auth middleware so a failure inside it can neither hang the request
+ * nor leak a stack trace.
+ *
+ * Express 5 forwards a rejected handler promise to the default error handler,
+ * which serialises the stack into the response outside production, and Express
+ * 4 (still an accepted peer range) does not await handlers at all, so a
+ * rejection there would hang the request. Owning both paths here keeps the
+ * behaviour identical across the supported range.
+ *
+ * Used by `addStrandsExpressEndpoint` to keep auth ahead of the optional body
+ * parser in one route. Not part of the package's public surface.
+ */
+export function authGuard(
+  auth: StrandsAuthMiddleware,
+  logger: Logger,
+): (req: Request, res: Response, next: NextFunction) => Promise<void> {
+  return async (req, res, next) => {
+    // One-shot: whichever of `advance` / `fail` claims the request first owns
+    // it, so a late rejection after `next()` cannot answer over a live stream.
+    let settled = false;
+    const claim = (): boolean => {
+      if (settled) return false;
+      settled = true;
+      return true;
+    };
+
+    // Both exits below weigh the same pair, `headersSent` and `writableEnded`.
+    // `headersSent` alone would have `fail` drop a response that had already
+    // finished cleanly, which the admit path correctly leaves alone.
+    const fail = (error: unknown): void => {
+      // Logged before the request is claimed: a failure arriving after the
+      // request was admitted has nowhere else to surface, and it is exactly the
+      // one worth seeing.
+      logger.error("Auth middleware failed for the agent route", error);
+      if (!claim()) return;
+      // Already finished, cleanly. There is no status left to set and nothing
+      // left to drop.
+      if (res.writableEnded) return;
+      // Nothing to set a status on once the head is on the wire, so the only
+      // honest move left is to drop the connection.
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
+      const status = statusForAuthError(error);
+      res.status(status).json(bodyForAuthStatus(status));
+    };
+
+    const advance = (control?: ExpressControlSignal): void => {
+      if (!claim()) return;
+      // A middleware that answered the request and then continued anyway must
+      // not reach the agent: the response is already spoken for, and the agent
+      // would stream into a finished one.
+      if (res.headersSent || res.writableEnded) return;
+      if (control) {
+        next(control);
+        return;
+      }
+      next();
+    };
+
+    const proceed = (error?: unknown): void => {
+      // Control flow, not failure. The agent does not run for either signal,
+      // and answering an error for them would be wrong.
+      if (isControlSignal(error)) {
+        advance(error);
+        return;
+      }
+      if (error !== undefined && error !== null) {
+        fail(error);
+        return;
+      }
+      advance();
+    };
+
+    try {
+      await auth(req, res, proceed);
+    } catch (error) {
+      fail(error);
+    }
+  };
 }
 
 // The wire format is camelCase per the protocol, but the Python reference
@@ -72,7 +323,9 @@ export function addStrandsExpressEndpoint(
   agent: StrandsAgent,
   options: AddStrandsEndpointOptions,
 ): void {
-  app.post(options.path, async (req: Request, res: Response) => {
+  assertAddStrandsEndpointOptions(options);
+
+  const runAgent = async (req: Request, res: Response): Promise<void> => {
     // Request boundary validation. Express's `express.json()` middleware
     // skips bodies whose Content-Type isn't JSON — it leaves `req.body` as
     // `{}` instead of rejecting, so silently invalid requests would otherwise
@@ -209,7 +462,22 @@ export function addStrandsExpressEndpoint(
       }
       if (!res.writableEnded) res.end();
     }
-  });
+  };
+
+  const handlers: RequestHandler[] = [];
+  if (options.auth) {
+    // Auth failures go through the adapter's own injectable logger
+    // (`StrandsAgentConfig.logger`), not straight to the console, so an app
+    // that redirected the adapter's output gets these in the same place as
+    // everything else the adapter logs.
+    const logger = resolveLogger(agent.config.logger);
+    handlers.push(authGuard(options.auth, logger));
+  }
+  if (options.bodyParser) {
+    handlers.push(options.bodyParser);
+  }
+  handlers.push(runAgent);
+  app.post(options.path, ...handlers);
 }
 
 /** Add a ping endpoint returning `{status: "healthy"}`. */

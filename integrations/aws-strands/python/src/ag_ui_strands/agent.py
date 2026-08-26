@@ -332,6 +332,18 @@ def _interrupt_resume_error(message: str) -> "RunErrorEvent":
     )
 
 
+def _continuation_tool_name_error(tool_call_ids: list) -> "RunErrorEvent":
+    return RunErrorEvent(
+        type=EventType.RUN_ERROR,
+        message=(
+            "Cannot name the tool behind continuation tool result(s) "
+            f"{', '.join(tool_call_ids)}: absent from the input messages, from "
+            "the native session history, and from the wire->native map"
+        ),
+        code="CONTINUATION_TOOL_NAME_UNRESOLVED",
+    )
+
+
 def _preflight_resume_entries(
     agent: Any,
     resume_entries: Any,
@@ -536,7 +548,12 @@ from .config import (
     maybe_await,
     normalize_predict_state,
 )
-from .utils import convert_agui_content_to_strands, flatten_content_to_text
+from .utils import (
+    UrlFetchPolicy,
+    _FetchBudget,
+    convert_agui_content_to_strands,
+    flatten_content_to_text,
+)
 
 
 def _resume_fingerprint(resume_entries: list[ResumeEntry]) -> str:
@@ -912,7 +929,10 @@ def _build_snapshot_messages(input_messages: List[Any]) -> List[Any]:
     return out
 
 
-def _build_strands_history(input_messages: List[Any]) -> List[Dict[str, Any]]:
+def _build_strands_history(
+    input_messages: List[Any],
+    url_fetch_policy: "UrlFetchPolicy | None" = None,
+) -> List[Dict[str, Any]]:
     """Convert ``RunAgentInput.messages`` to Strands native ``Messages``.
 
     Strands has only ``user`` and ``assistant`` roles; tool calls and
@@ -921,8 +941,13 @@ def _build_strands_history(input_messages: List[Any]) -> List[Dict[str, Any]]:
     before invoking ``stream_async(None)`` ensures the LLM sees the
     real conversation state — including frontend tool results — rather
     than a fresh prompt that re-fires the same tool every turn.
+
+    Every URL content source in *input_messages* is fetched under
+    *url_fetch_policy* and shares one budget, so the ceilings bound the whole
+    history rather than each attachment separately.
     """
     out: List[Dict[str, Any]] = []
+    fetch_budget = _FetchBudget(url_fetch_policy)
     pending_tool_results: List[Dict[str, Any]] = []
 
     def flush_tool_results() -> None:
@@ -958,7 +983,9 @@ def _build_strands_history(input_messages: List[Any]) -> List[Dict[str, Any]]:
                     for item in content
                 )
                 if has_media:
-                    blocks = convert_agui_content_to_strands(content)
+                    blocks = convert_agui_content_to_strands(
+                        content, url_fetch_policy, fetch_budget
+                    )
                     if isinstance(blocks, list) and blocks:
                         out.append({"role": "user", "content": blocks})
                         continue
@@ -2709,6 +2736,22 @@ class StrandsAgent:
                     last_msg_had_tool_calls = False
                     strands_messages.append(strands_msg)
 
+            # The durable wire->native map recorded at emission, read back from
+            # session state (restored from the store on a fresh process). Read
+            # here rather than at the reconciliation block below because the
+            # continuation-message derivation needs it too: on a delta-only
+            # payload the tool result arrives under the wire id, while the tool
+            # name is only known under the native one.
+            wire_to_native: Dict[str, str] = {}
+            reconciliation_setup_error: Exception | None = None
+            if session_manager is not None:
+                try:
+                    wire_to_native = (
+                        strands_agent.state.get(AG_UI_WIRE_MAP_STATE_KEY) or {}
+                    )
+                except Exception as e:  # noqa: BLE001 - handled below by checkpoint state
+                    reconciliation_setup_error = e
+
             # Build a lookup of tool_call_id -> tool_name from the input messages
             # directly (the assistant message in Run 2 already carries the name).
             _tool_call_id_to_name: dict = {}
@@ -2749,10 +2792,34 @@ class StrandsAgent:
                 # frontend-tool turn sends N results in one continuation run; the model
                 # must see every answer.
                 _result_parts: list[str] = []
+                _unresolved_result_ids: list[str] = []
                 for msg in reversed(input_data.messages):
                     if msg.role == "tool" and hasattr(msg, "tool_call_id"):
                         tool_name = _tool_call_id_to_name.get(msg.tool_call_id)
-                        if tool_name and tool_name in frontend_tool_names:
+                        # An entry in the durable wire->native map is only ever
+                        # recorded when a frontend tool call is emitted, so its
+                        # presence proves this result came from a client-executed
+                        # tool. A backend tool never has one: its wire id IS the
+                        # native id.
+                        _native_id = wire_to_native.get(msg.tool_call_id)
+                        if tool_name is None and _native_id:
+                            # A frontend tool is emitted under a fresh wire id, so
+                            # the name recovered from native session history above is
+                            # keyed by the native ``toolUseId`` instead. Translate
+                            # through the durable map and retry. Kept as a fallback
+                            # rather than translating up front: when the assistant
+                            # message IS in the payload the lookup is already keyed
+                            # by the wire id.
+                            tool_name = _tool_call_id_to_name.get(_native_id)
+                        # Provenance is either signal, not membership alone: a
+                        # continuation that declares no tools (``tools: []``) still
+                        # carries a real frontend result, and reading membership
+                        # alone would file it as a backend result and hand the model
+                        # an empty prompt — the very loop this derivation prevents.
+                        _is_frontend_result = bool(tool_name) and (
+                            tool_name in frontend_tool_names or bool(_native_id)
+                        )
+                        if _is_frontend_result:
                             # Forward the ACTUAL result so the model can act on the
                             # human's decision (e.g. an approval resolving to
                             # {"approved": false}). Hardcoding a success string here
@@ -2765,27 +2832,68 @@ class StrandsAgent:
                                 if isinstance(msg.content, str)
                                 else flatten_content_to_text(msg.content)
                             )
-                            if result_text and result_text.strip():
+                            # A client-reported failure carries its reason on
+                            # ``error``, and an empty ``content`` alongside it
+                            # is normal. Reading ``content`` alone announces
+                            # that failure to the model as "executed
+                            # successfully with no return value" — the same
+                            # inversion the toolResult ``status`` mapping
+                            # avoids on the native path, which this text
+                            # prompt replaces whenever replay and
+                            # reconciliation are both off.
+                            error_text = getattr(msg, "error", None)
+                            if error_text:
+                                if result_text and result_text.strip():
+                                    _result_parts.append(
+                                        f"{tool_name} failed: {error_text} "
+                                        f"(returned: {result_text})"
+                                    )
+                                else:
+                                    _result_parts.append(
+                                        f"{tool_name} failed: {error_text}"
+                                    )
+                            elif result_text and result_text.strip():
                                 _result_parts.append(f"{tool_name} returned: {result_text}")
                             else:
                                 _result_parts.append(
                                     f"{tool_name} executed successfully with no return value."
                                 )
+                        elif tool_name:
+                            # Named, but neither signal says frontend: not in
+                            # the current declarations and no wire-map entry.
+                            # That is a tool Strands ran itself, so the model
+                            # already has it in the native history and the
+                            # continuation prompt has nothing to carry.
+                            logger.debug(
+                                f"Skipping non-frontend tool result in the continuation "
+                                f"message: tool_name={tool_name}, "
+                                f"tool_call_id={msg.tool_call_id}"
+                            )
                         else:
-                            # Could not resolve this tool's name from input messages
-                            # or session history (e.g. a delta-only payload with no
-                            # assistant tool_calls). Skip it rather than guessing:
-                            # picking an arbitrary frontend tool would feed false
-                            # context to the LLM when several frontend tools exist.
-                            # Strands still has the real result in session history to
-                            # conclude the round-trip from.
+                            # Neither the input messages, nor the native
+                            # session history, nor the durable wire->native
+                            # map name this call. Guessing stays off the
+                            # table: with several frontend tools declared,
+                            # picking one feeds the model false context.
+                            # Collected here and raised as a run error below
+                            # rather than skipped — skipping is what left the
+                            # prompt empty, and an empty prompt is the re-fire
+                            # loop this derivation exists to prevent.
+                            _unresolved_result_ids.append(msg.tool_call_id)
                             logger.warning(
                                 f"Could not resolve tool name for tool_call_id={msg.tool_call_id} "
                                 f"from input messages or session history (delta-only payload). "
-                                f"Skipping this tool result in the continuation message."
+                                f"Failing the run instead of prompting the model with no result."
                             )
                     else:
                         break
+                if _unresolved_result_ids:
+                    # Fail closed: without a name there is no result context
+                    # to give the model, and invoking it with an empty prompt
+                    # is exactly how the same frontend tool gets re-fired
+                    # every run (issue #2376).
+                    yield _continuation_tool_name_error(list(reversed(_unresolved_result_ids)))
+                    return
                 user_message = "\n".join(reversed(_result_parts))
             elif input_data.messages:
                 for msg in reversed(input_data.messages):
@@ -2796,7 +2904,11 @@ class StrandsAgent:
                                 for item in msg.content
                             )
                             if has_media:
-                                user_message = convert_agui_content_to_strands(msg.content)
+                                user_message = await asyncio.to_thread(
+                                    convert_agui_content_to_strands,
+                                    msg.content,
+                                    self.config.url_fetch_policy,
+                                )
                                 if not user_message:
                                     # All content blocks failed conversion — fall back to text
                                     user_message = flatten_content_to_text(msg.content) or ""
@@ -2880,18 +2992,6 @@ class StrandsAgent:
             # result when its tool name is client-declared, or (for delta-only
             # payloads that omit the assistant message) when its wire id was
             # recorded in the wire->native map when the call was emitted.
-            # The durable wire->native map recorded at emission, read back from
-            # session state (restored from the store on a fresh process).
-            wire_to_native: Dict[str, str] = {}
-            reconciliation_setup_error: Exception | None = None
-            if session_manager is not None:
-                try:
-                    wire_to_native = (
-                        strands_agent.state.get(AG_UI_WIRE_MAP_STATE_KEY) or {}
-                    )
-                except Exception as e:  # noqa: BLE001 - handled below by checkpoint state
-                    reconciliation_setup_error = e
-
             # The durable per-``toolUseId`` call metadata map recorded at
             # emission (see the ``current_tool_use`` handler). On a RESUME
             # run this is the ONLY source of ``{name, args, input,
@@ -3048,7 +3148,11 @@ class StrandsAgent:
             # on top, rather than short-circuiting them.
             resume_prompt: str | List[Dict[str, Any]] | list[InterruptResponseContent] | None = user_message
             if replay_history:
-                native_history = _build_strands_history(input_data.messages)
+                native_history = await asyncio.to_thread(
+                    _build_strands_history,
+                    input_data.messages,
+                    self.config.url_fetch_policy,
+                )
                 # Apply ``state_context_builder`` to the last user-text
                 # message in the reconciled history rather than to the
                 # synthetic ``user_message`` string. This matches what the

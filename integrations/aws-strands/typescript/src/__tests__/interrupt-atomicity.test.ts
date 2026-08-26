@@ -283,7 +283,7 @@ describe("a failed resume leaves no replayable fingerprint", () => {
 
     const failed = await collect(agent, resumeRun(batch, "run-2"));
     expect(errorCodes(failed), "the resumed run did not fail").toEqual([
-      "STRANDS_ERROR",
+      "STRANDS_FORCE_STOP",
     ]);
     // The answers were applied before the failure, which is why the batch
     // cannot be replayed afterwards.

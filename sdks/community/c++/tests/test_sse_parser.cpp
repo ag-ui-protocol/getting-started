@@ -463,3 +463,20 @@ TEST(SseParserTest, BufferSizeExactlyAtLimit) {
     
     EXPECT_NO_THROW(parser.feed(exactLimitData));
 }
+
+TEST(SseParserTest, EventAccumulatorSizeExceeded) {
+    SseParser parser;
+
+    // A single event whose data is never terminated by a blank line, delivered
+    // as many small chunks. Each chunk is consumed out of m_buffer immediately,
+    // so the buffer stays small while the per-event accumulator keeps growing.
+    const size_t kChunkPayload = 64 * 1024;
+    const std::string chunk = "data: " + std::string(kChunkPayload, 'A') + "\n";
+    const size_t iterations = (SseParser::kMaxBufferSize / kChunkPayload) + 8;
+
+    EXPECT_THROW({
+        for (size_t i = 0; i < iterations; ++i) {
+            parser.feed(chunk);
+        }
+    }, SseBufferExceededError);
+}

@@ -6,7 +6,9 @@ This package exposes a lightweight wrapper that lets any `strands.Agent` speak t
 
 - Python 3.10+
 - `poetry` (recommended) or `pip`
-- A Strands-compatible model key (e.g., `GOOGLE_API_KEY` for Gemini)
+- A model key for the provider `MODEL_PROVIDER` selects. It defaults to
+  `openai`, which requires `OPENAI_API_KEY`; `anthropic` and `gemini` need
+  `ANTHROPIC_API_KEY` and `GOOGLE_API_KEY` instead.
 
 ## Quick Start
 
@@ -20,12 +22,22 @@ poetry run python -m server
 
 It exposes:
 
-| Route                     | Description                  |
-| ------------------------- | ---------------------------- |
-| `/agentic-chat`           | Frontend tool demo           |
-| `/backend-tool-rendering` | Backend tool rendering demo  |
-| `/shared-state`           | Shared recipe state          |
-| `/agentic-generative-ui`  | Agentic UI with PredictState |
+| Route                       | Description                                    |
+| --------------------------- | ---------------------------------------------- |
+| `/agentic-chat`             | Frontend tool demo                             |
+| `/agentic-chat-reasoning`   | Reasoning / thinking event streaming           |
+| `/agentic-chat-multimodal`  | Multimodal image / document analysis           |
+| `/backend-tool-rendering`   | Backend tool rendering demo                    |
+| `/shared-state`             | Shared recipe state                            |
+| `/agentic-generative-ui`    | Agentic UI with PredictState                   |
+| `/human-in-the-loop`        | Frontend proxy tool with halt-after-call       |
+| `/interrupt`                | Tool pauses to ask the user for a meeting time |
+| `/predictive-state-updates` | Document editor driven by streaming tool args  |
+| `/tool-based-generative-ui` | Frontend-rendered tool (`generate_haiku`)      |
+| `/multi-agent`              | Strands graph of agents, streamed as steps     |
+| `/a2ui-dynamic-schema`      | A2UI surfaces composed on the fly              |
+| `/a2ui-fixed-schema`        | A2UI from fixed-layout backend tools           |
+| `/a2ui-recovery`            | A2UI validate-and-retry recovery loop          |
 
 This is the easiest way to test multiple flows locally. Each route still follows the pattern described below (Strands agent → wrapper → FastAPI).
 
@@ -195,6 +207,41 @@ JSON-safe (no raw `bytes`): Strands' `SessionAgent.to_dict()` — unlike
 `ToolResult` in the same turn, raises `TypeError: Object of type bytes is not
 JSON serializable` from `FileSessionManager`/`S3SessionManager` and aborts the
 run.
+
+## Fetching URL content sources
+
+A user message may carry an image, document or video as a URL rather than
+inline data. The adapter fetches those server-side, so every fetch runs under
+a `UrlFetchPolicy`. The default refuses everything but `http`/`https`, refuses
+any host that resolves outside the public internet (loopback, private,
+link-local, including the cloud metadata endpoints), pins the connection to
+the address it validated so a second DNS answer cannot redirect it, re-checks
+every redirect hop, refuses a redirect that drops TLS, and bounds both one
+attachment and everything a single run fetches.
+
+A deployment whose attachments live on a private CDN or behind split DNS opts
+in explicitly:
+
+```python
+from ag_ui_strands import StrandsAgent, StrandsAgentConfig, UrlFetchPolicy
+
+agent = StrandsAgent(
+    strands_agent,
+    name="my-agent",
+    config=StrandsAgentConfig(
+        url_fetch_policy=UrlFetchPolicy(
+            allow_private_networks=True,
+            max_attachments=20,
+            max_total_bytes=100 * 1024 * 1024,
+            max_total_seconds=120.0,
+        ),
+    ),
+)
+```
+
+Link-local addresses stay blocked under `allow_private_networks`, and
+`allowed_schemes` can only be narrowed, never widened: a scheme with no pinned
+transport would resolve the host again at connection time.
 
 ## Supported AG-UI Events
 

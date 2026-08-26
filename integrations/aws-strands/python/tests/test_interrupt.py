@@ -1272,6 +1272,25 @@ async def test_active_reconciliation_retry_counts_already_applied_results(tmp_pa
 async def test_non_active_reconciliation_exception_keeps_legacy_fallback(caplog):
     core = _MockStrandsCore(session_manager=_repository_manager())
     core.state.set(AG_UI_WIRE_MAP_STATE_KEY, {"wire-proxy": "native-proxy"})
+    # The wire map above points ``wire-proxy`` at a native call, so the native
+    # history has to contain that call. Without the ``toolUse`` block the
+    # fixture maps onto a call that exists nowhere and the continuation cannot
+    # name the tool at all — which is a separate failure from the reconcile
+    # exception this test is about.
+    core.messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "toolUse": {
+                        "toolUseId": "native-proxy",
+                        "name": "approveTool",
+                        "input": {},
+                    }
+                }
+            ],
+        }
+    ]
     agent = _make_base_agent(StrandsAgentConfig())
     input_data = _make_run_input(
         messages=[

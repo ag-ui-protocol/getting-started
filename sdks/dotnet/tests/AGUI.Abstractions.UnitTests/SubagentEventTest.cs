@@ -296,7 +296,9 @@ public sealed class SubagentAttributionTest
             new AGUIAssistantMessage { Id = "m4", Content = "from the parent" },
         };
 
-        var back = original.AsChatMessages().AsAGUIMessages().ToList();
+        var back = original.AsChatMessages()
+            .AsAGUIMessages(AGUIJsonSerializerContext.Default.Options)
+            .ToList();
 
         var byId = back.ToDictionary(m => m.Id!, m => m.SubagentRunId);
         Assert.Equal("s1", byId["m1"]);
@@ -317,7 +319,9 @@ public sealed class SubagentAttributionTest
         var back = new List<AGUIMessage>
         {
             new AGUIAssistantMessage { Id = "m1", Content = "hi", SubagentRunId = "" },
-        }.AsChatMessages().AsAGUIMessages().ToList();
+        }.AsChatMessages()
+            .AsAGUIMessages(AGUIJsonSerializerContext.Default.Options)
+            .ToList();
 
         Assert.Equal("", Assert.Single(back).SubagentRunId);
     }

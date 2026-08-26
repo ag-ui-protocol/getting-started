@@ -183,6 +183,13 @@ export interface LangGraphAgentConfig extends AgentConfig {
    * before structured interrupts existed.
    */
   emitInterruptOutcome?: boolean;
+  /**
+   * Emit the underlying LangGraph events on the AG-UI event stream.
+   *
+   * When disabled, RAW events are suppressed and `rawEvent` is removed from
+   * typed AG-UI events. AG-UI event metadata is preserved. Defaults to true.
+   */
+  emitRawEvents?: boolean;
 }
 
 const ROOT_SUBGRAPH_NAME = "root";
@@ -222,12 +229,15 @@ export class LangGraphAgent extends AbstractAgent {
   config: LangGraphAgentConfig;
   enableLegacyOnInterruptEvent: boolean;
   emitInterruptOutcome: boolean;
+  emitRawEvents: boolean;
 
   constructor(config: LangGraphAgentConfig) {
     super(config);
     this.config = config;
-    this.enableLegacyOnInterruptEvent = config.enableLegacyOnInterruptEvent ?? true;
+    this.enableLegacyOnInterruptEvent =
+      config.enableLegacyOnInterruptEvent ?? true;
     this.emitInterruptOutcome = config.emitInterruptOutcome ?? false;
+    this.emitRawEvents = config.emitRawEvents ?? true;
     this.messagesInProcess = {};
     this.agentName = config.agentName;
     this.graphId = config.graphId;
@@ -284,6 +294,7 @@ export class LangGraphAgent extends AbstractAgent {
       client: this.client,
       enableLegacyOnInterruptEvent: this.enableLegacyOnInterruptEvent,
       emitInterruptOutcome: this.emitInterruptOutcome,
+      emitRawEvents: this.emitRawEvents,
 
       assistant: this.assistant,
       activeRun: this.activeRun ? structuredClone(this.activeRun) : undefined,
@@ -320,6 +331,17 @@ export class LangGraphAgent extends AbstractAgent {
   }
 
   dispatchEvent(event: ProcessedEvents) {
+    if (!this.emitRawEvents) {
+      if (event.type === EventType.RAW) {
+        return false;
+      }
+
+      const eventWithoutRawEvent = { ...event };
+      delete eventWithoutRawEvent.rawEvent;
+      this.subscriber.next(eventWithoutRawEvent);
+      return true;
+    }
+
     this.subscriber.next(event);
     return true;
   }
@@ -794,7 +816,10 @@ export class LangGraphAgent extends AbstractAgent {
           openInterrupts: this.interruptsToAGUI(interrupts),
         }),
       };
-    } else if (effectiveCommand?.resume && typeof effectiveCommand.resume === "string") {
+    } else if (
+      effectiveCommand?.resume &&
+      typeof effectiveCommand.resume === "string"
+    ) {
       try {
         effectiveCommand.resume = JSON.parse(effectiveCommand.resume);
       } catch {
@@ -1199,6 +1224,26 @@ export class LangGraphAgent extends AbstractAgent {
     });
   }
 
+  /**
+   * True when a tool call's originating assistant message is already present in
+   * the durable thread history (`this.messages`). On a HITL resume the client
+   * replays the full conversation, so the TOOL_CALL_START/ARGS/END triple for
+   * this tool call was already delivered in the prior run and must not be
+   * re-emitted by `OnToolEnd` (whose per-run `emittedToolCallStartIds` Set is
+   * reset on every run). `TOOL_CALL_RESULT` still fires normally. See #2014.
+   */
+  private toolCallAnnouncedInPriorRun(toolCallId: string | undefined): boolean {
+    if (!toolCallId) {
+      return false;
+    }
+    return (this.messages ?? []).some(
+      (message: any) =>
+        message?.role === "assistant" &&
+        Array.isArray(message.toolCalls) &&
+        message.toolCalls.some((toolCall: any) => toolCall?.id === toolCallId),
+    );
+  }
+
   handleSingleEvent(event: any): void {
     // messages-tuple data arrives as [AIMessageChunk, metadata] arrays,
     // not objects with an .event property like events-mode data.
@@ -1507,7 +1552,12 @@ export class LangGraphAgent extends AbstractAgent {
           toolCallOutput.update?.messages
             .filter((message: MessageFields) => message.type === "tool")
             .forEach((message: MessageFields) => {
-              if (!this.activeRun!.hasFunctionStreaming) {
+              // Skip the synthetic START/ARGS on a HITL resume where the tool
+              // call was already announced in a prior run (#2014).
+              if (
+                !this.activeRun!.hasFunctionStreaming &&
+                !this.toolCallAnnouncedInPriorRun(message.tool_call_id)
+              ) {
                 this.dispatchEvent({
                   type: EventType.TOOL_CALL_START,
                   toolCallId: message.tool_call_id,
@@ -1544,8 +1594,12 @@ export class LangGraphAgent extends AbstractAgent {
 
         // Emit TOOL_CALL_START + ARGS + END for tool calls that were not
         // already handled by the streaming path. Uses emittedToolCallStartIds
-        // to avoid duplicates from parallel tool calls.
-        if (!this.emittedToolCallStartIds.has(toolCallOutput.tool_call_id)) {
+        // to avoid duplicates from parallel tool calls, and the durable
+        // thread history to avoid re-announcing on a HITL resume (#2014).
+        if (
+          !this.emittedToolCallStartIds.has(toolCallOutput.tool_call_id) &&
+          !this.toolCallAnnouncedInPriorRun(toolCallOutput.tool_call_id)
+        ) {
           this.emittedToolCallStartIds.add(toolCallOutput.tool_call_id);
           this.dispatchEvent({
             type: EventType.TOOL_CALL_START,
@@ -1791,7 +1845,8 @@ export class LangGraphAgent extends AbstractAgent {
       // one: the snapshot converter re-emits this same reasoning under that
       // id, and only a matching id lets the client reconcile the streamed
       // copy with the snapshot copy instead of rendering both.
-      const messageId = reasoningData.id ?? this.pendingReasoningId ?? randomUUID();
+      const messageId =
+        reasoningData.id ?? this.pendingReasoningId ?? randomUUID();
       this.pendingReasoningId = undefined;
       this.dispatchEvent({
         type: EventType.REASONING_START,
@@ -2134,8 +2189,7 @@ export class LangGraphAgent extends AbstractAgent {
    * bubbles. See #1317.
    */
   private getOrPinTextMessageId(fallbackId: string): string {
-    const messageId =
-      this.activeRun!.currentTextMessageId ?? fallbackId;
+    const messageId = this.activeRun!.currentTextMessageId ?? fallbackId;
     this.activeRun!.currentTextMessageId = messageId;
     return messageId;
   }

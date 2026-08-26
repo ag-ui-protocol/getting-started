@@ -17,6 +17,7 @@ from ag_ui.core import (
 )
 
 from ag_ui_strands.utils import (
+    UrlFetchPolicy,
     convert_agui_content_to_strands,
     flatten_content_to_text,
     _mime_to_format,
@@ -78,9 +79,14 @@ class TestConvertAguiContentToStrands:
         source = InputContentUrlSource(value="https://example.com/img.png", mime_type="image/png")
         content = [ImageInputContent(source=source)]
 
-        result = convert_agui_content_to_strands(content)
+        policy = UrlFetchPolicy(max_attachments=3)
+        result = convert_agui_content_to_strands(content, policy)
 
-        mock_fetch.assert_called_once_with("https://example.com/img.png")
+        mock_fetch.assert_called_once()
+        url, passed_policy, budget = mock_fetch.call_args.args
+        assert url == "https://example.com/img.png"
+        assert passed_policy is policy
+        assert budget.policy is policy
         assert len(result) == 1
         assert result[0]["image"]["format"] == "png"
         assert result[0]["image"]["source"]["bytes"] == fetched_bytes

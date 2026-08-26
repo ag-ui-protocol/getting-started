@@ -24,7 +24,7 @@ AGUI.Abstractions.InterruptResponseContent.Metadata.set -> void
 AGUI.Abstractions.InterruptResponseContent.Payload.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.InterruptResponseContent.Payload.set -> void
 static AGUI.Abstractions.AGUIChatMessageExtensions.AsChatMessages(this System.Collections.Generic.IEnumerable<AGUI.Abstractions.AGUIMessage!>! aguiMessages) -> System.Collections.Generic.IEnumerable<Microsoft.Extensions.AI.ChatMessage!>!
-static AGUI.Abstractions.AGUIChatMessageExtensions.AsAGUIMessages(this System.Collections.Generic.IEnumerable<Microsoft.Extensions.AI.ChatMessage!>! chatMessages) -> System.Collections.Generic.IEnumerable<AGUI.Abstractions.AGUIMessage!>!
+static AGUI.Abstractions.AGUIChatMessageExtensions.AsAGUIMessages(this System.Collections.Generic.IEnumerable<Microsoft.Extensions.AI.ChatMessage!>! chatMessages, System.Text.Json.JsonSerializerOptions! jsonSerializerOptions) -> System.Collections.Generic.IEnumerable<AGUI.Abstractions.AGUIMessage!>!
 static AGUI.Abstractions.AGUIChatMessageExtensions.MapChatRole(string! role) -> Microsoft.Extensions.AI.ChatRole
 static AGUI.Abstractions.AGUIToolExtensions.AsAGUITools(this System.Collections.Generic.IEnumerable<Microsoft.Extensions.AI.AITool!>! tools) -> System.Collections.Generic.IEnumerable<AGUI.Abstractions.AGUITool!>!
 static AGUI.Abstractions.AGUIToolExtensions.AsAITools(this System.Collections.Generic.IList<AGUI.Abstractions.AGUITool!>! tools) -> System.Collections.Generic.IEnumerable<Microsoft.Extensions.AI.AITool!>!
@@ -46,6 +46,7 @@ AGUI.Abstractions.AGUIBinaryInputContent.Url.get -> string?
 AGUI.Abstractions.AGUIBinaryInputContent.Url.set -> void
 AGUI.Abstractions.AGUIEventTypes
 
+AGUI.Abstractions.AGUIJsonSerializerContext.JsonObject.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Text.Json.Nodes.JsonObject>
 AGUI.Abstractions.AGUIJsonSerializerContext.StateDeltaEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.StateDeltaEvent>
 AGUI.Abstractions.AGUIJsonSerializerContext.StateSnapshotEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.StateSnapshotEvent>
 AGUI.Abstractions.AGUIJsonSerializerContext.ReasoningStartEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.ReasoningStartEvent>

@@ -1680,7 +1680,9 @@ public sealed class ProtocolRuleTest
         // And it survives coalescing into the response, then back out to AG-UI messages —
         // which is what the next turn actually sends.
         var response = updates.ToChatResponse();
-        var roundTripped = response.Messages.AsAGUIMessages().ToList();
+        var roundTripped = response.Messages
+            .AsAGUIMessages(AGUIJsonSerializerContext.Default.Options)
+            .ToList();
         Assert.All(
             roundTripped.Where(m => m.Role is "assistant" or "tool"),
             m => Assert.Equal("s1", m.SubagentRunId));
@@ -1710,7 +1712,9 @@ public sealed class ProtocolRuleTest
         var updates = await ProcessEventsAsync(events);
 
         var response = updates.ToChatResponse();
-        var roundTripped = response.Messages.AsAGUIMessages().ToList();
+        var roundTripped = response.Messages
+            .AsAGUIMessages(AGUIJsonSerializerContext.Default.Options)
+            .ToList();
 
         var attributable = roundTripped
             .Where(m => m is AGUIAssistantMessage { ToolCalls.Count: > 0 } or AGUIToolMessage)
@@ -1762,7 +1766,9 @@ public sealed class ProtocolRuleTest
 
         var updates = await ProcessEventsAsync(events);
         var response = updates.ToChatResponse();
-        var roundTripped = response.Messages.AsAGUIMessages().ToList();
+        var roundTripped = response.Messages
+            .AsAGUIMessages(AGUIJsonSerializerContext.Default.Options)
+            .ToList();
 
         // The encrypted-only update coalesces into an assistant message (the reverse
         // mapping has no reasoning-message case for protected-data-only content) — the
@@ -1819,7 +1825,9 @@ public sealed class ProtocolRuleTest
         Assert.NotNull(approvalUpdate.MessageId);
 
         var response = updates.ToChatResponse();
-        var roundTripped = response.Messages.AsAGUIMessages().ToList();
+        var roundTripped = response.Messages
+            .AsAGUIMessages(AGUIJsonSerializerContext.Default.Options)
+            .ToList();
         // The approval content maps back to an assistant message; whatever shape it
         // lands in, the subagent's ownership must survive the turn.
         var assistant = roundTripped.OfType<AGUIAssistantMessage>().ToList();
