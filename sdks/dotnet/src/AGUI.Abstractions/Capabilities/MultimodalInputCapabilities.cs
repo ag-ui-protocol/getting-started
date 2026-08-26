@@ -1,22 +1,15 @@
-using System.Text.Json.Serialization;
-
 namespace AGUI.Abstractions;
 
 // Keep in sync with sdks/typescript/packages/core/src/capabilities.ts
 public sealed class MultimodalInputCapabilities
 {
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? Image { get; set; }
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? Audio { get; set; }
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? Video { get; set; }
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? Pdf { get; set; }
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? File { get; set; }
 }

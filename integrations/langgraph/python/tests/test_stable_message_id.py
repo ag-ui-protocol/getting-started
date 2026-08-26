@@ -54,10 +54,15 @@ def _make_agent():
     return agent
 
 
-def _make_text_chunk(chunk_id: str, content: str):
+def _make_text_chunk(chunk_id: str, content: str, node: str = None):
+    metadata = {"emit-messages": True, "emit-tool-calls": True}
+    if node is not None:
+        # Real OnChatModelStream chunks carry their node; the text-message pin
+        # resets when a lane's own node changes (see _get_or_pin_text_message_id).
+        metadata["langgraph_node"] = node
     return {
         "event": LangGraphEventTypes.OnChatModelStream,
-        "metadata": {"emit-messages": True, "emit-tool-calls": True},
+        "metadata": metadata,
         "data": {
             "chunk": {
                 "id": chunk_id,
@@ -240,7 +245,7 @@ class TestStableMessageId(unittest.IsolatedAsyncioTestCase):
 
         # 1. Supervisor emits its routing message.
         async for _ in agent._handle_single_event(
-            _make_text_chunk("msg-sup", "Routing to billing"), {}
+            _make_text_chunk("msg-sup", "Routing to billing", node="supervisor"), {}
         ):
             pass
 
@@ -258,7 +263,7 @@ class TestStableMessageId(unittest.IsolatedAsyncioTestCase):
         # 4. Billing emits its response. Different node, so it must mint a
         #    fresh message_id even though the run hasn't ended.
         async for _ in agent._handle_single_event(
-            _make_text_chunk("msg-bil", "Here's your invoice"), {}
+            _make_text_chunk("msg-bil", "Here's your invoice", node="billing"), {}
         ):
             pass
 
@@ -272,6 +277,68 @@ class TestStableMessageId(unittest.IsolatedAsyncioTestCase):
         )
         assert text_starts[0].message_id == "msg-sup"
         assert text_starts[1].message_id == "msg-bil"
+
+    @pytest.mark.asyncio
+    async def test_node_transition_mints_fresh_id_without_chunk_node_metadata(self):
+        """The same supervisor → specialist flow when the OnChatModelStream
+        chunks carry NO ``langgraph_node``.
+
+        The pin reset became lazy (driven by the chunk's own node so concurrent
+        subagent lanes don't re-mint each other's bubbles), which made the reset
+        depend on metadata that plenty of providers/versions never attach — and
+        the two nodes then merged into ONE bubble, re-opening #1317. The node
+        transition itself must still clear the transitioning lane's pin, so this
+        shape behaves like the node-carrying one above.
+        """
+        agent = _make_agent()
+        agent.active_run["node_name"] = "supervisor"
+
+        async for _ in agent._handle_single_event(
+            _make_text_chunk("msg-sup", "Routing to billing"), {}
+        ):
+            pass
+        async for _ in agent._handle_single_event(_make_model_end_event(), {}):
+            pass
+        for _ in agent.handle_node_change("billing"):
+            pass
+        async for _ in agent._handle_single_event(
+            _make_text_chunk("msg-bil", "Here's your invoice"), {}
+        ):
+            pass
+
+        text_starts = [e for e in agent.dispatched if e.type == EventType.TEXT_MESSAGE_START]
+        assert len(text_starts) == 2, (
+            f"Expected 2 TEXT_MESSAGE_STARTs (one per node), got {len(text_starts)}"
+        )
+        assert [e.message_id for e in text_starts] == ["msg-sup", "msg-bil"], (
+            "A node transition must mint a fresh bubble even when the chunks "
+            f"carry no langgraph_node; got {[e.message_id for e in text_starts]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_node_transition_does_not_reset_another_lanes_pin(self):
+        """A node transition clears only the TRANSITIONING lane's pin.
+
+        Concurrent subagents each keep their own bubble, so the parent moving to
+        a new node must not re-mint a subagent's in-flight pin (the thrashing the
+        lazy reset was introduced to avoid).
+        """
+        agent = _make_agent()
+        agent.active_run["current_text_message_ids"] = {
+            "__root__": "root-pin", "tools:s1": "sub-pin",
+        }
+        agent.active_run["current_text_message_nodes"] = {
+            "__root__": "supervisor", "tools:s1": "inner",
+        }
+
+        for _ in agent.handle_node_change("billing"):
+            pass
+
+        pins = agent.active_run["current_text_message_ids"]
+        assert pins.get("__root__") is None, "the parent's pin must be cleared"
+        assert pins.get("tools:s1") == "sub-pin", (
+            "another lane's pin must survive the parent's node transition"
+        )
 
     @pytest.mark.asyncio
     async def test_same_node_across_llm_invocations_reuses_id(self):
@@ -316,7 +383,9 @@ class TestStableMessageId(unittest.IsolatedAsyncioTestCase):
         from ag_ui_langgraph.types import CustomEventNames
 
         agent = _make_agent()
-        agent.active_run["current_text_message_id"] = "stable-stream-id"
+        # The pin is keyed per subagent lane ("__root__" for the root); seed it
+        # and confirm ManuallyEmitMessage leaves it untouched.
+        agent.active_run["current_text_message_ids"] = {"__root__": "stable-stream-id"}
 
         manual_event = {
             "event": LangGraphEventTypes.OnCustomEvent,
@@ -330,6 +399,6 @@ class TestStableMessageId(unittest.IsolatedAsyncioTestCase):
         text_starts = [e for e in agent.dispatched if e.type == EventType.TEXT_MESSAGE_START]
         assert len(text_starts) == 1
         assert text_starts[0].message_id == "user-supplied-id"
-        assert agent.active_run["current_text_message_id"] == "stable-stream-id", (
-            "ManuallyEmitMessage must not mutate current_text_message_id"
+        assert agent.active_run["current_text_message_ids"].get("__root__") == "stable-stream-id", (
+            "ManuallyEmitMessage must not mutate the text-message pin"
         )

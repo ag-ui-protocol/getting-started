@@ -122,6 +122,62 @@ public sealed class InterruptContentTest
         Assert.Throws<ArgumentException>("requestId", () => new InterruptResponseContent("   "));
     }
 
+    // Metadata on an incoming resume entry survives the hosting layer's translation to
+    // MEAI content, so an inner pipeline reading InterruptResponseContent sees the
+    // envelope data (signatures, routing keys) the client attached.
+    [Fact]
+    public void ResumeMetadata_SurvivesTranslationToInterruptResponseContent()
+    {
+        var input = new RunAgentInput
+        {
+            ThreadId = "t1",
+            RunId = "r1",
+            Resume =
+            [
+                new AGUIResume
+                {
+                    InterruptId = "generic-1",
+                    Status = ResumeStatus.Resolved,
+                    Payload = JsonDocument.Parse("""{"approved":true}""").RootElement,
+                    Metadata = JsonDocument.Parse(
+                        """{"definitionId":"review-plan","key":"afterModel-review"}""").RootElement,
+                },
+            ],
+        };
+
+        var context = input.ToChatRequestContext(AIJsonUtilities.DefaultOptions);
+
+        var response = Assert.Single(context.Messages
+            .SelectMany(m => m.Contents)
+            .OfType<InterruptResponseContent>());
+        Assert.Equal("generic-1", response.RequestId);
+        Assert.NotNull(response.Metadata);
+        Assert.Equal("review-plan", response.Metadata!.Value.GetProperty("definitionId").GetString());
+        Assert.Equal("afterModel-review", response.Metadata!.Value.GetProperty("key").GetString());
+    }
+
+    // A resume entry without metadata translates to content without it.
+    [Fact]
+    public void ResumeWithoutMetadata_TranslatesWithoutIt()
+    {
+        var input = new RunAgentInput
+        {
+            ThreadId = "t1",
+            RunId = "r1",
+            Resume =
+            [
+                new AGUIResume { InterruptId = "generic-1", Status = ResumeStatus.Resolved },
+            ],
+        };
+
+        var context = input.ToChatRequestContext(AIJsonUtilities.DefaultOptions);
+
+        var response = Assert.Single(context.Messages
+            .SelectMany(m => m.Contents)
+            .OfType<InterruptResponseContent>());
+        Assert.Null(response.Metadata);
+    }
+
     #endregion
 
     #region JSON Serialization

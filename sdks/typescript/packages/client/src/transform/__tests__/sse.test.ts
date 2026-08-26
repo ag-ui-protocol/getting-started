@@ -86,7 +86,7 @@ describe("transformHttpEventStream", () => {
             resolve(events);
           }
         },
-        error: (err) => fail(err),
+        error: (err) => expect.fail(String(err)),
       });
     });
 
@@ -192,13 +192,13 @@ describe("transformHttpEventStream", () => {
       event$.subscribe({
         next: () => {
           // This should not be called
-          fail("Should not emit events for invalid JSON");
+          expect.fail("Should not emit events for invalid JSON");
         },
         error: (err) => {
           resolve(err);
         },
         complete: () => {
-          fail("Stream should not complete successfully with invalid JSON");
+          expect.fail("Stream should not complete successfully with invalid JSON");
         },
       });
     });

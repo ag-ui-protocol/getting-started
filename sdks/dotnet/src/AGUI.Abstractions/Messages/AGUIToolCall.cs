@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace AGUI.Abstractions;
@@ -15,6 +16,16 @@ public sealed class AGUIToolCall
     public AGUIToolCallFunction Function { get; set; } = new();
 
     [JsonPropertyName("encryptedValue")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? EncryptedValue { get; set; }
+
+    /// <summary>
+    /// Extra information attached to this tool call, open by key.
+    /// </summary>
+    /// <remarks>
+    /// A tool call is not a message, so it carries its own metadata rather than
+    /// folding into the assistant message that owns it — several tool calls can
+    /// share one parent.
+    /// </remarks>
+    [JsonPropertyName("metadata")]
+    public JsonElement? Metadata { get; set; }
 }

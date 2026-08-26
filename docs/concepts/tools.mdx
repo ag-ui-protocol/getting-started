@@ -158,6 +158,25 @@ The frontend accumulates these deltas to construct the complete tool call
 arguments. Once the tool call is complete, the frontend can execute the tool and
 provide results back to the agent.
 
+### Tool call metadata
+
+All three of these events can carry a `metadata` object, and it accumulates onto
+the **tool call itself** rather than onto the assistant message that owns it:
+
+```typescript
+assistantMessage.toolCalls[0].metadata
+// { provider: "anthropic", latencyMs: 84 }
+```
+
+That is deliberate. One assistant message can own several tool calls, so folding
+their metadata into the parent would make the result depend on the order the
+calls happened to interleave. Giving each tool call its own keeps it
+unambiguous.
+
+`ToolCallResult` is different — it creates a tool message, so its metadata
+merges into that message like any other message-building event. See
+[Metadata](/concepts/metadata).
+
 ## Tool Results
 
 After a tool has been executed, the result is sent back to the agent as a "tool

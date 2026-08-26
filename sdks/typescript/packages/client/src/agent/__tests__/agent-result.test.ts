@@ -373,9 +373,11 @@ describe("Agent Result", () => {
       const activityMessage = agent.messages.find((message) => message.id === "activity-ops");
 
       expect(activityMessage).toBeTruthy();
-      expect(activityMessage?.role).toBe("activity");
-      expect(activityMessage?.activityType).toBe("PLAN");
-      expect(activityMessage?.content).toEqual({
+      if (activityMessage?.role !== "activity") {
+        throw new Error(`Expected activity message, got role ${activityMessage?.role}`);
+      }
+      expect(activityMessage.activityType).toBe("PLAN");
+      expect(activityMessage.content).toEqual({
         operations: [firstOperation, secondOperation],
       });
 

@@ -17,283 +17,43 @@ entrypoint:
 * ``chat_tools_to_responses_tools`` -- nested ``{"type": "function",
   "function": {...}}`` tool specs onto the Responses flat shape.
 
-Availability is a pair of RUNTIME CAPABILITY PROBES, never a litellm version or
-model-name comparison: ``responses_channel_available()`` answers whether the
-channel can be used at all (see its docstring for the two probes), and callers
-fall back to chat-completions when it cannot.
+``responses_channel_available()`` answers whether litellm exposes the public
+``aresponses`` entrypoint at all, and callers fall back to chat-completions when
+it does not. The event vocabulary the stream carries is covered by this package's
+declared litellm range, not by a runtime probe of litellm's internals.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
-from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from pydantic import ValidationError
-
-from ._capabilities import (
-    CAPABILITIES,
-    ResponsesAPIStreamingIteratorBase,
-    responses_entrypoint,
-    responses_event_modelling,
-)
-from ._responses_events import event_role, is_load_bearing
+from ._capabilities import CAPABILITIES, responses_entrypoint
 
 _LOGGER = logging.getLogger(__name__)
 
-# Cap on events skipped for being unparseable in one stream. Past this the stream
-# is not "one odd event that costs nothing" but something systemically wrong, and
-# reporting it beats silently returning an empty message.
-_MAX_SKIPPED_EVENTS = 50
-
 #: Roles a Responses ``input`` message item accepts verbatim.
 _INPUT_MESSAGE_ROLES = frozenset({"user", "assistant", "system", "developer"})
-
-#: litellm 1.63-1.67 raise ``ValueError("Unknown event type: <type>")`` from their
-#: event-type lookup for a type they have no model for (newer builds answer with
-#: their extras-allowing catch-all model instead). Matched case-insensitively on
-#: the ORIGINAL message so the captured type is the one litellm wrote, and
-#: anchored on the colon so a message that names no type does not read as one.
-_UNKNOWN_EVENT_TYPE_RE = re.compile(r"unknown event type\s*:\s*(\S+)", re.IGNORECASE)
-_UNKNOWN_EVENT_TYPE_MARKER_RE = re.compile(r"unknown event type", re.IGNORECASE)
-
-# What to do with a per-event parse failure.
-#: This event costs nothing this bridge maps: log it and keep reading.
-_SKIP = "skip"
-#: This event carried content or the stream's outcome: report it.
-_SURFACE = "surface"
-#: The event cannot be identified at all, so it cannot be shown harmless.
-_UNATTRIBUTABLE = "unattributable"
-#: This litellm build has no model for an event type the bridge must read, which
-#: is a property of the BUILD rather than of this event.
-_UNREADABLE_TYPE = "unreadable_type"
-#: Not litellm's event parsing at all: leave it alone.
-_PROPAGATE = "propagate"
-
-
-def _classify_parse_failure(exc: ValueError) -> Tuple[str, str]:
-    """Decide the fate of one event that failed to parse, and name what failed.
-
-    Parsing is what failed, so there is no event object to read a ``type`` off.
-    Two signals remain, and each is turned into that event's ROLE for this bridge
-    (``_responses_events.EVENT_ROLES``) instead of being judged against a list of
-    types or model names maintained here:
-
-    * ``pydantic.ValidationError`` -- litellm had a model for the type and could
-      not build it. ``title`` is that model's name, and litellm's OWN event-type
-      to model registry maps it back onto a role
-      (``ResponsesEventModelling.model_roles``). A load-bearing role surfaces; a
-      role whose loss costs nothing this bridge maps is skipped; a model that
-      registry does not attribute to any type this bridge reads means nothing
-      this bridge maps was lost, so it is skipped too. When the registry could
-      not be resolved at all, nothing can be attributed and the failure is
-      reported rather than assumed harmless.
-    * a plain ``ValueError`` carrying litellm's "Unknown event type: <type>"
-      lookup failure -- the type is in the message. A type this bridge never
-      reads costs nothing to skip. A type it reads means THIS BUILD cannot read
-      this channel: reported as the build fact it is, not as a corrupt event.
-      A message that names no type cannot be judged either way.
-
-    Anything else that merely happens to be a ``ValueError`` is not litellm's
-    event parsing (``json.JSONDecodeError`` from a truncated SSE frame is a
-    ``ValueError`` too) and propagates untouched.
-
-    Returns ``(disposition, subject)``, where ``subject`` names the model or the
-    event type for the log line or the error message.
-    """
-    if isinstance(exc, ValidationError):
-        modelling = responses_event_modelling()
-        role = modelling.model_roles.get(exc.title)
-        if role is None:
-            if not modelling.resolver_available:
-                return _UNATTRIBUTABLE, exc.title
-            return _SKIP, exc.title
-        return (_SURFACE if is_load_bearing(role) else _SKIP), exc.title
-
-    message = str(exc)
-    match = _UNKNOWN_EVENT_TYPE_RE.search(message)
-    if match is None:
-        if _UNKNOWN_EVENT_TYPE_MARKER_RE.search(message):
-            # litellm's lookup failure with no type in it: nothing identifies
-            # the event, so it cannot be shown harmless to drop.
-            return _UNATTRIBUTABLE, message
-        return _PROPAGATE, message
-    # Strip quotes/punctuation a future litellm might wrap the type in
-    # (``Unknown event type: 'response.output_text.delta'``): only the ends are
-    # stripped, so the dotted type survives, and a load-bearing type is still
-    # recognised instead of silently downgraded to a harmless skip.
-    event_type = match.group(1).strip("\"'`.,;:!?()[]{}<>")
-    role = event_role(event_type)
-    if role is None:
-        return _SKIP, event_type
-    if is_load_bearing(role):
-        return _UNREADABLE_TYPE, event_type
-    # One reasoning-summary delta costs a gap in the visible trace but leaves
-    # the replay item and answer intact. Builds that cannot model the reasoning
-    # channel at all are declared unavailable by the capability probe.
-    return _SKIP, event_type
-
 
 #: Roles whose content rides ``input_text`` / ``input_image`` parts. ``assistant``
 #: is deliberately absent: see ``_assistant_content_text``.
 _INPUT_PART_ROLES = frozenset({"user", "system", "developer"})
 
+#: Prefix OpenAI issues on a Responses reasoning item id. It is the only signal
+#: that separates an id OpenAI can resolve from one this process minted: the
+#: chat-completions channel carries no provider item id, so the bridge keys those
+#: reasoning messages by a uuid4, which has no prefix at all.
+_RESPONSES_REASONING_ID_PREFIX = "rs_"
+
 
 def responses_channel_available() -> bool:
     """Whether the OpenAI Responses streaming channel can be used.
 
-    Two runtime capability probes, never a litellm version compare and never a
-    model-name branch:
-
-    * litellm exposes a callable ``aresponses`` entrypoint to open the stream, and
-    * litellm can MODEL every Responses event type this bridge must read. litellm
-      1.63-1.67 (inside this package's declared ``litellm>=1.60.2`` floor) raise
-      ``ValueError("Unknown event type: <type>")`` for a type they have no model
-      for, and on those builds the reasoning-summary deltas this bridge must read
-      are exactly those types (the answer text delta still models). Reasoning is a
-      REQUIRED role, so the channel reports unavailable there and callers degrade
-      to chat-completions -- which still carries the text -- rather than failing
-      once per turn on a reasoning trace we advertised as working.
-
-    False means callers must stay on chat-completions.
+    True when litellm exposes a callable ``aresponses`` entrypoint to open the
+    stream. False means callers must stay on chat-completions.
     """
     return CAPABILITIES.responses_api_available
-
-
-def is_responses_stream(response: Any) -> bool:
-    """Whether ``response`` is an ASYNC litellm Responses-API streaming iterator.
-
-    Async-iterability is checked FIRST, for both branches. litellm's
-    ``SyncResponsesAPIStreamingIterator`` subclasses the very same
-    ``BaseResponsesAPIStreamingIterator`` the async iterator does, so an
-    isinstance-only branch would accept a sync stream that the async driver
-    (``iter_responses_events`` calls ``__aiter__``) cannot consume. Requiring
-    ``__aiter__`` up front also keeps this branch and the duck-typed one from
-    disagreeing about what qualifies.
-
-    Past that gate: an isinstance check against the resolved base class, falling
-    back to duck-typing (the iterator's own ``_process_chunk``) so a litellm that
-    relocates the class still works.
-    """
-    if not hasattr(response, "__aiter__"):
-        return False
-    base = ResponsesAPIStreamingIteratorBase
-    if base is not None and isinstance(response, base):
-        return True
-    return hasattr(response, "_process_chunk")
-
-
-def is_sync_responses_stream(response: Any) -> bool:
-    """Whether ``response`` is a SYNCHRONOUS Responses-API streaming iterator.
-
-    The exact complement of ``is_responses_stream`` over Responses iterators:
-    something recognisably a Responses stream that has no ``__aiter__``. Kept as
-    its own predicate so a caller who reached for the sync entrypoint gets told
-    which entrypoint to use instead of a generic "unsupported type".
-
-    Same two branches, same async-iterability gate first, so the two predicates
-    cannot both answer True.
-    """
-    if hasattr(response, "__aiter__"):
-        return False
-    base = ResponsesAPIStreamingIteratorBase
-    if base is not None and isinstance(response, base):
-        return True
-    return hasattr(response, "__iter__") and hasattr(response, "_process_chunk")
-
-
-async def iter_responses_events(response: Any) -> AsyncIterator[Any]:
-    """Yield Responses stream events, skipping one that costs nothing to lose.
-
-    litellm validates each event against its own typed models, so a single event
-    can fail to parse and raise straight out of ``__anext__``, which would void
-    the whole turn: no reasoning, no answer, just a RUN_ERROR. Whether that is
-    the right outcome depends entirely on WHICH event it was, so each failure is
-    attributed to the role that event plays for this bridge
-    (``_responses_events``) and:
-
-    * an event whose loss costs nothing this bridge maps is SKIPPED with a
-      warning: stream bookkeeping (``response.created`` /
-      ``response.in_progress``, whose fields all have fallbacks), one
-      reasoning-summary delta (a gap in a trace, with replay identity, the answer,
-      and the outcome intact), and any event of a type this bridge never reads.
-    * an event carrying reasoning continuation state, answer text, a tool call's
-      identity or arguments, or the stream's outcome is REPORTED as a
-      ``RuntimeError`` the drivers' exception taxonomy surfaces. Dropping one
-      loses replayability/content or turns a failed stream into an empty assistant
-      message with no failure recorded.
-    * a failure that cannot be attributed to any event is reported too: it cannot
-      be shown harmless, so it is not assumed to be.
-    * litellm having NO model for a type this bridge must read is reported as the
-      BUILD fact it is (the channel cannot be read on this build), not as a
-      corrupt event. ``responses_channel_available()`` reports such a build
-      unavailable, so callers that probe it degrade to chat-completions instead
-      of reaching here at all.
-
-    Transport failures, cancellation and any other non-parse error propagate
-    untouched.
-
-    EVERY skip counts against ``_MAX_SKIPPED_EVENTS``, so a stream that is
-    unreadable end to end raises rather than quietly yielding an empty turn.
-    """
-    iterator = response.__aiter__()
-    skipped = 0
-    while True:
-        try:
-            event = await iterator.__anext__()
-        except StopAsyncIteration:
-            return
-        except ValueError as exc:
-            # Both litellm parse failures are ValueErrors: pydantic's
-            # ValidationError subclasses it, and the unknown-event-type lookup
-            # raises it directly. Transport errors (httpx, ConnectionError) and
-            # asyncio.CancelledError are not ValueErrors and never land here.
-            disposition, subject = _classify_parse_failure(exc)
-            if disposition == _PROPAGATE:
-                raise
-            if disposition == _UNREADABLE_TYPE:
-                raise RuntimeError(
-                    "The installed litellm has no model for the OpenAI Responses "
-                    f"stream event type {subject!r}, which this bridge reads for "
-                    "reasoning continuation, answer text, tool-call arguments or "
-                    "the stream's outcome, so this stream cannot be read on this "
-                    "build. Probe "
-                    "responses_channel_available() and stream over "
-                    "chat-completions instead, or upgrade litellm."
-                ) from exc
-            if disposition == _SURFACE:
-                raise RuntimeError(
-                    "An OpenAI Responses stream event this bridge reads for "
-                    "reasoning continuation, answer text, tool-call arguments or "
-                    f"the stream's outcome failed to parse ({subject}); skipping "
-                    "it would drop replay state, content or the stream's outcome "
-                    "in silence"
-                ) from exc
-            if disposition == _UNATTRIBUTABLE:
-                raise RuntimeError(
-                    f"An OpenAI Responses stream event failed to parse ({subject}) "
-                    "and nothing identifies which event it was, so it cannot be "
-                    "shown harmless to skip: dropping one that carried reasoning "
-                    "continuation, answer text, tool-call arguments or the "
-                    "stream's outcome would lose it in silence"
-                ) from exc
-            skipped += 1
-            if skipped > _MAX_SKIPPED_EVENTS:
-                raise RuntimeError(
-                    f"OpenAI Responses stream is unreadable: more than "
-                    f"{_MAX_SKIPPED_EVENTS} events failed to parse"
-                ) from exc
-            _LOGGER.warning(
-                "Skipping an unparseable Responses stream event (%s, %d so far): "
-                "it carries nothing this bridge maps. %s",
-                subject,
-                skipped,
-                exc,
-            )
-            continue
-        if event is not None:
-            yield event
 
 
 def chat_tools_to_responses_tools(tools: Optional[Iterable[Any]]) -> Optional[List[dict]]:
@@ -532,13 +292,28 @@ def _paired_call_ids(messages: List[Any]) -> Set[str]:
     return called & answered
 
 
-def _reasoning_message_to_responses_item(message: Any) -> dict:
-    """Rebuild one AG-UI reasoning message as an OpenAI Responses item."""
+def _reasoning_message_to_responses_item(message: Any) -> Optional[dict]:
+    """Rebuild one AG-UI reasoning message as an OpenAI Responses item.
+
+    ``None`` when the message did not come from the Responses channel, so the
+    caller drops it rather than sending an item OpenAI cannot resolve.
+    """
     item_id = _message_field(message, "id")
-    if not isinstance(item_id, str) or not item_id:
-        raise ValueError(
-            "A reasoning message requires its OpenAI provider item id for replay"
+    if not isinstance(item_id, str) or not item_id.startswith(
+        _RESPONSES_REASONING_ID_PREFIX
+    ):
+        # DEBUG per message, because the WHOLE history is reconverted on every
+        # turn: a thread that switched providers once would otherwise re-log the
+        # same warning for the same messages for the rest of its life. The caller
+        # reports the count once per conversion instead.
+        _LOGGER.debug(
+            "Dropping reasoning message %r: only reasoning produced by the "
+            "Responses channel carries an id OpenAI can resolve, and a reasoning "
+            "message off the chat-completions channel (an Anthropic or Gemini "
+            "turn) is keyed by a locally minted id instead",
+            item_id,
         )
+        return None
 
     content = _message_field(message, "content")
     if content is None or content == "":
@@ -561,6 +336,51 @@ def _reasoning_message_to_responses_item(message: Any) -> dict:
             raise ValueError("A reasoning message encrypted value must be a string")
         item["encrypted_content"] = encrypted
     return item
+
+
+def _reasoning_keeps_its_output(
+    items: List[dict], index: int, *, tail_output_dropped: bool
+) -> bool:
+    """Whether the reasoning item at ``index`` still has the output it produced.
+
+    Consecutive reasoning items share the output that follows them, and reasoning
+    that trails the input is normally followed by the output THIS request
+    generates. That last allowance holds ONLY while nothing was dropped after it:
+    a reasoning item that became trailing BECAUSE its own function_call was
+    dropped as unpaired is dangling, not pending, and ``tail_output_dropped`` is
+    what tells the two apart. Anything else in that position (an input message, or
+    a bare output whose call is gone) leaves the reasoning dangling too.
+    """
+    for item in items[index + 1 :]:
+        if item.get("type") == "reasoning":
+            continue
+        return item.get("type") == "function_call" or item.get("role") == "assistant"
+    return not tail_output_dropped
+
+
+def _drop_dangling_reasoning(
+    items: List[dict], *, tail_output_dropped: bool
+) -> List[dict]:
+    """Drop reasoning items whose output did not survive conversion.
+
+    Runs after emission because the shape depends on what followed: a call
+    dropped as unpaired takes the reasoning that produced it, so the drop that
+    protects the request cannot create the very shape it protects against.
+    """
+    kept: List[dict] = []
+    for index, item in enumerate(items):
+        if item.get("type") == "reasoning" and not _reasoning_keeps_its_output(
+            items, index, tail_output_dropped=tail_output_dropped
+        ):
+            _LOGGER.warning(
+                "Dropping dangling reasoning item %r: the output it produced did "
+                "not survive conversion, and the Responses API rejects a reasoning "
+                "item that is not followed by its output",
+                item.get("id"),
+            )
+            continue
+        kept.append(item)
+    return kept
 
 
 def _input_replays_reasoning(input_value: Any) -> bool:
@@ -588,19 +408,46 @@ def chat_messages_to_responses_input(messages: Iterable[Any]) -> List[dict]:
     abandoned mid-tool-call, or a tool result whose call never made it into
     state, would otherwise hard-fail every later turn. A duplicate of either
     kind is dropped for the same reason.
+
+    A reasoning message from any OTHER channel is dropped under that same policy.
+    Only OpenAI can resolve a Responses reasoning item id, so a thread whose
+    earlier turns ran on Anthropic or Gemini would otherwise hard-fail here the
+    moment the user switches provider.
+
+    Reasoning items carry the same two guards on top of that. A second item for
+    an id already emitted is dropped, and so is a reasoning item whose output did
+    not survive: the API requires a reasoning item to be followed by the output
+    it produced, so reasoning left in front of the next user message by the
+    unpaired-call drop would hard-fail the request that drop exists to protect.
     """
     materialised = list(messages or [])
     paired = _paired_call_ids(materialised)
 
+    dropped_foreign_reasoning = 0
+    # Set when an assistant output is dropped, cleared when one survives, so
+    # the post-pass can tell reasoning that is PENDING this request's output
+    # from reasoning left trailing by a drop.
+    tail_output_dropped = False
     emitted_calls: Set[str] = set()
     emitted_outputs: Set[str] = set()
+    emitted_reasoning: Set[str] = set()
     items: List[dict] = []
     for message in materialised:
         role = _message_field(message, "role")
         content = _message_field(message, "content")
 
         if role == "reasoning":
-            items.append(_reasoning_message_to_responses_item(message))
+            reasoning_item = _reasoning_message_to_responses_item(message)
+            if reasoning_item is None:
+                dropped_foreign_reasoning += 1
+                continue
+            if reasoning_item["id"] in emitted_reasoning:
+                _LOGGER.warning(
+                    "Dropping a second reasoning item for id %r", reasoning_item["id"]
+                )
+                continue
+            emitted_reasoning.add(reasoning_item["id"])
+            items.append(reasoning_item)
             continue
 
         if role == "tool":
@@ -676,9 +523,11 @@ def chat_messages_to_responses_input(messages: Iterable[Any]) -> List[dict]:
         for tool_call in _tool_calls_of(message):
             call_id, name, arguments = _tool_call_fields(tool_call)
             if not call_id or not name:
+                tail_output_dropped = True
                 _LOGGER.warning("Dropping tool call with no id or name: %r", tool_call)
                 continue
             if call_id not in paired:
+                tail_output_dropped = True
                 _LOGGER.warning(
                     "Dropping unresolved function_call %r (%s): the Responses API "
                     "rejects a call with no matching output",
@@ -690,6 +539,7 @@ def chat_messages_to_responses_input(messages: Iterable[Any]) -> List[dict]:
                 _LOGGER.warning("Dropping a second function_call for call %r", call_id)
                 continue
             emitted_calls.add(call_id)
+            tail_output_dropped = False
             items.append(
                 {
                     "type": "function_call",
@@ -699,7 +549,15 @@ def chat_messages_to_responses_input(messages: Iterable[Any]) -> List[dict]:
                 }
             )
 
-    return items
+    if dropped_foreign_reasoning:
+        _LOGGER.warning(
+            "Dropped %d reasoning message(s) from the Responses input: they were "
+            "produced on the chat-completions channel, whose ids OpenAI cannot "
+            "resolve. Each one rendered normally when it streamed; only replay is "
+            "affected. Enable DEBUG on this logger to see which.",
+            dropped_foreign_reasoning,
+        )
+    return _drop_dangling_reasoning(items, tail_output_dropped=tail_output_dropped)
 
 
 async def copilotkit_responses(
@@ -729,7 +587,8 @@ async def copilotkit_responses(
 
     ``reasoning`` is passed through untouched. OpenAI streams reasoning summaries
     only when it carries a ``summary`` (``"auto"`` / ``"concise"`` /
-    ``"detailed"``); without one the run succeeds but has no trace to surface.
+    ``"detailed"``); without one the run succeeds and the reasoning messages that
+    surface carry no visible text.
 
     Continuation has two exclusive shapes. Without ``previous_response_id``,
     AG-UI message history is converted into stateless Responses input (including
@@ -737,12 +596,11 @@ async def copilotkit_responses(
     explicit new ``input``; converted history is not sent, and including a
     reasoning item in that explicit input is rejected as duplicate continuation.
 
-    Raises ``RuntimeError`` when the channel is unavailable, naming which of the
-    two probes failed: litellm exposes no ``aresponses`` entrypoint, or it cannot
-    model event types this bridge must read. Probe
-    ``responses_channel_available()`` first when the caller wants to degrade to
-    chat-completions instead; refusing here is what keeps such a build from
-    failing mid-turn, after the client has already seen part of an answer.
+    Raises ``RuntimeError`` when the installed litellm exposes no ``aresponses``
+    entrypoint. Probe ``responses_channel_available()`` first when the caller
+    wants to degrade to chat-completions instead; refusing here is what keeps
+    such a build from failing mid-turn, after the client has already seen part of
+    an answer.
     """
     entrypoint = responses_entrypoint()
     if entrypoint is None:
@@ -753,22 +611,11 @@ async def copilotkit_responses(
             "reasoning summaries)."
         )
 
-    unmodellable = responses_event_modelling().unmodellable_event_types
-    if unmodellable:
-        raise RuntimeError(
-            "The OpenAI Responses channel is unavailable: the installed litellm "
-            "has no model for these stream event types ("
-            f"{', '.join(unmodellable)}) and raises on them, so the reasoning "
-            "summaries, continuation items and answer deltas this channel exists "
-            "to read cannot be parsed at all. Upgrade litellm, or call "
-            "litellm.acompletion instead "
-            "(chat-completions carries no OpenAI reasoning summaries)."
-        )
-
     if reasoning is not None and not reasoning.get("summary"):
         _LOGGER.warning(
             "reasoning=%r has no 'summary': OpenAI streams reasoning summaries "
-            "only when one is requested, so no REASONING_* events will surface.",
+            "only when one is requested, so the reasoning messages that surface "
+            "will carry no visible text.",
             reasoning,
         )
 

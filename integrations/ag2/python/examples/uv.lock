@@ -16,7 +16,7 @@ wheels = [
 
 [[package]]
 name = "ag2"
-version = "0.14.0"
+version = "1.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -29,9 +29,9 @@ dependencies = [
     { name = "termcolor" },
     { name = "tiktoken" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fd/91/628099cbd03f5f185a1bb35a2e3187d1e9439c7a8da65f083842163e62d0/ag2-0.14.0.tar.gz", hash = "sha256:19e9d8609ca8e2e616b6262a964d8cd2242b1292988b2607e5e3bf2b351a5c70", size = 3428682, upload-time = "2026-06-26T04:48:42.06Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/84/41f134baa2a0ba437d85134224e2c0ecfe121237973aaf0ecbdf2d84f3c4/ag2-1.0.2.tar.gz", hash = "sha256:fd58ae079e63d3a1657fd9f8847deb24956852dfddefdfe89c72222953339e41", size = 703925, upload-time = "2026-08-15T05:29:08.581Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7f/23/2cfa28c5452e11942a820a1ffb5061c053af5d6a8c7a2c0a2b65d7bd7226/ag2-0.14.0-py3-none-any.whl", hash = "sha256:73621600af17409204993768a5b43787e36ed919e6993349283dc6974861dd7e", size = 1726768, upload-time = "2026-06-26T04:48:39.784Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/b7/43a404d9d1f574ca85d3b5275a9448cadb64681fd63e83133577ac6233a5/ag2-1.0.2-py3-none-any.whl", hash = "sha256:6b9ce2b7f9b5d95e2b19a84c8499719f063aae6291b05dc6293e86a0eade4581", size = 969868, upload-time = "2026-08-15T05:29:07.153Z" },
 ]
 
 [package.optional-dependencies]
@@ -56,7 +56,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ag2", extras = ["ag-ui", "openai"], specifier = ">=0.11.1,<1.0.0" },
+    { name = "ag2", extras = ["ag-ui", "openai"], specifier = ">=1.0.2,<2.0.0" },
     { name = "fastapi", specifier = ">=0.116.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "python-dotenv", specifier = ">=0.9.0" },
@@ -228,7 +228,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [

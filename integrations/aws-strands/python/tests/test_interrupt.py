@@ -6,22 +6,27 @@ AG-UI interrupt lifecycle:
 1. A paused run finishes with ``RunFinishedInterruptOutcome``.
 2. ``RunAgentInput.resume`` is translated into the Strands resume prompt shape.
 3. ``status == "cancelled"`` resumes with the documented denial sentinel.
-4. Runs that never interrupt finish bare (no behavior change).
+4. Runs that never interrupt finish with a success outcome.
 """
 
 from __future__ import annotations
 
+import ast
 import copy
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from ag_ui.core import (
+    Context,
     CustomEvent,
     EventType,
+    Interrupt,
     ResumeEntry,
     RunAgentInput,
+    RunFinishedSuccessOutcome,
     Tool,
     ToolMessage,
     UserMessage,
@@ -30,18 +35,24 @@ from strands import Agent as StrandsAgentCore
 from strands import ToolContext, tool
 from strands.agent.state import AgentState
 from strands.interrupt import Interrupt as StrandsInterrupt
-from strands.interrupt import _InterruptState
+from strands.hooks.registry import HookRegistry
 from strands.models.model import Model as StrandsModel
 from strands.session import FileSessionManager
 from strands.types.session import SessionAgent, SessionMessage
 
-from ag_ui_strands.agent import INTERRUPT_CANCELLED, StrandsAgent
+from ag_ui_strands.agent import (
+    INTERRUPT_CANCELLED,
+    _INTERRUPT_BOOKKEEPING_STATE_KEY,
+    StrandsAgent,
+)
 from ag_ui_strands.client_proxy_tool import PROXY_RESULT_PLACEHOLDER
 from ag_ui_strands.config import StrandsAgentConfig, ToolBehavior
 from ag_ui_strands.session_reconcile import (
     AG_UI_TOOL_CALL_MAP_STATE_KEY,
     AG_UI_WIRE_MAP_STATE_KEY,
 )
+from tests.interrupt_state_stub import InterruptStateStub
+from tests.hook_helpers import invoke_after_model_call, invoke_before_model_call
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -54,6 +65,7 @@ def _make_run_input(
     messages=None,
     resume=None,
     tools=None,
+    context=None,
 ) -> RunAgentInput:
     return RunAgentInput(
         thread_id=thread_id,
@@ -61,7 +73,7 @@ def _make_run_input(
         state={},
         messages=messages or [],
         tools=tools or [],
-        context=[],
+        context=context or [],
         forwarded_props={},
         resume=resume,
     )
@@ -97,9 +109,10 @@ _UNSET = object()
 class _MockStrandsCore:
     """A minimal stand-in for ``StrandsAgentCore`` driving the stream loop.
 
-    ``stream_async`` records the prompt it was called with and yields the
-    provided terminal events. When ``interrupts`` are supplied it also flips its
-    ``_interrupt_state`` to activated, mirroring a paused native run.
+    ``stream_async`` records the prompt it was called with, applies Strands' own
+    checkpoint-resume step, and then yields whatever ``_stream_body`` produces.
+    When ``interrupts`` are supplied it also flips its ``_interrupt_state`` to
+    activated, mirroring a paused native run.
     """
 
     def __init__(self, terminal_events=None, interrupts=None, session_manager=_UNSET):
@@ -110,20 +123,38 @@ class _MockStrandsCore:
         self.model = MagicMock()
         self.messages = []
         self.stream_prompts = []
+        self.model_messages = []
+        self.hooks = HookRegistry()
         # Default to a mock session manager: the ``session_manager is None``
         # guard now rejects interrupts/resume without one, and most tests
         # here exercise the resume-translation logic, not that guard. Pass
         # ``session_manager=None`` explicitly to exercise the guard itself.
         self.session_manager = MagicMock() if session_manager is _UNSET else session_manager
         self._terminal_events = terminal_events or []
-        self._interrupt_state = _InterruptState()
+        self._interrupt_state = InterruptStateStub()
         if interrupts:
             for itr in interrupts:
                 self._interrupt_state.interrupts[itr.id] = itr
             self._interrupt_state.activate()
 
     async def stream_async(self, prompt):
+        """Record the prompt and apply Strands' own checkpoint-resume step.
+
+        Real ``stream_async`` resumes the checkpoint from the prompt before
+        anything else, so an activated checkpoint rejects a prompt that is not a
+        list of interrupt responses. Doubles supply a ``_stream_body`` instead of
+        replacing this method, so none of them can skip that step: one that skips
+        it certifies prompts production would reject.
+        """
         self.stream_prompts.append(prompt)
+        self._interrupt_state.resume(prompt)
+        invoke_before_model_call(self.hooks, self)
+        self.model_messages.append(copy.deepcopy(self.messages))
+        invoke_after_model_call(self.hooks, self)
+        async for event in self._stream_body(prompt):
+            yield event
+
+    async def _stream_body(self, prompt):
         for event in self._terminal_events:
             yield event
 
@@ -131,8 +162,7 @@ class _MockStrandsCore:
 class _PostStreamMixedCore(_MockStrandsCore):
     """Create an exact mixed checkpoint only after streaming starts."""
 
-    async def stream_async(self, prompt):
-        self.stream_prompts.append(prompt)
+    async def _stream_body(self, prompt):
         interrupt = StrandsInterrupt(id="native-interrupt", name="confirm")
         self._interrupt_state.interrupts[interrupt.id] = interrupt
         self._interrupt_state.context["tool_results"] = [
@@ -171,6 +201,72 @@ def _assert_single_run_error(events: list, code: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Stream-double contract
+# ---------------------------------------------------------------------------
+
+
+class TestStreamDoubleContract:
+    """Every core double drives Strands' checkpoint-resume step.
+
+    Overriding ``_stream_body`` keeps that step in place; overriding or reassigning
+    ``stream_async`` would skip a call the real one makes unconditionally.
+    """
+
+    def test_only_the_shared_core_defines_stream_async(self):
+        tree = ast.parse(Path(__file__).read_text())
+        definitions = [
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef)
+            and any(
+                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and child.name == "stream_async"
+                for child in node.body
+            )
+        ]
+        reassignments = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Attribute) and target.attr == "stream_async"
+                for target in node.targets
+            )
+        ]
+        assert definitions == ["_MockStrandsCore"]
+        assert reassignments == []
+
+    @pytest.mark.asyncio
+    async def test_core_double_rejects_a_prompt_the_sdk_rejects(self):
+        core = _MockStrandsCore(
+            interrupts=[StrandsInterrupt(id="native-interrupt", name="confirm")]
+        )
+
+        with pytest.raises(TypeError):
+            async for _ in core.stream_async("what now?"):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_core_double_records_the_submitted_answer(self):
+        interrupt = StrandsInterrupt(id="native-interrupt", name="confirm")
+        core = _MockStrandsCore(interrupts=[interrupt])
+
+        async for _ in core.stream_async(
+            [
+                {
+                    "interruptResponse": {
+                        "interruptId": interrupt.id,
+                        "response": {"approved": True},
+                    }
+                }
+            ]
+        ):
+            pass
+
+        assert interrupt.response == {"approved": True}
+
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
@@ -186,7 +282,6 @@ class TestInterruptOutcome:
         )
         core = _MockStrandsCore(
             terminal_events=[{"result": _agent_result_with_interrupt([strands_interrupt])}],
-            interrupts=[strands_interrupt],
         )
         agent = _make_base_agent()
 
@@ -200,14 +295,9 @@ class TestInterruptOutcome:
 
         agui_interrupt = finished.outcome.interrupts[0]
         assert agui_interrupt.id == "v1:tool_call:tu-1:00000000-0000-0000-0000-000000000000"
-        # Every Strands interrupt is tool-call-bound; id embeds the toolUseId.
-        assert agui_interrupt.tool_call_id == "tu-1"
-        assert agui_interrupt.reason == "tool_call"
-        # The free-form Strands name/reason are preserved under metadata.
-        assert agui_interrupt.metadata == {
-            "strands_name": "confirm",
-            "strands_reason": {"summary": "delete all"},
-        }
+        assert agui_interrupt.tool_call_id is None
+        assert agui_interrupt.reason == "confirm"
+        assert agui_interrupt.metadata == {"reason": {"summary": "delete all"}}
 
     @pytest.mark.asyncio
     async def test_terminal_result_captured_despite_halt_in_same_cycle(self):
@@ -270,8 +360,18 @@ class TestInterruptOutcome:
         # path where the stream breaks before a terminal AgentResult is captured.
         core = _MockStrandsCore(
             terminal_events=[],
-            interrupts=[answered, open_interrupt],
         )
+
+        async def _activate_during_stream(prompt):
+            core._interrupt_state.interrupts = {
+                answered.id: answered,
+                open_interrupt.id: open_interrupt,
+            }
+            core._interrupt_state.activate()
+            if False:
+                yield None
+
+        core._stream_body = _activate_during_stream
         agent = _make_base_agent()
 
         with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
@@ -284,8 +384,8 @@ class TestInterruptOutcome:
         assert reported_ids == {open_interrupt.id}
 
     @pytest.mark.asyncio
-    async def test_no_interrupt_finishes_bare(self):
-        """A normal run finishes with no outcome (back-compat, no behavior change)."""
+    async def test_no_interrupt_finishes_with_success(self):
+        """A normal run finishes with the protocol's explicit success outcome."""
         result = MagicMock()
         result.stop_reason = "end_turn"
         result.interrupts = None
@@ -296,7 +396,7 @@ class TestInterruptOutcome:
             events = await _collect_events(agent, _make_run_input())
 
         finished = next(e for e in events if e.type == EventType.RUN_FINISHED)
-        assert finished.outcome is None
+        assert isinstance(finished.outcome, RunFinishedSuccessOutcome)
 
 
 class TestResumeConsumption:
@@ -315,11 +415,31 @@ class TestResumeConsumption:
         resume = [ResumeEntry(interrupt_id="int-1", status="resolved", payload="yes")]
 
         with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
-            await _collect_events(agent, _make_run_input(resume=resume))
+            await _collect_events(
+                agent,
+                _make_run_input(
+                    resume=resume,
+                    context=[Context(description="account", value="premium")],
+                ),
+            )
 
         assert core.stream_prompts == [
             [{"interruptResponse": {"interruptId": "int-1", "response": {"response": "yes"}}}]
         ]
+        assert core.model_messages == [[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "text": (
+                            "Context provided by the application:\n"
+                            "- account: premium"
+                        )
+                    }
+                ],
+            }
+        ]]
+        assert core.messages == []
 
     @pytest.mark.parametrize("falsy_payload", [None, False, "", 0, [], {}])
     @pytest.mark.asyncio
@@ -417,13 +537,24 @@ def _invalid_resume_case(case: str) -> tuple[list[StrandsInterrupt], list[Resume
             ResumeEntry(interrupt_id="unknown", status="resolved", payload=True),
         ]
     if case == "answered":
+        # An answered interrupt is not open, so addressing it is refused. The
+        # submitted answer deliberately differs from the recorded one: an exact
+        # replay of the recorded answers is the one batch an all-answered
+        # checkpoint accepts, and this row is about the batches it does not.
         return [
             StrandsInterrupt(
                 id="answered",
                 name="confirm",
                 response={"response": True},
             )
-        ], [ResumeEntry(interrupt_id="answered", status="resolved", payload=True)]
+        ], [ResumeEntry(interrupt_id="answered", status="resolved", payload=False)]
+    if case == "answered-partially-addressed":
+        # Both are answered, so nothing is open, and a batch that covers only
+        # one of them is not the replay the checkpoint would accept either.
+        return [
+            StrandsInterrupt(id="first", name="confirm", response={"response": True}),
+            StrandsInterrupt(id="second", name="confirm", response={"response": True}),
+        ], [ResumeEntry(interrupt_id="first", status="resolved", payload=True)]
     raise AssertionError(f"unknown resume case: {case}")
 
 
@@ -437,6 +568,7 @@ def _invalid_resume_case(case: str) -> tuple[list[StrandsInterrupt], list[Resume
         "duplicate",
         "known-then-unknown",
         "answered",
+        "answered-partially-addressed",
     ],
 )
 @pytest.mark.asyncio
@@ -457,13 +589,147 @@ async def test_resume_preflight_rejects_invalid_batch_before_any_mutation(case):
             _make_run_input(resume=resume, tools=[unexpected_tool]),
         )
 
-    _assert_single_run_error(events, "INTERRUPT_RESUME_ERROR")
+    expected_code = (
+        "UNKNOWN_INTERRUPT_ID" if case == "inactive" else "INTERRUPT_RESUME_ERROR"
+    )
+    _assert_single_run_error(events, expected_code)
+    assert core.stream_prompts == []
+    assert _snapshot_mutable_core_state(core) == before
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_code"),
+    [
+        pytest.param("partial", "PARTIAL_RESUME", id="partial"),
+        pytest.param("expired", "INTERRUPT_EXPIRED", id="expired"),
+        pytest.param("invalid-payload", "INVALID_PAYLOAD", id="invalid-payload"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_protocol_resume_rejection_is_atomic(case, expected_code):
+    interrupts = [StrandsInterrupt(id="open", name="confirm")]
+    resume = [ResumeEntry(interrupt_id="open", status="resolved", payload=True)]
+    pending: dict[str, Interrupt] = {}
+
+    if case == "partial":
+        interrupts.append(StrandsInterrupt(id="other-open", name="confirm-other"))
+    elif case == "expired":
+        pending["open"] = Interrupt(
+            id="open",
+            reason="confirm",
+            expires_at="2000-01-01T00:00:00+00:00",
+        )
+    else:
+        pending["open"] = Interrupt(
+            id="open",
+            reason="confirm",
+            response_schema={
+                "type": "object",
+                "properties": {"approved": {"type": "boolean"}},
+                "required": ["approved"],
+            },
+        )
+        resume = [
+            ResumeEntry(
+                interrupt_id="open",
+                status="resolved",
+                payload={"approved": "true"},
+            )
+        ]
+
+    core = _MockStrandsCore(interrupts=interrupts)
+    agent = _make_base_agent()
+    if pending:
+        agent._pending_interrupts_by_thread["thread-1"] = pending
+    before = _snapshot_mutable_core_state(core)
+
+    with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
+        events = await _collect_events(
+            agent,
+            _make_run_input(
+                resume=resume,
+                tools=[
+                    Tool(
+                        name="must_not_register",
+                        description="resume validation must be atomic",
+                        parameters={},
+                    )
+                ],
+            ),
+        )
+
+    _assert_single_run_error(events, expected_code)
     assert core.stream_prompts == []
     assert _snapshot_mutable_core_state(core) == before
 
 
 @pytest.mark.asyncio
-async def test_valid_partial_retry_succeeds_after_atomic_resume_rejection():
+async def test_pending_interrupt_blocks_new_input_before_any_mutation():
+    core = _MockStrandsCore(
+        interrupts=[StrandsInterrupt(id="open", name="confirm")]
+    )
+    agent = _make_base_agent()
+    before = _snapshot_mutable_core_state(core)
+
+    with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
+        events = await _collect_events(
+            agent,
+            _make_run_input(
+                tools=[
+                    Tool(
+                        name="must_not_register",
+                        description="blocked input must not mutate the checkpoint",
+                        parameters={},
+                    )
+                ]
+            ),
+        )
+
+    _assert_single_run_error(events, "PENDING_INTERRUPTS")
+    assert core.stream_prompts == []
+    assert _snapshot_mutable_core_state(core) == before
+
+
+@pytest.mark.asyncio
+async def test_resume_only_requires_unanswered_interrupts():
+    answered = StrandsInterrupt(
+        id="answered",
+        name="confirm-answered",
+        response={"response": True},
+    )
+    open_interrupt = StrandsInterrupt(id="open", name="confirm-open")
+    core = _MockStrandsCore(interrupts=[answered, open_interrupt])
+    agent = _make_base_agent()
+
+    with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
+        events = await _collect_events(
+            agent,
+            _make_run_input(
+                resume=[
+                    ResumeEntry(
+                        interrupt_id="open",
+                        status="resolved",
+                        payload=True,
+                    )
+                ]
+            ),
+        )
+
+    assert not any(event.type == EventType.RUN_ERROR for event in events)
+    assert core.stream_prompts == [
+        [
+            {
+                "interruptResponse": {
+                    "interruptId": "open",
+                    "response": {"response": True},
+                }
+            }
+        ]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_retry_requires_complete_batch_after_atomic_resume_rejection():
     core = _MockStrandsCore(
         interrupts=[
             StrandsInterrupt(id="open", name="confirm"),
@@ -478,7 +744,7 @@ async def test_valid_partial_retry_succeeds_after_atomic_resume_rejection():
 
     with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
         rejected = await _collect_events(agent, _make_run_input(resume=invalid))
-        accepted = await _collect_events(
+        partial = await _collect_events(
             agent,
             _make_run_input(
                 run_id="run-2",
@@ -489,8 +755,23 @@ async def test_valid_partial_retry_succeeds_after_atomic_resume_rejection():
                 ],
             ),
         )
+        accepted = await _collect_events(
+            agent,
+            _make_run_input(
+                run_id="run-3",
+                resume=[
+                    ResumeEntry(
+                        interrupt_id="open", status="resolved", payload=False
+                    ),
+                    ResumeEntry(
+                        interrupt_id="other-open", status="resolved", payload=True
+                    ),
+                ],
+            ),
+        )
 
     _assert_single_run_error(rejected, "INTERRUPT_RESUME_ERROR")
+    _assert_single_run_error(partial, "PARTIAL_RESUME")
     assert not any(event.type == EventType.RUN_ERROR for event in accepted)
     assert core.stream_prompts == [
         [
@@ -499,7 +780,13 @@ async def test_valid_partial_retry_succeeds_after_atomic_resume_rejection():
                     "interruptId": "open",
                     "response": {"response": False},
                 }
-            }
+            },
+            {
+                "interruptResponse": {
+                    "interruptId": "other-open",
+                    "response": {"response": True},
+                }
+            },
         ]
     ]
 
@@ -545,6 +832,45 @@ async def test_post_stream_new_mixed_checkpoint_fails_before_outcome_and_stays_r
     assert core._interrupt_state.context["tool_results"][0]["content"] == [
         {"text": PROXY_RESULT_PLACEHOLDER}
     ]
+
+
+def _sdk_active_mixed_core(session_manager=None, answered=False) -> _MockStrandsCore:
+    """A checkpoint the SDK still holds active, parking a proxy placeholder.
+
+    ``answered`` records an answer on the interrupt, which is how a checkpoint
+    ends up active with nothing open: the SDK settles the interrupt but the tool
+    output it parked has not been appended to the conversation yet.
+    """
+    interrupt = StrandsInterrupt(id="native-interrupt", name="confirm")
+    if answered:
+        interrupt.response = {"approved": True}
+    core = _MockStrandsCore(interrupts=[interrupt], session_manager=session_manager)
+    core._interrupt_state.context["tool_use_message"] = {
+        "role": "assistant",
+        "content": [{"toolUse": {"toolUseId": "native-proxy", "name": "proxy"}}],
+    }
+    core._interrupt_state.context["tool_results"] = [
+        {
+            "toolUseId": "native-proxy",
+            "status": "success",
+            "content": [{"text": PROXY_RESULT_PLACEHOLDER}],
+        }
+    ]
+    core.messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "toolResult": {
+                        "toolUseId": "native-proxy",
+                        "status": "success",
+                        "content": [{"text": PROXY_RESULT_PLACEHOLDER}],
+                    }
+                }
+            ],
+        }
+    ]
+    return core
 
 
 def _repository_manager() -> SimpleNamespace:
@@ -612,6 +938,62 @@ def _mixed_resume_input(*, include_proxy_result: bool) -> RunAgentInput:
         ],
         tools=[Tool(name="approveTool", description="approve", parameters={})],
     )
+
+
+@pytest.mark.parametrize(
+    ("session_manager", "expected_code"),
+    [
+        pytest.param(None, "INTERRUPT_SESSION_REQUIRED", id="no-session"),
+        pytest.param(
+            SimpleNamespace(session_id="session-without-repository"),
+            "INTERRUPT_SESSION_CAPABILITY_ERROR",
+            id="missing-repository-capability",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_resume_against_a_parked_proxy_placeholder_hits_the_mixed_guard(
+    session_manager, expected_code
+):
+    """The guard reads the checkpoint's parked tool results, so they must be there."""
+    core = _sdk_active_mixed_core(session_manager=session_manager)
+    agent = _make_base_agent()
+    before = _snapshot_mutable_core_state(core)
+
+    with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
+        events = await _collect_events(
+            agent,
+            _mixed_resume_input(include_proxy_result=True),
+        )
+
+    _assert_single_run_error(events, expected_code)
+    assert core.stream_prompts == []
+    assert _snapshot_mutable_core_state(core) == before
+
+
+@pytest.mark.asyncio
+async def test_fresh_turn_never_admits_a_checkpoint_parking_a_proxy_placeholder():
+    """The parked placeholder must not reach the model as the tool's own output.
+
+    An answered interrupt leaves the checkpoint active with nothing open. Clearing
+    it for the fresh turn also clears the tool results the mixed frontend-proxy
+    guard reads a few dozen lines later, so the guard passes on an empty
+    checkpoint and the placeholder is replayed to the model under a success
+    outcome.
+    """
+    core = _sdk_active_mixed_core(answered=True)
+    agent = _make_base_agent()
+    before = _snapshot_mutable_core_state(core)
+
+    with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
+        events = await _collect_events(
+            agent,
+            _make_run_input(messages=[UserMessage(id="u1", content="what now?")]),
+        )
+
+    _assert_single_run_error(events, "PENDING_INTERRUPTS")
+    assert core.stream_prompts == []
+    assert _snapshot_mutable_core_state(core) == before
 
 
 @pytest.mark.asyncio
@@ -840,11 +1222,10 @@ async def test_active_reconciliation_retry_counts_already_applied_results(tmp_pa
     core.state.set("agui_context", [])
 
     async def consume_checkpoint(prompt):
-        core.stream_prompts.append(prompt)
         core._interrupt_state.deactivate()
         yield {"complete": True}
 
-    core.stream_async = consume_checkpoint
+    core._stream_body = consume_checkpoint
     agent = _make_base_agent(StrandsAgentConfig())
     input_data = _make_run_input(
         messages=[
@@ -920,6 +1301,25 @@ async def test_active_reconciliation_retry_counts_already_applied_results(tmp_pa
 async def test_non_active_reconciliation_exception_keeps_legacy_fallback(caplog):
     core = _MockStrandsCore(session_manager=_repository_manager())
     core.state.set(AG_UI_WIRE_MAP_STATE_KEY, {"wire-proxy": "native-proxy"})
+    # The wire map above points ``wire-proxy`` at a native call, so the native
+    # history has to contain that call. Without the ``toolUse`` block the
+    # fixture maps onto a call that exists nowhere and the continuation cannot
+    # name the tool at all — which is a separate failure from the reconcile
+    # exception this test is about.
+    core.messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "toolUse": {
+                        "toolUseId": "native-proxy",
+                        "name": "approveTool",
+                        "input": {},
+                    }
+                }
+            ],
+        }
+    ]
     agent = _make_base_agent(StrandsAgentConfig())
     input_data = _make_run_input(
         messages=[
@@ -1030,6 +1430,114 @@ def _make_e2e_agent(config: StrandsAgentConfig) -> tuple[StrandsAgent, _Interrup
     model = _InterruptFlowModel()
     core = StrandsAgentCore(model=model, tools=[confirm_action], system_prompt="test")
     return StrandsAgent(core, name="e2e-interrupt", config=config), model
+
+
+@pytest.mark.asyncio
+async def test_interrupt_bookkeeping_is_durable_when_each_run_returns(tmp_path):
+    managers: dict[str, FileSessionManager] = {}
+
+    def session_manager_provider(input_data):
+        manager = FileSessionManager(
+            session_id=input_data.thread_id,
+            storage_dir=str(tmp_path),
+        )
+        managers[input_data.thread_id] = manager
+        return manager
+
+    config = StrandsAgentConfig(session_manager_provider=session_manager_provider)
+    model = _InterruptFlowModel(include_frontend=False)
+    core = StrandsAgentCore(model=model, tools=[confirm_action], system_prompt="test")
+    agent = StrandsAgent(core, name="e2e-interrupt", config=config)
+    thread_id = "durable-interrupt-bookkeeping"
+
+    paused_events = await _collect_events(
+        agent,
+        _make_run_input(
+            thread_id=thread_id,
+            messages=[UserMessage(id="u1", role="user", content="confirm")],
+        ),
+    )
+    paused = next(event for event in paused_events if event.type == EventType.RUN_FINISHED)
+    interrupt_id = paused.outcome.interrupts[0].id
+    strands_agent = agent._agents_by_thread[thread_id]
+    manager = managers[thread_id]
+
+    persisted_pause = manager.session_repository.read_agent(
+        thread_id, strands_agent.agent_id
+    )
+    pause_bookkeeping = persisted_pause.state[_INTERRUPT_BOOKKEEPING_STATE_KEY]
+    assert set(pause_bookkeeping["pending_interrupts"]) == {interrupt_id}
+    assert pause_bookkeeping["last_resume_fingerprint"] is None
+
+    resumed_events = await _collect_events(
+        agent,
+        _make_run_input(
+            thread_id=thread_id,
+            run_id="run-2",
+            resume=[
+                ResumeEntry(
+                    interrupt_id=interrupt_id,
+                    status="resolved",
+                    payload=True,
+                )
+            ],
+        ),
+    )
+    assert not any(event.type == EventType.RUN_ERROR for event in resumed_events)
+
+    persisted_resume = manager.session_repository.read_agent(
+        thread_id, strands_agent.agent_id
+    )
+    resume_bookkeeping = persisted_resume.state[_INTERRUPT_BOOKKEEPING_STATE_KEY]
+    assert resume_bookkeeping["pending_interrupts"] == {}
+    assert isinstance(resume_bookkeeping["last_resume_fingerprint"], str)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_approval_emits_one_tool_result_inside_run_envelope():
+    config = StrandsAgentConfig(
+        tool_behaviors={
+            "confirm_action": ToolBehavior(interrupt_on_call=True),
+        }
+    )
+    model = _InterruptFlowModel(include_frontend=False)
+    core = StrandsAgentCore(model=model, tools=[confirm_action], system_prompt="test")
+    agent = StrandsAgent(core, name="e2e-interrupt", config=config)
+    thread_id = "cancelled-approval-result"
+
+    paused_events = await _collect_events(
+        agent,
+        _make_run_input(
+            thread_id=thread_id,
+            messages=[UserMessage(id="u1", role="user", content="confirm")],
+        ),
+    )
+    paused = next(event for event in paused_events if event.type == EventType.RUN_FINISHED)
+    interrupt_id = paused.outcome.interrupts[0].id
+
+    resumed_events = await _collect_events(
+        agent,
+        _make_run_input(
+            thread_id=thread_id,
+            run_id="run-2",
+            resume=[
+                ResumeEntry(
+                    interrupt_id=interrupt_id,
+                    status="cancelled",
+                )
+            ],
+        ),
+    )
+
+    tool_results = [
+        event
+        for event in resumed_events
+        if event.type == EventType.TOOL_CALL_RESULT
+        and event.tool_call_id == "native-confirm"
+    ]
+    assert len(tool_results) == 1
+    assert resumed_events[0].type == EventType.RUN_STARTED
+    assert resumed_events.index(tool_results[0]) > 0
 
 
 @pytest.mark.asyncio

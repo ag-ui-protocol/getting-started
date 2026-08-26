@@ -1,4 +1,9 @@
-from .agent import LangGraphAgent
+from .agent import (
+    LangGraphAgent,
+    SUBAGENT_VISIBILITY_ATTRIBUTED,
+    SUBAGENT_VISIBILITY_HIDDEN,
+    SUBAGENT_VISIBILITY_INLINE,
+)
 from .types import (
     LangGraphEventTypes,
     CustomEventNames,
@@ -29,6 +34,9 @@ from .a2ui_tool import (
 
 __all__ = [
     "LangGraphAgent",
+    "SUBAGENT_VISIBILITY_ATTRIBUTED",
+    "SUBAGENT_VISIBILITY_HIDDEN",
+    "SUBAGENT_VISIBILITY_INLINE",
     "get_a2ui_tools",
     "A2UIToolParams",
     "A2UIGuidelines",

@@ -21,6 +21,12 @@ public sealed class ToolCallResultEvent : BaseEvent
     public string Content { get; set; } = string.Empty;
 
     [JsonPropertyName("role")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Role { get; set; }
+
+    /// <summary>
+    /// Gets or sets the subagent that produced this event, absent when the parent agent
+    /// produced it directly.
+    /// </summary>
+    [JsonPropertyName("subagentRunId")]
+    public string? SubagentRunId { get; set; }
 }

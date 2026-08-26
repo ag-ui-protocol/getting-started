@@ -183,6 +183,13 @@ export interface LangGraphAgentConfig extends AgentConfig {
    * before structured interrupts existed.
    */
   emitInterruptOutcome?: boolean;
+  /**
+   * Emit the underlying LangGraph events on the AG-UI event stream.
+   *
+   * When disabled, RAW events are suppressed and `rawEvent` is removed from
+   * typed AG-UI events. AG-UI event metadata is preserved. Defaults to true.
+   */
+  emitRawEvents?: boolean;
 }
 
 const ROOT_SUBGRAPH_NAME = "root";
@@ -222,12 +229,15 @@ export class LangGraphAgent extends AbstractAgent {
   config: LangGraphAgentConfig;
   enableLegacyOnInterruptEvent: boolean;
   emitInterruptOutcome: boolean;
+  emitRawEvents: boolean;
 
   constructor(config: LangGraphAgentConfig) {
     super(config);
     this.config = config;
-    this.enableLegacyOnInterruptEvent = config.enableLegacyOnInterruptEvent ?? true;
+    this.enableLegacyOnInterruptEvent =
+      config.enableLegacyOnInterruptEvent ?? true;
     this.emitInterruptOutcome = config.emitInterruptOutcome ?? false;
+    this.emitRawEvents = config.emitRawEvents ?? true;
     this.messagesInProcess = {};
     this.agentName = config.agentName;
     this.graphId = config.graphId;
@@ -284,6 +294,7 @@ export class LangGraphAgent extends AbstractAgent {
       client: this.client,
       enableLegacyOnInterruptEvent: this.enableLegacyOnInterruptEvent,
       emitInterruptOutcome: this.emitInterruptOutcome,
+      emitRawEvents: this.emitRawEvents,
 
       assistant: this.assistant,
       activeRun: this.activeRun ? structuredClone(this.activeRun) : undefined,
@@ -320,6 +331,17 @@ export class LangGraphAgent extends AbstractAgent {
   }
 
   dispatchEvent(event: ProcessedEvents) {
+    if (!this.emitRawEvents) {
+      if (event.type === EventType.RAW) {
+        return false;
+      }
+
+      const eventWithoutRawEvent = { ...event };
+      delete eventWithoutRawEvent.rawEvent;
+      this.subscriber.next(eventWithoutRawEvent);
+      return true;
+    }
+
     this.subscriber.next(event);
     return true;
   }
@@ -453,6 +475,78 @@ export class LangGraphAgent extends AbstractAgent {
     );
   }
 
+  private shapePayloadConfig(payloadConfig: LangGraphConfig | undefined) {
+    const contextSchemaKeys = new Set(
+      this.activeRun!.schemaKeys?.context ?? [],
+    );
+    const configurable = payloadConfig?.configurable ?? {};
+    const contextFromConfigurable: Record<string, unknown> = {};
+    const remainingConfigurable: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(configurable)) {
+      if (contextSchemaKeys.has(key)) {
+        contextFromConfigurable[key] = value;
+      } else {
+        remainingConfigurable[key] = value;
+      }
+    }
+
+    const finalConfig = payloadConfig
+      ? {
+          ...payloadConfig,
+          configurable:
+            Object.keys(remainingConfigurable).length > 0
+              ? remainingConfigurable
+              : undefined,
+        }
+      : undefined;
+    const hasContext = Object.keys(contextFromConfigurable).length > 0;
+    const hasConfigurable =
+      finalConfig?.configurable != null &&
+      Object.keys(finalConfig.configurable).length > 0;
+
+    if (hasContext && hasConfigurable) {
+      console.warn(
+        `[@ag-ui/langgraph] Dropping configurable keys not in context_schema: [${Object.keys(remainingConfigurable).join(", ")}]. Use context instead.`,
+      );
+    }
+
+    const configForPayloadBase = (() => {
+      if (!finalConfig) return undefined;
+      if (hasConfigurable && !hasContext) return finalConfig;
+      const { configurable: _stripped, ...configSansConfigurable } =
+        finalConfig;
+      return Object.keys(configSansConfigurable).length > 0
+        ? configSansConfigurable
+        : undefined;
+    })();
+
+    const forwardedHeaders = Object.fromEntries(
+      Object.entries(this.headers ?? {}).filter(([key]) =>
+        key.toLowerCase().startsWith("x-"),
+      ),
+    );
+    const configForPayload =
+      Object.keys(forwardedHeaders).length > 0
+        ? {
+            ...(configForPayloadBase ?? {}),
+            configurable: {
+              ...((
+                configForPayloadBase as {
+                  configurable?: Record<string, unknown>;
+                }
+              )?.configurable ?? {}),
+              copilotkit_forwarded_headers: forwardedHeaders,
+            },
+          }
+        : configForPayloadBase;
+
+    return {
+      config: configForPayload,
+      context: hasContext ? contextFromConfigurable : undefined,
+    };
+  }
+
   async prepareRegenerateStream(
     input: RegenerateInput,
     streamMode: StreamMode | StreamMode[],
@@ -494,6 +588,9 @@ export class LangGraphAgent extends AbstractAgent {
       });
     }
 
+    const { config: configForPayload, context: payloadContext } =
+      this.shapePayloadConfig(payloadConfig);
+
     const payload = {
       ...(input.forwardedProps ?? {}),
       input: this.langGraphDefaultMergeState(
@@ -504,7 +601,8 @@ export class LangGraphAgent extends AbstractAgent {
       // @ts-ignore
       checkpointId: fork.checkpoint.checkpoint_id!,
       streamMode,
-      config: payloadConfig,
+      config: configForPayload,
+      ...(payloadContext ? { context: payloadContext } : {}),
     };
     return {
       streamResponse: this.client.runs.stream(
@@ -718,7 +816,10 @@ export class LangGraphAgent extends AbstractAgent {
           openInterrupts: this.interruptsToAGUI(interrupts),
         }),
       };
-    } else if (effectiveCommand?.resume && typeof effectiveCommand.resume === "string") {
+    } else if (
+      effectiveCommand?.resume &&
+      typeof effectiveCommand.resume === "string"
+    ) {
       try {
         effectiveCommand.resume = JSON.parse(effectiveCommand.resume);
       } catch {
@@ -726,99 +827,8 @@ export class LangGraphAgent extends AbstractAgent {
       }
     }
 
-    // Build context from configurable keys that match the graph's context_schema.
-    // RunAgentInput.context is a separate ag-ui concept (Array<{description, value}>)
-    // that already flows into the graph's input state via langGraphDefaultMergeState.
-    // It does NOT go into the payload-level context field.
-    const contextSchemaKeys = new Set(
-      this.activeRun!.schemaKeys?.context ?? [],
-    );
-    const configurable = payloadConfig?.configurable ?? {};
-
-    // Partition configurable: keys declared in context_schema go to context,
-    // the rest stay in configurable (for backward compat with older servers).
-    const contextFromConfigurable: Record<string, unknown> = {};
-    const remainingConfigurable: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(configurable)) {
-      if (contextSchemaKeys.has(key)) {
-        contextFromConfigurable[key] = value;
-      } else {
-        remainingConfigurable[key] = value;
-      }
-    }
-
-    // Build payload-level context ONLY from configurable keys matching context_schema.
-    // Do NOT spread RunAgentInput.context here — it is Array<{description, value}>,
-    // not Record<string, unknown>, and belongs in the graph's input state, not the
-    // payload-level context field.
-    const mergedContext = { ...contextFromConfigurable };
-
-    // Build final config: if remaining configurable is empty, omit it
-    const finalConfig = payloadConfig
-      ? {
-          ...payloadConfig,
-          configurable:
-            Object.keys(remainingConfigurable).length > 0
-              ? remainingConfigurable
-              : undefined,
-        }
-      : undefined;
-
-    // If both context and configurable would be present, context wins
-    // (matches langgraph-api >= 0.7.x expectation).
-    // If context is empty, omit it (backward compat with older servers).
-    const hasContext = Object.keys(mergedContext).length > 0;
-    const hasConfigurable =
-      finalConfig?.configurable != null &&
-      Object.keys(finalConfig.configurable).length > 0;
-
-    // Warn if non-schema configurable keys are being dropped because context wins
-    if (hasContext && hasConfigurable) {
-      const droppedKeys = Object.keys(remainingConfigurable);
-      if (droppedKeys.length > 0) {
-        console.warn(
-          `[@ag-ui/langgraph] Dropping configurable keys not in context_schema: [${droppedKeys.join(", ")}]. Use context instead.`,
-        );
-      }
-    }
-
-    // Strip configurable cleanly using destructuring to avoid leaving an
-    // explicit `configurable: undefined` key in the serialized payload.
-    const configForPayloadBase = (() => {
-      if (!finalConfig) return undefined;
-      if (hasConfigurable && !hasContext) return finalConfig; // old-style: configurable only
-      const { configurable: _stripped, ...configSansConfigurable } =
-        finalConfig;
-      return Object.keys(configSansConfigurable).length > 0
-        ? configSansConfigurable
-        : undefined;
-    })();
-
-    // Forward x-* request headers into payload.config.configurable so the
-    // Python middleware can extract them via _extract_forwarded_headers_from_config.
-    // This is infrastructure metadata (correlation IDs, x-aimock-context, etc.),
-    // NOT graph context, so it must ride in configurable regardless of whether
-    // context_schema wins. Only x-* headers are forwarded; auth/content-type
-    // headers stay on the HTTP wire via the onRequest hook.
-    const forwardedHeaders = Object.fromEntries(
-      Object.entries(this.headers ?? {}).filter(([k]) =>
-        k.toLowerCase().startsWith("x-"),
-      ),
-    );
-    const configForPayload =
-      Object.keys(forwardedHeaders).length > 0
-        ? {
-            ...(configForPayloadBase ?? {}),
-            configurable: {
-              ...((
-                configForPayloadBase as {
-                  configurable?: Record<string, unknown>;
-                }
-              )?.configurable ?? {}),
-              copilotkit_forwarded_headers: forwardedHeaders,
-            },
-          }
-        : configForPayloadBase;
+    const { config: configForPayload, context: payloadContext } =
+      this.shapePayloadConfig(payloadConfig);
 
     const payload: Record<string, unknown> = {
       ...restProps,
@@ -826,7 +836,7 @@ export class LangGraphAgent extends AbstractAgent {
       streamMode,
       input: payloadInput,
       config: configForPayload,
-      ...(hasContext ? { context: mergedContext } : {}),
+      ...(payloadContext ? { context: payloadContext } : {}),
     };
 
     // If there are still outstanding unresolved interrupts, we must force resolution of them before moving forward
@@ -1214,6 +1224,26 @@ export class LangGraphAgent extends AbstractAgent {
     });
   }
 
+  /**
+   * True when a tool call's originating assistant message is already present in
+   * the durable thread history (`this.messages`). On a HITL resume the client
+   * replays the full conversation, so the TOOL_CALL_START/ARGS/END triple for
+   * this tool call was already delivered in the prior run and must not be
+   * re-emitted by `OnToolEnd` (whose per-run `emittedToolCallStartIds` Set is
+   * reset on every run). `TOOL_CALL_RESULT` still fires normally. See #2014.
+   */
+  private toolCallAnnouncedInPriorRun(toolCallId: string | undefined): boolean {
+    if (!toolCallId) {
+      return false;
+    }
+    return (this.messages ?? []).some(
+      (message: any) =>
+        message?.role === "assistant" &&
+        Array.isArray(message.toolCalls) &&
+        message.toolCalls.some((toolCall: any) => toolCall?.id === toolCallId),
+    );
+  }
+
   handleSingleEvent(event: any): void {
     // messages-tuple data arrives as [AIMessageChunk, metadata] arrays,
     // not objects with an .event property like events-mode data.
@@ -1522,7 +1552,12 @@ export class LangGraphAgent extends AbstractAgent {
           toolCallOutput.update?.messages
             .filter((message: MessageFields) => message.type === "tool")
             .forEach((message: MessageFields) => {
-              if (!this.activeRun!.hasFunctionStreaming) {
+              // Skip the synthetic START/ARGS on a HITL resume where the tool
+              // call was already announced in a prior run (#2014).
+              if (
+                !this.activeRun!.hasFunctionStreaming &&
+                !this.toolCallAnnouncedInPriorRun(message.tool_call_id)
+              ) {
                 this.dispatchEvent({
                   type: EventType.TOOL_CALL_START,
                   toolCallId: message.tool_call_id,
@@ -1559,8 +1594,12 @@ export class LangGraphAgent extends AbstractAgent {
 
         // Emit TOOL_CALL_START + ARGS + END for tool calls that were not
         // already handled by the streaming path. Uses emittedToolCallStartIds
-        // to avoid duplicates from parallel tool calls.
-        if (!this.emittedToolCallStartIds.has(toolCallOutput.tool_call_id)) {
+        // to avoid duplicates from parallel tool calls, and the durable
+        // thread history to avoid re-announcing on a HITL resume (#2014).
+        if (
+          !this.emittedToolCallStartIds.has(toolCallOutput.tool_call_id) &&
+          !this.toolCallAnnouncedInPriorRun(toolCallOutput.tool_call_id)
+        ) {
           this.emittedToolCallStartIds.add(toolCallOutput.tool_call_id);
           this.dispatchEvent({
             type: EventType.TOOL_CALL_START,
@@ -1806,7 +1845,8 @@ export class LangGraphAgent extends AbstractAgent {
       // one: the snapshot converter re-emits this same reasoning under that
       // id, and only a matching id lets the client reconcile the streamed
       // copy with the snapshot copy instead of rendering both.
-      const messageId = reasoningData.id ?? this.pendingReasoningId ?? randomUUID();
+      const messageId =
+        reasoningData.id ?? this.pendingReasoningId ?? randomUUID();
       this.pendingReasoningId = undefined;
       this.dispatchEvent({
         type: EventType.REASONING_START,
@@ -2149,8 +2189,7 @@ export class LangGraphAgent extends AbstractAgent {
    * bubbles. See #1317.
    */
   private getOrPinTextMessageId(fallbackId: string): string {
-    const messageId =
-      this.activeRun!.currentTextMessageId ?? fallbackId;
+    const messageId = this.activeRun!.currentTextMessageId ?? fallbackId;
     this.activeRun!.currentTextMessageId = messageId;
     return messageId;
   }

@@ -8,6 +8,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from typing import (
+  AsyncIterator,
   List,
   Any,
   Optional,
@@ -30,7 +31,7 @@ from crewai.flow.flow import FlowState
 # The event bus moved from ``crewai.utilities.events`` (0.x) to
 # ``crewai.events`` (1.x); ``_capabilities`` resolves whichever exists.
 from ._capabilities import crewai_event_bus
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from ag_ui.core import EventType, Message
 from .context import flow_context
 from .events import (
@@ -50,18 +51,11 @@ from ._reasoning import (
   DeltaReasoning,
   reasoning_from_delta,
   reasoning_from_responses_event,
-  responses_event_type,
 )
 from ._responses import (
   copilotkit_responses,
-  is_responses_stream,
-  is_sync_responses_stream,
-  iter_responses_events,
   responses_channel_available,
 )
-# The event ``type`` discriminators the driver below branches on live next to the
-# ROLE each one plays for this bridge, which is what decides the cost of losing
-# one (see ``_responses_events``).
 from ._responses_events import (
   RESPONSES_COMPLETED,
   RESPONSES_CREATED,
@@ -70,8 +64,13 @@ from ._responses_events import (
   RESPONSES_FUNCTION_CALL_ARGS_DELTA,
   RESPONSES_INCOMPLETE,
   RESPONSES_OUTPUT_ITEM_ADDED,
+  RESPONSES_OUTPUT_ITEM_DONE,
   RESPONSES_OUTPUT_TEXT_DELTA,
+  RESPONSES_RECOGNISED,
   RESPONSES_TERMINAL,
+  responses_attr,
+  responses_event_type,
+  responses_item_id,
 )
 from .utils import yield_control, convert_litellm_multimodal_to_agui
 
@@ -480,36 +479,29 @@ async def copilotkit_stream(response):
     Also consumes an OpenAI Responses-API stream opened by
     ``copilotkit_responses``, and returns the same chat-shaped
     ``ModelResponse`` either way so a flow node's code is identical on both
-    channels. That stream must be the ASYNC one: a synchronous Responses
-    iterator raises the ``ValueError`` below, naming the async entrypoint.
+    channels. That stream must be the ASYNC one ``aresponses`` returns; anything
+    else raises the ``ValueError`` below, naming the entrypoint to use.
 
     Raises
     ------
     ValueError
         For any response this helper cannot consume, so an unusable response is
-        one clear caller error rather than a failure deep inside a driver.
+        one clear caller error rather than a failure deep inside a driver. An
+        async iterable that is not a Responses stream passes the dispatch below
+        (async-iterability is the whole contract) and is caught by the Responses
+        driver once it has yielded nothing that driver recognises.
     """
     if isinstance(response, ModelResponse):
         return _copilotkit_stream_response(response)
     if isinstance(response, CustomStreamWrapper):
         return await _copilotkit_stream_custom_stream_wrapper(response)
-    if is_responses_stream(response):
+    if hasattr(response, "__aiter__"):
         return await _copilotkit_stream_responses(response)
-    if is_sync_responses_stream(response):
-        # A recognisable Responses stream, just the synchronous one: the drivers
-        # here are async-only. Same ValueError as any other unusable type, with
-        # the fix named rather than left to a missing-__aiter__ AttributeError.
-        raise ValueError(
-            f"Invalid response type {type(response)!r}: this is a synchronous "
-            f"Responses-API streaming iterator, which cannot be consumed "
-            f"asynchronously. Open the stream with "
-            f"'await copilotkit_responses(...)' (litellm's async 'aresponses' "
-            f"entrypoint) instead of the synchronous one"
-        )
     raise ValueError(
         f"Invalid response type {type(response)!r}; expected "
-        f"{ModelResponse.__name__}, {CustomStreamWrapper.__name__} or an async "
-        f"Responses-API streaming iterator"
+        f"{ModelResponse.__name__}, {CustomStreamWrapper.__name__} or the async "
+        f"Responses-API stream returned by 'await copilotkit_responses(...)' "
+        f"(litellm's async 'aresponses' entrypoint)"
     )
 
 
@@ -732,6 +724,57 @@ async def _copilotkit_stream_custom_stream_wrapper(response: CustomStreamWrapper
         ]
     )
 
+
+#: litellm's event models for ``response.created`` and ``response.in_progress``,
+#: named the way ``pydantic.ValidationError`` reports the model it could not
+#: build (``.title``). A failed parse yields no event to read a ``type`` off, so
+#: the model class is the only thing identifying what was lost.
+_SKIPPABLE_ENVELOPE_EVENT_MODELS = frozenset(
+    {"ResponseCreatedEvent", "ResponseInProgressEvent"}
+)
+
+
+async def _responses_events(response: Any) -> AsyncIterator[Any]:
+    """Iterate a Responses stream, skipping ONLY the frames nothing reads.
+
+    A provider emulation may send an envelope frame with fewer fields than
+    litellm's model for it requires, and litellm raises on the event rather than
+    the stream: with nothing catching it, a turn ends on its FIRST event. These
+    two frames are the only ones whose loss cannot corrupt the turn. The driver
+    reads ``response.created`` for the returned model name and created-at, both
+    of which have defaults, and never reads ``response.in_progress`` at all.
+
+    Every other parse failure propagates as itself. Silently losing answer text,
+    tool-call arguments, reasoning or the terminal outcome would report a broken
+    turn as a clean one, which is worse than ending it.
+
+    Reading the stream again after a skip holds across the declared litellm range,
+    and ``test_litellm_iterator_resumes_after_an_envelope_parse_failure`` is what
+    holds it there: 1.70.4 and the locked 1.72.0 raise out of ``_process_chunk``
+    without marking the iterator finished, having already advanced past that
+    chunk, while 1.96.2 parses these frames and never reaches this branch at all.
+    """
+    events = response.__aiter__()
+    while True:
+        try:
+            event = await events.__anext__()
+        except StopAsyncIteration:
+            return
+        except ValidationError as exc:
+            if exc.title not in _SKIPPABLE_ENVELOPE_EVENT_MODELS:
+                raise
+            _LOGGER.warning(
+                "ag-ui-crewai skipped an OpenAI Responses envelope frame the "
+                "installed litellm could not parse (%s, %d validation errors): "
+                "this driver reads no field of it that has no default, so the "
+                "turn is unaffected. Every other event surfaces as itself.",
+                exc.title,
+                len(exc.errors()),
+            )
+            continue
+        yield event
+
+
 async def _copilotkit_stream_responses(response):
     """Stream an OpenAI Responses-API call to CopilotKit.
 
@@ -742,8 +785,12 @@ async def _copilotkit_stream_responses(response):
 
     The channel exists because OpenAI's reasoning models stream their reasoning
     summaries here and NOWHERE on chat-completions. Event ``type`` values are
-    read as strings (see ``_responses``) so a litellm build that predates an
-    event still delivers it via ``GenericEvent``.
+    read as strings so a litellm build that predates an event type still delivers
+    it via ``GenericEvent``, and every field is read off the event and its
+    payloads shape-agnostically (``responses_attr``) because litellm delivers
+    them as plain dicts on older builds in the supported range and as response
+    objects on newer ones. Reading a field any other way would let a branch body
+    disagree with the type gate about what an event is.
     """
     flow = flow_context.get(None)
 
@@ -752,6 +799,11 @@ async def _copilotkit_stream_responses(response):
     created = 0
     model = ""
     failure: Optional[str] = None
+    # Whether the stream carried anything this driver acts on. Dispatch here is
+    # async-iterability alone, so an object that is not a Responses stream reaches
+    # this loop, matches no branch, and would otherwise be returned as a finished
+    # assistant turn with no content, nothing raised and nothing logged.
+    recognised = False
     # Set when the turn ends on ``response.incomplete``: the assistant message
     # was CUT OFF, and reporting a clean "stop" would make a truncated turn
     # indistinguishable from a finished one.
@@ -766,35 +818,85 @@ async def _copilotkit_stream_responses(response):
         """The assistant message id for this turn, resolved once then reused.
 
         Reads whichever id this event shape actually carries (see
-        ``_responses_item_id``), falling back to a uuid when it carries none, so
+        ``responses_item_id``), falling back to a uuid when it carries none, so
         the streamed message has ONE stable id across the turn either way.
         ``response.created`` normally wins because the caller records its
         ``response.id`` before any output item arrives.
         """
         nonlocal message_id
         if message_id is None:
-            message_id = _responses_item_id(event) or str(uuid.uuid4())
+            message_id = responses_item_id(event) or str(uuid.uuid4())
         return message_id
 
-    events = iter_responses_events(response)
+    events = _responses_events(response)
     try:
         async for event in events:
             event_type = responses_event_type(event)
             if event_type is None:
                 continue
+            if event_type in RESPONSES_RECOGNISED:
+                recognised = True
 
             # Reasoning summaries + the encrypted reasoning blob.
             await reasoning.emit(reasoning_from_responses_event(event))
 
+            if event_type == RESPONSES_OUTPUT_ITEM_DONE:
+                # A completed reasoning item ends that item's lifecycle. Without
+                # this, a turn whose model emits a SECOND reasoning item with no
+                # answer text or tool call between the two hits the open
+                # message's id guard and the whole run dies; and only the first
+                # item reaches the client, so the rest of the turn's reasoning
+                # never round-trips into the next turn's Responses input.
+                item = responses_attr(event, "item")
+                item_type = responses_attr(item, "type")
+                if item_type == "reasoning":
+                    reasoning.close()
+                    continue
+                if item_type == "function_call":
+                    # The completed item carries that call's FINAL arguments, and
+                    # they are the only complete value a provider that streams no
+                    # argument delta ever sends: ignoring them puts the call on the
+                    # wire and in the ModelResponse with EMPTY arguments, reported
+                    # as a clean turn. They are authoritative only while nothing
+                    # streamed -- real OpenAI streams the deltas and then repeats
+                    # the whole value here, so a delta-driven call must keep what it
+                    # accumulated rather than append the arguments a second time.
+                    entry = calls_by_item.get(responses_attr(item, "id"))
+                    final_arguments = responses_attr(item, "arguments")
+                    if entry is None:
+                        # No `output_item.added` opened this call, so nothing put it
+                        # on the wire or into the ModelResponse. Logged rather than
+                        # recovered here: emitting a tool call at completion time
+                        # would put TOOL_CALL_CHUNK after content the shaper has
+                        # already closed. Matches the ERROR the added branch logs for
+                        # an unusable item.
+                        _LOGGER.error(
+                            "ag-ui-crewai dropped a completed Responses function_call "
+                            "item that was never opened by an output_item.added: %r",
+                            item,
+                        )
+                    if (
+                        entry is not None
+                        and not entry["streamed"]
+                        and isinstance(final_arguments, str)
+                        and final_arguments
+                    ):
+                        entry["arguments"] = final_arguments
+                        # Still provisional: nothing reached the wire, so a delta
+                        # arriving after this REPLACES it instead of appending. The
+                        # post-loop flush is what puts it on the wire.
+                        entry["provisional"] = True
+                continue
+
             if event_type == RESPONSES_CREATED:
                 # ``response.id`` is the stable id for this turn; use it as the
                 # assistant message id (parity with the chat path's chunk id).
-                created_response = getattr(event, "response", None)
+                created_response = responses_attr(event, "response")
                 if message_id is None:
-                    message_id = _responses_attr(created_response, "id")
-                model = _responses_attr(created_response, "model") or model
+                    message_id = responses_attr(created_response, "id")
+                model = responses_attr(created_response, "model") or model
                 created = _responses_created_timestamp(
-                    _responses_attr(created_response, "created_at"), created
+                    responses_attr(created_response, "created_at"), created
                 )
                 continue
 
@@ -803,14 +905,14 @@ async def _copilotkit_stream_responses(response):
                 # ``BaseLiteLLMOpenAIResponseObject`` on real OpenAI, so read it
                 # shape-agnostically -- gating on ``dict`` alone dropped every
                 # function call the model made against a live Responses stream.
-                item = getattr(event, "item", None)
-                if item is None or _responses_attr(item, "type") != "function_call":
+                item = responses_attr(event, "item")
+                if item is None or responses_attr(item, "type") != "function_call":
                     continue
-                item_id = _responses_attr(item, "id")
+                item_id = responses_attr(item, "id")
                 # ``call_id`` is what a later ``function_call_output`` must
                 # reference, so it is the tool call's identity on the wire.
-                call_id = _responses_attr(item, "call_id") or item_id
-                name = _responses_attr(item, "name")
+                call_id = responses_attr(item, "call_id") or item_id
+                name = responses_attr(item, "name")
                 if not item_id or not call_id or not name:
                     _LOGGER.error(
                         "ag-ui-crewai dropped a Responses function_call item with "
@@ -824,7 +926,7 @@ async def _copilotkit_stream_responses(response):
                 # STATE_SNAPSHOT, which would otherwise rebuild from flow.state and
                 # clobber the predicted state the client is already rendering.
                 _mark_predicted_tool_streamed(flow, name)
-                seeded_arguments = _responses_attr(item, "arguments") or ""
+                seeded_arguments = responses_attr(item, "arguments") or ""
                 calls_by_item[item_id] = {
                     "id": call_id,
                     "name": name,
@@ -853,7 +955,7 @@ async def _copilotkit_stream_responses(response):
                 continue
 
             if event_type == RESPONSES_OUTPUT_TEXT_DELTA:
-                delta = getattr(event, "delta", None)
+                delta = responses_attr(event, "delta")
                 if not isinstance(delta, str) or not delta:
                     continue
                 # Reasoning is done once the answer starts.
@@ -872,10 +974,21 @@ async def _copilotkit_stream_responses(response):
                 continue
 
             if event_type == RESPONSES_FUNCTION_CALL_ARGS_DELTA:
-                delta = getattr(event, "delta", None)
-                item_id = getattr(event, "item_id", None)
+                delta = responses_attr(event, "delta")
+                item_id = responses_attr(event, "item_id")
                 entry = calls_by_item.get(item_id)
-                if entry is None or not isinstance(delta, str) or not delta:
+                if entry is None:
+                    # Arguments for a call whose ``output_item.added`` never
+                    # arrived or was itself dropped. Nothing can carry them, and a
+                    # turn made only of these would otherwise report a clean empty
+                    # assistant message.
+                    _LOGGER.error(
+                        "ag-ui-crewai dropped Responses function_call arguments "
+                        "for an item it never saw opened (item_id=%r)",
+                        item_id,
+                    )
+                    continue
+                if not isinstance(delta, str) or not delta:
                     continue
                 if entry["provisional"]:
                     # The added item already carried the whole call and the
@@ -902,10 +1015,10 @@ async def _copilotkit_stream_responses(response):
                 if event_type in (RESPONSES_ERROR, RESPONSES_FAILED):
                     failure = _responses_failure_message(event)
                 if event_type in (RESPONSES_COMPLETED, RESPONSES_INCOMPLETE):
-                    terminal = getattr(event, "response", None)
-                    model = _responses_attr(terminal, "model") or model
+                    terminal = responses_attr(event, "response")
+                    model = responses_attr(terminal, "model") or model
                     created = _responses_created_timestamp(
-                        _responses_attr(terminal, "created_at"), created
+                        responses_attr(terminal, "created_at"), created
                     )
                 if event_type == RESPONSES_INCOMPLETE:
                     truncated_finish_reason = _responses_incomplete_finish_reason(event)
@@ -915,15 +1028,31 @@ async def _copilotkit_stream_responses(response):
         # reasoning, ended before any answer text / tool call, or raised
         # mid-reasoning.
         reasoning.close()
-        # The terminal-event ``break`` above leaves both this generator and
-        # litellm's iterator suspended, so release them rather than waiting for
-        # the garbage collector to drop the open response.
-        await _release_responses_stream(response, events)
+        # The terminal-event ``break`` above leaves the wrapper and litellm's
+        # iterator suspended, so close both rather than waiting for the garbage
+        # collector to drop the open response.
+        await events.aclose()
+        await _release_responses_stream(response)
 
     if failure is not None:
         # Surfaced as a RUN_ERROR by the drivers' exception taxonomy rather than
         # returned as a silently empty message.
         raise RuntimeError(f"OpenAI Responses stream failed: {failure}")
+
+    if not recognised:
+        # A Responses turn always carries at least one recognised event (a
+        # terminal one at minimum), so recognising none means this was never a
+        # Responses stream. Raised rather than logged: the caller passed the wrong
+        # object, and the drivers' exception taxonomy turns that into a RUN_ERROR
+        # instead of a finished assistant turn that never happened. A turn that
+        # legitimately produced nothing still carries its terminal event, so it is
+        # unaffected.
+        raise ValueError(
+            "The async stream passed to copilotkit_stream carried no OpenAI "
+            "Responses event this bridge recognises, so it has no assistant turn "
+            "to report; expected the stream returned by 'await "
+            "copilotkit_responses(...)' (litellm's async 'aresponses' entrypoint)"
+        )
 
     # A call whose arguments arrived complete on its output item and never streamed
     # a delta: put them on the wire now, so the streamed TOOL_CALL_ARGS still match
@@ -982,15 +1111,6 @@ async def _copilotkit_stream_responses(response):
     )
 
 
-def _responses_attr(response_object: Any, key: str) -> Any:
-    """Read ``key`` off a Responses payload that may be a model or a dict."""
-    if response_object is None:
-        return None
-    if isinstance(response_object, dict):
-        return response_object.get(key)
-    return getattr(response_object, key, None)
-
-
 def _responses_created_timestamp(value: Any, current: int) -> int:
     """Project a Responses ``created_at`` onto ``ModelResponse.created``.
 
@@ -1023,8 +1143,8 @@ def _responses_incomplete_finish_reason(event: Any) -> str:
     partial and any tool-call arguments in it are likely unparseable. Also logs
     the reason, which is otherwise lost entirely.
     """
-    details = _responses_attr(getattr(event, "response", None), "incomplete_details")
-    reason = _responses_attr(details, "reason")
+    details = responses_attr(responses_attr(event, "response"), "incomplete_details")
+    reason = responses_attr(details, "reason")
     finish_reason = _RESPONSES_INCOMPLETE_FINISH_REASONS.get(reason, "length")
     _LOGGER.warning(
         "The OpenAI Responses turn ended incomplete (reason=%r): the assistant "
@@ -1035,68 +1155,46 @@ def _responses_incomplete_finish_reason(event: Any) -> str:
     return finish_reason
 
 
-async def _close_quietly(candidate: Any) -> bool:
-    """Best-effort ``aclose()`` / ``close()`` on ``candidate``; True when one ran.
-
-    Feature-detected, never assumed: litellm's Responses iterator exposes neither
-    (nor ``__aenter__`` / ``__aexit__``), and a closer that raises must not mask a
-    turn that already streamed.
-    """
-    for name in ("aclose", "close"):
-        closer = getattr(candidate, name, None)
-        if not callable(closer):
-            continue
-        try:
-            outcome = closer()
-            if inspect.isawaitable(outcome):
-                await outcome
-        except Exception:  # noqa: BLE001 - releasing must never void the turn
-            _LOGGER.debug(
-                "Could not release the Responses stream via %s()", name, exc_info=True
-            )
-            continue
-        return True
-    return False
-
-
-async def _release_responses_stream(response: Any, events: Any) -> None:
+async def _release_responses_stream(response: Any) -> None:
     """Release a Responses stream the driver stopped reading.
 
     The driver breaks on the terminal event instead of draining to
-    ``StopAsyncIteration``, so neither the wrapping generator nor litellm's
-    iterator is ever asked to clean up, and that is the happy path for every run.
-    litellm's iterator exposes no closer of its own and holds the live httpx
-    response, so probe the iterator first and fall back to the response object it
-    carries.
+    ``StopAsyncIteration``, so litellm's iterator is never asked to clean up, and
+    that is the happy path for every run. That iterator exposes no closer of its
+    own and holds the live httpx response, so probe it first and fall back to the
+    response object it carries.
+
+    Every closer is feature-detected, never assumed, and one that raises must not
+    mask a turn that already streamed.
     """
-    await _close_quietly(events)
     for candidate in (response, getattr(response, "response", None)):
-        if candidate is not None and await _close_quietly(candidate):
+        if candidate is None:
+            continue
+        for name in ("aclose", "close"):
+            closer = getattr(candidate, name, None)
+            if not callable(closer):
+                continue
+            try:
+                outcome = closer()
+                if inspect.isawaitable(outcome):
+                    await outcome
+            except Exception:  # noqa: BLE001 - releasing must never void the turn
+                _LOGGER.debug(
+                    "Could not release the Responses stream via %s()",
+                    name,
+                    exc_info=True,
+                )
+                continue
             return
-
-
-def _responses_item_id(event: Any) -> Optional[str]:
-    """The output-item id a Responses stream event carries, if any.
-
-    Text and function-call argument deltas expose it flat as ``item_id``, while
-    ``output_item.added`` defines no such field and carries the id inside
-    ``item``. Reading both shapes is what keeps a stream that skipped
-    ``response.created`` on a real id from the stream instead of a minted uuid.
-    """
-    item_id = getattr(event, "item_id", None)
-    if isinstance(item_id, str) and item_id:
-        return item_id
-    nested = _responses_attr(getattr(event, "item", None), "id")
-    return nested if isinstance(nested, str) and nested else None
 
 
 def _responses_failure_message(event: Any) -> str:
     """Best-effort human-readable reason from a failed/error Responses event."""
-    message = getattr(event, "message", None)
+    message = responses_attr(event, "message")
     if isinstance(message, str) and message:
         return message
-    error = _responses_attr(getattr(event, "response", None), "error")
-    error_message = _responses_attr(error, "message")
+    error = responses_attr(responses_attr(event, "response"), "error")
+    error_message = responses_attr(error, "message")
     if isinstance(error_message, str) and error_message:
         return error_message
     return responses_event_type(event) or "unknown error"

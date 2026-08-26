@@ -1841,6 +1841,54 @@ async def test_frame_path_aclose_called_on_early_generator_close():
     assert session.aclosed is True
 
 
+# -- a stream that carries nothing translatable still terminates the run --
+
+async def test_frame_path_stream_with_no_translatable_frame_still_terminates():
+    """A run the driver never opened off a frame still owes the client a terminal.
+
+    The belt-and-braces terminal only emits once the run is open, so a stream that
+    exhausts without a single translatable frame used to leave the response a 200
+    with an empty body: no RUN_STARTED, no RUN_FINISHED, no RUN_ERROR, and a client
+    whose run therefore never ends. Nothing here failed, which is what made it
+    survive: the flow ran, the request succeeded, and only the client was left
+    waiting.
+    """
+    from ag_ui.encoder import EventEncoder
+
+    class _UntranslatableSession:
+        """One frame, shaped enough for the driver's ``frame.id`` lookup.
+
+        No raw event was ever published under that id, so the driver drops it the
+        way it drops a nested-flow or crewai-internal frame, and the stream
+        exhausts having produced nothing.
+        """
+
+        async def __aiter__(self):
+            yield SimpleNamespace(id="frame-0")
+
+        async def aclose(self):
+            pass
+
+    class _UntranslatableFlow:
+        state = {}
+
+        def astream(self, inputs=None):
+            return _UntranslatableSession()
+
+    payloads = _decode_sse(await _collect(ep._run_flow_frame_stream(
+        flow_copy=_UntranslatableFlow(),
+        encoder=EventEncoder(),
+        input_data=_make_run_input(),
+        inputs={},
+        timeout=30.0,
+    )))
+
+    assert [p["type"] for p in payloads] == ["RUN_STARTED", "RUN_FINISHED"]
+    # Correlated, like every other event the driver emits: an uncorrelated
+    # terminal ends no run on the client either.
+    assert {(p["threadId"], p["runId"]) for p in payloads} == {("t-1", "r-1")}
+
+
 # -- raising astream is mapped to RUN_ERROR + no contextvar leak --
 
 async def test_frame_path_raising_astream_emits_run_error_and_resets_context():

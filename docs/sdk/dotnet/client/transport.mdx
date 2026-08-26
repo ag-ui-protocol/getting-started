@@ -104,7 +104,9 @@ to `ChatResponseUpdate` values:
   `InterruptRequestContent`.
 - `RUN_ERROR` becomes an `ErrorContent` update. Its `message` maps to
   `ErrorContent.Message`, and its optional `code` maps to
-  `ErrorContent.ErrorCode`.
+  `ErrorContent.ErrorCode`. When the event carries partial `usage`, the client
+  also emits `UsageContent` updates so `ChatResponse.Usage` includes the tokens
+  consumed before the failure.
 
 `ResponseId` on each update corresponds to the AG-UI run id. The client clears
 `ConversationId` before yielding updates so callers continue sending full

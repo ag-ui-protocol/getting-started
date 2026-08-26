@@ -10,10 +10,10 @@ Covers the graceful-degradation invariants of the crewai capability layer:
   ``ag_ui_crewai.endpoint`` degrades to a plain ``object`` base rather than
   crashing at class-definition time with an opaque
   ``TypeError: NoneType takes no arguments`` (fewer capabilities, not a crash).
-* A litellm that raises a non-ImportError, from its own top level or from the
-  ``responses.streaming_iterator`` submodule the Responses probe imports, only
-  costs the Responses isinstance shortcut. It never fails the import, since the
-  litellm probe already decided to continue degraded.
+* A litellm that raises a non-ImportError from its own top level leaves the
+  capability module itself importable, with the whole litellm-backed surface
+  reported absent. Importing the PACKAGE still fails on such a build, because
+  ``sdk`` imports litellm at top level; that is by design and out of scope here.
 """
 
 import importlib
@@ -136,11 +136,8 @@ def test_endpoint_module_degrades_when_base_event_listener_missing():
 # A broken litellm degrades the Responses channel; it never fails the import
 # --------------------------------------------------------------------------
 # The litellm probe tolerates ANY exception from litellm's top level (bare
-# ``except Exception``) and continues with ``_litellm_available = False``. The
-# Responses-iterator resolution that follows must honour that decision: it
-# imports a litellm SUBMODULE, which re-executes the same failing top level, so
-# an unguarded probe re-raises a non-ImportError and converts the tolerated
-# degraded mode into a hard import failure.
+# ``except Exception``) and continues with ``_litellm_available = False``, which
+# leaves the Responses channel unavailable and every caller on chat-completions.
 
 #: Preamble installing a meta-path finder whose matched modules raise a
 #: NON-ImportError from their body, which is how a genuinely broken install
@@ -182,11 +179,10 @@ _BROKEN_MODULE_FINDER = """
 def test_capabilities_import_survives_broken_litellm_top_level():
     """litellm's top level raising a non-ImportError must not fail this import.
 
-    Breaking ``litellm`` itself breaks every ``litellm.*`` submodule with it:
-    importing a submodule imports its parent first, so the Responses probe hits
-    the same ``RuntimeError``. Yet the litellm probe above it already chose to
-    continue degraded, so the module body must complete and report the whole
-    litellm-backed surface as absent.
+    The litellm probe chose to continue degraded, so the module body must complete
+    and report the whole litellm-backed surface as absent rather than re-raising.
+    The Responses entrypoint resolves by ``getattr`` off the already-imported
+    module, guarded by that same probe, so it degrades to ``None`` with it.
 
     Loaded straight from its file rather than as ``ag_ui_crewai._capabilities``,
     because that dotted import would first execute the package ``__init__``,
@@ -209,9 +205,10 @@ def test_capabilities_import_survives_broken_litellm_top_level():
 
         sys.meta_path.insert(0, _BrokenFinder("litellm"))
 
-        # Load it UNDER the real package name so its relative imports of the
-        # stdlib-only sibling vocabulary resolve; a bare file-path load would
-        # fail on those, which says nothing about the litellm degradation.
+        # Load it UNDER the real package name so ``@dataclass`` can resolve the
+        # deferred annotations of ``_Capabilities`` through
+        # ``sys.modules[__module__]``; a bare file-path load would fail on that,
+        # which says nothing about the litellm degradation.
         pkg = importlib.util.module_from_spec(importlib.util.find_spec("ag_ui_crewai"))
         pkg.__path__ = [str(path.parent)]
         sys.modules.setdefault("ag_ui_crewai", pkg)
@@ -228,10 +225,9 @@ def test_capabilities_import_survives_broken_litellm_top_level():
 
         assert cap.CAPABILITIES.litellm_available is False
         assert "litellm" in cap.CAPABILITIES.missing
-        # Both litellm-backed Responses symbols degrade to absent, not to a raise.
+        # The Responses entrypoint degrades to absent, not to a raise.
         assert cap.responses_entrypoint() is None
         assert cap.CAPABILITIES.responses_api_available is False
-        assert cap.ResponsesAPIStreamingIteratorBase is None
         # crewai resolved normally, so this is a litellm-only degradation.
         assert cap.CAPABILITIES.has_event_bus is True
         print("OK")
@@ -240,51 +236,3 @@ def test_capabilities_import_survives_broken_litellm_top_level():
     assert result.returncode == 0, result.stderr
     assert "OK" in result.stdout
 
-
-def test_package_import_survives_broken_litellm_responses_submodule():
-    """A broken ``litellm.responses.streaming_iterator`` must not fail the import.
-
-    Same asymmetry seen from the other side: litellm imports fine, so nothing
-    else in the package is affected, and the ONLY thing that reaches the broken
-    submodule is this probe. Its result is optional by design
-    (``_responses.is_responses_stream`` duck-types the iterator when the base
-    class is ``None``), so a failure there costs an isinstance shortcut, not
-    ``import ag_ui_crewai``.
-
-    The installed litellm imports that submodule during its own startup, so the
-    cached entry is dropped first to make the probe actually load it, standing in
-    for a litellm build that does not preload it.
-    """
-    result = _run_isolated(
-        _BROKEN_MODULE_FINDER
-        + """
-        import litellm  # noqa: F401
-
-        sys.modules.pop("litellm.responses.streaming_iterator", None)
-        sys.meta_path.insert(0, _BrokenFinder("litellm.responses.streaming_iterator"))
-
-        import ag_ui_crewai  # the whole package, not just the capability leaf
-        from ag_ui_crewai import _capabilities as cap
-        from ag_ui_crewai._responses import is_responses_stream
-
-        # litellm itself is fine, so the channel stays advertised.
-        assert cap.CAPABILITIES.litellm_available is True
-        assert cap.CAPABILITIES.responses_api_available is True
-        # Only the isinstance shortcut is lost; duck-typing still recognises an
-        # iterator, and a non-iterator is still rejected.
-        assert cap.ResponsesAPIStreamingIteratorBase is None
-
-        class _FakeIterator:
-            def __aiter__(self):
-                return self
-
-            def _process_chunk(self, chunk):
-                return chunk
-
-        assert is_responses_stream(_FakeIterator()) is True
-        assert is_responses_stream(object()) is False
-        print("OK")
-        """
-    )
-    assert result.returncode == 0, result.stderr
-    assert "OK" in result.stdout

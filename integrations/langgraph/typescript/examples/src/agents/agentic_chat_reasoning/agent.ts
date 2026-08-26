@@ -3,7 +3,7 @@
  *
  * This agent supports multiple model providers with reasoning/thinking capabilities:
  * - OpenAI (default): Uses o3 model
- * - Anthropic: Uses claude-sonnet-4-20250514 with thinking enabled
+ * - Anthropic: Uses claude-sonnet-4-6 with manual thinking
  * - Gemini: Uses gemini-2.5-pro with thinking budget
  *
  * The model is selected based on the `model` field in the agent state.
@@ -14,16 +14,23 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { SystemMessage } from "@langchain/core/messages";
 import { RunnableConfig } from "@langchain/core/runnables";
-import { Annotation, MessagesAnnotation, StateGraph, Command, START, END } from "@langchain/langgraph";
+import {
+  Annotation,
+  MessagesAnnotation,
+  StateGraph,
+  Command,
+  START,
+  END,
+} from "@langchain/langgraph";
 
 const AgentStateAnnotation = Annotation.Root({
   tools: Annotation<any[]>({
     reducer: (x, y) => y ?? x,
-    default: () => []
+    default: () => [],
   }),
   model: Annotation<string>({
     reducer: (x, y) => y ?? x,
-    default: () => ""
+    default: () => "",
   }),
   ...MessagesAnnotation.spec,
 });
@@ -43,7 +50,7 @@ async function chatNode(state: AgentState, config?: RunnableConfig) {
   let model;
   if (state.model === "Anthropic") {
     model = new ChatAnthropic({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       thinking: { type: "enabled", budget_tokens: 2000 },
     });
   } else if (state.model === "Gemini") {
@@ -66,29 +73,25 @@ async function chatNode(state: AgentState, config?: RunnableConfig) {
   }
 
   // 2. Bind the tools to the model
-  const modelWithTools = model.bindTools(
-    [
-      ...(state.tools ?? []),
-    ],
-  );
+  const modelWithTools = model.bindTools([...(state.tools ?? [])]);
 
   // 3. Define the system message
   const systemMessage = new SystemMessage({
-    content: "You are a helpful assistant."
+    content: "You are a helpful assistant.",
   });
 
   // 4. Run the model to generate a response
-  const response = await modelWithTools.invoke([
-    systemMessage,
-    ...state.messages,
-  ], config);
+  const response = await modelWithTools.invoke(
+    [systemMessage, ...state.messages],
+    config,
+  );
 
   // 5. Return the response
   return new Command({
     goto: END,
     update: {
-      messages: [response]
-    }
+      messages: [response],
+    },
   });
 }
 

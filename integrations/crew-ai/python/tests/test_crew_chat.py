@@ -715,6 +715,40 @@ async def test_additional_params_do_not_collide_with_call_owned_kwargs():
     assert calls[1]["tool_choice"] == "none"
 
 
+def test_a_disabled_timeout_leaves_a_users_own_additional_param_alone(monkeypatch):
+    """Call-owned settings win, except a ``timeout`` of ``None``.
+
+    ``None`` is the env knob's "this integration passes no timeout" spelling. Let
+    it win and a user who put their own ``timeout`` in ``additional_params`` loses
+    it to nothing, which is the one case where the framework has no opinion to
+    impose.
+    """
+    monkeypatch.setenv("AGUI_CREWAI_LLM_TIMEOUT_SECONDS", "0")
+    real_llm = LLM(model="gpt-4o", api_key="k", additional_params={"timeout": 45})
+    # The precondition: crewai keeps a directly-supplied ``additional_params``
+    # timeout there rather than on the field, so it reaches the call through the
+    # spread and is the value a ``None`` would replace.
+    assert real_llm.additional_params.get("timeout") == 45
+    assert real_llm.timeout is None
+    flow = _new_crew_flow(chat_llm=real_llm)
+    assert flow._completion_timeout_seconds() is None
+
+    params = flow._completion_call_params(
+        messages=[],
+        timeout=flow._completion_timeout_seconds(),
+    )
+
+    assert params["timeout"] == 45
+
+    # A real timeout still wins over an additional_params one.
+    monkeypatch.setenv("AGUI_CREWAI_LLM_TIMEOUT_SECONDS", "30")
+    with_timeout = flow._completion_call_params(
+        messages=[],
+        timeout=flow._completion_timeout_seconds(),
+    )
+    assert with_timeout["timeout"] == 30.0
+
+
 # --------------------------------------------------------------------------
 # Crew-run state mutation surfaced as a StateSnapshotEvent
 # --------------------------------------------------------------------------
@@ -862,7 +896,7 @@ def test_protocol_accepts_name_only_and_crew_name_only_wrappers():
     ``_crew_name`` in the protocol — as an earlier round did — wrongly
     rejected the name-only ``CrewChatCrew`` even though it works at
     runtime."""
-    from ag_ui_crewai.examples.crew_chat import CrewChatCrew
+    from agents.crew_chat import CrewChatCrew
 
     name_only = CrewChatCrew()
     # Precondition: name-only shape (has .name, lacks _crew_name).

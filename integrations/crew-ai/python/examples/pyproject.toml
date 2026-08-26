@@ -1,0 +1,42 @@
+[project]
+name = "crewai-agui-dojo"
+version = "0.1.0"
+description = "Dojo example server for the AG-UI CrewAI integration"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+# Everything imported directly by the demo flows or the server. The library brings
+# most of these transitively, but a demo that imports a package names it here, so a
+# bound change upstream cannot quietly break the dojo. Bounds match the library's so
+# the two projects resolve the same versions.
+dependencies = [
+    "ag-ui-crewai",
+    "crewai>=1.0,<2",
+    "litellm>=1.60.2",
+    "pydantic>=2.0,<3",
+    "fastapi>=0.115.12,<0.116.0",
+    "uvicorn>=0.34.3,<0.35.0",
+    "ag-ui-a2ui-toolkit>=0.0.4",
+]
+
+# The dojo has to exercise the bridge in this checkout, not the published release,
+# so the library is a path dependency. dojo-e2e depends on that: it starts this
+# server to test the adjacent library's behaviour.
+[tool.uv.sources]
+ag-ui-crewai = { path = "..", editable = true }
+
+[project.scripts]
+dev = "agents.dojo:main"
+
+# No test config, and no dev group: this is a demo app, and demo apps in this repo do
+# not carry unit tests. The bridge has its own suite next door, and dojo-e2e covers
+# this server by running against it. Two things in ``agents/dojo.py`` and
+# ``agents/__init__.py`` still have to hold for the deployed dojo — the ``0.0.0.0``
+# bind and the telemetry opt-out at package import — and both are argued for where
+# they are written rather than asserted here.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agents"]

@@ -774,6 +774,52 @@ async def test_e2e_resume_repause_emits_second_interrupt(_isolated_cwd):
     assert finished["outcome"]["type"] == "interrupt"
 
 
+async def test_e2e_resume_of_a_regular_flow_ignores_a_conversational_worker(
+    _isolated_cwd,
+):
+    """A paused REGULAR flow must resume while a conversational turn is abandoned.
+
+    The two share nothing but a client-chosen ``threadId``: the conversational
+    refusal exists because two turns of ONE conversation write one conversation's
+    state, and a regular flow's resume is not one of them. Refusing it strands the
+    paused run with no way to complete it, and HITL pause/resume is the one path
+    where that cannot be retried away.
+    """
+    from ag_ui_crewai._conversation import (
+        AbandonmentSignal,
+        acquire_conversation_worker,
+    )
+
+    flow = _DemoInterruptFlow()
+    await _run_kickoff(flow, _mk_input("thr-hitl-busy"), HITLOptions())
+
+    signal = AbandonmentSignal()
+    lease = acquire_conversation_worker(
+        flow_key="some.other.ConversationalFlow",
+        thread_id="thr-hitl-busy",
+        run_id="run-conversational",
+        signal=signal,
+    )
+    signal.abandon()
+    try:
+        resume = [
+            ResumeEntry(
+                interrupt_id="thr-hitl-busy", status="resolved", payload="looks good"
+            )
+        ]
+        events = await _run_resume(
+            flow, _mk_input("thr-hitl-busy", resume=resume), HITLOptions()
+        )
+    finally:
+        lease.release()
+
+    codes = [e.get("code") for e in events]
+    assert "AGUI_CREWAI_CONVERSATION_THREAD_BUSY" not in codes, codes
+    types = _types(events)
+    assert types[0] == "RUN_STARTED"
+    assert types[-1] == "RUN_FINISHED"
+
+
 async def test_e2e_resume_no_pending_errors(_isolated_cwd):
     flow = _DemoInterruptFlow()
     resume = [ResumeEntry(interrupt_id="ghost", status="resolved", payload="hi")]
@@ -867,7 +913,7 @@ async def test_e2e_resume_ceiling_is_flow_timeout():
 async def test_e2e_crew_endpoint_rejects_resume():
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from ag_ui_crewai.examples.crew_chat import CrewChatCrew
+    from agents.crew_chat import CrewChatCrew
 
     app = FastAPI()
     ep.add_crewai_crew_fastapi_endpoint(app=app, crew=CrewChatCrew(), path="/crew")

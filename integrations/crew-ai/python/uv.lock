@@ -27,6 +27,7 @@ dependencies = [
     { name = "crewai" },
     { name = "fastapi" },
     { name = "litellm" },
+    { name = "pydantic" },
     { name = "uvicorn" },
 ]
 
@@ -37,8 +38,10 @@ tools = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "crewai-agui-dojo" },
     { name = "hatchling" },
     { name = "httpx" },
+    { name = "openai" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
@@ -51,15 +54,18 @@ requires-dist = [
     { name = "crewai", specifier = ">=1.0,<2" },
     { name = "crewai-tools", marker = "extra == 'tools'", specifier = ">=0.38.1" },
     { name = "fastapi", specifier = ">=0.115.12,<0.116.0" },
-    { name = "litellm", specifier = ">=1.60.2" },
+    { name = "litellm", specifier = ">=1.70.4,<2" },
+    { name = "pydantic", specifier = ">=2.0,<3" },
     { name = "uvicorn", specifier = ">=0.34.3,<0.35.0" },
 ]
 provides-extras = ["tools"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "hatchling", specifier = ">=1.27,<2" },
+    { name = "crewai-agui-dojo", editable = "examples" },
+    { name = "hatchling", specifier = "==1.32.0" },
     { name = "httpx", specifier = ">=0.27,<0.29" },
+    { name = "openai", specifier = ">=2.30,<3" },
     { name = "pytest", specifier = ">=8.0,<9.0" },
     { name = "pytest-asyncio", specifier = ">=0.24,<0.25" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
@@ -636,6 +642,31 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/4f/73/be2114196484f362dd31c698088a44770c6a18d6c3526b0eb3426e7aa35c/crewai-1.15.11.tar.gz", hash = "sha256:bd2476d7aaa9f52265e68f5b716be740d8cc15e4a64effda9edefbc6a129944b", size = 7859622, upload-time = "2026-08-05T06:30:42.891Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2f/9c/29a003f4e1653f65d2e72fc24f6f995ca95de128dab1431e69e71b932d8b/crewai-1.15.11-py3-none-any.whl", hash = "sha256:569cad1a9b333401895bc9a9cd3cdd0448c8ab93be81746e94bff21e81795563", size = 1109258, upload-time = "2026-08-05T06:30:40.712Z" },
+]
+
+[[package]]
+name = "crewai-agui-dojo"
+version = "0.1.0"
+source = { editable = "examples" }
+dependencies = [
+    { name = "ag-ui-a2ui-toolkit" },
+    { name = "ag-ui-crewai" },
+    { name = "crewai" },
+    { name = "fastapi" },
+    { name = "litellm" },
+    { name = "pydantic" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ag-ui-a2ui-toolkit", specifier = ">=0.0.4" },
+    { name = "ag-ui-crewai", editable = "." },
+    { name = "crewai", specifier = ">=1.0,<2" },
+    { name = "fastapi", specifier = ">=0.115.12,<0.116.0" },
+    { name = "litellm", specifier = ">=1.60.2" },
+    { name = "pydantic", specifier = ">=2.0,<3" },
+    { name = "uvicorn", specifier = ">=0.34.3,<0.35.0" },
 ]
 
 [[package]]

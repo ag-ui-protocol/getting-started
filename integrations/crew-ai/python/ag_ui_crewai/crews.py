@@ -21,7 +21,10 @@ from ._capabilities import (
 # optional ``crewai[litellm]`` extra at 1.0.0, so importing it ourselves keeps
 # ``acompletion`` resolvable regardless of crewai extras.
 from litellm import acompletion
-from ._env import _parse_env_float
+from ._config import (
+  DEFAULT_PROVIDER_TIMEOUT_SECONDS,
+  resolve_provider_timeout_seconds,
+)
 from ._copyutil import safe_deepcopy
 from .sdk import (
   copilotkit_stream,
@@ -143,16 +146,10 @@ def _read_crew_name(crew: Any) -> str:
         "ChatInputs.crew_name requires a non-empty string."
     )
 
-# Per-read idle guard (seconds) for LiteLLM streaming requests. LiteLLM
-# forwards this to the underlying HTTP client, where it acts as a
-# *per-read* / socket-recv timeout — NOT a session-level ceiling. That means
-# a trickle-feeding server can still keep the coroutine alive indefinitely
-# by sending a single byte before each timeout expires; the session-level
-# cap for that scenario is enforced by ``AGUI_CREWAI_FLOW_TIMEOUT_SECONDS``
-# in ``endpoint.py``. Override this per-read guard with the
-# ``AGUI_CREWAI_LLM_TIMEOUT_SECONDS`` environment variable; set to a
-# non-positive value to disable it (the outer flow ceiling still applies).
-_DEFAULT_LLM_TIMEOUT_SECONDS = 120.0
+# Test-facing alias of the shipped per-read provider timeout. The knob, its env
+# variable and its policy are documented on ``_config``; kept here only because
+# ``tests/test_llm_timeout.py`` imports this name.
+_DEFAULT_LLM_TIMEOUT_SECONDS = DEFAULT_PROVIDER_TIMEOUT_SECONDS
 
 
 def _llm_timeout_seconds() -> float | None:
@@ -164,18 +161,13 @@ def _llm_timeout_seconds() -> float | None:
     silently disable the guard. Mirrors the NaN handling in
     ``endpoint._flow_timeout_seconds``.
 
-    Delegates to ``_env._parse_env_float`` so the three env-parsed float
-    helpers (flow ceiling / cancel-join ceiling / LLM read timeout) share a
-    single parse + policy path. The helper lives on the neutral ``_env``
-    module (not ``endpoint``) so it can be imported at module load time
-    without a circular dependency (``endpoint`` imports ``ChatWithCrewFlow``
-    from ``crews``).
+    Delegates to ``_config.resolve_provider_timeout_seconds`` (itself over
+    ``_env._parse_env_float``) so the crew-chat flow and the shipped example
+    flows read ONE resolver for the same variable. ``_config`` is a leaf over
+    ``_env``, so importing it here cannot reintroduce the load cycle
+    (``endpoint`` imports ``ChatWithCrewFlow`` from ``crews``).
     """
-    return _parse_env_float(
-        "AGUI_CREWAI_LLM_TIMEOUT_SECONDS",
-        _DEFAULT_LLM_TIMEOUT_SECONDS,
-        allow_disable=True,
-    )
+    return resolve_provider_timeout_seconds()
 
 
 def _crew_result_to_text(result: Any) -> str:
@@ -313,7 +305,6 @@ class ChatWithCrewFlow(Flow):
         for attr in (
             "api_key", "base_url", "api_base", "api_version",
             "temperature", "top_p", "n", "stop",
-            "max_tokens", "max_completion_tokens",
             "presence_penalty", "frequency_penalty", "logit_bias",
             "response_format", "seed", "logprobs", "top_logprobs",
             "reasoning_effort",
@@ -326,7 +317,32 @@ class ChatWithCrewFlow(Flow):
             if value is None or value == [] or value == {}:
                 continue
             kwargs[attr] = value
+
+        # ONE token cap, matching crewai's own litellm call
+        # (``LLM._prepare_completion_params`` sends
+        # ``max_tokens or max_completion_tokens``). Forwarding both would hand
+        # litellm a pair the provider treats as mutually exclusive.
+        cap = getattr(llm, "max_tokens", None) or getattr(
+            llm, "max_completion_tokens", None
+        )
+        if cap is not None:
+            kwargs["max_tokens"] = cap
         return kwargs
+
+    def _completion_timeout_seconds(self) -> float | None:
+        """Timeout for one ``acompletion``: the crew's own value, else the env one.
+
+        ``Crew(chat_llm=LLM(model=..., timeout=30))`` is the documented way to
+        bound this loop, so an explicitly-built timeout must win over the env
+        default rather than being silently replaced by it. Only a positive number
+        counts as explicit: crewai leaves ``timeout`` at ``None`` unless the
+        caller passed one, and a non-positive value is the env knob's own
+        "disabled" spelling, which is not what an LLM object expresses.
+        """
+        own = getattr(getattr(self, "chat_llm", None), "timeout", None)
+        if isinstance(own, (int, float)) and not isinstance(own, bool) and own > 0:
+            return own
+        return _llm_timeout_seconds()
 
     def _completion_call_params(self, **call_owned: Any) -> dict:
         """Build the FULL kwargs dict for one ``acompletion`` call.
@@ -345,8 +361,15 @@ class ChatWithCrewFlow(Flow):
         of user LLM extras). Call sites splat the result as
         ``acompletion(**self._completion_call_params(...))`` and never mix
         explicit ``kw=`` args with the splat, so no key is passed twice.
+
+        ONE exception to call-owned winning: a ``timeout`` of ``None``. That is the
+        env knob's "this integration passes no timeout" spelling, which must leave a
+        user's own ``additional_params["timeout"]`` in place rather than replace it
+        with nothing.
         """
         params = self._completion_llm_kwargs()
+        if "timeout" in call_owned and call_owned["timeout"] is None:
+            del call_owned["timeout"]
         params.update(call_owned)  # call-owned settings win on collision.
         return params
 
@@ -379,7 +402,7 @@ class ChatWithCrewFlow(Flow):
                     tools=tools,
                     parallel_tool_calls=False,
                     stream=True,
-                    timeout=_llm_timeout_seconds(),
+                    timeout=self._completion_timeout_seconds(),
                 )
             )
         )
@@ -458,7 +481,7 @@ class ChatWithCrewFlow(Flow):
                             parallel_tool_calls=False,
                             stream=True,
                             tool_choice="none",
-                            timeout=_llm_timeout_seconds(),
+                            timeout=self._completion_timeout_seconds(),
                         )
                     )
                 )
@@ -487,7 +510,7 @@ class ChatWithCrewFlow(Flow):
                             parallel_tool_calls=False,
                             stream=True,
                             tool_choice="none",
-                            timeout=_llm_timeout_seconds(),
+                            timeout=self._completion_timeout_seconds(),
                         )
                     )
                 )

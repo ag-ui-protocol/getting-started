@@ -15,10 +15,8 @@ public sealed class AGUIToolMessage : AGUIMessage
     public string ToolCallId { get; set; } = string.Empty;
 
     [JsonPropertyName("error")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Error { get; set; }
 
     [JsonPropertyName("encryptedValue")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? EncryptedValue { get; set; }
 }

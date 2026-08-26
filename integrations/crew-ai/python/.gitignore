@@ -217,3 +217,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Mutation-suite backups. Written before a guard is neutralized and removed
+# after it is restored, so one on disk means a run was killed mid-mutation. The
+# next test run repairs the package from it and refuses to continue.
+*.mutation-backup

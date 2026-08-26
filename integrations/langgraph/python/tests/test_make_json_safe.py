@@ -260,3 +260,30 @@ class TestMakeJsonSafe(unittest.TestCase):
         uid = uuid.UUID("550e8400-e29b-41d4-a716-446655440000")
         result = make_json_safe([uid, "hello", 42])
         assert result == ["550e8400-e29b-41d4-a716-446655440000", "hello", 42]
+
+class TestPathScopedCycleDetection(unittest.TestCase):
+    """Cycle detection must be PATH-scoped, not global: a langgraph 1.2.x
+    interrupt payload legitimately shares references (the recommended flight IS
+    one of the options dicts), and the global seen-set serialized the second
+    appearance as the string "<recursive>", crashing the dojo's interrupt
+    renderer client-side ('airline' in "<recursive>")."""
+
+    def test_shared_references_are_not_cycles(self):
+        shared = {"airline": "KLM", "price": 650}
+        payload = {
+            "options": [shared, {"airline": "United", "price": 720}],
+            "recommended": shared,
+        }
+        out = make_json_safe(payload)
+        self.assertEqual(out["recommended"], {"airline": "KLM", "price": 650})
+        self.assertEqual(out["options"][0], {"airline": "KLM", "price": 650})
+
+    def test_a_true_cycle_is_still_caught(self):
+        cyc = {}
+        cyc["self"] = cyc
+        self.assertEqual(make_json_safe(cyc), {"self": "<recursive>"})
+
+    def test_sibling_lists_sharing_an_element(self):
+        item = {"id": 1}
+        out = make_json_safe({"a": [item], "b": [item]})
+        self.assertEqual(out, {"a": [{"id": 1}], "b": [{"id": 1}]})

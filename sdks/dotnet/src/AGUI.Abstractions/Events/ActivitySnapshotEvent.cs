@@ -35,6 +35,12 @@ public sealed class ActivitySnapshotEvent : BaseEvent
     /// Whether to replace the existing activity content or merge. Defaults to <see langword="true"/>.
     /// </summary>
     [JsonPropertyName("replace")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? Replace { get; set; }
+
+    /// <summary>
+    /// Gets or sets the subagent that produced this event, absent when the parent agent
+    /// produced it directly.
+    /// </summary>
+    [JsonPropertyName("subagentRunId")]
+    public string? SubagentRunId { get; set; }
 }

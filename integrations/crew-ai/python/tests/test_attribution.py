@@ -788,7 +788,7 @@ async def test_conversational_route_preserves_nested_crew_attribution():
     # and a module-scope import would fail collection of this whole file.
     # importorskip covers the module itself; the skipif above covers the case
     # where the module exists but the build has no stream_turn surface.
-    conversational = pytest.importorskip("ag_ui_crewai.examples.conversational")
+    conversational = pytest.importorskip("agents.conversational")
     _conversational_type = conversational._conversational_type
 
     # The SAME factory the dojo's conversational routes use, so this drives the
