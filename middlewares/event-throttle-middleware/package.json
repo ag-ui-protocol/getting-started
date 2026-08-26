@@ -37,7 +37,7 @@
   },
   "peerDependencies": {
     "@ag-ui/client": ">=0.0.40",
-    "rxjs": "7.8.1"
+    "rxjs": ">=7.8.0 <8"
   },
   "devDependencies": {
     "@ag-ui/client": "workspace:*",

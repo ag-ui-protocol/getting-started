@@ -35,12 +35,12 @@
     "@langchain/core": "^1.1.40",
     "@langchain/langgraph-sdk": "^1.8.8",
     "langchain": ">=1.2.0",
-    "partial-json": "^0.1.7",
-    "rxjs": "7.8.1"
+    "partial-json": "^0.1.7"
   },
   "peerDependencies": {
     "@ag-ui/core": ">=0.0.42",
-    "@ag-ui/client": ">=0.0.42"
+    "@ag-ui/client": ">=0.0.42",
+    "rxjs": ">=7.8.0 <8"
   },
   "devDependencies": {
     "@ag-ui/core": "workspace:*",
@@ -51,7 +51,8 @@
     "@arethetypeswrong/cli": "^0.17.4",
     "vitest": "^4.0.18",
     "tsdown": "^0.20.1",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "rxjs": "7.8.1"
   },
   "exports": {
     ".": {

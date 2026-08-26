@@ -35,13 +35,12 @@
     "link:global": "pnpm link --global",
     "unlink:global": "pnpm unlink --global"
   },
-  "dependencies": {
-    "rxjs": "7.8.1"
-  },
+  "dependencies": {},
   "peerDependencies": {
     "@ag-ui/core": ">=0.0.42",
     "@ag-ui/client": ">=0.0.42",
-    "@anthropic-ai/sdk": ">=0.109.0"
+    "@anthropic-ai/sdk": ">=0.109.0",
+    "rxjs": ">=7.8.0 <8"
   },
   "devDependencies": {
     "@ag-ui/core": "workspace:*",
@@ -54,7 +53,8 @@
     "tsx": "^4.20.6",
     "vitest": "^4.0.18",
     "tsdown": "^0.20.1",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "rxjs": "7.8.1"
   },
   "exports": {
     ".": {

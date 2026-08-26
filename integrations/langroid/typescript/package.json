@@ -23,7 +23,7 @@
   "peerDependencies": {
     "@ag-ui/core": ">=0.0.37",
     "@ag-ui/client": ">=0.0.37",
-    "rxjs": "7.8.1"
+    "rxjs": ">=7.8.0 <8"
   },
   "devDependencies": {
     "@ag-ui/core": "workspace:*",
@@ -33,7 +33,7 @@
     "jest": "^29.7.0",
     "ts-jest": "^29.1.2",
     "tsup": "^8.0.2",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "rxjs": "7.8.1"
   }
 }
-
