@@ -351,11 +351,22 @@ type ToolCallResultEvent = BaseEvent & {
 | `toolCallId` | `string`            | Matches the ID from the corresponding ToolCallStartEvent    |
 | `content`    | `string`            | The actual result/output content from the tool execution    |
 | `role`       | `"tool"` (optional) | Optional role identifier, typically "tool" for tool results |
-| `error`      | `string` (optional) | Failure detail when the call failed; absent when it succeeded |
+| `error`      | `string` (optional) | Failure detail; present only when the producer reports it   |
 
 `error` is the event-side twin of `ToolMessage.error`. It lets a client render a
 failed tool call as it streams, instead of waiting for the `MESSAGES_SNAPSHOT`
 that carries the finished message.
+
+Failure is signalled by the presence of `error`, not by its truthiness: an empty
+string is a value the producer deliberately sent and the SDK preserves it, so
+`if (event.error)` reads `""` as a success. Check `event.error !== undefined`
+instead. `content` and `error` are independent — a failed result conventionally
+leaves `content` empty and carries the detail in `error`, but the protocol does
+not require it, and a consumer must not infer failure from `content` alone.
+Absence does not yet prove success either: no producer populates `error` today,
+so an absent `error` covers both a call that succeeded and one that failed
+without reporting it. Treat a present `error` as a definite failure and an
+absent one as unreported.
 
 ## State Management Events
 

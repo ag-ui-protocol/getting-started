@@ -332,6 +332,16 @@ var evt = new ToolCallResultEvent
 | `ToolCallId` | `toolCallId` | `string` | Tool call ID |
 | `Content` | `content` | `string` | Tool result content |
 | `Role` | `role` | `string?` | Optional role, typically `"tool"` |
+| `Error` | `error` | `string?` | Failure detail; present only when the producer reports it |
+
+`Error` is the event-side twin of `AGUIToolMessage.Error`, so a consumer can
+render a failed tool call from the live stream instead of waiting for the
+messages snapshot. Failure is signalled by presence, not by value — an empty
+string is preserved and still marks the call as failed — so test `Error is not
+null` rather than `string.IsNullOrEmpty(Error)`. `Content` and `Error` are
+independent, and an absent `Error` does not yet prove success, because no
+producer populates it today. See [Events](/concepts/events#toolcallresult) for
+the full contract.
 
 ## State Management Events
 

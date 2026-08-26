@@ -388,6 +388,20 @@ the tool's output.
 | `toolCallId` | Matches the ID from the corresponding `ToolCallStart` event |
 | `content`    | The actual result/output content from the tool execution    |
 | `role`       | Optional role identifier, typically "tool" for tool results |
+| `error`      | Failure detail; present only when the producer reports it   |
+
+Failure is signalled by the presence of `error`, not by its value: an empty
+string is a value the producer deliberately sent and every SDK preserves it, so
+a consumer that tests the field for truthiness reads `""` as a success. Test
+whether `error` is present instead.
+
+`content` and `error` are independent. A failed result conventionally leaves
+`content` empty and carries the detail in `error`, but the protocol does not
+require it, and a consumer must not infer failure from `content` alone. Absence
+does not yet prove success either: no producer in the SDKs populates `error`
+today, so an absent `error` covers both a call that succeeded and one that
+failed without reporting it. Treat a present `error` as a definite failure and
+an absent one as unreported.
 
 ### ToolCallChunk
 
