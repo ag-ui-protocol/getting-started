@@ -76,9 +76,11 @@ class TestToolCallResultError(unittest.TestCase):
         self.assertIsInstance(without_error, ToolCallResultEvent)
         self.assertIsNone(without_error.error)
 
-    def test_a_pre_existing_event_serializes_exactly_as_before(self):
-        # The additive guarantee: an event from before this field existed keeps
-        # the same keys and values, so no consumer sees a change.
+    def test_an_event_without_an_error_round_trips_to_the_same_keys_and_values(self):
+        # The compat guarantee for a producer that never writes `error`: no key
+        # gains or loses a value. Not a byte comparison — dict equality ignores
+        # key order, which is the right strength here: key order is a serializer
+        # detail, not part of the wire contract.
         legacy_wire = {
             "type": "TOOL_CALL_RESULT",
             "messageId": "msg_1",

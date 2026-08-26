@@ -24,9 +24,12 @@ public sealed class ToolCallResultEvent : BaseEvent
     public string? Role { get; set; }
 
     /// <summary>
-    /// Gets or sets the failure detail for this tool call, absent when the call succeeded.
-    /// The event-side twin of <see cref="AGUIToolMessage.Error"/>, so a consumer can render
-    /// the failure from the live stream instead of waiting for the messages snapshot.
+    /// Gets or sets the failure detail for this tool call. The event-side twin of
+    /// <see cref="AGUIToolMessage.Error"/>. Schema only: no producer populates it yet, so an
+    /// absent error means the producer said nothing about failure, not that the call succeeded.
+    /// The client's event-to-<c>ChatResponseUpdate</c> conversion does not read it either, so a
+    /// consumer wanting the failure from the live stream has to read it off the event itself.
+    /// An explicit JSON null deserializes to <c>null</c>, as for every optional property here.
     /// </summary>
     [JsonPropertyName("error")]
     public string? Error { get; set; }

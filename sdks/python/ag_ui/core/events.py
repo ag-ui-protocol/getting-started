@@ -234,8 +234,15 @@ class ToolCallResultEvent(BaseEvent):
     role: Optional[Literal["tool"]] = None
     # The event-side twin of ToolMessage.error: set when the tool call failed,
     # so a consumer can render the failure from the live stream instead of
-    # waiting for the MESSAGES_SNAPSHOT that carries the message. Absent means
-    # the call succeeded, exactly as before this field existed.
+    # waiting for the MESSAGES_SNAPSHOT that carries the message. Schema only —
+    # no producer populates it yet, so an absent error means the producer said
+    # nothing about failure, not that the call succeeded.
+    #
+    # Declaring it narrows the wire rather than purely extending it: extra="allow"
+    # used to let an `error` of any shape ride along as an extra, and a non-string
+    # one now fails validation. An explicit JSON null still validates and reads
+    # back as None, as it does for every optional field here; only the TypeScript
+    # schema rejects it.
     error: Optional[str] = None
     subagent_run_id: Optional[str] = None
 

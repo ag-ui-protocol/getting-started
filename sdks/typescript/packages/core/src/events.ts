@@ -172,8 +172,16 @@ export const ToolCallResultEventSchema = BaseEventSchema.extend({
   role: z.literal("tool").optional(),
   // The event-side twin of `ToolMessage.error`: set when the tool call failed,
   // so a consumer can render the failure from the live stream instead of
-  // waiting for the MESSAGES_SNAPSHOT that carries the message. Absent means
-  // the call succeeded, exactly as before this field existed.
+  // waiting for the MESSAGES_SNAPSHOT that carries the message. Schema only —
+  // no producer populates it yet, so an absent error means the producer said
+  // nothing about failure, not that the call succeeded.
+  //
+  // Typing it narrows the wire rather than purely extending it: BaseEventSchema
+  // is `.passthrough()`, so an `error` of any other shape — an object, an
+  // explicit null — used to survive parsing as an unrecognized key and now
+  // fails it. That is the intended no-null-tolerance reading for new fields
+  // (see the note above SubagentStartedEventSchema), but it does tighten what
+  // an existing stream may carry under this key.
   error: z.string().optional(),
   subagentRunId: z.string().optional(),
 });

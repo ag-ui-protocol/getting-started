@@ -142,10 +142,15 @@ describe("ToolCallResultEventSchema — optional `error`", () => {
     expect(parsed.error).toBe("");
   });
 
-  it("rejects an explicit null, like every other new optional field", () => {
-    // No null tolerance on new fields: since PNI-199 the Python and .NET SDKs
-    // omit valueless fields at the source, so no producer legally writes null
-    // here. The three legacy tolerances stay a closed set.
+  it("rejects an explicit null, like every other new optional field in these schemas", () => {
+    // No null tolerance on new fields in the Zod schemas: since PNI-199 the
+    // Python and .NET SDKs omit valueless fields at the source, so no producer
+    // legally writes null here. The three legacy tolerances stay a closed set.
+    //
+    // The rejection is TypeScript's alone. The Python model and the .NET class
+    // both accept an explicit null and read it back as absent — as they do for
+    // every optional field, `subagent_run_id` and `role` included — so the
+    // guarantee is that nothing writes null, not that every SDK refuses one.
     expect(() => ToolCallResultEventSchema.parse({ ...base, error: null })).toThrow();
   });
 
@@ -178,9 +183,11 @@ describe("ToolCallResultEventSchema — optional `error`", () => {
     }
   });
 
-  it("parses a pre-existing stream byte-identically to before the field existed", () => {
-    // The additive guarantee: an old producer's event is unchanged by the new
-    // field, key-for-key and value-for-value.
+  it("re-serializes an event that carries no error to the same keys and values", () => {
+    // The compat guarantee for a producer that never writes `error`: no key
+    // gains or loses a value. Not a byte comparison — `toEqual` ignores key
+    // order and undefined-valued keys, which is the right strength here: key
+    // order is a serializer detail, not part of the wire contract.
     const legacyWire = {
       type: EventType.TOOL_CALL_RESULT,
       messageId: "msg-1",
@@ -229,7 +236,7 @@ describe("ToolCallResultEventSchema — optional `error`", () => {
     const read: string | undefined = event.error;
     expect(read).toBe("boom");
 
-    // Omitting it still type-checks: the field is additive, not required.
+    // Omitting it still type-checks: the field is optional, not required.
     const omitted: ToolCallResultEvent = {
       type: EventType.TOOL_CALL_RESULT,
       messageId: "msg-1",
