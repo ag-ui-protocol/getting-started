@@ -1,0 +1,124 @@
+---
+title: "Unknown and malformed"
+description: "What survives, what is fatal, and where middleware sits relative to enforcement — draft"
+---
+
+<Warning>
+  **Draft — not yet ratified.** Published for review. The wording is not final
+  and nothing here carries a compatibility promise yet.
+</Warning>
+
+Two things look superficially alike and must never be confused: material the
+protocol does not describe, and a value the protocol does describe that is
+wrong. The first is how the protocol grows. The second is a bug.
+
+## The rule
+
+**Unrecognised material is not an error. A malformed known value is.**
+
+- An event of a type this implementation does not recognise MUST NOT abort the
+  run.
+- A property that is not described on an event MUST NOT abort the run.
+- A union member the implementation does not recognise — a content part of a new
+  kind, an outcome named after it shipped — MUST NOT abort the run.
+- A field the protocol DOES describe, carrying a value the schema rejects, MUST
+  be fatal: the consumer MUST fail the run rather than repair, coerce or ignore
+  the value.
+
+The reasoning is asymmetric on purpose. An event type added after an
+implementation shipped is expected — the sender is newer, and the older party
+has no basis to call it invalid. But `messageId` holding a number is not a newer
+protocol; it is a defect, and a consumer that quietly coerces it hides the defect
+until it surfaces as something harder to diagnose.
+
+## What a consumer does with unrecognised material
+
+A consumer that exposes events to application code MUST NOT deliver unrecognised
+material as though the protocol described it. Having read it, such a consumer
+MUST do one of:
+
+- **Drop it**, if the whole event is of an unrecognised type. The consumer
+  SHOULD emit a warning naming the type.
+- **Strip it**, if it is an unknown property or an unrecognised union member on
+  an otherwise valid event. The consumer SHOULD emit a warning naming the path
+  that was removed.
+
+A consumer MUST NOT let a stripped property survive into the value application
+code receives, and MUST NOT let a dropped event reach it at all.
+
+This binds the pipeline, not the parser. A library layer that only parses an
+event — the generated models in each SDK, say — keeps unknown properties on
+purpose, so that the middleware above it can still see them. An SDK that offers
+such a parser without an enforcement stage does not yet satisfy this rule; today
+that is Python and .NET, whose models parse leniently with no stage that strips
+before application code.
+
+<Note>
+  One case is not yet met by the reference implementation: a field whose schema
+  is a closed set of string values — a message `role`, for instance — is checked
+  as a leaf, so an unrecognised value there is fatal rather than stripped. The
+  .NET converters reject an unknown role or outcome the same way. The rule above
+  is what the protocol requires; both are gaps against it rather than a softening
+  of it.
+</Note>
+
+Stripping reaches all the way down, and what it removes depends on where the
+unrecognisable value sits:
+
+- In an **optional** position, that field is removed and everything around it
+  survives.
+- In a **required** position, the value *containing* it is removed instead. A
+  media part whose source is of a kind this implementation has never heard of is
+  removed whole — leaving a part behind with no source would hand the validator
+  something it must treat as malformed, turning an addition into a fatal error.
+- Inside a **list**, the unrecognisable element is dropped and the list survives.
+
+## Where middleware sits
+
+Middleware — anything a consumer installs to translate, observe or rewrite the
+stream — MUST run before enforcement, and enforcement MUST run before
+verification and before application code sees anything.
+
+```
+producer → compatibility boundary → middleware → chunk expansion
+         → enforcement → verification → application
+```
+
+The compatibility boundary is the always-on translator for shapes the protocol
+has retired. It MUST see the stream before chunk expansion, because a retired
+shape can be a chunk, and an expander that met it first would either fail on it
+or expand it into something the boundary can no longer recognise. Middleware a
+consumer installs itself sees the stream after expansion, so it works in terms
+of the start/content/end events the rest of this document is written in.
+
+The order is load-bearing in both directions:
+
+- Middleware MUST see material before enforcement removes it. A shim exists
+  precisely to translate a shape the current protocol does not describe; if
+  enforcement stripped that shape first, the shim would receive an event with
+  nothing left to translate and the run would lose data no one could recover.
+- Application code MUST NOT see material enforcement would remove. Once the
+  translators have had their chance, whatever is still unrecognised is
+  unrecognised, and it stops there.
+
+A consumer MUST apply this ordering on every path that produces events for
+application code, including reconnection and replay. A path that skips
+enforcement is a hole in the guarantee, not an optimisation.
+
+## Outgoing material
+
+The same boundary applies to what a consumer sends. Immediately before
+transmission, a consumer MUST remove unrecognised material from the run input,
+SHOULD warn about what it removed, and MUST treat a malformed known field as
+fatal before anything is sent.
+
+A producer receiving a run input MUST apply the same asymmetry to it:
+unrecognised material does not make the input invalid, a malformed known field
+does.
+
+## What a producer must not do
+
+A producer MUST NOT emit an event type the protocol does not describe in the
+expectation that consumers will ignore it. Unrecognised events survive so the
+protocol can add them, not so a producer can smuggle private signalling through
+the stream; `CUSTOM` and `RAW` exist for that and are described by the schema.

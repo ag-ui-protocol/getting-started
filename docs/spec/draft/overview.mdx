@@ -1,0 +1,96 @@
+---
+title: "Overview"
+description: "The behavioural specification for the AG-UI protocol — draft"
+---
+
+<Warning>
+  **Draft — not yet ratified.** This document is published for review. It
+  describes the intended 1.0 behaviour, its wording is not final, and nothing
+  here is covered by a compatibility promise until a version is frozen. Do not
+  cite it as a stable reference.
+</Warning>
+
+## What this document is
+
+A JSON Schema says what an event looks like. It cannot say what order events may
+arrive in, what an implementation does with something it does not recognise, or
+when a warning has to be emitted. Those rules are the protocol, and this document
+states them.
+
+The division of authority is deliberate and absolute:
+
+- **The [schema](/spec/draft/schema.json) is authoritative for structure.** Which
+  fields exist, which are required, what type each carries, which values a
+  discriminator may take. Where this document mentions a field, it does so to
+  give a rule meaning — never to restate the field's shape. If the two disagree
+  about structure, the schema wins and this document has a bug.
+- **This document is authoritative for behaviour.** Ordering, lifecycle,
+  attribution, error handling, compatibility. The schema cannot express any of
+  it. If an implementation disagrees with a rule here, the implementation has a
+  bug.
+
+## How to read the requirements
+
+The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHALL**, **SHALL NOT**,
+**SHOULD**, **SHOULD NOT**, **RECOMMENDED**, **MAY** and **OPTIONAL** in this
+document are to be interpreted as described in
+[RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
+[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174), and only when they appear in
+capitals.
+
+Every rule names who it binds. Two roles carry obligations:
+
+- A **producer** is whatever emits the event stream — an agent, a proxy, a
+  bridge, a test double.
+- A **consumer** is whatever reads it — a client SDK, a UI, a recorder, another
+  proxy.
+
+A participant that does both is bound by both sets of rules, in each direction
+separately.
+
+## What conformance means
+
+An implementation conforms when it satisfies every MUST and MUST NOT that
+applies to the roles it plays. SHOULD-level rules describe what a good
+implementation does; departing from one is a decision that needs a reason, not a
+violation.
+
+Conformance is judged per stream. A producer that emits one malformed run does
+not conform, whatever it does on other runs.
+
+## The pages
+
+<CardGroup cols={2}>
+  <Card title="Run lifecycle" href="/spec/draft/lifecycle">
+    Which event may follow which, when a run begins and ends, and how messages,
+    tool calls and steps open and close.
+  </Card>
+  <Card title="Unknown and malformed" href="/spec/draft/unknown-and-malformed">
+    What happens to material the protocol does not describe, why that differs
+    from a malformed known value, and where middleware sits relative to
+    enforcement.
+  </Card>
+  <Card title="Subagents" href="/spec/draft/subagents">
+    Attribution, ownership, nesting, parallel execution, state, and how a run
+    with subagents terminates.
+  </Card>
+  <Card title="Compatibility" href="/spec/draft/compatibility">
+    Talking to an older peer, what may be dropped, and when losing content
+    obliges a warning.
+  </Card>
+  <Card title="Schema files" href="/spec/draft/schema-files">
+    The machine-readable schema, its address, and how to use it.
+  </Card>
+</CardGroup>
+
+## Scope
+
+This document specifies the protocol: the event stream, the run input, and the
+obligations of the parties exchanging them. It does not specify what any
+particular integration does with an event after receiving it, how an agent
+framework should be structured, or how a UI should render anything.
+
+AG-UI is maintained with three first-party SDKs — TypeScript, Python and .NET —
+and every rule here applies to all of them equally. Other language bindings are
+community-maintained; they are bound by this document when they claim
+conformance, but nothing here is derived from them.

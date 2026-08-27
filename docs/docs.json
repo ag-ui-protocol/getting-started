@@ -56,6 +56,17 @@
             ]
           },
           {
+            "group": "Specification",
+            "pages": [
+              "spec/draft/overview",
+              "spec/draft/lifecycle",
+              "spec/draft/unknown-and-malformed",
+              "spec/draft/subagents",
+              "spec/draft/compatibility",
+              "spec/draft/schema-files"
+            ]
+          },
+          {
             "group": "Draft Proposals",
             "pages": ["drafts/overview", "drafts/generative-ui", "drafts/meta-events"]
           },
@@ -225,6 +236,10 @@
     {
       "source": "/quickstart/build",
       "destination": "/quickstart/server"
+    },
+    {
+      "source": "/spec/draft",
+      "destination": "/spec/draft/overview"
     }
   ]
 }

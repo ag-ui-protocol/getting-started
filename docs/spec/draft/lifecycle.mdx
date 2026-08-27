@@ -1,0 +1,177 @@
+---
+title: "Run lifecycle"
+description: "Event sequencing, run and step boundaries, and how messages and tool calls open and close — draft"
+---
+
+<Warning>
+  **Draft — not yet ratified.** Published for review. The wording is not final
+  and nothing here carries a compatibility promise yet.
+</Warning>
+
+A run is one exchange: a consumer sends a [`RunAgentInput`](/spec/draft/schema.json),
+a producer answers with a stream of events. This page states which events may
+appear, in what order, and what closes what.
+
+## The run
+
+A stream MUST begin with `RUN_STARTED` or `RUN_ERROR`. A producer MUST NOT emit
+any other event first, and a consumer MUST treat a stream that opens with
+anything else as a protocol violation. `RUN_ERROR` is admitted first because a
+run can fail before it begins — a transport that cannot reach the agent has a
+failure to report and no run to report it against.
+
+A run ends with `RUN_FINISHED` or `RUN_ERROR`, after which it is closed. Once a
+run has closed:
+
+- A producer MUST NOT emit any further event for that run, other than the two
+  named below.
+- A producer MAY emit `RUN_STARTED` to begin a new run on the same stream.
+- A producer MAY emit `RUN_ERROR` after `RUN_FINISHED`, reporting a failure that
+  surfaced after the run reported success — a transport error while flushing,
+  say. A consumer MUST treat the run as failed in that case.
+- A producer MUST NOT emit anything after `RUN_ERROR` except `RUN_STARTED`.
+
+A consumer MUST reject any other event that arrives after a run has closed.
+
+`RUN_FINISHED` reports how the run ended. Its `outcome` distinguishes a run that
+completed from one suspended awaiting outside input; an absent outcome means
+success. A producer MUST NOT send an outcome value the schema does not describe.
+
+A consumer MUST NOT report a run as successful on the strength of an outcome it
+could not read. An outcome value the consumer does not recognise is not an
+absent outcome: absent means success because the protocol says so, whereas
+unrecognised means a terminal state named after this consumer shipped.
+
+<Note>
+  The reference implementation does not yet honour this: enforcement strips the
+  unrecognised outcome, after which the reducer sees an absent one and reports
+  success. Correcting that is tracked against the client rather than resolved by
+  softening the rule, because a future terminal state silently reported as
+  success is the worst available failure.
+</Note>
+
+A single stream MAY carry several runs in sequence — a replayed thread is the
+common case. A producer MUST close the current run before opening the next: a
+`RUN_STARTED` while a run is still active is a violation. Across runs within a stream, messages accumulate and state
+persists unless an event replaces it.
+
+## Steps
+
+`STEP_STARTED` opens a step and `STEP_FINISHED` closes it, matched by
+`stepName`. A producer MUST NOT open a step whose name is already open, and MUST
+NOT finish a step that was never opened.
+
+Every step a producer opens MUST be closed before the run finishes.
+
+## Text messages
+
+A text message is opened by `TEXT_MESSAGE_START`, extended by zero or more
+`TEXT_MESSAGE_CONTENT` events, and closed by `TEXT_MESSAGE_END`, all matched by
+`messageId`.
+
+- A producer MUST NOT open a message whose `messageId` is already open.
+- A producer MUST NOT send `TEXT_MESSAGE_CONTENT` or `TEXT_MESSAGE_END` for a
+  `messageId` that is not open.
+- Every message a producer opens MUST be closed before the run finishes.
+
+Reasoning messages use `REASONING_MESSAGE_START`, `REASONING_MESSAGE_CONTENT`
+and `REASONING_MESSAGE_END`, matched by `messageId`, and a producer MUST observe
+the same three rules for them.
+
+<Note>
+  A consumer is not yet required to *detect* a violation of these three rules on
+  a reasoning message. The reference implementation verifies the open/close
+  discipline for text messages and tool calls but not for reasoning messages, so
+  requiring detection here would declare a shipped consumer non-conformant. A
+  producer that breaks the rules is non-conformant either way.
+</Note>
+
+## Tool calls
+
+A tool call is opened by `TOOL_CALL_START`, extended by zero or more
+`TOOL_CALL_ARGS` events, and closed by `TOOL_CALL_END`, all matched by
+`toolCallId`. The same three rules apply: no reopening an open id, no continuing
+or closing an id that is not open, and everything opened is closed before the
+run finishes.
+
+`TOOL_CALL_RESULT` carries the result of a call. It is a message in its own
+right and does not reopen the call it answers.
+
+## Chunked events
+
+`TEXT_MESSAGE_CHUNK`, `REASONING_MESSAGE_CHUNK` and `TOOL_CALL_CHUNK` are a
+compact spelling of the sequences above, for producers that would otherwise have
+to buffer. A consumer MUST expand them into the start/content/end form before
+enforcement and before application code, so every rule on this page applies to
+the expanded events. Where expansion sits relative to middleware is specified
+in [Unknown and malformed](/spec/draft/unknown-and-malformed).
+
+The first chunk of a message or call carries what opening it requires; later
+chunks MAY omit those fields and continue what is already open.
+
+- The first `TEXT_MESSAGE_CHUNK` for a message MUST carry `messageId`. It MAY
+  carry `role`; an absent role means `assistant`, exactly as on
+  `TEXT_MESSAGE_START`.
+- The first `REASONING_MESSAGE_CHUNK` for a message MUST carry `messageId`.
+- The first `TOOL_CALL_CHUNK` for a call MUST carry both `toolCallId` and
+  `toolCallName`.
+- A later chunk that carries an id MUST carry the same id it is continuing. A
+  chunk that names a different id opens a new message or call, and the previous
+  one closes first.
+
+A consumer MUST treat a first chunk missing a required field as a protocol
+violation rather than inventing an identifier.
+
+## Ordering between kinds
+
+Messages, tool calls and steps are independent. A producer MAY interleave them
+freely — a tool call MAY open while a message is still streaming — provided each
+respects its own open/close discipline.
+
+`STATE_SNAPSHOT`, `STATE_DELTA`, `MESSAGES_SNAPSHOT`, `CUSTOM` and `RAW` are
+standalone: they open nothing and close nothing, and MAY appear anywhere within
+an open run.
+
+## Metadata
+
+`metadata` is open by key. Any JSON value is allowed under a key, including
+`null`; the object itself is either absent or an object and MUST NOT be `null`.
+
+A message is assembled from several events, and the interesting values — token
+usage, a finish reason — are only known at the end. So metadata accumulates
+rather than being fixed when the message opens: a consumer MUST merge the
+metadata of every event making up a message, key by key, with the last write
+winning for each key.
+
+The merge MUST NOT recurse. A key's value is replaced outright, so an object or
+array under a key is replaced wholesale rather than blended with what was there
+before.
+
+The `ag-ui` key is reserved for the protocol's own use. Every other key is
+application space.
+
+## Absent means absent
+
+An optional field that has no value MUST be omitted rather than sent as `null`.
+
+The rule binds a field whose schema does not itself admit `null` — which is most
+of them. Some fields carry arbitrary JSON, `rawEvent` and `RUN_FINISHED.result`
+among them, and for those `null` is a value the schema permits: a producer MAY
+send it, a consumer MUST preserve it, and nothing can distinguish it from an
+"absent" null because there is no such thing there. Whether a field admits
+`null` is a structural question, so the [schema](/spec/draft/schema.json)
+answers it.
+
+This is not a style preference. A consumer that must accept both spellings has
+to treat them as equal everywhere, and every such tolerance is permanent once
+shipped. The protocol carries the one spelling every implementation can
+represent.
+
+A `null` *value under an open-by-key object* — a metadata value, something inside
+`state` — is data and MUST be preserved. Only a `null` standing in for a whole
+absent field is prohibited.
+
+Where the protocol has already shipped tolerance for a `null` in an optional
+position, it is listed in the deprecation registry and handled by a
+compatibility shim rather than by this rule. See
+[Compatibility](/spec/draft/compatibility).
