@@ -195,6 +195,160 @@ jobs:
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         uses: ./.github/actions/assert-lockfiles-unchanged
 
+  # The locked langgraph-python lane above installs whatever uv.lock resolves, which
+  # sits at or above the floor pyproject.toml declares. That leaves the declared
+  # minimum asserted by nothing -- and for this package that gap has teeth.
+  #
+  # ag-ui-langgraph imports SubagentStartedEvent, SubagentFinishedEvent,
+  # SubagentErrorEvent and SubagentFinishedSuspendedOutcome from ag_ui.core. None of
+  # them exist below ag-ui-protocol 0.1.21, so a floor declared any lower ships a
+  # wheel that ImportErrors on a clean install while every CI lane stays green --
+  # exactly the hazard the [tool.uv.sources] override carried until PNI-274, and the
+  # reason removing that override has to come with a gate rather than a promise.
+  #
+  # This lane installs the floor itself. It reads the version out of the manifest
+  # rather than repeating it, so raising the declared minimum moves this lane with it
+  # and the two cannot drift apart.
+  langgraph-python-declared-floor:
+    name: langgraph-python-declared-floor
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        # id so the lockfile assertion below can gate on this step's outcome. See
+        # that step for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Read the declared ag-ui-protocol floor
+        id: floor
+        working-directory: integrations/langgraph/python
+        # Reads [project].dependencies specifically. That table is what becomes the
+        # built wheel's Requires-Dist, and it is the floor this lane exists to test.
+        # Scanning the whole manifest would also match [dependency-groups] or
+        # [project.optional-dependencies], where a version has no bearing on what a
+        # clean `pip install ag-ui-langgraph` resolves -- so the lane could report a
+        # floor it had tested while the wheel declared something else.
+        #
+        # Parsed with `packaging` -- the library that defines PEP 508 -- rather than
+        # grepped. A grep gets the easy case right and the rest silently wrong: it
+        # misses "ag-ui-protocol >= 0.1.21" and single-quoted TOML, mangles a
+        # prerelease floor into the wrong version, and cannot see an environment
+        # marker at all. It also exits non-zero on no match, which under
+        # `set -euo pipefail` killed this step at the assignment and made the
+        # no-floor branch below unreachable dead code.
+        #
+        # Handled: extras, an added upper bound, prerelease floors, and the
+        # underscore spelling of the name (canonicalize_name).
+        #
+        # Everything else fails CLOSED with an explicit message rather than guessing,
+        # because every way of guessing wrong here produces the same silent outcome —
+        # a lane that reports testing a floor the wheel does not declare. The rule is
+        # one unambiguous floor or nothing: exactly one requirement naming this
+        # distribution, no environment marker on it, exactly one `>=` in it, and that
+        # `>=` version actually permitted by the requirement as a whole.
+        #
+        # That last check is the semantic one, and it subsumes guessing from structure:
+        # ">=0.1.21,!=0.1.21" passes every structural test above while excluding the
+        # very version it names. Asking `specifier.contains()` whether the floor we are
+        # about to install is one the wheel would accept answers the question directly.
+        # Note it must allow prereleases, or a legitimate ">=0.1.22rc1" floor would be
+        # rejected as not satisfying itself. A plain exclusion of some LATER release,
+        # ">=0.1.21,!=0.1.23", stays valid and still yields 0.1.21.
+        #
+        # The multiple-requirements case is the subtle one. PEP 621 permits
+        # `ag-ui-protocol` to appear more than once with different markers, each
+        # becoming its own Requires-Dist, in which case the effective floor is
+        # whichever marker matches the installing interpreter. Taking the first match
+        # would silently ignore the rest — including a marker this lane would
+        # otherwise have rejected.
+        #
+        # The interpreter comes from uv (installed above) rather than the runner
+        # image, so this does not depend on the image's python3 being new enough for
+        # tomllib.
+        run: |
+          set -euo pipefail
+          floor=$(uv run --no-project --with packaging python -c '
+          import tomllib
+          from packaging.requirements import Requirement
+          from packaging.utils import canonicalize_name
+          deps = tomllib.load(open("pyproject.toml", "rb"))["project"]["dependencies"]
+          reqs = [r for r in map(Requirement, deps) if canonicalize_name(r.name) == "ag-ui-protocol"]
+          if len(reqs) > 1:
+              print("UNSUPPORTED:found " + str(len(reqs)) + " ag-ui-protocol requirements (" + "; ".join(str(r) for r in reqs) + "). PEP 621 permits that, but the effective floor then depends on markers this lane cannot evaluate.")
+          elif len(reqs) == 1:
+              req = reqs[0]
+              if req.marker is not None:
+                  print("UNSUPPORTED:the ag-ui-protocol requirement carries an environment marker (" + str(req) + "), which this lane cannot honour because it installs the floor unconditionally.")
+              else:
+                  mins = [sp.version for sp in req.specifier if sp.operator == ">="]
+                  if len(mins) != 1:
+                      print("UNSUPPORTED:expected exactly one >= specifier on ag-ui-protocol, got (" + str(req) + ").")
+                  elif not req.specifier.contains(mins[0], prereleases=True):
+                      print("UNSUPPORTED:the >= floor " + mins[0] + " is itself excluded by the rest of the requirement (" + str(req) + "), so installing it would violate the Requires-Dist of the wheel itself.")
+                  else:
+                      print(mins[0])
+          ')
+          case "$floor" in
+            UNSUPPORTED:*)
+              echo "::error::${floor#UNSUPPORTED:}" \
+                   "Teach this lane that case rather than letting it test a floor the wheel does not declare."
+              exit 1
+              ;;
+          esac
+          if [ -z "$floor" ]; then
+            echo "::error::No \`ag-ui-protocol>=\` floor found in [project].dependencies." \
+                 "This lane exists to test that floor, so it must not pass without one."
+            exit 1
+          fi
+          echo "version=$floor" >> "$GITHUB_OUTPUT"
+          echo "Declared floor: ag-ui-protocol==$floor"
+
+      - name: Install dependencies
+        working-directory: integrations/langgraph/python
+        run: uv sync --locked
+
+      - name: Downgrade to the declared floor
+        working-directory: integrations/langgraph/python
+        # The floor reaches the shell through the environment, not through template
+        # expansion. The value is read out of a file in the repository, so on a fork
+        # PR it is attacker-controllable, and expanding it inline would splice that
+        # content into the script itself.
+        env:
+          AG_UI_PROTOCOL_FLOOR: ${{ steps.floor.outputs.version }}
+        run: |
+          set -euo pipefail
+          uv pip install "ag-ui-protocol==${AG_UI_PROTOCOL_FLOOR}"
+          uv run --no-sync python -c \
+            "import importlib.metadata as m; print('ag-ui-protocol', m.version('ag-ui-protocol'))"
+
+      # Fails loudly and specifically if the floor predates a symbol the code imports,
+      # rather than surfacing it as an opaque ImportError partway through the suite.
+      - name: Assert the floor satisfies the subagent imports
+        working-directory: integrations/langgraph/python
+        run: |
+          set -euo pipefail
+          uv run --no-sync python -c "import ag_ui_langgraph"
+
+      - name: Run tests at the declared floor
+        working-directory: integrations/langgraph/python
+        run: uv run --no-sync python -m unittest discover tests -v
+
+      - name: Assert no lockfile was rewritten
+        # Same reasoning as the locked lane: this must run even when the tests fail,
+        # or a run that rewrote a lockfile and then went red would report only the
+        # test failure and lose this signal.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
+
   watsonx-python:
     runs-on: ubuntu-latest
 

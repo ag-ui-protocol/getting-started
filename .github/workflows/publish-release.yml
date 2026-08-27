@@ -158,6 +158,28 @@ env:
   # this file needs no frozen-mode exemption.
   UV_VERSION: "0.12.1"
   PYTHON_VERSION: "3.12"
+  # Budget for the post-publish registry visibility check, shared by the stable
+  # and canary TypeScript publish loops.
+  #
+  # npm's CDN can take minutes to serve a freshly published version back, and
+  # npm says so itself on every publish: "Your package is being processed and
+  # may take a few minutes to become available." The check has to outlast that,
+  # because timing out here fails the release AFTER the packages are already
+  # live and immutable on the registry -- no git tags, no GitHub Releases, and
+  # publish-dotnet / publish-maven (which `needs: publish`) never run at all.
+  #
+  # This has now been tuned upward twice from real false positives: 15s, then
+  # 60s. Run 33068467612 is the 60s case -- all four @ag-ui packages published
+  # fine, then each timed out at exactly 60s in turn, taking NuGet and Maven
+  # Central down with them and leaving npm/PyPI published but untagged.
+  #
+  # The asymmetry is what sets the value: a false positive breaks a release
+  # that already shipped and needs hand recovery, while a slow true negative
+  # only delays the error report in a rare failure mode (silent OIDC fallback).
+  # So this is deliberately generous. The fast path is unaffected -- the loop
+  # breaks as soon as the version is visible, usually on the first attempt.
+  NPM_VISIBILITY_ATTEMPTS: "30"
+  NPM_VISIBILITY_INTERVAL_SECONDS: "10"
 
 permissions:
   contents: read
@@ -912,12 +934,12 @@ jobs:
                 # Verify publish actually landed on the registry. Catches the
                 # silent-OIDC-fallback failure mode (npm returns 0 but the
                 # version never propagated) and transient registry/CDN issues.
-                # 6 attempts × 10s = up to 60s of CDN propagation tolerance. npm CDN can lag 30-60s
-                # during peak hours; 15s was too aggressive and produced false-positive failures.
+                # Budget comes from NPM_VISIBILITY_ATTEMPTS × NPM_VISIBILITY_INTERVAL_SECONDS
+                # (see the workflow-level env block for why it is set where it is).
                 PUBLISH_VERIFIED=0
                 VIEW_STDERR=$(mktemp)
                 VIEW_STDOUT=$(mktemp)
-                for ATTEMPT in 1 2 3 4 5 6; do
+                for ATTEMPT in $(seq 1 "$NPM_VISIBILITY_ATTEMPTS"); do
                   # exit 0 alone is not sufficient — npm view can return 0 with
                   # empty stdout (e.g. when the registry serves a stale doc that
                   # lacks the new version under a dist-tag) or with a different
@@ -928,14 +950,14 @@ jobs:
                     PUBLISH_VERIFIED=1
                     break
                   fi
-                  if [ "$ATTEMPT" -lt 6 ]; then
-                    sleep 10
+                  if [ "$ATTEMPT" -lt "$NPM_VISIBILITY_ATTEMPTS" ]; then
+                    sleep "$NPM_VISIBILITY_INTERVAL_SECONDS"
                   fi
                 done
                 if [ "$PUBLISH_VERIFIED" -eq 1 ]; then
                   echo "::notice::PUBLISHED: ${PROJECT}@${PKG_VERSION}"
                 else
-                  echo "::error::Publish returned 0 but ${PROJECT}@${PKG_VERSION} not visible on registry after 6 attempts (60s)"
+                  echo "::error::Publish returned 0 but ${PROJECT}@${PKG_VERSION} not visible on registry after ${NPM_VISIBILITY_ATTEMPTS} attempts ($((NPM_VISIBILITY_ATTEMPTS * NPM_VISIBILITY_INTERVAL_SECONDS))s)"
                   echo "::error::Last npm view stderr (may be empty if npm routed error to stdout):"
                   if [ -s "$VIEW_STDERR" ]; then cat "$VIEW_STDERR"; else echo "  (empty)"; fi
                   echo "::error::Last npm view stdout:"
@@ -1026,11 +1048,11 @@ jobs:
               # propagated) and transient registry/CDN issues. Without this, a
               # green workflow run can hide a publish that never actually
               # reached the canary dist-tag.
-              # 6 attempts × 10s = up to 60s of CDN propagation tolerance.
+              # Same budget as the stable loop -- see the workflow-level env block.
               PUBLISH_VERIFIED=0
               VIEW_STDERR=$(mktemp)
               VIEW_STDOUT=$(mktemp)
-              for ATTEMPT in 1 2 3 4 5 6; do
+              for ATTEMPT in $(seq 1 "$NPM_VISIBILITY_ATTEMPTS"); do
                 # exit 0 alone is not sufficient — npm view can return 0 with
                 # empty stdout (e.g. when the registry serves a stale doc that
                 # lacks the new version under a dist-tag) or with a different
@@ -1041,14 +1063,14 @@ jobs:
                   PUBLISH_VERIFIED=1
                   break
                 fi
-                if [ "$ATTEMPT" -lt 6 ]; then
-                  sleep 10
+                if [ "$ATTEMPT" -lt "$NPM_VISIBILITY_ATTEMPTS" ]; then
+                  sleep "$NPM_VISIBILITY_INTERVAL_SECONDS"
                 fi
               done
               if [ "$PUBLISH_VERIFIED" -eq 1 ]; then
                 echo "::notice::PUBLISHED: ${PROJECT}@${PKG_VERSION} (canary)"
               else
-                echo "::error::Canary publish returned 0 but ${PROJECT}@${PKG_VERSION} not visible on registry after 6 attempts (60s)"
+                echo "::error::Canary publish returned 0 but ${PROJECT}@${PKG_VERSION} not visible on registry after ${NPM_VISIBILITY_ATTEMPTS} attempts ($((NPM_VISIBILITY_ATTEMPTS * NPM_VISIBILITY_INTERVAL_SECONDS))s)"
                 echo "::error::Last npm view stderr (may be empty if npm routed error to stdout):"
                 if [ -s "$VIEW_STDERR" ]; then cat "$VIEW_STDERR"; else echo "  (empty)"; fi
                 echo "::error::Last npm view stdout:"

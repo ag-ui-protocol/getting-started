@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,6 +16,7 @@ from ag_ui_strands.client_proxy_tool import (
     create_proxy_tool,
     sync_proxy_tools,
 )
+from ag_ui_strands.config import ToolBehavior
 
 
 # ---------------------------------------------------------------------------
@@ -35,6 +37,14 @@ def _make_native_tool(name: str) -> PythonAgentTool:
     _func.__name__ = name
     spec = {"name": name, "description": "native", "inputSchema": {"json": {}}}
     return PythonAgentTool(tool_name=name, tool_spec=spec, tool_func=_func)
+
+
+async def _stream_tool(proxy, tool_use):
+    agent = SimpleNamespace(
+        _interrupt_state=SimpleNamespace(interrupts={}),
+    )
+    invocation_state = {"agent": agent}
+    return [event async for event in proxy.stream(tool_use, invocation_state)]
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +87,30 @@ class TestProxyToolResult:
         assert result["toolUseId"] == "abc-123"
         assert result["status"] == "success"
         assert result["content"] == [{"text": "Forwarded to client"}]
+
+    @pytest.mark.asyncio
+    async def test_explicit_false_raises_tagged_native_interrupt(self):
+        proxy = create_proxy_tool(
+            _make_ag_ui_tool("wait_for_client"),
+            continue_after_frontend_call=False,
+        )
+        tool_use = {
+            "toolUseId": "native-wait-id",
+            "name": "wait_for_client",
+            "input": {"value": "requested"},
+        }
+
+        events = await _stream_tool(proxy, tool_use)
+
+        assert len(events) == 1
+        interrupt_event = events[0]["tool_interrupt_event"]
+        assert interrupt_event["tool_use"] == tool_use
+        [interrupt] = interrupt_event["interrupts"]
+        assert interrupt.name == "ag_ui_frontend_tool_wait"
+        assert interrupt.reason == {
+            "name": "ag_ui_frontend_tool_wait",
+            "tool_use_id": "native-wait-id",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -147,3 +181,31 @@ class TestSyncProxyTools:
 
         assert r1 == r2 == {"t1"}
         assert "t1" in registry.registry
+
+    @pytest.mark.asyncio
+    async def test_only_explicit_false_selects_native_interrupt_mode(self):
+        registry = self._fresh_registry()
+        tools = [
+            _make_ag_ui_tool("unconfigured"),
+            _make_ag_ui_tool("waiting"),
+        ]
+
+        sync_proxy_tools(
+            registry,
+            tools,
+            set(),
+            tool_behaviors={
+                "waiting": ToolBehavior(continue_after_frontend_call=False),
+            },
+        )
+
+        unconfigured_result = registry.registry["unconfigured"]._tool_func(
+            {"toolUseId": "legacy-id", "name": "unconfigured", "input": {}}
+        )
+        waiting_events = await _stream_tool(
+            registry.registry["waiting"],
+            {"toolUseId": "waiting-id", "name": "waiting", "input": {}},
+        )
+
+        assert unconfigured_result["content"] == [{"text": "Forwarded to client"}]
+        assert "tool_interrupt_event" in waiting_events[0]

@@ -23,7 +23,7 @@ import { Agent } from "@strands-agents/sdk";
 import { StrandsAgent, type StrandsAgentConfig } from "@ag-ui/aws-strands";
 import { createStrandsApp } from "@ag-ui/aws-strands/server";
 import { createModel } from "../model-factory";
-import { demoPort, runIfMain } from "../run-if-main";
+import { demoPort, listenOrExit, runIfMain } from "../run-if-main";
 
 const SYSTEM_PROMPT = `You are a helpful assistant for writing documents.
 
@@ -37,7 +37,7 @@ Keep stories SHORT.
 After calling the tool, do NOT repeat the document as a message. Just briefly
 summarize the changes you made, 2 sentences max.`;
 
-const config: StrandsAgentConfig = {
+export const predictiveStateConfig: StrandsAgentConfig = {
   stateContextBuilder: (input, prompt) => {
     const state = (input.state ?? {}) as Record<string, unknown>;
     const document = state.document;
@@ -81,7 +81,11 @@ const config: StrandsAgentConfig = {
           input === null ||
           Array.isArray(input)
         ) {
-          const kind = Array.isArray(input) ? "an array" : `${typeof input}`;
+          const kind = Array.isArray(input)
+            ? "an array"
+            : input === null
+              ? "null"
+              : `${typeof input}`;
           console.warn(
             `write_document arguments were ${kind}, not an object; no authoritative document state published`,
           );
@@ -113,19 +117,17 @@ export async function createPredictiveStateUpdatesAgent(): Promise<StrandsAgent>
     name: "predictive_state_updates",
     description:
       "AWS Strands document editor that streams tool arguments into shared state",
-    config,
+    config: predictiveStateConfig,
   });
 }
 
 runIfMain(import.meta.url, async () => {
+  // Port first: it throws on a malformed PORT, and building the agent first
+  // would surface a missing API key instead and hide the real complaint.
+  const port = demoPort();
   const app = await createStrandsApp(
     await createPredictiveStateUpdatesAgent(),
     { path: "/" },
   );
-  const port = demoPort();
-  app.listen(port, () => {
-    console.log(
-      `predictive-state-updates demo listening on http://localhost:${port}`,
-    );
-  });
+  listenOrExit(app, "predictive-state-updates", port);
 });

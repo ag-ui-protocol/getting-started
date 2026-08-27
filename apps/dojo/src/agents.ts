@@ -487,6 +487,16 @@ export const agentsIntegrations = {
         shared_state: "shared_state",
         tool_based_generative_ui: "tool_based_generative_ui",
         predictive_state_updates: "predictive_state_updates",
+        // A2UI: generate_a2ui is auto-injected and handled server-side by the MAF
+        // Python adapter (plan_a2ui_injection → subagent + recovery), driven by the
+        // runtime forwarding injectA2UITool (see the copilotkit route). No client-side
+        // tool injection or per-agent middleware, so these are plain HttpAgents.
+        // Fixed-schema needs no generation tool — its search tools return the surface
+        // envelope directly and simply never emit a generate_a2ui call.
+        a2ui_fixed_schema: "a2ui_fixed_schema",
+        a2ui_dynamic_schema: "a2ui_dynamic_schema",
+        a2ui_advanced: "a2ui_advanced",
+        a2ui_recovery: "a2ui_recovery",
       },
     ),
 

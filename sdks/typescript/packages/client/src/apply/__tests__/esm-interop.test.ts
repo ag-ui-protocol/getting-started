@@ -2,9 +2,14 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const pkgDir = path.resolve(__dirname, "../../..");
 const distEsm = path.join(pkgDir, "dist", "index.mjs");
+// Node's ESM loader only accepts file:/// URLs for absolute specifiers. A raw
+// Windows path ("C:\...") is read as a "c:" protocol and rejected with
+// ERR_UNSUPPORTED_ESM_URL_SCHEME, so the specifier has to be a URL, not a path.
+const distEsmUrl = pathToFileURL(distEsm).href;
 
 describe("ESM consumers under Node's native loader (regression #1577)", () => {
   beforeAll(() => {
@@ -22,7 +27,7 @@ describe("ESM consumers under Node's native loader (regression #1577)", () => {
   // (the same loader used by tsx, Node with `"type":"module"`, Vite SSR, etc.).
   it("applies STATE_DELTA through the built ESM bundle without 'applyPatch is not a function'", () => {
     const script = `
-      import { defaultApplyEvents } from ${JSON.stringify(distEsm)};
+      import { defaultApplyEvents } from ${JSON.stringify(distEsmUrl)};
       import { EventType } from "@ag-ui/core";
       import { of, firstValueFrom } from "rxjs";
 

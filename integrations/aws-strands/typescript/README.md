@@ -11,8 +11,8 @@ This package exposes a lightweight wrapper that lets any `@strands-agents/sdk` `
 ## Quick Start
 
 The `examples/` package ships a "dojo" server that mounts every demo on a
-single port, plus ten standalone servers, one per feature, that you can run
-independently.
+single port, plus a standalone server for each of the ten demos that ship a
+run script, which you can start on its own.
 
 ```bash
 # from the repo root
@@ -52,11 +52,12 @@ The dojo exposes:
 | `/interrupt`                | Backend tool pauses itself to ask the user for a meeting time            |
 | `/predictive-state-updates` | Frontend write tool whose streaming args paint `state.document`          |
 | `/tool-based-generative-ui` | Frontend-rendered tool (`generate_haiku`)                                |
+| `/multi-agent`              | Graph orchestrator; the adapter drives `.stream()` rather than cloning   |
 | `/a2ui-dynamic-schema`      | A2UI surfaces composed on the fly (auto-injected tool)                   |
 | `/a2ui-fixed-schema`        | A2UI from fixed-layout backend tools                                     |
 | `/a2ui-recovery`            | A2UI validate-and-retry recovery loop                                    |
 
-Most files under `examples/server/api/*.ts` follow the same pattern: build a Strands `Agent`, wrap it in a `StrandsAgent`, hand it to `createStrandsApp`, listen. The three a2ui files export a factory instead and are mounted only by `server.ts`, so they have no standalone script.
+Every file under `examples/server/api/*.ts` follows the same pattern: build the thing the demo drives, wrap it in a `StrandsAgent`, and export that as a factory. Usually that is a single Strands `Agent`; `multi-agent.ts` wraps a graph orchestrator instead. Each file is the single definition of its demo, so the dojo server mounts the same agent you get by running the demo on its own. The ten with a `pnpm run <demo>` script also hand the agent to `createStrandsApp` and listen, guarded so importing the file starts no server; the a2ui and multi-agent files export the factory only.
 
 ## Architecture Overview
 
@@ -78,7 +79,7 @@ See [../ARCHITECTURE.md](../ARCHITECTURE.md) for diagrams and a deeper dive.
 | `src/endpoint.ts`          | Express endpoint helpers (used by `server.ts`)                                  |
 | `src/utils.ts`             | Multimodal content conversion                                                   |
 | `src/client-proxy-tool.ts` | Dynamic frontend tool registration/deregistration                               |
-| `examples/server/api/*.ts` | Ready-to-run demo apps                                                          |
+| `examples/server/api/*.ts` | One factory per demo; ten of them also run standalone                           |
 
 ## Amazon Bedrock AgentCore Considerations
 

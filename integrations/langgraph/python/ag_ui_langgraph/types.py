@@ -19,6 +19,48 @@ class CustomEventNames(str, Enum):
     ManuallyEmitMessage = "manually_emit_message"
     ManuallyEmitToolCall = "manually_emit_tool_call"
     ManuallyEmitState = "manually_emit_state"
+
+    # Advisory only — this does NOT terminate the stream.
+    #
+    # Unlike the ``ManuallyEmit*`` members above, which the bridge additionally
+    # translates into specific AG-UI events, ``Exit`` has no special-case branch: it
+    # is only forwarded, as ``CUSTOM(name="exit")`` — the same treatment any
+    # unrecognised custom event name gets. Graphs dispatch it with
+    # ``adispatch_custom_event(CustomEventNames.Exit.value, ...)``.
+    #
+    # The run then ends however it would have ended anyway: the exit event changes
+    # nothing about in-flight work or the terminal sequence. On the normal end-node
+    # path, with a step open, that sequence is STEP_FINISHED, STATE_SNAPSHOT,
+    # MESSAGES_SNAPSHOT, RUN_FINISHED, and an open message or tool call is closed
+    # first. Runs that end another way differ — the interrupt path closes the step
+    # after the snapshots; the error path ends at RUN_ERROR without the snapshots and
+    # without closing an in-flight message — but that is true with or without an exit
+    # event.
+    #
+    # Forwarding is subject to subagent visibility: under
+    # ``subagent_visibility="hidden"``, an exit dispatched from inside a subagent
+    # window is withheld along with the rest of that subagent's stream, because
+    # ``EventType.CUSTOM`` is one of ``agent.py``'s
+    # ``_SUBAGENT_ATTRIBUTABLE_EVENT_TYPES``. Nothing in the hidden-mode contract
+    # suite covered CUSTOM before PNI-386; ``test_exit_custom_event.py`` now records
+    # the drop as current behavior rather than endorsed contract. Whether an advisory
+    # signal should be exempt is a question for the subagent-visibility design, not
+    # for this contract.
+    #
+    # It is deliberately not a stream terminator. LangGraph never inspects custom
+    # event names — its only handler (``pregel/_retry.py``) is a timeout keepalive
+    # that discards its arguments — so the
+    # graph keeps running regardless, and honoring exit as a terminator would abandon
+    # a live graph with its checkpoint left at whatever super-step it last completed.
+    #
+    # The name is inherited from CopilotKit; AG-UI has no equivalent field. Clients
+    # may act on it (e.g. releasing an agent lock); nothing in this repo does today.
+    # The CrewAI integration's ``copilotkit_exit`` is the same advisory idea — note
+    # it spells the event name ``"Exit"``, not ``"exit"``, so one string comparison
+    # will not match both integrations.
+    #
+    # ``tests/test_exit_custom_event.py`` pins the forwarding, the non-termination,
+    # the normal- and interrupt-path terminal order, and the per-visibility behavior.
     Exit = "exit"
 
 State = Dict[str, Any]

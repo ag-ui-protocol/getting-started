@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from ag_ui.core import (
+    Context,
     CustomEvent,
     EventType,
     Interrupt,
@@ -34,6 +35,7 @@ from strands import Agent as StrandsAgentCore
 from strands import ToolContext, tool
 from strands.agent.state import AgentState
 from strands.interrupt import Interrupt as StrandsInterrupt
+from strands.hooks.registry import HookRegistry
 from strands.models.model import Model as StrandsModel
 from strands.session import FileSessionManager
 from strands.types.session import SessionAgent, SessionMessage
@@ -50,6 +52,7 @@ from ag_ui_strands.session_reconcile import (
     AG_UI_WIRE_MAP_STATE_KEY,
 )
 from tests.interrupt_state_stub import InterruptStateStub
+from tests.hook_helpers import invoke_after_model_call, invoke_before_model_call
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,6 +65,7 @@ def _make_run_input(
     messages=None,
     resume=None,
     tools=None,
+    context=None,
 ) -> RunAgentInput:
     return RunAgentInput(
         thread_id=thread_id,
@@ -69,7 +73,7 @@ def _make_run_input(
         state={},
         messages=messages or [],
         tools=tools or [],
-        context=[],
+        context=context or [],
         forwarded_props={},
         resume=resume,
     )
@@ -119,6 +123,8 @@ class _MockStrandsCore:
         self.model = MagicMock()
         self.messages = []
         self.stream_prompts = []
+        self.model_messages = []
+        self.hooks = HookRegistry()
         # Default to a mock session manager: the ``session_manager is None``
         # guard now rejects interrupts/resume without one, and most tests
         # here exercise the resume-translation logic, not that guard. Pass
@@ -142,6 +148,9 @@ class _MockStrandsCore:
         """
         self.stream_prompts.append(prompt)
         self._interrupt_state.resume(prompt)
+        invoke_before_model_call(self.hooks, self)
+        self.model_messages.append(copy.deepcopy(self.messages))
+        invoke_after_model_call(self.hooks, self)
         async for event in self._stream_body(prompt):
             yield event
 
@@ -406,11 +415,31 @@ class TestResumeConsumption:
         resume = [ResumeEntry(interrupt_id="int-1", status="resolved", payload="yes")]
 
         with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
-            await _collect_events(agent, _make_run_input(resume=resume))
+            await _collect_events(
+                agent,
+                _make_run_input(
+                    resume=resume,
+                    context=[Context(description="account", value="premium")],
+                ),
+            )
 
         assert core.stream_prompts == [
             [{"interruptResponse": {"interruptId": "int-1", "response": {"response": "yes"}}}]
         ]
+        assert core.model_messages == [[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "text": (
+                            "Context provided by the application:\n"
+                            "- account: premium"
+                        )
+                    }
+                ],
+            }
+        ]]
+        assert core.messages == []
 
     @pytest.mark.parametrize("falsy_payload", [None, False, "", 0, [], {}])
     @pytest.mark.asyncio

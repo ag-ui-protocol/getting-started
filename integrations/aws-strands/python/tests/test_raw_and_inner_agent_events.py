@@ -174,8 +174,18 @@ def _run_input(thread_id: str = "t1") -> RunAgentInput:
     )
 
 
-async def _collect(agent: StrandsAgent, thread_id: str = "t1") -> list:
-    return [event async for event in agent.run(_run_input(thread_id))]
+async def _collect(
+    agent: StrandsAgent,
+    thread_id: str = "t1",
+    *,
+    invocation_state: dict[str, Any] | None = None,
+) -> list:
+    kwargs = (
+        {"invocation_state": invocation_state}
+        if invocation_state is not None
+        else {}
+    )
+    return [event async for event in agent.run(_run_input(thread_id), **kwargs)]
 
 
 def _assert_stream_encodes(events: list) -> None:
@@ -347,7 +357,13 @@ async def test_raw_payloads_never_carry_invocation_state_injections():
         callback_handler=None,
     )
 
-    events = await _collect(_wrap(strands_agent))
+    invocation_state = {
+        "auth_token": "server-secret",
+        "tenant_id": "tenant-42",
+    }
+    events = await _collect(
+        _wrap(strands_agent), invocation_state=invocation_state
+    )
     _assert_stream_encodes(events)
 
     raw_events = [e for e in events if e.type == EventType.RAW]
@@ -361,10 +377,19 @@ async def test_raw_payloads_never_carry_invocation_state_injections():
         "event_loop_parent_span",
         "event_loop_parent_cycle_id",
         "request_state",
+        "auth_token",
+        "tenant_id",
     }
     for raw in raw_events:
         leaked = forbidden & set(raw.event)
         assert not leaked, f"invocation_state leaked into a RAW payload: {leaked}"
+
+    # The locked SDK release does not merge custom caller keys into this
+    # particular citation envelope, while newer supported releases do. Pin the
+    # sanitizer contract directly so the protection is not version-accidental.
+    merged_payload = {"citation": CITATION, **invocation_state}
+    sanitized = _sanitize_raw_event(merged_payload, invocation_state)
+    assert sanitized == {"citation": CITATION}
 
     # And nothing anywhere in the emitted payloads may be a stringified Agent:
     # a `default=str` style escape hatch would pass the key check above while

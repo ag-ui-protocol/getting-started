@@ -12,7 +12,7 @@ import urllib.request
 import warnings
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, TypeAlias
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from ag_ui.core import (
@@ -20,10 +20,18 @@ from ag_ui.core import (
     BinaryInputContent,
     DocumentInputContent,
     ImageInputContent,
+    RunAgentInput,
     TextInputContent,
     VideoInputContent,
 )
 from ag_ui.core.types import InputContentDataSource, InputContentUrlSource
+from fastapi import Request
+
+
+InvocationStateProvider: TypeAlias = Callable[
+    [Request, RunAgentInput],
+    dict[str, Any] | None | Awaitable[dict[str, Any] | None],
+]
 
 logger = logging.getLogger(__name__)
 
@@ -750,6 +758,7 @@ def create_strands_app(
     allow_methods: Optional[List[str]] = None,
     allow_headers: Optional[List[str]] = None,
     cors_enabled: Optional[bool] = None,
+    invocation_state_provider: Optional["InvocationStateProvider"] = None,
 ) -> "Any":
     """Create a FastAPI app with a single Strands agent endpoint and optional ping endpoint.
 
@@ -790,6 +799,9 @@ def create_strands_app(
             CORS explicitly; when *origins* is empty, this uses ``["*"]`` without
             emitting the implicit-wildcard warning. ``None`` preserves the
             legacy behavior and warns when *origins* is empty.
+        invocation_state_provider: Optional sync or async callable receiving the
+            FastAPI request and validated AG-UI input. Its returned dictionary is
+            forwarded as trusted, request-scoped Strands invocation state.
     """
     from fastapi import FastAPI
     from .endpoint import add_strands_fastapi_endpoint, add_ping
@@ -820,7 +832,13 @@ def create_strands_app(
         )
 
     # Add the agent endpoint
-    add_strands_fastapi_endpoint(app, agent, path, auth=auth)
+    add_strands_fastapi_endpoint(
+        app,
+        agent,
+        path,
+        auth=auth,
+        invocation_state_provider=invocation_state_provider,
+    )
 
     # Add ping endpoint if path is provided
     if ping_path is not None:

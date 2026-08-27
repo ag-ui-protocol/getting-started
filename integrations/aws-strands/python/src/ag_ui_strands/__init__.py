@@ -19,6 +19,7 @@ from .a2ui_tool import (
 from .client_proxy_tool import create_proxy_tool, sync_proxy_tools
 from .utils import (
     DEFAULT_URL_FETCH_POLICY,
+    InvocationStateProvider,
     UrlFetchPolicy,
     UrlFetchPolicyError,
     create_strands_app,
@@ -59,6 +60,7 @@ __all__ = [
     "UrlFetchPolicyError",
     "DEFAULT_URL_FETCH_POLICY",
     "add_strands_fastapi_endpoint",
+    "InvocationStateProvider",
     "add_ping",
     "StrandsAgentConfig",
     "ToolBehavior",
@@ -73,4 +75,3 @@ __all__ = [
     "RunFinishedInterruptOutcome",
     "RunFinishedSuccessOutcome",
 ]
-

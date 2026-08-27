@@ -218,7 +218,22 @@ export const defaultApplyEvents = (
             // Check if a message with this ID already exists (e.g., created by TOOL_CALL_START
             // with the same parentMessageId)
             const existingMessage = messages.find((m) => m.id === messageId);
-            let targetMessage = existingMessage;
+
+            if (existingMessage?.role === "activity") {
+              // Message ids are unique across the conversation, so an activity message under
+              // this id means the producer reused it. Streaming text into it would overwrite
+              // its structured content with a string. Leave it alone and drop the text — and
+              // with it the event's metadata, which describes a text message that never exists.
+              console.warn(
+                `TEXT_MESSAGE_START: Message '${messageId}' is an activity message — ` +
+                  `message ids must be unique across activity and text messages`,
+              );
+              return emitUpdates();
+            }
+
+            // Annotated: the guard above narrows `existingMessage` to the non-activity
+            // members, while the message created below is a full `Message`.
+            let targetMessage: Message | undefined = existingMessage;
 
             if (!targetMessage) {
               // Create a new message using properties from the event
@@ -253,6 +268,15 @@ export const defaultApplyEvents = (
           const targetMessage = messages.find((m) => m.id === messageId);
           if (!targetMessage) {
             console.warn(`TEXT_MESSAGE_CONTENT: No message found with ID '${messageId}'`);
+            return emitUpdates();
+          }
+          if (targetMessage.role === "activity") {
+            // Appending here would replace the activity message's structured content with a
+            // string, leaving it no longer a valid ActivityMessage.
+            console.warn(
+              `TEXT_MESSAGE_CONTENT: Message '${messageId}' is an activity message — ` +
+                `message ids must be unique across activity and text messages`,
+            );
             return emitUpdates();
           }
 
@@ -292,6 +316,15 @@ export const defaultApplyEvents = (
           const targetMessage = messages.find((m) => m.id === messageId);
           if (!targetMessage) {
             console.warn(`TEXT_MESSAGE_END: No message found with ID '${messageId}'`);
+            return emitUpdates();
+          }
+          if (targetMessage.role === "activity") {
+            // The matching TEXT_MESSAGE_START was dropped for the same reason, so there is no
+            // text message to finish — don't announce the activity message as a new one.
+            console.warn(
+              `TEXT_MESSAGE_END: Message '${messageId}' is an activity message — ` +
+                `message ids must be unique across activity and text messages`,
+            );
             return emitUpdates();
           }
 

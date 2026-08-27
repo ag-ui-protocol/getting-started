@@ -1,12 +1,15 @@
 """Integration tests for the LangGraph A2UI tool factory (``get_a2ui_tools``).
 
-These run in the ``langgraph-python`` unit job, which builds the LOCAL adapter
-and (via the adapter's ``[tool.uv.sources]`` path) the LOCAL toolkit — so they
-exercise the real in-repo code. The dojo e2e suite can't cover this: it installs
-the PUBLISHED ``ag-ui-langgraph`` (the langgraph-cloud build rejects local path
-deps that escape the examples root), so the new single-arg ``A2UIToolParams`` /
-``guidelines`` surface has no e2e coverage until it ships. This file is that
-coverage.
+These run in the ``langgraph-python`` unit job, which builds the LOCAL adapter,
+so they exercise the real in-repo ``get_a2ui_tools``. Its dependencies are NOT
+local: ``ag-ui-a2ui-toolkit`` has always come from PyPI as uv.lock resolves it,
+and ``ag-ui-protocol`` does too since PNI-274 removed the ``[tool.uv.sources]``
+override that pointed it at ``sdks/python``.
+
+The dojo e2e suite can't cover this: it installs the PUBLISHED
+``ag-ui-langgraph`` (the langgraph-cloud build rejects local path deps that
+escape the examples root), so the single-arg ``A2UIToolParams`` / ``guidelines``
+surface has no e2e coverage until it ships. This file is that coverage.
 
 A lightweight fake chat model STREAMS a fixed ``render_a2ui`` tool call as
 several ``AIMessageChunk``s (mirroring how a real provider streams tool-call arg

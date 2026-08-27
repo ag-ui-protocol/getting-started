@@ -12,12 +12,13 @@ Two layers of coverage:
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from ag_ui.core import EventType
+from ag_ui.core import Context, EventType
 from strands.models.model import Model
 
 from ag_ui_strands.agent import StrandsAgent
@@ -37,10 +38,12 @@ class FakeOrchestrator:
         self.events = events
         self.raises = raises
         self.prompts: list[Any] = []
+        self.invocation_states: list[dict[str, Any] | None] = []
         self.closed = False
 
     async def stream_async(self, task, invocation_state=None, **kwargs):
         self.prompts.append(task)
+        self.invocation_states.append(invocation_state)
         try:
             for event in self.events:
                 yield event
@@ -57,13 +60,13 @@ class FakeMessage:
 
 
 class FakeInput:
-    def __init__(self, messages=None, state=None, forwarded_props=None):
+    def __init__(self, messages=None, state=None, forwarded_props=None, context=None):
         self.thread_id = "test-thread"
         self.run_id = "test-run"
         self.state = state
         self.messages = messages or []
         self.tools = []
-        self.context = []
+        self.context = context or []
         self.forwarded_props = forwarded_props or {}
 
 
@@ -71,8 +74,18 @@ def node_stream(node_id: str, inner: dict) -> dict:
     return {"type": "multiagent_node_stream", "node_id": node_id, "event": inner}
 
 
-async def collect(agent: StrandsAgent, input_data=None) -> list:
-    return [e async for e in agent.run(input_data or FakeInput())]
+async def collect(
+    agent: StrandsAgent,
+    input_data=None,
+    *,
+    invocation_state: dict[str, Any] | None = None,
+) -> list:
+    kwargs = (
+        {"invocation_state": invocation_state}
+        if invocation_state is not None
+        else {}
+    )
+    return [e async for e in agent.run(input_data or FakeInput(), **kwargs)]
 
 
 async def _drain(stream) -> list:
@@ -121,6 +134,17 @@ async def test_orchestrator_path_chosen_when_agent_has_no_model():
     assert types[0] == EventType.RUN_STARTED
     assert types[-1] == EventType.RUN_FINISHED
     assert EventType.RUN_ERROR not in types
+
+
+@pytest.mark.asyncio
+async def test_shared_orchestrator_receives_an_isolated_invocation_state():
+    orchestrator = FakeOrchestrator([])
+    invocation_state = {"tenant_id": "tenant-1"}
+
+    await collect(make_agent(orchestrator), invocation_state=invocation_state)
+
+    assert orchestrator.invocation_states == [invocation_state]
+    assert orchestrator.invocation_states[0] is not invocation_state
 
 
 @pytest.mark.asyncio
@@ -557,6 +581,23 @@ async def test_list_content_is_flattened_not_repr_ed():
     assert orchestrator.prompts == ["summarise this"]
 
 
+@pytest.mark.asyncio
+async def test_context_reaches_structural_orchestrator_task():
+    orchestrator = FakeOrchestrator([])
+
+    await collect(
+        make_agent(orchestrator),
+        FakeInput(
+            messages=[FakeMessage("user", "what tier?")],
+            context=[Context(description="account", value="premium")],
+        ),
+    )
+
+    assert orchestrator.prompts == [
+        "Context provided by the application:\n- account: premium\n\nwhat tier?"
+    ]
+
+
 class _ResumeEntry:
     """Resolved resume for the interrupt the fake orchestrators raise."""
 
@@ -820,6 +861,7 @@ class ScriptedModel(Model):
 
     def __init__(self, text: str):
         self._text = text
+        self.calls = []
 
     def get_config(self):
         return {}
@@ -831,6 +873,7 @@ class ScriptedModel(Model):
         raise NotImplementedError
 
     async def stream(self, messages, tool_specs=None, system_prompt=None, **kwargs):
+        self.calls.append(copy.deepcopy(messages))
         yield {"messageStart": {"role": "assistant"}}
         yield {"contentBlockStart": {"start": {}}}
         yield {"contentBlockDelta": {"delta": {"text": self._text}}}
@@ -886,6 +929,32 @@ async def test_real_graph_streams_through_the_adapter():
     )
     assert "Found it." in text
     assert "Final answer." in text
+
+
+@pytest.mark.asyncio
+async def test_real_graph_context_is_transient_at_each_leaf_model():
+    from strands import Agent
+    from strands.multiagent import GraphBuilder
+
+    model = ScriptedModel("Done.")
+    node = Agent(model=model, name="solo", callback_handler=None)
+    builder = GraphBuilder()
+    builder.add_node(node, "solo")
+    builder.set_entry_point("solo")
+
+    agent = StrandsAgent(builder.build(), name="multi_agent")
+    events = await collect(
+        agent,
+        FakeInput(
+            messages=[FakeMessage("user", "what tier?")],
+            context=[Context(description="account", value="premium")],
+        ),
+    )
+
+    assert EventType.RUN_ERROR not in [event.type for event in events]
+    assert "Context provided by the application" in repr(model.calls)
+    assert "account: premium" in repr(model.calls)
+    assert "account: premium" not in repr(node.messages)
 
 
 @pytest.mark.asyncio
@@ -1050,6 +1119,24 @@ async def test_a_factory_builds_a_fresh_orchestrator_per_run():
     # One at construction to validate the factory, then one per run.
     assert len(built) == 3
     assert built[1] is not built[2]
+
+
+@pytest.mark.asyncio
+async def test_factory_orchestrator_receives_invocation_state_for_its_run():
+    built = []
+
+    def build():
+        orchestrator = FakeOrchestrator([])
+        built.append(orchestrator)
+        return orchestrator
+
+    agent = StrandsAgent(build, name="multi_agent")
+    invocation_state = {"request_id": "request-1"}
+
+    await collect(agent, invocation_state=invocation_state)
+
+    assert built[1].invocation_states == [invocation_state]
+    assert built[1].invocation_states[0] is not invocation_state
 
 
 @pytest.mark.asyncio

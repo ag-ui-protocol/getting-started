@@ -7,12 +7,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from strands.agent.state import AgentState
+from strands.hooks.registry import HookRegistry
 from strands.session import SessionManager
 
 from ag_ui_strands.session_reconcile import AG_UI_WIRE_MAP_STATE_KEY
 
 from ag_ui.core import (
     AssistantMessage,
+    Context,
     EventType,
     FunctionCall,
     RunAgentInput,
@@ -23,6 +25,7 @@ from ag_ui.core import (
 )
 from ag_ui_strands.agent import StrandsAgent
 from ag_ui_strands.config import StrandsAgentConfig
+from tests.hook_helpers import invoke_after_model_call, invoke_before_model_call
 
 
 def _mock_session_manager() -> MagicMock:
@@ -536,9 +539,14 @@ class _MockSessionAgentReal:
         self.tool_registry.registry = {}
         self.state = AgentState()
         self.stream_prompts = []
+        self.model_messages = []
+        self.hooks = HookRegistry()
 
     async def stream_async(self, prompt):
         self.stream_prompts.append(prompt)
+        invoke_before_model_call(self.hooks, self)
+        self.model_messages.append(copy.deepcopy(self.messages))
+        invoke_after_model_call(self.hooks, self)
         return
         yield  # pragma: no cover
 
@@ -611,7 +619,14 @@ def _result_content(sm, agent_id, index):
 
 
 async def _run_session_continuation(
-    sm, agent_id, messages, tools, wire_map, store, config_kwargs=None
+    sm,
+    agent_id,
+    messages,
+    tools,
+    wire_map,
+    store,
+    config_kwargs=None,
+    context=None,
 ):
     """Drive run() for a continuation and return the mock agent instance."""
     _seed_session(sm, agent_id, store)
@@ -625,7 +640,7 @@ async def _run_session_continuation(
         state={},
         messages=messages,
         tools=tools,
-        context=[],
+        context=context or [],
         forwarded_props={},
     )
     instance = _MockSessionAgentReal(
@@ -751,6 +766,35 @@ class TestSessionFrontendToolReconciliation:
         assert _result_content(sm, "default", 1)[0]["toolResult"]["content"] == [
             {"text": '{"approved": false}'}
         ]
+
+    @pytest.mark.asyncio
+    async def test_context_preserves_reconciled_history_continuation(self, tmp_path):
+        """Application context must not replace the ``None`` prompt sentinel.
+
+        After repository reconciliation, Strands continues from its corrected
+        native history. Sending a context-only prompt here would create a new
+        user turn and can make the model re-run the frontend tool.
+        """
+        from strands.session.file_session_manager import FileSessionManager
+
+        sm = FileSessionManager(session_id="thread-map-context", storage_dir=str(tmp_path))
+        instance = await _run_session_continuation(
+            sm,
+            "default",
+            messages=[_payload_tool("wire-1", '{"approved": false}')],
+            tools=[_frontend_tool("approve")],
+            wire_map={"wire-1": "native-1"},
+            store=[_store_tool_use("native-1", "approve"), _store_placeholder("native-1")],
+            context=[Context(description="account", value="premium")],
+        )
+
+        assert instance.stream_prompts == [None]
+        assert instance.model_messages[-1][-1]["content"][0] == {
+            "text": "Context provided by the application:\n- account: premium"
+        }
+        assert instance.messages[-1]["content"][0].get("toolResult") is not None
+        persisted = sm.session_repository.list_messages(sm.session_id, "default")
+        assert "Context provided by the application" not in repr(persisted)
 
     @pytest.mark.asyncio
     async def test_legacy_continuation_names_the_tool_when_replay_is_disabled(

@@ -232,6 +232,10 @@ export const menuIntegrations = [
       "predictive_state_updates",
       "shared_state",
       "tool_based_generative_ui",
+      "a2ui_dynamic_schema",
+      "a2ui_advanced",
+      "a2ui_recovery",
+      "a2ui_fixed_schema",
     ],
   },
   {

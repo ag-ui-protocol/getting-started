@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Set
+from typing import TYPE_CHECKING, Any, Mapping, Set
 
 from ag_ui.core import Tool as AgUiTool
+from strands import ToolContext
+from strands import tool as strands_tool
 from strands.tools.registry import ToolRegistry
 from strands.tools.tools import PythonAgentTool
-from strands.types.tools import ToolResult, ToolSpec, ToolUse
+from strands.types.tools import AgentTool, ToolResult, ToolSpec, ToolUse
+
+from .frontend_tool_interrupt import (
+    FRONTEND_TOOL_INTERRUPT_NAME,
+    frontend_tool_reason,
+    unwrap_frontend_tool_response,
+)
+
+if TYPE_CHECKING:
+    from .config import ToolBehavior
 
 logger = logging.getLogger(__name__)
 
@@ -20,20 +31,7 @@ _PROXY_MARKER = "_ag_ui_proxy"
 PROXY_RESULT_PLACEHOLDER = "Forwarded to client"
 
 
-def create_proxy_tool(ag_ui_tool: AgUiTool) -> PythonAgentTool:
-    """Convert an AG-UI ``Tool`` into a Strands ``PythonAgentTool``.
-
-    The resulting tool is marked as dynamic so it can be hot-reloaded and is
-    distinguishable from tools registered at server startup.
-
-    Args:
-        ag_ui_tool: Tool definition received from the client via ``RunAgentInput.tools``.
-
-    Returns:
-        A ``PythonAgentTool`` that the LLM can call.  When invoked server-side
-        the proxy returns a placeholder result – the real execution happens on
-        the client.
-    """
+def _tool_spec(ag_ui_tool: AgUiTool) -> tuple[str, str, ToolSpec]:
     name: str = ag_ui_tool.name if isinstance(ag_ui_tool, AgUiTool) else ag_ui_tool.get("name", "")  # type: ignore[union-attr]
     description: str = (
         ag_ui_tool.description
@@ -45,12 +43,74 @@ def create_proxy_tool(ag_ui_tool: AgUiTool) -> PythonAgentTool:
         if isinstance(ag_ui_tool, AgUiTool)
         else ag_ui_tool.get("parameters", {})  # type: ignore[union-attr]
     )
+    return (
+        name,
+        description,
+        {
+            "name": name,
+            "description": description,
+            "inputSchema": {"json": parameters or {}},
+        },
+    )
 
-    tool_spec: ToolSpec = {
-        "name": name,
-        "description": description,
-        "inputSchema": {"json": parameters or {}},
-    }
+
+def waits_for_frontend_call(behavior: "ToolBehavior | None") -> bool:
+    """Return whether a frontend tool parks in a native Strands interrupt.
+
+    Waiting is what a human-in-the-loop tool needs: the agent stops until the
+    client answers. A plain frontend action — render something, change the
+    background — never answers, so waiting would strand the thread. The server
+    cannot tell those apart from the tool definition, so waiting stays an
+    explicit ``ToolBehavior(continue_after_frontend_call=False)`` opt-in and
+    an unconfigured tool keeps the legacy placeholder path.
+    """
+    return behavior is not None and behavior.continue_after_frontend_call is False
+
+
+def create_proxy_tool(
+    ag_ui_tool: AgUiTool,
+    *,
+    continue_after_frontend_call: bool = True,
+) -> AgentTool:
+    """Convert an AG-UI ``Tool`` into a Strands ``PythonAgentTool``.
+
+    The resulting tool is marked as dynamic so it can be hot-reloaded and is
+    distinguishable from tools registered at server startup.
+
+    Args:
+        ag_ui_tool: Tool definition received from the client via ``RunAgentInput.tools``.
+
+    Returns:
+        A dynamic Strands tool. Waiting proxies pause in Strands; continuation
+        proxies retain the existing placeholder result.
+    """
+    name, description, tool_spec = _tool_spec(ag_ui_tool)
+
+    if not continue_after_frontend_call:
+
+        @strands_tool(
+            name=name,
+            description=description,
+            inputSchema=tool_spec["inputSchema"],
+            context=True,
+        )
+        def _interrupting_proxy(tool_context: ToolContext) -> ToolResult:
+            tool_use_id = tool_context.tool_use["toolUseId"]
+            response = tool_context.interrupt(
+                FRONTEND_TOOL_INTERRUPT_NAME,
+                reason=frontend_tool_reason(tool_use_id),
+            )
+            content, is_error = unwrap_frontend_tool_response(response)
+            return {
+                "toolUseId": tool_use_id,
+                "status": "error" if is_error else "success",
+                "content": [{"text": content}],
+            }
+
+        interrupting_proxy: AgentTool = _interrupting_proxy
+        interrupting_proxy.mark_dynamic()
+        setattr(interrupting_proxy, _PROXY_MARKER, True)
+        return interrupting_proxy
 
     def _proxy_func(tool_use: ToolUse, **_kwargs: Any) -> ToolResult:
         return {
@@ -62,7 +122,7 @@ def create_proxy_tool(ag_ui_tool: AgUiTool) -> PythonAgentTool:
     # ToolFunc protocol requires __name__
     _proxy_func.__name__ = name
 
-    tool = PythonAgentTool(
+    tool: AgentTool = PythonAgentTool(
         tool_name=name,
         tool_spec=tool_spec,
         tool_func=_proxy_func,
@@ -81,6 +141,8 @@ def sync_proxy_tools(
     tool_registry: ToolRegistry,
     ag_ui_tools: list[AgUiTool],
     tracked_names: Set[str],
+    *,
+    tool_behaviors: Mapping[str, "ToolBehavior"] | None = None,
 ) -> Set[str]:
     """Synchronise proxy tools in *tool_registry* with *ag_ui_tools*.
 
@@ -125,7 +187,11 @@ def sync_proxy_tools(
             logger.debug("Skipping proxy for native tool: %s", n)
             continue
 
-        proxy = create_proxy_tool(t)
+        behavior = tool_behaviors.get(n) if tool_behaviors is not None else None
+        proxy = create_proxy_tool(
+            t,
+            continue_after_frontend_call=not waits_for_frontend_call(behavior),
+        )
         tool_registry.register_tool(proxy)
         current_proxy_names.add(n)
         logger.debug("Registered proxy tool: %s", n)

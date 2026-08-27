@@ -56,9 +56,16 @@ class FakeAgent:
     def __init__(self, events: Iterable[BaseEvent] | None = None) -> None:
         self._events = list(events) if events is not None else [run_started(), run_finished()]
         self.received: list[Any] = []
+        self.invocation_states: list[dict[str, Any] | None] = []
 
-    async def run(self, input_data: Any) -> AsyncIterator[BaseEvent]:
+    async def run(
+        self,
+        input_data: Any,
+        *,
+        invocation_state: dict[str, Any] | None = None,
+    ) -> AsyncIterator[BaseEvent]:
         self.received.append(input_data)
+        self.invocation_states.append(invocation_state)
         for event in self._events:
             yield event
 

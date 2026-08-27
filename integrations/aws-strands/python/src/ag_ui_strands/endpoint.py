@@ -1,6 +1,7 @@
 """FastAPI endpoint utilities for AWS Strands integration."""
 
 import asyncio
+import inspect
 import json
 from typing import Any, Callable, Optional
 
@@ -18,6 +19,21 @@ from ag_ui.core import (
 from ag_ui.encoder import AGUI_MEDIA_TYPE, EventEncoder
 
 from .agent import StrandsAgent
+from .utils import InvocationStateProvider
+
+
+async def _resolve_invocation_state(
+    provider: InvocationStateProvider,
+    request: Request,
+    input_data: RunAgentInput,
+) -> dict[str, Any] | None:
+    """Resolve trusted request state without hiding provider failures."""
+    invocation_state = provider(request, input_data)
+    if inspect.isawaitable(invocation_state):
+        invocation_state = await invocation_state
+    if invocation_state is not None and not isinstance(invocation_state, dict):
+        raise TypeError("invocation_state_provider must return a dict or None")
+    return invocation_state
 
 
 async def _require_json_content_type(request: Request) -> None:
@@ -203,12 +219,14 @@ def _encoded_or_none(encoder: EventEncoder, event) -> str | bytes | None:
     except Exception:
         return None
 
+
 def add_strands_fastapi_endpoint(
     app: FastAPI,
     agent: StrandsAgent,
     path: str,
     *,
     auth: Optional[Callable[..., Any]] = None,
+    invocation_state_provider: Optional[InvocationStateProvider] = None,
     **kwargs: Any,
 ) -> None:
     """Add a Strands agent endpoint to FastAPI app.
@@ -221,6 +239,9 @@ def add_strands_fastapi_endpoint(
             It should raise ``fastapi.HTTPException`` to reject a request. The
             endpoint is unauthenticated when this is ``None``. Authentication
             runs before the request body is parsed and validated.
+        invocation_state_provider: Optional sync or async callable receiving the
+            FastAPI request and validated AG-UI input. Its returned dictionary is
+            forwarded as trusted, request-scoped Strands invocation state.
         **kwargs: Forwarded to ``app.post`` (``tags``, ``dependencies``, ...).
             Any ``dependencies`` given here run after the ones this helper
             installs, rather than replacing them.
@@ -250,6 +271,15 @@ def add_strands_fastapi_endpoint(
     async def strands_endpoint(request: Request):
         """AWS Strands agent endpoint."""
         input_data = await _parse_run_agent_input(request)
+        invocation_state = (
+            await _resolve_invocation_state(
+                invocation_state_provider,
+                request,
+                input_data,
+            )
+            if invocation_state_provider is not None
+            else None
+        )
         # A client may send Accept as several field lines. `get` returns only
         # the first, which would hide a protobuf entry on a later one; Node
         # joins them before the Express peer ever sees the header.
@@ -264,7 +294,12 @@ def add_strands_fastapi_endpoint(
             failure: tuple[str, str] | None = None
 
             try:
-                stream = agent.run(input_data)
+                run_kwargs = (
+                    {"invocation_state": invocation_state}
+                    if invocation_state is not None
+                    else {}
+                )
+                stream = agent.run(input_data, **run_kwargs)
                 iterator = stream.__aiter__()
             except Exception as e:
                 # Headers are already committed, so a failure to even start

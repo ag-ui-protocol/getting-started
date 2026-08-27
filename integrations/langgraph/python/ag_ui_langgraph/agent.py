@@ -1706,7 +1706,6 @@ class LangGraphAgent:
                 for ev in self.handle_node_change(self.active_run.get("node_name")):
                     yield ev
 
-            should_exit = False
             current_graph_state = state
 
             async for event in stream:
@@ -1882,10 +1881,11 @@ class LangGraphAgent:
                     if any(k not in ("messages", "tools", "ag-ui") for k in output):
                         self.active_run["state_reliable"] = True
 
-                should_exit = should_exit or (
-                        event_type == "on_custom_event" and
-                        event["name"] == CustomEventNames.Exit
-                    )
+                # No exit handling here on purpose. A `should_exit` flag used to be
+                # accumulated at this point and never read; it is deleted rather than
+                # wired up because CustomEventNames.Exit is advisory, not a stream
+                # terminator. The full contract (and why terminating here would be
+                # wrong) lives on the enum member in types.py. See PNI-386.
 
                 # Compare against THIS EVENT'S LANE, not the flat node_name field.
                 # node_name is a single slot last written by whichever lane

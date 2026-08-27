@@ -19,7 +19,7 @@ import { z } from "zod";
 import { StrandsAgent } from "@ag-ui/aws-strands";
 import { createStrandsApp } from "@ag-ui/aws-strands/server";
 import { createModel } from "../model-factory";
-import { demoPort, runIfMain } from "../run-if-main";
+import { demoPort, listenOrExit, runIfMain } from "../run-if-main";
 
 /** What the picker sends back, plus the shape a cancelled resume entry carries. */
 interface MeetingChoice {
@@ -45,9 +45,12 @@ const scheduleMeeting = tool({
       throw new Error("schedule_meeting needs a tool context to pause on");
     }
 
+    // `attendee` is optional, and the reason has to be JSON, which has no
+    // `undefined`. Omitted rather than sent as undefined so the picker sees the
+    // field missing instead of present-and-empty.
     const answer = context.interrupt<MeetingChoice>({
       name: "schedule_meeting",
-      reason: { topic, attendee },
+      reason: attendee === undefined ? { topic } : { topic, attendee },
     });
 
     // Two cancel shapes reach here: the adapter's own marker for a cancelled
@@ -93,11 +96,11 @@ export async function createInterruptAgent(): Promise<StrandsAgent> {
 }
 
 runIfMain(import.meta.url, async () => {
+  // Port first: it throws on a malformed PORT, and building the agent first
+  // would surface a missing API key instead and hide the real complaint.
+  const port = demoPort();
   const app = await createStrandsApp(await createInterruptAgent(), {
     path: "/",
   });
-  const port = demoPort();
-  app.listen(port, () => {
-    console.log(`interrupt demo listening on http://localhost:${port}`);
-  });
+  listenOrExit(app, "interrupt", port);
 });
