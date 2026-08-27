@@ -19,6 +19,10 @@ on:
       - "sdks/python/ag_ui/_generated/**"
       - "sdks/dotnet/src/AGUI.Protobuf/Generated/**"
       - "sdks/dotnet/tests/AGUI.Protobuf.UnitTests/Fixtures/**"
+      # The published schema is a generated file under the same drift gate, and
+      # the docs folder is the one place it can be edited or deleted without
+      # touching spec/ at all.
+      - "docs/spec/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
@@ -42,6 +46,10 @@ on:
       - "sdks/python/ag_ui/_generated/**"
       - "sdks/dotnet/src/AGUI.Protobuf/Generated/**"
       - "sdks/dotnet/tests/AGUI.Protobuf.UnitTests/Fixtures/**"
+      # The published schema is a generated file under the same drift gate, and
+      # the docs folder is the one place it can be edited or deleted without
+      # touching spec/ at all.
+      - "docs/spec/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"

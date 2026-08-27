@@ -65,6 +65,16 @@ export const DOTNET_MODELS_OUTPUT_DIR = join(
   "Generated",
 );
 
+/**
+ * Where the schema is published on the web. Every schema file states its own
+ * address in `$id`, and tools fetch that address to resolve it, so the file the
+ * docs site serves has to be the same bytes as the file the SDKs are generated
+ * from. Emitting it as an output puts it under the drift gate: a schema edit
+ * without a regeneration fails there rather than silently publishing a stale
+ * contract.
+ */
+export const DOCS_SPEC_OUTPUT_DIR = join(REPO_ROOT, "docs", "spec", "draft");
+
 export const DOTNET_OUTPUT_DIR = join(
   REPO_ROOT,
   "sdks",
@@ -120,6 +130,14 @@ export async function generateFiles(): Promise<GeneratedOutput[]> {
   };
   const freeze = { path: FREEZE_PATH, content: emitFreeze(wire) };
 
+  // Byte-identical to spec/draft/schema.json: the published copy is the source,
+  // not a re-serialisation of it, so `$id` and the address it is fetched from
+  // cannot drift apart and no formatting difference can creep in.
+  const published = {
+    path: join(DOCS_SPEC_OUTPUT_DIR, "schema.json"),
+    content: readFileSync(SCHEMA_PATH, "utf8"),
+  };
+
   const dotnet = emitDotnet(wire).map((file) => ({
     path: join(DOTNET_OUTPUT_DIR, file.name),
     content: file.content,
@@ -136,6 +154,7 @@ export async function generateFiles(): Promise<GeneratedOutput[]> {
     ...dotnetModels,
     translation,
     freeze,
+    published,
     ...dotnet,
   ];
 }
