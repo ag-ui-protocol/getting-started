@@ -120,16 +120,29 @@ stream — MUST run before enforcement, and enforcement MUST run before
 verification and before application code sees anything.
 
 ```
-producer → compatibility boundary → middleware → chunk expansion
-         → enforcement → verification → application
+producer → compatibility boundary → middleware → enforcement
+         → chunk expansion → verification → application
 ```
 
 The compatibility boundary is the always-on translator for shapes the protocol
-has retired. It MUST see the stream before chunk expansion, because a retired
-shape can be a chunk, and an expander that met it first would either fail on it
-or expand it into something the boundary can no longer recognise. Middleware a
-consumer installs itself sees the stream after expansion, so it works in terms
-of the start/content/end events the rest of this document is written in.
+has retired. It MUST see the stream first, because a retired shape can be a
+chunk, and a stage that met it earlier would either fail on it or turn it into
+something the boundary can no longer recognise. Middleware a consumer installs
+itself also sees chunks unexpanded, so a middleware that rewrites message
+content has to handle the chunk form as well as the start/content/end form the
+rest of this document is written in.
+
+Enforcement MUST run before chunk expansion. A chunk is an event in its own
+right, so it is validated as one like anything else, and expansion then only
+reshapes values already known good. Expanding first gives the expander
+unvalidated input to cope with, and coping means repairing: a consumer that
+substituted a default for a malformed role made the same producer defect fatal
+when sent plainly and invisible when sent as a chunk, so which form a producer
+happened to use decided whether its bug was ever reported.
+
+Verification MUST run after expansion, because what it checks — that messages
+and calls open before they continue and close after — only exists once a chunk
+has become the events it stands for.
 
 The order is load-bearing in both directions:
 

@@ -281,3 +281,49 @@ describe("objects the spec leaves open", () => {
     warn.mockRestore();
   });
 });
+
+describe("enforcement runs before chunk expansion", () => {
+  // A chunk is an event of its own, so it is validated as one before anything
+  // expands it. Expanding first handed enforcement already-repaired input: the
+  // expander replaced a falsy role with "assistant", so the SAME defect was
+  // fatal when a producer sent it plainly and invisible when it sent it as a
+  // chunk. Which form a producer happened to use decided whether its bug was
+  // reported.
+  it("rejects a malformed value on a chunk, as it does on a plain event", async () => {
+    const chunked = new MemoryAgent([
+      START,
+      { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", role: 0, delta: "hi" } as unknown as BaseEvent,
+      FINISH,
+    ]);
+    const plain = new MemoryAgent([
+      START,
+      { type: EventType.TEXT_MESSAGE_START, messageId: "m1", role: 0 } as unknown as BaseEvent,
+      FINISH,
+    ]);
+
+    await expect(chunked.runAgent()).rejects.toThrow();
+    await expect(plain.runAgent()).rejects.toThrow();
+  });
+
+  // The reordering must not cost the run its expansion: a well-formed chunk
+  // still becomes the events it always did, and verification still sees them
+  // paired, which is why it stays after expansion rather than moving with it.
+  it("still expands a well-formed chunk into a verified message", async () => {
+    const seen: string[] = [];
+    const agent = new MemoryAgent([
+      START,
+      { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", delta: "hi" } as unknown as BaseEvent,
+      FINISH,
+    ]);
+
+    await agent.runAgent(undefined, {
+      onEvent: ({ event }) => {
+        seen.push(String(event.type));
+      },
+    });
+
+    expect(seen).toContain(EventType.TEXT_MESSAGE_START);
+    expect(seen).toContain(EventType.TEXT_MESSAGE_CONTENT);
+    expect(seen).toContain(EventType.TEXT_MESSAGE_END);
+  });
+});

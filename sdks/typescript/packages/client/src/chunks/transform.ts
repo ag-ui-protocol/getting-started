@@ -68,6 +68,23 @@ const missingIdFieldName = (kind: PendingStream["kind"]) =>
 const withChunkMetadata = <T extends BaseEvent>(event: T, chunk: BaseEvent): T =>
   chunk.metadata === undefined ? event : { ...event, metadata: chunk.metadata };
 
+/**
+ * As above, plus the chunk's `rawEvent`.
+ *
+ * A chunk carries one provider payload, and expansion turns it into an opener
+ * and a content event. The content event is the one that carries what the
+ * producer actually sent, so the payload rides there; the opener is synthesised
+ * here and claims no raw event of its own. Dropping it entirely — which is what
+ * expansion used to do — silently lost every provider payload a chunked stream
+ * carried, while the same stream sent unchunked kept them.
+ */
+const withChunkOrigin = <T extends BaseEvent>(event: T, chunk: BaseEvent): T => {
+  const withMetadata = withChunkMetadata(event, chunk);
+  return chunk.rawEvent === undefined
+    ? withMetadata
+    : { ...withMetadata, rawEvent: chunk.rawEvent };
+};
+
 export const transformChunks =
   (debugLogger?: DebugLoggerInput) =>
   (events$: Observable<BaseEvent>): Observable<BaseEvent> => {
@@ -296,7 +313,13 @@ export const transformChunks =
                 {
                   type: EventType.TEXT_MESSAGE_START,
                   messageId: messageChunkEvent.messageId,
-                  role: messageChunkEvent.role || "assistant",
+                  // Absent means assistant, which the spec states normatively
+                  // and the generated validator deliberately does not apply, so
+                  // materialising it here is real work nothing else does. `??`
+                  // rather than `||` on purpose: a role that is present but
+                  // wrong is not this stage's to correct, and enforcement has
+                  // already rejected it by the time expansion runs.
+                  role: messageChunkEvent.role ?? "assistant",
                   ...(messageChunkEvent.name !== undefined && { name: messageChunkEvent.name }),
                   ...(messageChunkEvent.subagentRunId != null && {
                     subagentRunId: messageChunkEvent.subagentRunId,
@@ -314,7 +337,7 @@ export const transformChunks =
 
             if (messageChunkEvent.delta !== undefined) {
               const contentOwner = messageChunkEvent.subagentRunId ?? textMessageFields.subagentRunId;
-              const textMessageContentEvent = withChunkMetadata(
+              const textMessageContentEvent = withChunkOrigin(
                 {
                   type: EventType.TEXT_MESSAGE_CONTENT,
                   messageId: textMessageFields.messageId,
@@ -351,6 +374,9 @@ export const transformChunks =
                 messageId: textMessageFields!.messageId,
                 delta: "",
                 metadata: messageChunkEvent.metadata,
+                ...(messageChunkEvent.rawEvent !== undefined && {
+                  rawEvent: messageChunkEvent.rawEvent,
+                }),
                 ...(metadataOwner != null && { subagentRunId: metadataOwner }),
               } as TextMessageContentEvent);
             }
@@ -415,7 +441,7 @@ export const transformChunks =
 
             if (toolCallChunkEvent.delta !== undefined) {
               const argsOwner = toolCallChunkEvent.subagentRunId ?? toolCallFields.subagentRunId;
-              const toolCallArgsEvent = withChunkMetadata(
+              const toolCallArgsEvent = withChunkOrigin(
                 {
                   type: EventType.TOOL_CALL_ARGS,
                   toolCallId: toolCallFields.toolCallId,
@@ -445,6 +471,9 @@ export const transformChunks =
                 toolCallId: toolCallFields!.toolCallId,
                 delta: "",
                 metadata: toolCallChunkEvent.metadata,
+                ...(toolCallChunkEvent.rawEvent !== undefined && {
+                  rawEvent: toolCallChunkEvent.rawEvent,
+                }),
                 ...(metadataOwner != null && { subagentRunId: metadataOwner }),
               } as ToolCallArgsEvent);
             }
@@ -507,7 +536,7 @@ export const transformChunks =
             if (reasoningChunkEvent.delta !== undefined) {
               const contentOwner =
                 reasoningChunkEvent.subagentRunId ?? reasoningMessageFields.subagentRunId;
-              const reasoningMessageContentEvent = withChunkMetadata(
+              const reasoningMessageContentEvent = withChunkOrigin(
                 {
                   type: EventType.REASONING_MESSAGE_CONTENT,
                   messageId: reasoningMessageFields.messageId,
@@ -537,6 +566,9 @@ export const transformChunks =
                 messageId: reasoningMessageFields!.messageId,
                 delta: "",
                 metadata: reasoningChunkEvent.metadata,
+                ...(reasoningChunkEvent.rawEvent !== undefined && {
+                  rawEvent: reasoningChunkEvent.rawEvent,
+                }),
                 ...(metadataOwner != null && { subagentRunId: metadataOwner }),
               } as ReasoningMessageContentEvent);
             }

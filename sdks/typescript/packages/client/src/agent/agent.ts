@@ -226,8 +226,16 @@ export abstract class AbstractAgent {
 
           return chainedAgent.run(input);
         },
-        transformChunks(this.debugLogger),
+        // Enforcement BEFORE expansion: a chunk is an event of its own, so it
+        // is validated as one like any other, and expansion then only ever
+        // reshapes values already known good. Expanding first handed this stage
+        // repaired input — a malformed role arrived as "assistant" — so the
+        // same defect was fatal when a producer sent it plainly and invisible
+        // when it sent it as a chunk. Verification stays after expansion,
+        // because what it checks (messages opening and closing, pairing) only
+        // exists once the chunk has become a start and a content event.
         enforceEvents(this.debugLogger),
+        transformChunks(this.debugLogger),
         verifyEvents(this.debugLogger),
         // Stop processing immediately when this run is detached
         (source$) => source$.pipe(takeUntil(this.activeRunDetach$!)),
@@ -306,11 +314,11 @@ export abstract class AbstractAgent {
       const pipeline = pipe(
         () => defer(() => this.connect(input)),
         // The connect flow has no middleware chain, so the always-on inbound
-        // boundary applies as a plain operator here (composed with the chunk
-        // stage: rxjs pipe() runs out of typed arities beyond nine stages).
+        // boundary applies as a plain operator here (composed with enforcement:
+        // rxjs pipe() runs out of typed arities beyond nine stages).
         (source$: Observable<BaseEvent>) =>
-          transformChunks(this.debugLogger)(compatibilityBoundaryOperator()(source$)),
-        enforceEvents(this.debugLogger),
+          enforceEvents(this.debugLogger)(compatibilityBoundaryOperator()(source$)),
+        transformChunks(this.debugLogger),
         verifyEvents(this.debugLogger),
         // Stop processing immediately when this run is detached
         (source$) => source$.pipe(takeUntil(this.activeRunDetach$!)),
@@ -749,8 +757,8 @@ export abstract class AbstractAgent {
     })();
 
     return runObservable.pipe(
-      transformChunks(this.debugLogger),
       enforceEvents(this.debugLogger),
+      transformChunks(this.debugLogger),
       verifyEvents(this.debugLogger),
       convertToLegacyEvents(this.threadId, input.runId, this.agentId),
       (events$: Observable<LegacyRuntimeProtocolEvent>) => {
