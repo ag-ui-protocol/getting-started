@@ -194,8 +194,16 @@ class InputContentUrlSource(ConfiguredBaseModel):
     mime_type: Optional[str] = None
 
 
+class InputContentCustomSource(ConfiguredBaseModel):
+    """Custom source."""
+
+    type: Literal["custom"] = "custom"
+    name: str
+    value: Any
+
+
 InputContentSource = Annotated[
-    Union[InputContentDataSource, InputContentUrlSource],
+    Union[InputContentDataSource, InputContentUrlSource, InputContentCustomSource],
     Field(discriminator="type"),
 ]
 

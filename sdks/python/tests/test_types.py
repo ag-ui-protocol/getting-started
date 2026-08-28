@@ -17,6 +17,7 @@ from ag_ui.core.types import (
     TextInputContent,
     InputContentDataSource,
     InputContentUrlSource,
+    InputContentCustomSource,
     ImageInputPart,
     AudioInputPart,
     DocumentInputPart,
@@ -213,6 +214,27 @@ class TestBaseTypes(unittest.TestCase):
         self.assertEqual(serialized["content"][0]["type"], "audio")
         self.assertEqual(serialized["content"][0]["source"]["type"], "data")
         self.assertEqual(serialized["content"][0]["source"]["mimeType"], "audio/wav")
+
+    def test_user_message_multimodal_custom_data_source(self):
+        """Test data source serialization for multimodal parts"""
+        msg = UserMessage(
+            id="user_custom_source",
+            content=[
+                DocumentInputPart(
+                    source=InputContentCustomSource(
+                        name="my-storage",
+                        value="my-id",
+                    )
+                )
+            ],
+        )
+
+        serialized = msg.model_dump(by_alias=True)
+        self.assertEqual(serialized["content"][0]["type"], "document")
+        self.assertEqual(serialized["content"][0]["source"]["type"], "custom")
+        self.assertEqual(serialized["content"][0]["source"]["name"], "my-storage")
+        self.assertEqual(serialized["content"][0]["source"]["value"], "my-id")
+
 
     def test_document_part_with_metadata(self):
         """Test document parts accept provider metadata"""
