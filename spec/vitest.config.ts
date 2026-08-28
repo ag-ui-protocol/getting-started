@@ -8,5 +8,13 @@ export default mergeConfig(baseConfig, {
     // renamed harness file exits 0 with nothing checked at all, and CI merging on
     // the strength of it.
     passWithNoTests: false,
+    // Three tests here — the determinism check, the schema compile, and the
+    // published-copy comparison — each run the generator or compile every
+    // definition, and each is the FIRST test in its file to touch that module
+    // graph, so it also pays the cold import. Locally that is 70-130ms; on a
+    // loaded CI runner it measured 4.6-5.5s and tripped vitest's 5s default,
+    // failing the suite on timing rather than on anything it checks. The work
+    // is genuinely long-running, which is the case the option exists for.
+    testTimeout: 30_000,
   },
 });
