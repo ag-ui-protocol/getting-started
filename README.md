@@ -119,6 +119,7 @@ AG-UI was born from CopilotKit's initial **partnership** with LangChain and Crew
 | [Langroid](https://github.com/ag-ui-protocol/ag-ui/tree/main/integrations/langroid) | ✅ Supported | 🎮 [Demos](https://dojo.ag-ui.com/langroid/feature/shared_state) |
 | [OpenAI Agent SDK](https://openai.github.io/openai-agents-python/) | 🛠️ In Progress | – |
 | [Cloudflare Agents](https://developers.cloudflare.com/agents/) | 🛠️ In Progress | – |
+| [tRPC-Agent-Go](https://github.com/trpc-group/trpc-agent-go) | 🛠️ In Progress | ➡️ [Docs](https://trpc-group.github.io/trpc-agent-go/agui/) 🎮 [Demos](https://github.com/trpc-group/trpc-agent-go/tree/main/examples/agui) |
 
 
 ## Agent Interaction Protocols
