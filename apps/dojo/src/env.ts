@@ -8,6 +8,7 @@ type envVars = {
   langgraphTypescriptUrl: string;
   agnoUrl: string;
   springAiUrl: string;
+  swarmsUrl: string;
   llamaIndexUrl: string;
   crewAiUrl: string;
   agentSpecUrl: string;
@@ -70,6 +71,7 @@ export default function getEnvVars(): envVars {
       process.env.AGENT_FRAMEWORK_DOTNET_URL || "http://localhost:8016",
     aguiDotnetUrl: process.env.AGUI_DOTNET_URL || "http://localhost:8023",
     springAiUrl: process.env.SPRING_AI_URL || "http://localhost:8080",
+    swarmsUrl: process.env.SWARMS_URL || "http://localhost:8023",
     a2aUrl: process.env.A2A_URL || "http://localhost:10002",
     a2aMiddlewareBuildingsManagementUrl:
       process.env.A2A_MIDDLEWARE_BUILDINGS_MANAGEMENT_URL ||

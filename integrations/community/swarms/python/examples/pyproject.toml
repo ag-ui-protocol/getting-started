@@ -1,0 +1,33 @@
+[project]
+name = "swarms-examples"
+version = "0.1.0"
+description = "Example usage of the AG-UI adapter for Swarms"
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.10, <3.15"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.24.0",
+    "python-dotenv>=1.0.0",
+    "ag-ui-swarms",
+    "swarms>=7.0.0",
+]
+authors = [
+    { name = "AG-UI Team" },
+]
+
+[project.scripts]
+dev = "server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["server"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.uv.sources]
+ag-ui-swarms = { path = "../", editable = true }

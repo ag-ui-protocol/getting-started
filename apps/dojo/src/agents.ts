@@ -33,6 +33,7 @@ import { a2uiFixedSchemaAgent } from "./mastra/agents/a2ui-fixed";
 import { PydanticAIAgent } from "@ag-ui/pydantic-ai";
 import { ADKAgent } from "@ag-ui/adk";
 import { SpringAiAgent } from "@ag-ui/spring-ai";
+import { SwarmsAgent } from "@ag-ui/swarms";
 import { HttpAgent } from "@ag-ui/client";
 import { A2AMiddlewareAgent } from "@ag-ui/a2a-middleware";
 import { AWSStrandsAgent } from "@ag-ui/aws-strands";
@@ -424,6 +425,14 @@ export const agentsIntegrations = {
         tool_based_generative_ui: "tool_based_generative_ui",
         human_in_the_loop: "human_in_the_loop",
         agentic_generative_ui: "agentic_generative_ui",
+      },
+    ),
+
+  swarms: async () =>
+    mapAgents(
+      (path) => new SwarmsAgent({ url: `${envVars.swarmsUrl}/${path}/agui` }),
+      {
+        agentic_chat: "agentic_chat",
       },
     ),
 

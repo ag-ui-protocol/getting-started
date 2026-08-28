@@ -177,6 +177,9 @@ importers:
       '@ag-ui/spring-ai':
         specifier: workspace:*
         version: link:../../integrations/community/spring-ai/typescript
+      '@ag-ui/swarms':
+        specifier: workspace:*
+        version: link:../../integrations/community/swarms/typescript
       '@ag-ui/vercel-ai-sdk':
         specifier: workspace:*
         version: link:../../integrations/vercel-ai-sdk/typescript
@@ -781,6 +784,40 @@ importers:
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
 
   integrations/community/spring-ai/typescript:
+    dependencies:
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
+    devDependencies:
+      '@ag-ui/client':
+        specifier: workspace:*
+        version: link:../../../../sdks/typescript/packages/client
+      '@ag-ui/core':
+        specifier: workspace:*
+        version: link:../../../../sdks/typescript/packages/core
+      '@arethetypeswrong/cli':
+        specifier: ^0.17.4
+        version: 0.17.4
+      '@types/node':
+        specifier: ^20.11.19
+        version: 20.19.21
+      '@vitest/coverage-istanbul':
+        specifier: ^4.0.18
+        version: 4.0.18(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4))
+      publint:
+        specifier: ^0.3.12
+        version: 0.3.17
+      tsdown:
+        specifier: ^0.20.1
+        version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
+
+  integrations/community/swarms/typescript:
     dependencies:
       rxjs:
         specifier: 7.8.1

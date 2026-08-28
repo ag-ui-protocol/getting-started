@@ -1,0 +1,56 @@
+{
+  "name": "@ag-ui/swarms",
+  "author": "AG-UI Team",
+  "version": "0.0.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ag-ui-protocol/ag-ui.git"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist/**",
+    "README.md"
+  ],
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "clean": "git clean -fdX --exclude=\"!.env\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "test:exports": "publint --strict && attw --pack",
+    "link:global": "pnpm link --global",
+    "unlink:global": "pnpm unlink --global"
+  },
+  "peerDependencies": {
+    "@ag-ui/core": ">=0.0.37",
+    "@ag-ui/client": ">=0.0.37",
+    "rxjs": "7.8.1"
+  },
+  "devDependencies": {
+    "@ag-ui/core": "workspace:*",
+    "@ag-ui/client": "workspace:*",
+    "@types/node": "^20.11.19",
+    "@vitest/coverage-istanbul": "^4.0.18",
+    "publint": "^0.3.12",
+    "@arethetypeswrong/cli": "^0.17.4",
+    "vitest": "^4.0.18",
+    "tsdown": "^0.20.1",
+    "typescript": "^5.3.3"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  }
+}

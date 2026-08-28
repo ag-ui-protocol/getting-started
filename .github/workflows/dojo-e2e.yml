@@ -136,6 +136,10 @@ jobs:
             test_path: tests/adkMiddlewareTests
             services: ["dojo", "adk-middleware"]
             wait_on: http://localhost:9999,tcp:localhost:8010
+          - suite: swarms
+            test_path: tests/swarmsTests
+            services: ["dojo", "swarms"]
+            wait_on: http://localhost:9999,tcp:localhost:8023
           - suite: agno
             test_path: tests/agnoTests
             services: ["dojo", "agno"]

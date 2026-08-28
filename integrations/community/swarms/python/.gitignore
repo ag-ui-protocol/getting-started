@@ -1,0 +1,4 @@
+/.venv-test/
+/agent_workspace/
+__pycache__/
+*.pyc

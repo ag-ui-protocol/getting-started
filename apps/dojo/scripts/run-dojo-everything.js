@@ -193,6 +193,14 @@ const ALL_SERVICES = {
       env: { PORT: 8010 },
     },
   ],
+  swarms: [
+    {
+      command: "uv run dev",
+      name: "Swarms",
+      cwd: path.join(integrationsRoot, "community/swarms/python/examples"),
+      env: { PORT: 8023 },
+    },
+  ],
   "a2a-middleware": [
     {
       command: "uv run buildings_management.py",
@@ -372,6 +380,7 @@ const ALL_SERVICES = {
         CLAUDE_MANAGED_AGENTS_PYTHON_URL: "http://localhost:8025",
         CLAUDE_MANAGED_AGENTS_TYPESCRIPT_URL: "http://localhost:8024",
         LANGROID_URL: "http://localhost:8021",
+        SWARMS_URL: "http://localhost:8023",
         NEXT_PUBLIC_CUSTOM_DOMAIN_TITLE:
           "cpkdojo.local___CopilotKit Feature Viewer",
       },
@@ -411,6 +420,7 @@ const ALL_SERVICES = {
         CLAUDE_MANAGED_AGENTS_PYTHON_URL: "http://localhost:8025",
         CLAUDE_MANAGED_AGENTS_TYPESCRIPT_URL: "http://localhost:8024",
         LANGROID_URL: "http://localhost:8021",
+        SWARMS_URL: "http://localhost:8023",
         NEXT_PUBLIC_CUSTOM_DOMAIN_TITLE:
           "cpkdojo.local___CopilotKit Feature Viewer",
       },
