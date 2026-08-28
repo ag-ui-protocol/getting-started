@@ -861,25 +861,12 @@ A side-band annotation event that can occur anywhere in the stream.
 | `metaType` | Application-defined type (e.g., "thumbs_up", "tag") |
 | `payload`  | Application-defined payload                         |
 
-### Modified Lifecycle Events
-
-<span
-  style={{
-    backgroundColor: "#3b82f6",
-    color: "white",
-    padding: "2px 6px",
-    borderRadius: "4px",
-    fontSize: "0.75em",
-    fontWeight: "bold",
-  }}
->
-  DRAFT
-</span>
-[View Specification](/concepts/interrupts)
+## Modified Lifecycle Events
 
 Extensions to existing lifecycle events to support interrupts and branching.
+See [Interrupts](/concepts/interrupts) for the full lifecycle.
 
-#### RunFinished (Extended)
+### RunFinished (Extended)
 
 The `RunFinished` event gains new fields to support interrupt-aware workflows.
 
@@ -890,7 +877,7 @@ The `RunFinished` event gains new fields to support interrupt-aware workflows.
 
 See [Serialization](/concepts/serialization) for lineage and input capture.
 
-#### RunStarted (Extended)
+### RunStarted (Extended)
 
 The `RunStarted` event gains new fields to support branching and input tracking.
 
