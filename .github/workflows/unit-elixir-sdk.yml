@@ -1,0 +1,77 @@
+name: unit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sdks/community/elixir/**"
+      - ".github/workflows/unit-elixir-sdk.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "sdks/community/elixir/**"
+      - ".github/workflows/unit-elixir-sdk.yml"
+
+jobs:
+  elixir:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - elixir: "1.15.7"
+            otp: "25.3"
+          - elixir: "1.19.5"
+            otp: "27.3"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+
+      - name: Restore deps/_build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            sdks/community/elixir/deps
+            sdks/community/elixir/_build
+          key: ${{ runner.os }}-elixir-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('sdks/community/elixir/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-elixir-${{ matrix.elixir }}-${{ matrix.otp }}-
+
+      - name: Restore dialyzer PLT cache
+        uses: actions/cache@v4
+        with:
+          path: sdks/community/elixir/priv/plts
+          key: ${{ runner.os }}-elixir-${{ matrix.elixir }}-${{ matrix.otp }}-plt-${{ hashFiles('sdks/community/elixir/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-elixir-${{ matrix.elixir }}-${{ matrix.otp }}-plt-
+
+      - name: Install dependencies
+        working-directory: sdks/community/elixir
+        run: mix deps.get
+
+      - name: Compile
+        working-directory: sdks/community/elixir
+        run: mix compile --warnings-as-errors
+
+      - name: Compile (no optional deps)
+        working-directory: sdks/community/elixir
+        run: mix compile --no-optional-deps --warnings-as-errors
+
+      - name: Format check
+        working-directory: sdks/community/elixir
+        run: mix format --check-formatted
+
+      - name: Run tests
+        working-directory: sdks/community/elixir
+        run: mix test
+
+      - name: Run dialyzer
+        working-directory: sdks/community/elixir
+        run: mix dialyzer
