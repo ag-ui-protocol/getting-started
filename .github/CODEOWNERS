@@ -9,6 +9,9 @@ docs/sdk/go @mattsp1290
 sdks/community/dart @mattsp1290
 docs/sdk/dart @mattsp1290
 
+sdks/community/rust @MikeSchirtzinger @wdoppenberg
+docs/sdk/rust @MikeSchirtzinger @wdoppenberg
+
 integrations/agent-spec @sonleoracle
 
 .github/config-allowlist.txt @AlemTuzlak @atai
