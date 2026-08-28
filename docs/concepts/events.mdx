@@ -519,11 +519,12 @@ system so that UIs can render a complete activity view immediately and then
 incrementally update it as new information arrives.
 
 An activity message occupies the same id space as every other message, so its
-`messageId` must not be reused by a text message, and vice versa. The two carry
-different shapes of `content` — a structured object for activity, a string for
-text — so a shared id has no coherent meaning. A client that receives a text
-message under an id an activity message already holds should leave the activity
-message untouched rather than overwrite it.
+`messageId` must not be reused by a text or reasoning message, and vice versa.
+Those carry different shapes of `content` — a structured object for activity, a
+string for text and reasoning — so a shared id has no coherent meaning. A client
+that receives a text or reasoning message under an id an activity message
+already holds should leave the activity message untouched rather than overwrite
+it.
 
 ### ActivitySnapshot
 
