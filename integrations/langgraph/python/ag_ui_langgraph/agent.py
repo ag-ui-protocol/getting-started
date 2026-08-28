@@ -3360,7 +3360,12 @@ class LangGraphAgent:
                     )
                     self.set_message_in_progress(
                         self.active_run["id"],
-                        MessageInProgress(id=public_parent_id, tool_call_id=public_call_id, tool_call_name=tool_call_data["name"])
+                        MessageInProgress(
+                            id=public_parent_id,
+                            tool_call_id=public_call_id,
+                            tool_call_name=tool_call_data["name"],
+                            run_id=event.get("run_id"),
+                        )
                     )
                 return
 
@@ -3403,7 +3408,8 @@ class LangGraphAgent:
                         MessageInProgress(
                             id=message_id,
                             tool_call_id=None,
-                            tool_call_name=None
+                            tool_call_name=None,
+                            run_id=event.get("run_id"),
                         )
                     )
                     current_stream = self.get_message_in_progress(self.active_run["id"])
@@ -3419,22 +3425,35 @@ class LangGraphAgent:
                 return
 
         elif event_type == LangGraphEventTypes.OnChatModelEnd:
-            if self.get_message_in_progress(self.active_run["id"]) and self.get_message_in_progress(self.active_run["id"]).get("tool_call_id"):
+            message_in_progress = self.get_message_in_progress(self.active_run["id"])
+            # LangGraph interleaves on_chat_model_end across parallel
+            # branches/subgraphs sharing one client run_id, so this end
+            # event isn't necessarily for the call that's currently tracked.
+            # Only close/clear the tracked entry if the run_ids match;
+            # otherwise leave it alone and let the real owner's end event
+            # close it later.
+            belongs_to_this_call = (
+                message_in_progress is not None
+                and message_in_progress.get("run_id") == event.get("run_id")
+            )
+            if belongs_to_this_call and message_in_progress.get("tool_call_id"):
                 resolved = self._dispatch_event(
-                    ToolCallEndEvent(type=EventType.TOOL_CALL_END, tool_call_id=self.get_message_in_progress(self.active_run["id"])["tool_call_id"], raw_event=event)
+                    ToolCallEndEvent(type=EventType.TOOL_CALL_END, tool_call_id=message_in_progress["tool_call_id"], raw_event=event)
                 )
-                # Clear unconditionally: a None here means subagent_visibility="hidden"
-                # withheld the close from the wire, not that the model kept streaming.
-                # Leaving the slot open made the PARENT's next chunks read as a
-                # continuation of the suppressed entity — and vanish with it.
+                # Clear unconditionally, even if `_dispatch_event` suppressed
+                # the event (returned None, e.g. copilotkit:emit-tool-calls
+                # =False, or subagent_visibility="hidden"). The slot lifecycle
+                # is bookkeeping, not wire output: leaving it "in progress"
+                # after a suppressed close would misattribute the next real
+                # chunk in this lane as a continuation of the closed call, or
+                # block it from ever getting its own TEXT_MESSAGE_START.
                 self.clear_message_in_progress(self.active_run["id"])
                 yield resolved
-            elif self.get_message_in_progress(self.active_run["id"]) and self.get_message_in_progress(self.active_run["id"]).get("id"):
+            elif belongs_to_this_call and message_in_progress.get("id"):
                 resolved = self._dispatch_event(
-                    TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=self.get_message_in_progress(self.active_run["id"])["id"], raw_event=event)
+                    TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=message_in_progress["id"], raw_event=event)
                 )
-                # Same rule as the tool-call branch above: the slot lifecycle is
-                # bookkeeping, not wire output — it must not depend on suppression.
+                # Same reasoning as the tool-call branch above.
                 self.clear_message_in_progress(self.active_run["id"])
                 yield resolved
 
