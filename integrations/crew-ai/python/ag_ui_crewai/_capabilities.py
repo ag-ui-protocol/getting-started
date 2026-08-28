@@ -29,7 +29,7 @@ import importlib.util
 import inspect
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, get_args
 
 from ag_ui.core import EventType
 
@@ -222,6 +222,43 @@ def flow_supports_conversational_stream(flow: Any) -> bool:
         and _safe_getattr(flow, "conversational") is True
         and callable(_safe_getattr(flow, "stream_turn"))
     )
+
+
+# --------------------------------------------------------------------------
+# conversational message roles
+# --------------------------------------------------------------------------
+# CrewAI's conversational history is TYPED: ``ConversationMessage.role`` is a
+# closed literal, and a state deriving from ``ConversationState`` types its
+# ``messages`` as ``list[ConversationMessage]``. AG-UI's own role vocabulary is
+# wider (``developer`` among them), and one unheld role anywhere in a seeded
+# history fails validation for the WHOLE turn.
+#
+# Read the accepted set off the installed literal rather than hardcoding one
+# release's answer. When the symbol is absent or reshaped, fall back to the four
+# roles CrewAI has documented for the conversational surface, which keeps every
+# role that already worked working.
+_FALLBACK_CONVERSATIONAL_MESSAGE_ROLES = frozenset(
+    {"user", "assistant", "system", "tool"}
+)
+_CONVERSATIONAL_MODULE, _CONVERSATIONAL_MODULE_NAME = _first_module(
+    ["crewai.experimental.conversational"]
+)
+ConversationMessageRole = (
+    getattr(_CONVERSATIONAL_MODULE, "ConversationMessageRole", None)
+    if _CONVERSATIONAL_MODULE is not None
+    else None
+)
+_probed_conversational_message_roles = frozenset(
+    role for role in get_args(ConversationMessageRole) if isinstance(role, str)
+)
+_conversational_message_roles = (
+    _probed_conversational_message_roles or _FALLBACK_CONVERSATIONAL_MESSAGE_ROLES
+)
+
+
+def conversational_message_roles() -> frozenset[str]:
+    """The message roles CrewAI's conversational history can hold."""
+    return _conversational_message_roles
 
 
 # --------------------------------------------------------------------------
