@@ -40,9 +40,23 @@ const SURFACE_OPERATION_KEYS = [
 
 type SurfaceOperationKey = (typeof SURFACE_OPERATION_KEYS)[number];
 
+/**
+ * The legacy binary content part, which left `@ag-ui/core` in 1.0. Old
+ * producers still send it, so this boundary keeps reading it — typed locally,
+ * because the protocol no longer knows the shape.
+ */
+interface LegacyBinaryInputContent {
+  type: "binary";
+  mimeType: string;
+  id?: string;
+  url?: string;
+  data?: string;
+  filename?: string;
+}
+
 const isBinaryContent = (
-  content: InputContent,
-): content is Extract<InputContent, { type: "binary" }> => content.type === "binary";
+  content: InputContent | LegacyBinaryInputContent,
+): content is LegacyBinaryInputContent => content.type === "binary";
 
 const isTextContent = (content: InputContent): content is Extract<InputContent, { type: "text" }> =>
   content.type === "text";
@@ -52,7 +66,7 @@ const createTextPart = (text: string): A2ATextPart => ({
   text,
 });
 
-const createFilePart = (content: Extract<InputContent, { type: "binary" }>): A2AFilePart | null => {
+const createFilePart = (content: LegacyBinaryInputContent): A2AFilePart | null => {
   if (content.url) {
     return {
       kind: "file",

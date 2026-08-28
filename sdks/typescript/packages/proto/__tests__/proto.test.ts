@@ -60,7 +60,9 @@ describe("Proto", () => {
     // Check delta operations
     expect(decoded.delta[0].op).toBe(originalEvent.delta[0].op);
     expect(decoded.delta[0].path).toBe(originalEvent.delta[0].path);
-    expect(decoded.delta[0].value).toBe(originalEvent.delta[0].value);
+    expect((decoded.delta[0] as { value?: unknown }).value).toBe(
+      (originalEvent.delta[0] as { value?: unknown }).value,
+    );
     expect(decoded.delta[1].op).toBe(originalEvent.delta[1].op);
     expect(decoded.delta[1].path).toBe(originalEvent.delta[1].path);
   });
@@ -81,7 +83,7 @@ describe("Proto", () => {
     };
     const encoded = encode(originalEvent);
     const decoded = decode(encoded) as StateDeltaEvent;
-    expect(decoded.delta[0].value).toEqual(complexValue);
+    expect((decoded.delta[0] as { value?: unknown }).value).toEqual(complexValue);
   });
   it("should correctly encode/decode a MessagesSnapshotEvent event with tool calls", () => {
     const originalEvent: MessagesSnapshotEvent = {

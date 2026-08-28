@@ -116,7 +116,10 @@ function emitObjectType(definition: ObjectDefinition): string {
           ? `${field.description} Each item: ${field.type.itemsDescription}`
           : field.description;
       const doc = jsdoc(description, fieldTags(field), "  ");
-      const optional = field.required ? "" : "?";
+      const optional =
+        field.required || ABSENT_MEANS_EMPTY.has(`${definition.name}.${field.name}`)
+          ? ""
+          : "?";
       return `${doc}\n  ${field.name}${optional}: ${tsType(field.type)};`;
     })
     .join("\n");
@@ -172,6 +175,28 @@ export function emitTypes(model: ProtocolModel): string {
  * request body.
  */
 const NULL_MEANS_ABSENT = new Set(["RunAgentInput.state"]);
+
+/**
+ * Optional list fields the TypeScript SDK materialises as an empty list rather
+ * than leaving absent.
+ *
+ * The schema leaves these optional deliberately — "an absent key and an empty
+ * array mean the same thing, so requiring them would catch nothing a producer
+ * could get wrong" — and that stays true of the wire, where a producer may omit
+ * them freely. It is a poor bargain for a consumer, though: every reader would
+ * have to narrow a value that has only one meaning, and nine integration
+ * packages stopped compiling for want of it.
+ *
+ * So the SDK presents the one form every layer already accepts. The protobuf
+ * decoder does the same on purpose and for the same reason, since the wire
+ * cannot tell an absent repeated field from an empty one; this makes the JSON
+ * path agree with it. Absent in, empty out — no meaning is invented, because
+ * absent and empty were never different meanings.
+ */
+const ABSENT_MEANS_EMPTY = new Set([
+  "RunAgentInput.tools",
+  "RunAgentInput.context",
+]);
 
 function zodType(type: TypeExpr): string {
   switch (type.kind) {
@@ -239,7 +264,11 @@ function emitSchemaDefinition(
             field.required && acceptsUndefined
               ? ".refine((value) => value !== undefined)"
               : "";
-          const optional = field.required ? "" : ".optional()";
+          const optional = field.required
+            ? ""
+            : ABSENT_MEANS_EMPTY.has(`${definition.name}.${field.name}`)
+              ? ".default([])"
+              : ".optional()";
           // A field the protocol reads as absent when it arrives as null: the
           // coercion belongs with the validator because a server parsing a
           // request body has no middleware in front of it. It sits INSIDE the

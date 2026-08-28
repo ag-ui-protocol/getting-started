@@ -1530,11 +1530,11 @@ export type RunAgentInput = {
   /**
    * The tools the agent may call. Absent means none.
    */
-  tools?: Tool[];
+  tools: Tool[];
   /**
    * Ambient information for the run. Absent means none.
    */
-  context?: Context[];
+  context: Context[];
   /**
    * Application-specific values passed through to the agent untouched. Any
    * JSON value.
