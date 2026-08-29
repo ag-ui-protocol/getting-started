@@ -59,6 +59,11 @@ export class HttpAgent extends AbstractAgent {
       },
       body: JSON.stringify(sanitizeOutgoingInput(input)),
       signal: this.abortController.signal,
+      // The run request carries the conversation and developer auth headers.
+      // Never let fetch follow a server-chosen redirect with that payload:
+      // surfacing redirects as errors keeps a compromised endpoint from
+      // re-issuing the POST (and everything in it) at another origin.
+      redirect: "error",
     };
   }
 
