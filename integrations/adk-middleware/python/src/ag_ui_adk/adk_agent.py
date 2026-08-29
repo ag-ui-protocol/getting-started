@@ -205,6 +205,9 @@ class ADKAgent:
         # Message snapshot configuration
         emit_messages_snapshot: bool = False,
 
+        # RAW passthrough of the untranslated ADK event (debugging / extensibility)
+        emit_raw_events: bool = False,
+
         # Streaming function call arguments (Gemini 3+ via Vertex AI)
         streaming_function_call_arguments: bool = False,
 
@@ -260,6 +263,11 @@ class ADKAgent:
                 full message history (e.g., for client-side persistence or AG-UI
                 protocol compliance). Note: Clients using CopilotKit can use the
                 /agents/state endpoint instead for on-demand history retrieval.
+            emit_raw_events: Whether to emit a RawEvent carrying the untranslated
+                ADK event immediately before its translated AG-UI events. Defaults
+                to False. Opt-in for debugging and for clients that need ADK-specific
+                fields the translation doesn't carry (e.g. actions, custom_metadata,
+                grounding_metadata). Each RawEvent has source="google-adk".
             streaming_function_call_arguments: Whether to enable streaming of function
                 call arguments from Gemini 3+ models via Vertex AI. When enabled,
                 TOOL_CALL_ARGS events are emitted incrementally as the model streams
@@ -411,6 +419,8 @@ class ADKAgent:
         self._predict_state = predict_state
         # Message snapshot configuration
         self._emit_messages_snapshot = emit_messages_snapshot
+        # RAW passthrough of the untranslated ADK event (opt-in; debugging/extensibility)
+        self._emit_raw_events = emit_raw_events
         self._capabilities = capabilities
         # A2UI auto-injection config (mirrors StrandsAgentConfig.a2ui). None
         # disables auto-injection unless the runtime forwards injectA2UITool.
@@ -583,6 +593,7 @@ class ADKAgent:
         # AG-UI specific
         predict_state: Optional[Iterable[PredictStateMapping]] = None,
         emit_messages_snapshot: bool = False,
+        emit_raw_events: bool = False,
         streaming_function_call_arguments: bool = False,
         # Session identity
         use_thread_id_as_session_id: bool = False,
@@ -672,6 +683,7 @@ class ADKAgent:
             save_session_to_memory_on_cleanup=save_session_to_memory_on_cleanup,
             predict_state=predict_state,
             emit_messages_snapshot=emit_messages_snapshot,
+            emit_raw_events=emit_raw_events,
             streaming_function_call_arguments=streaming_function_call_arguments,
             use_thread_id_as_session_id=use_thread_id_as_session_id,
             capabilities=capabilities,
@@ -3030,6 +3042,7 @@ class ADKAgent:
                 is_resumable=self._is_adk_resumable(),
                 streaming_function_call_arguments=self._streaming_function_call_arguments,
                 output_schema_agent_names=output_schema_names,
+                emit_raw_events=self._emit_raw_events,
             )
 
             # Share the translator's emitted IDs set with proxy toolsets so

@@ -20,7 +20,7 @@ from ag_ui.core import (
     DocumentInputContent, InputContentUrlSource, TextInputContent,
     ReasoningStartEvent, ReasoningEndEvent,
     ReasoningMessageStartEvent, ReasoningMessageContentEvent, ReasoningMessageEndEvent,
-    ReasoningEncryptedValueEvent,
+    ReasoningEncryptedValueEvent, RawEvent,
 )
 import json
 from google.adk.events import Event as ADKEvent
@@ -200,6 +200,7 @@ class EventTranslator:
         is_resumable: bool = False,
         streaming_function_call_arguments: bool = False,
         output_schema_agent_names: Optional[set] = None,
+        emit_raw_events: bool = False,
     ):
         """Initialize the event translator.
 
@@ -225,6 +226,10 @@ class EventTranslator:
         """
         # Agent names with output_schema — suppress their text from the chat UI (GitHub #1390)
         self._output_schema_agent_names: set[str] = output_schema_agent_names if output_schema_agent_names is not None else set()
+        # When True, emit a RawEvent carrying the untranslated ADK event before its
+        # translated AG-UI events. Opt-in (off by default) — meant for debugging and
+        # for clients that want access to ADK-specific fields the translation drops.
+        self._emit_raw_events = emit_raw_events
         # Whether the agent uses ADK's native resumability (ResumabilityConfig).
         # When True, ClientProxyTool handles tool call emission and the translator
         # must skip client tool names to avoid duplicates.
@@ -336,8 +341,27 @@ class EventTranslator:
         """
         return len(self._deferred_confirm_events) > 0
 
+    def _build_raw_event(self, adk_event: ADKEvent) -> Optional[RawEvent]:
+        """Wrap the untranslated ADK event in an AG-UI ``RawEvent``.
+
+        Best-effort: the ADK ``Event`` is a pydantic model, so it is dumped in
+        JSON mode (``exclude_none``) to a plain dict. Any serialization failure
+        is logged and swallowed (returns ``None``) so the RAW passthrough can
+        never break the main event stream. ``source="google-adk"`` identifies
+        the producer for clients that consume multiple agent backends.
+        """
+        try:
+            if hasattr(adk_event, "model_dump"):
+                payload = adk_event.model_dump(mode="json", exclude_none=True)
+            else:  # pragma: no cover - ADK Event is always a pydantic model today
+                payload = adk_event
+            return RawEvent(type=EventType.RAW, event=payload, source="google-adk")
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(f"Failed to build RAW passthrough event: {e}")
+            return None
+
     async def translate(
-        self, 
+        self,
         adk_event: ADKEvent,
         thread_id: str,
         run_id: str
@@ -371,6 +395,13 @@ class EventTranslator:
             if hasattr(adk_event, 'author') and adk_event.author == "user":
                 logger.debug("Skipping user event")
                 return
+
+            # Optional RAW passthrough: emit the untranslated ADK event so clients
+            # can debug or read ADK-specific fields the translation doesn't carry.
+            if self._emit_raw_events:
+                raw = self._build_raw_event(adk_event)
+                if raw is not None:
+                    yield raw
 
             # Handle text content
             # --- THIS IS THE RESTORED LINE ---
