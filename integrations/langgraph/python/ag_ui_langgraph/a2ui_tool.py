@@ -59,6 +59,26 @@ logger = logging.getLogger("ag_ui_langgraph")
 RENDER_A2UI_TOOL_NAME: str = RENDER_A2UI_TOOL_DEF["function"]["name"]
 
 
+def _is_thinking_mode_tool_choice_error(exc: BaseException) -> bool:
+    """True when a provider rejected a forced/named ``tool_choice`` because the
+    model is in reasoning/"thinking" mode.
+
+    Reasoning models on some OpenAI-compatible providers (observed: Alibaba
+    DashScope ``qwen*`` with thinking enabled) forbid a ``required``/object
+    ``tool_choice`` and fail the request with a 400 such as::
+
+        The tool_choice parameter does not support being set to required or
+        object in thinking mode
+
+    We match on the error text — not the exception class — so this adapter
+    doesn't hard-depend on the ``openai`` SDK's error types, and the match stays
+    narrow (both ``tool_choice`` and ``thinking mode`` must appear) so unrelated
+    400s are re-raised untouched.
+    """
+    msg = str(exc).lower()
+    return "tool_choice" in msg and "thinking mode" in msg
+
+
 # Re-export the toolkit constants/types for callers that previously imported
 # them from this package — keeps the public surface stable and lets consumers
 # type the shared params object + its guidelines without depending on the
@@ -136,6 +156,11 @@ def get_a2ui_tools(params: A2UIToolParams):
     catalog = cfg["catalog"]
     recovery = cfg["recovery"]
     on_a2ui_attempt = cfg["on_a2ui_attempt"]
+    # Default: force the inner render tool by name so the subagent is guaranteed
+    # to emit a structured surface. Reasoning/"thinking-mode" models reject a
+    # forced choice; the runtime fallback below downgrades to "auto"
+    # for those, and a caller may pin ``tool_choice="auto"`` up front via params.
+    tool_choice = cfg["tool_choice"]
 
     @tool(cfg["tool_name"], description=cfg["tool_description"])
     async def generate_a2ui(
@@ -171,13 +196,33 @@ def get_a2ui_tools(params: A2UIToolParams):
         if prep.get("error"):
             return wrap_error_envelope(prep["error"])
 
-        # Glue: bind the structured-output tool.
-        model_with_tool = model.bind_tools(
-            [RENDER_A2UI_TOOL_DEF], tool_choice="render_a2ui"
-        )
+        # Glue: bind the structured-output tool. ``choice_state`` is mutable so a
+        # thinking-mode fallback (below) sticks for every subsequent recovery
+        # attempt instead of re-tripping — and re-recovering from — the same 400.
+        choice_state = {"tool_choice": tool_choice}
+
+        def _bind(choice):
+            return model.bind_tools([RENDER_A2UI_TOOL_DEF], tool_choice=choice)
 
         async def _invoke_subagent(prompt, _attempt):
-            return await _stream_render_subagent(model_with_tool, prompt, messages)
+            choice = choice_state["tool_choice"]
+            try:
+                return await _stream_render_subagent(_bind(choice), prompt, messages)
+            except Exception as exc:  # noqa: BLE001 - re-raised unless it's the known 400
+                # Reasoning models reject a forced/object tool_choice. Fall back
+                # to "auto" once (and for the rest of this run) so the render can
+                # proceed; the validate->retry loop below still gates the result,
+                # so a model that skips the tool degrades gracefully rather than
+                # crashing the stream.
+                if choice != "auto" and _is_thinking_mode_tool_choice_error(exc):
+                    logger.warning(
+                        "A2UI: provider rejected forced tool_choice=%r in thinking "
+                        "mode; falling back to tool_choice='auto' for this run.",
+                        choice,
+                    )
+                    choice_state["tool_choice"] = "auto"
+                    return await _stream_render_subagent(_bind("auto"), prompt, messages)
+                raise
 
         def _build_envelope(args):
             return build_a2ui_envelope(

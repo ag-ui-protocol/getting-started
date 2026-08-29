@@ -29,7 +29,10 @@ from langchain_core.messages import AIMessageChunk
 from langchain_core.messages.tool import tool_call_chunk
 
 from ag_ui_langgraph import get_a2ui_tools
-from ag_ui_langgraph.a2ui_tool import _stream_render_subagent
+from ag_ui_langgraph.a2ui_tool import (
+    _is_thinking_mode_tool_choice_error,
+    _stream_render_subagent,
+)
 from ag_ui_a2ui_toolkit import (
     A2UI_OPERATIONS_KEY,
     DEFAULT_DESIGN_GUIDELINES,
@@ -94,9 +97,37 @@ class FakeModel:
     def __init__(self, args):
         self.args = args
         self.captured_prompts: list[str] = []
+        self.bound_tool_choices: list = []
 
     def bind_tools(self, tools, tool_choice=None):
+        self.bound_tool_choices.append(tool_choice)
         return _StreamingBoundModel(self)
+
+
+class _ThinkingModeModel(FakeModel):
+    """A provider whose thinking mode rejects a forced/named ``tool_choice`` with
+    the DashScope 400, but streams normally under ``tool_choice="auto"`` — the
+    exact reasoning/thinking-mode shape."""
+
+    def bind_tools(self, tools, tool_choice=None):
+        self.bound_tool_choices.append(tool_choice)
+        if tool_choice not in (None, "auto"):
+            return _RejectingBoundModel()
+        return _StreamingBoundModel(self)
+
+
+class _RejectingBoundModel:
+    """A bound model whose stream raises the DashScope thinking-mode 400 (raised
+    when the stream is iterated, as a real provider does)."""
+
+    async def astream(self, messages):
+        if False:  # pragma: no cover - make this an async generator
+            yield None
+        raise RuntimeError(
+            "Error code: 400 - InternalError.Algo.InvalidParameter: The "
+            "tool_choice parameter does not support being set to required or "
+            "object in thinking mode"
+        )
 
 
 class FakeRuntime:
@@ -115,13 +146,15 @@ def _invoke_tool(tool, runtime, **kwargs) -> str:
 
 
 class TestGetA2UITools(unittest.TestCase):
-    def _make(self, guidelines=None, tool_name=None):
-        model = FakeModel(VALID_ARGS)
+    def _make(self, guidelines=None, tool_name=None, tool_choice=None, model=None):
+        model = model if model is not None else FakeModel(VALID_ARGS)
         params = {"model": model, "default_catalog_id": "cat://custom"}
         if guidelines is not None:
             params["guidelines"] = guidelines
         if tool_name is not None:
             params["tool_name"] = tool_name
+        if tool_choice is not None:
+            params["tool_choice"] = tool_choice
         return get_a2ui_tools(params), model
 
     def test_single_arg_params_produces_operations_envelope(self):
@@ -170,6 +203,54 @@ class TestGetA2UITools(unittest.TestCase):
         custom_tool, _ = self._make(tool_name="render_ui")
         self.assertEqual(custom_tool.name, "render_ui")
 
+    def test_default_tool_choice_forces_render(self):
+        # By default the subagent forces the inner render tool by name so it is
+        # guaranteed to emit a structured surface.
+        tool, model = self._make()
+        _invoke_tool(tool, FakeRuntime({"messages": []}), intent="create")
+        self.assertEqual(model.bound_tool_choices, ["render_a2ui"])
+
+    def test_tool_choice_override_reaches_bind(self):
+        # A caller can pin tool_choice up front (explicit escape hatch)
+        # — e.g. "auto" for a reasoning model that rejects a forced choice.
+        tool, model = self._make(tool_choice="auto")
+        _invoke_tool(tool, FakeRuntime({"messages": []}), intent="create")
+        self.assertEqual(model.bound_tool_choices, ["auto"])
+
+    def test_thinking_mode_falls_back_to_auto(self):
+        # A forced tool_choice 400s in a reasoning model's thinking mode. The adapter must
+        # catch that specific error, downgrade to "auto", and still produce a
+        # valid operations envelope — no crash, no caller change.
+        model = _ThinkingModeModel(VALID_ARGS)
+        tool, _ = self._make(model=model)
+        envelope = _invoke_tool(tool, FakeRuntime({"messages": []}), intent="create")
+        parsed = json.loads(envelope)
+        self.assertTrue(any("createSurface" in o for o in parsed[A2UI_OPERATIONS_KEY]))
+        # Forced choice tried first, then the "auto" fallback.
+        self.assertEqual(model.bound_tool_choices, ["render_a2ui", "auto"])
+
+    def test_unrelated_bad_request_is_not_swallowed(self):
+        # The fallback is narrow: a 400 that isn't the thinking-mode tool_choice
+        # rejection must propagate, not silently downgrade.
+        class _OtherError(FakeModel):
+            def bind_tools(self, tools, tool_choice=None):
+                self.bound_tool_choices.append(tool_choice)
+
+                class _Boom:
+                    async def astream(self, messages):
+                        if False:  # pragma: no cover
+                            yield None
+                        raise RuntimeError("400 - context length exceeded")
+
+                return _Boom()
+
+        model = _OtherError(VALID_ARGS)
+        tool, _ = self._make(model=model)
+        with self.assertRaises(RuntimeError):
+            _invoke_tool(tool, FakeRuntime({"messages": []}), intent="create")
+        # Only the forced choice was attempted; no "auto" fallback.
+        self.assertEqual(model.bound_tool_choices, ["render_a2ui"])
+
 
 class TestStreamRenderSubagent(unittest.TestCase):
     """The subagent STREAMS the model (``astream``) so the nested render_a2ui
@@ -202,6 +283,24 @@ class TestStreamRenderSubagent(unittest.TestCase):
         bound.astream = _empty_astream
         captured = asyncio.run(_stream_render_subagent(bound, "PROMPT", []))
         self.assertIsNone(captured)
+
+
+class TestThinkingModeErrorPredicate(unittest.TestCase):
+    def test_matches_dashscope_thinking_mode_400(self):
+        exc = RuntimeError(
+            "Error code: 400 - InternalError.Algo.InvalidParameter: The "
+            "tool_choice parameter does not support being set to required or "
+            "object in thinking mode"
+        )
+        self.assertTrue(_is_thinking_mode_tool_choice_error(exc))
+
+    def test_ignores_unrelated_errors(self):
+        for exc in (
+            RuntimeError("400 - context length exceeded"),
+            RuntimeError("tool_choice invalid tool name"),  # tool_choice but not thinking
+            ValueError("rate limited"),
+        ):
+            self.assertFalse(_is_thinking_mode_tool_choice_error(exc))
 
 
 if __name__ == "__main__":

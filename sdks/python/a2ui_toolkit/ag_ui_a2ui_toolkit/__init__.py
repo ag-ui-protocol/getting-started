@@ -780,6 +780,14 @@ class A2UIToolParams(TypedDict, total=False):
     catalog: Optional[dict]
     recovery: Optional[dict]
     on_a2ui_attempt: Optional[Any]
+    # ``tool_choice`` the render subagent binds the inner ``render_a2ui`` tool
+    # with. Defaults to forcing that tool by name (``"render_a2ui"``) so the
+    # subagent is guaranteed to emit a structured surface. Override to
+    # ``"auto"`` for reasoning/"thinking-mode" models (e.g. Alibaba DashScope
+    # ``qwen*`` with thinking enabled) that reject a forced/object ``tool_choice``
+    # (reasoning-model thinking mode). Adapters that honor a runtime fallback only reach for this
+    # when a caller wants to pin the behavior explicitly.
+    tool_choice: Optional[Any]
 
 
 class ResolvedA2UIToolParams(TypedDict):
@@ -796,6 +804,7 @@ class ResolvedA2UIToolParams(TypedDict):
     catalog: Optional[dict]
     recovery: Optional[dict]
     on_a2ui_attempt: Optional[Any]
+    tool_choice: Any
 
 
 def resolve_a2ui_tool_params(params: A2UIToolParams) -> ResolvedA2UIToolParams:
@@ -818,6 +827,10 @@ def resolve_a2ui_tool_params(params: A2UIToolParams) -> ResolvedA2UIToolParams:
         "catalog": params.get("catalog"),
         "recovery": params.get("recovery"),
         "on_a2ui_attempt": params.get("on_a2ui_attempt"),
+        # Forced-render by default; ``or`` (not ``is None``) so an empty-string
+        # override falls back to the forced default rather than binding a blank
+        # (invalid) tool choice.
+        "tool_choice": params.get("tool_choice") or RENDER_A2UI_TOOL_DEF["function"]["name"],
     }
 
 
