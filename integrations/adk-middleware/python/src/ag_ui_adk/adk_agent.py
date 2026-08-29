@@ -205,6 +205,9 @@ class ADKAgent:
         # Message snapshot configuration
         emit_messages_snapshot: bool = False,
 
+        # Workflow step events (SequentialAgent/ParallelAgent/LoopAgent, multi-agent)
+        emit_workflow_steps: bool = False,
+
         # Streaming function call arguments (Gemini 3+ via Vertex AI)
         streaming_function_call_arguments: bool = False,
 
@@ -260,6 +263,19 @@ class ADKAgent:
                 full message history (e.g., for client-side persistence or AG-UI
                 protocol compliance). Note: Clients using CopilotKit can use the
                 /agents/state endpoint instead for on-demand history retrieval.
+            emit_workflow_steps: Whether to emit STEP_STARTED/STEP_FINISHED events
+                at ADK node/sub-agent boundaries for workflow and multi-agent runs
+                (SequentialAgent, ParallelAgent, LoopAgent, coordinator/sub-agent
+                and dynamic-transfer topologies). Each node's name (the ADK author)
+                becomes the AG-UI ``stepName``, giving the frontend observable
+                per-step progress as recommended by the AG-UI spec. Defaults to
+                False to preserve existing behavior. Steps are only emitted for
+                workflow/multi-agent topologies; a plain single LlmAgent run is
+                unchanged even when this is True. ParallelAgent is handled
+                precisely: steps are keyed by the ADK event ``branch`` (distinct
+                per parallel sub-agent), so concurrent branches each get one step
+                and stay open together, then close when execution returns to an
+                ancestor branch.
             streaming_function_call_arguments: Whether to enable streaming of function
                 call arguments from Gemini 3+ models via Vertex AI. When enabled,
                 TOOL_CALL_ARGS events are emitted incrementally as the model streams
@@ -411,6 +427,7 @@ class ADKAgent:
         self._predict_state = predict_state
         # Message snapshot configuration
         self._emit_messages_snapshot = emit_messages_snapshot
+        self._emit_workflow_steps = emit_workflow_steps
         self._capabilities = capabilities
         # A2UI auto-injection config (mirrors StrandsAgentConfig.a2ui). None
         # disables auto-injection unless the runtime forwards injectA2UITool.
@@ -488,6 +505,35 @@ class ADKAgent:
         if root is None:
             return False
         return isinstance(root, Workflow)
+
+    @staticmethod
+    def _agent_has_workflow(agent) -> bool:
+        """Whether the agent topology is a workflow / multi-agent run.
+
+        True when the root is an ADK workflow orchestrator (SequentialAgent,
+        ParallelAgent, LoopAgent), an ADK 2.0 ``Workflow`` graph, or has
+        sub-agents (coordinator/collaborative or dynamic-transfer topologies).
+        Used to gate STEP event emission so a plain single LlmAgent run stays
+        unchanged even with emit_workflow_steps enabled.
+
+        Detection is by isinstance with imports wrapped in try/except so this
+        stays compatible with ADK 1.x (where some classes don't exist).
+        """
+        if agent is None:
+            return False
+        try:
+            from google.adk.agents import SequentialAgent, ParallelAgent, LoopAgent
+            if isinstance(agent, (SequentialAgent, ParallelAgent, LoopAgent)):
+                return True
+        except Exception:
+            pass
+        try:
+            from google.adk.workflow import Workflow  # ADK 2.0 graph engine
+            if isinstance(agent, Workflow):
+                return True
+        except Exception:
+            pass
+        return bool(getattr(agent, 'sub_agents', None))
 
     def _root_agent_needs_invocation_id(self) -> bool:
         """Check if the agent topology requires invocation_id for HITL resumption.
@@ -3030,6 +3076,11 @@ class ADKAgent:
                 is_resumable=self._is_adk_resumable(),
                 streaming_function_call_arguments=self._streaming_function_call_arguments,
                 output_schema_agent_names=output_schema_names,
+                # Only emit STEP events for workflow/multi-agent topologies, so a
+                # plain single LlmAgent run is unchanged even with the flag on.
+                emit_workflow_steps=(
+                    self._emit_workflow_steps and self._agent_has_workflow(adk_agent)
+                ),
             )
 
             # Share the translator's emitted IDs set with proxy toolsets so
@@ -3143,6 +3194,13 @@ class ADKAgent:
                             break
                 logger.info(f"[ADK_EVENT] author={event_author}, partial={event_partial}, turn_complete={event_turn_complete}, content={content_preview[:80]}...")
 
+                # Workflow steps: emit STEP_STARTED/STEP_FINISHED at ADK node
+                # (sub-agent) boundaries before this event's content is translated,
+                # so STEP_STARTED precedes the node's text/tool events. No-op unless
+                # emit_workflow_steps is enabled for a workflow/multi-agent topology.
+                for step_ev in event_translator.step_boundary_events(adk_event):
+                    await event_queue.put(step_ev)
+
                 # LRO persistence fix: if we're draining events after LRO detection,
                 # only translate text content and wait for non-partial event
                 if lro_draining_for_persistence:
@@ -3185,6 +3243,10 @@ class ADKAgent:
                         await self._finalize_hitl_buffer(
                             event_queue, input.thread_id, app_name, user_id
                         )
+                        # Close any open workflow step before the HITL pause ends
+                        # the run (no-op unless workflow steps are active).
+                        for step_ev in event_translator.finalize_step_events():
+                            await event_queue.put(step_ev)
                         await event_queue.put(None)
                         return
                     else:
@@ -3344,12 +3406,26 @@ class ADKAgent:
                                 app_name,
                                 user_id,
                             )
+                            # Close any open workflow steps before this LRO/HITL
+                            # pause ends the run — otherwise RUN_FINISHED would
+                            # follow with steps still active. (No-op unless on.)
+                            for step_ev in event_translator.finalize_step_events():
+                                await event_queue.put(step_ev)
                             await event_queue.put(None)
                             return
 
             # Force close any streaming messages
             async for ag_ui_event in event_translator.force_close_streaming_message():
                 await event_queue.put(ag_ui_event)
+
+            # Close any open workflow steps now — after the last node's content
+            # (including its text stream just closed above) but BEFORE the
+            # run-level STATE_SNAPSHOT / MESSAGES_SNAPSHOT below, so those
+            # run-level events are not nested inside the final step's bracket.
+            # No new steps open after the runner loop, so this is the single
+            # close point for the normal path. (No-op unless workflow steps are on.)
+            for step_ev in event_translator.finalize_step_events():
+                await event_queue.put(step_ev)
 
             # Manage invocation_id lifecycle for resumable agents.
             # Composite agents: store after LRO pause so the next resume can

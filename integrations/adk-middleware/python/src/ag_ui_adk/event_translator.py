@@ -11,6 +11,7 @@ from google.genai import types
 
 from ag_ui.core import (
     BaseEvent, EventType,
+    StepStartedEvent, StepFinishedEvent,
     TextMessageStartEvent, TextMessageContentEvent, TextMessageEndEvent,
     ToolCallStartEvent, ToolCallArgsEvent, ToolCallEndEvent,
     ToolCallResultEvent, StateSnapshotEvent, StateDeltaEvent,
@@ -185,6 +186,20 @@ def _serialize_tool_response(response: Any) -> str:
             logger.warning("Failed to stringify tool response; returning empty string.")
             return json.dumps("", ensure_ascii=False)
 
+def _branch_is_descendant(child: str, parent: str) -> bool:
+    """True if ADK branch ``child`` is strictly nested under ``parent``.
+
+    ADK branches are dot-paths like ``"par.p"`` / ``"par.p.inner.x"``; ``""`` is
+    the root. Concurrent siblings (``"par.p"`` vs ``"par.q"``) are NOT descendants
+    of each other, so they never close one another.
+    """
+    if child == parent:
+        return False
+    if parent == "":
+        return child != ""
+    return child.startswith(parent + ".")
+
+
 class EventTranslator:
     """Translates Google ADK events to AG-UI protocol events.
 
@@ -200,6 +215,7 @@ class EventTranslator:
         is_resumable: bool = False,
         streaming_function_call_arguments: bool = False,
         output_schema_agent_names: Optional[set] = None,
+        emit_workflow_steps: bool = False,
     ):
         """Initialize the event translator.
 
@@ -222,9 +238,22 @@ class EventTranslator:
                 TextMessageEvents. This prevents structured output from
                 output_schema agents (e.g. classifiers in Workflow pipelines)
                 from leaking into user-visible messages. (GitHub #1390)
+            emit_workflow_steps: When True, emit STEP_STARTED/STEP_FINISHED around
+                ADK node/sub-agent boundaries (author transitions). Enabled by
+                ADKAgent only for workflow/multi-agent topologies so a plain
+                single LlmAgent run stays unchanged.
         """
         # Agent names with output_schema — suppress their text from the chat UI (GitHub #1390)
         self._output_schema_agent_names: set[str] = output_schema_agent_names if output_schema_agent_names is not None else set()
+        # Workflow step lifecycle: when True, emit STEP_STARTED/STEP_FINISHED
+        # around ADK sub-agent/node boundaries. Only set True by ADKAgent for
+        # workflow/multi-agent topologies.
+        self._emit_workflow_steps = emit_workflow_steps
+        # Currently-open workflow steps, keyed by ADK branch ("" = root). ADK sets
+        # a distinct branch per ParallelAgent sub-agent (e.g. "par.p"), so keying
+        # by branch lets concurrent branches stay open at once while serial nodes
+        # (same branch) still close-on-change. Value is the open step's name.
+        self._open_steps: Dict[str, str] = {}
         # Whether the agent uses ADK's native resumability (ResumabilityConfig).
         # When True, ClientProxyTool handles tool call emission and the translator
         # must skip client tool names to avoid duplicates.
@@ -335,6 +364,65 @@ class EventTranslator:
             True if there are deferred events waiting to be emitted
         """
         return len(self._deferred_confirm_events) > 0
+
+    def step_boundary_events(self, adk_event: ADKEvent) -> Iterable[BaseEvent]:
+        """Emit STEP_STARTED/STEP_FINISHED at ADK node/sub-agent boundaries.
+
+        Each ADK event's ``author`` is the node (sub-agent) that produced it, and
+        its ``branch`` is that node's position in the run tree (``""`` = root; ADK
+        assigns a distinct branch such as ``"par.p"`` to each ParallelAgent
+        sub-agent). We keep one open step **per branch**, so:
+
+        - **Serial** nodes (Sequential/Loop/custom, same branch) close-on-change:
+          when the branch's author changes, the old step closes and the new opens.
+        - **Concurrent** ParallelAgent branches (distinct branches) each get their
+          own step and stay open together — the AG-UI verifier tracks active steps
+          by name, so overlapping steps with distinct names are valid.
+        - When execution **returns to an ancestor branch** (e.g. the next
+          sequential node after a parallel block), the still-open descendant
+          branches (the parallel children) are closed.
+
+        This mirrors the LangGraph integration (node name → step) and follows the
+        spec — *"the stepName could be the name of a node"* — with each
+        STEP_FINISHED.step_name matching its STEP_STARTED.
+
+        No-op unless ``emit_workflow_steps`` was enabled. User-authored and
+        author-less events are ignored, and consecutive events from the same node
+        do not re-emit steps. Call once per ADK event, before translating its
+        content, so STEP_STARTED precedes the node's text/tool events.
+        """
+        if not self._emit_workflow_steps:
+            return
+        author = getattr(adk_event, 'author', None)
+        if not author or author == "user":
+            return
+        branch = getattr(adk_event, 'branch', None) or ""
+
+        # Same node still emitting within this branch → nothing to do.
+        if self._open_steps.get(branch) == author:
+            return
+
+        # (a) This branch switched to a new node → close the step open here.
+        if branch in self._open_steps:
+            yield StepFinishedEvent(step_name=self._open_steps.pop(branch))
+
+        # (b) Execution returned to an ancestor branch → close any open steps in
+        #     descendant branches (e.g. a ParallelAgent's children once the run
+        #     moves on to the next sequential node). Concurrent siblings are not
+        #     descendants of each other, so they stay open.
+        for stale in [b for b in reversed(list(self._open_steps)) if _branch_is_descendant(b, branch)]:
+            yield StepFinishedEvent(step_name=self._open_steps.pop(stale))
+
+        # (c) Open the step for this node.
+        yield StepStartedEvent(step_name=author)
+        self._open_steps[branch] = author
+
+    def finalize_step_events(self) -> Iterable[BaseEvent]:
+        """Close any still-open workflow steps (call right before the run
+        completes) so every STEP_FINISHED is paired before RUN_FINISHED. Closes
+        deepest/most-recently-opened branches first. Idempotent."""
+        for branch in reversed(list(self._open_steps.keys())):
+            yield StepFinishedEvent(step_name=self._open_steps.pop(branch))
 
     async def translate(
         self, 
@@ -1351,6 +1439,7 @@ class EventTranslator:
         to ensure clean state.
         """
         self._active_tool_calls.clear()
+        self._open_steps.clear()  # workflow step tracking is run-scoped
         self._streaming_message_id = None
         self._is_streaming = False
         self._current_stream_text = ""
