@@ -21,7 +21,104 @@ from ag_ui_langgraph.utils import (
     agui_messages_to_langchain,
     langchain_messages_to_agui,
     normalize_tool_content,
+    strip_empty_content_blocks,
+    sanitize_messages_for_responses_api,
 )
+
+
+class TestStripEmptyContentBlocks(unittest.TestCase):
+    """Tests for strip_empty_content_blocks() / sanitize_messages_for_responses_api().
+
+    Regression coverage for the streamed Responses-API tool-call bug: some
+    OpenAI-compatible providers leave a trailing {"type": "text", "id": "msg_..",
+    "index": N} block with no "text" key, which crashes langchain-openai's
+    _construct_responses_api_input (KeyError: 'text') on the tool round-trip.
+    """
+
+    def test_drops_text_block_missing_text_key(self):
+        # Mirrors the real captured failing AIMessage: reasoning + a valid text
+        # block + a function_call + a trailing empty text container (no "text").
+        msg = AIMessage(
+            id="a1",
+            content=[
+                {"id": "rs_1", "type": "reasoning",
+                 "summary": [{"type": "summary_text", "text": "thinking"}]},
+                {"type": "text", "text": "\n\n", "index": 1},
+                {"type": "function_call", "name": "change_background",
+                 "arguments": "{}", "call_id": "c1", "id": "fc_1"},
+                {"type": "text", "id": "msg_1", "index": 2},  # malformed: no "text"
+            ],
+        )
+        cleaned = strip_empty_content_blocks(msg)
+        assert [b.get("type") for b in cleaned.content] == [
+            "reasoning", "text", "function_call",
+        ]
+        # every surviving text-ish block has a "text" key -> serializer won't KeyError
+        assert all(
+            "text" in b
+            for b in cleaned.content
+            if b.get("type") in ("text", "output_text", "refusal")
+        )
+
+    def test_drops_output_text_and_refusal_without_text(self):
+        msg = AIMessage(id="a2", content=[
+            {"type": "output_text", "id": "m1"},
+            {"type": "refusal", "id": "m2"},
+            {"type": "output_text", "text": "kept"},
+        ])
+        cleaned = strip_empty_content_blocks(msg)
+        assert cleaned.content == [{"type": "output_text", "text": "kept"}]
+
+    def test_preserves_valid_refusal(self):
+        # A valid refusal stores its content under "refusal", not "text", so it has
+        # no "text" key — it must NOT be dropped (only the empty refusal container is).
+        msg = AIMessage(id="a2b", content=[
+            {"type": "refusal", "refusal": "I can't help with that", "id": "m3"},
+            {"type": "text", "id": "msg_empty", "index": 0},  # empty container -> dropped
+        ])
+        cleaned = strip_empty_content_blocks(msg)
+        assert cleaned.content == [
+            {"type": "refusal", "refusal": "I can't help with that", "id": "m3"},
+        ]
+
+    def test_keeps_empty_string_text(self):
+        # An intentional empty string (key present) is distinct from a missing key.
+        msg = AIMessage(id="a2c", content=[{"type": "text", "text": ""}])
+        result = strip_empty_content_blocks(msg)
+        assert result is msg  # nothing to strip -> same instance
+        assert result.content == [{"type": "text", "text": ""}]
+
+    def test_keeps_valid_message_identity(self):
+        msg = AIMessage(id="a3", content=[{"type": "text", "text": "hi"}])
+        result = strip_empty_content_blocks(msg)
+        assert result is msg  # nothing to strip -> same instance
+
+    def test_string_content_passthrough(self):
+        msg = AIMessage(id="a4", content="plain string")
+        result = strip_empty_content_blocks(msg)
+        assert result is msg
+        assert result.content == "plain string"
+
+    def test_does_not_mutate_original(self):
+        msg = AIMessage(id="a5", content=[
+            {"type": "text", "text": "hi"},
+            {"type": "text", "id": "msg_x", "index": 0},
+        ])
+        cleaned = strip_empty_content_blocks(msg)
+        assert len(msg.content) == 2      # original untouched (model_copy, not in place)
+        assert len(cleaned.content) == 1
+
+    def test_sanitize_messages_maps_over_history(self):
+        history = [
+            HumanMessage(id="h1", content="hello"),
+            AIMessage(id="a1", content=[{"type": "text", "id": "msg_1", "index": 0}]),
+            ToolMessage(id="t1", content="", tool_call_id="c1"),
+        ]
+        cleaned = sanitize_messages_for_responses_api(history)
+        assert len(cleaned) == 3
+        assert cleaned[0] is history[0]   # human (str content) unchanged
+        assert cleaned[1].content == []   # empty block dropped
+        assert cleaned[2] is history[2]   # tool (str content) unchanged
 
 
 class TestAguiMessagesToLangchain(unittest.TestCase):

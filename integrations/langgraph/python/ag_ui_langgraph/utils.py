@@ -2029,6 +2029,57 @@ def normalize_tool_content(content: Any) -> str:
     return json.dumps(content)
 
 
+def strip_empty_content_blocks(message: BaseMessage) -> BaseMessage:
+    """Drop assistant content blocks that are *empty* streamed Responses-API
+    containers: a ``text`` / ``output_text`` block with no ``text`` field, or a
+    ``refusal`` block with no ``refusal`` field.
+
+    When a Responses-API turn (``ChatOpenAI(use_responses_api=True)``) is *streamed*
+    and ends on a tool call, some OpenAI-compatible providers leave a trailing empty
+    text container on the assistant message — ``{"type": "text", "id": "msg_…",
+    "index": N}`` with **no** ``"text"`` key. On the follow-up tool round-trip,
+    langchain-openai's ``_construct_responses_api_input`` does ``block["text"]`` on
+    it and raises ``KeyError: 'text'``, which aborts the run. These containers carry
+    no content, so dropping them makes the round-trip robust across providers. (Real
+    OpenAI does not emit them; some OpenAI-compatible endpoints do.)
+
+    Content-bearing blocks are always preserved — including a valid refusal
+    (``{"type": "refusal", "refusal": "…"}``, whose content lives under ``refusal``,
+    not ``text``) and an intentional empty string (``{"type": "text", "text": ""}``).
+    Each block type is keyed to its own content field, so this never drops a block
+    that carries real content. Returns the same instance when there is nothing to
+    strip, so it is cheap to map over an entire history on every turn.
+    """
+    content = getattr(message, "content", None)
+    if isinstance(content, list):
+        cleaned = [
+            block
+            for block in content
+            if not (
+                isinstance(block, dict)
+                and (
+                    (block.get("type") in ("text", "output_text") and "text" not in block)
+                    or (block.get("type") == "refusal" and "refusal" not in block)
+                )
+            )
+        ]
+        if cleaned != content:
+            return message.model_copy(update={"content": cleaned})
+    return message
+
+
+def sanitize_messages_for_responses_api(messages: List[BaseMessage]) -> List[BaseMessage]:
+    """Apply :func:`strip_empty_content_blocks` to every message in a history.
+
+    Intended to be called inside a LangGraph node on ``state["messages"]`` right
+    before invoking a model configured with ``use_responses_api=True``::
+
+        messages = sanitize_messages_for_responses_api(state["messages"])
+        response = await model.ainvoke([system_message, *messages], config)
+    """
+    return [strip_empty_content_blocks(m) for m in messages]
+
+
 # Used by run() to normalize forwarded_props keys from camelCase (JS frontend convention)
 # to snake_case (Python convention). Appears isolated but is called from agent.py and
 # removing it would silently break all streaming options forwarded from the frontend
