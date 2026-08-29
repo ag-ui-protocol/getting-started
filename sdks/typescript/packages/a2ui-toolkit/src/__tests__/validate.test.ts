@@ -331,3 +331,130 @@ describe("validateA2UIComponents — data bindings", () => {
     expect(r.valid).toBe(true);
   });
 });
+
+describe("validateA2UIComponents — functionCall actions (OSS-165 v2)", () => {
+  it("does not flag a functionCall's write-target path as an unresolved binding", () => {
+    // `agui.setValue`'s `path` arg is a WRITE target — it need not exist in the
+    // data model yet (setValue creates/sets it). The binding collector must not
+    // mistake the args map for a `{path}` read-binding.
+    const comps = [
+      { id: "root", component: "Column", children: ["btn"] },
+      {
+        id: "btn",
+        component: "Button",
+        child: "t",
+        action: { functionCall: { call: "agui.setValue", args: { path: "/notInData", value: true } } },
+      },
+      { id: "t", component: "Text", text: "Toggle" },
+    ];
+    const r = validateA2UIComponents({ components: comps, data: {} });
+    expect(r.errors.some((e) => e.code === "unresolved_binding")).toBe(false);
+    expect(r.valid).toBe(true);
+  });
+
+  it("still validates a nested {path} read-binding used as a functionCall arg value", () => {
+    // `setValue("/target", { path: "/missingSource" })` copies from a read source
+    // resolved at click time; a source that does not resolve is a genuine broken
+    // binding and must still be flagged, even though the target path is exempt.
+    const comps = [
+      { id: "root", component: "Column", children: ["btn"] },
+      {
+        id: "btn",
+        component: "Button",
+        child: "t",
+        action: {
+          functionCall: {
+            call: "agui.setValue",
+            args: { path: "/target", value: { path: "/missingSource" } },
+          },
+        },
+      },
+      { id: "t", component: "Text", text: "Copy" },
+    ];
+    const r = validateA2UIComponents({ components: comps, data: {} });
+    expect(r.errors.some((e) => e.code === "unresolved_binding" && /\/missingSource/.test(e.message))).toBe(true);
+  });
+});
+
+describe("validateA2UIComponents — agui.* functionCall vocabulary (OSS-165 v2)", () => {
+  it("flags an unknown agui.* function name", () => {
+    const comps = [
+      {
+        id: "root",
+        component: "Button",
+        child: "t",
+        action: { functionCall: { call: "agui.setValu", args: { path: "/x", value: 1 } } },
+      },
+      { id: "t", component: "Text", text: "Go" },
+    ];
+    const r = validateA2UIComponents({ components: comps });
+    expect(r.errors.some((e) => e.code === "invalid_function_call" && /agui\.setValu/.test(e.message))).toBe(true);
+  });
+
+  it("flags an agui.setValue missing a required arg", () => {
+    const comps = [
+      {
+        id: "root",
+        component: "Button",
+        child: "t",
+        action: { functionCall: { call: "agui.setValue", args: { path: "/x" } } }, // no value
+      },
+      { id: "t", component: "Text", text: "Go" },
+    ];
+    const r = validateA2UIComponents({ components: comps });
+    expect(r.errors.some((e) => e.code === "invalid_function_call" && /value/.test(e.message))).toBe(true);
+  });
+
+  it("flags an agui.toggleValue missing its required path arg", () => {
+    const comps = [
+      {
+        id: "root",
+        component: "Button",
+        child: "t",
+        action: { functionCall: { call: "agui.toggleValue", args: {} } },
+      },
+      { id: "t", component: "Text", text: "Go" },
+    ];
+    const r = validateA2UIComponents({ components: comps });
+    expect(r.errors.some((e) => e.code === "invalid_function_call" && /path/.test(e.message))).toBe(true);
+  });
+
+  it("does not reject a non-agui functionCall (e.g. a built-in openUrl)", () => {
+    // The vocabulary check is scoped to `agui.*`; native/built-in or app-registered
+    // functions are legitimate and must not be flagged.
+    const comps = [
+      {
+        id: "root",
+        component: "Button",
+        child: "t",
+        action: { functionCall: { call: "openUrl", args: { url: "https://a2ui.org" } } },
+      },
+      { id: "t", component: "Text", text: "Help" },
+    ];
+    const r = validateA2UIComponents({ components: comps });
+    expect(r.errors.some((e) => e.code === "invalid_function_call")).toBe(false);
+  });
+
+  it("accepts well-formed agui.setValue and agui.toggleValue actions", () => {
+    const comps = [
+      { id: "root", component: "Column", children: ["b1", "b2"] },
+      {
+        id: "b1",
+        component: "Button",
+        child: "t1",
+        action: { functionCall: { call: "agui.setValue", args: { path: "/x", value: true } } },
+      },
+      {
+        id: "b2",
+        component: "Button",
+        child: "t2",
+        action: { functionCall: { call: "agui.toggleValue", args: { path: "/y" } } },
+      },
+      { id: "t1", component: "Text", text: "Set" },
+      { id: "t2", component: "Text", text: "Toggle" },
+    ];
+    const r = validateA2UIComponents({ components: comps });
+    expect(r.valid).toBe(true);
+    expect(r.errors).toEqual([]);
+  });
+});

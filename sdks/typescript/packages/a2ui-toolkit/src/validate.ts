@@ -24,7 +24,8 @@ export interface A2UIValidationError {
     | "missing_required_prop"
     | "unresolved_child"
     | "child_cycle"
-    | "unresolved_binding";
+    | "unresolved_binding"
+    | "invalid_function_call";
   /** A JSON-pointer-ish locator, e.g. `components[2].component`. */
   path: string;
   /** Human/LLM-readable description (fed back to the sub-agent on retry). */
@@ -183,6 +184,31 @@ export function validateA2UIComponents(input: ValidateA2UIInput): ValidateA2UIRe
             path: `components[${i}]`,
             message: `Binding path '${p}' does not resolve in the data model`,
           });
+        }
+      });
+
+      // Fail loud on a malformed CopilotKit-layer `agui.*` local-swap functionCall
+      // (OSS-165 v2) — an unknown function name is almost always a typo/drift and
+      // would blow up at render time as `INVALID_FUNCTION_CALL`; a missing required
+      // arg would no-op silently.
+      collectAguiFunctionCalls(comp).forEach(({ call, args }) => {
+        const required = KNOWN_AGUI_FUNCTIONS[call];
+        if (!required) {
+          errors.push({
+            code: "invalid_function_call",
+            path: `components[${i}]`,
+            message: `Unknown agui function '${call}'`,
+          });
+          return;
+        }
+        for (const arg of required) {
+          if (!(arg in args)) {
+            errors.push({
+              code: "invalid_function_call",
+              path: `components[${i}]`,
+              message: `agui function '${call}' is missing required arg '${arg}'`,
+            });
+          }
         }
       });
     }
@@ -374,11 +400,49 @@ function findChildCycles(components: Array<Record<string, unknown>>, catalog?: A
   return [...cycles.values()];
 }
 
+/**
+ * The CopilotKit-layer `agui.*` local-swap function vocabulary (OSS-165 v2),
+ * mapped to their required arg names. Kept here so the validator (retry gate)
+ * and the authoring builders agree on what's valid.
+ */
+const KNOWN_AGUI_FUNCTIONS: Record<string, string[]> = {
+  "agui.setValue": ["path", "value"],
+  "agui.toggleValue": ["path"],
+};
+
+/** A single `agui.*` functionCall descriptor found in a component. */
+interface AguiFunctionCall {
+  call: string;
+  args: Record<string, unknown>;
+}
+
+/** Recursively collect `{call, args}` descriptors whose `call` is `agui.*`-namespaced. */
+function collectAguiFunctionCalls(node: unknown, acc: AguiFunctionCall[] = []): AguiFunctionCall[] {
+  if (Array.isArray(node)) {
+    node.forEach((v) => collectAguiFunctionCalls(v, acc));
+  } else if (isObject(node)) {
+    if (typeof node.call === "string" && node.call.startsWith("agui.") && isObject(node.args)) {
+      acc.push({ call: node.call, args: node.args });
+    }
+    for (const v of Object.values(node)) collectAguiFunctionCalls(v, acc);
+  }
+  return acc;
+}
+
 /** Recursively collect absolute (`/…`) binding paths from a component's props. */
 function collectAbsoluteBindingPaths(node: unknown, acc: string[] = []): string[] {
   if (Array.isArray(node)) {
     node.forEach((v) => collectAbsoluteBindingPaths(v, acc));
   } else if (isObject(node)) {
+    // A functionCall descriptor (`{call, args}`) carries function INPUTS, not
+    // data bindings: e.g. `agui.setValue`'s `path` arg is a WRITE target that
+    // need not resolve in the data model. So the args map must not be read as a
+    // `{path}` binding. Only nested `{path}` arg VALUES are genuine read-bindings
+    // (e.g. `setValue("/target", { path: "/source" })`) — recurse into those.
+    if (typeof node.call === "string" && isObject(node.args)) {
+      for (const v of Object.values(node.args)) collectAbsoluteBindingPaths(v, acc);
+      return acc;
+    }
     if (typeof node.path === "string" && node.path.startsWith("/")) acc.push(node.path);
     for (const [k, v] of Object.entries(node)) {
       if (k === "path") continue;

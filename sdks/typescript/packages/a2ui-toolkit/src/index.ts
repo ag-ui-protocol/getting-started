@@ -52,6 +52,41 @@ export function updateDataModel(
 }
 
 // ---------------------------------------------------------------------------
+// Action builders (agui.* local-swap functionCalls) — OSS-165 v2
+//
+// A local swap is authored in-band as a native A2UI `action.functionCall`
+// referencing a CopilotKit-registered, framework-agnostic data-write function.
+// These builders centralise the `agui.*` name so authoring code never hardcodes
+// the wire string.
+// ---------------------------------------------------------------------------
+
+/** An A2UI component `action` value carrying a client-side functionCall. */
+export type A2UIFunctionCallAction = {
+  functionCall: { call: string; args: Record<string, unknown> };
+};
+
+/**
+ * Build an ``agui.setValue`` local-swap action. On click the renderer writes
+ * ``value`` into the surface data model at ``path`` with no agent round-trip.
+ * ``value`` may be a literal or a ``{ path }`` binding resolved at click time.
+ */
+export function setValue(path: string, value: unknown): A2UIFunctionCallAction {
+  return { functionCall: { call: "agui.setValue", args: { path, value } } };
+}
+
+/**
+ * Build an ``agui.toggleValue`` local-swap action. On click the renderer reads
+ * the current value at ``path`` and writes its negation (boolean) or toggles it
+ * between empty and ``value`` (e.g. a data-bound ``List``), with no agent
+ * round-trip. Omit ``value`` for a plain boolean toggle.
+ */
+export function toggleValue(path: string, value?: unknown): A2UIFunctionCallAction {
+  const args: Record<string, unknown> = { path };
+  if (value !== undefined) args.value = value;
+  return { functionCall: { call: "agui.toggleValue", args } };
+}
+
+// ---------------------------------------------------------------------------
 // Inner render_a2ui tool definition
 // ---------------------------------------------------------------------------
 
@@ -436,6 +471,18 @@ in the button's action. Paths are resolved to their current values at click time
 
 To pre-fill form values, pass initial data via the "data" tool argument:
   "data": { "form": { "name": "Markus" } }
+
+LOCAL INTERACTIONS (no agent round-trip):
+For interactions that only update local surface state — toggling visibility,
+switching a value, revealing details — use a client-side "functionCall" action
+instead of an "event", so the change applies instantly with no server round-trip:
+  - Set a value:    "action": { "functionCall": { "call": "agui.setValue", "args": { "path": "/showDetails", "value": true } } }
+  - Toggle a value: "action": { "functionCall": { "call": "agui.toggleValue", "args": { "path": "/showDetails" } } }
+"path" is the data-model location to write; components bound to it re-render.
+There is no data-bound "visible" flag: to SHOW/HIDE a region, bind a List to a
+path and toggle its array between empty and its items (agui.toggleValue with a
+"value"). Use an "event" action (NOT functionCall) when the agent must handle the
+interaction or when the change requires re-structuring the component tree.
 
 FORM EXAMPLE (editable text field with pre-filled value + submit button):
   "components": [
