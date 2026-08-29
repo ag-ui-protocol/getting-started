@@ -85,6 +85,25 @@ class TestAguiMessagesToLangchain(unittest.TestCase):
         # A tool result with no error maps to LangChain's default "success" status.
         assert result[0].status == "success"
 
+    def test_tool_message_name_round_trip(self):
+        # LangChain routes tool results by ToolMessage.name; the AG-UI tool
+        # message must carry the name in both conversion directions (#2530).
+        lc = ToolMessage(content="42", tool_call_id="tc1", name="request_page_oncall")
+        agui = langchain_messages_to_agui([lc])
+        assert isinstance(agui[0], AGUIToolMessage)
+        assert agui[0].name == "request_page_oncall"
+
+        msg = AGUIToolMessage(
+            id="t1",
+            role="tool",
+            content="42",
+            tool_call_id="tc1",
+            name="request_page_oncall",
+        )
+        result = agui_messages_to_langchain([msg])
+        assert isinstance(result[0], ToolMessage)
+        assert result[0].name == "request_page_oncall"
+
     def test_tool_message_error_maps_to_status(self):
         # A client-reported tool failure must reach the model as an error, not a
         # silent success -- AG-UI's ToolMessage.error becomes status="error".

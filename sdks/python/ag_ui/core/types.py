@@ -295,6 +295,7 @@ class ToolMessage(MetadataMixin):
     role: Literal["tool"] = "tool"
     content: str
     tool_call_id: str
+    name: Optional[str] = None
     error: Optional[str] = None
     encrypted_value: Optional[str] = None
     subagent_run_id: Optional[str] = None
