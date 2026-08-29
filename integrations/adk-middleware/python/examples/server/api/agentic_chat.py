@@ -16,7 +16,7 @@ except AttributeError:
 # Create a sample ADK agent (this would be your actual agent)
 sample_agent = LlmAgent(
     name="assistant",
-    model="gemini-2.5-flash",
+    model="gemini-3.5-flash",
     instruction="""
     You are a helpful assistant. Help users by answering their questions and assisting with their needs.
     - If the user greets you, please greet them back with specifically with "Hello".

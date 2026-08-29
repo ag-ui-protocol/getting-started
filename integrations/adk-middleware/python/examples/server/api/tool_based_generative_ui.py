@@ -28,7 +28,7 @@ IMAGE_LIST = [
 image_list_str = "\n".join([f"- {img}" for img in IMAGE_LIST])
 
 haiku_generator_agent = Agent(
-    model='gemini-2.5-flash',
+    model='gemini-3.5-flash',
     name='haiku_generator_agent',
     instruction=f"""
         You are an expert haiku generator that creates beautiful Japanese haiku poems

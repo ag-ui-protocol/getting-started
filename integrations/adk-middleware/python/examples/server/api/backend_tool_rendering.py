@@ -131,7 +131,7 @@ async def get_weather(location: str) -> dict[str, str | float]:
 # Create a sample ADK agent (this would be your actual agent)
 sample_agent = LlmAgent(
     name="assistant",
-    model="gemini-2.5-flash",
+    model="gemini-3.5-flash",
     instruction="""
       You are a helpful weather assistant that provides accurate weather information.
 

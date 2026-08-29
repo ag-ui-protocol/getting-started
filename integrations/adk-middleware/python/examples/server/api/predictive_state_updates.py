@@ -78,7 +78,7 @@ def on_before_agent(callback_context: CallbackContext):
 
 predictive_state_updates_agent = LlmAgent(
     name="DocumentAgent",
-    model="gemini-2.5-flash",
+    model="gemini-3.5-flash",
     instruction="""
     You are a helpful assistant for writing documents.
     To write the document, you MUST use the write_document_local tool.

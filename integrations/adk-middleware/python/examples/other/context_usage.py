@@ -127,7 +127,7 @@ async def main():
     # Create an ADK agent with context-aware instructions
     context_agent = LlmAgent(
         name="context_assistant",
-        model="gemini-2.0-flash",
+        model="gemini-3.5-flash",
         instruction=context_aware_instructions,  # Callable instruction provider
         tools=[personalized_greeting]  # Tools can access context via state
     )

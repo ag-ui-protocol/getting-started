@@ -29,7 +29,7 @@ def create_configured_agent():
     """Create an agent with specific model settings."""
     agent = Agent(
         name="advanced_assistant",
-        model="gemini-2.0-flash",
+        model="gemini-3.5-flash",
         instruction="""You are an expert technical assistant.
         Provide detailed, accurate technical information.
         Use examples when explaining complex concepts.""",
@@ -104,7 +104,7 @@ def create_domain_agent():
         - Ask clarifying questions
         - Provide step-by-step solutions
         - Follow up to ensure issues are resolved""",
-        model="gemini-1.5-pro",
+        model="gemini-2.5-pro",
     )
     return agent
 
@@ -139,7 +139,7 @@ def create_agent_from_env():
     """Create an agent using environment variables for configuration."""
     agent = Agent(
         name=os.getenv("ADK_AGENT_NAME", "assistant"),
-        model=os.getenv("ADK_MODEL", "gemini-2.0-flash"),
+        model=os.getenv("ADK_MODEL", "gemini-3.5-flash"),
         instruction=os.getenv("ADK_INSTRUCTIONS", "You are a helpful assistant."),
         # API key would be handled by Google ADK's auth system
     )

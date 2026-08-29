@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `gemini-2.0-flash` reached its shutdown date (2026-06-01) and `gemini-2.5-flash` is scheduled to shut down (2026-10-16), so the live/integration tests and documentation snippets now target the current stable flash GA, `gemini-3.5-flash`. The large file count is purely this model-string sweep — there are no library or runtime behavior changes.
   - The test model is centralized in `tests/constants.py` as `LIVE_TEST_MODEL` (env-overridable via `ADK_TEST_MODEL`) so future cutovers are a one-line change instead of a sweep across every test file. A companion `LIVE_TEST_PRO_MODEL` (env-overridable via `ADK_TEST_PRO_MODEL`) holds the high-reasoning model at `gemini-2.5-pro` for now.
   - The HITL resumption live test was hardened for determinism alongside the model bump: the agent instruction now mandates a single `plan_steps` tool call, `temperature` is `0.0`, and per-run `thread_id`s use a UUID instead of a second-resolution timestamp to avoid collisions under concurrent test load.
+- **CHORE**: Update the model in the adk-middleware examples to `gemini-3.5-flash`
+  - `gemini-2.0-flash` reached its shutdown date (2026-06-01) and `gemini-2.5-flash` is scheduled to shut down (2026-10-16), so the example servers and scripts now target the current stable flash GA, `gemini-3.5-flash`. A long-retired `gemini-1.5-pro` example reference was bumped to `gemini-2.5-pro` (the pro tier; the deliberate `gemini-2.5-pro` in `shared_state.py` is unchanged).
+  - The dojo content manifest (`apps/dojo/src/files.json`) was regenerated so the displayed source for the adk-middleware demos matches the updated example files.
 
 ### Fixed
 

@@ -15,7 +15,7 @@ from google.genai import types
 # Create a reasoning-enabled ADK agent using Gemini 2.5 Flash
 reasoning_agent = LlmAgent(
     name="reasoning_assistant",
-    model="gemini-2.5-flash",
+    model="gemini-3.5-flash",
     instruction="""You are a helpful assistant that thinks carefully before responding.
     Work through problems step by step in your reasoning.
     """,

@@ -25,7 +25,7 @@ async def main():
     # Step 1: Create an ADK agent
     simple_adk_agent = LlmAgent(
         name="assistant",
-        model="gemini-2.0-flash",
+        model="gemini-3.5-flash",
         instruction="You are a helpful AI assistant. Be concise and friendly."
     )
 
@@ -100,7 +100,7 @@ async def advanced_example():
     # Create a more sophisticated agent
     advanced_agent = LlmAgent(
         name="research_assistant",
-        model="gemini-2.0-flash",
+        model="gemini-3.5-flash",
         instruction="""You are a research assistant.
         Keep track of topics the user is interested in.
         Be thorough but well-organized in your responses."""

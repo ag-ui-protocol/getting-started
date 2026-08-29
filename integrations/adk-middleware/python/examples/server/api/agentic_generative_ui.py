@@ -100,7 +100,7 @@ async def update_plan_step(
 # Create the ADK agent
 agent = LlmAgent(
     name="planner",
-    model="gemini-2.5-flash",
+    model="gemini-3.5-flash",
     instruction=dedent(
         """
         When planning use tools only, without any other messages.

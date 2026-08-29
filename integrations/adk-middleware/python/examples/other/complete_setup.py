@@ -67,7 +67,7 @@ async def setup_and_run():
     # Create a versatile assistant
     assistant = Agent(
         name="ag_ui_assistant",
-        model="gemini-2.0-flash",
+        model="gemini-3.5-flash",
         instruction="""You are a helpful AI assistant integrated with AG-UI protocol.
 
         Your capabilities:
