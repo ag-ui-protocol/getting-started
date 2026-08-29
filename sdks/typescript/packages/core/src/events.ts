@@ -501,6 +501,17 @@ export const EventSchemas = z.discriminatedUnion("type", [
 
 export type BaseEvent = z.infer<typeof BaseEventSchema>;
 export type AGUIEvent = z.infer<typeof EventSchemas>;
+/**
+ * Input-side counterpart to {@link AGUIEvent}.
+ *
+ * `AGUIEvent` is the parsed/output shape (`z.infer`), where every field with a
+ * schema default is required. `AGUIEventInput` is the pre-parse shape
+ * (`z.input`), where defaulted fields are optional. Emitters constructing
+ * events to hand to `EventSchemas.parse` should type against this union so the
+ * compiler checks the discriminated payload without forcing them to restate
+ * defaults.
+ */
+export type AGUIEventInput = z.input<typeof EventSchemas>;
 export type BaseEventFields = z.infer<typeof BaseEventSchema>;
 export type AGUIEventByType = {
   [EventType.TEXT_MESSAGE_START]: TextMessageStartEvent;
