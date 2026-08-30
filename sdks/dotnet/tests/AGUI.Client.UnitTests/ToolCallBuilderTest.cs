@@ -253,7 +253,7 @@ public sealed class ToolCallBuilderTest
     }
 
     [Fact]
-    public void AddResult_MultipleToolCalls_FlushesWhenAllResolved()
+    public void AddResult_MultipleToolCalls_FlushesEachCallIndependently()
     {
         var builder = new ToolCallBuilder();
         builder.SetIds("thread1", "run1");
@@ -266,23 +266,20 @@ public sealed class ToolCallBuilderTest
         var result1 = new ChatResponseUpdate(ChatRole.Tool,
             [new FunctionResultContent("c1", "result_a")]);
 
-        // First result — c2 still pending, should not flush
+        // First result — release c1 immediately; c2 stays pending for interrupt rewrite
         var flushed1 = builder.AddResult("c1", result1);
-        Assert.Empty(flushed1);
+        Assert.Equal(2, flushed1.Count);
+        Assert.IsType<FunctionCallContent>(flushed1[0].Contents[0]);
+        Assert.IsType<FunctionResultContent>(flushed1[1].Contents[0]);
         Assert.True(builder.IsBuffering);
 
         var result2 = new ChatResponseUpdate(ChatRole.Tool,
             [new FunctionResultContent("c2", "result_b")]);
 
-        // Second result — all resolved, should flush everything in order
         var flushed2 = builder.AddResult("c2", result2);
-        Assert.Equal(4, flushed2.Count);
-
-        // FCC(c1), FCC(c2), FRC(c1), FRC(c2)
+        Assert.Equal(2, flushed2.Count);
         Assert.IsType<FunctionCallContent>(flushed2[0].Contents[0]);
-        Assert.IsType<FunctionCallContent>(flushed2[1].Contents[0]);
-        Assert.IsType<FunctionResultContent>(flushed2[2].Contents[0]);
-        Assert.IsType<FunctionResultContent>(flushed2[3].Contents[0]);
+        Assert.IsType<FunctionResultContent>(flushed2[1].Contents[0]);
         Assert.False(builder.IsBuffering);
     }
 
@@ -304,11 +301,12 @@ public sealed class ToolCallBuilderTest
 
         var flushed = builder.AddResult("c1", resultUpdate);
 
-        // Order: FCC, text, FRC
+        // Call and result for this id first; pass-through updates that arrived
+        // while another call was still pending flush after the last pending id.
         Assert.Equal(3, flushed.Count);
         Assert.IsType<FunctionCallContent>(flushed[0].Contents[0]);
-        Assert.Equal("thinking...", flushed[1].Text);
-        Assert.IsType<FunctionResultContent>(flushed[2].Contents[0]);
+        Assert.IsType<FunctionResultContent>(flushed[1].Contents[0]);
+        Assert.Equal("thinking...", flushed[2].Text);
     }
 
     [Fact]
@@ -337,5 +335,84 @@ public sealed class ToolCallBuilderTest
         var flushed2 = builder.AddResult("c2", result2);
         Assert.Equal(2, flushed2.Count);
         Assert.False(builder.IsBuffering);
+    }
+
+    [Fact]
+    public void MarkCallYielded_AddResult_DoesNotReemitTheCall()
+    {
+        var builder = new ToolCallBuilder();
+        builder.StartToolCall(new ToolCallStartEvent { ToolCallId = "c1", ToolCallName = "tool" });
+        var callUpdate = builder.EndToolCall(new ToolCallEndEvent { ToolCallId = "c1" }, s_options);
+        builder.MarkCallYielded("c1");
+
+        Assert.IsType<FunctionCallContent>(callUpdate.Contents[0]);
+
+        var flushed = builder.AddResult("c1", new ChatResponseUpdate(ChatRole.Tool,
+            [new FunctionResultContent("c1", "done")]));
+
+        Assert.Single(flushed);
+        Assert.IsType<FunctionResultContent>(flushed[0].Contents[0]);
+        Assert.False(builder.IsBuffering);
+    }
+
+    [Fact]
+    public void MarkCallYielded_FlushAsToolCalls_DoesNotReemitTheCall()
+    {
+        var builder = new ToolCallBuilder();
+        builder.StartToolCall(new ToolCallStartEvent { ToolCallId = "c1", ToolCallName = "tool" });
+        builder.EndToolCall(new ToolCallEndEvent { ToolCallId = "c1" }, s_options);
+        builder.MarkCallYielded("c1");
+
+        Assert.Empty(builder.FlushAsToolCalls());
+        Assert.False(builder.IsBuffering);
+    }
+
+    [Fact]
+    public void FlushWithInterrupts_ReplacesHeldCallWithApproval()
+    {
+        var builder = new ToolCallBuilder();
+        builder.SetIds("thread1", "run1");
+        builder.StartToolCall(new ToolCallStartEvent { ToolCallId = "c1", ToolCallName = "delete_file" });
+        builder.EndToolCall(new ToolCallEndEvent { ToolCallId = "c1" }, s_options);
+
+        var flushed = builder.FlushWithInterrupts(InterruptForCall("int-1", "c1"));
+
+        Assert.Single(flushed);
+        var approval = Assert.IsType<ToolApprovalRequestContent>(flushed[0].Contents[0]);
+        Assert.Equal("int-1", approval.RequestId);
+        Assert.Equal("c1", approval.ToolCall.CallId);
+        Assert.False(builder.IsBuffering);
+    }
+
+    [Fact]
+    public void FlushWithInterrupts_AfterYield_EmitsApprovalWithoutDuplicatingTheCall()
+    {
+        var builder = new ToolCallBuilder();
+        builder.SetIds("thread1", "run1");
+        builder.StartToolCall(new ToolCallStartEvent { ToolCallId = "c1", ToolCallName = "delete_file" });
+        builder.EndToolCall(new ToolCallEndEvent { ToolCallId = "c1" }, s_options);
+        builder.MarkCallYielded("c1");
+
+        var flushed = builder.FlushWithInterrupts(InterruptForCall("int-1", "c1"));
+
+        Assert.Single(flushed);
+        Assert.IsType<ToolApprovalRequestContent>(flushed[0].Contents[0]);
+        Assert.DoesNotContain(flushed, u => u.Contents.OfType<FunctionCallContent>().Any());
+    }
+
+    private static RunFinishedInterruptOutcome InterruptForCall(string interruptId, string toolCallId)
+    {
+        return new RunFinishedInterruptOutcome
+        {
+            Interrupts =
+            {
+                new AGUIInterrupt
+                {
+                    Id = interruptId,
+                    Reason = InterruptReasons.ToolCall,
+                    ToolCallId = toolCallId
+                }
+            }
+        };
     }
 }
