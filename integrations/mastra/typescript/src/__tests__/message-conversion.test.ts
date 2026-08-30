@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { convertAGUIMessagesToMastra } from "../utils";
 import type { Message } from "@ag-ui/client";
 
@@ -442,6 +443,165 @@ describe("convertAGUIMessagesToMastra", () => {
               args: { q: "test" },
             },
           ],
+        },
+      ]);
+    });
+
+    it("recovers the first JSON object when replayed arguments are concatenated", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const messages: Message[] = [
+        {
+          id: "1",
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: "tc-1",
+              type: "function",
+              function: {
+                name: "anyTool",
+                arguments: '{"mine":true}{"mine":true}',
+              },
+            },
+          ],
+        },
+      ];
+
+      const first = convertAGUIMessagesToMastra(messages);
+      const second = convertAGUIMessagesToMastra(messages);
+
+      expect(first).toEqual(second);
+      expect(first).toEqual([
+        {
+          id: "1",
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "tc-1",
+              toolName: "anyTool",
+              args: { mine: true },
+            },
+          ],
+        },
+      ]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Recovered first JSON value"),
+      );
+      warn.mockRestore();
+    });
+
+    it("does not truncate a recovered object at a brace that is inside a string", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const messages: Message[] = [
+        {
+          id: "1",
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: "tc-1",
+              type: "function",
+              function: {
+                name: "anyTool",
+                arguments: '{"note":"use } here"}{"note":"dup"}',
+              },
+            },
+          ],
+        },
+      ];
+
+      const result = convertAGUIMessagesToMastra(messages);
+
+      expect(result[0].content).toEqual([
+        {
+          type: "tool-call",
+          toolCallId: "tc-1",
+          toolName: "anyTool",
+          args: { note: "use } here" },
+        },
+      ]);
+      warn.mockRestore();
+    });
+
+    it("skips a malformed tool-call instead of failing the whole conversion", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const messages: Message[] = [
+        {
+          id: "1",
+          role: "assistant",
+          content: "still usable",
+          toolCalls: [
+            {
+              id: "tc-bad",
+              type: "function",
+              function: {
+                name: "broken",
+                arguments: "not-json",
+              },
+            },
+            {
+              id: "tc-good",
+              type: "function",
+              function: {
+                name: "search",
+                arguments: JSON.stringify({ q: "ok" }),
+              },
+            },
+          ],
+        },
+      ];
+
+      const result = convertAGUIMessagesToMastra(messages);
+
+      expect(result).toEqual([
+        {
+          id: "1",
+          role: "assistant",
+          content: [
+            { type: "text", text: "still usable" },
+            {
+              type: "tool-call",
+              toolCallId: "tc-good",
+              toolName: "search",
+              args: { q: "ok" },
+            },
+          ],
+        },
+      ]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Skipping tool-call broken (tc-bad)"),
+      );
+      warn.mockRestore();
+    });
+
+    it("treats empty tool-call arguments as an empty object", () => {
+      const messages: Message[] = [
+        {
+          id: "1",
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: "tc-1",
+              type: "function",
+              function: {
+                name: "noop",
+                arguments: "   ",
+              },
+            },
+          ],
+        },
+      ];
+
+      const result = convertAGUIMessagesToMastra(messages);
+
+      expect(result[0].content).toEqual([
+        {
+          type: "tool-call",
+          toolCallId: "tc-1",
+          toolName: "noop",
+          args: {},
         },
       ]);
     });
