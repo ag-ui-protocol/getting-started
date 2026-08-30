@@ -470,4 +470,35 @@ describe("parseProtoStream", () => {
     // Complete the stream
     chunk$.complete();
   });
+
+  it("rejects protobuf-decoded events that fail EventSchemas.parse", async () => {
+    const decodeSpy = vi.spyOn(proto, "decode").mockReturnValue({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: 12345,
+    } as never);
+
+    const chunk$ = new Subject<HttpEvent>();
+    const event$ = transformHttpEventStream(chunk$);
+    const errorPromise = firstValueFrom(event$).catch((err) => err);
+
+    const headers = new Headers();
+    headers.append("Content-Type", proto.AGUI_MEDIA_TYPE);
+    chunk$.next({
+      type: HttpEventType.HEADERS,
+      status: 200,
+      headers,
+    });
+
+    // Length-prefixed dummy payload so processBuffer calls decode.
+    chunk$.next({
+      type: HttpEventType.DATA,
+      data: new Uint8Array([0, 0, 0, 1, 0]),
+    });
+
+    const err = await errorPromise;
+    expect(err).toBeInstanceOf(Error);
+    expect(String((err as Error).message)).toMatch(/invalid_type|Expected string|messageId/i);
+    decodeSpy.mockRestore();
+    chunk$.complete();
+  });
 });
