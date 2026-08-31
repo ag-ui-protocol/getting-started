@@ -47,11 +47,11 @@ not describe. Objects that are open by design stay open — `metadata` and the
 JSON Patch operations among them — because the protocol carries whatever a
 consumer puts there. That strictness is for authoring and for tests. A *runtime* consumer
 does the opposite — it accepts unrecognised material and strips it, as
-[Unknown and malformed](/spec/draft/unknown-and-malformed) requires. Do not
+[Unknown and malformed](/spec/draft/basic/processing) requires. Do not
 wire the strict schema into a receive path and call the result conformance.
 
 ## What the schema does not say
 
 Ordering, lifecycle, attribution, error handling and compatibility are
 behavioural, and no JSON Schema can express them. They are specified in the
-other pages of this document, starting at the [overview](/spec/draft/overview).
+other pages of this document, starting at the [overview](/spec/draft).

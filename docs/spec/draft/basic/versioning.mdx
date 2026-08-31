@@ -3,10 +3,9 @@ title: "Compatibility"
 description: "Talking to an older peer, what may be dropped, and when losing content obliges a warning — draft"
 ---
 
-<Warning>
-  **Draft — not yet ratified.** Published for review. The wording is not final
-  and nothing here carries a compatibility promise yet.
-</Warning>
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
 
 Two parties on one stream are rarely the same age. This page states what each
 owes the other when they are not.
@@ -16,7 +15,7 @@ owes the other when they are not.
 The protocol grows by adding — new event types, new optional fields, new members
 of an open union. Every such addition MUST be safe for an older party to meet,
 because [unrecognised material survives rather than aborting the
-run](/spec/draft/unknown-and-malformed).
+run](/spec/draft/basic/processing).
 
 It follows that a producer MUST NOT place in an addition alone anything the
 protocol already has a described place for. Concretely: the run's outcome, the

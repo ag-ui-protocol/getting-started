@@ -1,14 +1,11 @@
 ---
-title: "Overview"
+title: "Specification"
 description: "The behavioural specification for the AG-UI protocol — draft"
 ---
 
-<Warning>
-  **Draft — not yet ratified.** This document is published for review. It
-  describes the intended 1.0 behaviour, its wording is not final, and nothing
-  here is covered by a compatibility promise until a version is frozen. Do not
-  cite it as a stable reference.
-</Warning>
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
 
 ## What this document is
 
@@ -61,20 +58,20 @@ not conform, whatever it does on other runs.
 ## The pages
 
 <CardGroup cols={2}>
-  <Card title="Run lifecycle" href="/spec/draft/lifecycle">
+  <Card title="Run lifecycle" href="/spec/draft/events/lifecycle">
     Which event may follow which, when a run begins and ends, and how messages,
     tool calls and steps open and close.
   </Card>
-  <Card title="Unknown and malformed" href="/spec/draft/unknown-and-malformed">
+  <Card title="Unknown and malformed" href="/spec/draft/basic/processing">
     What happens to material the protocol does not describe, why that differs
     from a malformed known value, and where middleware sits relative to
     enforcement.
   </Card>
-  <Card title="Subagents" href="/spec/draft/subagents">
+  <Card title="Subagents" href="/spec/draft/events/subagents">
     Attribution, ownership, nesting, parallel execution, state, and how a run
     with subagents terminates.
   </Card>
-  <Card title="Compatibility" href="/spec/draft/compatibility">
+  <Card title="Compatibility" href="/spec/draft/basic/versioning">
     Talking to an older peer, what may be dropped, and when losing content
     obliges a warning.
   </Card>

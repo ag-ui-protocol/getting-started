@@ -3,10 +3,9 @@ title: "Run lifecycle"
 description: "Event sequencing, run and step boundaries, and how messages and tool calls open and close — draft"
 ---
 
-<Warning>
-  **Draft — not yet ratified.** Published for review. The wording is not final
-  and nothing here carries a compatibility promise yet.
-</Warning>
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
 
 A run is one exchange: a consumer sends a [`RunAgentInput`](/spec/draft/schema.json),
 a producer answers with a stream of events. This page states which events may
@@ -105,7 +104,7 @@ compact spelling of the sequences above, for producers that would otherwise have
 to buffer. A consumer MUST expand them into the start/content/end form before
 verification and before application code, so every rule on this page applies to
 the expanded events. Where expansion sits relative to enforcement and middleware
-is specified in [Unknown and malformed](/spec/draft/unknown-and-malformed) —
+is specified in [Unknown and malformed](/spec/draft/basic/processing) —
 enforcement runs first, so a chunk is validated as the event it is before
 anything reshapes it.
 
@@ -177,4 +176,4 @@ absent field is prohibited.
 Where the protocol has already shipped tolerance for a `null` in an optional
 position, it is listed in the deprecation registry and handled by a
 compatibility shim rather than by this rule. See
-[Compatibility](/spec/draft/compatibility).
+[Compatibility](/spec/draft/basic/versioning).

@@ -11,10 +11,10 @@ long-lived commitment rather than a deployment detail.
 One folder per version holds both halves of that version:
 
 ```
-/spec/draft                     the readable specification (redirect → overview)
-/spec/draft/overview            a page
-/spec/draft/lifecycle           a page
-/spec/draft/schema.json         the machine-readable schema
+/spec/draft                       the readable specification (index.mdx)
+/spec/draft/basic/processing      a page
+/spec/draft/events/lifecycle      a page
+/spec/draft/schema.json           the machine-readable schema
 ```
 
 Pages are `.mdx` files Mintlify renders. `schema.json` is a static file Mintlify
@@ -99,12 +99,13 @@ curl -sS -D- -o /dev/null -H 'Origin: https://example.com' \
 
 # 4. Pages still render, and everything outside /spec/ still redirects.
 curl -sSL -o /dev/null -w '%{http_code}\n' https://ag-ui.com/spec/draft
-#                                                    expect: 200 — -L is needed
-#   because /spec/draft redirects to /spec/draft/overview. Without it curl
-#   reports the 3xx, which is the correct response rather than a failure.
+#                                                    expect: 200 — -L tolerated
+#   in case the renderer answers the bare path with a redirect to the index
+#   page. Either way the overview must come back; only 4xx/5xx is a failure.
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://ag-ui.com/introduction
                                                      # expect: 3xx → docs.ag-ui.com/introduction
 ```
 
 The distinction in step 4 is the one to keep straight: a page may redirect (the
-bare `/spec/draft` does, to the overview), a `.json` address may never.
+retired page addresses do, to their new homes under `basic/` and `events/`), a
+`.json` address may never.

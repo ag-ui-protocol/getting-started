@@ -56,23 +56,19 @@
             ]
           },
           {
-            "group": "Specification",
+            "group": "Draft Proposals",
             "pages": [
-              "spec/draft/overview",
-              "spec/draft/lifecycle",
-              "spec/draft/unknown-and-malformed",
-              "spec/draft/subagents",
-              "spec/draft/compatibility",
-              "spec/draft/schema-files"
+              "drafts/overview",
+              "drafts/generative-ui",
+              "drafts/meta-events"
             ]
           },
           {
-            "group": "Draft Proposals",
-            "pages": ["drafts/overview", "drafts/generative-ui", "drafts/meta-events"]
-          },
-          {
             "group": "Tutorials",
-            "pages": ["tutorials/cursor", "tutorials/debugging"]
+            "pages": [
+              "tutorials/cursor",
+              "tutorials/debugging"
+            ]
           },
           {
             "group": "Development",
@@ -81,6 +77,37 @@
               "development/roadmap",
               "development/contributing",
               "support"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Specification",
+        "groups": [
+          {
+            "group": "Specification",
+            "pages": [
+              "spec/draft/index"
+            ]
+          },
+          {
+            "group": "Base Protocol",
+            "pages": [
+              "spec/draft/basic/processing",
+              "spec/draft/basic/versioning"
+            ]
+          },
+          {
+            "group": "Event Streams",
+            "pages": [
+              "spec/draft/events/lifecycle",
+              "spec/draft/events/subagents"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "spec/draft/schema-files"
             ]
           }
         ]
@@ -130,7 +157,9 @@
               },
               {
                 "group": "ag_ui.encoder",
-                "pages": ["sdk/python/encoder/overview"]
+                "pages": [
+                  "sdk/python/encoder/overview"
+                ]
               }
             ]
           },
@@ -238,8 +267,24 @@
       "destination": "/quickstart/server"
     },
     {
-      "source": "/spec/draft",
-      "destination": "/spec/draft/overview"
+      "source": "/spec/draft/overview",
+      "destination": "/spec/draft"
+    },
+    {
+      "source": "/spec/draft/lifecycle",
+      "destination": "/spec/draft/events/lifecycle"
+    },
+    {
+      "source": "/spec/draft/unknown-and-malformed",
+      "destination": "/spec/draft/basic/processing"
+    },
+    {
+      "source": "/spec/draft/subagents",
+      "destination": "/spec/draft/events/subagents"
+    },
+    {
+      "source": "/spec/draft/compatibility",
+      "destination": "/spec/draft/basic/versioning"
     }
   ]
 }
