@@ -116,6 +116,12 @@ CITATION = {
     "location": {"documentChar": {"documentIndex": 0, "start": 10, "end": 26}},
 }
 
+BEDROCK_METADATA = {
+    "usage": {"inputTokens": 67, "outputTokens": 324, "totalTokens": 391},
+    "metrics": {"latencyMs": 5199},
+    "trace": {"guardrail": {"actionReason": "Guardrail blocked."}},
+}
+
 
 def _find_citation_payload(event: Any) -> Optional[dict]:
     """Locate the citation payload in a RAW event, whatever shape it arrives in.
@@ -174,8 +180,18 @@ def _run_input(thread_id: str = "t1") -> RunAgentInput:
     )
 
 
-async def _collect(agent: StrandsAgent, thread_id: str = "t1") -> list:
-    return [event async for event in agent.run(_run_input(thread_id))]
+async def _collect(
+    agent: StrandsAgent,
+    thread_id: str = "t1",
+    *,
+    invocation_state: dict[str, Any] | None = None,
+) -> list:
+    kwargs = (
+        {"invocation_state": invocation_state}
+        if invocation_state is not None
+        else {}
+    )
+    return [event async for event in agent.run(_run_input(thread_id), **kwargs)]
 
 
 def _assert_stream_encodes(events: list) -> None:
@@ -294,6 +310,23 @@ async def test_bedrock_citation_event_is_emitted_as_raw():
 
 
 @pytest.mark.asyncio
+async def test_bedrock_metadata_event_is_emitted_as_raw():
+    """Usage and guardrail metadata must reach the wire instead of being dropped."""
+    strands_agent = StrandsAgentCore(
+        model=ScriptedModel([_text_turn("Guardrail response.") + [{"metadata": BEDROCK_METADATA}]]),
+        callback_handler=None,
+    )
+
+    events = await _collect(_wrap(strands_agent))
+    _assert_stream_encodes(events)
+
+    raw_events = [event for event in events if event.type == EventType.RAW]
+    assert len(raw_events) == 1
+    assert raw_events[0].source == "strands"
+    assert raw_events[0].event == {"event": {"metadata": BEDROCK_METADATA}}
+
+
+@pytest.mark.asyncio
 async def test_lifecycle_events_are_not_emitted_as_raw():
     """The deliberate plumbing skips must stay silent, not turn into RAW."""
     strands_agent = StrandsAgentCore(
@@ -347,7 +380,13 @@ async def test_raw_payloads_never_carry_invocation_state_injections():
         callback_handler=None,
     )
 
-    events = await _collect(_wrap(strands_agent))
+    invocation_state = {
+        "auth_token": "server-secret",
+        "tenant_id": "tenant-42",
+    }
+    events = await _collect(
+        _wrap(strands_agent), invocation_state=invocation_state
+    )
     _assert_stream_encodes(events)
 
     raw_events = [e for e in events if e.type == EventType.RAW]
@@ -361,10 +400,19 @@ async def test_raw_payloads_never_carry_invocation_state_injections():
         "event_loop_parent_span",
         "event_loop_parent_cycle_id",
         "request_state",
+        "auth_token",
+        "tenant_id",
     }
     for raw in raw_events:
         leaked = forbidden & set(raw.event)
         assert not leaked, f"invocation_state leaked into a RAW payload: {leaked}"
+
+    # The locked SDK release does not merge custom caller keys into this
+    # particular citation envelope, while newer supported releases do. Pin the
+    # sanitizer contract directly so the protection is not version-accidental.
+    merged_payload = {"citation": CITATION, **invocation_state}
+    sanitized = _sanitize_raw_event(merged_payload, invocation_state)
+    assert sanitized == {"citation": CITATION}
 
     # And nothing anywhere in the emitted payloads may be a stringified Agent:
     # a `default=str` style escape hatch would pass the key check above while

@@ -16,6 +16,7 @@
  */
 
 import { Agent, tool } from "@strands-agents/sdk";
+import type { JSONValue } from "@strands-agents/sdk";
 import { z } from "zod";
 import { StrandsAgent } from "@ag-ui/aws-strands";
 import {
@@ -106,14 +107,19 @@ function envelope(
   surfaceId: string,
   schema: Array<Record<string, unknown>>,
   data: unknown,
-): Record<string, unknown> {
-  return {
-    [A2UI_OPERATIONS_KEY]: [
-      createSurface(surfaceId, CUSTOM_CATALOG_ID),
-      updateComponents(surfaceId, schema),
-      updateDataModel(surfaceId, data),
-    ],
-  };
+  // The SDK types a tool result as `JSONValue`. Declared once here rather than
+  // cast at each call site.
+): JSONValue {
+  const operations = [
+    createSurface(surfaceId, CUSTOM_CATALOG_ID),
+    updateComponents(surfaceId, schema),
+    updateDataModel(surfaceId, data),
+  ];
+  // Asserted, not inferred: the toolkit's operation interfaces are plain JSON
+  // at runtime but are declared without an index signature, so they are not
+  // structurally assignable to the SDK's recursive `JSONValue`. This is the one
+  // place that gap is bridged.
+  return { [A2UI_OPERATIONS_KEY]: operations } as unknown as JSONValue;
 }
 
 const searchFlights = tool({
@@ -132,7 +138,8 @@ const searchFlights = tool({
           'and price (e.g. "$289").',
       ),
   }),
-  callback: ({ flights }) => envelope(FLIGHT_SURFACE_ID, FLIGHT_SCHEMA, { flights }),
+  callback: ({ flights }) =>
+    envelope(FLIGHT_SURFACE_ID, FLIGHT_SCHEMA, { flights }),
 });
 
 const searchHotels = tool({
@@ -145,11 +152,12 @@ const searchHotels = tool({
       .describe(
         "A list of hotel objects. Each hotel must have: id, name (e.g. " +
           '"The Plaza"), location (e.g. "Midtown Manhattan, NYC"), ' +
-          "rating (float 0-5, e.g. 4.5), and price (per night, e.g. \"$350\"). " +
+          'rating (float 0-5, e.g. 4.5), and price (per night, e.g. "$350"). ' +
           "Generate 3-4 realistic hotel results.",
       ),
   }),
-  callback: ({ hotels }) => envelope(HOTEL_SURFACE_ID, HOTEL_SCHEMA, { hotels }),
+  callback: ({ hotels }) =>
+    envelope(HOTEL_SURFACE_ID, HOTEL_SCHEMA, { hotels }),
 });
 
 const SYSTEM_PROMPT = `You are a helpful travel assistant that can search for flights and hotels.

@@ -139,8 +139,10 @@ class TestHandleReasoningEventCanonicalId(unittest.TestCase):
         item (id only, no summary ever) must keep rendering nothing."""
         self._events({"type": "text", "text": "", "index": 0, "id": "rs-canonical"})
         self.assertEqual(self.agent.dispatched, [])
+        # pending_reasoning_ids is keyed per subagent lane ("__root__" here).
         self.assertEqual(
-            self.agent.active_run.get("pending_reasoning_id"), "rs-canonical"
+            (self.agent.active_run.get("pending_reasoning_ids") or {}).get("__root__"),
+            "rs-canonical",
         )
 
     def test_first_delta_opens_under_stashed_canonical_id(self):
@@ -152,7 +154,9 @@ class TestHandleReasoningEventCanonicalId(unittest.TestCase):
         self.assertEqual(len(start_events), 1)
         self.assertEqual(start_events[0].message_id, "rs-canonical")
         # consumed: a later id-less reasoning item must not inherit it
-        self.assertIsNone(self.agent.active_run.get("pending_reasoning_id"))
+        self.assertIsNone(
+            (self.agent.active_run.get("pending_reasoning_ids") or {}).get("__root__")
+        )
 
     def test_subsequent_deltas_join_the_canonical_message(self):
         self._events({"type": "text", "text": "", "index": 0, "id": "rs-canonical"})

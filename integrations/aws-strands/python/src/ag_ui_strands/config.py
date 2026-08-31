@@ -12,12 +12,15 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Mapping,
     Optional,
 )
 
 from ag_ui.core import RunAgentInput
 
 from strands.session import SessionManager
+
+from .utils import UrlFetchPolicy
 
 
 StatePayload = Dict[str, Any]
@@ -129,12 +132,43 @@ class ToolBehavior:
     tool_stream_event_handler: Optional[ToolStreamEventHandler] = None
 
 
+ThreadAgentKwargsProvider = Callable[["RunAgentInput"], Mapping[str, Any]]
+"""Builds extra constructor kwargs for one thread's agent.
+
+See :attr:`StrandsAgentConfig.thread_agent_kwargs`.
+"""
+
+
 @dataclass
 class StrandsAgentConfig:
     """Top-level configuration for the Strands agent adapter."""
 
     tool_behaviors: Dict[str, ToolBehavior] = field(default_factory=dict)
     state_context_builder: Optional[StateContextBuilder] = None
+    thread_agent_kwargs: Optional["ThreadAgentKwargsProvider"] = None
+    """Extra keyword arguments for each per-thread Strands ``Agent``.
+
+    The adapter builds one ``Agent`` per thread from the template it was given,
+    by reading the template's settings back off the built instance. Some
+    settings cannot be read back at all: Strands consumes them into internal
+    state during construction and keeps nothing under a name the adapter can
+    find. Others are readable but belong to the agent that owns them, so
+    handing the same instance to every thread would let one conversation
+    disturb another.
+
+    Either way the template is the wrong place to put them. This hook is the
+    supported route: it runs once per ``thread_id`` and whatever mapping it
+    returns is applied over the recovered kwargs, so a caller can set anything
+    the adapter cannot carry and override anything it can.
+
+    ``model``, ``system_prompt``, ``tools`` and ``session_manager`` stay the
+    adapter's to set, because they are what keeps threads apart and a run
+    coherent.
+
+    Called with the ``RunAgentInput`` that created the thread. If it raises,
+    the run yields ``RUN_ERROR`` and the thread is not cached, so the next
+    request retries it.
+    """
     session_manager_provider: Optional[SessionManagerProvider] = None
     """Optional factory for creating per-thread SessionManager instances.
 
@@ -189,6 +223,16 @@ class StrandsAgentConfig:
     - ``recovery`` — recovery loop config. NOTE: keys are camelCase per the
       shared toolkit contract — e.g. ``{"maxAttempts": 5}`` (a snake_case
       ``max_attempts`` is silently ignored).
+    """
+    url_fetch_policy: Optional[UrlFetchPolicy] = None
+    """Policy applied to every server-side fetch of a URL content source.
+
+    ``None`` uses :data:`~ag_ui_strands.utils.DEFAULT_URL_FETCH_POLICY`, which
+    fetches only ``http``/``https``, refuses addresses outside the public
+    internet, and bounds both a single attachment and everything one run
+    fetches. A deployment whose attachments live on a private CDN or behind
+    split DNS passes ``UrlFetchPolicy(allow_private_networks=True)``; cloud
+    metadata endpoints stay blocked either way.
     """
 
 

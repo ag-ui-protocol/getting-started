@@ -11,6 +11,32 @@ interface RunHttpAgentConfig extends RunAgentParameters {
   abortController?: AbortController;
 }
 
+/**
+ * The TERMINAL egress guard for the no-null attribution rule (PNI-199
+ * alignment). prepareRunAgentInput sanitizes what it assembles, but middlewares
+ * and in-place onRunInitialized mutations write to the input AFTER it — this is
+ * the last point before the bytes leave, so it is where the rule must hold. A
+ * null tag on the wire is schema-invalid and kills the whole run on the
+ * receiving side; absent is the only spelling. Non-mutating: messages are
+ * shallow-copied only when a strip is needed.
+ */
+function sanitizeOutgoingInput(input: RunAgentInput): RunAgentInput {
+  if (!Array.isArray(input.messages)) return input;
+  let changed = false;
+  const messages = input.messages.map((message) => {
+    if ((message as { subagentRunId?: string | null }).subagentRunId === null) {
+      changed = true;
+      // Spread + delete rather than rest-destructuring: Message is a union, and
+      // rest types may only be created from object types under tsc.
+      const copy = { ...message } as typeof message & { subagentRunId?: string | null };
+      delete copy.subagentRunId;
+      return copy as typeof message;
+    }
+    return message;
+  });
+  return changed ? { ...input, messages } : input;
+}
+
 export class HttpAgent extends AbstractAgent {
   public url: string;
   public headers: Record<string, string>;
@@ -31,7 +57,7 @@ export class HttpAgent extends AbstractAgent {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
       },
-      body: JSON.stringify(input),
+      body: JSON.stringify(sanitizeOutgoingInput(input)),
       signal: this.abortController.signal,
     };
   }

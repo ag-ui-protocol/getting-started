@@ -25,6 +25,7 @@ export {
 } from "./a2ui-tool";
 export type {
   A2UIToolParams,
+  A2UIAttemptRecord,
   A2UIToolGlue,
   A2UIInjectConfig,
   A2UIInjectionPlan,

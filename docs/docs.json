@@ -50,6 +50,7 @@
               "concepts/interrupts",
               "concepts/serialization",
               "concepts/tools",
+              "concepts/subagents",
               "concepts/capabilities",
               "concepts/generative-ui-specs"
             ]

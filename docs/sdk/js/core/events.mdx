@@ -42,6 +42,9 @@ enum EventType {
   REASONING_MESSAGE_CHUNK = "REASONING_MESSAGE_CHUNK",
   REASONING_END = "REASONING_END",
   REASONING_ENCRYPTED_VALUE = "REASONING_ENCRYPTED_VALUE",
+  SUBAGENT_STARTED = "SUBAGENT_STARTED",
+  SUBAGENT_FINISHED = "SUBAGENT_FINISHED",
+  SUBAGENT_ERROR = "SUBAGENT_ERROR",
 }
 ```
 
@@ -570,6 +573,98 @@ type ReasoningEncryptedValueEvent = BaseEvent & {
 | `subtype`        | `"tool-call" \| "message"` | The type of entity this value belongs to           |
 | `entityId`       | `string`                   | ID of the tool call or message to attach the value |
 | `encryptedValue` | `string`                   | The encrypted value to attach to the entity        |
+
+## Subagent Events
+
+These events report that the agent delegated work to a child agent, so a frontend
+can attribute output to the subagent that produced it. Attribution itself travels
+as an optional `subagentRunId` on most other event types.
+
+`subagentRunId` identifies **one invocation**, not a reusable subagent
+definition — the same subagent run twice yields two different values. See
+[Subagents](/concepts/subagents) for the full model.
+
+### SubagentStartedEvent
+
+Announces a new subagent invocation and names it for display.
+
+```typescript
+type SubagentStartedEvent = BaseEvent & {
+  type: EventType.SUBAGENT_STARTED
+  subagentRunId: string
+  name: string
+  description?: string
+  parentSubagentRunId?: string
+  parentToolCallId?: string
+  parentMessageId?: string
+}
+```
+
+| Property              | Type     | Description                                    |
+| --------------------- | -------- | ---------------------------------------------- |
+| `subagentRunId`       | `string` | Opaque identifier for this invocation          |
+| `name`                | `string` | Declared subagent name or type, for display    |
+| `description`         | `string` | Optional description                           |
+| `parentSubagentRunId` | `string` | Optional enclosing subagent, when nesting      |
+| `parentToolCallId`    | `string` | Optional tool call that spawned this subagent  |
+| `parentMessageId`     | `string` | Optional message holding that tool call        |
+
+### SubagentFinishedEvent
+
+Marks a subagent invocation as complete.
+
+```typescript
+type SubagentFinishedEvent = BaseEvent & {
+  type: EventType.SUBAGENT_FINISHED
+  subagentRunId: string
+  result?: any
+  outcome?: { type: "success" } | { type: "suspended"; interruptIds?: string[] }
+}
+```
+
+| Property        | Type     | Description                                        |
+| --------------- | -------- | -------------------------------------------------- |
+| `subagentRunId` | `string` | Matches the id from `SubagentStartedEvent`          |
+| `result`        | `any`    | Optional payload, mirroring `RunFinishedEvent.result` |
+| `outcome`       | `SubagentFinishedOutcome` | Optional discriminated union; omitted means success (the legacy reading). `{ type: "suspended", interruptIds?: string[] }` says the subagent is checkpointed awaiting outside input; `interruptIds` names the run-level interrupts whose answers resume it. |
+
+### SubagentErrorEvent
+
+Marks a subagent invocation as failed.
+
+```typescript
+type SubagentErrorEvent = BaseEvent & {
+  type: EventType.SUBAGENT_ERROR
+  subagentRunId: string
+  message: string
+  code?: string
+}
+```
+
+| Property        | Type     | Description                               |
+| --------------- | -------- | ----------------------------------------- |
+| `subagentRunId` | `string` | Matches the id from `SubagentStartedEvent` |
+| `message`       | `string` | Human-readable error message              |
+| `code`          | `string` | Optional error code                       |
+
+### Attribution on other events
+
+Most event types accept an optional `subagentRunId`. An event without it belongs
+to the parent agent, so a stream that never sets the field behaves exactly as it
+did before subagents existed.
+
+`RunStartedEvent`, `RunFinishedEvent` and `RunErrorEvent` are not attributable —
+they describe the run as a whole. `MessagesSnapshotEvent` carries attribution
+per-message instead, since one snapshot mixes messages from several producers.
+
+`StateSnapshotEvent` and `StateDeltaEvent` are attributable, but attribution on
+them is provenance rather than ownership — it records which subagent produced the
+update. State stays run-scoped, so an attributed snapshot or delta is applied to
+the run's one state document just as an unattributed one is. There is no
+per-subagent state.
+
+Subscribers can react to the lifecycle directly via `onSubagentStartedEvent`,
+`onSubagentFinishedEvent` and `onSubagentErrorEvent`.
 
 ## Special Events
 

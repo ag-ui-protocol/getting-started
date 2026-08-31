@@ -92,6 +92,12 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    # Job-level env carries only a BOOLEAN — whether the webhook is configured
+    # — because job env is visible to every step, including dependency
+    # lifecycle scripts and third-party actions. The secret itself is passed
+    # solely to the Slack step that sends the message.
+    env:
+      HAS_SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_ENGR != '' }}
     steps:
       - name: Find existing release/next PR (stacking target)
         id: existing
@@ -269,16 +275,177 @@ jobs:
           [ -z "$SCOPES" ] || [ "$SCOPES" = "null" ] && SCOPES="$INPUT_SCOPE"
           echo "title=release: ${SCOPES}" >> "$GITHUB_OUTPUT"
 
-      - name: Generate AI release notes
-        id: ai_notes
+      # Writes one entry per bumped package into <package>/CHANGELOG.md from
+      # its real git history, plus a rendered summary for the PR body. The
+      # committed files are the source of truth: humans edit them with normal
+      # commits on release/next, and the publish workflow copies the merged
+      # text into the GitHub Release (create-or-update-release.sh).
+      # Fail-soft but LOUD: on any failure the script writes the reason to
+      # /tmp/changelog-failure.txt and exits 0; the alert steps below turn
+      # that into a CI annotation and a Slack message without blocking the
+      # release.
+      - name: Generate changelog entries
+        id: changelog
         if: inputs.dry_run != true && steps.bump.outputs.changed_count != '0'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          pnpm tsx scripts/release/generate-ai-release-notes.ts \
+          rm -f /tmp/changelog-failure.txt /tmp/changelog-summary.md /tmp/changelog-result.json
+
+          # The script is designed to always exit 0, but the LAUNCHER can still
+          # die (tsx missing, node OOM-killed, SIGKILL). Under `bash -e` that
+          # would abort this step, skipping the warn/Slack/PR-body/PR-create
+          # steps via their implicit success() — after version bumps are
+          # already pushed, leaving a branch with no PR. So capture the status
+          # and convert any launcher failure into the ordinary failure file.
+          set +e
+          pnpm tsx scripts/release/generate-changelog-entries.ts \
             --accumulated /tmp/accumulated.json \
-            --output /tmp/ai-notes.md \
-            || echo "AI notes generation failed; falling back to table-only body"
+            --summary-output /tmp/changelog-summary.md \
+            --failure-output /tmp/changelog-failure.txt \
+            > /tmp/changelog-result.json 2>/tmp/changelog-stderr.txt
+          STATUS=$?
+          set -e
+          cat /tmp/changelog-stderr.txt || true
+
+          if [ "$STATUS" -ne 0 ] && [ ! -s /tmp/changelog-failure.txt ]; then
+            {
+              echo "changelog generator exited ${STATUS} without reporting a reason"
+              echo "(stderr tail: $(tail -c 300 /tmp/changelog-stderr.txt | tr '\n' ' '))"
+            } > /tmp/changelog-failure.txt
+          fi
+
+          # A zero exit still has to produce parseable JSON: an empty or
+          # truncated result file would otherwise reach `jq` in the commit step
+          # and fail the job there instead.
+          if [ ! -s /tmp/changelog-failure.txt ] && ! jq -e 'has("written")' /tmp/changelog-result.json >/dev/null 2>&1; then
+            echo "changelog generator produced no parseable result JSON on stdout" > /tmp/changelog-failure.txt
+          fi
+
+          # The generator writes its summary BEFORE the changelog files, so a
+          # process killed in between (OOM, SIGKILL) leaves a summary whose
+          # entries were never written and will never be committed. Retract it
+          # on any failure the generator did not report itself: the PR body
+          # must not display entries as committed when they are not.
+          if [ -s /tmp/changelog-failure.txt ] && [ "$STATUS" -ne 0 ]; then
+            rm -f /tmp/changelog-summary.md
+          fi
+
+          if [ -s /tmp/changelog-failure.txt ]; then
+            echo "generated=false" >> "$GITHUB_OUTPUT"
+            # Random delimiter: a fixed one can appear verbatim in the reason,
+            # which carries a slice of an untrusted API error body, and would
+            # close the block early and corrupt every later output record.
+            DELIM="CHANGELOG_FAILURE_EOF_$(openssl rand -hex 16)"
+            {
+              echo "failure_reason<<${DELIM}"
+              # printf guarantees the trailing newline the closing delimiter
+              # needs, even if the reason file lacks one.
+              printf '%s\n' "$(cat /tmp/changelog-failure.txt)"
+              echo "${DELIM}"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "generated=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit changelog entries
+        id: commit_changelog
+        if: >-
+          inputs.dry_run != true && steps.bump.outputs.changed_count != '0' &&
+          steps.changelog.outputs.generated == 'true'
+        run: |
+          # NUL-delimited so a path containing whitespace or a glob character
+          # cannot word-split or expand.
+          mapfile -d '' -t WRITTEN < <(jq -j '.written[] | (., "\u0000")' /tmp/changelog-result.json)
+          if [ "${#WRITTEN[@]}" -eq 0 ]; then
+            echo "No new changelog entries to commit (all versions already have entries)"
+            exit 0
+          fi
+          git add -- "${WRITTEN[@]}"
+          git commit -m "chore(release): add changelog entries"
+
+          # A maintainer can push to release/next while the model call is in
+          # flight, which makes this push non-fast-forward and would otherwise
+          # strand the generated notes locally with the version bump already
+          # remote. Rebase onto their work and retry. If a rebase conflicts,
+          # their edit is authoritative: abort, keep the release mergeable, and
+          # say so loudly rather than clobbering it.
+          #
+          # Every giving-up path must ALSO retract the local summary and record
+          # a failure reason. Otherwise the PR body would render entries and
+          # state they are committed on the branch when the remote does not
+          # have them — the approval surface contradicting the source of truth.
+          # None of these paths may exit non-zero: the version bump is already
+          # pushed, and failing here would skip PR creation entirely.
+          abandon_entries() {
+            rm -f /tmp/changelog-summary.md
+            printf '%s\n' "$1" > /tmp/changelog-failure.txt
+            echo "::warning title=Changelog entries not pushed::$1"
+            # Generation SUCCEEDED here, so the generation-keyed alert steps
+            # would not fire. Publish an outcome they can key on as well,
+            # otherwise an abandoned push reaches the PR and the log but never
+            # Slack.
+            echo "abandoned=true" >> "$GITHUB_OUTPUT"
+            DELIM="CHANGELOG_ABANDON_EOF_$(openssl rand -hex 16)"
+            {
+              echo "reason<<${DELIM}"
+              printf '%s\n' "$1"
+              echo "${DELIM}"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          for attempt in 1 2 3; do
+            if git push origin release/next; then
+              exit 0
+            fi
+            echo "push rejected (attempt ${attempt}/3); rebasing onto origin/release/next" >&2
+            if ! git fetch origin release/next; then
+              abandon_entries "Could not fetch release/next to rebase the generated changelog entries (attempt ${attempt}/3). The version bump is pushed; the entries are not. Write them by hand on release/next, or add the next scope to regenerate them."
+            fi
+            if ! git rebase origin/release/next; then
+              git rebase --abort || git rebase --quit || true
+              abandon_entries "release/next moved underneath this run and the generated entries conflict with the newer commit. The version bump is pushed; the entries are not, and nothing was overwritten. Write them by hand on release/next, or add the next scope to regenerate them. Do NOT re-run this workflow with an already-added scope — that bumps the version again."
+            fi
+          done
+          abandon_entries "Could not push the generated changelog entries after 3 attempts. The version bump is pushed; the entries are not. Write them by hand on release/next, or add the next scope to regenerate them."
+
+      - name: Warn on changelog generation failure
+        if: >-
+          inputs.dry_run != true && steps.bump.outputs.changed_count != '0' &&
+          steps.changelog.outputs.generated != 'true'
+        env:
+          REASON: ${{ steps.changelog.outputs.failure_reason }}
+        run: |
+          # Do NOT advise re-running create-pr with the same scope: the bump
+          # step is not idempotent and would bump the version a second time.
+          # Recovery is hand-writing entries, or letting the next scope added
+          # to this PR regenerate the missing ones (generation covers all
+          # accumulated bumps and skips versions that already have entries).
+          echo "::warning title=Changelog generation failed::${REASON} — entries for some or all packages in this release are missing (any committed by an earlier scope are unaffected). Write the missing ones by hand on release/next; they are also regenerated automatically when the next scope is added to this release PR."
+
+      # Fires for a failed GENERATION or an abandoned PUSH: entries that were
+      # generated but never reached the branch are just as invisible to the
+      # release as entries that were never generated, and the annotation for
+      # that case lives in a step Slack does not observe.
+      - name: Notify Slack of missing changelog entries
+        if: >-
+          inputs.dry_run != true && steps.bump.outputs.changed_count != '0' &&
+          (steps.changelog.outputs.generated != 'true' ||
+           steps.commit_changelog.outputs.abandoned == 'true') &&
+          env.HAS_SLACK_WEBHOOK == 'true'
+        # The alert is best-effort: a rejected webhook must not fail the job
+        # here, ahead of the PR-body and PR-creation steps — that would leave
+        # pushed version bumps without a release PR.
+        continue-on-error: true
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_ENGR }}
+          webhook-type: incoming-webhook
+          # toJSON keeps a failure reason containing quotes or newlines from
+          # breaking the YAML payload.
+          payload: |
+            text: ${{ toJSON(format(':warning: Release changelog entries are missing on {0} — {1} The release PR is still mergeable. Missing entries can be hand-written on release/next, or will regenerate when the next scope is added. Run: {2}/{0}/actions/runs/{3}', github.repository, steps.changelog.outputs.failure_reason || steps.commit_changelog.outputs.reason, github.server_url, github.run_id)) }}
 
       - name: Build PR body
         id: prbody
@@ -295,12 +462,33 @@ jobs:
             echo ""
             echo "---"
             echo ""
-            if [ -s /tmp/ai-notes.md ]; then
+            # The two blocks are independent: a later scope's generation can
+            # fail while earlier scopes' entries are already committed, and
+            # the PR body must show both the valid entries and the warning.
+            echo ""
+            echo "## What's in this release"
+            echo ""
+            if [ -s /tmp/changelog-summary.md ]; then
               {
+                echo "_Rendered from the committed \`CHANGELOG.md\` entries on this branch — those files"
+                echo "are the source of truth; their text is published to the GitHub Release on merge,"
+                echo "with heading levels shifted so each entry nests under it."
+                echo "To adjust the notes, edit the files with an ordinary commit on \`release/next\`;"
+                echo "merging this PR approves them._"
                 echo ""
-                echo "## What's in this release"
+                cat /tmp/changelog-summary.md
                 echo ""
-                cat /tmp/ai-notes.md
+              }
+            fi
+            if [ -s /tmp/changelog-failure.txt ]; then
+              {
+                echo "> :warning: **Changelog generation failed** — entries for some or all of the"
+                echo "> packages in this release are missing (see the workflow run's annotation for"
+                echo "> the reason; entries listed above are unaffected). The PR is still mergeable,"
+                echo "> but the GitHub Release will state that notes are missing unless entries are"
+                echo "> written by hand into each package's \`CHANGELOG.md\` on \`release/next\`,"
+                echo "> or regenerated when the next scope is added to this PR. Do not re-run"
+                echo "> \`release / create-pr\` with an already-added scope — that bumps versions again."
                 echo ""
               }
             fi
@@ -313,12 +501,13 @@ jobs:
             echo "   - Builds and tests all packages"
             echo "   - Publishes to npm, PyPI, NuGet, and Maven Central"
             echo "   - Creates per-package git tags"
-            echo "   - Creates a GitHub Release"
+            echo "   - Creates a GitHub Release carrying the approved changelog entries"
             echo ""
             echo "### Before merging"
             echo ""
             echo "- [ ] CI is green"
             echo "- [ ] Version bumps look correct"
+            echo "- [ ] Changelog entries are accurate — especially each **Breaking changes** section"
             echo ""
             echo "> **Do not merge until CI is fully green.**"
             echo "> To add another scope to this release, re-run \`release / create-pr\` with a different scope."

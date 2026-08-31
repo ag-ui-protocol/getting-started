@@ -422,6 +422,80 @@ add_adk_fastapi_endpoint(app, technical_agent_wrapper, path="/agents/technical")
 add_adk_fastapi_endpoint(app, creative_agent_wrapper, path="/agents/creative")
 ```
 
+### Endpoint Agent Resolver
+
+Use `agent_resolver` when a single FastAPI endpoint should route each request
+to one of several independently configured `ADKAgent` wrappers. The resolver
+runs after request state extraction and may return an `ADKAgent` or `None`.
+Returning `None` uses the default agent supplied to `add_adk_fastapi_endpoint()`.
+
+```python
+from fastapi import FastAPI
+from ag_ui_adk import (
+    ADKAgent,
+    add_adk_fastapi_endpoint,
+    resolve_agent_from_message_history,
+)
+
+default_agent = ADKAgent(adk_agent=supervisor, app_name="demo", user_id="demo")
+support_agent = ADKAgent(adk_agent=support, app_name="demo", user_id="demo")
+billing_agent = ADKAgent(adk_agent=billing, app_name="demo", user_id="demo")
+
+AGENT_REGISTRY = {
+    "supervisor": default_agent,
+    "support": support_agent,
+    "billing": billing_agent,
+}
+
+
+async def extract_agent_state(request, input_data):
+    agent_key = request.headers.get("x-agent-key")
+    return {"to_agent": agent_key} if agent_key else {}
+
+
+async def agent_resolver(request, input_data):
+    history_agent = resolve_agent_from_message_history(
+        input_data.messages,
+        AGENT_REGISTRY,
+    )
+    if history_agent is not None:
+        return history_agent
+
+    state = input_data.state if isinstance(input_data.state, dict) else {}
+    return AGENT_REGISTRY.get(state.get("to_agent"))
+
+
+app = FastAPI()
+add_adk_fastapi_endpoint(
+    app,
+    default_agent,
+    path="/agent",
+    extract_state_from_request=extract_agent_state,
+    agent_resolver=agent_resolver,
+)
+```
+
+This is an endpoint routing boundary, not ADK sub-agent delegation. Use it when
+each route target has its own `ADKAgent` configuration, capabilities, or service
+dependencies. If a conversation can move between routed agents, configure those
+agents with compatible session infrastructure: the same session-service backing
+layer plus compatible `app_name`, `user_id`, extractor behavior, and
+thread/session-id mapping.
+
+The resolver also runs for `/agent/capabilities` and `/agents/state`, but those
+surfaces use synthetic `RunAgentInput` objects rather than a normal run body.
+Route those requests from the FastAPI `Request` or extractor-populated state,
+not from tool history or arbitrary run-body state.
+
+The helper convention requires the registry to include every agent that can
+originate an open tool call, and the inbound message history must preserve the
+assistant tool-call message with `AssistantMessage.name` set to that registry
+key. The ADK middleware preserves concrete ADK event authors this way when
+converting session events to AG-UI messages. If the latest message is not a
+`ToolMessage`, or the matching assistant message cannot be resolved,
+`resolve_agent_from_message_history()` returns `None` so the resolver can apply
+its normal request, extractor, or default fallback policy.
+
 ### Predictive State Updates
 
 Predictive state updates allow the frontend to receive real-time state changes derived from tool call arguments. This is particularly useful for live previews — for example, showing a document update immediately when a tool call completes.
@@ -519,7 +593,7 @@ When using `add_adk_fastapi_endpoint()`, an additional `POST /agents/state` endp
 }
 ```
 
-The `appName` and `userId` parameters are optional if the `ADKAgent` was configured with static values. They are required for session lookup when using dynamic extractors or after middleware restart.
+The `appName` and `userId` parameters are optional if the `ADKAgent` was configured with static values. When an extractor or resolver is configured, request/extractor-derived identity takes precedence; body `appName` and `userId` are fallback inputs for deployments that configure neither static identity nor extractor-supplied identity.
 
 **Response:**
 ```json

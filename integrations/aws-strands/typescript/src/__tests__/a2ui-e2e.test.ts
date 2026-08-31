@@ -6,13 +6,14 @@
  * returns to the outer loop, and the agent narrates. The run MUST emit
  * RUN_FINISHED instead of hanging on a still-Running generate_a2ui.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 import { Agent, Model } from "@strands-agents/sdk";
-import { EventType } from "@ag-ui/core";
+import { EventType, type BaseEvent } from "@ag-ui/core";
 
 import { StrandsAgent } from "../agent";
-import { collect, minimalRunInput } from "./helpers";
+import type { StrandsAgentConfig } from "../config";
+import { collect, expectCompletedRun, minimalRunInput } from "./helpers";
 
 const GENERATE_A2UI_TOOL_NAME = "generate_a2ui";
 const RENDER_A2UI_TOOL_NAME = "render_a2ui";
@@ -61,6 +62,19 @@ class DynamicA2UIFakeModel extends Model {
   renderCalls = 0;
   outerCalls = 0;
 
+  /**
+   * `renderArgs[n]` is the args JSON the nth forced render turn emits, so a
+   * test can drive an omitted `surfaceId` or a first attempt that fails
+   * validation. Past the end, the last entry repeats.
+   */
+  constructor(
+    private readonly renderArgs: string[] = [
+      '{"surfaceId":"s1","components":[{"id":"root","component":"Row"}],"data":{}}',
+    ],
+  ) {
+    super();
+  }
+
   getConfig() {
     return { modelId: "fake" };
   }
@@ -71,11 +85,14 @@ class DynamicA2UIFakeModel extends Model {
   async *stream(messages: any, options?: any) {
     const tc = options?.toolChoice;
     if (tc?.tool?.name === RENDER_A2UI_TOOL_NAME) {
+      const args =
+        this.renderArgs[this.renderCalls] ??
+        this.renderArgs[this.renderArgs.length - 1];
       this.renderCalls++;
       for (const ev of toolUseEvents(
         RENDER_A2UI_TOOL_NAME,
-        "render-1",
-        '{"surfaceId":"s1","components":[{"id":"root","component":"Row"}],"data":{}}',
+        `render-${this.renderCalls}`,
+        args,
       )) {
         yield ev as never;
       }
@@ -164,5 +181,182 @@ describe("end-to-end dynamic A2UI run (real Strands loop, hang regression)", () 
     expect(model.renderCalls).toBe(1);
     // Outer loop: one generate call + one narration.
     expect(model.outerCalls).toBe(2);
+  });
+});
+
+/**
+ * The A2UI operations `generate_a2ui` returned to the outer loop, read off the
+ * TOOL_CALL_RESULT paired with its call. Fails loudly when the run produced no
+ * such call or result, so an assertion about the ops can't hold vacuously.
+ */
+function a2uiOperationsOf(
+  events: BaseEvent[],
+): Array<Record<string, Record<string, unknown>>> {
+  const start = events.find(
+    (e) =>
+      e.type === EventType.TOOL_CALL_START &&
+      (e as { toolCallName?: string }).toolCallName === GENERATE_A2UI_TOOL_NAME,
+  ) as { toolCallId?: string } | undefined;
+  expect(start, "run produced no generate_a2ui call").toBeDefined();
+  const result = events.find(
+    (e) =>
+      e.type === EventType.TOOL_CALL_RESULT &&
+      (e as { toolCallId?: string }).toolCallId === start!.toolCallId,
+  ) as { content?: string } | undefined;
+  expect(result, "generate_a2ui produced no result").toBeDefined();
+  const envelope = JSON.parse(result!.content ?? "") as {
+    a2ui_operations?: Array<Record<string, Record<string, unknown>>>;
+  };
+  expect(
+    envelope.a2ui_operations,
+    `generate_a2ui returned no operations: ${result!.content}`,
+  ).toBeDefined();
+  return envelope.a2ui_operations!;
+}
+
+/** Drive one auto-injected A2UI run over `model` with the given adapter config. */
+function runDynamicA2UI(
+  model: DynamicA2UIFakeModel,
+  config: StrandsAgentConfig = {},
+): Promise<BaseEvent[]> {
+  const core = new Agent({
+    model: model as never,
+    systemPrompt: "You render UIs.",
+    tools: [],
+  });
+  const agent = new StrandsAgent({ agent: core, name: "strands-e2e", config });
+  return collect(
+    agent,
+    minimalRunInput({
+      forwardedProps: { injectA2UITool: true },
+      tools: [RENDER_TOOL_INPUT] as never,
+      messages: [
+        { id: "u1", role: "user", content: "Show my sales dashboard" },
+      ] as never,
+    }),
+  );
+}
+
+describe("auto-injected A2UI generation options (config.a2ui)", () => {
+  it("stamps config.a2ui.defaultSurfaceId when the sub-agent omits surfaceId", async () => {
+    // No `surfaceId` in the render args: the id on the resulting ops can only
+    // come from the configured default.
+    const model = new DynamicA2UIFakeModel([
+      '{"components":[{"id":"root","component":"Row"}],"data":{}}',
+    ]);
+    const events = await runDynamicA2UI(model, {
+      a2ui: { defaultSurfaceId: "sales-panel" },
+    });
+
+    expectCompletedRun(events, "defaultSurfaceId run");
+    const ops = a2uiOperationsOf(events);
+    const created = ops.find((op) => op.createSurface);
+    expect(
+      created,
+      `no createSurface op: ${JSON.stringify(ops)}`,
+    ).toBeDefined();
+    expect(created!.createSurface.surfaceId).toBe("sales-panel");
+    // Every op addresses the same surface, or the renderer paints into nothing.
+    const targets = ops.map(
+      (op) =>
+        (op.createSurface ?? op.updateComponents ?? op.updateDataModel)
+          ?.surfaceId,
+    );
+    expect(targets).toEqual(["sales-panel", "sales-panel"]);
+  });
+
+  it("reports each recovery attempt to config.a2ui.onA2UIAttempt", async () => {
+    // Attempt 1 has no component with id "root" (structural failure, no catalog
+    // needed); attempt 2 does, so the loop recovers and commits.
+    const seen: Array<{ attempt: number; ok: boolean; codes: string[] }> = [];
+    const model = new DynamicA2UIFakeModel([
+      '{"surfaceId":"s1","components":[{"id":"header","component":"Row"}],"data":{}}',
+      '{"surfaceId":"s1","components":[{"id":"root","component":"Row"}],"data":{}}',
+    ]);
+    const events = await runDynamicA2UI(model, {
+      a2ui: {
+        onA2UIAttempt: (record) =>
+          seen.push({
+            attempt: record.attempt,
+            ok: record.ok,
+            codes: record.errors.map((e) => e.code),
+          }),
+      },
+    });
+
+    expectCompletedRun(events, "onA2UIAttempt run");
+    expect(seen).toEqual([
+      { attempt: 1, ok: false, codes: ["no_root"] },
+      { attempt: 2, ok: true, codes: [] },
+    ]);
+    expect(model.renderCalls).toBe(2);
+    // The recovered surface still reached the outer loop.
+    const ops = a2uiOperationsOf(events);
+    expect(ops.find((op) => op.createSurface)?.createSurface.surfaceId).toBe(
+      "s1",
+    );
+  });
+
+  it("contains a throwing onA2UIAttempt hook rather than discarding the valid surface", async () => {
+    // The toolkit fires the hook before it builds the envelope, so an
+    // unguarded throw would lose a surface that already validated.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const model = new DynamicA2UIFakeModel();
+      const events = await runDynamicA2UI(model, {
+        a2ui: {
+          onA2UIAttempt: () => {
+            throw new Error("host hook boom");
+          },
+        },
+      });
+
+      expectCompletedRun(events, "throwing-hook run");
+      const ops = a2uiOperationsOf(events);
+      expect(ops.find((op) => op.createSurface)?.createSurface.surfaceId).toBe(
+        "s1",
+      );
+      // Swallowed, but not silently: the failure is on the record.
+      expect(warn.mock.calls.map((c) => String(c[0])).join("\n")).toMatch(
+        /onA2UIAttempt hook threw on attempt 1.*host hook boom/,
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("contains an async onA2UIAttempt hook that rejects", async () => {
+    // The callback type is `=> void`, which an async function also satisfies,
+    // so a rejected hook promise would escape the synchronous try/catch and
+    // surface as an unhandled rejection instead of being contained.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const model = new DynamicA2UIFakeModel();
+      const events = await runDynamicA2UI(model, {
+        a2ui: {
+          onA2UIAttempt: async () => {
+            throw new Error("async hook boom");
+          },
+        },
+      });
+
+      expectCompletedRun(events, "async-throwing-hook run");
+      const ops = a2uiOperationsOf(events);
+      expect(ops.find((op) => op.createSurface)?.createSurface.surfaceId).toBe(
+        "s1",
+      );
+      expect(warn.mock.calls.map((c) => String(c[0])).join("\n")).toMatch(
+        /onA2UIAttempt hook threw on attempt 1.*async hook boom/,
+      );
+      // Give any escaped rejection a turn of the loop to be reported.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      warn.mockRestore();
+    }
   });
 });

@@ -15,6 +15,7 @@ os.environ["OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"] = "all"
 from strands import Agent
 from ag_ui_strands import StrandsAgent, create_strands_app
 from server.model_factory import create_model
+from server.settings import cors_origins
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent.parent.parent / '.env'
@@ -25,7 +26,7 @@ load_dotenv(dotenv_path=env_path)
 # This demo is specifically about reasoning, so it opts into the OpenAI
 # Responses API, which is what surfaces reasoning summaries. Every other
 # demo uses the factory default (Chat Completions, no reasoning).
-model = create_model(openai_api="responses")
+model = create_model(openai_api="responses", reasoning=True)
 
 strands_agent = Agent(
     model=model,
@@ -43,4 +44,4 @@ agui_agent = StrandsAgent(
     description="Conversational Strands agent with reasoning/thinking event streaming",
 )
 
-app = create_strands_app(agui_agent, "/")
+app = create_strands_app(agui_agent, "/", origins=cors_origins())

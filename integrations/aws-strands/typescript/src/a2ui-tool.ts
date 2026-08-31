@@ -48,6 +48,7 @@ import {
   runA2UIGenerationWithRecovery,
   splitA2UISchemaContext,
   wrapErrorEnvelope,
+  type A2UIAttemptRecord,
   type A2UIGuidelines,
   type A2UIRecoveryConfig,
   type A2UIToolParams,
@@ -57,7 +58,7 @@ import {
 import { flattenContentToText } from "./utils";
 import { DEFAULT_LOGGER, type Logger } from "./logger";
 
-export type { A2UIToolParams };
+export type { A2UIToolParams, A2UIAttemptRecord };
 
 /** Default name of the render tool the A2UI middleware injects (and we drop). */
 const RENDER_A2UI_TOOL_NAME = RENDER_A2UI_TOOL_DEF.function.name;
@@ -157,6 +158,31 @@ export function getA2UITools<TModel = Model>(
   } = resolveA2UIToolParams(params);
   const subagentModel = model as Model;
 
+  // The toolkit fires this hook INSIDE the recovery loop, and on the winning
+  // attempt it fires BEFORE the envelope is built, so a throwing host hook
+  // would reject the whole `generate_a2ui` call and discard an already-valid
+  // surface. Contain it (the toolkit documents the hook as non-disruptive) and
+  // leave the failure countable rather than silent.
+  const onAttempt = onA2UIAttempt
+    ? (record: A2UIAttemptRecord) => {
+        const reportHookError = (err: unknown) => {
+          DEFAULT_LOGGER.warn(
+            `[@ag-ui/aws-strands] A2UI onA2UIAttempt hook threw on attempt ${
+              record.attempt
+            }; ignoring: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        };
+        // The callback type is `=> void`, which TypeScript also satisfies with
+        // an async function, so a rejected hook promise would otherwise escape
+        // as an unhandled rejection rather than being contained here.
+        try {
+          void Promise.resolve(onA2UIAttempt(record)).catch(reportHookError);
+        } catch (err) {
+          reportHookError(err);
+        }
+      }
+    : undefined;
+
   return {
     name: toolName,
     description: toolDescription,
@@ -252,7 +278,7 @@ export function getA2UITools<TModel = Model>(
             basePrompt: prep.prompt,
             catalog,
             config: recovery,
-            onAttempt: onA2UIAttempt,
+            onAttempt,
             invokeSubagent: (prompt) => {
               if (disconnected) {
                 const abort = new Error(
@@ -686,6 +712,12 @@ export interface A2UIInjectConfig {
    * the injected render tool to drop.
    */
   injectA2UITool?: boolean | string;
+  /**
+   * Description advertised to the main agent's planner in place of the
+   * toolkit's canonical one. Use it to steer WHEN the planner reaches for
+   * `generate_a2ui`. Mirrors `getA2UITools({ toolDescription })`.
+   */
+  toolDescription?: string;
   /** Inline catalog forwarded to the recovery loop (overrides context). */
   catalog?: A2UIValidationCatalog;
   /**
@@ -704,10 +736,21 @@ export interface A2UIInjectConfig {
    */
   guidelines?: A2UIGuidelines;
   /**
+   * Surface id stamped on the operations when the sub-agent omits `surfaceId`
+   * on a create. Falls back to the toolkit's `DEFAULT_SURFACE_ID`.
+   */
+  defaultSurfaceId?: string;
+  /**
    * Recovery loop config (attempt cap, retry-UI threshold) for the
    * auto-injected tool. Defaults to the toolkit's `MAX_A2UI_ATTEMPTS` (3).
    */
   recovery?: A2UIRecoveryConfig;
+  /**
+   * Per-attempt recovery hook (attempt number, ok flag, validation errors) for
+   * host-side status and dev traces. Non-disruptive: a hook that throws is
+   * logged and ignored, so it can never discard a valid surface.
+   */
+  onA2UIAttempt?: (record: A2UIAttemptRecord) => void;
 }
 
 /** The injection decision: what to register and what to drop. */
@@ -814,10 +857,13 @@ export function planA2UIInjection<TModel = Model>(
     {
       model: args.model as unknown as Model,
       toolName,
+      toolDescription: config?.toolDescription,
       catalog,
       defaultCatalogId,
+      defaultSurfaceId: config?.defaultSurfaceId,
       guidelines,
       recovery: config?.recovery,
+      onA2UIAttempt: config?.onA2UIAttempt,
     },
     { aguiMessages: input.messages as AguiMessage[], state: baseState },
   );

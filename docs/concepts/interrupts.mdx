@@ -75,6 +75,7 @@ type Interrupt = {
   responseSchema?: JsonSchema
   expiresAt?: string
   metadata?: Record<string, any>
+  subagentRunId?: string
 }
 ```
 
@@ -87,6 +88,7 @@ type Interrupt = {
 | `responseSchema` | JSON Schema for the expected `resume.payload`. |
 | `expiresAt` | Optional ISO-8601 TTL. Stale resumes produce `RunError`. |
 | `metadata` | Free-form framework-specific data. |
+| `subagentRunId` | The subagent whose work raised this interrupt — absent for a root-raised one. Attribution lives per interrupt because one run can carry interrupts from several subagents. A producer that emits the subagent lifecycle events also closes the subagent with `outcome: { type: "suspended" }` — lifecycle events remain optional, so attribution here is valid on its own (see [Subagents](/concepts/subagents#suspension)). |
 
 ## Resuming a run
 

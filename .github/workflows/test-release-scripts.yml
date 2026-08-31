@@ -2,9 +2,8 @@ name: Test Release Scripts
 
 # Runs node:test unit tests under scripts/release/. Lives outside Nx because
 # scripts/release/ is not an Nx project (pnpm test = nx run-many -t test skips
-# it), which is why the existing generate-ai-release-notes.test.ts has been
-# local-only since it landed. Sibling lint-release-workflows.yml covers
-# actionlint + shellcheck; this file covers the TypeScript tests.
+# it). Sibling lint-release-workflows.yml covers actionlint + shellcheck; this
+# file covers the TypeScript tests.
 
 on:
   push:

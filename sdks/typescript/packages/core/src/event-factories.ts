@@ -101,6 +101,15 @@ import {
   ReasoningEncryptedValueEvent,
   ReasoningEncryptedValueEventProps,
   ReasoningEncryptedValueEventSchema,
+  SubagentStartedEvent,
+  SubagentStartedEventProps,
+  SubagentStartedEventSchema,
+  SubagentFinishedEvent,
+  SubagentFinishedEventProps,
+  SubagentFinishedEventSchema,
+  SubagentErrorEvent,
+  SubagentErrorEventProps,
+  SubagentErrorEventSchema,
 } from "./events";
 
 const buildEvent = <Schema extends z.ZodTypeAny>(
@@ -365,3 +374,25 @@ export const createReasoningEncryptedValueEvent = (
   props: ReasoningEncryptedValueEventProps,
 ): ReasoningEncryptedValueEvent =>
   buildEvent(EventType.REASONING_ENCRYPTED_VALUE, ReasoningEncryptedValueEventSchema, props);
+
+/**
+ * Creates a SUBAGENT_STARTED event.
+ */
+export const createSubagentStartedEvent = (
+  props: SubagentStartedEventProps,
+): SubagentStartedEvent =>
+  buildEvent(EventType.SUBAGENT_STARTED, SubagentStartedEventSchema, props);
+
+/**
+ * Creates a SUBAGENT_FINISHED event.
+ */
+export const createSubagentFinishedEvent = (
+  props: SubagentFinishedEventProps,
+): SubagentFinishedEvent =>
+  buildEvent(EventType.SUBAGENT_FINISHED, SubagentFinishedEventSchema, props);
+
+/**
+ * Creates a SUBAGENT_ERROR event.
+ */
+export const createSubagentErrorEvent = (props: SubagentErrorEventProps): SubagentErrorEvent =>
+  buildEvent(EventType.SUBAGENT_ERROR, SubagentErrorEventSchema, props);

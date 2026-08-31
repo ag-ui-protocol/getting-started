@@ -1,7 +1,7 @@
 /** Configuration primitives for customizing Strands agent behavior. */
 
 import type { RunAgentInput, BaseEvent } from "@ag-ui/core";
-import type { SessionManager } from "@strands-agents/sdk";
+import type { AgentConfig, SessionManager } from "@strands-agents/sdk";
 import type { A2UIInjectConfig } from "./a2ui-tool";
 
 import type { Logger } from "./logger";
@@ -131,6 +131,15 @@ export interface ToolBehavior {
   toolStreamEventHandler?: ToolStreamEventHandler;
 }
 
+/**
+ * Builds extra `AgentConfig` for one thread's agent.
+ *
+ * See {@link StrandsAgentConfig.threadAgentConfig}.
+ */
+export type ThreadAgentConfigProvider = (
+  input: RunAgentInput,
+) => Partial<AgentConfig> | Promise<Partial<AgentConfig>>;
+
 /** Top-level configuration for the Strands agent adapter. */
 export interface StrandsAgentConfig {
   /** Per-tool overrides keyed by the Strands tool name. */
@@ -153,6 +162,50 @@ export interface StrandsAgentConfig {
    * the agent runs without session persistence; the thread IS cached.
    */
   sessionManagerProvider?: SessionManagerProvider;
+  /**
+   * Extra `AgentConfig` for each per-thread agent, merged over whatever was
+   * recovered from the template.
+   *
+   * The adapter builds one Strands `Agent` per thread from the template it was
+   * given, by reading the template's settings back off the built instance.
+   * Some settings cannot be read back at all: Strands consumes them into
+   * internal state during construction and keeps nothing under a name the
+   * adapter can find. `retryStrategy`, `traceAttributes` and `contextManager`
+   * are the current examples. Others are readable but belong to the agent that
+   * owns them, so handing the same instance to every thread would let one
+   * conversation disturb another.
+   *
+   * Either way the template is the wrong place to put them, and no amount of
+   * reflection over a built `Agent` recovers them. This hook is the supported
+   * route: it runs once per `threadId`, and whatever it returns is applied over
+   * the recovered fields, so a caller can set anything the adapter cannot carry
+   * and can override anything it can.
+   *
+   * Three fields are re-asserted by the adapter afterwards, because they are
+   * what keeps threads apart and a run coherent: the `SessionManager` from
+   * `sessionManagerProvider`, the seeded `messages` for a cold thread, and
+   * `printer`, which stays off because the adapter streams the run itself.
+   *
+   * Called with the same `RunAgentInput` that created the thread. If it throws,
+   * the run yields `RUN_ERROR` and the thread is not cached, so the next
+   * request retries it.
+   *
+   * @example
+   * ```ts
+   * new StrandsAgent({
+   *   agent: template,
+   *   name: "assistant",
+   *   config: {
+   *     // Retries disabled, and a fresh context manager per conversation.
+   *     threadAgentConfig: () => ({
+   *       retryStrategy: null,
+   *       contextManager: "auto",
+   *     }),
+   *   },
+   * })
+   * ```
+   */
+  threadAgentConfig?: ThreadAgentConfigProvider;
   /**
    * Emit `MessagesSnapshotEvent` at lifecycle boundaries (after the initial
    * `STATE_SNAPSHOT`, after each `TOOL_CALL_END` / `TOOL_CALL_RESULT`, and
@@ -195,6 +248,10 @@ export interface StrandsAgentConfig {
    *     components; required for a real model to compose them.
    *   - `catalog` — inline catalog for catalog-aware (semantic) recovery.
    *   - `recovery` — attempt cap / retry-UI threshold.
+   *   - `toolDescription` sets the description advertised to the planner,
+   *     steering when it reaches for `generate_a2ui`.
+   *   - `defaultSurfaceId` is stamped when the sub-agent omits a surface id.
+   *   - `onA2UIAttempt` is a per-attempt recovery hook for host status/traces.
    */
   a2ui?: A2UIInjectConfig;
   /**

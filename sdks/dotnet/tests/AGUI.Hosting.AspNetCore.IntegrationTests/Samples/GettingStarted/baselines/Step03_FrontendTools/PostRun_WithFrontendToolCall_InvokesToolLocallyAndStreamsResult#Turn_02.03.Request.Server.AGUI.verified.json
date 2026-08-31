@@ -17,7 +17,8 @@
             "arguments": "{}"
           }
         }
-      ]
+      ],
+      "id": "call_Id_1"
     },
     {
       "role": "tool",

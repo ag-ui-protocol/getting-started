@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from ag_ui.core import (
+    Context,
     CustomEvent,
     EventType,
     Interrupt,
@@ -34,6 +35,7 @@ from strands import Agent as StrandsAgentCore
 from strands import ToolContext, tool
 from strands.agent.state import AgentState
 from strands.interrupt import Interrupt as StrandsInterrupt
+from strands.hooks.registry import HookRegistry
 from strands.models.model import Model as StrandsModel
 from strands.session import FileSessionManager
 from strands.types.session import SessionAgent, SessionMessage
@@ -44,12 +46,18 @@ from ag_ui_strands.agent import (
     StrandsAgent,
 )
 from ag_ui_strands.client_proxy_tool import PROXY_RESULT_PLACEHOLDER
+from ag_ui_strands.frontend_tool_interrupt import (
+    FRONTEND_TOOL_INTERRUPT_NAME,
+    frontend_tool_reason,
+)
 from ag_ui_strands.config import StrandsAgentConfig, ToolBehavior
 from ag_ui_strands.session_reconcile import (
+    AG_UI_FRONTEND_CALL_IDS_STATE_KEY,
     AG_UI_TOOL_CALL_MAP_STATE_KEY,
-    AG_UI_WIRE_MAP_STATE_KEY,
+    active_proxy_placeholder_ids,
 )
 from tests.interrupt_state_stub import InterruptStateStub
+from tests.hook_helpers import invoke_after_model_call, invoke_before_model_call
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,6 +70,7 @@ def _make_run_input(
     messages=None,
     resume=None,
     tools=None,
+    context=None,
 ) -> RunAgentInput:
     return RunAgentInput(
         thread_id=thread_id,
@@ -69,7 +78,7 @@ def _make_run_input(
         state={},
         messages=messages or [],
         tools=tools or [],
-        context=[],
+        context=context or [],
         forwarded_props={},
         resume=resume,
     )
@@ -119,6 +128,8 @@ class _MockStrandsCore:
         self.model = MagicMock()
         self.messages = []
         self.stream_prompts = []
+        self.model_messages = []
+        self.hooks = HookRegistry()
         # Default to a mock session manager: the ``session_manager is None``
         # guard now rejects interrupts/resume without one, and most tests
         # here exercise the resume-translation logic, not that guard. Pass
@@ -142,6 +153,9 @@ class _MockStrandsCore:
         """
         self.stream_prompts.append(prompt)
         self._interrupt_state.resume(prompt)
+        invoke_before_model_call(self.hooks, self)
+        self.model_messages.append(copy.deepcopy(self.messages))
+        invoke_after_model_call(self.hooks, self)
         async for event in self._stream_body(prompt):
             yield event
 
@@ -406,11 +420,31 @@ class TestResumeConsumption:
         resume = [ResumeEntry(interrupt_id="int-1", status="resolved", payload="yes")]
 
         with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
-            await _collect_events(agent, _make_run_input(resume=resume))
+            await _collect_events(
+                agent,
+                _make_run_input(
+                    resume=resume,
+                    context=[Context(description="account", value="premium")],
+                ),
+            )
 
         assert core.stream_prompts == [
             [{"interruptResponse": {"interruptId": "int-1", "response": {"response": "yes"}}}]
         ]
+        assert core.model_messages == [[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "text": (
+                            "Context provided by the application:\n"
+                            "- account: premium"
+                        )
+                    }
+                ],
+            }
+        ]]
+        assert core.messages == []
 
     @pytest.mark.parametrize("falsy_payload", [None, False, "", 0, [], {}])
     @pytest.mark.asyncio
@@ -881,7 +915,7 @@ def _active_mixed_mock_core() -> _MockStrandsCore:
             ],
         }
     ]
-    core.state.set(AG_UI_WIRE_MAP_STATE_KEY, {"wire-proxy": "native-proxy"})
+    core.state.set(AG_UI_FRONTEND_CALL_IDS_STATE_KEY, ["native-proxy"])
     return core
 
 
@@ -891,7 +925,7 @@ def _mixed_resume_input(*, include_proxy_result: bool) -> RunAgentInput:
             ToolMessage(
                 id="tool-result",
                 role="tool",
-                tool_call_id="wire-proxy",
+                tool_call_id="native-proxy",
                 content='{"approved": true}',
             )
         ]
@@ -1026,9 +1060,7 @@ async def test_active_mixed_capability_accessor_failure_is_atomic_and_retryable(
     ]
 
 
-@pytest.mark.parametrize(
-    "failure_point", ["wire-map-read", "id-resolution", "repository"]
-)
+@pytest.mark.parametrize("failure_point", ["call-id-read", "repository"])
 @pytest.mark.asyncio
 async def test_active_reconciliation_failure_is_atomic_and_retryable(failure_point):
     core = _active_mixed_mock_core()
@@ -1040,18 +1072,13 @@ async def test_active_reconciliation_failure_is_atomic_and_retryable(failure_poi
     before = _snapshot_mutable_core_state(core)
     original_state_get = core.state.get
 
-    def fail_wire_map_read(key=None):
-        if key == AG_UI_WIRE_MAP_STATE_KEY:
-            raise RuntimeError("wire map unavailable")
+    def fail_call_id_read(key=None):
+        if key == AG_UI_FRONTEND_CALL_IDS_STATE_KEY:
+            raise RuntimeError("recorded call ids unavailable")
         return original_state_get(key)
 
-    if failure_point == "wire-map-read":
-        failure_patch = patch.object(core.state, "get", side_effect=fail_wire_map_read)
-    elif failure_point == "id-resolution":
-        failure_patch = patch(
-            "ag_ui_strands.agent.resolve_native_ids",
-            side_effect=RuntimeError("id resolution unavailable"),
-        )
+    if failure_point == "call-id-read":
+        failure_patch = patch.object(core.state, "get", side_effect=fail_call_id_read)
     else:
         failure_patch = patch(
             "ag_ui_strands.agent.reconcile_frontend_tool_results",
@@ -1078,6 +1105,57 @@ async def test_active_reconciliation_failure_is_atomic_and_retryable(failure_poi
     assert core._interrupt_state.context["tool_results"][0]["content"] == [
         {"text": '{"approved": true}'}
     ]
+
+
+@pytest.mark.asyncio
+async def test_active_call_id_read_failure_fails_closed_without_parked_placeholders(
+    caplog,
+):
+    """The provenance read fails closed on its own, not via a later guard.
+
+    An unreadable store leaves the adapter unable to tell a client-executed
+    result from one Strands produced itself. With an interrupt live and no
+    parked proxy placeholder, the missing-results guard downstream has nothing
+    to catch, so only the read itself can stop the run before the checkpoint is
+    consumed.
+    """
+    core = _MockStrandsCore(
+        interrupts=[StrandsInterrupt(id="native-interrupt", name="confirm")],
+        session_manager=_repository_manager(),
+    )
+    core.state.set("agui_context", [])
+    assert not active_proxy_placeholder_ids(core)
+    agent = _make_base_agent(StrandsAgentConfig())
+    input_data = _mixed_resume_input(include_proxy_result=True).model_copy(
+        update={"tools": []}
+    )
+    before = _snapshot_mutable_core_state(core)
+    original_state_get = core.state.get
+
+    def fail_call_id_read(key=None):
+        if key == AG_UI_FRONTEND_CALL_IDS_STATE_KEY:
+            raise RuntimeError("recorded call ids unavailable")
+        return original_state_get(key)
+
+    with (
+        patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core),
+        patch.object(core.state, "get", side_effect=fail_call_id_read),
+    ):
+        rejected = await _collect_events(agent, input_data)
+
+    _assert_single_run_error(rejected, "INTERRUPT_RECONCILIATION_ERROR")
+    assert "Active interrupt tool result reconciliation failed" in caplog.text
+    assert core.stream_prompts == []
+    assert _snapshot_mutable_core_state(core) == before
+
+    with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
+        retried = await _collect_events(
+            agent,
+            input_data.model_copy(update={"run_id": "run-2"}),
+        )
+
+    assert not any(event.type == EventType.RUN_ERROR for event in retried)
+    assert len(core.stream_prompts) == 1
 
 
 @pytest.mark.asyncio
@@ -1134,10 +1212,6 @@ async def test_active_reconciliation_retry_counts_already_applied_results(tmp_pa
         "native-proxy-1": '{"approved": true}',
         "native-proxy-2": '{"approved": false}',
     }
-    wire_to_native = {
-        "wire-proxy-1": "native-proxy-1",
-        "wire-proxy-2": "native-proxy-2",
-    }
 
     session_manager = FileSessionManager(
         session_id="session-1", storage_dir=str(tmp_path)
@@ -1189,7 +1263,7 @@ async def test_active_reconciliation_retry_counts_already_applied_results(tmp_pa
         tool_result(native_id, PROXY_RESULT_PLACEHOLDER)
         for native_id in native_results
     ]
-    core.state.set(AG_UI_WIRE_MAP_STATE_KEY, wire_to_native)
+    core.state.set(AG_UI_FRONTEND_CALL_IDS_STATE_KEY, list(native_results))
     core.state.set("agui_context", [])
 
     async def consume_checkpoint(prompt):
@@ -1201,12 +1275,12 @@ async def test_active_reconciliation_retry_counts_already_applied_results(tmp_pa
     input_data = _make_run_input(
         messages=[
             ToolMessage(
-                id=f"result-{wire_id}",
+                id=f"result-{native_id}",
                 role="tool",
-                tool_call_id=wire_id,
-                content=native_results[native_id],
+                tool_call_id=native_id,
+                content=result,
             )
-            for wire_id, native_id in wire_to_native.items()
+            for native_id, result in native_results.items()
         ],
         resume=[
             ResumeEntry(
@@ -1241,7 +1315,7 @@ async def test_active_reconciliation_retry_counts_already_applied_results(tmp_pa
     assert core.stream_prompts == []
     assert core._interrupt_state.activated
     assert set(core._interrupt_state.interrupts) == {"native-interrupt"}
-    assert core.state.get(AG_UI_WIRE_MAP_STATE_KEY) == wire_to_native
+    assert core.state.get(AG_UI_FRONTEND_CALL_IDS_STATE_KEY) == list(native_results)
 
     partially_updated = repository.list_messages("session-1", "default")
     assert partially_updated[0].message["content"][0]["toolResult"]["content"] == [
@@ -1260,7 +1334,7 @@ async def test_active_reconciliation_retry_counts_already_applied_results(tmp_pa
     assert any(event.type == EventType.RUN_FINISHED for event in retried)
     assert len(core.stream_prompts) == 1
     assert not core._interrupt_state.activated
-    assert core.state.get(AG_UI_WIRE_MAP_STATE_KEY) == {}
+    assert core.state.get(AG_UI_FRONTEND_CALL_IDS_STATE_KEY) == []
     persisted = repository.list_messages("session-1", "default")
     for index, expected_text in enumerate(native_results.values()):
         assert persisted[index].message["content"][0]["toolResult"]["content"] == [
@@ -1271,14 +1345,33 @@ async def test_active_reconciliation_retry_counts_already_applied_results(tmp_pa
 @pytest.mark.asyncio
 async def test_non_active_reconciliation_exception_keeps_legacy_fallback(caplog):
     core = _MockStrandsCore(session_manager=_repository_manager())
-    core.state.set(AG_UI_WIRE_MAP_STATE_KEY, {"wire-proxy": "native-proxy"})
+    core.state.set(AG_UI_FRONTEND_CALL_IDS_STATE_KEY, ["native-proxy"])
+    # The recorded id above names a real call, so the native history has to
+    # contain it. Without the ``toolUse`` block the fixture points at a call
+    # that exists nowhere and the continuation cannot name the tool at all,
+    # which is a separate failure from the reconcile exception this test is
+    # about.
+    core.messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "toolUse": {
+                        "toolUseId": "native-proxy",
+                        "name": "approveTool",
+                        "input": {},
+                    }
+                }
+            ],
+        }
+    ]
     agent = _make_base_agent(StrandsAgentConfig())
     input_data = _make_run_input(
         messages=[
             ToolMessage(
                 id="tool-result",
                 role="tool",
-                tool_call_id="wire-proxy",
+                tool_call_id="native-proxy",
                 content='{"approved": true}',
             )
         ],
@@ -1638,7 +1731,7 @@ async def test_mixed_resume_batch_with_falsy_payload_and_tool_behaviors(
     assert finished1.outcome is not None
     assert finished1.outcome.type == "interrupt"
     interrupt_id = finished1.outcome.interrupts[0].id
-    fe_wire_id = next(
+    fe_tool_call_id = next(
         e.tool_call_id
         for e in events1
         if e.type == EventType.TOOL_CALL_START and e.tool_call_name == "approveTool"
@@ -1646,7 +1739,7 @@ async def test_mixed_resume_batch_with_falsy_payload_and_tool_behaviors(
 
     if recreate_agent:
         # Discard the wrapper and underlying core entirely — turn 2 must
-        # restore interrupt state, the wire->native map, and history purely
+        # restore interrupt state, the recorded call ids, and history purely
         # from the FileSessionManager-backed session, not from memory. Carry
         # over the turn count so it reads the same as the non-recreated case.
         prior_turn = model.turn
@@ -1659,7 +1752,7 @@ async def test_mixed_resume_batch_with_falsy_payload_and_tool_behaviors(
             ToolMessage(
                 id="t-fe",
                 role="tool",
-                tool_call_id=fe_wire_id,
+                tool_call_id=fe_tool_call_id,
                 content='{"approved": true}',
             )
         ],
@@ -1687,3 +1780,51 @@ async def test_mixed_resume_batch_with_falsy_payload_and_tool_behaviors(
     assert any(
         e.type == EventType.STATE_SNAPSHOT and e.snapshot.get("confirmed_key") for e in events2
     ), "state_from_result did not fire for confirm_action on the resume run"
+
+
+@pytest.mark.asyncio
+async def test_a_parked_wait_the_history_cannot_name_is_refused() -> None:
+    """An unnameable parked call is as unresumable as an unregistered one.
+
+    The gate protects a parked wait by looking its tool up by name. A call the
+    native history does not name yields no name at all, so skipping it there
+    waves through exactly the silent substitution the gate exists to catch.
+    """
+    interrupt = StrandsInterrupt(
+        id="native-interrupt",
+        name=FRONTEND_TOOL_INTERRUPT_NAME,
+        reason=frontend_tool_reason("native-unnamed"),
+    )
+    core = _MockStrandsCore(
+        interrupts=[interrupt],
+        session_manager=_repository_manager(),
+    )
+    core.state.set("agui_context", [])
+    # History holds no toolUse for the parked id, so its tool cannot be named.
+    core.messages = []
+    agent = _make_base_agent(StrandsAgentConfig())
+
+    # The client answers the parked call, which is what carries the run past
+    # the pending-interrupt refusal and into the gate under test.
+    input_data = _make_run_input(
+        tools=[],
+        messages=[
+            ToolMessage(
+                id="answer",
+                role="tool",
+                tool_call_id="native-unnamed",
+                content="the client's answer",
+            )
+        ],
+    )
+
+    with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
+        events = await _collect_events(agent, input_data)
+
+    [error] = [e for e in events if e.type == EventType.RUN_ERROR]
+    assert error.code == "FRONTEND_TOOL_NOT_REGISTERED"
+    # The remedy differs per cause, so the message must not file an opaque call
+    # id under the one that asks for tool definitions.
+    assert "the tool behind call native-unnamed" in error.message
+    assert "RunAgentInput.tools" not in error.message
+    assert core.stream_prompts == []

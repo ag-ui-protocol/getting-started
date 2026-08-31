@@ -542,6 +542,92 @@ var evt = new ActivityDeltaEvent
 | `ActivityType` | `activityType` | `string` | Activity discriminator |
 | `Patch` | `patch` | `JsonElement` | Activity JSON Patch payload |
 
+## Subagent Events
+
+These events report that the agent delegated work to a child agent, so a frontend
+can attribute output to the subagent that produced it. Attribution itself travels
+as an optional `SubagentRunId` on most other event types.
+
+`SubagentRunId` identifies **one invocation**, not a reusable subagent
+definition — the same subagent run twice yields two different values. See
+[Subagents](/concepts/subagents) for the full model.
+
+### SubagentStartedEvent
+
+Announces a new subagent invocation and names it for display.
+
+```csharp
+var evt = new SubagentStartedEvent
+{
+    SubagentRunId = "sub-1",
+    Name = "researcher",
+    Description = "Searches for supporting sources"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"SUBAGENT_STARTED"` | Event discriminator |
+| `SubagentRunId` | `subagentRunId` | `string` | Opaque id for this invocation |
+| `Name` | `name` | `string` | Declared subagent name, for display |
+| `Description` | `description` | `string?` | Optional description |
+| `ParentSubagentRunId` | `parentSubagentRunId` | `string?` | Enclosing subagent, when nesting |
+| `ParentToolCallId` | `parentToolCallId` | `string?` | Tool call that spawned this subagent |
+| `ParentMessageId` | `parentMessageId` | `string?` | Message holding that tool call |
+
+### SubagentFinishedEvent
+
+Marks a subagent invocation as complete.
+
+```csharp
+var evt = new SubagentFinishedEvent { SubagentRunId = "sub-1" };
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"SUBAGENT_FINISHED"` | Event discriminator |
+| `SubagentRunId` | `subagentRunId` | `string` | Matches the id from `SubagentStartedEvent` |
+| `Result` | `result` | `object?` | Optional payload, mirroring `RunFinishedEvent.Result` |
+| `Outcome` | `outcome` | `SubagentFinishedOutcome?` | `SubagentFinishedSuccessOutcome` or `SubagentFinishedSuspendedOutcome` (with optional `InterruptIds`); `null` means success (the legacy reading). Suspended says the subagent is checkpointed awaiting outside input; `InterruptIds` names the run-level interrupts whose answers resume it. |
+
+### SubagentErrorEvent
+
+Marks a subagent invocation as failed.
+
+```csharp
+var evt = new SubagentErrorEvent
+{
+    SubagentRunId = "sub-1",
+    Message = "Search backend unavailable"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"SUBAGENT_ERROR"` | Event discriminator |
+| `SubagentRunId` | `subagentRunId` | `string` | Matches the id from `SubagentStartedEvent` |
+| `Message` | `message` | `string` | Human-readable error message |
+| `Code` | `code` | `string?` | Optional error code |
+
+### Attribution on other events
+
+Most event types expose an optional `SubagentRunId`. An event without it belongs
+to the parent agent, so a stream that never sets it behaves exactly as it did
+before subagents existed.
+
+`RunStartedEvent`, `RunFinishedEvent` and `RunErrorEvent` are not attributable —
+they describe the run as a whole. `MessagesSnapshotEvent` carries attribution
+per-message instead.
+
+`StateSnapshotEvent` and `StateDeltaEvent` are attributable, but attribution on
+them is provenance rather than ownership — it records which subagent produced the
+update. State stays run-scoped, so an attributed snapshot or delta is applied to
+the run's one state document just as an unattributed one is.
+
+When events are converted to `Microsoft.Extensions.AI` types, attribution is
+preserved on `ChatMessage.AdditionalProperties` under the key
+`agui.subagentRunId`, since those types have no dedicated field for it.
+
 ## Special Events
 
 ### RawEvent

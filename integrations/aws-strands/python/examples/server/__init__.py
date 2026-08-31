@@ -1,9 +1,10 @@
-"""AG-UI Dojo server for AWS Strands Integration 2.
+"""AG-UI Dojo server for the AWS Strands integration.
 
 Simple server running all example agents.
 """
 import os
 import sys
+import warnings
 import uvicorn
 from pathlib import Path
 from dotenv import load_dotenv
@@ -15,83 +16,91 @@ src_dir = Path(__file__).parent.parent.parent / "src"
 if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
-# Suppress OpenTelemetry warnings
-os.environ["OTEL_SDK_DISABLED"] = "true"
-os.environ["OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"] = "all"
-
-# Load environment variables
-env_path = Path(__file__).parent.parent.parent / '.env'
+# Load environment variables from examples/.env, which is where the README tells
+# the operator to put them. One `parent` fewer than the api modules use, because
+# this file sits one directory shallower than they do.
+env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(dotenv_path=env_path)
 
+# Quieten OpenTelemetry warnings by default, before the api imports below,
+# which is what has to happen for the setting to take effect at all.
+#
+# `setdefault` so an operator value from the environment or examples/.env
+# survives this line. It does not survive the import that follows: most demo
+# modules assign the same two variables outright, which is their bug to fix,
+# not something this line can defend against.
+os.environ.setdefault("OTEL_SDK_DISABLED", "true")
+os.environ.setdefault("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "all")
+
 # Import agent apps
-from .api import (
-    a2ui_dynamic_schema_app,
-    a2ui_fixed_schema_app,
-    a2ui_recovery_app,
-    agentic_chat_app,
-    agentic_chat_reasoning_app,
-    agentic_chat_multimodal_app,
-    agentic_generative_ui_app,
-    backend_tool_rendering_app,
-    human_in_the_loop_app,
-    shared_state_app,
+from . import api
+from .settings import (
+    CORS_ORIGINS_VAR,
+    DEMO_PATHS,
+    WILDCARD,
+    allow_credentials,
+    app_attribute,
+    cors_origins,
+    mount_name,
+    names_nothing,
+    port_from_env,
 )
 
-# Create main app
-app = FastAPI(title='AWS Strands Integration 2 - Dojo')
+# Enough to tell "this could match a request" from "this cannot", for the
+# startup notice only. Not a validator: an entry it judges wrongly still goes
+# to the middleware unchanged, so the worst it can do is word a warning badly.
+def _could_match_a_request(origin: str) -> bool:
+    return origin == WILDCARD or "://" in origin
 
-# Add CORS.
-# Origins come from CORS_ALLOW_ORIGINS (comma-separated) and default to the "*"
-# wildcard for local development. Credentials are only enabled for explicit,
-# non-wildcard origins — a wildcard can never be combined with
-# allow_credentials=True (any site could then read authenticated responses).
-_origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if o.strip()]
-cors_origins = _origins or ["*"]
-is_wildcard = "*" in cors_origins
+# Create main app
+app = FastAPI(title='AWS Strands - AG-UI Dojo')
+
+# Add CORS. The mounted demos are given the same origins, because a demo left
+# on the wildcard default would answer a disallowed origin with
+# Access-Control-Allow-Origin: * and this middleware would then add
+# Access-Control-Allow-Credentials: true on the way out.
+_origins = cors_origins()
+
+# Reported here rather than inside the settings helpers, which every demo calls
+# too: one notice per server start, not one per demo.
+#
+# Only an unset or whitespace-only value opens the wildcard. A value that was
+# written but says nothing usable refuses every origin instead, which is the
+# recoverable direction, so it gets its own notice rather than being widened.
+if names_nothing():
+    warnings.warn(
+        f"{CORS_ORIGINS_VAR} is unset, so every browser origin is allowed. Set it "
+        "to the origins your frontend is served from before exposing this server.",
+        stacklevel=1,
+    )
+elif not any(_could_match_a_request(origin) for origin in _origins):
+    warnings.warn(
+        f"{CORS_ORIGINS_VAR} is set to {os.getenv(CORS_ORIGINS_VAR)!r}, which names "
+        "no origin a browser can send, so every cross-origin request will be "
+        "refused, including from your own frontend.",
+        stacklevel=1,
+    )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=bool(_origins) and not is_wildcard,
+    allow_origins=_origins,
+    allow_credentials=allow_credentials(_origins),
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Mount agents
-app.mount('/a2ui-dynamic-schema', a2ui_dynamic_schema_app, 'A2UI Dynamic Schema')
-app.mount('/a2ui-fixed-schema', a2ui_fixed_schema_app, 'A2UI Fixed Schema')
-app.mount('/a2ui-recovery', a2ui_recovery_app, 'A2UI Recovery')
-app.mount('/agentic-chat', agentic_chat_app, 'Agentic Chat')
-app.mount('/agentic-chat-reasoning', agentic_chat_reasoning_app, 'Agentic Chat Reasoning')
-app.mount('/agentic-chat-multimodal', agentic_chat_multimodal_app, 'Agentic Chat Multimodal')
-app.mount('/backend-tool-rendering', backend_tool_rendering_app, 'Backend Tool Rendering')
-app.mount('/agentic-generative-ui', agentic_generative_ui_app, 'Agentic Generative UI')
-app.mount('/shared-state', shared_state_app, 'Shared State')
-app.mount('/human-in-the-loop', human_in_the_loop_app, 'Human in the Loop')
+for _path in DEMO_PATHS:
+    app.mount(_path, getattr(api, app_attribute(_path)), mount_name(_path))
 
 @app.get("/")
 def root():
     return {
-        "message": "AWS Strands Integration 2 - AG-UI Dojo",
-        "endpoints": {
-            "a2ui_dynamic_schema": "/a2ui-dynamic-schema",
-            "a2ui_fixed_schema": "/a2ui-fixed-schema",
-            "a2ui_recovery": "/a2ui-recovery",
-            "agentic_chat": "/agentic-chat",
-            "agentic_chat_reasoning": "/agentic-chat-reasoning",
-            "agentic_chat_multimodal": "/agentic-chat-multimodal",
-            "backend_tool_rendering": "/backend-tool-rendering",
-            "agentic_generative_ui": "/agentic-generative-ui",
-            "shared_state": "/shared-state",
-            "human_in_the_loop": "/human-in-the-loop"
-        }
+        "message": "AWS Strands - AG-UI Dojo",
+        "endpoints": {mount_name(path): path for path in DEMO_PATHS},
     }
 
 def main():
     """Start the server."""
-    port = int(os.getenv("PORT", "8000"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
-
-if __name__ == "__main__":
-    main()
+    uvicorn.run(app, host="0.0.0.0", port=port_from_env())
 
 __all__ = ["main", "app"]

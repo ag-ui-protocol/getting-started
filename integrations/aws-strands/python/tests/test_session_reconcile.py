@@ -17,9 +17,9 @@ from strands.types.session import SessionAgent, SessionMessage
 
 from ag_ui_strands import session_reconcile
 from ag_ui_strands.session_reconcile import (
+    AG_UI_FRONTEND_CALL_IDS_STATE_KEY,
     has_placeholder_results,
     reconcile_frontend_tool_results,
-    resolve_native_ids,
 )
 
 PLACEHOLDER = "Forwarded to client"
@@ -348,32 +348,6 @@ def test_reconcile_handles_parallel_tool_calls_in_one_message(tmp_path):
     assert blocks[1]["toolResult"]["content"] == [{"text": "R2"}]
 
 
-def test_resolve_maps_wire_id_to_native_id():
-    # Client speaks the wire id; the store holds the native id. The durable
-    # wire->native map (from session state) bridges them.
-    resolved = resolve_native_ids(
-        wire_to_native={"wire-1": "native-1", "wire-2": "native-2"},
-        frontend_results=[
-            {"wire_id": "wire-1", "text": "R1", "is_error": False},
-            {"wire_id": "wire-2", "text": "R2", "is_error": True},
-        ],
-    )
-    assert resolved == {"native-1": ("R1", False), "native-2": ("R2", True)}
-
-
-def test_resolve_skips_results_absent_from_map():
-    # A wire id not in the map (fresh session with no recorded mapping, or a
-    # pruned entry) is dropped — the caller then degrades to the legacy path.
-    resolved = resolve_native_ids(
-        wire_to_native={"wire-1": "native-1"},
-        frontend_results=[
-            {"wire_id": "wire-1", "text": "R1", "is_error": False},
-            {"wire_id": "wire-unknown", "text": "R2", "is_error": False},
-        ],
-    )
-    assert resolved == {"native-1": ("R1", False)}
-
-
 def test_has_placeholder_results_detects_remaining_stub():
     assert has_placeholder_results(
         [{"role": "user", "content": [_tool_result_block("tu-1", PLACEHOLDER)]}]
@@ -533,3 +507,31 @@ def test_reconcile_leaves_status_alone_when_the_block_is_not_a_placeholder(tmp_p
         "content"
     ][0]["toolResult"]
     assert block["status"] == "success"
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        pytest.param("native-xyz", id="string"),
+        pytest.param(7, id="number"),
+        pytest.param({"minted-1": "native-1"}, id="legacy-mapping"),
+        pytest.param(["native-1", "", "  ", 4, None], id="list-with-junk"),
+    ],
+)
+def test_recorded_call_ids_accepts_only_ids_this_adapter_wrote(stored):
+    """A permissive read fabricates provenance out of whatever is stored.
+
+    A bare string iterates one character per id, and every fabricated id is
+    then written back by the emission path, so the damage outlives the turn.
+    """
+    agent = SimpleNamespace(
+        state=SimpleNamespace(
+            get=lambda key=None: (
+                stored if key == AG_UI_FRONTEND_CALL_IDS_STATE_KEY else None
+            )
+        )
+    )
+
+    assert session_reconcile.recorded_frontend_call_ids(agent) == (
+        ["native-1"] if isinstance(stored, list) else []
+    )

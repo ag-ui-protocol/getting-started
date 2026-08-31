@@ -62,28 +62,1242 @@ function mimeToFormat(
     return fmt;
   }
   log.warn(
-    `${LOG_PREFIX} Unsupported MIME type '${mimeType}' (parsed format '${fmt}' not in ${JSON.stringify([...allowed].sort())})`,
+    `${LOG_PREFIX} Unsupported MIME type '${forLog(mimeType)}' (parsed format '${forLog(fmt)}' not in ${JSON.stringify([...allowed].sort())})`,
   );
   return null;
 }
 
-/** Fetch raw bytes from a URL using the global fetch (Node 20+). */
-async function fetchUrlBytes(
+/**
+ * Raised when the policy refuses a URL on its merits: a disallowed scheme,
+ * userinfo, an address outside the permitted ranges, a redirect that cannot be
+ * re-validated or that downgrades to cleartext, too many redirects, or a body
+ * past the size cap. These are logged at `error` level, so the signal stays
+ * specific to a request that was actually turned away.
+ *
+ * @internal not part of the package's public API; exported for tests.
+ */
+export class UrlFetchPolicyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UrlFetchPolicyError";
+  }
+}
+
+/**
+ * Raised when the policy cannot reach a verdict, so the fetch fails closed: a
+ * resolver that errored, returned nothing, or returned something unparseable,
+ * or a lookup that outlived the request deadline. Kept separate from
+ * {@link UrlFetchPolicyError} because a transient DNS failure is not a refusal
+ * and should not appear as one.
+ *
+ * @internal not part of the package's public API; exported for tests.
+ */
+export class UrlFetchUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UrlFetchUnavailableError";
+  }
+}
+
+// `node:crypto` is loaded on demand, like the other builtins here, to keep the
+// main entry free of server-only dependencies.
+let cryptoModule: typeof import("node:crypto") | undefined;
+
+/**
+ * Render a URL for a log line as an opaque, stable identifier.
+ *
+ * No component of the URL survives. Stripping the query and userinfo is not
+ * enough: a capability URL puts its bearer material in the path, and some
+ * systems put a tenant identifier or a secret in a subdomain, so the host and
+ * path are no safer than the query. The digest is stable, so repeated failures
+ * for the same URL can still be correlated with each other and, given the URL,
+ * confirmed by hand.
+ *
+ * This is a deliberate divergence from the Python sibling, which logs the URL
+ * as given.
+ */
+function describeUrl(url: string): string {
+  if (!cryptoModule) return "url<digest unavailable>";
+  const digest = cryptoModule
+    .createHash("sha256")
+    .update(url, "utf8")
+    .digest("hex")
+    .slice(0, 12);
+  return `url#${digest}`;
+}
+
+/** Load the hash used by {@link describeUrl}. Called before any logging. */
+async function loadCrypto(): Promise<void> {
+  cryptoModule ??= await import("node:crypto");
+}
+
+/**
+ * Make a client-controlled value safe to interpolate into a log line.
+ *
+ * A newline in an attacker-chosen field would otherwise let them append lines
+ * that impersonate this module's own refusal records.
+ */
+function forLog(value: unknown, max = 120): string {
+  const text = String(value).replace(
+    // CR, LF, TAB, VT, FF, NUL, ESC, NEL, LS and PS. Several of these are
+    // treated as line breaks by log consumers, and ESC lets a terminal sink be
+    // driven with control sequences.
+    /[\r\n\t\v\f\0\u001b\u0085\u2028\u2029]+/g,
+    " ",
+  );
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+/**
+ * Strip anything secret out of third-party error text.
+ *
+ * Runtime errors quote the URL they were handed. Node's "cannot be constructed
+ * from a URL that includes credentials" `TypeError` embeds the userinfo, and
+ * `ERR_INVALID_URL` reports both `input` and `base`, either of which would put
+ * a password or a presigned signature in the log despite every line this
+ * module writes going through {@link describeUrl}.
+ */
+function scrubSecrets(text: string, ...urls: string[]): string {
+  let out = text;
+  for (const url of urls) {
+    if (!url) continue;
+    out = out.split(url).join(describeUrl(url));
+    try {
+      const parsed = new URL(url);
+      // An error may quote a component without the whole URL, so the parts
+      // that can carry secrets are removed individually as well.
+      if (parsed.search.length > 1) out = out.split(parsed.search).join("");
+      if (parsed.pathname.length > 1) {
+        out = out.split(parsed.pathname).join("");
+      }
+      if (parsed.host) out = out.split(parsed.host).join("");
+    } catch {
+      // An unparseable URL has no components to strip individually.
+    }
+  }
+  return forLog(out, 300);
+}
+
+/**
+ * Policy applied to every server-side URL fetch.
+ *
+ * The defaults are deliberately restrictive: only `http`/`https` are fetched,
+ * addresses outside the public internet (loopback, private, link-local -
+ * notably the `169.254.169.254` cloud metadata endpoint - multicast and
+ * reserved ranges) are refused, and the response body is capped. IPv6
+ * transition forms that embed an IPv4 address are checked against the embedded
+ * address too, so `::ffff:`, `::`, `2002::` and well-known NAT64 spellings of
+ * a blocked target are refused as well. A NAT64 deployment using its own
+ * network-specific prefix is not decoded; only the well-known and local-use
+ * prefixes are. Note that under the default policy an IPv4-mapped host is
+ * refused whatever it wraps, because the wrapper itself is not global unicast.
+ *
+ * The address check runs against the addresses `resolvedAddresses` sees. The
+ * connection resolves the host again, so a host that changes its answer
+ * between the two lookups is not covered; closing that would require pinning
+ * the connection to the validated address.
+ *
+ * There is no port dimension: a host whose addresses are all public is
+ * reachable on any port, as in the Python fix this mirrors (#2491).
+ *
+ * Relaxing the address checks requires passing a custom policy to
+ * `fetchUrlBytes`. No supported AG-UI-to-Strands conversion path currently
+ * accepts one, so in practice the defaults are what a consumer gets. Even
+ * under `allowPrivateNetworks`, this-network, link-local ranges and the cloud
+ * metadata endpoints listed in `ALWAYS_BLOCKED_IPV4`/`ALWAYS_BLOCKED_IPV6`
+ * stay blocked; that list covers the major providers rather than every
+ * provider.
+ */
+/** The NAT64 prefixes every deployment can be assumed to use. */
+const WELL_KNOWN_NAT64_PREFIX = "64:ff9b::/96"; // RFC 6052
+const LOCAL_USE_NAT64_PREFIX = "64:ff9b:1::/48"; // RFC 8215
+
+export interface UrlFetchPolicy {
+  readonly allowedSchemes: SchemeAllowlist;
+  readonly allowPrivateNetworks: boolean;
+  readonly maxBytes: number;
+  readonly timeoutMs: number;
+  readonly maxRedirects: number;
+  /**
+   * Deployment-specific NAT64 prefixes, as `address/length` strings.
+   *
+   * An address under a recognised NAT64 prefix carries an IPv4 destination,
+   * which is extracted and put through the full IPv4 policy, so a public
+   * destination is reachable and a private or metadata one is not. RFC 6052
+   * allows prefix lengths 32, 40, 48, 56, 64 and 96.
+   *
+   * The well-known `64:ff9b::/96` and local-use `64:ff9b:1::/48` prefixes are
+   * always recognised and do not need listing; this field adds the
+   * network-specific prefixes a deployment has chosen for itself.
+   *
+   * A network-specific prefix cannot be inferred from an address alone, so one
+   * that is not listed here is not recognised as NAT64 and an address under it
+   * is classified as ordinary global IPv6. An egress control has to cover that
+   * case.
+   */
+  readonly nat64Prefixes: readonly string[];
+}
+
+/**
+ * The membership test and iteration the policy needs from a scheme allowlist.
+ *
+ * Deliberately narrower than `ReadonlySet`: a plain `Set` satisfies it, so
+ * callers can pass one, while the shared default can be an object with no
+ * `Set` behind it. That matters because neither `Object.freeze` nor shadowing
+ * `add` protects a real `Set` - its contents live in internal slots and
+ * `Set.prototype.add.call(theSet, x)` reaches past any own property. It plays
+ * the role the `frozenset` plays in the Python fix this mirrors (#2491).
+ */
+export interface SchemeAllowlist {
+  has(scheme: string): boolean;
+  [Symbol.iterator](): IterableIterator<string>;
+}
+
+function immutableSet(values: string[]): SchemeAllowlist {
+  const items: readonly string[] = Object.freeze([...new Set(values)]);
+  return Object.freeze({
+    has: (scheme: string) => items.includes(scheme),
+    [Symbol.iterator]: () => items[Symbol.iterator](),
+  });
+}
+
+export const DEFAULT_URL_FETCH_POLICY: UrlFetchPolicy = Object.freeze({
+  allowedSchemes: immutableSet(["http", "https"]),
+  allowPrivateNetworks: false,
+  maxBytes: 25 * 1024 * 1024,
+  timeoutMs: 30_000,
+  maxRedirects: 10,
+  // The well-known and local-use prefixes are recognised unconditionally, so
+  // this list holds only what a deployment adds.
+  nat64Prefixes: Object.freeze([] as string[]),
+});
+
+type IpAddress = { version: 4 | 6; bytes: Uint8Array };
+
+/** A `[prefixBytes, prefixLength]` pair compared against a parsed address. */
+type Cidr = [Uint8Array, number];
+
+/**
+ * Parse a `address/prefix` literal into a {@link Cidr}.
+ *
+ * Throws on a missing or out-of-range prefix. Without that check a bare
+ * address would yield `NaN`, and every `inCidr` test against it would pass,
+ * silently turning one blocklist entry into "block everything".
+ *
+ * @internal exported for tests.
+ */
+export function cidr(literal: string): Cidr {
+  const parts = literal.split("/");
+  if (parts.length !== 2) {
+    throw new Error(`CIDR literal must be address/prefix: ${literal}`);
+  }
+  const ip = parseIpLiteral(parts[0]);
+  if (!ip) {
+    throw new Error(`Invalid CIDR address: ${literal}`);
+  }
+  // `Number("")` is 0 and `Number("abc")` is NaN; both would produce a range
+  // that matches every address, so the digits are checked before conversion.
+  if (!/^(0|[1-9]\d{0,2})$/.test(parts[1])) {
+    throw new Error(`Invalid CIDR prefix length: ${literal}`);
+  }
+  const prefixLength = Number(parts[1]);
+  // A zero-length prefix matches everything and is never a real blocklist
+  // entry, so it is refused alongside an out-of-range one.
+  if (prefixLength < 1 || prefixLength > ip.bytes.length * 8) {
+    throw new Error(`Invalid CIDR prefix length: ${literal}`);
+  }
+  return [ip.bytes, prefixLength];
+}
+
+function inCidr(bytes: Uint8Array, [prefixBytes, prefixLength]: Cidr): boolean {
+  if (bytes.length !== prefixBytes.length) return false;
+  const wholeBytes = prefixLength >> 3;
+  for (let i = 0; i < wholeBytes; i++) {
+    if (bytes[i] !== prefixBytes[i]) return false;
+  }
+  const remainingBits = prefixLength & 7;
+  if (remainingBits === 0) return true;
+  const mask = 0xff << (8 - remainingBits);
+  return (bytes[wholeBytes] & mask) === (prefixBytes[wholeBytes] & mask);
+}
+
+/**
+ * Parse a dotted-quad IPv4 literal. Rejects leading zeros, so only the
+ * canonical spelling parses here.
+ *
+ * For the special schemes this policy allows, the WHATWG URL parser has
+ * already canonicalized the alternate numeric forms (`2130706433`, `127.1`,
+ * `0x7f000001`) to dotted-quad by the time a hostname reaches this code. A
+ * non-special scheme would keep the original spelling, which is why the
+ * decision rests on the resolved-address check rather than on this parse.
+ */
+function parseIpv4(text: string): Uint8Array | null {
+  const parts = text.split(".");
+  if (parts.length !== 4) return null;
+  const bytes = new Uint8Array(4);
+  for (let i = 0; i < 4; i++) {
+    const part = parts[i];
+    if (!/^\d{1,3}$/.test(part)) return null;
+    if (part.length > 1 && part[0] === "0") return null;
+    const value = Number(part);
+    if (value > 255) return null;
+    bytes[i] = value;
+  }
+  return bytes;
+}
+
+/** Parse an IPv6 literal, returning `null` for anything malformed. */
+function parseIpv6(text: string): Uint8Array | null {
+  const withoutZone = text.split("%")[0];
+  if (withoutZone.length === 0) return null;
+
+  const halves = withoutZone.split("::");
+  if (halves.length > 2) return null;
+  const hasElision = halves.length === 2;
+
+  const readGroups = (chunk: string): number[] | null => {
+    if (chunk.length === 0) return [];
+    const groups: number[] = [];
+    for (const group of chunk.split(":")) {
+      if (group.includes(".")) {
+        // Trailing dotted-quad form, e.g. `::ffff:127.0.0.1`.
+        const quad = parseIpv4(group);
+        if (!quad) return null;
+        groups.push((quad[0] << 8) | quad[1], (quad[2] << 8) | quad[3]);
+        continue;
+      }
+      if (!/^[0-9a-fA-F]{1,4}$/.test(group)) return null;
+      groups.push(parseInt(group, 16));
+    }
+    return groups;
+  };
+
+  // A dotted quad may only appear as the last group of the whole address, so
+  // it has to be in the final half and at the end of it.
+  const lastHalf = hasElision ? halves[1] : halves[0];
+  const dotted = withoutZone.indexOf(".");
+  if (dotted !== -1) {
+    if (halves[0].includes(".") && hasElision) return null;
+    const lastGroup = lastHalf.slice(lastHalf.lastIndexOf(":") + 1);
+    if (!lastGroup.includes(".")) return null;
+    if (withoutZone.indexOf(":", dotted) !== -1) return null;
+  }
+
+  const head = readGroups(halves[0]);
+  const tail = hasElision ? readGroups(halves[1]) : [];
+  if (head === null || tail === null) return null;
+  const total = head.length + tail.length;
+  if (hasElision ? total > 7 : total !== 8) return null;
+
+  const bytes = new Uint8Array(16);
+  head.forEach((group, i) => {
+    bytes[i * 2] = group >> 8;
+    bytes[i * 2 + 1] = group & 0xff;
+  });
+  tail.forEach((group, i) => {
+    const offset = 16 - (tail.length - i) * 2;
+    bytes[offset] = group >> 8;
+    bytes[offset + 1] = group & 0xff;
+  });
+  return bytes;
+}
+
+function parseIpLiteral(text: string): IpAddress | null {
+  const bare =
+    text.startsWith("[") && text.endsWith("]") ? text.slice(1, -1) : text;
+  const v4 = parseIpv4(bare);
+  if (v4) return { version: 4, bytes: v4 };
+  const v6 = parseIpv6(bare);
+  if (v6) return { version: 6, bytes: v6 };
+  return null;
+}
+
+// IPv4 ranges that are not globally routable (RFC 6890 special-purpose
+// registry): this-network, private, carrier-grade NAT, loopback, link-local,
+// IETF assignments, documentation, benchmarking, 6to4 relay anycast, multicast
+// and reserved.
+const BLOCKED_IPV4 = [
+  "0.0.0.0/8",
+  "10.0.0.0/8",
+  "100.64.0.0/10",
+  "127.0.0.0/8",
+  "169.254.0.0/16",
+  "172.16.0.0/12",
+  "192.0.0.0/24",
+  "192.0.2.0/24",
+  "192.88.99.0/24",
+  "192.168.0.0/16",
+  "198.18.0.0/15",
+  "198.51.100.0/24",
+  "203.0.113.0/24",
+  "224.0.0.0/4",
+  "240.0.0.0/4",
+].map(cidr);
+
+// Everything outside global unicast is non-global, which covers the
+// unspecified address, loopback, unique-local `fc00::/7`, link-local
+// `fe80::/10`, multicast `ff00::/8` and the reserved blocks. The ranges below
+// sit inside global unicast but are still not routable to a public host.
+const IPV6_GLOBAL_UNICAST = cidr("2000::/3");
+const BLOCKED_IPV6 = [
+  "2001::/23", // IETF protocol assignments, including Teredo and benchmarking
+  "2001:db8::/32", // documentation
+  "2002::/16", // 6to4, which embeds an arbitrary IPv4 destination
+  "3ffe::/16", // 6bone, returned to the reserved pool
+  "3fff::/20", // documentation (RFC 9637)
+].map(cidr);
+
+// Blocked whatever the policy says. Link-local carries the cloud metadata
+// services, and the individual addresses below are metadata endpoints outside
+// it. None is ever a legitimate source of URL content.
+const ALWAYS_BLOCKED_IPV4 = [
+  cidr("0.0.0.0/8"), // this-network is never a legitimate URL destination
+  cidr("169.254.0.0/16"), // link-local, including 169.254.169.254 and 169.254.170.2
+  cidr("100.100.100.200/32"), // Alibaba Cloud metadata
+  cidr("192.0.0.192/32"), // Oracle Cloud metadata
+  cidr("168.63.129.16/32"), // Azure WireServer
+];
+const ALWAYS_BLOCKED_IPV6 = [
+  cidr("fe80::/10"), // link-local
+  cidr("fd00:ec2::254/128"), // AWS IPv6 instance metadata
+  // NAT64 translation addresses are never a public content host, and the
+  // embedded-address layout for a /48 prefix is split around a reserved octet
+  // (RFC 6052), so the range is refused outright rather than decoded.
+  // Teredo carries the client IPv4 in its low 32 bits, obfuscated by XOR, so
+  // the range is refused outright rather than decoded.
+  cidr("2001::/32"),
+];
+
+// IPv6 prefixes that carry an IPv4 address inside them. Each entry gives the
+// prefix and the byte offset of the embedded address, so a blocked IPv4 target
+// cannot be smuggled through one of these IPv6 spellings. Prefixes whose
+// layout is not a plain byte range (Teredo) or which a site chooses for itself
+// (RFC 6052 network-specific) are refused by range instead.
+const IPV4_MAPPED_PREFIX = cidr("::ffff:0:0/96");
+
+/**
+ * Prefixes that carry an IPv4 address at a fixed byte offset, independent of
+ * any NAT64 configuration.
+ */
+const IPV4_EMBEDDING_PREFIXES: { prefix: Cidr; offset: number }[] = [
+  { prefix: IPV4_MAPPED_PREFIX, offset: 12 }, // IPv4-mapped
+  { prefix: cidr("::ffff:0:0:0/96"), offset: 12 }, // IPv4-translated (SIIT)
+  { prefix: cidr("::/96"), offset: 12 }, // IPv4-compatible (deprecated)
+  { prefix: cidr("2002::/16"), offset: 2 }, // 6to4
+];
+
+/**
+ * Byte positions of the embedded IPv4 address for each RFC 6052 prefix length.
+ *
+ * The address is split around the reserved octet at byte 8, which is why this
+ * is a list of ranges rather than one offset.
+ */
+const NAT64_LAYOUTS: Record<number, [number, number][]> = {
+  32: [[4, 8]],
+  40: [
+    [5, 8],
+    [9, 10],
+  ],
+  48: [
+    [6, 8],
+    [9, 11],
+  ],
+  56: [
+    [7, 8],
+    [9, 12],
+  ],
+  64: [[9, 13]],
+  96: [[12, 16]],
+};
+
+/** Pull the IPv4 address a NAT64 address carries, per RFC 6052 section 2.2. */
+function embeddedNat64Address(
+  ip: IpAddress,
+  prefixLength: number,
+): IpAddress | null {
+  const ranges = NAT64_LAYOUTS[prefixLength];
+  if (!ranges) return null;
+  const bytes = new Uint8Array(4);
+  let written = 0;
+  for (const [start, end] of ranges) {
+    for (let i = start; i < end && written < 4; i++) {
+      bytes[written++] = ip.bytes[i];
+    }
+  }
+  if (written !== 4) return null;
+  return { version: 4, bytes };
+}
+
+/** Parse the configured NAT64 prefixes, always including the well-known one. */
+function nat64Prefixes(policy: UrlFetchPolicy): { prefix: Cidr }[] {
+  const literals = new Set<string>([
+    WELL_KNOWN_NAT64_PREFIX,
+    LOCAL_USE_NAT64_PREFIX,
+    ...(policy.nat64Prefixes ?? []),
+  ]);
+  return [...literals].map((literal) => ({ prefix: cidr(literal) }));
+}
+
+/**
+ * Every address that has to be checked for `ip`: any IPv4 address embedded in
+ * it by an IPv6 transition prefix, then the address itself.
+ *
+ * Embedded addresses come first so that a refusal names the actual target
+ * rather than the IPv6 wrapper carrying it.
+ */
+function addressesToCheck(
+  ip: IpAddress,
+  policy: UrlFetchPolicy = DEFAULT_URL_FETCH_POLICY,
+): IpAddress[] {
+  if (ip.version !== 6) return [ip];
+  const embedded: IpAddress[] = [];
+  for (const { prefix } of nat64Prefixes(policy)) {
+    if (!inCidr(ip.bytes, prefix)) continue;
+    const translated = embeddedNat64Address(ip, prefix[1]);
+    if (translated) embedded.push(translated);
+  }
+  for (const { prefix, offset } of IPV4_EMBEDDING_PREFIXES) {
+    if (!inCidr(ip.bytes, prefix)) continue;
+    const bytes = ip.bytes.slice(offset, offset + 4);
+    // A candidate in 0.0.0.0/8 is never a real embedded target: `::/96`
+    // matches `::` and `::1`, and reporting `::1` as "0.0.0.1" would be
+    // misleading. 0.0.0.0/8 is refused on its own account anyway, so the
+    // candidate is dropped for any prefix and the address itself carries the
+    // decision.
+    if (bytes[0] === 0) continue;
+    embedded.push({ version: 4, bytes });
+  }
+  return [...embedded, ip];
+}
+
+function isAlwaysBlocked(ip: IpAddress): boolean {
+  const ranges = ip.version === 4 ? ALWAYS_BLOCKED_IPV4 : ALWAYS_BLOCKED_IPV6;
+  return ranges.some((range) => inCidr(ip.bytes, range));
+}
+
+function isNonGlobal(ip: IpAddress): boolean {
+  if (ip.version === 4) {
+    return BLOCKED_IPV4.some((range) => inCidr(ip.bytes, range));
+  }
+  return (
+    !inCidr(ip.bytes, IPV6_GLOBAL_UNICAST) ||
+    BLOCKED_IPV6.some((range) => inCidr(ip.bytes, range))
+  );
+}
+
+/**
+ * Return the address that must not be reached server-side, or `null` when
+ * every address derived from `address` is acceptable.
+ */
+function blockedAddress(
+  address: IpAddress,
+  allowPrivateNetworks = false,
+  policy: UrlFetchPolicy = DEFAULT_URL_FETCH_POLICY,
+): IpAddress | null {
+  // A recognised NAT64 address is a wrapper around an IPv4 destination, and
+  // the prefix itself sits outside global unicast. Judging the wrapper on its
+  // own shape would refuse every translated address, including a perfectly
+  // public one, so the embedded address carries the decision instead.
+  const wrapperIsNat64 = isNat64(address, policy);
+  for (const ip of addressesToCheck(address, policy)) {
+    // This-network, cloud metadata and other link-local services are never
+    // legitimate URL content sources, even when an application opts into its
+    // private network.
+    if (isAlwaysBlocked(ip)) return ip;
+    if (wrapperIsNat64 && ip === address) continue;
+    if (!allowPrivateNetworks && isNonGlobal(ip)) return ip;
+  }
+  return null;
+}
+
+/** True when `ip` sits under a NAT64 prefix this policy recognises. */
+function isNat64(ip: IpAddress, policy: UrlFetchPolicy): boolean {
+  return (
+    ip.version === 6 &&
+    nat64Prefixes(policy).some(
+      ({ prefix }) =>
+        inCidr(ip.bytes, prefix) &&
+        embeddedNat64Address(ip, prefix[1]) !== null,
+    )
+  );
+}
+
+// `node:dns` is loaded on demand rather than imported at the top of the module.
+// `src/index.ts` keeps server-only dependencies off the main entry so
+// client-side bundlers can trace it, and a static import here would put a Node
+// builtin back into that graph.
+let dnsModule: typeof import("node:dns") | undefined;
+
+async function loadDns(): Promise<typeof import("node:dns")> {
+  dnsModule ??= await import("node:dns");
+  return dnsModule;
+}
+
+/**
+ * Reject if `promise` outlives `deadlineAt`.
+ *
+ * The `AbortSignal` in `fetchUrlBytes` only reaches `fetch`, so a name lookup
+ * that never returns would otherwise sit outside the policy timeout, once per
+ * redirect hop.
+ */
+async function withDeadline<T>(
+  promise: Promise<T>,
+  deadlineAt: number | undefined,
+  what: string,
+): Promise<T> {
+  if (deadlineAt === undefined) return await promise;
+  // Always raced, never short-circuited. An already-elapsed deadline still goes
+  // through `Promise.race` so that `promise`, which the caller already started,
+  // is subscribed. Abandoning it would leave a later rejection unowned, and an
+  // unhandled rejection terminates the process.
+  const remaining = Math.max(0, deadlineAt - now());
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new UrlFetchUnavailableError(
+                `${what} exceeded the request deadline`,
+              ),
+            ),
+          remaining,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Resolve `host` to IP addresses, accepting IP literals as-is. */
+async function resolvedAddresses(
+  host: string,
+  deadlineAt?: number,
+): Promise<IpAddress[]> {
+  const literal = parseIpLiteral(host);
+  if (literal) return [literal];
+
+  let records: { address: string }[];
+  try {
+    // Inside the try so a runtime without `node:dns` is classified as an
+    // inability to resolve rather than surfacing as an opaque failure.
+    const dns = await loadDns();
+    records = await withDeadline(
+      dns.promises.lookup(host, { all: true, verbatim: true }),
+      deadlineAt,
+      `Resolving host '${host}'`,
+    );
+  } catch (e) {
+    // Only a genuine resolver failure is relabelled. The policy arm matters if
+    // a future change raises one from inside the lookup; without it, such an
+    // error would be reported as a resolution failure.
+    if (
+      e instanceof UrlFetchUnavailableError ||
+      e instanceof UrlFetchPolicyError
+    ) {
+      throw e;
+    }
+    throw new UrlFetchUnavailableError(
+      `cannot resolve host: ${e instanceof Error ? e.name : "error"}`,
+    );
+  }
+  if (records.length === 0) {
+    throw new UrlFetchUnavailableError("host resolves to no IP address");
+  }
+  const addresses: IpAddress[] = [];
+  for (const record of records) {
+    const parsed = parseIpLiteral(record.address);
+    // Refuse rather than skip: an address that cannot be parsed cannot be
+    // checked, and skipping it would let it through unvalidated.
+    if (!parsed) {
+      throw new UrlFetchUnavailableError(
+        "host resolved to an address that cannot be parsed",
+      );
+    }
+    addresses.push(parsed);
+  }
+  return addresses;
+}
+
+/**
+ * Validate `url` against `policy`.
+ *
+ * Throws {@link UrlFetchPolicyError} if the URL is refused on its merits,
+ * {@link UrlFetchUnavailableError} if it cannot be evaluated (unparseable, or
+ * a host that will not resolve), and a plain `Error` if `policy` itself is
+ * unusable, which is a programming error rather than a fetch outcome.
+ *
+ * @internal not part of the package's public API; exported for tests.
+ */
+export async function validateFetchUrl(
+  url: string,
+  policy: UrlFetchPolicy = DEFAULT_URL_FETCH_POLICY,
+  deadlineAt?: number,
+): Promise<IpAddress[]> {
+  assertUsablePolicy(policy);
+  await loadCrypto();
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new UrlFetchUnavailableError("URL is malformed");
+  }
+  const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
+  if (!policy.allowedSchemes.has(scheme)) {
+    throw new UrlFetchPolicyError(
+      `URL scheme '${scheme}' is not allowed (allowed: ${JSON.stringify(
+        [...policy.allowedSchemes].sort(),
+      )})`,
+    );
+  }
+  if (parsed.username || parsed.password) {
+    throw new UrlFetchPolicyError(
+      "URL carries credentials in its userinfo, which fetch refuses to send",
+    );
+  }
+  const host = parsed.hostname;
+  if (!host) {
+    // Unreachable while the allowlist is confined to http/https, both of which
+    // require an authority. Kept so a future scheme cannot slip through
+    // unchecked.
+    throw new UrlFetchPolicyError(
+      `URL with scheme '${scheme}' has no host to check`,
+    );
+  }
+  const approved = await resolvedAddresses(host, deadlineAt);
+  for (const address of approved) {
+    const blocked = blockedAddress(
+      address,
+      policy.allowPrivateNetworks,
+      policy,
+    );
+    if (blocked) {
+      // `blocked` is the address that actually matched, which for an IPv6
+      // transition form is the IPv4 address embedded in it.
+      const reported = formatAddress(blocked);
+      const via =
+        blocked === address ? "" : ` (embedded in ${formatAddress(address)})`;
+      throw new UrlFetchPolicyError(
+        `resolves to non-public address ${reported}${via}, ` +
+          "which is blocked by the URL fetch policy",
+      );
+    }
+  }
+  return approved;
+}
+
+function formatAddress(ip: IpAddress): string {
+  if (ip.version === 4) return Array.from(ip.bytes).join(".");
+  const groups: string[] = [];
+  for (let i = 0; i < 16; i += 2) {
+    groups.push(((ip.bytes[i] << 8) | ip.bytes[i + 1]).toString(16));
+  }
+  return groups.join(":");
+}
+
+/** The largest delay `setTimeout` accepts without silently clamping to 1ms. */
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
+/** Reject a policy whose limits cannot express a meaningful decision. */
+function assertUsablePolicy(policy: UrlFetchPolicy): void {
+  if (!Number.isInteger(policy.maxBytes) || policy.maxBytes < 1) {
+    throw new Error(
+      `URL fetch policy maxBytes must be an integer of at least 1, got ${policy.maxBytes}`,
+    );
+  }
+  // setTimeout silently clamps anything past a signed 32-bit millisecond count
+  // to 1ms, which would abort every fetch immediately.
+  if (
+    !Number.isFinite(policy.timeoutMs) ||
+    policy.timeoutMs < 1 ||
+    policy.timeoutMs > MAX_TIMEOUT_MS
+  ) {
+    throw new Error(
+      `URL fetch policy timeoutMs must be between 1 and ${MAX_TIMEOUT_MS}, got ${policy.timeoutMs}`,
+    );
+  }
+  if (typeof policy.allowedSchemes?.has !== "function") {
+    throw new Error("URL fetch policy allowedSchemes must provide has()");
+  }
+  // Only http and https are fetched through a transport pinned to the
+  // addresses that passed validation. Allowing any other scheme would route
+  // the request through a client that resolves the host again, which is the
+  // rebinding window this policy exists to close.
+  for (const scheme of policy.allowedSchemes) {
+    if (scheme !== "http" && scheme !== "https") {
+      throw new Error(
+        `URL fetch policy allowedSchemes may only contain http and https, got '${forLog(scheme, 40)}'`,
+      );
+    }
+  }
+  // Read in truthiness position throughout, so a string "false" out of config
+  // would otherwise open the private network.
+  if (typeof policy.allowPrivateNetworks !== "boolean") {
+    throw new Error("URL fetch policy allowPrivateNetworks must be a boolean");
+  }
+  if (!Number.isInteger(policy.maxRedirects) || policy.maxRedirects < 0) {
+    throw new Error(
+      `URL fetch policy maxRedirects must be a non-negative integer, got ${policy.maxRedirects}`,
+    );
+  }
+}
+
+// `node:http` and `node:https` are loaded on demand for the same reason as
+// `node:dns`: src/index.ts keeps server-only dependencies off the main entry.
+let httpModule: typeof import("node:http") | undefined;
+let httpsModule: typeof import("node:https") | undefined;
+
+async function loadHttp(secure: boolean) {
+  if (secure) {
+    httpsModule ??= await import("node:https");
+    return httpsModule;
+  }
+  httpModule ??= await import("node:http");
+  return httpModule;
+}
+
+/**
+ * A `lookup` implementation that offers only the addresses validation approved.
+ *
+ * The hostname is still what the request carries, so the `Host` header, TLS SNI
+ * and certificate verification all continue to see the real name; only the
+ * address the socket dials is constrained.
+ */
+function pinnedLookup(approved: IpAddress[]) {
+  const records = approved.map((ip) => ({
+    address: formatAddress(ip),
+    family: ip.version,
+  }));
+  return (
+    _hostname: string,
+    options: { all?: boolean; family?: number | string },
+    callback: (
+      err: Error | null,
+      address?: string | { address: string; family: number }[],
+      family?: number,
+    ) => void,
+  ) => {
+    // `family` arrives as 4 / 6, or as "IPv4" / "IPv6" from some callers.
+    const wanted =
+      typeof options?.family === "string"
+        ? Number(options.family.replace(/^IPv/, ""))
+        : options?.family;
+    const usable = wanted
+      ? records.filter((record) => record.family === wanted)
+      : records;
+    if (usable.length === 0) {
+      callback(
+        new UrlFetchPolicyError(
+          "no validated address is available for this request",
+        ),
+      );
+      return;
+    }
+    if (options?.all) {
+      callback(null, usable);
+      return;
+    }
+    callback(null, usable[0].address, usable[0].family);
+  };
+}
+
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
+/**
+ * Escape a literal `%` that does not begin a valid `%XX` escape.
+ *
+ * The URL parser already percent-encodes spaces and non-ASCII in the path and
+ * query, so those need no help here, and it leaves existing escapes alone so a
+ * presigned URL keeps the `%2F` and `%3D` its signature was computed over.
+ * What it does not repair is a `%` from a name like `50%.txt`, which would go
+ * on the wire as an invalid request target. Only `%` is rewritten, so the
+ * result cannot grow an authority delimiter and the component stays within the
+ * URL it came from.
+ */
+function escapeBarePercent(component: string): string {
+  return component.replace(/%(?![0-9A-Fa-f]{2})/g, "%25");
+}
+
+/**
+ * Perform one request, reaching only `approved`.
+ *
+ * A fresh agent with keep-alive disabled is used for every hop. A pooled socket
+ * is keyed by host and port, not by the addresses that were approved for it, so
+ * a reused connection would skip `lookup` entirely and could carry a request to
+ * an address this policy never cleared.
+ */
+async function pinnedRequest(
+  target: string,
+  approved: IpAddress[],
+  policy: UrlFetchPolicy,
+  signal: AbortSignal,
+): Promise<Response> {
+  const url = new URL(target);
+  const secure = url.protocol === "https:";
+  const mod = await loadHttp(secure);
+  const agent = new mod.Agent({ keepAlive: false, maxSockets: 1 });
+
+  return await new Promise<Response>((resolve, reject) => {
+    let settled = false;
+    const resolveOnce = (response: Response) => {
+      if (settled) return;
+      settled = true;
+      resolve(response);
+    };
+    const rejectOnce = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      agent.destroy();
+      reject(
+        error instanceof Error
+          ? error
+          : new UrlFetchUnavailableError("HTTP request failed"),
+      );
+    };
+    const request = mod.request(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port === "" ? (secure ? 443 : 80) : Number(url.port),
+        // Built from the components of the target validation just cleared, and
+        // after that validation, so the repair cannot reach the host, the port
+        // or the addresses `lookup` is pinned to.
+        path: `${escapeBarePercent(url.pathname)}${escapeBarePercent(url.search)}`,
+        method: "GET",
+        lookup: pinnedLookup(approved) as never,
+        agent,
+        signal,
+        // No proxy is consulted: these modules ignore the ambient proxy
+        // environment, so the socket cannot be routed somewhere unvalidated.
+      },
+      (message) => {
+        try {
+          const status = message.statusCode;
+          if (status === undefined || status < 200 || status > 599) {
+            message.destroy();
+            rejectOnce(
+              new UrlFetchUnavailableError(
+                status === undefined
+                  ? "response carried no HTTP status"
+                  : `response carried unsupported HTTP status ${status}`,
+              ),
+            );
+            return;
+          }
+
+          const headers = new Headers();
+          for (const [name, value] of Object.entries(message.headers)) {
+            if (value === undefined) continue;
+            for (const single of Array.isArray(value) ? value : [value]) {
+              headers.append(name, single);
+            }
+          }
+
+          let body: ReadableStream<Uint8Array> | null = null;
+          if (NULL_BODY_STATUSES.has(status)) {
+            message.resume();
+          } else {
+            body = new ReadableStream<Uint8Array>({
+              start(controller) {
+                let streamSettled = false;
+                const errorStream = (error: unknown) => {
+                  if (streamSettled) return;
+                  streamSettled = true;
+                  try {
+                    controller.error(error);
+                  } catch {
+                    message.destroy();
+                  }
+                };
+                message.on("data", (chunk: Buffer) => {
+                  if (streamSettled) return;
+                  try {
+                    controller.enqueue(new Uint8Array(chunk));
+                  } catch (error) {
+                    errorStream(error);
+                    message.destroy();
+                  }
+                });
+                message.on("end", () => {
+                  if (streamSettled) return;
+                  streamSettled = true;
+                  try {
+                    controller.close();
+                  } catch {
+                    message.destroy();
+                  }
+                });
+                message.on("error", errorStream);
+                message.on("aborted", () =>
+                  errorStream(
+                    new UrlFetchUnavailableError("response body was aborted"),
+                  ),
+                );
+              },
+              cancel() {
+                message.destroy();
+              },
+            });
+          }
+
+          resolveOnce(new Response(body, { status, headers }));
+        } catch {
+          message.destroy();
+          rejectOnce(
+            new UrlFetchUnavailableError(
+              "HTTP response could not be represented safely",
+            ),
+          );
+        }
+      },
+    );
+    request.once("error", rejectOnce);
+    request.once("upgrade", (_message, socket) => {
+      socket.destroy();
+      rejectOnce(
+        new UrlFetchUnavailableError(
+          "HTTP protocol upgrades are not supported",
+        ),
+      );
+    });
+    request.once("close", () => {
+      if (!settled) {
+        rejectOnce(
+          new UrlFetchUnavailableError(
+            "connection closed before an HTTP response was received",
+          ),
+        );
+      }
+    });
+    request.setTimeout(policy.timeoutMs, () => {
+      request.destroy(
+        new UrlFetchUnavailableError(
+          `no response within the ${policy.timeoutMs}ms request timeout`,
+        ),
+      );
+    });
+    request.end();
+  });
+}
+
+/**
+ * The transport boundary.
+ *
+ * @internal not part of the package's public API; exists so tests can stand in
+ * for the socket layer.
+ */
+export const urlFetchTransport = { request: pinnedRequest };
+
+/** Monotonic milliseconds, so a wall-clock step cannot move a deadline. */
+function now(): number {
+  return performance.now();
+}
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/** Name the redirect hop that failed, when it is not the URL that was asked for. */
+function hopSuffix(url: string, target: string): string {
+  return target === url ? "" : ` (at redirect target ${describeUrl(target)})`;
+}
+
+/**
+ * Release a response body this code is not going to read.
+ *
+ * Undici holds the socket until the body is consumed or cancelled, so a
+ * redirect hop or an error response whose body is dropped on the floor leaks a
+ * connection per fetch.
+ */
+async function discardBody(res: Response): Promise<void> {
+  try {
+    await res.body?.cancel();
+  } catch {
+    // A body that is already errored or closed needs no release.
+  }
+}
+
+/** Read the response body, refusing anything past `maxBytes`. */
+async function readBoundedBody(
+  res: Response,
+  maxBytes: number,
+): Promise<Uint8Array> {
+  // Advisory only: a server can understate or omit it, so the streaming check
+  // below stays the authority. When it is present and already over the cap,
+  // refusing here avoids transferring the body at all.
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isInteger(declared) && declared > maxBytes) {
+    await discardBody(res);
+    throw new UrlFetchPolicyError(
+      `response declares ${declared} bytes, over the ${maxBytes} byte limit`,
+    );
+  }
+  const reader = res.body?.getReader();
+  if (!reader) return new Uint8Array(0);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > maxBytes) {
+        throw new UrlFetchPolicyError(
+          `response exceeds the ${maxBytes} byte limit`,
+        );
+      }
+      chunks.push(value);
+    }
+  } finally {
+    // Releases the socket on the oversized-body path; a stream that already
+    // finished or errored needs no release, so a rejection here is expected.
+    await reader.cancel().catch(() => {});
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return body;
+}
+
+/**
+ * Fetch raw bytes from a URL using the global fetch (Node 20+).
+ *
+ * The URL is validated against `policy` before any request is made and again
+ * on every redirect hop, so requests to private, loopback or cloud-metadata
+ * addresses are refused, as are schemes outside the allowlist. The response
+ * body is read in chunks and capped at `policy.maxBytes`.
+ *
+ * Returns `null` on any failure (policy violation, network error, timeout,
+ * oversized body); the reason is logged. Throws only if `policy` itself is
+ * unusable, which is a programming error rather than a fetch outcome.
+ *
+ * @internal not part of the package's public API; exported for tests.
+ */
+export async function fetchUrlBytes(
   url: string,
   log: Logger,
+  policy: UrlFetchPolicy = DEFAULT_URL_FETCH_POLICY,
 ): Promise<Uint8Array | null> {
+  assertUsablePolicy(policy);
+  // Loaded up front so every failure path below can name the URL opaquely.
+  await loadCrypto();
+  let refusedTarget = url;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  const timeout = setTimeout(
+    () =>
+      controller.abort(
+        new UrlFetchUnavailableError(
+          `fetch exceeded the ${policy.timeoutMs}ms request timeout`,
+        ),
+      ),
+    policy.timeoutMs,
+  );
+  const deadlineAt = now() + policy.timeoutMs;
   try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) {
-      log.warn(`${LOG_PREFIX} Failed to fetch URL ${url}: HTTP ${res.status}`);
+    let target = url;
+    for (let hop = 0; ; hop++) {
+      // Tracked outside the try so the catch can name the hop that failed
+      // rather than only the URL originally asked for.
+      refusedTarget = target;
+      // Checked per hop as well as inside the lookup, so a budget already spent
+      // stops the chain deterministically rather than depending on whether the
+      // next resolution happens to be instant.
+      if (now() >= deadlineAt) {
+        throw new UrlFetchUnavailableError("request deadline exceeded");
+      }
+      const approved = await validateFetchUrl(target, policy, deadlineAt);
+      // Bound to the addresses just approved for this hop, and only those.
+      const res = await urlFetchTransport.request(
+        target,
+        approved,
+        policy,
+        controller.signal,
+      );
+      if (res.type === "opaqueredirect") {
+        // Node returns the real 3xx and its Location under
+        // `redirect: "manual"`. A runtime that returns an opaque redirect
+        // instead cannot be validated hop by hop, so the fetch is refused
+        // rather than followed blind.
+        await discardBody(res);
+        throw new UrlFetchPolicyError(
+          "redirect cannot be re-validated on this runtime, which returns " +
+            'opaque redirects for `redirect: "manual"`',
+        );
+      }
+      if (res.status === 0) {
+        // Not a policy decision: a zero status on any other response type is a
+        // transport failure.
+        await discardBody(res);
+        throw new UrlFetchUnavailableError(
+          `response carried no HTTP status (type '${forLog(res.type)}')`,
+        );
+      }
+      if (REDIRECT_STATUSES.has(res.status)) {
+        const location = res.headers.get("location");
+        await discardBody(res);
+        if (!location) {
+          log.warn(
+            `${LOG_PREFIX} Failed to fetch URL ${describeUrl(url)}: HTTP ${res.status} without a Location header${hopSuffix(url, target)}`,
+          );
+          return null;
+        }
+        if (hop >= policy.maxRedirects) {
+          throw new UrlFetchPolicyError(
+            `more than ${policy.maxRedirects} redirects`,
+          );
+        }
+        let next: URL;
+        try {
+          next = new URL(location, target);
+        } catch {
+          throw new UrlFetchPolicyError(
+            "redirect Location is not a usable URL",
+          );
+        }
+        // A redirect must not quietly move the transfer onto cleartext.
+        if (
+          new URL(target).protocol === "https:" &&
+          next.protocol === "http:"
+        ) {
+          throw new UrlFetchPolicyError(
+            "redirect downgrades the transfer from https to http",
+          );
+        }
+        target = next.toString();
+        continue;
+      }
+      if (!res.ok) {
+        await discardBody(res);
+        log.warn(
+          `${LOG_PREFIX} Failed to fetch URL ${describeUrl(url)}: HTTP ${res.status}${hopSuffix(url, target)}`,
+        );
+        return null;
+      }
+      return await readBoundedBody(res, policy.maxBytes);
+    }
+  } catch (e) {
+    if (e instanceof UrlFetchPolicyError) {
+      log.error(
+        `${LOG_PREFIX} Refusing to fetch URL ${describeUrl(url)}: ${e.message}${hopSuffix(url, refusedTarget)}`,
+      );
       return null;
     }
-    const buf = await res.arrayBuffer();
-    return new Uint8Array(buf);
-  } catch (e) {
-    log.warn(`${LOG_PREFIX} Failed to fetch URL ${url}:`, e);
+    if (e instanceof UrlFetchUnavailableError) {
+      log.warn(
+        `${LOG_PREFIX} Failed to fetch URL ${describeUrl(url)}: ${e.message}${hopSuffix(url, refusedTarget)}`,
+      );
+      return null;
+    }
+    // The raw error is not handed to the sink: a runtime message can quote the
+    // URL it was given, including its userinfo and query.
+    const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    log.warn(
+      `${LOG_PREFIX} Failed to fetch URL ${describeUrl(url)}: ${scrubSecrets(detail, refusedTarget, url)}${hopSuffix(url, refusedTarget)}`,
+    );
     return null;
   } finally {
     clearTimeout(timeout);
@@ -116,7 +1330,7 @@ async function resolveSourceBytes(
     return await fetchUrlBytes(source.value, log);
   }
   log.warn(
-    `${LOG_PREFIX} Unknown content source type: ${(source as { type?: string }).type}, cannot resolve bytes`,
+    `${LOG_PREFIX} Unknown content source type: ${forLog((source as { type?: string }).type)}, cannot resolve bytes`,
   );
   return null;
 }
@@ -214,7 +1428,7 @@ export async function convertAguiContentToStrands(
       const fmt = mimeToFormat(bin.mimeType, IMAGE_FORMATS, log);
       if (!fmt) {
         log.warn(
-          `${LOG_PREFIX} Skipping binary content: unsupported MIME type '${bin.mimeType}'`,
+          `${LOG_PREFIX} Skipping binary content: unsupported MIME type '${forLog(bin.mimeType)}'`,
         );
         continue;
       }
@@ -225,7 +1439,7 @@ export async function convertAguiContentToStrands(
     }
 
     log.warn(
-      `${LOG_PREFIX} Skipping unknown content type: ${(item as { type?: string }).type}`,
+      `${LOG_PREFIX} Skipping unknown content type: ${forLog((item as { type?: string }).type)}`,
     );
   }
 

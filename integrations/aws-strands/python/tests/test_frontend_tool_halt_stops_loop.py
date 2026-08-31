@@ -21,7 +21,9 @@ import asyncio
 import copy
 
 import pytest
-from ag_ui.core import EventType, RunAgentInput, Tool, ToolMessage, UserMessage
+from ag_ui.core import Context, EventType, RunAgentInput, Tool, ToolMessage, UserMessage
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from strands import Agent
 from strands.models.model import Model
 from strands.session.file_session_manager import FileSessionManager
@@ -30,7 +32,9 @@ from strands.tools.tools import PythonAgentTool
 from ag_ui_strands.agent import StrandsAgent
 from ag_ui_strands.client_proxy_tool import PROXY_RESULT_PLACEHOLDER
 from ag_ui_strands.config import StrandsAgentConfig, ToolBehavior
-from ag_ui_strands.session_reconcile import AG_UI_WIRE_MAP_STATE_KEY
+from ag_ui_strands.endpoint import add_strands_fastapi_endpoint
+from ag_ui_strands.session_reconcile import AG_UI_FRONTEND_CALL_IDS_STATE_KEY
+from tests.endpoint_helpers import sse_payloads
 
 # Ceiling on model invocations. The halt should stop the loop after ONE, so any
 # regression trips this and fails loudly instead of hanging the suite.
@@ -181,6 +185,25 @@ async def test_halt_emits_run_finished_when_the_model_would_never_stop():
     assert model.calls == 1
     assert any(e.type == EventType.RUN_FINISHED for e in events)
     assert not any(e.type == EventType.RUN_ERROR for e in events)
+
+
+def test_endpoint_halt_keeps_request_context_scoped_to_each_stream_step():
+    """The endpoint pulls each SSE event in a new task context."""
+    model = _ScriptedModel(follow_ups=None)
+    adapter = _build(model)
+    app = FastAPI()
+    add_strands_fastapi_endpoint(app, adapter, "/")
+    input_data = _run_input("t-endpoint-context")
+    input_data.context = [Context(description="account", value="premium")]
+
+    response = TestClient(app).post(
+        "/", json=input_data.model_dump(by_alias=True, mode="json")
+    )
+    payloads = sse_payloads(response.text)
+
+    assert response.status_code == 200
+    assert payloads[-1]["type"] == EventType.RUN_FINISHED
+    assert not any(payload["type"] == EventType.RUN_ERROR for payload in payloads)
 
 
 @pytest.mark.asyncio
@@ -479,7 +502,7 @@ async def test_event_stream_alone_replays_into_a_servable_transcript():
     client_history = list(
         [e for e in turn_1 if e.type == EventType.MESSAGES_SNAPSHOT][-1].messages
     )
-    fe_wire_id = next(
+    fe_tool_call_id = next(
         e.tool_call_id
         for e in turn_1
         if e.type == EventType.TOOL_CALL_START and e.tool_call_name == "get_cell"
@@ -488,7 +511,7 @@ async def test_event_stream_alone_replays_into_a_servable_transcript():
         ToolMessage(
             id="tm-fe",
             role="tool",
-            tool_call_id=fe_wire_id,
+            tool_call_id=fe_tool_call_id,
             content='{"cell": "B4", "value": 42}',
         )
     )
@@ -518,11 +541,11 @@ def _persisted_messages(sm: FileSessionManager, session_id: str) -> list[dict]:
 
 
 @pytest.mark.asyncio
-async def test_halted_turn_persists_tool_use_placeholder_and_wire_map(tmp_path):
+async def test_halted_turn_persists_tool_use_placeholder_and_call_id(tmp_path):
     """Stopping the loop must not cost the next run's reconcile inputs.
 
-    The reconcile overwrites a persisted placeholder ``toolResult``, keyed via
-    the wire->native map on agent state. Both are written before the halt
+    The reconcile overwrites a persisted placeholder ``toolResult``, admitted
+    by the frontend-call id on agent state. Both are written before the halt
     latches (``MessageAddedEvent`` drives ``append_message`` AND ``sync_agent``
     — see ``SessionManager.register_hooks``), so halting keeps them. If Strands
     ever stops syncing state on message-added, this test is the tripwire.
@@ -563,9 +586,9 @@ async def test_halted_turn_persists_tool_use_placeholder_and_wire_map(tmp_path):
     assert placeholders[0]["toolUseId"] == tool_uses[0]["toolUseId"]
 
     persisted_agent = sm.read_agent(session_id, "default")
-    wire_map = persisted_agent.state.get(AG_UI_WIRE_MAP_STATE_KEY) or {}
-    assert tool_uses[0]["toolUseId"] in wire_map.values(), (
-        "reconcile cannot locate the placeholder without the wire->native map"
+    recorded = persisted_agent.state.get(AG_UI_FRONTEND_CALL_IDS_STATE_KEY) or []
+    assert tool_uses[0]["toolUseId"] in recorded, (
+        "reconcile cannot admit the result without the recorded call id"
     )
 
 

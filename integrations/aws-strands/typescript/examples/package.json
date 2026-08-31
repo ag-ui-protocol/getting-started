@@ -2,8 +2,10 @@
   "private": true,
   "name": "@ag-ui/aws-strands-examples",
   "version": "0.0.0",
-  "description": "Runnable AG-UI + Strands examples. Each file under server/api/ is a standalone server; server.ts mounts them all at once for the dojo.",
+  "description": "Runnable AG-UI + Strands examples. Each file under server/api/ exports the only definition of its agent, and most also run standalone; server.ts mounts them all at once for the dojo.",
   "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
     "dojo": "tsx --env-file-if-exists=.env server/server.ts",
     "agentic-chat": "tsx --env-file-if-exists=.env server/api/agentic-chat.ts",
     "agentic-chat-multimodal": "tsx --env-file-if-exists=.env server/api/agentic-chat-multimodal.ts",
@@ -11,26 +13,44 @@
     "agentic-generative-ui": "tsx --env-file-if-exists=.env server/api/agentic-generative-ui.ts",
     "backend-tool-rendering": "tsx --env-file-if-exists=.env server/api/backend-tool-rendering.ts",
     "human-in-the-loop": "tsx --env-file-if-exists=.env server/api/human-in-the-loop.ts",
+    "interrupt": "tsx --env-file-if-exists=.env server/api/interrupt.ts",
+    "predictive-state-updates": "tsx --env-file-if-exists=.env server/api/predictive-state-updates.ts",
     "shared-state": "tsx --env-file-if-exists=.env server/api/shared-state.ts",
     "tool-based-generative-ui": "tsx --env-file-if-exists=.env server/api/tool-based-generative-ui.ts"
   },
   "dependencies": {
     "@ag-ui/a2ui-toolkit": "workspace:*",
     "@ag-ui/aws-strands": "workspace:*",
+    "@ag-ui/client": "workspace:*",
     "@ag-ui/core": "workspace:*",
     "@ag-ui/encoder": "workspace:*",
-    "@strands-agents/sdk": "^1.1.0",
+    "@anthropic-ai/sdk": "^0.92.0",
+    "@google/genai": "^1.40.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@strands-agents/sdk": "^1.1.0",
     "cors": "^2.8.5",
-    "express": "^5.0.0",
-    "openai": "^6.0.0",
+    "express": "5.1.0",
+    "openai": "^6.7.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^20.11.19",
+    "@types/semver": "^7.7.1",
+    "semver": "^7.8.5",
     "tsx": "^4.20.6",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^4.0.18"
+  },
+  "nx": {
+    "targets": {
+      "test": {
+        "dependsOn": [
+          "^build"
+        ]
+      }
+    }
   }
 }

@@ -63,8 +63,8 @@
     "zod": "^3.25.76"
   },
   "peerDependencies": {
-    "@ag-ui/core": ">=0.0.44",
-    "@ag-ui/client": ">=0.0.44",
+    "@ag-ui/core": ">=0.0.58",
+    "@ag-ui/client": ">=0.0.58",
     "@copilotkit/runtime": "^1.60.1",
     "@mastra/client-js": ">=1.0.0-0 <2.0.0-0",
     "@mastra/core": ">=1.29.0 <2.0.0-0"

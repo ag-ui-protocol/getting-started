@@ -30,6 +30,7 @@ os.environ["OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"] = "all"
 from strands import Agent, tool
 from ag_ui_strands import StrandsAgent, create_strands_app
 from server.model_factory import create_model
+from server.settings import cors_origins
 
 from ag_ui_a2ui_toolkit import (
     A2UI_OPERATIONS_KEY,
@@ -145,4 +146,4 @@ agui_agent = StrandsAgent(
     description="A2UI surfaces from fixed, pre-authored schemas (direct backend tools)",
 )
 
-app = create_strands_app(agui_agent, "/")
+app = create_strands_app(agui_agent, "/", origins=cors_origins())

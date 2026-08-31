@@ -88,7 +88,15 @@ export interface Message {
    * Extra information, open by key. See BaseEvent.metadata in events.proto for
    * why this is a Struct.
    */
-  metadata: { [key: string]: any } | undefined;
+  metadata:
+    | { [key: string]: any }
+    | undefined;
+  /**
+   * Which subagent produced this message, absent for the parent's own. Carried
+   * per-message rather than on MessagesSnapshotEvent, since one snapshot mixes
+   * the parent's messages with those of every subagent that ran.
+   */
+  subagentRunId?: string | undefined;
 }
 
 export interface Interrupt {
@@ -98,7 +106,14 @@ export interface Interrupt {
   toolCallId?: string | undefined;
   responseSchema?: any | undefined;
   expiresAt?: string | undefined;
-  metadata?: any | undefined;
+  metadata?:
+    | any
+    | undefined;
+  /**
+   * The subagent whose work raised this interrupt; absent for a root-raised
+   * interrupt.
+   */
+  subagentRunId?: string | undefined;
 }
 
 function createBaseToolCall(): ToolCall {
@@ -822,6 +837,7 @@ function createBaseMessage(): Message {
     error: undefined,
     contentParts: [],
     metadata: undefined,
+    subagentRunId: undefined,
   };
 }
 
@@ -853,6 +869,9 @@ export const Message: MessageFns<Message> = {
     }
     if (message.metadata !== undefined) {
       Struct.encode(Struct.wrap(message.metadata), writer.uint32(74).fork()).join();
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(82).string(message.subagentRunId);
     }
     return writer;
   },
@@ -936,6 +955,14 @@ export const Message: MessageFns<Message> = {
           message.metadata = Struct.unwrap(Struct.decode(reader, reader.uint32()));
           continue;
         }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -959,6 +986,7 @@ export const Message: MessageFns<Message> = {
     message.error = object.error ?? undefined;
     message.contentParts = object.contentParts?.map((e) => InputContent.fromPartial(e)) || [];
     message.metadata = object.metadata ?? undefined;
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };
@@ -972,6 +1000,7 @@ function createBaseInterrupt(): Interrupt {
     responseSchema: undefined,
     expiresAt: undefined,
     metadata: undefined,
+    subagentRunId: undefined,
   };
 }
 
@@ -997,6 +1026,9 @@ export const Interrupt: MessageFns<Interrupt> = {
     }
     if (message.metadata !== undefined) {
       Value.encode(Value.wrap(message.metadata), writer.uint32(58).fork()).join();
+    }
+    if (message.subagentRunId !== undefined) {
+      writer.uint32(66).string(message.subagentRunId);
     }
     return writer;
   },
@@ -1064,6 +1096,14 @@ export const Interrupt: MessageFns<Interrupt> = {
           message.metadata = Value.unwrap(Value.decode(reader, reader.uint32()));
           continue;
         }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.subagentRunId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1085,6 +1125,7 @@ export const Interrupt: MessageFns<Interrupt> = {
     message.responseSchema = object.responseSchema ?? undefined;
     message.expiresAt = object.expiresAt ?? undefined;
     message.metadata = object.metadata ?? undefined;
+    message.subagentRunId = object.subagentRunId ?? undefined;
     return message;
   },
 };

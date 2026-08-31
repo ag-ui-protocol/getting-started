@@ -119,8 +119,12 @@ public sealed class MetadataTest
         Assert.Equal(100, restored!.Metadata!.Value.GetProperty("usage").GetProperty("total").GetInt32());
     }
 
-    public static TheoryData<AGUIMessage> AllMessageRoles() =>
-    [
+    // Object-initializer rather than a collection expression: the compiler lowers
+    // the latter through a zero-length array, which CA1825 rejects under this
+    // repo's warnings-as-errors Release build (the exact invocation
+    // publish-release.yml runs).
+    public static TheoryData<AGUIMessage> AllMessageRoles() => new()
+    {
         new AGUIDeveloperMessage { Id = "1", Content = "c" },
         new AGUISystemMessage { Id = "1", Content = "c" },
         new AGUIAssistantMessage { Id = "1", Content = "c" },
@@ -133,7 +137,7 @@ public sealed class MetadataTest
             Content = JsonDocument.Parse("{}").RootElement.Clone(),
         },
         new AGUIReasoningMessage { Id = "1", Content = "c" },
-    ];
+    };
 
     [Theory]
     [MemberData(nameof(AllMessageRoles))]

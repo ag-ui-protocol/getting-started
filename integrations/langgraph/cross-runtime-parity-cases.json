@@ -1,0 +1,6778 @@
+{
+  "readme": [
+    "ONE TABLE, TWO RUNTIMES. Every case below is fed to BOTH langgraph adapters —",
+    "`integrations/langgraph/typescript/src/utils.ts` and",
+    "`integrations/langgraph/python/ag_ui_langgraph/utils.py` — and both must produce",
+    "the outcome recorded in `expect`. This file exists because those two adapters",
+    "implement one contract as two independent bodies of code: three review rounds",
+    "found the same class of defect fixed on one side and not mirrored to the other,",
+    "and neither suite could see it, because each runtime pinned behaviour the other",
+    "left unpinned. A hand-mirrored pair of test lists reproduces exactly that failure,",
+    "so the cases live here, in a format both languages read natively, and each suite",
+    "reads THIS file.",
+    "",
+    "Readers: `utils.test.ts` (`describe(\"cross-runtime parity table\")`) and",
+    "`tests/test_multimodal.py` (`TestCrossRuntimeParityTable`).",
+    "",
+    "ADDING A CASE. Add it here once. Both suites pick it up with no edit. If the two",
+    "runtimes then disagree, that is the point of the file: fix the runtime that is",
+    "wrong, do not split the expectation.",
+    "",
+    "WHAT `expect` ASSERTS — three things, not one, because past divergences hid in",
+    "the second and third:",
+    "  * `kept`     the canonical value each surviving item converts to, in order.",
+    "  * `dropped`  how many input items produced NO OUTPUT AT ALL — MEASURED, not",
+    "               derived. Each harness removes one input item at a time and re-runs",
+    "               the converter; an item whose removal leaves the output the same",
+    "               LENGTH produced nothing, and that is what dropped means. It used",
+    "               to be `len(content) - len(kept)`, which is arithmetic on `kept`:",
+    "               it could not fail unless `kept` had already failed, so this was",
+    "               one axis wearing two names while this file claimed it was",
+    "               independent. Measuring the ITEM rather than the list makes it its",
+    "               own assertion — a run that drops one item while emitting an extra",
+    "               block for another nets to the right length and still fails here.",
+    "               KNOWN BLIND SPOT: two items that convert identically cannot be",
+    "               told apart this way (removing either shortens the output by one),",
+    "               so provenance between duplicates is not pinned.",
+    "  * `loggedDrops`  how many warnings BEGIN \"Dropping \" once the runtime's own",
+    "               module prefix is stripped. Rule 2 of the malformed-input contract",
+    "               (see the comment block above each pair of converters) requires",
+    "               exactly one per dropped item; a silent drop is the failure an",
+    "               operator cannot diagnose, and it is invisible to an assertion on",
+    "               the return value alone.",
+    "Neither runtime may RAISE on any case here. That is rule 1 of the same contract:",
+    "these converters build a whole MESSAGES_SNAPSHOT / a whole provider request, so",
+    "an exception does not degrade one attachment, it costs the client every message",
+    "in the thread.",
+    "",
+    "ONE DROP RULE, ONE NORMALIZED FORM. The two harnesses used to enforce DIFFERENT",
+    "rules for `loggedDrops`: Python matched `startswith(\"Dropping \")` and TypeScript",
+    "matched `/Dropping /` ANYWHERE in the line, while both comments claimed the",
+    "`startswith` rule — the anti-drift harness had itself drifted. The loose regex",
+    "was there because the runtimes legitimately prefix their lines differently",
+    "(`[convertAguiMultimodalToLangchain] Dropping …` versus a bare `Dropping …`).",
+    "The prefix is now STRIPPED (`^\\[[^\\]]*\\]\\s*`) and the one `startswith` rule",
+    "applied to the one normalized form, in both harnesses. A warning that merely",
+    "MENTIONS the word somewhere in its prose is no longer counted as a drop.",
+    "",
+    "CANONICAL FORM. The two runtimes emit the same content in deliberately different",
+    "key vocabularies — outbound, TypeScript emits the `source_type`/`data`/`mimeType`/",
+    "`metadata.filename` family and Python emits `base64`/`mime_type`/`filename`; that",
+    "difference is documented on `StandardMediaBlock` and is not drift. `expect.kept`",
+    "is therefore written in a neutral form and each suite projects its own output",
+    "onto it. The projection RENAMES keys; it does not delete them, and it does not",
+    "inspect the input, so no case can be normalized into agreement.",
+    "",
+    "  inbound  (LangChain content -> AG-UI InputContent)",
+    "    {\"kind\": \"text\", \"text\": <str>}",
+    "    {\"kind\": \"image\"|\"audio\"|\"video\"|\"document\",",
+    "     \"source\": \"data\"|\"url\", \"value\": <str>,",
+    "     \"mimeType\": <str|null>, \"filename\": <str|null>}",
+    "",
+    "  outbound (AG-UI InputContent -> LangChain content)",
+    "    {\"kind\": \"text\", \"text\": <str>}",
+    "    {\"kind\": \"image_url\", \"url\": <str>}",
+    "    {\"kind\": \"standard\", \"blockType\": \"audio\"|\"file\",",
+    "     \"sourceType\": \"base64\", \"data\": <str>,",
+    "     \"mimeType\": <str|null>, \"filename\": <str|null>}",
+    "",
+    "  `sourceType` is the RECOGNITION MARKER, and it is projected because deleting",
+    "  it from an emitted block used to fail ZERO of these cases. It is the key that",
+    "  makes a translator see the block as inline base64 media at all: TypeScript",
+    "  emits `source_type: \"base64\"` (`@langchain/core`'s `isDataContentBlock` tests",
+    "  for `source_type` and nothing else) and Python emits the `base64` key itself",
+    "  (measured on langchain-core 1.2.13: `is_data_content_block` returns True on",
+    "  `\"base64\" in block`). A block that loses its marker is forwarded to the",
+    "  provider as an unrecognized object — the exact failure the outbound design",
+    "  exists to prevent. On the Python side the marker and the payload are the same",
+    "  key, so `sourceType` there restates `data`; on the TypeScript side they are two",
+    "  keys and this is the only thing pinning the marker.",
+    "",
+    "  An empty-string mimeType/filename is normalized to null on both sides: neither",
+    "  runtime distinguishes \"absent\" from \"present and empty\" for those two fields,",
+    "  and pinning a distinction the code does not make would be a false assertion.",
+    "",
+    "WHAT THE PROJECTION DOES NOT COVER, stated so nobody has to rediscover it:",
+    "  * Every key either runtime emits on an OUTBOUND block is projected. Nothing is",
+    "    dropped there any more.",
+    "  * INBOUND, only the AG-UI item's kind, source type, source value, MIME type and",
+    "    `metadata.filename` are compared. Any OTHER key a runtime attached to",
+    "    `metadata`, and the difference between an absent `metadata` and an empty one,",
+    "    are invisible here.",
+    "  * `\"\"` and absent are the same value for `mimeType` and `filename` (above).",
+    "  * Log PROSE is not compared, only the count — see the next section.",
+    "",
+    "OUTBOUND INPUTS ARE DICTS. TypeScript's converter reads client JSON that nothing",
+    "validates. Python's reads pydantic-validated AG-UI content objects, so the suite",
+    "builds each item into its declared class; where a MALFORMED item cannot pass",
+    "validation, Python receives the raw dict, which is what its converter would see",
+    "for such an item in production (an item that fails validation is never a typed",
+    "content object). The two runtimes therefore reach some outbound drops through",
+    "DIFFERENT branches — TypeScript through a typed guard, Python through its",
+    "terminal `else`.",
+    "",
+    "That divergence is expected, but it was left IMPLICIT and it made most of the",
+    "outbound malformed cases misdescribe themselves: eleven of twelve failed pydantic",
+    "validation and collapsed onto the single terminal `else`, so a case named after",
+    "a text guard or a media guard was not exercising one in Python at all. Two things",
+    "fix that:",
+    "  * `outbound/malformed/ts-only/…` — the id says so. The named BRANCH is reached",
+    "    in TypeScript only; in Python the item cannot become a typed content object,",
+    "    so it arrives as a raw dict and lands in the terminal `else`. Both runtimes",
+    "    still drop it and log once, which is what `expect` asserts.",
+    "  * `pythonBuilds` — every outbound case records, per item, what Python's harness",
+    "    actually builds it into (a class name, or `dict` / `NoneType` for an item no",
+    "    class accepts). It is ASSERTED, so if a schema change ever moves a case onto a",
+    "    different branch, the table says so instead of hiding it behind an unchanged",
+    "    outcome triple.",
+    "",
+    "`pythonBuild: \"unvalidated\"` — THE THIRD OPTION, and the one that lets a",
+    "malformed case exercise Python's TYPED branch instead of collapsing onto the",
+    "terminal `else`. The harness then builds every item in that case with",
+    "`model_construct` (recursively, for `source`) rather than the validating",
+    "constructor. That is not a harness convenience: `model_construct`, plain",
+    "attribute assignment and `model_copy(update=…)` are the three routes THE",
+    "MALFORMED-INPUT CONTRACT already declares in scope, all three are reachable, and",
+    "all three hand this converter a REAL typed content object carrying a payload the",
+    "schema would have refused. A case may only carry the marker if the validating",
+    "route really does refuse one of its items — asserted, so the flag cannot be",
+    "sprinkled onto a case that never needed it. A case whose malformed value the",
+    "schema ACCEPTS (an empty-string payload is one) must not carry it, because the",
+    "ordinary route already reaches the branch.",
+    "",
+    "KNOWN UNREACHABLE IN PYTHON THROUGH THE VALIDATING ROUTE: the legacy-binary",
+    "`no url, data, or id` guard. `BinaryInputContent` refuses to validate without one",
+    "of the three, so no VALIDATED item reaches that guard. That is why",
+    "`outbound/malformed/ts-only/binary-empty` carries the `ts-only` marker rather",
+    "than being reconstructed. The guard is not dead in Python, though: the",
+    "`outbound/malformed/payload/binary-…` cases reach it with `pythonBuild:",
+    "\"unvalidated\"`, because an item whose three payload keys are all present and",
+    "UNUSABLE now falls into it in both runtimes, and",
+    "`outbound/malformed/payload/binary-mime-type-absent-and-no-payload` is the same",
+    "input as `binary-empty` REBUILT around validation, which is what puts Python on",
+    "the typed legacy branch and pins the drop the guard emits there.",
+    "",
+    "LOG PROSE IS NOT ASSERTED. `loggedDrops` counts warnings beginning \"Dropping \"",
+    "after prefix normalization. The rest of each message legitimately differs (`int`",
+    "vs `number`, `dict` vs `object`) and pinning it here would fail on wording.",
+    "",
+    "`axis` is documentation only. `malformed` = input no schema allows; `edge` =",
+    "legal but easy to get wrong; `wellformed` = the modality x source x vocabulary",
+    "matrix that must not regress; `data-url` = the one rule that decides whether a",
+    "url-SHAPED source is a reference or bytes.",
+    "",
+    "THE `data-url` AXIS, because it is the one place where the two legs have to",
+    "agree with each other as well as with the sibling runtime. A `data:` URL is",
+    "url-shaped but RFC 2397 puts the bytes IN the string, so it is inline data on",
+    "both legs: inbound it is stored as a `data` source (a url source would be a",
+    "false claim in the thread about where the attachment lives), and outbound a url",
+    "source holding one still reaches the standard block (threads persisted before",
+    "this rule, and client JSON that never passed through the inbound leg, both hold",
+    "such sources). A REMOTE url is untouched on both legs — the standard block for",
+    "one throws in TypeScript and raises in Python, so promoting it would turn a",
+    "degraded request into a dead run. Three near-misses are refused and left on",
+    "whatever path they take today rather than guessed at: a data URL with no",
+    "`;base64` parameter (RFC 2397's default encoding is percent-encoded text, and",
+    "the standard block's payload key is base64 by definition), one with no comma,",
+    "and one with an empty payload. The `data:` scheme is matched case-sensitively",
+    "and the `;base64` token case-insensitively, and both spellings have a case here",
+    "so the two runtimes cannot drift on either."
+  ],
+  "cases": [
+    {
+      "id": "inbound/image_url/url-non-string",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a non-string truthy url used to throw a TypeError out of the whole snapshot",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": 42
+          }
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/url-empty",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an empty url mints an attachment pointing at nothing",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": ""
+          }
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/url-null",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "the null inside the payload",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": null
+          }
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/url-object",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a url that is itself an object",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": {}
+          }
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/payload-null",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "the payload itself is null",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": null
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/payload-number",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "the payload is a number",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": 42
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/payload-bool",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "the payload is a boolean",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": true
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/payload-empty-array",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "the payload is an array",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": []
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/payload-array-of-url",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a url in an array is not a url",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": ["https://example.com/a.png"]
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/payload-empty-object",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an object with no url key at all",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {}
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/payload-empty-string",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "the bare-string shape, empty",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": ""
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/payload-absent",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "no image_url key on an image_url block",
+      "content": [
+        {
+          "type": "image_url"
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/neighbours-survive",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "rule 3: one unreadable image_url must not cost the blocks beside it",
+      "content": [
+        {
+          "type": "text",
+          "text": "before"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": 42
+          }
+        },
+        {
+          "type": "text",
+          "text": "after"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": "before"
+          },
+          {
+            "kind": "text",
+            "text": "after"
+          }
+        ],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/text/non-string-number",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a truthy non-string text was emitted verbatim and failed schema validation downstream",
+      "content": [
+        {
+          "type": "text",
+          "text": 42
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/text/non-string-object",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an object where text belongs",
+      "content": [
+        {
+          "type": "text",
+          "text": {
+            "a": 1
+          }
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/text/non-string-null",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an explicit null text",
+      "content": [
+        {
+          "type": "text",
+          "text": null
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/text/non-string-array",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an array where text belongs",
+      "content": [
+        {
+          "type": "text",
+          "text": ["x"]
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/text/non-string-bool",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a boolean where text belongs",
+      "content": [
+        {
+          "type": "text",
+          "text": true
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/text/neighbours-survive",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "rule 3 on the text branch",
+      "content": [
+        {
+          "type": "text",
+          "text": "before"
+        },
+        {
+          "type": "text",
+          "text": 42
+        },
+        {
+          "type": "text",
+          "text": "after"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": "before"
+          },
+          {
+            "kind": "text",
+            "text": "after"
+          }
+        ],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/text/empty",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "a present-but-empty text is the empty string, KEPT, and not a drop",
+      "content": [
+        {
+          "type": "text",
+          "text": ""
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": ""
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/text/absent",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "an absent text reads as the empty string, KEPT",
+      "content": [
+        {
+          "type": "text"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": ""
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/text/whitespace",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "whitespace is text",
+      "content": [
+        {
+          "type": "text",
+          "text": "   "
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": "   "
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/edge/identical-blocks-both-survive",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "the same block twice is two blocks, not one; and this is the case that makes `dropped` falsifiable — a converter that emitted one item twice while dropping the other would net to the right length and be caught only by the leave-one-out measurement",
+      "content": [
+        {
+          "type": "text",
+          "text": "dup"
+        },
+        {
+          "type": "text",
+          "text": "dup"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": "dup"
+          },
+          {
+            "kind": "text",
+            "text": "dup"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/unrecognised/unknown-kind",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a block kind LangChain adds later",
+      "content": [
+        {
+          "type": "totally_unknown"
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/unrecognised/empty-string",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an empty type names no branch",
+      "content": [
+        {
+          "type": ""
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/unrecognised/absent",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "no type key at all",
+      "content": [
+        {
+          "foo": "bar"
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/unrecognised/number",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a numeric type",
+      "content": [
+        {
+          "type": 7
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/unrecognised/null",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an explicit null type",
+      "content": [
+        {
+          "type": null
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/unrecognised/array",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an unhashable type raised TypeError out of the whole snapshot in Python",
+      "content": [
+        {
+          "type": []
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/unrecognised/object",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "the other unhashable shape",
+      "content": [
+        {
+          "type": {}
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/unrecognised/neighbours-survive",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an unhashable type must not cost the blocks beside it",
+      "content": [
+        {
+          "type": "text",
+          "text": "before"
+        },
+        {
+          "type": []
+        },
+        {
+          "type": "text",
+          "text": "after"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": "before"
+          },
+          {
+            "kind": "text",
+            "text": "after"
+          }
+        ],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/non-object-entry/null",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a JSON null where a block is expected",
+      "content": [null],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/non-object-entry/bare-string",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "a bare string entry is text content, not a malformed block",
+      "content": ["just a string"],
+      "expect": {
+        "kept": [{ "kind": "text", "text": "just a string" }],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/non-object-entry/number",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a number where a block is expected",
+      "content": [7],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/non-object-entry/bool",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a boolean where a block is expected",
+      "content": [true],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/non-object-entry/array",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an array where a block is expected",
+      "content": [["x"]],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/non-object-entry/neighbours-survive",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "rule 3 one level out",
+      "content": [
+        {
+          "type": "text",
+          "text": "before"
+        },
+        null,
+        {
+          "type": "text",
+          "text": "after"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": "before"
+          },
+          {
+            "kind": "text",
+            "text": "after"
+          }
+        ],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/media/unreadable-no-payload",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a media block with no data, base64 or url",
+      "content": [
+        {
+          "type": "image"
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/media/unreadable-file-id-only",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "provider-side storage has no AG-UI representation",
+      "content": [
+        {
+          "type": "file",
+          "fileId": "file-123"
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/media/unreadable-empty-payloads",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "every payload key present and empty",
+      "content": [
+        {
+          "type": "audio",
+          "data": "",
+          "base64": "",
+          "url": ""
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/media/unreadable-url-non-string",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a non-string url is not a url",
+      "content": [
+        {
+          "type": "image",
+          "url": 42
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/media/unreadable-url-empty",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an empty url is not a url",
+      "content": [
+        {
+          "type": "image",
+          "url": ""
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/media/empty-mimeType-hides-mime_type",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an empty mimeType must fall through to the Python-shaped mime_type behind it",
+      "content": [
+        {
+          "type": "file",
+          "mimeType": "",
+          "mime_type": "application/pdf",
+          "base64": "JVBERi0xLjQK"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/media/non-string-mimeType-hides-mime_type",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a non-string mimeType is no more usable than an empty one",
+      "content": [
+        {
+          "type": "file",
+          "mimeType": 42,
+          "mime_type": "application/pdf",
+          "base64": "JVBERi0xLjQK"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/media/empty-data-hides-base64",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an empty data must fall through to base64",
+      "content": [
+        {
+          "type": "file",
+          "data": "",
+          "base64": "JVBERi0xLjQK",
+          "mime_type": "application/pdf"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/media/non-string-data-hides-base64",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a truthy non-string data short-circuited an `or` and dropped the whole block",
+      "content": [
+        {
+          "type": "image",
+          "data": 42,
+          "base64": "QUJD",
+          "mime_type": "image/png"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/png",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/media/object-data-hides-base64",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "same defect with a dict",
+      "content": [
+        {
+          "type": "file",
+          "data": {
+            "x": 1
+          },
+          "base64": "QUJD",
+          "mime_type": "application/pdf"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/pdf",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/media/true-data-hides-base64",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "same defect with a bool",
+      "content": [
+        {
+          "type": "video",
+          "data": true,
+          "base64": "QUJD",
+          "mime_type": "video/mp4"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "video/mp4",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/media/non-string-data-hides-url",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "the url behind an unusable data is still a url",
+      "content": [
+        {
+          "type": "image",
+          "data": 42,
+          "url": "https://example.com/a.png"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "url",
+            "value": "https://example.com/a.png",
+            "mimeType": null,
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/media/empty-filename-hides-name",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "an empty metadata.filename must not throw away metadata.name",
+      "content": [
+        {
+          "type": "file",
+          "base64": "JVBERi0xLjQK",
+          "mime_type": "application/pdf",
+          "metadata": {
+            "filename": "",
+            "name": "report.pdf"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": "report.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/media/non-string-filename-hides-title",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "the scan runs the whole chain, not just the first two",
+      "content": [
+        {
+          "type": "file",
+          "base64": "JVBERi0xLjQK",
+          "mime_type": "application/pdf",
+          "metadata": {
+            "filename": 42,
+            "name": "",
+            "title": "report.pdf"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": "report.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/media/top-level-filename-behind-empty-metadata",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "the top-level filename is the last link of the same chain",
+      "content": [
+        {
+          "type": "file",
+          "base64": "JVBERi0xLjQK",
+          "mime_type": "application/pdf",
+          "metadata": {},
+          "filename": "report.pdf"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": "report.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/media/non-string-mime-only",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a non-string MIME type is treated as absent, not handed to a source class",
+      "content": [
+        {
+          "type": "audio",
+          "base64": "QUJD",
+          "mime_type": 123
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/octet-stream",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/media/non-string-mime-url-source",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "same on the url leg, where the fallback does not apply",
+      "content": [
+        {
+          "type": "image",
+          "url": "https://example.com/a.png",
+          "mime_type": {
+            "a": 1
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "url",
+            "value": "https://example.com/a.png",
+            "mimeType": null,
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/modality-no-slash",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "a MIME string with no slash names no modality and stays an image",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:noslash;base64,QUJD"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "noslash",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/modality-empty-subtype",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "a major with an empty subtype names no modality",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:video/;base64,QUJD"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "video/",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/modality-empty-major",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "a subtype with no major names no modality",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:/mp4;base64,QUJD"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "/mp4",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/modality-three-parts",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "everything after the first slash is the subtype",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:a/b/c;base64,QUJD"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "a/b/c",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/modality-uppercase-video",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "MIME types are case-insensitive (RFC 2045 5.1)",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:VIDEO/MP4;base64,QUJD"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "VIDEO/MP4",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/modality-uppercase-audio",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "mixed case is still audio",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:Audio/WAV;base64,QUJD"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "Audio/WAV",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/modality-padded-major",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "a leading space around the major type",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data: video/mp4;base64,QUJD"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": " video/mp4",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/modality-params",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "parameters are part of a legal MIME type",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:video/mp4;codecs=avc1;base64,QUJD"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "video/mp4",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/modality-unknown-major",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "an unknown major type is a document",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:application/pdf;base64,QUJD"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/pdf",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/modality-bare-slash",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "neither half is present",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:/;base64,QUJD"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "/",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/modality-mimeless-data-url",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "a MIME-less data URL falls back to image/png and stays an image",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:;base64,QUJD"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/png",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/plain-url",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "a plain url carries no modality and stays an image",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "https://example.com/a.png"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "url",
+            "value": "https://example.com/a.png",
+            "mimeType": null,
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/bare-string-url",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "the bare-string payload shape both runtimes accept",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": "https://example.com/a.png"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "url",
+            "value": "https://example.com/a.png",
+            "mimeType": null,
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/data-url-no-comma",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a data URL with no comma has a header and no payload, so keeping it minted an attachment whose value was the empty string — an item pointing at nothing. Both runtimes now drop and log it, which is what the standard-block path already did for an empty data/base64. This expectation was previously recorded as kept-with-an-empty-value, explicitly to make a UNILATERAL change fail; the change that replaced it was made in both runtimes together",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/png;base64"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/media/derived-filename-is-not-supplied",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "the name this adapter fabricates outbound must not come back as a user-chosen one",
+      "content": [
+        {
+          "type": "file",
+          "base64": "JVBERi0xLjQK",
+          "mime_type": "application/pdf",
+          "filename": "attachment.pdf"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/media/supplied-filename-survives",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "a real name is kept",
+      "content": [
+        {
+          "type": "file",
+          "base64": "JVBERi0xLjQK",
+          "mime_type": "application/pdf",
+          "filename": "invoice.pdf"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": "invoice.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/media/derived-name-on-a-non-file-block-is-kept",
+      "direction": "inbound",
+      "axis": "edge",
+      "why": "only file blocks are ever given a derived name",
+      "content": [
+        {
+          "type": "image",
+          "base64": "QUJD",
+          "mime_type": "image/png",
+          "filename": "attachment.png"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/png",
+            "filename": "attachment.png"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/image-png/data/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "image",
+          "data": "QUJD",
+          "mimeType": "image/png",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/png",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/image-png/data/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "image",
+          "base64": "QUJD",
+          "mime_type": "image/png",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/png",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/image-png/data/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "image",
+          "source_type": "base64",
+          "data": "QUJD",
+          "mime_type": "image/png",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/png",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/image-png/url/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "image",
+          "url": "https://example.com/a.bin",
+          "mimeType": "image/png",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "image/png",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/image-png/url/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "image",
+          "url": "https://example.com/a.bin",
+          "mime_type": "image/png",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "image/png",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/image-png/url/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "image",
+          "source_type": "url",
+          "url": "https://example.com/a.bin",
+          "mime_type": "image/png",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "image/png",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/image-jpeg/data/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "image",
+          "data": "QUJD",
+          "mimeType": "image/jpeg",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/jpeg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/image-jpeg/data/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "image",
+          "base64": "QUJD",
+          "mime_type": "image/jpeg",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/jpeg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/image-jpeg/data/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "image",
+          "source_type": "base64",
+          "data": "QUJD",
+          "mime_type": "image/jpeg",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/jpeg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/image-jpeg/url/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "image",
+          "url": "https://example.com/a.bin",
+          "mimeType": "image/jpeg",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "image/jpeg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/image-jpeg/url/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "image",
+          "url": "https://example.com/a.bin",
+          "mime_type": "image/jpeg",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "image/jpeg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/image-jpeg/url/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "image",
+          "source_type": "url",
+          "url": "https://example.com/a.bin",
+          "mime_type": "image/jpeg",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "image/jpeg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/IMAGE-PNG/data/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "image",
+          "data": "QUJD",
+          "mimeType": "IMAGE/PNG",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "IMAGE/PNG",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/IMAGE-PNG/data/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "image",
+          "base64": "QUJD",
+          "mime_type": "IMAGE/PNG",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "IMAGE/PNG",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/IMAGE-PNG/data/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "image",
+          "source_type": "base64",
+          "data": "QUJD",
+          "mime_type": "IMAGE/PNG",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "IMAGE/PNG",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/IMAGE-PNG/url/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "image",
+          "url": "https://example.com/a.bin",
+          "mimeType": "IMAGE/PNG",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "IMAGE/PNG",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/IMAGE-PNG/url/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "image",
+          "url": "https://example.com/a.bin",
+          "mime_type": "IMAGE/PNG",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "IMAGE/PNG",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/image/IMAGE-PNG/url/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "image",
+          "source_type": "url",
+          "url": "https://example.com/a.bin",
+          "mime_type": "IMAGE/PNG",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "IMAGE/PNG",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-wav/data/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "audio",
+          "data": "QUJD",
+          "mimeType": "audio/wav",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "audio/wav",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-wav/data/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "audio",
+          "base64": "QUJD",
+          "mime_type": "audio/wav",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "audio/wav",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-wav/data/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "audio",
+          "source_type": "base64",
+          "data": "QUJD",
+          "mime_type": "audio/wav",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "audio/wav",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-wav/url/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "audio",
+          "url": "https://example.com/a.bin",
+          "mimeType": "audio/wav",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "audio/wav",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-wav/url/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "audio",
+          "url": "https://example.com/a.bin",
+          "mime_type": "audio/wav",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "audio/wav",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-wav/url/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "audio",
+          "source_type": "url",
+          "url": "https://example.com/a.bin",
+          "mime_type": "audio/wav",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "audio/wav",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-mpeg/data/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "audio",
+          "data": "QUJD",
+          "mimeType": "audio/mpeg",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "audio/mpeg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-mpeg/data/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "audio",
+          "base64": "QUJD",
+          "mime_type": "audio/mpeg",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "audio/mpeg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-mpeg/data/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "audio",
+          "source_type": "base64",
+          "data": "QUJD",
+          "mime_type": "audio/mpeg",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "audio/mpeg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-mpeg/url/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "audio",
+          "url": "https://example.com/a.bin",
+          "mimeType": "audio/mpeg",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "audio/mpeg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-mpeg/url/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "audio",
+          "url": "https://example.com/a.bin",
+          "mime_type": "audio/mpeg",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "audio/mpeg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-mpeg/url/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "audio",
+          "source_type": "url",
+          "url": "https://example.com/a.bin",
+          "mime_type": "audio/mpeg",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "audio/mpeg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-ogg/data/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "audio",
+          "data": "QUJD",
+          "mimeType": "audio/ogg",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "audio/ogg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-ogg/data/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "audio",
+          "base64": "QUJD",
+          "mime_type": "audio/ogg",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "audio/ogg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-ogg/data/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "audio",
+          "source_type": "base64",
+          "data": "QUJD",
+          "mime_type": "audio/ogg",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "audio/ogg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-ogg/url/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "audio",
+          "url": "https://example.com/a.bin",
+          "mimeType": "audio/ogg",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "audio/ogg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-ogg/url/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "audio",
+          "url": "https://example.com/a.bin",
+          "mime_type": "audio/ogg",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "audio/ogg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/audio/audio-ogg/url/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "audio",
+          "source_type": "url",
+          "url": "https://example.com/a.bin",
+          "mime_type": "audio/ogg",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "audio/ogg",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/video-mp4/data/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "video",
+          "data": "QUJD",
+          "mimeType": "video/mp4",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "video/mp4",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/video-mp4/data/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "video",
+          "base64": "QUJD",
+          "mime_type": "video/mp4",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "video/mp4",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/video-mp4/data/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "video",
+          "source_type": "base64",
+          "data": "QUJD",
+          "mime_type": "video/mp4",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "video/mp4",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/video-mp4/url/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "video",
+          "url": "https://example.com/a.bin",
+          "mimeType": "video/mp4",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "video/mp4",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/video-mp4/url/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "video",
+          "url": "https://example.com/a.bin",
+          "mime_type": "video/mp4",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "video/mp4",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/video-mp4/url/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "video",
+          "source_type": "url",
+          "url": "https://example.com/a.bin",
+          "mime_type": "video/mp4",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "video/mp4",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/video-quicktime/data/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "video",
+          "data": "QUJD",
+          "mimeType": "video/quicktime",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "video/quicktime",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/video-quicktime/data/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "video",
+          "base64": "QUJD",
+          "mime_type": "video/quicktime",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "video/quicktime",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/video-quicktime/data/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "video",
+          "source_type": "base64",
+          "data": "QUJD",
+          "mime_type": "video/quicktime",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "video/quicktime",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/video-quicktime/url/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "video",
+          "url": "https://example.com/a.bin",
+          "mimeType": "video/quicktime",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "video/quicktime",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/video-quicktime/url/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "video",
+          "url": "https://example.com/a.bin",
+          "mime_type": "video/quicktime",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "video/quicktime",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/video-quicktime/url/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "video",
+          "source_type": "url",
+          "url": "https://example.com/a.bin",
+          "mime_type": "video/quicktime",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "video/quicktime",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/no-mime/data/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "video",
+          "data": "QUJD",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/octet-stream",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/no-mime/data/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "video",
+          "base64": "QUJD",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/octet-stream",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/no-mime/data/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "video",
+          "source_type": "base64",
+          "data": "QUJD",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/octet-stream",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/no-mime/url/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "video",
+          "url": "https://example.com/a.bin",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": null,
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/no-mime/url/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "video",
+          "url": "https://example.com/a.bin",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": null,
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/video/no-mime/url/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "video",
+          "source_type": "url",
+          "url": "https://example.com/a.bin",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": null,
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/application-pdf/data/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "file",
+          "data": "QUJD",
+          "mimeType": "application/pdf",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/pdf",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/application-pdf/data/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "file",
+          "base64": "QUJD",
+          "mime_type": "application/pdf",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/pdf",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/application-pdf/data/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "file",
+          "source_type": "base64",
+          "data": "QUJD",
+          "mime_type": "application/pdf",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/pdf",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/application-pdf/url/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "file",
+          "url": "https://example.com/a.bin",
+          "mimeType": "application/pdf",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "application/pdf",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/application-pdf/url/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "file",
+          "url": "https://example.com/a.bin",
+          "mime_type": "application/pdf",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "application/pdf",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/application-pdf/url/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "file",
+          "source_type": "url",
+          "url": "https://example.com/a.bin",
+          "mime_type": "application/pdf",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "application/pdf",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/application-vnd-ms-excel/data/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "file",
+          "data": "QUJD",
+          "mimeType": "application/vnd.ms-excel",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/vnd.ms-excel",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/application-vnd-ms-excel/data/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "file",
+          "base64": "QUJD",
+          "mime_type": "application/vnd.ms-excel",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/vnd.ms-excel",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/application-vnd-ms-excel/data/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "file",
+          "source_type": "base64",
+          "data": "QUJD",
+          "mime_type": "application/vnd.ms-excel",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/vnd.ms-excel",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/application-vnd-ms-excel/url/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "file",
+          "url": "https://example.com/a.bin",
+          "mimeType": "application/vnd.ms-excel",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "application/vnd.ms-excel",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/application-vnd-ms-excel/url/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "file",
+          "url": "https://example.com/a.bin",
+          "mime_type": "application/vnd.ms-excel",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "application/vnd.ms-excel",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/application-vnd-ms-excel/url/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "file",
+          "source_type": "url",
+          "url": "https://example.com/a.bin",
+          "mime_type": "application/vnd.ms-excel",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": "application/vnd.ms-excel",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/no-mime/data/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "file",
+          "data": "QUJD",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/octet-stream",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/no-mime/data/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "file",
+          "base64": "QUJD",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/octet-stream",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/no-mime/data/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "file",
+          "source_type": "base64",
+          "data": "QUJD",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/octet-stream",
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/no-mime/url/vocab-js",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "native LangChain.js vocabulary: data/url + mimeType + metadata.filename",
+      "content": [
+        {
+          "type": "file",
+          "url": "https://example.com/a.bin",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": null,
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/no-mime/url/vocab-py",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "LangChain-Python vocabulary: base64/url + mime_type + top-level filename",
+      "content": [
+        {
+          "type": "file",
+          "url": "https://example.com/a.bin",
+          "filename": "report.bin"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": null,
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/wellformed/file/no-mime/url/vocab-source_type",
+      "direction": "inbound",
+      "axis": "wellformed",
+      "why": "the deprecated source_type family this adapter emits on the wire",
+      "content": [
+        {
+          "type": "file",
+          "source_type": "url",
+          "url": "https://example.com/a.bin",
+          "metadata": {
+            "filename": "report.bin"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "https://example.com/a.bin",
+            "mimeType": null,
+            "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/url-whitespace-only",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a whitespace-only url is truthy, so a bare falsiness check lets it through to mint an attachment pointing at nothing",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "   "
+          }
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/url-bare-string-whitespace-only",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "the same defect through the bare-string shape rather than the {url} object",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": "  \t "
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/data-url-leading-whitespace",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "a LEADING space makes the data: test false, so base64 bytes are filed as a remote url the client then tries to fetch",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": "  data:image/png;base64,QUJD"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/png",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/data-url-payload-whitespace-only",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "a whitespace-only payload is truthy and mints the same empty-valued attachment the no-payload guard rejects",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": "data:image/png;base64,   "
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/data-url-mediatype-blank",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "a blank mediatype is present-but-empty wearing whitespace and must take the image/png default like the empty one; a PADDED REAL mediatype keeps its padding, which modality-padded-major pins",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": "data:   ;base64,QUJD"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/png",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/malformed/unknown-type",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "a content type added to the AG-UI union later; both runtimes reach their terminal else",
+      "content": [
+        {
+          "type": "totally_unknown"
+        }
+      ],
+      "pythonBuilds": ["dict"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/no-type",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "an item with no type at all; both runtimes reach their terminal else",
+      "content": [
+        {
+          "foo": "bar"
+        }
+      ],
+      "pythonBuilds": ["dict"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/ts-only/text-number",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "TypeScript's text guard — a non-string text forwarded into a provider block is a 400. Python cannot reach its text branch: TextInputContent.text is a str, so this stays a raw dict and lands in the terminal else",
+      "content": [
+        {
+          "type": "text",
+          "text": 42
+        }
+      ],
+      "pythonBuilds": ["dict"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/ts-only/text-object",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "same guard with an object; same collapse onto Python's terminal else",
+      "content": [
+        {
+          "type": "text",
+          "text": {
+            "a": 1
+          }
+        }
+      ],
+      "pythonBuilds": ["dict"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/ts-only/text-null",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "same guard with a null; same collapse onto Python's terminal else",
+      "content": [
+        {
+          "type": "text",
+          "text": null
+        }
+      ],
+      "pythonBuilds": ["dict"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/ts-only/media-no-source",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "TypeScript's media branch drops an item whose source yields no URL. Python cannot reach it: source is required on every typed media class, so this stays a raw dict and lands in the terminal else",
+      "content": [
+        {
+          "type": "image"
+        }
+      ],
+      "pythonBuilds": ["dict"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/ts-only/media-null-source",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "same branch with an explicit null source; same collapse onto Python's terminal else",
+      "content": [
+        {
+          "type": "audio",
+          "source": null
+        }
+      ],
+      "pythonBuilds": ["dict"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/media-empty-url-source/image",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "a url source whose value is empty converts to no URL and must be dropped, not emitted; both runtimes reach their media branch",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "url",
+            "value": ""
+          }
+        }
+      ],
+      "pythonBuilds": ["ImageInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/media-empty-url-source/audio",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "a url source whose value is empty converts to no URL and must be dropped, not emitted; both runtimes reach their media branch for audio as they do for image",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "url",
+            "value": ""
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/media-empty-url-source/video",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "a url source whose value is empty converts to no URL and must be dropped, not emitted; both runtimes reach their media branch for video as they do for image",
+      "content": [
+        {
+          "type": "video",
+          "source": {
+            "type": "url",
+            "value": ""
+          }
+        }
+      ],
+      "pythonBuilds": ["VideoInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/media-empty-url-source/document",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "a url source whose value is empty converts to no URL and must be dropped, not emitted; both runtimes reach their media branch for document as they do for image",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "value": ""
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/ts-only/binary-empty",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "TypeScript's legacy-binary guard — no url, data or id. Python can NEVER reach that guard: BinaryInputContent refuses to validate without one of the three, so this stays a raw dict and lands in the terminal else",
+      "content": [
+        {
+          "type": "binary"
+        }
+      ],
+      "pythonBuilds": ["dict"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/null-entry",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "a JSON null where a content item is expected; TypeScript's not-an-object guard, Python's terminal else",
+      "content": [
+        {
+          "type": "text",
+          "text": "before"
+        },
+        null,
+        {
+          "type": "text",
+          "text": "after"
+        }
+      ],
+      "pythonBuilds": ["TextInputContent", "NoneType", "TextInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": "before"
+          },
+          {
+            "kind": "text",
+            "text": "after"
+          }
+        ],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/neighbours-survive",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "rule 3 on the outbound leg, around the terminal else both runtimes reach",
+      "content": [
+        {
+          "type": "text",
+          "text": "before"
+        },
+        {
+          "type": "totally_unknown"
+        },
+        {
+          "type": "text",
+          "text": "after"
+        }
+      ],
+      "pythonBuilds": ["TextInputContent", "dict", "TextInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": "before"
+          },
+          {
+            "kind": "text",
+            "text": "after"
+          }
+        ],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/ts-only/text-neighbours-survive",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "rule 3 around TypeScript's text guard; in Python the middle item is a raw dict, so rule 3 is exercised around the terminal else instead",
+      "content": [
+        {
+          "type": "text",
+          "text": "before"
+        },
+        {
+          "type": "text",
+          "text": 42
+        },
+        {
+          "type": "text",
+          "text": "after"
+        }
+      ],
+      "pythonBuilds": ["TextInputContent", "dict", "TextInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": "before"
+          },
+          {
+            "kind": "text",
+            "text": "after"
+          }
+        ],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/document-data-null",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "the payload emitted as the media block's base64 was never checked: a null one shipped `data: null` to the provider, silently",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": null,
+            "mimeType": "application/pdf"
+          }
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/document-data-non-string",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "same emission point, wrong type rather than absent",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": 42,
+            "mimeType": "application/pdf"
+          }
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/document-data-empty",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "the empty payload reaches the typed branch through the VALIDATING route — AG-UI's source schema accepts `\"\"` — so no runtime needs a bypass to hit it",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": "",
+            "mimeType": "application/pdf"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/audio-data-null",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "the audio standard block reads the same unchecked payload as the file one",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "data",
+            "value": null,
+            "mimeType": "audio/wav"
+          }
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/audio-data-non-string",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "same emission point, wrong type rather than absent",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "data",
+            "value": 42,
+            "mimeType": "audio/wav"
+          }
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/image-data-null",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "interpolated straight into the data URL, and the two runtimes did not even agree on the garbage: `base64,null` here, `base64,None` in Python",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "data",
+            "value": null,
+            "mimeType": "image/png"
+          }
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["ImageInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/image-data-non-string",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "`data:image/png;base64,42` is a payload the provider will try to decode",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "data",
+            "value": 42,
+            "mimeType": "image/png"
+          }
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["ImageInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/image-data-empty",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "`data:image/png;base64,` is the exact string the inbound leg refuses to read back as bytes, so the attachment was already unreadable by this adapter's own rule",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "data",
+            "value": "",
+            "mimeType": "image/png"
+          }
+        }
+      ],
+      "pythonBuilds": ["ImageInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/video-data-null",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "video has no standard block, so it reaches the data-URL construction with the same unchecked payload",
+      "content": [
+        {
+          "type": "video",
+          "source": {
+            "type": "data",
+            "value": null,
+            "mimeType": "video/mp4"
+          }
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["VideoInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/document-url-non-string",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "a non-string url source value went out verbatim under `image_url.url`",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "value": 42
+          }
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/image-url-object",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "the measured DIVERGENCE: `{}` is truthy in TypeScript and falsy in Python, so this same item was kept by one runtime and dropped by the other",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "url",
+            "value": {}
+          }
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["ImageInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/binary-data-non-string",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "the legacy branch's third emission point: a non-string `data` reached the standard block as its base64",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "application/pdf",
+          "data": 42
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/binary-url-non-string",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "a non-string legacy `url` went out verbatim under `image_url.url`",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "image/png",
+          "url": 42
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/binary-id-non-string",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "the `id` reference form is emitted verbatim too",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "image/png",
+          "id": 42
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/binary-unusable-url-does-not-shadow-a-usable-data",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "an unusable payload is an ABSENT one, the rule this file already applies to a MIME type and a filename — so a `url` of 42 no longer outranks a usable `data`, and the item survives instead of being dropped",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "image/png",
+          "url": 42,
+          "data": "QUJD"
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:image/png;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/binary-mime-type-absent",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "`mimeType` is the one field on the legacy item with no default, so it is the one that can be ABSENT rather than null. Python read it as a plain attribute and pydantic raised `AttributeError` out of the whole message list; an absent MIME type must read exactly like the null one this table already pins under `binary/no-mime/data`",
+      "content": [
+        {
+          "type": "binary",
+          "data": "QUJD"
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/binary-mime-type-absent-and-no-payload",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "the same absent `mimeType` on an item with nothing to send: the MIME read happens BEFORE the `no url, data, or id` guard, so Python raised where it used to drop — this is the one case in the table that was a REGRESSION rather than a pre-existing hole, and the drop it asserts is the one the guard already emits",
+      "content": [
+        {
+          "type": "binary"
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/malformed/payload/neighbours-survive",
+      "direction": "outbound",
+      "axis": "malformed",
+      "why": "rule 3 on the outbound payload guard: the bad attachment costs itself and nothing else, not the text around it and not the good attachment beside it",
+      "content": [
+        {
+          "type": "text",
+          "text": "before"
+        },
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": null,
+            "mimeType": "application/pdf"
+          }
+        },
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": "aGk=",
+            "mimeType": "application/pdf"
+          }
+        },
+        {
+          "type": "text",
+          "text": "after"
+        }
+      ],
+      "pythonBuild": "unvalidated",
+      "pythonBuilds": [
+        "TextInputContent",
+        "DocumentInputContent",
+        "DocumentInputContent",
+        "TextInputContent"
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": "before"
+          },
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "aGk=",
+            "mimeType": "application/pdf",
+            "filename": "attachment.pdf"
+          },
+          {
+            "kind": "text",
+            "text": "after"
+          }
+        ],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "outbound/edge/text-empty",
+      "direction": "outbound",
+      "axis": "edge",
+      "why": "an empty text is text",
+      "content": [
+        {
+          "type": "text",
+          "text": ""
+        }
+      ],
+      "pythonBuilds": ["TextInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": ""
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/edge/identical-items-both-survive",
+      "direction": "outbound",
+      "axis": "edge",
+      "why": "the same item twice is two blocks, not one; the outbound half of the case that makes `dropped` falsifiable — see its inbound twin",
+      "content": [
+        {
+          "type": "text",
+          "text": "dup"
+        },
+        {
+          "type": "text",
+          "text": "dup"
+        }
+      ],
+      "pythonBuilds": ["TextInputContent", "TextInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": "dup"
+          },
+          {
+            "kind": "text",
+            "text": "dup"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/edge/metadata-name-is-not-a-filename",
+      "direction": "outbound",
+      "axis": "edge",
+      "why": "the outbound leg reads ONE metadata key; metadata.name is not it, so the name is DERIVED",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": "aGk=",
+            "mimeType": "application/pdf"
+          },
+          "metadata": {
+            "name": "from-name.pdf"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "aGk=",
+            "mimeType": "application/pdf",
+            "filename": "attachment.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/edge/metadata-filename-empty-derives",
+      "direction": "outbound",
+      "axis": "edge",
+      "why": "an empty supplied filename is an absent one, so the document derives its name",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": "aGk=",
+            "mimeType": "application/pdf"
+          },
+          "metadata": {
+            "filename": ""
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "aGk=",
+            "mimeType": "application/pdf",
+            "filename": "attachment.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/edge/metadata-filename-supplied",
+      "direction": "outbound",
+      "axis": "edge",
+      "why": "a supplied filename wins over derivation",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": "aGk=",
+            "mimeType": "application/pdf"
+          },
+          "metadata": {
+            "filename": "real.pdf"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "aGk=",
+            "mimeType": "application/pdf",
+            "filename": "real.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/edge/metadata-filename-non-string-derives",
+      "direction": "outbound",
+      "axis": "edge",
+      "why": "a non-string metadata.filename is not a name, it is a name the client failed to send; without the guard `filename: 12345` reaches the provider, and with it the document derives its own name",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": "aGk=",
+            "mimeType": "application/pdf"
+          },
+          "metadata": {
+            "filename": 12345
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "aGk=",
+            "mimeType": "application/pdf",
+            "filename": "attachment.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/edge/metadata-filename-non-string-on-audio",
+      "direction": "outbound",
+      "axis": "edge",
+      "why": "the same guard on an audio block, which has no derivation to fall back on, so the refused name leaves the block with none at all",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "data",
+            "value": "aGk=",
+            "mimeType": "audio/wav"
+          },
+          "metadata": {
+            "filename": 12345
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "audio",
+            "sourceType": "base64",
+            "data": "aGk=",
+            "mimeType": "audio/wav",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/image/image-png/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": "image/png"
+          }
+        }
+      ],
+      "pythonBuilds": ["ImageInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:image/png;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/image/IMAGE-PNG/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": "IMAGE/PNG"
+          }
+        }
+      ],
+      "pythonBuilds": ["ImageInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:IMAGE/PNG;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/image/no-mime/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": ""
+          }
+        }
+      ],
+      "pythonBuilds": ["ImageInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/image/url",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with a url source: every modality keeps image_url",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "url",
+            "value": "https://example.com/a.bin"
+          }
+        }
+      ],
+      "pythonBuilds": ["ImageInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "https://example.com/a.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/audio/audio-wav/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": "audio/wav"
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "audio",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "audio/wav",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/audio/audio-mpeg/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": "audio/mpeg"
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "audio",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "audio/mp3",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/audio/AUDIO-WAV/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": "AUDIO/WAV"
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "audio",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "audio/wav",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/audio/audio-ogg/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": "audio/ogg"
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:audio/ogg;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/audio/audio-wav-codecs-1/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": "audio/wav;codecs=1"
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "audio",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "audio/wav",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/audio/no-mime/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": ""
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/audio/url",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with a url source: every modality keeps image_url",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "url",
+            "value": "https://example.com/a.bin"
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "https://example.com/a.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/video/video-mp4/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "video",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": "video/mp4"
+          }
+        }
+      ],
+      "pythonBuilds": ["VideoInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:video/mp4;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/video/no-mime/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "video",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": ""
+          }
+        }
+      ],
+      "pythonBuilds": ["VideoInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/video/url",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with a url source: every modality keeps image_url",
+      "content": [
+        {
+          "type": "video",
+          "source": {
+            "type": "url",
+            "value": "https://example.com/a.bin"
+          }
+        }
+      ],
+      "pythonBuilds": ["VideoInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "https://example.com/a.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/document/application-pdf/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": "application/pdf"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "application/pdf",
+            "filename": "attachment.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/document/application-vnd-ms-excel/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": "application/vnd.ms-excel"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "application/vnd.ms-excel",
+            "filename": "attachment.xls"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/document/text-plain/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": "text/plain"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "text/plain",
+            "filename": "attachment.txt"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/document/APPLICATION-PDF/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": "APPLICATION/PDF"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "APPLICATION/PDF",
+            "filename": "attachment.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/document/no-mime/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with an inline-data source",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": ""
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "application/octet-stream",
+            "filename": "attachment.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/document/url",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "typed AG-UI media item with a url source: every modality keeps image_url",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "value": "https://example.com/a.bin"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "https://example.com/a.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/binary/image-png/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "legacy BinaryInputContent with inline data",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "image/png",
+          "data": "QUJD"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:image/png;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/binary/audio-wav/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "legacy BinaryInputContent with inline data",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "audio/wav",
+          "data": "QUJD"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "audio",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "audio/wav",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/binary/AUDIO-WAV/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "legacy BinaryInputContent with inline data",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "AUDIO/WAV",
+          "data": "QUJD"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "audio",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "audio/wav",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/binary/audio-ogg/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "legacy BinaryInputContent with inline data",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "audio/ogg",
+          "data": "QUJD"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:audio/ogg;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/binary/video-mp4/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "legacy BinaryInputContent with inline data",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "video/mp4",
+          "data": "QUJD"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:video/mp4;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/binary/application-pdf/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "legacy BinaryInputContent with inline data",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "application/pdf",
+          "data": "QUJD"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "application/pdf",
+            "filename": "attachment.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/binary/APPLICATION-PDF/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "legacy BinaryInputContent with inline data",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "APPLICATION/PDF",
+          "data": "QUJD"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "APPLICATION/PDF",
+            "filename": "attachment.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/binary/no-mime/data",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "legacy BinaryInputContent with inline data",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "",
+          "data": "QUJD"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/binary/url",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "legacy BinaryInputContent with a url",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "image/png",
+          "url": "https://example.com/a.png"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "https://example.com/a.png"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/binary/id",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "legacy BinaryInputContent with only an id",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "image/png",
+          "id": "file-123"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "file-123"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/binary/filename",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "legacy BinaryInputContent carries its filename at the top level",
+      "content": [
+        {
+          "type": "binary",
+          "mimeType": "application/pdf",
+          "data": "QUJD",
+          "filename": "legacy.pdf"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "application/pdf",
+            "filename": "legacy.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/wellformed/mixed",
+      "direction": "outbound",
+      "axis": "wellformed",
+      "why": "a realistic mixed array",
+      "content": [
+        {
+          "type": "text",
+          "text": "look"
+        },
+        {
+          "type": "image",
+          "source": {
+            "type": "url",
+            "value": "https://example.com/a.png"
+          }
+        },
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": "QUJD",
+            "mimeType": "application/pdf"
+          },
+          "metadata": {
+            "filename": "invoice.pdf"
+          }
+        }
+      ],
+      "pythonBuilds": [
+        "TextInputContent",
+        "ImageInputContent",
+        "DocumentInputContent"
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "text",
+            "text": "look"
+          },
+          {
+            "kind": "image_url",
+            "url": "https://example.com/a.png"
+          },
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "application/pdf",
+            "filename": "invoice.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/data-url/file/data-url-becomes-inline-data",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "a data: URL carries its bytes inline, so it is stored as a data source, not a url source; stored as a url source it went back out as image_url and reached the provider as an image",
+      "content": [
+        {
+          "type": "file",
+          "url": "data:application/pdf;base64,JVBERi0xLjQK",
+          "mime_type": "application/pdf",
+          "metadata": {
+            "filename": "in.pdf"
+          }
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": "in.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/file/round-trip-of-the-inbound-leg-reaches-the-standard-block",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "the other half of inbound/data-url/file/data-url-becomes-inline-data: exactly what that case stores, sent again, must reach the provider as a file block",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "data",
+            "value": "JVBERi0xLjQK",
+            "mimeType": "application/pdf"
+          },
+          "metadata": {
+            "filename": "in.pdf"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": "in.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/file/url-source-holding-a-data-url-reaches-the-standard-block",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "a url source can hold a data URL without having come from this adapter's inbound leg — a thread persisted before the fix, or client JSON — so the outbound leg classifies on what the source CARRIES, not on its label",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "value": "data:application/pdf;base64,JVBERi0xLjQK"
+          },
+          "metadata": {
+            "filename": "in.pdf"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": "in.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/data-url/audio/data-url-becomes-inline-data",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "same as the file case, for audio: stored as a url source it went back out as image_url instead of input_audio",
+      "content": [
+        {
+          "type": "audio",
+          "url": "data:audio/wav;base64,SGVsbG8=",
+          "mime_type": "audio/wav"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "audio",
+            "source": "data",
+            "value": "SGVsbG8=",
+            "mimeType": "audio/wav",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/audio/round-trip-of-the-inbound-leg-reaches-the-standard-block",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "the other half of inbound/data-url/audio/data-url-becomes-inline-data",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "data",
+            "value": "SGVsbG8=",
+            "mimeType": "audio/wav"
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "audio",
+            "sourceType": "base64",
+            "data": "SGVsbG8=",
+            "mimeType": "audio/wav",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/audio/url-source-holding-a-data-url-reaches-the-standard-block",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "a url source holding an audio data URL reaches input_audio rather than image_url",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "url",
+            "value": "data:audio/wav;base64,SGVsbG8="
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "audio",
+            "sourceType": "base64",
+            "data": "SGVsbG8=",
+            "mimeType": "audio/wav",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/data-url/file/source_type-url-spelling",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "the deprecated source_type family spells the same block differently and must classify the same way",
+      "content": [
+        {
+          "type": "file",
+          "source_type": "url",
+          "url": "data:application/pdf;base64,JVBERi0xLjQK",
+          "mime_type": "application/pdf"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/data-url/mediatype-inside-the-url-wins-over-the-declared-one",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "RFC 2397 makes the mediatype a description of the payload that follows it in the same string; a mime_type on the block describes the reference",
+      "content": [
+        {
+          "type": "file",
+          "url": "data:application/pdf;base64,JVBERi0xLjQK",
+          "mime_type": "image/png"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/data-url/omitted-mediatype-falls-back-to-the-declared-one",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "data:;base64,... says nothing about its payload, so the block's own mime_type is the only signal left",
+      "content": [
+        {
+          "type": "file",
+          "url": "data:;base64,QUJD",
+          "mime_type": "application/pdf"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "application/pdf",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/mediatype-inside-the-url-wins-over-the-declared-one",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "the outbound leg reads the payload's own mediatype for the same reason the inbound leg does",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "value": "data:application/pdf;base64,JVBERi0xLjQK",
+            "mimeType": "image/png"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": "attachment.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/omitted-mediatype-falls-back-to-the-declared-one",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "a MIME-less data URL on a url source that declares one",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "value": "data:;base64,QUJD",
+            "mimeType": "application/pdf"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "application/pdf",
+            "filename": "attachment.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/grammar/base64-token-is-case-insensitive",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "RFC 2045 6.1 makes the encoding token case-insensitive and ;Base64 occurs in the wild",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "value": "data:application/pdf;BASE64,QUJD"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "QUJD",
+            "mimeType": "application/pdf",
+            "filename": "attachment.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/grammar/parameters-before-the-base64-token",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "the base64 token is documented as trailing but other parameters can precede it, and the encoding is still base64",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "url",
+            "value": "data:audio/wav;codecs=1;base64,SGVsbG8="
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "audio",
+            "sourceType": "base64",
+            "data": "SGVsbG8=",
+            "mimeType": "audio/wav",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/grammar/payload-carrying-a-comma-is-not-truncated",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "split on the FIRST comma and keep the whole remainder, the rule the image_url branch already applies",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "value": "data:application/pdf;base64,QUJD,RUZH"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "QUJD,RUZH",
+            "mimeType": "application/pdf",
+            "filename": "attachment.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/data-url/not-base64/percent-encoded-stays-a-url-source",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "RFC 2397's default encoding is percent-encoded text, not base64; putting it in a block whose payload key is base64 BY DEFINITION would hand the provider bytes that decode to garbage",
+      "content": [
+        {
+          "type": "file",
+          "url": "data:text/plain,hello%20there",
+          "mime_type": "text/plain"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "data:text/plain,hello%20there",
+            "mimeType": "text/plain",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/not-base64/percent-encoded-stays-image_url",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "the same refusal on the other leg: a non-base64 data URL keeps the pre-existing image_url form rather than being guessed at",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "value": "data:text/plain,hello%20there",
+            "mimeType": "text/plain"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:text/plain,hello%20there"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/data-url/malformed/no-comma-stays-a-url-source",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "no comma means no payload delimiter, so this is not a data URL at all",
+      "content": [
+        {
+          "type": "file",
+          "url": "data:application/pdf;base64",
+          "mime_type": "application/pdf"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "data:application/pdf;base64",
+            "mimeType": "application/pdf",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/malformed/no-comma-stays-image_url",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "no comma means no payload delimiter, so this is not a data URL at all",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "value": "data:application/pdf;base64",
+            "mimeType": "application/pdf"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:application/pdf;base64"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/data-url/malformed/empty-payload-stays-a-url-source",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "an empty payload would mint an inline attachment pointing at nothing, the same defect the image_url branch already rejects",
+      "content": [
+        {
+          "type": "file",
+          "url": "data:application/pdf;base64,",
+          "mime_type": "application/pdf"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "data:application/pdf;base64,",
+            "mimeType": "application/pdf",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/malformed/empty-payload-stays-image_url",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "an empty payload would emit a standard block with no bytes in it",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "value": "data:application/pdf;base64,",
+            "mimeType": "application/pdf"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:application/pdf;base64,"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/data-url/malformed/uppercase-scheme-stays-a-url-source",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "URI schemes are case-insensitive per RFC 3986 3.1, but this file already matched data: case-sensitively in the image_url branch and one rule applied everywhere beats a better rule applied in one place",
+      "content": [
+        {
+          "type": "file",
+          "url": "DATA:application/pdf;base64,QUJD",
+          "mime_type": "application/pdf"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "DATA:application/pdf;base64,QUJD",
+            "mimeType": "application/pdf",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/malformed/uppercase-scheme-stays-image_url",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "the same case-sensitivity rule on the other leg, so the two runtimes cannot drift on it",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "value": "DATA:application/pdf;base64,QUJD",
+            "mimeType": "application/pdf"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "DATA:application/pdf;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/data-url/remote-url-is-untouched",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "a REMOTE url is a reference and stays one — this is the row the data-URL rule must not widen into",
+      "content": [
+        {
+          "type": "file",
+          "url": "https://example.com/a.pdf",
+          "mime_type": "application/pdf"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "document",
+            "source": "url",
+            "value": "https://example.com/a.pdf",
+            "mimeType": "application/pdf",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/remote-url-is-untouched",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "a REMOTE-url standard block throws in the TypeScript translator and raises in Python, so it keeps image_url",
+      "content": [
+        {
+          "type": "document",
+          "source": {
+            "type": "url",
+            "value": "https://example.com/a.pdf",
+            "mimeType": "application/pdf"
+          }
+        }
+      ],
+      "pythonBuilds": ["DocumentInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "https://example.com/a.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/remote-audio-url-is-untouched",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "the same for audio, whose remote-url standard block raises 'Key base64 is required for audio blocks'",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "url",
+            "value": "https://example.com/a.wav",
+            "mimeType": "audio/wav"
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "https://example.com/a.wav"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/data-url/image/data-url-becomes-inline-data",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "an image data URL carries bytes too, and this is what the image_url branch already made of the identical payload — the two inbound branches now agree",
+      "content": [
+        {
+          "type": "image",
+          "url": "data:image/png;base64,QUJD"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/png",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/image/url-source-holding-a-data-url-stays-image_url",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "images keep image_url unconditionally, so the data-URL rule must leave the emitted url byte-for-byte what it was",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "url",
+            "value": "data:image/png;base64,QUJD"
+          }
+        }
+      ],
+      "pythonBuilds": ["ImageInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:image/png;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/data-url/video/data-url-becomes-inline-data",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "video too: the AG-UI item tells the truth about where its bytes are, even though the outbound leg still cannot promote it",
+      "content": [
+        {
+          "type": "video",
+          "url": "data:video/mp4;base64,QUJD"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "video",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "video/mp4",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/video/url-source-holding-a-data-url-stays-image_url",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "a video standard block is rejected by both translators, so the data-URL rule must not promote one",
+      "content": [
+        {
+          "type": "video",
+          "source": {
+            "type": "url",
+            "value": "data:video/mp4;base64,QUJD"
+          }
+        }
+      ],
+      "pythonBuilds": ["VideoInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:video/mp4;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/audio/unsupported-format-stays-image_url",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "audio the provider's format enum cannot name keeps image_url, and the url it keeps is the ORIGINAL data URL rather than one rebuilt from the parse",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "url",
+            "value": "data:audio/ogg;base64,SGVsbG8="
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:audio/ogg;base64,SGVsbG8="
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/audio/mpeg-normalizes-through-the-data-url",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "audio/mpeg is the standard type for MP3 and the provider's enum lists mp3, so the normalization has to survive the data-URL parse",
+      "content": [
+        {
+          "type": "audio",
+          "source": {
+            "type": "url",
+            "value": "data:audio/mpeg;base64,SGVsbG8="
+          }
+        }
+      ],
+      "pythonBuilds": ["AudioInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "audio",
+            "sourceType": "base64",
+            "data": "SGVsbG8=",
+            "mimeType": "audio/mp3",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/binary/url-holding-a-data-url-reaches-the-standard-block",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "a legacy item's url is a source classification point too, and a data URL in it is the same defect: bytes labelled as a reference",
+      "content": [
+        {
+          "type": "binary",
+          "url": "data:application/pdf;base64,JVBERi0xLjQK",
+          "mimeType": "application/pdf",
+          "filename": "in.pdf"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "file",
+            "sourceType": "base64",
+            "data": "JVBERi0xLjQK",
+            "mimeType": "application/pdf",
+            "filename": "in.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/binary/audio-url-holding-a-data-url-reaches-the-standard-block",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "the same for a legacy audio attachment",
+      "content": [
+        {
+          "type": "binary",
+          "url": "data:audio/wav;base64,SGVsbG8=",
+          "mimeType": "audio/wav"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "standard",
+            "blockType": "audio",
+            "sourceType": "base64",
+            "data": "SGVsbG8=",
+            "mimeType": "audio/wav",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/binary/remote-url-is-untouched",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "url still outranks data on the legacy item, and a remote one keeps the historical reference form",
+      "content": [
+        {
+          "type": "binary",
+          "url": "https://example.com/a.pdf",
+          "mimeType": "application/pdf",
+          "data": "QUJD"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "https://example.com/a.pdf"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "outbound/data-url/binary/image-data-url-stays-image_url",
+      "direction": "outbound",
+      "axis": "data-url",
+      "why": "a legacy image keeps image_url, so the legacy data-URL rule must not widen into it either",
+      "content": [
+        {
+          "type": "binary",
+          "url": "data:image/png;base64,QUJD",
+          "mimeType": "image/png"
+        }
+      ],
+      "pythonBuilds": ["BinaryInputContent"],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image_url",
+            "url": "data:image/png;base64,QUJD"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    }
+  ]
+}

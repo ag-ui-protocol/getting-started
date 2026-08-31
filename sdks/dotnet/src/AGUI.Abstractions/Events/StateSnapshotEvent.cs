@@ -18,4 +18,14 @@ public sealed class StateSnapshotEvent : BaseEvent
     /// </summary>
     [JsonPropertyName("snapshot")]
     public JsonElement Snapshot { get; set; }
+
+    /// <summary>
+    /// Gets or sets the subagent that produced this event. State events are attributable,
+    /// and attribution here is provenance rather than ownership: it records which subagent
+    /// produced the update, while the state itself stays run-scoped and is applied
+    /// run-scoped. There is no per-subagent state -- an attributed snapshot replaces the
+    /// run's state exactly as an unattributed one does.
+    /// </summary>
+    [JsonPropertyName("subagentRunId")]
+    public string? SubagentRunId { get; set; }
 }

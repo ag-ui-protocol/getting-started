@@ -45,6 +45,9 @@ class EventType(str, Enum):
     REASONING_MESSAGE_CHUNK = "REASONING_MESSAGE_CHUNK"
     REASONING_END = "REASONING_END"
     REASONING_ENCRYPTED_VALUE = "REASONING_ENCRYPTED_VALUE"
+    SUBAGENT_STARTED = "SUBAGENT_STARTED"
+    SUBAGENT_FINISHED = "SUBAGENT_FINISHED"
+    SUBAGENT_ERROR = "SUBAGENT_ERROR"
 ```
 
 ## BaseEvent
@@ -617,6 +620,100 @@ class ReasoningEncryptedValueEvent(BaseEvent):
 | `subtype`         | `ReasoningEncryptedValueSubtype` | The type of entity this value belongs to           |
 | `entity_id`       | `str`                            | ID of the tool call or message to attach the value |
 | `encrypted_value` | `str`                            | The encrypted value to attach to the entity        |
+
+## Subagent Events
+
+These events report that the agent delegated work to a child agent, so a frontend
+can attribute output to the subagent that produced it. Attribution itself travels
+as an optional `subagent_run_id` on most other event types.
+
+`subagent_run_id` identifies **one invocation**, not a reusable subagent
+definition — the same subagent run twice yields two different values. See
+[Subagents](/concepts/subagents) for the full model.
+
+Field names are snake_case in Python and serialize to camelCase on the wire, so
+`subagent_run_id` appears as `subagentRunId` in JSON.
+
+### SubagentStartedEvent
+
+`from ag_ui.core import SubagentStartedEvent`
+
+Announces a new subagent invocation and names it for display.
+
+```python
+class SubagentStartedEvent(BaseEvent):
+    type: Literal[EventType.SUBAGENT_STARTED]
+    subagent_run_id: str
+    name: str
+    description: Optional[str] = None
+    parent_subagent_run_id: Optional[str] = None
+    parent_tool_call_id: Optional[str] = None
+    parent_message_id: Optional[str] = None
+```
+
+| Property                 | Type  | Description                                   |
+| ------------------------ | ----- | --------------------------------------------- |
+| `subagent_run_id`        | `str` | Opaque identifier for this invocation         |
+| `name`                   | `str` | Declared subagent name or type, for display   |
+| `description`            | `str` | Optional description                          |
+| `parent_subagent_run_id` | `str` | Optional enclosing subagent, when nesting     |
+| `parent_tool_call_id`    | `str` | Optional tool call that spawned this subagent |
+| `parent_message_id`      | `str` | Optional message holding that tool call       |
+
+### SubagentFinishedEvent
+
+`from ag_ui.core import SubagentFinishedEvent`
+
+Marks a subagent invocation as complete.
+
+```python
+class SubagentFinishedEvent(BaseEvent):
+    type: Literal[EventType.SUBAGENT_FINISHED]
+    subagent_run_id: str
+    result: Optional[Any] = None
+    outcome: Optional[SubagentFinishedOutcome] = None
+```
+
+| Property          | Type  | Description                                            |
+| ----------------- | ----- | ------------------------------------------------------ |
+| `subagent_run_id` | `str` | Matches the id from `SubagentStartedEvent`               |
+| `result`          | `Any` | Optional payload, mirroring `RunFinishedEvent.result`   |
+| `outcome`         | `Optional[SubagentFinishedOutcome]` | Discriminated union of `SubagentFinishedSuccessOutcome` and `SubagentFinishedSuspendedOutcome` (with optional `interrupt_ids`); `None` means success (the legacy reading). Suspended says the subagent is checkpointed awaiting outside input; `interrupt_ids` names the run-level interrupts whose answers resume it. |
+
+### SubagentErrorEvent
+
+`from ag_ui.core import SubagentErrorEvent`
+
+Marks a subagent invocation as failed.
+
+```python
+class SubagentErrorEvent(BaseEvent):
+    type: Literal[EventType.SUBAGENT_ERROR]
+    subagent_run_id: str
+    message: str
+    code: Optional[str] = None
+```
+
+| Property          | Type  | Description                                |
+| ----------------- | ----- | ------------------------------------------ |
+| `subagent_run_id` | `str` | Matches the id from `SubagentStartedEvent`  |
+| `message`         | `str` | Human-readable error message               |
+| `code`            | `str` | Optional error code                        |
+
+### Attribution on other events
+
+Most event types accept an optional `subagent_run_id`. An event without it
+belongs to the parent agent, so a stream that never sets the field behaves
+exactly as it did before subagents existed.
+
+`RunStartedEvent`, `RunFinishedEvent` and `RunErrorEvent` are not attributable —
+they describe the run as a whole. `MessagesSnapshotEvent` carries attribution
+per-message instead.
+
+`StateSnapshotEvent` and `StateDeltaEvent` are attributable, but attribution on
+them is provenance rather than ownership — it records which subagent produced the
+update. State stays run-scoped, so an attributed snapshot or delta is applied to
+the run's one state document just as an unattributed one is.
 
 ## Deprecated Events
 

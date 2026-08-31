@@ -32,6 +32,7 @@ from ag_ui_strands import (
     PredictStateMapping,
 )
 from server.model_factory import create_model
+from server.settings import cors_origins
 
 # Suppress OpenTelemetry warnings
 os.environ["OTEL_SDK_DISABLED"] = "true"
@@ -220,4 +221,4 @@ agui_agent = StrandsAgent(
     config=generative_ui_config,
 )
 
-app = create_strands_app(agui_agent, "/")
+app = create_strands_app(agui_agent, "/", origins=cors_origins())

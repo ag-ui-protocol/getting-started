@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace AGUI.Abstractions;
@@ -98,6 +99,12 @@ namespace AGUI.Abstractions;
 [JsonSerializable(typeof(CustomEvent))]
 [JsonSerializable(typeof(RawEvent))]
 [JsonSerializable(typeof(MessagesSnapshotEvent))]
+[JsonSerializable(typeof(SubagentStartedEvent))]
+[JsonSerializable(typeof(SubagentFinishedEvent))]
+[JsonSerializable(typeof(SubagentFinishedOutcome))]
+[JsonSerializable(typeof(SubagentFinishedSuccessOutcome))]
+[JsonSerializable(typeof(SubagentFinishedSuspendedOutcome))]
+[JsonSerializable(typeof(SubagentErrorEvent))]
 [JsonSerializable(typeof(AgentCapabilities))]
 [JsonSerializable(typeof(IdentityCapabilities))]
 [JsonSerializable(typeof(TransportCapabilities))]
@@ -115,6 +122,7 @@ namespace AGUI.Abstractions;
 [JsonSerializable(typeof(IDictionary<string, object?>))]
 [JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(JsonElement?))]
+[JsonSerializable(typeof(JsonObject))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

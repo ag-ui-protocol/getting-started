@@ -24,13 +24,13 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": "The",
+    "delta": "This",
     "rawEvent": {
       "role": "assistant",
       "contents": [
         {
           "$type": "text",
-          "text": "The"
+          "text": "This"
         }
       ],
       "responseId": "chatcmpl-Id_1",
@@ -58,13 +58,13 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": " shows",
+    "delta": " depicts",
     "rawEvent": {
       "role": "assistant",
       "contents": [
         {
           "$type": "text",
-          "text": " shows"
+          "text": " depicts"
         }
       ],
       "responseId": "chatcmpl-Id_1",
@@ -109,57 +109,6 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": ",",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": ","
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": " minimalist",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": " minimalist"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": ",",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": ","
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
     "delta": " geometric",
     "rawEvent": {
       "role": "assistant",
@@ -177,13 +126,13 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": " design",
+    "delta": " shape",
     "rawEvent": {
       "role": "assistant",
       "contents": [
         {
           "$type": "text",
-          "text": " design"
+          "text": " shape"
         }
       ],
       "responseId": "chatcmpl-Id_1",
@@ -194,13 +143,30 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": " resembling",
+    "delta": " that",
     "rawEvent": {
       "role": "assistant",
       "contents": [
         {
           "$type": "text",
-          "text": " resembling"
+          "text": " that"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " resembles",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " resembles"
         }
       ],
       "responseId": "chatcmpl-Id_1",
@@ -228,13 +194,13 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": " diamond",
+    "delta": " simplified",
     "rawEvent": {
       "role": "assistant",
       "contents": [
         {
           "$type": "text",
-          "text": " diamond"
+          "text": " simplified"
         }
       ],
       "responseId": "chatcmpl-Id_1",
@@ -245,13 +211,47 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": " or",
+    "delta": " outline",
     "rawEvent": {
       "role": "assistant",
       "contents": [
         {
           "$type": "text",
-          "text": " or"
+          "text": " outline"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " of",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " of"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " a",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " a"
         }
       ],
       "responseId": "chatcmpl-Id_1",
@@ -279,13 +279,30 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": " shape",
+    "delta": " or",
     "rawEvent": {
       "role": "assistant",
       "contents": [
         {
           "$type": "text",
-          "text": " shape"
+          "text": " or"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " diamond",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " diamond"
         }
       ],
       "responseId": "chatcmpl-Id_1",
@@ -364,13 +381,13 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": " triangular",
+    "delta": " angular",
     "rawEvent": {
       "role": "assistant",
       "contents": [
         {
           "$type": "text",
-          "text": " triangular"
+          "text": " angular"
         }
       ],
       "responseId": "chatcmpl-Id_1",
@@ -381,13 +398,13 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": " sections",
+    "delta": " lines",
     "rawEvent": {
       "role": "assistant",
       "contents": [
         {
           "$type": "text",
-          "text": " sections"
+          "text": " lines"
         }
       ],
       "responseId": "chatcmpl-Id_1",
@@ -398,13 +415,13 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": ",",
+    "delta": " and",
     "rawEvent": {
       "role": "assistant",
       "contents": [
         {
           "$type": "text",
-          "text": ","
+          "text": " and"
         }
       ],
       "responseId": "chatcmpl-Id_1",
@@ -415,13 +432,64 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": " outlined",
+    "delta": " facets",
     "rawEvent": {
       "role": "assistant",
       "contents": [
         {
           "$type": "text",
-          "text": " outlined"
+          "text": " facets"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " that",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " that"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " inter",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " inter"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": "connect",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "connect"
         }
       ],
       "responseId": "chatcmpl-Id_1",
@@ -449,30 +517,13 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": " give",
+    "delta": " create",
     "rawEvent": {
       "role": "assistant",
       "contents": [
         {
           "$type": "text",
-          "text": " give"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": " it",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": " it"
+          "text": " create"
         }
       ],
       "responseId": "chatcmpl-Id_1",
@@ -490,6 +541,57 @@
         {
           "$type": "text",
           "text": " a"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " three",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " three"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": "-dimensional",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "-dimensional"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": ",",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ","
         }
       ],
       "responseId": "chatcmpl-Id_1",
@@ -551,244 +653,6 @@
   {
     "type": "TEXT_MESSAGE_CONTENT",
     "messageId": "chatcmpl-Id_1",
-    "delta": ",",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": ","
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": " like",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": " like"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": " a",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": " a"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": " cut",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": " cut"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": " gem",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": " gem"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": ".",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": "."
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": " The",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": " The"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": " overall",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": " overall"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": " design",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": " design"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": " is",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": " is"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": " simplistic",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": " simplistic"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": " and",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": " and"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": " styl",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": " styl"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
-    "delta": "ized",
-    "rawEvent": {
-      "role": "assistant",
-      "contents": [
-        {
-          "$type": "text",
-          "text": "ized"
-        }
-      ],
-      "responseId": "chatcmpl-Id_1",
-      "messageId": "chatcmpl-Id_1",
-      "modelId": ""
-    }
-  },
-  {
-    "type": "TEXT_MESSAGE_CONTENT",
-    "messageId": "chatcmpl-Id_1",
     "delta": ".",
     "rawEvent": {
       "role": "assistant",
@@ -817,8 +681,8 @@
     "usage": [
       {
         "inputTokens": 220,
-        "outputTokens": 47,
-        "totalTokens": 267,
+        "outputTokens": 39,
+        "totalTokens": 259,
         "reasoningTokens": 0,
         "cachedInputTokens": 0
       }

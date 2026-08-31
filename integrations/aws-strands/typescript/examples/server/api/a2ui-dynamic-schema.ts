@@ -65,7 +65,8 @@ export async function createA2UIDynamicSchemaAgent(): Promise<StrandsAgent> {
   return new StrandsAgent({
     agent,
     name: "a2ui_dynamic_schema",
-    description: "Dynamic A2UI surfaces generated on the fly (auto-injected tool)",
+    description:
+      "Dynamic A2UI surfaces generated on the fly (auto-injected tool)",
     config: {
       a2ui: {
         defaultCatalogId: DOJO_CATALOG_ID,

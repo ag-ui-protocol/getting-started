@@ -86,3 +86,67 @@ jobs:
 
       - name: Run tests
         run: pnpm run test
+
+  # The lane above runs against the SDK version the lockfile pins. The
+  # aws-strands package declares an open-ended `@strands-agents/sdk` peer, and
+  # consumers install it prebuilt, so they can be running a newer SDK than the
+  # one this repository compiles against.
+  #
+  # That gap is load-bearing for this integration. The adapter decides what to
+  # carry onto each per-thread agent from a table checked against
+  # `keyof AgentConfig`, and that check happens here, at build time, against the
+  # pinned type. It can say nothing about a field a later release adds, so a new
+  # field is dropped in silence on exactly the versions the peer range
+  # advertises as supported.
+  #
+  # This lane closes it by resolving the newest published SDK and running the
+  # package's own suite and typecheck against it. A red build here means the SDK
+  # gained something the adapter has not been taught.
+  aws-strands-typescript-latest:
+    name: aws-strands-typescript-latest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+        with:
+          version: 10.33.4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace dependencies
+        run: pnpm exec nx build @ag-ui/aws-strands
+
+      - name: Install the newest published Strands SDK
+        working-directory: integrations/aws-strands/typescript
+        # pnpm, not npm: this is a pnpm workspace and this package depends on
+        # its siblings through the `workspace:` protocol, which npm refuses
+        # with EUNSUPPORTEDPROTOCOL.
+        #
+        # This rewrites package.json and the lockfile. That is deliberate and
+        # confined to the runner: the whole point of the lane is to report on a
+        # version the repository has not adopted, so it does not also assert
+        # that those files are untouched afterwards. Nothing is committed.
+        run: |
+          set -euo pipefail
+          pnpm add -D "@strands-agents/sdk@latest"
+          pnpm list @strands-agents/sdk --depth 0
+
+      - name: Typecheck against the newest release
+        working-directory: integrations/aws-strands/typescript
+        run: pnpm exec tsc --noEmit
+
+      - name: Run tests against the newest release
+        working-directory: integrations/aws-strands/typescript
+        run: pnpm exec vitest run
