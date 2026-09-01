@@ -89,3 +89,13 @@ describe("AbstractAgent — interrupt lifecycle enforcement", () => {
     await expect(cloned.runAgent()).resolves.toBeDefined();
   });
 });
+
+  it("allows cancelling an expired interrupt so the thread can continue", async () => {
+    const agent = new StubAgent();
+    agent.pendingInterrupts = [
+      { id: "int-1", reason: "tool_call", expiresAt: "2000-01-01T00:00:00Z" },
+    ];
+    await expect(
+      agent.runAgent({ resume: [{ interruptId: "int-1", status: "cancelled" }] }),
+    ).resolves.toBeDefined();
+  });

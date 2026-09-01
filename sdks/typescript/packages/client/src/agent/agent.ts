@@ -391,7 +391,12 @@ export abstract class AbstractAgent {
             });
           });
         }
-        if (event.state) {
+        // `!== undefined`, not truthiness: State is any JSON value, so a
+        // snapshot of `null`, `0`, `""` or `false` is a replacement like any
+        // other. The mutation channel only carries `state` when a stage
+        // actually set it, so presence is the signal — a truthiness check
+        // silently discarded every falsy replacement.
+        if (event.state !== undefined) {
           this.state = event.state;
           subscribers.forEach((subscriber) => {
             subscriber.onStateChanged?.({
@@ -443,8 +448,17 @@ export abstract class AbstractAgent {
         );
       }
       for (const i of this.pendingInterrupts) {
-        if (isInterruptExpired(i)) {
-          throw new AGUIError(`Interrupt ${i.id} expired at ${i.expiresAt}`);
+        if (!isInterruptExpired(i)) continue;
+        // Expiry forecloses ANSWERING, not resolving the thread: a cancelled
+        // entry is the conforming way past an interrupt nobody answered in
+        // time. Throwing on mere presence — which this once did — made an
+        // expired interrupt block its thread forever, since coverage is
+        // mandatory and no entry could ever satisfy this check.
+        const entry = (input.resume ?? []).find((r) => r.interruptId === i.id);
+        if (entry?.status !== "cancelled") {
+          throw new AGUIError(
+            `Interrupt ${i.id} expired at ${i.expiresAt} and can no longer be answered. Cancel it to continue the thread.`,
+          );
         }
       }
     }
@@ -480,7 +494,9 @@ export abstract class AbstractAgent {
           });
         });
       }
-      if (onRunInitializedMutation.state) {
+      // `!== undefined`, as in apply(): a subscriber may legitimately set a
+      // falsy state, and the mutation only carries the key when it did.
+      if (onRunInitializedMutation.state !== undefined) {
         this.state = onRunInitializedMutation.state;
         input.state = onRunInitializedMutation.state;
         subscribers.forEach((subscriber) => {

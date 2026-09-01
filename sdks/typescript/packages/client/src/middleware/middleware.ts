@@ -42,7 +42,10 @@ export abstract class Middleware {
     next: AbstractAgent,
   ): Observable<EventWithState> {
     let currentMessages = structuredClone_(input.messages || []);
-    let currentState = structuredClone_(input.state || {});
+    // `=== undefined`, not truthiness: State is any JSON value, so `false`,
+    // `0`, `""` and `null` are states a run legitimately starts from. Only a
+    // genuinely absent state defaults to the empty object.
+    let currentState = structuredClone_(input.state === undefined ? {} : input.state);
 
     // Use a ReplaySubject to feed events one by one
     const eventSubject = new ReplaySubject<BaseEvent>();
