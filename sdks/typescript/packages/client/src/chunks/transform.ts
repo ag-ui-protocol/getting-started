@@ -384,17 +384,31 @@ export const transformChunks =
               });
             }
 
-            if (messageChunkEvent.delta !== undefined) {
-              const contentOwner = messageChunkEvent.subagentRunId ?? textMessageFields.subagentRunId;
+            // A content event is emitted when the chunk carries a delta OR a
+            // provider payload — here and in the two branches below. The
+            // synthesized START deliberately claims no rawEvent, so a first
+            // chunk carrying rawEvent but no delta needs this event as the
+            // payload's carrier, exactly as a continuation does.
+            if (messageChunkEvent.delta !== undefined || messageChunkEvent.rawEvent !== undefined) {
+              // `!== undefined`, not `??`, on the incoming tag — here and on
+              // every continuation path below: a null tag is a violation the
+              // spec names, and `??` read it as absence, so a continuation's
+              // null fell back to the opener's owner and never reached the
+              // stage that rejects it. Preserved, it rides the synthesized
+              // event to enforcement, exactly as an opener's null does.
+              const contentOwner =
+                messageChunkEvent.subagentRunId !== undefined
+                  ? messageChunkEvent.subagentRunId
+                  : textMessageFields.subagentRunId;
               const textMessageContentEvent = withChunkOrigin(
                 {
                   type: EventType.TEXT_MESSAGE_CONTENT,
                   messageId: textMessageFields.messageId,
-                  delta: messageChunkEvent.delta,
+                  delta: messageChunkEvent.delta ?? "",
                   // Prefer the INCOMING chunk's tag over the opener's, so a producer that
                   // attributes every chunk sees its own attribution on the output rather
                   // than a value this transform remembered.
-                  ...(contentOwner != null && { subagentRunId: contentOwner }),
+                  ...(contentOwner !== undefined && { subagentRunId: contentOwner }),
                 } as TextMessageContentEvent,
                 messageChunkEvent,
               );
@@ -412,21 +426,34 @@ export const transformChunks =
             // metadata still reaches the reducer. It cannot ride the synthetic
             // `*_END` instead: `finalize` discards the events it creates, so the
             // last message of a stream would lose it.
-            if (textMessageResult.length === 0 && messageChunkEvent.metadata !== undefined) {
+            //
+            // The gate also fires for a chunk carrying only `rawEvent` — a
+            // provider payload is content whichever field it rides — and for
+            // one carrying only `subagentRunId: null`, whose violation must
+            // reach the stage that rejects it rather than vanish with the
+            // chunk.
+            if (
+              textMessageResult.length === 0 &&
+              (messageChunkEvent.metadata !== undefined ||
+                messageChunkEvent.rawEvent !== undefined ||
+                messageChunkEvent.subagentRunId === null)
+            ) {
               // Attribution follows the same rule as the delta path above: the
               // incoming chunk's tag first, the opener's owner as fallback —
               // a metadata-only continuation is still the lane's event.
               const metadataOwner =
-                messageChunkEvent.subagentRunId ?? textMessageFields!.subagentRunId;
+                messageChunkEvent.subagentRunId !== undefined
+                  ? messageChunkEvent.subagentRunId
+                  : textMessageFields!.subagentRunId;
               textMessageResult.push({
                 type: EventType.TEXT_MESSAGE_CONTENT,
                 messageId: textMessageFields!.messageId,
                 delta: "",
-                metadata: messageChunkEvent.metadata,
+                ...(messageChunkEvent.metadata !== undefined && { metadata: messageChunkEvent.metadata }),
                 ...(messageChunkEvent.rawEvent !== undefined && {
                   rawEvent: messageChunkEvent.rawEvent,
                 }),
-                ...(metadataOwner != null && { subagentRunId: metadataOwner }),
+                ...(metadataOwner !== undefined && { subagentRunId: metadataOwner }),
               } as TextMessageContentEvent);
             }
             return textMessageResult;
@@ -505,17 +532,20 @@ export const transformChunks =
               });
             }
 
-            if (toolCallChunkEvent.delta !== undefined) {
-              const argsOwner = toolCallChunkEvent.subagentRunId ?? toolCallFields.subagentRunId;
+            if (toolCallChunkEvent.delta !== undefined || toolCallChunkEvent.rawEvent !== undefined) {
+              const argsOwner =
+                toolCallChunkEvent.subagentRunId !== undefined
+                  ? toolCallChunkEvent.subagentRunId
+                  : toolCallFields.subagentRunId;
               const toolCallArgsEvent = withChunkOrigin(
                 {
                   type: EventType.TOOL_CALL_ARGS,
                   toolCallId: toolCallFields.toolCallId,
-                  delta: toolCallChunkEvent.delta,
+                  delta: toolCallChunkEvent.delta ?? "",
                   // Prefer the INCOMING chunk's tag over the opener's, so a producer that
                   // attributes every chunk sees its own attribution on the output rather
                   // than a value this transform remembered.
-                  ...(argsOwner != null && { subagentRunId: argsOwner }),
+                  ...(argsOwner !== undefined && { subagentRunId: argsOwner }),
                 } as ToolCallArgsEvent,
                 toolCallChunkEvent,
               );
@@ -528,19 +558,26 @@ export const transformChunks =
             }
 
             // Same as the text case above.
-            if (toolMessageResult.length === 0 && toolCallChunkEvent.metadata !== undefined) {
+            if (
+              toolMessageResult.length === 0 &&
+              (toolCallChunkEvent.metadata !== undefined ||
+                toolCallChunkEvent.rawEvent !== undefined ||
+                toolCallChunkEvent.subagentRunId === null)
+            ) {
               // Same attribution rule as the args path above.
               const metadataOwner =
-                toolCallChunkEvent.subagentRunId ?? toolCallFields!.subagentRunId;
+                toolCallChunkEvent.subagentRunId !== undefined
+                  ? toolCallChunkEvent.subagentRunId
+                  : toolCallFields!.subagentRunId;
               toolMessageResult.push({
                 type: EventType.TOOL_CALL_ARGS,
                 toolCallId: toolCallFields!.toolCallId,
                 delta: "",
-                metadata: toolCallChunkEvent.metadata,
+                ...(toolCallChunkEvent.metadata !== undefined && { metadata: toolCallChunkEvent.metadata }),
                 ...(toolCallChunkEvent.rawEvent !== undefined && {
                   rawEvent: toolCallChunkEvent.rawEvent,
                 }),
-                ...(metadataOwner != null && { subagentRunId: metadataOwner }),
+                ...(metadataOwner !== undefined && { subagentRunId: metadataOwner }),
               } as ToolCallArgsEvent);
             }
             return toolMessageResult;
@@ -602,18 +639,20 @@ export const transformChunks =
               });
             }
 
-            if (reasoningChunkEvent.delta !== undefined) {
+            if (reasoningChunkEvent.delta !== undefined || reasoningChunkEvent.rawEvent !== undefined) {
               const contentOwner =
-                reasoningChunkEvent.subagentRunId ?? reasoningMessageFields.subagentRunId;
+                reasoningChunkEvent.subagentRunId !== undefined
+                  ? reasoningChunkEvent.subagentRunId
+                  : reasoningMessageFields.subagentRunId;
               const reasoningMessageContentEvent = withChunkOrigin(
                 {
                   type: EventType.REASONING_MESSAGE_CONTENT,
                   messageId: reasoningMessageFields.messageId,
-                  delta: reasoningChunkEvent.delta,
+                  delta: reasoningChunkEvent.delta ?? "",
                   // Prefer the INCOMING chunk's tag over the opener's, so a producer that
                   // attributes every chunk sees its own attribution on the output rather
                   // than a value this transform remembered.
-                  ...(contentOwner != null && { subagentRunId: contentOwner }),
+                  ...(contentOwner !== undefined && { subagentRunId: contentOwner }),
                 } as ReasoningMessageContentEvent,
                 reasoningChunkEvent,
               );
@@ -626,19 +665,26 @@ export const transformChunks =
             }
 
             // Same as the text case above.
-            if (reasoningMessageResult.length === 0 && reasoningChunkEvent.metadata !== undefined) {
+            if (
+              reasoningMessageResult.length === 0 &&
+              (reasoningChunkEvent.metadata !== undefined ||
+                reasoningChunkEvent.rawEvent !== undefined ||
+                reasoningChunkEvent.subagentRunId === null)
+            ) {
               // Same attribution rule as the content path above.
               const metadataOwner =
-                reasoningChunkEvent.subagentRunId ?? reasoningMessageFields!.subagentRunId;
+                reasoningChunkEvent.subagentRunId !== undefined
+                  ? reasoningChunkEvent.subagentRunId
+                  : reasoningMessageFields!.subagentRunId;
               reasoningMessageResult.push({
                 type: EventType.REASONING_MESSAGE_CONTENT,
                 messageId: reasoningMessageFields!.messageId,
                 delta: "",
-                metadata: reasoningChunkEvent.metadata,
+                ...(reasoningChunkEvent.metadata !== undefined && { metadata: reasoningChunkEvent.metadata }),
                 ...(reasoningChunkEvent.rawEvent !== undefined && {
                   rawEvent: reasoningChunkEvent.rawEvent,
                 }),
-                ...(metadataOwner != null && { subagentRunId: metadataOwner }),
+                ...(metadataOwner !== undefined && { subagentRunId: metadataOwner }),
               } as ReasoningMessageContentEvent);
             }
             return reasoningMessageResult;

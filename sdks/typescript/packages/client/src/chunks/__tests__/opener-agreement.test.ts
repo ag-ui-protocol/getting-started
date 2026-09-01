@@ -139,3 +139,81 @@ describe("transformChunks opener agreement", () => {
     ]);
   });
 });
+
+// A continuation carrying `subagentRunId: null` is a violation the verifier
+// names. Expansion must not read the null as absence and substitute the
+// opener's owner — that concealed the defect on paths where expansion runs
+// before enforcement. The null rides the synthesized event to the judge.
+describe("transformChunks null attribution preservation", () => {
+  const expand = (events: BaseEvent[]) =>
+    lastValueFrom(from(events).pipe(transformChunks(false), toArray()));
+
+  it("preserves a continuation's null subagentRunId for enforcement to reject", async () => {
+    const events = await expand([
+      {
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "msg-1",
+        delta: "a",
+      } as TextMessageChunkEvent,
+      {
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "msg-1",
+        delta: "b",
+        subagentRunId: null,
+      } as unknown as TextMessageChunkEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as BaseEvent,
+    ]);
+    const contents = events.filter((e) => e.type === EventType.TEXT_MESSAGE_CONTENT);
+    expect(contents).toHaveLength(2);
+    expect("subagentRunId" in contents[0]).toBe(false);
+    expect((contents[1] as { subagentRunId?: string | null }).subagentRunId).toBeNull();
+  });
+
+  it("preserves a metadata-only continuation's null subagentRunId", async () => {
+    const events = await expand([
+      {
+        type: EventType.TOOL_CALL_CHUNK,
+        toolCallId: "tc-1",
+        toolCallName: "search",
+        delta: "{}",
+      } as ToolCallChunkEvent,
+      {
+        type: EventType.TOOL_CALL_CHUNK,
+        metadata: { finish: "stop" },
+        subagentRunId: null,
+      } as unknown as ToolCallChunkEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as BaseEvent,
+    ]);
+    const args = events.filter((e) => e.type === EventType.TOOL_CALL_ARGS);
+    expect(args).toHaveLength(2);
+    expect((args[1] as { subagentRunId?: string | null }).subagentRunId).toBeNull();
+  });
+});
+
+// The synthesized START deliberately carries no rawEvent, so a first chunk
+// with a provider payload but no delta needs a content event as the carrier —
+// otherwise the payload is silently lost.
+describe("transformChunks rawEvent-only chunks", () => {
+  const expand = (events: BaseEvent[]) =>
+    lastValueFrom(from(events).pipe(transformChunks(false), toArray()));
+
+  it("carries a first chunk's rawEvent on a zero-delta content event", async () => {
+    const events = await expand([
+      {
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "msg-1",
+        rawEvent: { provider: "payload" },
+      } as TextMessageChunkEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as BaseEvent,
+    ]);
+    expect(events.map((e) => e.type)).toEqual([
+      EventType.TEXT_MESSAGE_START,
+      EventType.TEXT_MESSAGE_CONTENT,
+      EventType.TEXT_MESSAGE_END,
+      EventType.RUN_FINISHED,
+    ]);
+    const content = events[1] as { delta?: string; rawEvent?: unknown };
+    expect(content.delta).toBe("");
+    expect(content.rawEvent).toEqual({ provider: "payload" });
+  });
+});
