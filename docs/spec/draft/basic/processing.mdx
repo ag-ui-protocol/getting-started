@@ -1,5 +1,5 @@
 ---
-title: "Unknown and malformed"
+title: "Processing Model"
 description: "What survives, what is fatal, and where middleware sits relative to enforcement — draft"
 ---
 
@@ -35,7 +35,10 @@ until it surfaces as something harder to diagnose.
 These rules bind the protocol, not a wire format. A consumer that supports more
 than one transport MUST reach the same verdict on the same event however it
 arrived: if a stream survives as JSON, it MUST survive as protobuf, and if it
-fails, it MUST fail the same way.
+fails, it MUST fail the same way — except where the binary encoding itself
+cannot express the difference the verdict turns on, the two cases this page
+names below (the unnameable envelope variant, and the absences protobuf
+materialises).
 
 That puts a limit on what a reader may decide for itself. Turning bytes into
 events is the reader's whole job — a frame whose bytes map to no event at all is
@@ -126,18 +129,32 @@ producer → compatibility boundary → middleware → enforcement
 The compatibility boundary is the always-on translator for shapes the protocol
 has retired. It MUST see the stream first, because a retired shape can be a
 chunk, and a stage that met it earlier would either fail on it or turn it into
-something the boundary can no longer recognise. Middleware a consumer installs
-itself also sees chunks unexpanded, so a middleware that rewrites message
-content has to handle the chunk form as well as the start/content/end form the
-rest of this document is written in.
+something the boundary can no longer recognise. A middleware *chain* MAY
+expand chunks between its own stages, so that each stage receives the
+start/content/end form — the reference implementation's chaining helper does
+exactly that. A middleware therefore MUST be prepared for either form: what it
+sees depends on where in the chain it sits.
 
-Enforcement MUST run before chunk expansion. A chunk is an event in its own
-right, so it is validated as one like anything else, and expansion then only
-reshapes values already known good. Expanding first gives the expander
-unvalidated input to cope with, and coping means repairing: a consumer that
-substituted a default for a malformed role made the same producer defect fatal
-when sent plainly and invisible when sent as a chunk, so which form a producer
-happened to use decided whether its bug was ever reported.
+Expansion between stages narrows one guarantee, and the narrowing is stated
+rather than hidden: expansion synthesizes events carrying only what the
+protocol defines, so unrecognised fields *on a chunk* survive to enforcement —
+and earn their warning — only on the canonical order above. A chain that
+expands early loses them silently. A conforming producer never emits such
+fields, so what is lost is material from a newer protocol version crossing a
+chain that expands early. The material expansion exists to deliver — deltas,
+opener fields, metadata, `rawEvent`, attribution — is carried through intact;
+a chunk's `timestamp` is not, because the synthesized events are not the
+chunk, and like unknown fields it is judged before expansion only on the
+canonical order.
+
+A chunk is an event in its own right, and it MUST be judged as one: whichever
+stage meets a malformed chunk first — enforcement on the canonical order
+above, expansion where a middleware chain expands early — MUST reject it
+rather than repair it, and MUST NOT normalise, default or conceal a malformed
+known value enforcement would reject. A consumer that substituted a default
+for a malformed role made the same producer defect fatal when sent plainly and
+invisible when sent as a chunk, so which form a producer happened to use
+decided whether its bug was ever reported.
 
 Verification MUST run after expansion, because what it checks — that messages
 and calls open before they continue and close after — only exists once a chunk

@@ -1,0 +1,124 @@
+---
+title: "Reasoning"
+description: "Streaming what the model is thinking, and round-tripping what it must not reveal — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+Reasoning is what the model thinks before it answers. A producer streams it so
+a UI can show work in progress, and — where a provider keeps the real chain of
+thought private — carries an encrypted artefact the consumer stores and
+returns without being able to read.
+
+## User Interaction Model
+
+Reasoning is typically rendered apart from the conversation — collapsed by
+default, styled as thinking. The protocol does not mandate any presentation; a
+consumer MAY hide reasoning entirely.
+
+## Events
+
+### Spans: `REASONING_START` and `REASONING_END`
+
+A reasoning span brackets one stretch of thinking, opened by `REASONING_START`
+and closed by `REASONING_END`, matched by `messageId`. A span MAY contain
+several reasoning messages.
+
+- A producer MUST NOT open a span whose `messageId` is already open, MUST
+  close every span it opens before the run finishes, and MUST NOT close a
+  span it did not open.
+- The span's identifier namespaces nothing: the reasoning messages inside a
+  span carry their own `messageId`s.
+
+### Reasoning messages
+
+Reasoning messages follow the
+[streaming pattern](/spec/draft/basic/patterns/streaming):
+`REASONING_MESSAGE_START` opens one (its `role` is fixed, `reasoning`),
+`REASONING_MESSAGE_CONTENT` extends it, `REASONING_MESSAGE_END` closes it, all
+matched by `messageId` — and `REASONING_MESSAGE_CHUNK` is the compact spelling,
+whose first chunk MUST carry `messageId`. The pattern's rules apply exactly as
+for text messages.
+
+<Note>
+  A consumer is not yet required to *detect* a violation of the streaming rules
+  on reasoning messages or spans. The reference implementation verifies the
+  open/close discipline for text messages and tool calls but not for reasoning,
+  so requiring detection here would declare a shipped consumer non-conformant.
+  A producer that breaks the rules is non-conformant either way.
+</Note>
+
+### `REASONING_ENCRYPTED_VALUE`
+
+Carries a provider's opaque, encrypted reasoning artefact. `subtype` says what
+kind of thing `entityId` names — a message or a tool call — which decides where
+the value is stored.
+
+- A consumer MUST treat `encryptedValue` as opaque: never parsed, never
+  interpreted, never assumed to be any particular format.
+- A consumer MUST store the value with the message or tool call it names and
+  return it unmodified in later run input, so the producer can restore the
+  reasoning context it stands for. The rule presumes a target that can hold
+  it: activity messages carry no encrypted value by schema, so an event
+  naming one is treated as naming nothing the consumer knows — the
+  unknown-`entityId` case below.
+- A consumer that cannot preserve it — a downgrade path, a store that cannot
+  carry it — is losing content and MUST warn
+  ([Versioning](/spec/draft/basic/versioning)).
+- The artefact rides its message. A [`MESSAGES_SNAPSHOT`](/spec/draft/events/state)
+  restating the message replaces it wholesale, `encryptedValue` included — so
+  a producer that still needs the artefact MUST restate it in the snapshot's
+  copy, and one that omits it has withdrawn its own artefact. The consumer's
+  duty is to return what it holds once all events have applied, not to
+  resurrect what a snapshot removed.
+
+The event is standalone: it opens nothing, closes nothing, and MAY appear
+anywhere within an open run, though it conventionally arrives inside the span
+whose thinking it captures.
+
+## Message Flow
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Client
+
+    Agent->>Client: REASONING_START (span-1)
+    Agent->>Client: REASONING_MESSAGE_START (msg-9, reasoning)
+    Agent->>Client: REASONING_MESSAGE_CONTENT (delta) ×N
+    Agent->>Client: REASONING_MESSAGE_END (msg-9)
+    Agent->>Client: REASONING_ENCRYPTED_VALUE (message, msg-9)
+    Agent->>Client: REASONING_END (span-1)
+    Note over Client: stores msg-9 with its encrypted value,<br/>returns both in the next run's input
+```
+
+## Data Types
+
+The event shapes are defined by the [schema reference](/spec/draft/schema):
+[`ReasoningStartEvent`](/spec/draft/schema#reasoningstartevent), [`ReasoningEndEvent`](/spec/draft/schema#reasoningendevent), [`ReasoningMessageStartEvent`](/spec/draft/schema#reasoningmessagestartevent),
+[`ReasoningMessageContentEvent`](/spec/draft/schema#reasoningmessagecontentevent), [`ReasoningMessageEndEvent`](/spec/draft/schema#reasoningmessageendevent),
+[`ReasoningMessageChunkEvent`](/spec/draft/schema#reasoningmessagechunkevent), [`ReasoningEncryptedValueEvent`](/spec/draft/schema#reasoningencryptedvalueevent). In conversation
+history a reasoning message is a [`ReasoningMessage`](/spec/draft/schema#reasoningmessage).
+
+## Error Handling
+
+A `REASONING_ENCRYPTED_VALUE` whose `entityId` names nothing the consumer
+knows cannot be stored where it belongs; a consumer SHOULD warn and MAY drop
+it, and MUST NOT fail the run over it.
+
+A malformed reasoning event — a missing required field, a `subtype` that is
+not a string — is a malformed known value and fatal like any other. A
+`subtype` that is a string the schema does not name is different: it is
+unrecognised material — a member added after this consumer shipped — and the
+[processing model](/spec/draft/basic/processing) strips it with a warning,
+which in a required position removes the event that carried it.
+
+## Security Considerations
+
+Reasoning content routinely contains material the producer chose not to say in
+the answer. A consumer SHOULD treat it with the same confidentiality as the
+conversation, and MUST NOT feed an `encryptedValue` to anything but the
+producer that issued it — it is a capability for restoring context, not data
+for the application.

@@ -23,7 +23,7 @@ An id identifies an *invocation*, not an agent. A producer MUST NOT reuse a
 a suspended invocation is continued.
 
 Which events can carry attribution is a structural question, and the
-[schema](/spec/draft/schema.json) answers it. Read a tag on a standalone event
+[schema](/spec/draft/schema#attributable) answers it. Read a tag on a standalone event
 — `STEP_*`, `CUSTOM`, `RAW`, the state events — as provenance: it records who
 produced the event, not that the producer owns a private copy of what the event
 touches.

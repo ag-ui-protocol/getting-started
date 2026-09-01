@@ -87,12 +87,34 @@
           {
             "group": "Specification",
             "pages": [
-              "spec/draft/index"
+              "spec/draft/index",
+              "spec/draft/changelog",
+              "spec/draft/architecture"
             ]
           },
           {
             "group": "Base Protocol",
             "pages": [
+              "spec/draft/basic/index",
+              "spec/draft/basic/run-input",
+              "spec/draft/basic/metadata",
+              {
+                "group": "Event Patterns",
+                "pages": [
+                  "spec/draft/basic/patterns/index",
+                  "spec/draft/basic/patterns/streaming",
+                  "spec/draft/basic/patterns/snapshots",
+                  "spec/draft/basic/patterns/interrupt-resume"
+                ]
+              },
+              {
+                "group": "Transports",
+                "pages": [
+                  "spec/draft/basic/transports/index",
+                  "spec/draft/basic/transports/http-sse",
+                  "spec/draft/basic/transports/http-protobuf"
+                ]
+              },
               "spec/draft/basic/processing",
               "spec/draft/basic/versioning"
             ]
@@ -100,14 +122,22 @@
           {
             "group": "Event Streams",
             "pages": [
+              "spec/draft/events/index",
               "spec/draft/events/lifecycle",
-              "spec/draft/events/subagents"
+              "spec/draft/events/text-messages",
+              "spec/draft/events/tool-calls",
+              "spec/draft/events/reasoning",
+              "spec/draft/events/state",
+              "spec/draft/events/activity",
+              "spec/draft/events/subagents",
+              "spec/draft/events/passthrough"
             ]
           },
           {
             "group": "Reference",
             "pages": [
-              "spec/draft/schema-files"
+              "spec/draft/schema-files",
+              "spec/draft/schema"
             ]
           }
         ]

@@ -1,0 +1,83 @@
+---
+title: "Metadata"
+description: "The open channel on everything: what it carries, how it merges, and where it lands — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+Nearly everything in the protocol carries an OPTIONAL `metadata` object —
+events, messages, tool calls, tools, interrupts, resume entries. It is the
+open channel for what the protocol does not model: provider names, latencies,
+finish reasons, token counts, trace keys, whatever an application wants to
+ride along with its data.
+
+## The value
+
+`metadata` is open by key. Any JSON value is allowed under a key, including
+`null` — a `null` there is meaningful data. The object itself is either absent
+or an object and MUST NOT be `null`.
+
+Unknown metadata keys are protocol-legal, not unrecognised material: the
+[processing model](/spec/draft/basic/processing) never strips them, on any
+key.
+
+## Keys
+
+The `ag-ui` key is reserved for the protocol's own use. Every other key is
+application space; producers SHOULD prefix keys they invent with a vendor or
+application name, so two parties extending the same stream do not collide.
+
+## Merging
+
+A streamed item is assembled from several events, and the interesting values —
+token usage, a finish reason — are only known at the end. So metadata
+accumulates rather than being fixed when the item opens: a consumer MUST merge
+the metadata of every event making up an item, key by key, with the last write
+winning for each key.
+
+The merge MUST NOT recurse. A key's value is replaced outright, so an object
+or array under a key is replaced wholesale rather than blended with what was
+there before.
+
+## Where each event's metadata lands
+
+Merging needs a target, and the target is the thing the event builds — not
+always the message:
+
+| Event(s) | Merges into |
+| --- | --- |
+| `TEXT_MESSAGE_START` / `CONTENT` / `END` | the text message |
+| `REASONING_MESSAGE_START` / `CONTENT` / `END` | the reasoning message |
+| `TOOL_CALL_START` / `ARGS` / `END` | **the tool call itself** — not the assistant message that owns it |
+| `TOOL_CALL_RESULT` | the tool message it creates |
+| `ACTIVITY_SNAPSHOT` / `ACTIVITY_DELTA` | the activity message — accumulated metadata survives a replacing snapshot ([Activity](/spec/draft/events/activity)) |
+| chunks (`*_CHUNK`) | whatever their synthesized events merge into ([chunk metadata](/spec/draft/basic/patterns/streaming#chunk-metadata)) |
+| everything else (`RUN_*`, `STEP_*`, snapshots, `RAW`, `CUSTOM`, …) | nothing — see below |
+
+<Note>
+  Tool-call metadata landing on the call rather than its parent message is
+  deliberate. One assistant message can own several tool calls, so folding
+  their metadata into the parent would make the result depend on the order
+  the calls happened to interleave. Each call keeping its own is what keeps it
+  unambiguous.
+</Note>
+
+An event that builds no durable item has no merge target: its metadata is the
+event's own, visible to middleware and to whatever observes the stream, and
+the protocol assigns it nowhere further. A consumer MAY surface it — a run's
+`RUN_FINISHED` metadata in its own bookkeeping, say — but no rule requires it.
+
+## Stored metadata
+
+Messages, tool calls, tools, interrupts and resume entries carry `metadata` as
+a plain stored field of their own. Nothing merges into those except the events
+listed above; a tool's metadata in [run input](/spec/draft/basic/run-input),
+or an interrupt's, is simply data travelling with its carrier.
+
+## Data Types
+
+[`Metadata`](/spec/draft/schema#metadata) is defined by the
+[schema reference](/spec/draft/schema), and every carrier's entry there lists
+its `metadata` field.
