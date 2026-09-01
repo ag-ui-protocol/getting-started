@@ -16,6 +16,7 @@ import { emitDotnet } from "./dotnet";
 import { emitDotnetModels } from "./dotnet-models";
 import { buildWireModel, emitFreeze, emitProtoFiles } from "./protobuf";
 import { emitPython } from "./python";
+import { emitSchemaReference } from "./schema-reference";
 import { emitProtoTranslation } from "./proto-translation";
 import { emitTypeScript } from "./typescript";
 
@@ -138,6 +139,15 @@ export async function generateFiles(): Promise<GeneratedOutput[]> {
     content: readFileSync(SCHEMA_PATH, "utf8"),
   };
 
+  // The one generated page among the hand-written ones: the reference the
+  // prose links into instead of restating shapes. Emitted in final form —
+  // no prettier pass, so the bytes cannot depend on a formatter's opinion
+  // of prose.
+  const schemaReference = {
+    path: join(DOCS_SPEC_OUTPUT_DIR, "schema.mdx"),
+    content: emitSchemaReference(model),
+  };
+
   const dotnet = emitDotnet(wire).map((file) => ({
     path: join(DOTNET_OUTPUT_DIR, file.name),
     content: file.content,
@@ -155,6 +165,7 @@ export async function generateFiles(): Promise<GeneratedOutput[]> {
     translation,
     freeze,
     published,
+    schemaReference,
     ...dotnet,
   ];
 }

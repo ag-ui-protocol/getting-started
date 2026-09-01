@@ -1,0 +1,1260 @@
+---
+title: "Schema Reference"
+description: "Every definition of the draft schema, one anchor each — generated, do not edit"
+---
+
+{/* @generated from https://ag-ui.com/spec/draft/schema.json — DO NOT EDIT. Change the schema and regenerate. */}
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+This page is generated from the machine-readable schema at
+[`/spec/draft/schema.json`](/spec/draft/schema.json) — the source of truth for
+structure — so the prose specification can link a definition instead of
+restating it. Do not edit it by hand: change the schema and regenerate.
+
+Each definition's anchor is its name, lowercased.
+
+## Events
+
+The event union, its discriminator, and every event. The mixins their fields come from are listed under [Mixins](#mixins).
+
+### `EventType`
+
+The discriminator carried by every event.
+
+**Values:**
+
+`TEXT_MESSAGE_START` · `TEXT_MESSAGE_CONTENT` · `TEXT_MESSAGE_END` · `TEXT_MESSAGE_CHUNK` · `TOOL_CALL_START` · `TOOL_CALL_ARGS` · `TOOL_CALL_END` · `TOOL_CALL_CHUNK` · `TOOL_CALL_RESULT` · `STATE_SNAPSHOT` · `STATE_DELTA` · `MESSAGES_SNAPSHOT` · `ACTIVITY_SNAPSHOT` · `ACTIVITY_DELTA` · `RAW` · `CUSTOM` · `RUN_STARTED` · `RUN_FINISHED` · `RUN_ERROR` · `STEP_STARTED` · `STEP_FINISHED` · `REASONING_START` · `REASONING_MESSAGE_START` · `REASONING_MESSAGE_CONTENT` · `REASONING_MESSAGE_END` · `REASONING_MESSAGE_CHUNK` · `REASONING_END` · `REASONING_ENCRYPTED_VALUE` · `SUBAGENT_STARTED` · `SUBAGENT_FINISHED` · `SUBAGENT_ERROR`
+
+### `TextMessageStartEvent`
+
+Opens a streamed text message. The content arrives as TEXT_MESSAGE_CONTENT events and the message closes with TEXT_MESSAGE_END.
+
+**Fields:**
+
+- `type` — `"TEXT_MESSAGE_START"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `messageId` — `string`, **required**. Identifies the message this stream builds, and ties the later content and end events to it.
+- `role` — [`TextMessageRole`](#textmessagerole), optional. Who the message is from. An absent role means assistant; that meaning is normative and stated in the prose, because a validator treats a default as documentation rather than as behaviour. Default: `"assistant"`.
+- `name` — `string`, optional. An optional display name for the author, for providers that distinguish several participants in one role.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `TextMessageContentEvent`
+
+Appends a fragment to a streamed text message.
+
+**Fields:**
+
+- `type` — `"TEXT_MESSAGE_CONTENT"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `messageId` — `string`, **required**. The message this fragment belongs to.
+- `delta` — `string`, **required**. The fragment to append. May be the empty string: providers emit empty deltas as keep-alives and while a tool call is being decided, and rejecting them would kill runs that are working correctly.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `TextMessageEndEvent`
+
+Closes a streamed text message.
+
+**Fields:**
+
+- `type` — `"TEXT_MESSAGE_END"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `messageId` — `string`, **required**. The message being closed.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `TextMessageChunkEvent`
+
+A shorthand that stands in for a start, content and end sequence, for producers that cannot know in advance where a message begins. Every field is optional because a continuation chunk omits what has not changed; which message a field-less chunk continues is a sequence question the prose specification answers.
+
+**Fields:**
+
+- `type` — `"TEXT_MESSAGE_CHUNK"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `messageId` — `string`, optional. The message this chunk belongs to. Absent continues the message already open.
+- `role` — [`TextMessageRole`](#textmessagerole), optional. Who the message is from, on the chunk that opens it.
+- `delta` — `string`, optional. The fragment to append. May be the empty string.
+- `name` — `string`, optional. An optional display name for the author.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ToolCallStartEvent`
+
+Opens a tool call. The arguments arrive as TOOL_CALL_ARGS events and the call closes with TOOL_CALL_END.
+
+**Fields:**
+
+- `type` — `"TOOL_CALL_START"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `toolCallId` — `string`, **required**. Identifies the call, and ties the later args, end and result events to it.
+- `toolCallName` — `string`, **required**. Which tool is being called.
+- `parentMessageId` — `string`, optional. The assistant message that holds this call. Absent means the producer did not attribute it to one.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ToolCallArgsEvent`
+
+Appends a fragment of a tool call's arguments.
+
+**Fields:**
+
+- `type` — `"TOOL_CALL_ARGS"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `toolCallId` — `string`, **required**. The call these arguments belong to.
+- `delta` — `string`, **required**. A fragment of the arguments, which concatenate into the call's argument text — conventionally a JSON document, though the protocol does not validate it (see FunctionCall.arguments). Deliberately a string rather than parsed JSON: a fragment is not itself a document. May be the empty string.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ToolCallEndEvent`
+
+Closes a tool call, meaning its arguments are complete.
+
+**Fields:**
+
+- `type` — `"TOOL_CALL_END"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `toolCallId` — `string`, **required**. The call being closed.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ToolCallChunkEvent`
+
+A shorthand that stands in for a tool call's start, args and end sequence. Every field is optional for the same reason as TEXT_MESSAGE_CHUNK.
+
+**Fields:**
+
+- `type` — `"TOOL_CALL_CHUNK"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `toolCallId` — `string`, optional. The call this chunk belongs to. Absent continues the call already open.
+- `toolCallName` — `string`, optional. Which tool is being called, on the chunk that opens it.
+- `parentMessageId` — `string`, optional. The assistant message that holds this call.
+- `delta` — `string`, optional. A fragment of the arguments. May be the empty string.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ToolCallResultEvent`
+
+Carries what a tool returned. Mints a tool message rather than appending to an existing one, which is why it has its own messageId.
+
+**Fields:**
+
+- `type` — `"TOOL_CALL_RESULT"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `messageId` — `string`, **required**. The tool message this result becomes.
+- `toolCallId` — `string`, **required**. The call being answered.
+- `content` — `string`, **required**. What the tool returned, as a string. A tool returning structured data serialises it.
+- `role` — `"tool"`, optional. Present only for symmetry with the message it mints; the value is fixed, so a producer may leave it out.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `StateSnapshotEvent`
+
+Replaces the agent state wholesale. Sent when a delta cannot express the change, or to resynchronise a consumer.
+
+**Fields:**
+
+- `type` — `"STATE_SNAPSHOT"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `snapshot` — [`State`](#state), **required**. The complete new state.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `StateDeltaEvent`
+
+Changes the agent state incrementally.
+
+**Fields:**
+
+- `type` — `"STATE_DELTA"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `delta` — [`JsonPatch`](#jsonpatch), **required**. The change, as an RFC 6902 patch against the current state. Structural validity here does not mean the patch applies: a well-formed operation may point at a path that does not exist, which RFC 6902 leaves to the applier.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `MessagesSnapshotEvent`
+
+The complete set of messages the producer owns, in order. Conversation-wide rather than a plain overwrite: a consumer may keep messages of its own that no producer tracks, so exactly how a snapshot reconciles with those is behavioural and belongs in the prose. Being conversation-wide it cannot belong to a single subagent, so it carries no attribution; it does establish which subagent owns each message it contains, through the messages themselves.
+
+**Fields:**
+
+- `type` — `"MESSAGES_SNAPSHOT"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `messages` — array of [`Message`](#message), **required**. The messages the producer is declaring, in order.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent); the composed fields are listed above.
+
+### `ActivitySnapshotEvent`
+
+Reports structured progress that is not conversation content, such as a step a UI renders as its own widget.
+
+**Fields:**
+
+- `type` — `"ACTIVITY_SNAPSHOT"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `messageId` — `string`, **required**. The activity message this describes.
+- `activityType` — `string`, **required**. What kind of activity this is. An open string: the set is the producer's, not the protocol's.
+- `content` — `object`, open by key, **required**. The activity's payload, open by key.
+- `replace` — `boolean`, optional. Whether this snapshot overwrites the activity's existing content. Absent means it does, and that meaning is normative; only an explicit false asks a consumer to leave what is already there. It does not ask for a merge — ACTIVITY_DELTA is how content is changed incrementally. What a consumer does with a non-overwriting snapshot is behavioural and belongs in the prose. Default: `true`.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ActivityDeltaEvent`
+
+Changes an activity message's content incrementally.
+
+**Fields:**
+
+- `type` — `"ACTIVITY_DELTA"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `messageId` — `string`, **required**. The activity message being changed.
+- `activityType` — `string`, **required**. What kind of activity this is.
+- `patch` — [`JsonPatch`](#jsonpatch), **required**. The change, as an RFC 6902 patch against the activity's content.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `RawEvent`
+
+Passes a provider-native event through untranslated, for consumers that need detail the protocol does not model.
+
+**Fields:**
+
+- `type` — `"RAW"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `event` — any JSON value, **required**. The provider's own event. Any JSON value, and required: an event whose only purpose is to carry this would say nothing without it.
+- `source` — `string`, optional. Which provider or framework the event came from.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `CustomEvent`
+
+The protocol's extension point for an application's own events. Anything a consumer does with one is outside the protocol.
+
+**Fields:**
+
+- `type` — `"CUSTOM"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `name` — `string`, **required**. What this custom event is. Required: without it a consumer cannot route the value.
+- `value` — any JSON value, **required**. The payload. Any JSON value, and required.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `RunStartedEvent`
+
+Opens a run. Run-scoped, so it carries no subagent attribution.
+
+**Fields:**
+
+- `type` — `"RUN_STARTED"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `threadId` — `string`, **required**. The conversation this run belongs to.
+- `runId` — `string`, **required**. Identifies this run.
+- `parentRunId` — `string`, optional. The run that spawned this one, when an agent invokes another agent as a separate run rather than as a subagent within one.
+- `input` — [`RunAgentInput`](#runagentinput), optional. The request this run was started from, echoed back so a consumer that did not make the request can still see what the agent was asked.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent); the composed fields are listed above.
+
+### `RunFinishedEvent`
+
+Closes a run that did not fail. Run-scoped, so it carries no subagent attribution.
+
+**Fields:**
+
+- `type` — `"RUN_FINISHED"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `threadId` — `string`, **required**. The conversation this run belongs to.
+- `runId` — `string`, **required**. The run being closed.
+- `result` — any JSON value, optional. The run's return value, if it has one. Any JSON value.
+- `outcome` — [`RunFinishedOutcome`](#runfinishedoutcome), optional. Why the run ended. Absent means success, so every producer written before outcomes existed is already conformant.
+- `usage` — array of [`TokenUsage`](#tokenusage), optional. Token usage for the run, one entry per provider and model, so a run that invoked several models keeps them separate. A consumer that only wants totals sums across the entries.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent); the composed fields are listed above.
+
+### `RunErrorEvent`
+
+Ends a run that failed. Run-scoped, so it carries no subagent attribution; a subagent that fails without ending the run reports SUBAGENT_ERROR instead.
+
+**Fields:**
+
+- `type` — `"RUN_ERROR"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `message` — `string`, **required**. What went wrong, for a person to read.
+- `code` — `string`, optional. A machine-readable error code. An open string: the protocol defines no vocabulary.
+- `usage` — array of [`TokenUsage`](#tokenusage), optional. Token usage accrued before the failure, for a run that completed one or more model calls before dying.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent); the composed fields are listed above.
+
+### `StepStartedEvent`
+
+Opens a named step within a run, for producers whose frameworks have a step concept worth surfacing.
+
+**Fields:**
+
+- `type` — `"STEP_STARTED"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `stepName` — `string`, **required**. The step's name. Identifies it: the matching STEP_FINISHED carries the same name.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `StepFinishedEvent`
+
+Closes a named step.
+
+**Fields:**
+
+- `type` — `"STEP_FINISHED"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `stepName` — `string`, **required**. The step being closed.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ReasoningStartEvent`
+
+Opens a span of reasoning. A span may contain several reasoning messages.
+
+**Fields:**
+
+- `type` — `"REASONING_START"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `messageId` — `string`, **required**. The span being opened.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ReasoningMessageStartEvent`
+
+Opens a streamed reasoning message.
+
+**Fields:**
+
+- `type` — `"REASONING_MESSAGE_START"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `messageId` — `string`, **required**. The reasoning message this stream builds.
+- `role` — `"reasoning"`, **required**. Fixed, and required rather than defaulted. The requirement is inherited from the SDKs rather than chosen.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ReasoningMessageContentEvent`
+
+Appends a fragment to a streamed reasoning message.
+
+**Fields:**
+
+- `type` — `"REASONING_MESSAGE_CONTENT"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `messageId` — `string`, **required**. The reasoning message this fragment belongs to.
+- `delta` — `string`, **required**. The fragment to append. May be the empty string.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ReasoningMessageEndEvent`
+
+Closes a streamed reasoning message.
+
+**Fields:**
+
+- `type` — `"REASONING_MESSAGE_END"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `messageId` — `string`, **required**. The reasoning message being closed.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ReasoningMessageChunkEvent`
+
+A shorthand that stands in for a reasoning message's start, content and end sequence.
+
+**Fields:**
+
+- `type` — `"REASONING_MESSAGE_CHUNK"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `messageId` — `string`, optional. The reasoning message this chunk belongs to. Absent continues the one already open.
+- `delta` — `string`, optional. The fragment to append. May be the empty string.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ReasoningEndEvent`
+
+Closes a span of reasoning.
+
+**Fields:**
+
+- `type` — `"REASONING_END"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `messageId` — `string`, **required**. The span being closed.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ReasoningEncryptedValueEvent`
+
+Carries a provider's opaque, encrypted reasoning artefact, which a consumer stores and returns on a later turn without being able to read it.
+
+**Fields:**
+
+- `type` — `"REASONING_ENCRYPTED_VALUE"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `subtype` — [`ReasoningEncryptedValueSubtype`](#reasoningencryptedvaluesubtype), **required**. What kind of thing entityId names, which decides where the value is stored.
+- `entityId` — `string`, **required**. What the value belongs to: a message id or a tool call id, according to subtype.
+- `encryptedValue` — `string`, **required**. The provider's opaque artefact.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `SubagentStartedEvent`
+
+Announces that a subagent invocation has begun. Everything the subagent produces afterwards is attributed by carrying its subagentRunId, so a consumer can group the work without replaying the stream. Composed from BaseEvent alone rather than Attributable, because here subagentRunId identifies the subagent rather than attributing the event to one; attribution to an enclosing subagent is parentSubagentRunId.
+
+**Fields:**
+
+- `type` — `"SUBAGENT_STARTED"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), **required**. The invocation being announced.
+- `name` — `string`, **required**. The subagent's name, which is reusable across invocations, unlike subagentRunId.
+- `description` — `string`, optional. What this subagent is for, for a consumer to display.
+- `parentSubagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation that spawned this one, for nested delegation. Absent means the parent agent spawned it directly.
+- `parentToolCallId` — `string`, optional. The tool call that spawned this subagent, for the pattern where agents are exposed to a model as tools. Lets a consumer tie the subagent to the call without reading rawEvent.
+- `parentMessageId` — `string`, optional. The message that held the spawning tool call.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent); the composed fields are listed above.
+
+### `SubagentFinishedEvent`
+
+Ends a subagent invocation's segment of this run, either because the work completed or because it is suspended awaiting outside input.
+
+**Fields:**
+
+- `type` — `"SUBAGENT_FINISHED"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), **required**. The invocation being closed.
+- `result` — any JSON value, optional. The subagent's return value, if it has one. Any JSON value, mirroring RUN_FINISHED.result.
+- `outcome` — [`SubagentFinishedOutcome`](#subagentfinishedoutcome), optional. Why the segment ended. Absent means success. A suspended subagent is neither a success nor a failure, which is why saying so needs its own value rather than being inferred from a later interrupt.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent); the composed fields are listed above.
+
+### `SubagentErrorEvent`
+
+Reports that a subagent invocation failed. The run may continue: a parent agent is free to handle a failed subagent, which is why this is not RUN_ERROR.
+
+**Fields:**
+
+- `type` — `"SUBAGENT_ERROR"` ([`EventType`](#eventtype)), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), **required**. The invocation that failed.
+- `message` — `string`, **required**. What went wrong, for a person to read.
+- `code` — `string`, optional. A machine-readable error code. An open string.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseEvent`](#baseevent); the composed fields are listed above.
+
+### `Event`
+
+Any AG-UI event. Every member is normative: there is no optional tier and no event a consumer may decline to implement. Discriminated by the type property.
+
+**Members:**
+
+- [`TextMessageStartEvent`](#textmessagestartevent)
+- [`TextMessageContentEvent`](#textmessagecontentevent)
+- [`TextMessageEndEvent`](#textmessageendevent)
+- [`TextMessageChunkEvent`](#textmessagechunkevent)
+- [`ToolCallStartEvent`](#toolcallstartevent)
+- [`ToolCallArgsEvent`](#toolcallargsevent)
+- [`ToolCallEndEvent`](#toolcallendevent)
+- [`ToolCallChunkEvent`](#toolcallchunkevent)
+- [`ToolCallResultEvent`](#toolcallresultevent)
+- [`StateSnapshotEvent`](#statesnapshotevent)
+- [`StateDeltaEvent`](#statedeltaevent)
+- [`MessagesSnapshotEvent`](#messagessnapshotevent)
+- [`ActivitySnapshotEvent`](#activitysnapshotevent)
+- [`ActivityDeltaEvent`](#activitydeltaevent)
+- [`RawEvent`](#rawevent)
+- [`CustomEvent`](#customevent)
+- [`RunStartedEvent`](#runstartedevent)
+- [`RunFinishedEvent`](#runfinishedevent)
+- [`RunErrorEvent`](#runerrorevent)
+- [`StepStartedEvent`](#stepstartedevent)
+- [`StepFinishedEvent`](#stepfinishedevent)
+- [`ReasoningStartEvent`](#reasoningstartevent)
+- [`ReasoningMessageStartEvent`](#reasoningmessagestartevent)
+- [`ReasoningMessageContentEvent`](#reasoningmessagecontentevent)
+- [`ReasoningMessageEndEvent`](#reasoningmessageendevent)
+- [`ReasoningMessageChunkEvent`](#reasoningmessagechunkevent)
+- [`ReasoningEndEvent`](#reasoningendevent)
+- [`ReasoningEncryptedValueEvent`](#reasoningencryptedvalueevent)
+- [`SubagentStartedEvent`](#subagentstartedevent)
+- [`SubagentFinishedEvent`](#subagentfinishedevent)
+- [`SubagentErrorEvent`](#subagenterrorevent)
+
+Discriminated by `type`.
+
+## Messages
+
+The message union and the message types conversation history holds.
+
+### `TextMessageRole`
+
+The roles a streamed text message may take. Excludes tool, which is carried by TOOL_CALL_RESULT rather than streamed as text.
+
+**Values:**
+
+`developer` · `system` · `assistant` · `user`
+
+### `DeveloperMessage`
+
+Instructions from the application developer.
+
+**Fields:**
+
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `id` — `string`, **required**. Identifies the message within the conversation.
+- `role` — `"developer"`, **required**. Who the message is from. Each message definition narrows this to a single value.
+- `name` — `string`, optional. An optional display name for the author.
+- `encryptedValue` — `string`, optional. A provider's opaque artefact belonging to this message, stored by a consumer and returned on a later turn.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this message.
+- `content` — `string`, **required**. The instructions. Required: a developer message with nothing in it says nothing.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseMessage`](#basemessage), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `SystemMessage`
+
+Instructions from the system.
+
+**Fields:**
+
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `id` — `string`, **required**. Identifies the message within the conversation.
+- `role` — `"system"`, **required**. Who the message is from. Each message definition narrows this to a single value.
+- `name` — `string`, optional. An optional display name for the author.
+- `encryptedValue` — `string`, optional. A provider's opaque artefact belonging to this message, stored by a consumer and returned on a later turn.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this message.
+- `content` — `string`, **required**. The instructions. Required.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseMessage`](#basemessage), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `AssistantMessage`
+
+A message from the agent. Content is optional because a turn may consist only of tool calls.
+
+**Fields:**
+
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `id` — `string`, **required**. Identifies the message within the conversation.
+- `role` — `"assistant"`, **required**. Who the message is from. Each message definition narrows this to a single value.
+- `name` — `string`, optional. An optional display name for the author.
+- `encryptedValue` — `string`, optional. A provider's opaque artefact belonging to this message, stored by a consumer and returned on a later turn.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this message.
+- `content` — `string`, optional. What the agent said, if it said anything.
+- `toolCalls` — array of [`ToolCall`](#toolcall), optional. The tool calls this turn made.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseMessage`](#basemessage), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `UserMessage`
+
+A message from the person using the application.
+
+**Fields:**
+
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `id` — `string`, **required**. Identifies the message within the conversation.
+- `role` — `"user"`, **required**. Who the message is from. Each message definition narrows this to a single value.
+- `name` — `string`, optional. An optional display name for the author.
+- `encryptedValue` — `string`, optional. A provider's opaque artefact belonging to this message, stored by a consumer and returned on a later turn.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this message.
+- `content` — `string` | array of [`InputContent`](#inputcontent), **required**. What the person sent: either plain text, or an ordered list of parts for a multimodal message.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`BaseMessage`](#basemessage), [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ToolMessage`
+
+What a tool returned, as a message in the conversation. Stands alone rather than composing BaseMessage, because it carries no name.
+
+**Fields:**
+
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `id` — `string`, **required**. Identifies the message.
+- `role` — `"tool"`, **required**. Fixed. Declared here rather than inherited, because this message does not compose BaseMessage.
+- `content` — `string`, **required**. What the tool returned.
+- `toolCallId` — `string`, **required**. The call this answers.
+- `error` — `string`, optional. Why the tool failed, when it did. Present alongside content rather than instead of it, so a partial result survives a failure.
+- `encryptedValue` — `string`, optional. A provider's opaque artefact belonging to this message.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this message.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ActivityMessage`
+
+Structured progress that is not conversation content, materialised as a message so it keeps its place in the sequence. Stands alone rather than composing BaseMessage, because its content is an object rather than a string.
+
+**Fields:**
+
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `id` — `string`, **required**. Identifies the message.
+- `role` — `"activity"`, **required**. Fixed. Declared here rather than inherited, because this message does not compose BaseMessage.
+- `activityType` — `string`, **required**. What kind of activity this is. An open string: the set is the producer's.
+- `content` — `object`, open by key, **required**. The activity's payload, open by key.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this message.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`Attributable`](#attributable); the composed fields are listed above.
+
+### `ReasoningMessage`
+
+A span of the agent's reasoning, materialised as a message. Stands alone rather than composing BaseMessage, because it carries no name.
+
+**Fields:**
+
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `id` — `string`, **required**. Identifies the message.
+- `role` — `"reasoning"`, **required**. Fixed. Declared here rather than inherited, because this message does not compose BaseMessage.
+- `content` — `string`, **required**. The reasoning text.
+- `encryptedValue` — `string`, optional. A provider's opaque reasoning artefact belonging to this message.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this message.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`Attributable`](#attributable); the composed fields are listed above.
+
+### `Message`
+
+Any message in a conversation. Discriminated by role.
+
+**Members:**
+
+- [`DeveloperMessage`](#developermessage)
+- [`SystemMessage`](#systemmessage)
+- [`AssistantMessage`](#assistantmessage)
+- [`UserMessage`](#usermessage)
+- [`ToolMessage`](#toolmessage)
+- [`ActivityMessage`](#activitymessage)
+- [`ReasoningMessage`](#reasoningmessage)
+
+Discriminated by `role`.
+
+### `Role`
+
+Every role a materialised message may have.
+
+**Values:**
+
+`developer` · `system` · `assistant` · `user` · `tool` · `activity` · `reasoning`
+
+## Run Input
+
+The request that starts a run, and the types only it carries. Behaviour: [Run Input](/spec/draft/basic/run-input).
+
+### `TextInputContent`
+
+A text part.
+
+**Fields:**
+
+- `type` — `"text"`, **required**. Discriminator.
+- `text` — `string`, **required**. The text.
+
+Closed object: the schema rejects members not listed here.
+
+### `InputContentDataSource`
+
+Bytes carried inline.
+
+**Fields:**
+
+- `type` — `"data"`, **required**. Discriminator.
+- `value` — `string`, **required**. The bytes, base64-encoded. contentEncoding is an annotation rather than a constraint in 2020-12, so a malformed string still validates here; rejecting one is the decoder's job. Encoding: `base64`.
+- `mimeType` — `string`, **required**. What the bytes are. Required here, unlike on a URL source, because nothing else can tell a consumer how to read them.
+
+Closed object: the schema rejects members not listed here.
+
+### `InputContentUrlSource`
+
+Bytes referenced by URL, fetched by whoever needs them.
+
+**Fields:**
+
+- `type` — `"url"`, **required**. Discriminator.
+- `value` — `string`, **required**. The URL. Deliberately not constrained to a URI format, so a scheme a producer already uses is not rejected here.
+- `mimeType` — `string`, optional. What the resource is, when the producer knows. Optional, because the response can say.
+
+Closed object: the schema rejects members not listed here.
+
+### `InputContentSource`
+
+Where a media part's bytes come from: carried inline, or referenced by URL.
+
+**Members:**
+
+- [`InputContentDataSource`](#inputcontentdatasource)
+- [`InputContentUrlSource`](#inputcontenturlsource)
+
+Discriminated by `type`.
+
+### `ImageInputContent`
+
+An image part.
+
+**Fields:**
+
+- `type` — `"image"`, **required**. Discriminator.
+- `source` — [`InputContentSource`](#inputcontentsource), **required**. Where the image comes from.
+- `metadata` — any JSON value, optional. Extra information about this part. Unconstrained rather than an object: inherited from the SDKs, which declare it unknown rather than a record; listed under known divergences in the README rather than resolved here.
+
+Closed object: the schema rejects members not listed here.
+
+### `AudioInputContent`
+
+An audio part.
+
+**Fields:**
+
+- `type` — `"audio"`, **required**. Discriminator.
+- `source` — [`InputContentSource`](#inputcontentsource), **required**. Where the audio comes from.
+- `metadata` — any JSON value, optional. Extra information about this part. Unconstrained, as on the other media parts.
+
+Closed object: the schema rejects members not listed here.
+
+### `VideoInputContent`
+
+A video part.
+
+**Fields:**
+
+- `type` — `"video"`, **required**. Discriminator.
+- `source` — [`InputContentSource`](#inputcontentsource), **required**. Where the video comes from.
+- `metadata` — any JSON value, optional. Extra information about this part. Unconstrained, as on the other media parts.
+
+Closed object: the schema rejects members not listed here.
+
+### `DocumentInputContent`
+
+A document part.
+
+**Fields:**
+
+- `type` — `"document"`, **required**. Discriminator.
+- `source` — [`InputContentSource`](#inputcontentsource), **required**. Where the document comes from.
+- `metadata` — any JSON value, optional. Extra information about this part. Unconstrained, as on the other media parts.
+
+Closed object: the schema rejects members not listed here.
+
+### `InputContent`
+
+One part of a multimodal user message. Discriminated by type.
+
+**Members:**
+
+- [`TextInputContent`](#textinputcontent)
+- [`ImageInputContent`](#imageinputcontent)
+- [`AudioInputContent`](#audioinputcontent)
+- [`VideoInputContent`](#videoinputcontent)
+- [`DocumentInputContent`](#documentinputcontent)
+
+Discriminated by `type`.
+
+### `Tool`
+
+A tool the agent may call.
+
+**Fields:**
+
+- `name` — `string`, **required**. The tool's name, as the agent will call it.
+- `description` — `string`, **required**. What the tool does, for the agent to decide when to use it.
+- `parameters` — any JSON value, optional. A JSON Schema describing the tool's arguments. Carried opaquely: the protocol does not constrain or validate it. Optional, because all three SDKs already treat it that way and a tool that takes no arguments has nothing to declare; an absent schema and an empty one mean the same thing to an agent.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information about the tool, for consumers that attach their own rendering or routing information to it.
+
+Closed object: the schema rejects members not listed here.
+
+### `Context`
+
+A named piece of ambient information given to the agent for the run, distinct from the conversation.
+
+**Fields:**
+
+- `description` — `string`, **required**. What this context is, for the agent to interpret.
+- `value` — `string`, **required**. The context itself.
+
+Closed object: the schema rejects members not listed here.
+
+### `ResumeEntry`
+
+An answer to one interrupt, sent on the run that continues from it.
+
+**Fields:**
+
+- `interruptId` — `string`, **required**. The interrupt being answered.
+- `status` — `"resolved"` | `"cancelled"`, **required**. Whether the interrupt was answered or abandoned.
+- `payload` — any JSON value, optional. The answer the agent asked for and will act on. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Envelope information about the response, such as signatures or routing keys, as opposed to payload, which is the answer itself.
+
+Closed object: the schema rejects members not listed here.
+
+### `RunAgentInput`
+
+A request to run an agent. Also echoed back as RUN_STARTED.input. Only threadId, runId and messages are required: those are the three the SDKs already agree on, and for tools and context an absent key and an empty array mean the same thing, so requiring them would catch nothing a producer could get wrong.
+
+**Fields:**
+
+- `threadId` — `string`, **required**. The conversation this run belongs to.
+- `runId` — `string`, **required**. Identifies this run.
+- `parentRunId` — `string`, optional. The run that spawned this one.
+- `state` — [`State`](#state), optional. The state the run starts from.
+- `messages` — array of [`Message`](#message), **required**. The conversation so far, in order.
+- `tools` — array of [`Tool`](#tool), optional. The tools the agent may call. Absent means none.
+- `context` — array of [`Context`](#context), optional. Ambient information for the run. Absent means none.
+- `forwardedProps` — any JSON value, optional. Application-specific values passed through to the agent untouched. Any JSON value.
+- `resume` — array of [`ResumeEntry`](#resumeentry), optional. Answers to the interrupts that ended a previous run, when this run continues from one.
+
+Closed object: the schema rejects members not listed here.
+
+## Outcomes and Interrupts
+
+How runs and subagents report ending, and what an interrupted run is waiting for. Behaviour: [Interrupts and Resume](/spec/draft/basic/patterns/interrupt-resume).
+
+### `RunFinishedSuccessOutcome`
+
+The run completed. Equivalent to an absent outcome. Closed like every other object, which is also what keeps it from carrying the suspended sibling's interrupts — a success with an interrupt still pending would be a contradiction, not an extension.
+
+**Fields:**
+
+- `type` — `"success"`, **required**. Discriminator.
+
+Closed object: the schema rejects members not listed here.
+
+### `Interrupt`
+
+Something a run needs from outside before it can continue, such as an approval or a missing value.
+
+**Fields:**
+
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `id` — `string`, **required**. Identifies the interrupt. A resume entry answers it by this id.
+- `reason` — `string`, **required**. Why the run stopped. An open string rather than an enumeration: the protocol does not attempt to classify every reason an agent might need input.
+- `message` — `string`, optional. A human-readable prompt for whoever answers.
+- `toolCallId` — `string`, optional. The tool call this interrupt concerns, when it is a tool approval.
+- `responseSchema` — `object`, open by key, optional. A JSON Schema describing the answer this interrupt expects, so a consumer can build a form for it. Carried opaquely: the protocol does not constrain or validate it. Restricted to an object because TypeScript and Python both declare it that way; .NET holds it as any JSON, and the ticket that commissioned this schema lists it among the arbitrary-JSON fields. Following the two that constrain it keeps the schema from accepting documents the reference client rejects, at the cost of rejecting the boolean schemas JSON Schema also permits — a bare true for "any answer". Recorded as a known divergence rather than settled.
+- `expiresAt` — `string`, optional. When the interrupt stops being answerable. Deliberately unconstrained rather than a date-time format, because producers already disagree about the representation and tightening it here would reject streams that work today. The documented convention is ISO 8601, and a consumer comparing this value will parse it as a date, so a value that is not one leaves the interrupt looking permanently unexpired.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this interrupt.
+
+Closed object: the schema rejects members not listed here.
+
+Composes [`Attributable`](#attributable); the composed fields are listed above.
+
+### `RunFinishedInterruptOutcome`
+
+The run is paused, waiting for something outside it. Resuming means starting a new run whose resume entries answer these interrupts.
+
+**Fields:**
+
+- `type` — `"interrupt"`, **required**. Discriminator.
+- `interrupts` — array of [`Interrupt`](#interrupt) (min 1), **required**. What the run is waiting for. At least one: an interrupt outcome with nothing to answer would leave a consumer with nothing to do.
+
+Closed object: the schema rejects members not listed here.
+
+### `RunFinishedOutcome`
+
+Why a run ended.
+
+**Members:**
+
+- [`RunFinishedSuccessOutcome`](#runfinishedsuccessoutcome)
+- [`RunFinishedInterruptOutcome`](#runfinishedinterruptoutcome)
+
+Discriminated by `type`.
+
+### `SubagentFinishedSuccessOutcome`
+
+The subagent completed its work. Equivalent to an absent outcome.
+
+**Fields:**
+
+- `type` — `"success"`, **required**. Discriminator.
+
+Closed object: the schema rejects members not listed here.
+
+### `SubagentFinishedSuspendedOutcome`
+
+The subagent is paused awaiting outside input. Terminal for this stream, not for the subagent: a later run may continue the same invocation once the interrupts are answered.
+
+**Fields:**
+
+- `type` — `"suspended"`, **required**. Discriminator.
+- `interruptIds` — array of `string`, optional. The run-level interrupts this subagent raised itself. May be empty or absent: a subagent suspended because a descendant interrupted owns no interrupt of its own. Each entry: An Interrupt.id.
+
+Closed object: the schema rejects members not listed here.
+
+### `SubagentFinishedOutcome`
+
+Why a subagent's segment of a run ended. Mirrors RunFinishedOutcome one level down.
+
+**Members:**
+
+- [`SubagentFinishedSuccessOutcome`](#subagentfinishedsuccessoutcome)
+- [`SubagentFinishedSuspendedOutcome`](#subagentfinishedsuspendedoutcome)
+
+Discriminated by `type`.
+
+## Common Types
+
+Everything the sections above share.
+
+### `Metadata`
+
+Extra information attached to an event, a message, a tool call, a tool, an interrupt or a resume entry. Open by key: any JSON value is allowed under a key, including null, because a null there is meaningful data. The object itself may be absent but is never null when present. The key ag-ui is reserved for the protocol's own use; reservation is by convention, since validating the shape of a key's value would contradict being open by key.
+
+**Type:** `object`, open by key
+
+### `SubagentRunId`
+
+An opaque handle for one subagent invocation, not a reusable name for a subagent definition: two invocations of the same subagent carry two different values. Named to mirror runId one level down, the way the subagent's name mirrors agentId.
+
+**Type:** `string`
+
+### `State`
+
+Agent state. Any JSON value: the protocol carries state without interpreting it, so an object, an array, a string and a number are all valid.
+
+**Type:** any JSON value
+
+### `JsonPointer`
+
+A JSON Pointer as defined by RFC 6901. Either the empty string, meaning the whole document, or a sequence of slash-prefixed reference tokens in which a tilde is escaped as ~0 and a slash as ~1. A value with no leading slash, or a tilde followed by anything other than 0 or 1, is not a JSON Pointer.
+
+**Type:** `string` matching `^(/([^/~]|~[01])*)*$`
+
+### `AddOperation`
+
+Inserts value at path. RFC 6902 section 4.1.
+
+**Fields:**
+
+- `op` — `"add"`, **required**. Discriminator for the add operation.
+- `path` — [`JsonPointer`](#jsonpointer), **required**. Where to insert the value.
+- `value` — any JSON value, **required**. The value to insert. Any JSON value, including null, which is a legitimate thing to add.
+
+Open object: members beyond these are protocol-legal and are never stripped.
+
+### `RemoveOperation`
+
+Removes the value at path. RFC 6902 section 4.2.
+
+**Fields:**
+
+- `op` — `"remove"`, **required**. Discriminator for the remove operation.
+- `path` — [`JsonPointer`](#jsonpointer), **required**. What to remove.
+
+Open object: members beyond these are protocol-legal and are never stripped.
+
+### `ReplaceOperation`
+
+Replaces the value at path. RFC 6902 section 4.3.
+
+**Fields:**
+
+- `op` — `"replace"`, **required**. Discriminator for the replace operation.
+- `path` — [`JsonPointer`](#jsonpointer), **required**. What to replace.
+- `value` — any JSON value, **required**. The replacement. Any JSON value, including null.
+
+Open object: members beyond these are protocol-legal and are never stripped.
+
+### `MoveOperation`
+
+Moves the value at from to path. RFC 6902 section 4.4.
+
+**Fields:**
+
+- `op` — `"move"`, **required**. Discriminator for the move operation.
+- `from` — [`JsonPointer`](#jsonpointer), **required**. Where the value is moved from.
+- `path` — [`JsonPointer`](#jsonpointer), **required**. Where the value is moved to.
+
+Open object: members beyond these are protocol-legal and are never stripped.
+
+### `CopyOperation`
+
+Copies the value at from to path. RFC 6902 section 4.5.
+
+**Fields:**
+
+- `op` — `"copy"`, **required**. Discriminator for the copy operation.
+- `from` — [`JsonPointer`](#jsonpointer), **required**. Where the value is copied from.
+- `path` — [`JsonPointer`](#jsonpointer), **required**. Where the value is copied to.
+
+Open object: members beyond these are protocol-legal and are never stripped.
+
+### `TestOperation`
+
+Asserts that the value at path equals value. RFC 6902 section 4.6.
+
+**Fields:**
+
+- `op` — `"test"`, **required**. Discriminator for the test operation.
+- `path` — [`JsonPointer`](#jsonpointer), **required**. What to compare.
+- `value` — any JSON value, **required**. The value the target must equal. Any JSON value, including null.
+
+Open object: members beyond these are protocol-legal and are never stripped.
+
+### `JsonPatchOperation`
+
+A single RFC 6902 operation. Exactly one of the operation shapes must match, discriminated by op. Unlike the protocol's own objects, the operations are open: RFC 6902 section 4 requires members an operation does not define to be ignored rather than rejected, so a remove carrying a leftover value is a valid patch. Two of the RFC's rules are relations between values rather than shapes, so no static schema can express them and neither is checked here: a move whose from is a proper prefix of its path (section 4.4), and any operation whose pointer does not resolve in the target document. Both are the applier's to reject.
+
+**Members:**
+
+- [`AddOperation`](#addoperation)
+- [`RemoveOperation`](#removeoperation)
+- [`ReplaceOperation`](#replaceoperation)
+- [`MoveOperation`](#moveoperation)
+- [`CopyOperation`](#copyoperation)
+- [`TestOperation`](#testoperation)
+
+Discriminated by `op`.
+
+### `JsonPatch`
+
+A JSON Patch document as defined by RFC 6902, referenced by STATE_DELTA.delta and ACTIVITY_DELTA.patch: an ordered sequence of operations applied to a target document. An empty array is a valid no-op patch. Whether the operations actually apply to the document they target is a runtime question RFC 6902 leaves to the applier; structural validity here says nothing about it.
+
+**Type:** array of [`JsonPatchOperation`](#jsonpatchoperation)
+
+### `FunctionCall`
+
+The name and arguments of a tool call.
+
+**Fields:**
+
+- `name` — `string`, **required**. Which tool is being called.
+- `arguments` — `string`, **required**. The arguments as a JSON string, not as parsed JSON. Kept as written because a model can emit arguments that are not valid JSON, and losing them at the protocol boundary would hide the fault from the consumer that has to handle it.
+
+Closed object: the schema rejects members not listed here.
+
+### `ToolCall`
+
+A call an assistant message made. Carries no subagent attribution of its own and inherits its containing message's, since several calls can share one parent.
+
+**Fields:**
+
+- `id` — `string`, **required**. Identifies the call. The answering tool message carries this as its toolCallId.
+- `type` — `"function"`, **required**. The only kind of call the protocol models.
+- `function` — [`FunctionCall`](#functioncall), **required**. What is being called, and with what.
+- `encryptedValue` — `string`, optional. A provider's opaque artefact belonging to this call.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this call. Carried here rather than folded into the containing message, because several calls can share one parent and merging them would make the result depend on their order.
+
+Closed object: the schema rejects members not listed here.
+
+### `TokenUsage`
+
+Token counts for one provider and model. Every field is a label or a number — nothing content-bearing or identifying, no prompts, completions, messages, or thread, run and user identifiers.
+
+**Fields:**
+
+- `provider` — `string`, optional. Which provider served the request.
+- `model` — `string`, optional. Which model served the request.
+- `inputTokens` — `integer` (min 0, max 9007199254740991), optional. Prompt tokens consumed. Bounded like timestamp and for the same reason: a count above the JSON safe-integer range does not survive a round trip, so a consumer would silently read a different number than the producer wrote.
+- `outputTokens` — `integer` (min 0, max 9007199254740991), optional. Completion tokens produced.
+- `totalTokens` — `integer` (min 0, max 9007199254740991), optional. Total tokens, as the provider reports it rather than as a sum the protocol computes.
+- `reasoningTokens` — `integer` (min 0, max 9007199254740991), optional. Tokens spent on reasoning, where the provider distinguishes them.
+- `cachedInputTokens` — `integer` (min 0, max 9007199254740991), optional. Prompt tokens served from a provider cache.
+
+Closed object: the schema rejects members not listed here.
+
+### `ReasoningEncryptedValueSubtype`
+
+Whether a REASONING_ENCRYPTED_VALUE belongs to a message or to a tool call.
+
+**Values:**
+
+`tool-call` · `message`
+
+## Mixins
+
+Shared field sets, flattened into every definition that composes them. They
+exist in the schema as named definitions so their documentation lives once;
+no wire object is ever just a mixin.
+
+### `Attributable`
+
+Composed into everything that can belong to a subagent's work: the events that describe content or progress, the message types, and each interrupt. Run-scoped events omit it — RUN_STARTED, RUN_FINISHED and RUN_ERROR describe the run itself and MESSAGES_SNAPSHOT is conversation-wide, so none of them can belong to one subagent. A tool call omits it too and inherits its containing message's attribution.
+
+**Fields:**
+
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+
+
+### `BaseEvent`
+
+The fields every event carries, whatever its type. Composed into each event definition rather than repeated, so a change here reaches every event at once.
+
+**Fields:**
+
+- `type` — [`EventType`](#eventtype), **required**. Which event this is. Each event definition narrows this to a single value.
+- `timestamp` — `integer` (min -9007199254740991, max 9007199254740991), optional. When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value.
+- `rawEvent` — any JSON value, optional. The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
+
+
+### `BaseMessage`
+
+The fields shared by the developer, system, assistant and user messages. Deliberately excludes content, because a user message's content may be an array while the others are strings, and composition here intersects rather than overrides: a base that constrained content to a string would make an array content invalid. The tool, activity and reasoning messages do not compose this, because they carry no name.
+
+**Fields:**
+
+- `subagentRunId` — [`SubagentRunId`](#subagentrunid), optional. The subagent invocation this belongs to. Absent means the parent agent produced it directly.
+- `id` — `string`, **required**. Identifies the message within the conversation.
+- `role` — `string`, **required**. Who the message is from. Each message definition narrows this to a single value.
+- `name` — `string`, optional. An optional display name for the author.
+- `encryptedValue` — `string`, optional. A provider's opaque artefact belonging to this message, stored by a consumer and returned on a later turn.
+- `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this message.
+
