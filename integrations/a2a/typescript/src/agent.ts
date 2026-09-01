@@ -154,6 +154,11 @@ export class A2AAgent extends AbstractAgent {
     return {
       message,
       configuration,
+      ...(input.state &&
+        typeof input.state === "object" &&
+        Object.keys(input.state as Record<string, unknown>).length > 0 && {
+          metadata: { "x-agui-state": input.state },
+        }),
     } as MessageSendParams;
   }
 

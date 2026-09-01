@@ -4,6 +4,8 @@ import type {
   Message,
   TextMessageChunkEvent,
   RawEvent,
+  StateDeltaEvent,
+  StateSnapshotEvent,
   ToolCallArgsEvent,
   ToolCallEndEvent,
   ToolCallStartEvent,
@@ -37,6 +39,14 @@ const SURFACE_OPERATION_KEYS = [
   "surfaceUpdate",
   "dataModelUpdate",
 ] as const;
+
+/**
+ * Data part `type` values used to carry AG-UI state events back to the client.
+ * The server emits a data part with one of these types inside
+ * `status-update.status.message.parts`.
+ */
+export const AGUI_STATE_SNAPSHOT_TYPE = "agui-state-snapshot";
+export const AGUI_STATE_DELTA_TYPE = "agui-state-delta";
 
 type SurfaceOperationKey = (typeof SURFACE_OPERATION_KEYS)[number];
 
@@ -405,6 +415,35 @@ function convertMessageToEvents(
           ],
         } as BaseEvent);
 
+        continue;
+      }
+
+      // State snapshot/delta sent back by the agent via a data part.
+      if (
+        payload &&
+        typeof payload === "object" &&
+        (payload as Record<string, unknown>).type === AGUI_STATE_SNAPSHOT_TYPE
+      ) {
+        const statePayload = payload as { type: string; snapshot: unknown };
+        events.push({
+          type: EventType.STATE_SNAPSHOT,
+          snapshot: statePayload.snapshot,
+        } as StateSnapshotEvent);
+        continue;
+      }
+
+      if (
+        payload &&
+        typeof payload === "object" &&
+        (payload as Record<string, unknown>).type === AGUI_STATE_DELTA_TYPE
+      ) {
+        const statePayload = payload as { type: string; patch: unknown[] };
+        if (Array.isArray(statePayload.patch)) {
+          events.push({
+            type: EventType.STATE_DELTA,
+            delta: statePayload.patch,
+          } as StateDeltaEvent);
+        }
         continue;
       }
 

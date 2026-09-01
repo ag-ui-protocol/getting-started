@@ -17,6 +17,8 @@ type SendMessageResponseError = {
 };
 
 class FakeA2AClient {
+  public lastSendParams: MessageSendParams | undefined;
+
   constructor(
     readonly behaviour: {
       stream?: () => AsyncGenerator<any, void, unknown>;
@@ -26,6 +28,7 @@ class FakeA2AClient {
   ) {}
 
   sendMessageStream(params: MessageSendParams) {
+    this.lastSendParams = params;
     if (!this.behaviour.stream) {
       throw new Error("Streaming not configured");
     }
@@ -33,6 +36,7 @@ class FakeA2AClient {
   }
 
   async sendMessage(params: MessageSendParams) {
+    this.lastSendParams = params;
     if (!this.behaviour.send) {
       throw new Error("sendMessage not configured");
     }
@@ -139,5 +143,71 @@ describe("A2AAgent", () => {
     });
 
     await expect(agent.runAgent()).rejects.toThrow("Agent failure");
+  });
+
+  it("passes RunAgentInput.state as metadata['x-agui-state'] in MessageSendParams", async () => {
+    const fakeClient = new FakeA2AClient({
+      stream: async function* () {
+        yield {
+          kind: "message",
+          messageId: "resp-state",
+          role: "agent",
+          parts: [{ kind: "text", text: "ok" }],
+        };
+      },
+    });
+
+    const agent = new A2AAgent({ a2aClient: fakeClient as any });
+
+    const state = { host: { route: "/insights" }, selectedInsight: { id: "abc" } };
+
+    await new Promise<void>((resolve, reject) => {
+      agent
+        .run({
+          runId: "run-1",
+          threadId: "thread-1",
+          messages: [createMessage({ id: "u1", role: "user", content: "hi" })],
+          state,
+          tools: [],
+          context: [],
+          forwardedProps: {},
+        })
+        .subscribe({ complete: resolve, error: reject });
+    });
+
+    expect(fakeClient.lastSendParams?.metadata).toEqual(
+      expect.objectContaining({ "x-agui-state": state }),
+    );
+  });
+
+  it("omits metadata when state is empty", async () => {
+    const fakeClient = new FakeA2AClient({
+      stream: async function* () {
+        yield {
+          kind: "message",
+          messageId: "resp-no-state",
+          role: "agent",
+          parts: [{ kind: "text", text: "ok" }],
+        };
+      },
+    });
+
+    const agent = new A2AAgent({ a2aClient: fakeClient as any });
+
+    await new Promise<void>((resolve, reject) => {
+      agent
+        .run({
+          runId: "run-2",
+          threadId: "thread-2",
+          messages: [createMessage({ id: "u2", role: "user", content: "hi" })],
+          state: {},
+          tools: [],
+          context: [],
+          forwardedProps: {},
+        })
+        .subscribe({ complete: resolve, error: reject });
+    });
+
+    expect(fakeClient.lastSendParams?.metadata).toBeUndefined();
   });
 });

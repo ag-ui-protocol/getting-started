@@ -181,6 +181,74 @@ describe("convertA2AEventToAGUIEvents", () => {
 
     expect(events).toHaveLength(0);
   });
+
+  it("emits STATE_SNAPSHOT when a data part with type agui-state-snapshot is received", () => {
+    const snapshot = { selectedInsight: { id: "abc", title: "Abandono no bloco CPF" } };
+    const a2aEvent = {
+      kind: "message" as const,
+      messageId: "state-msg-1",
+      role: "agent" as const,
+      parts: [
+        {
+          kind: "data" as const,
+          data: { type: "agui-state-snapshot", snapshot },
+        },
+      ],
+    };
+
+    const events = convertA2AEventToAGUIEvents(a2aEvent, { messageIdMap: new Map() });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        type: EventType.STATE_SNAPSHOT,
+        snapshot,
+      }),
+    );
+  });
+
+  it("emits STATE_DELTA when a data part with type agui-state-delta is received", () => {
+    const patch = [{ op: "replace", path: "/selectedInsight/status", value: "analyzing" }];
+    const a2aEvent = {
+      kind: "message" as const,
+      messageId: "state-msg-2",
+      role: "agent" as const,
+      parts: [
+        {
+          kind: "data" as const,
+          data: { type: "agui-state-delta", patch },
+        },
+      ],
+    };
+
+    const events = convertA2AEventToAGUIEvents(a2aEvent, { messageIdMap: new Map() });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        type: EventType.STATE_DELTA,
+        delta: patch,
+      }),
+    );
+  });
+
+  it("skips a state-delta data part with a non-array patch", () => {
+    const a2aEvent = {
+      kind: "message" as const,
+      messageId: "state-msg-3",
+      role: "agent" as const,
+      parts: [
+        {
+          kind: "data" as const,
+          data: { type: "agui-state-delta", patch: "invalid" },
+        },
+      ],
+    };
+
+    const events = convertA2AEventToAGUIEvents(a2aEvent, { messageIdMap: new Map() });
+
+    expect(events).toHaveLength(0);
+  });
 });
 
 describe("sendMessageToA2AAgentTool", () => {
