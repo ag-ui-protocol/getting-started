@@ -325,9 +325,99 @@ data class TextInputContent(
 ) : InputContent()
 
 /**
- * A binary payload reference in a multimodal user message.
+ * The source of a binary input content part.
  *
- * At least one of id, url, or data must be provided to specify the binary content source.
+ * Either a base64-encoded data payload ([InputContentDataSource]) or a URL reference
+ * ([InputContentUrlSource]).
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+@JsonClassDiscriminator("type")
+sealed class InputContentSource
+
+/**
+ * A base64-encoded data payload.
+ *
+ * @param value Base64-encoded content
+ * @param mimeType MIME type of the content (e.g., "image/png", "application/pdf")
+ */
+@Serializable
+@SerialName("data")
+data class InputContentDataSource(
+    val value: String,
+    val mimeType: String,
+) : InputContentSource()
+
+/**
+ * A URL reference to external content.
+ *
+ * @param value URL pointing to the content
+ * @param mimeType Optional MIME type hint
+ */
+@Serializable
+@SerialName("url")
+data class InputContentUrlSource(
+    val value: String,
+    val mimeType: String? = null,
+) : InputContentSource()
+
+/**
+ * An image part in a multimodal user message.
+ *
+ * @param source The image data or URL
+ * @param metadata Optional arbitrary metadata
+ */
+@Serializable
+@SerialName("image")
+data class ImageInputContent(
+    val source: InputContentSource,
+    val metadata: JsonElement? = null,
+) : InputContent()
+
+/**
+ * An audio part in a multimodal user message.
+ *
+ * @param source The audio data or URL
+ * @param metadata Optional arbitrary metadata
+ */
+@Serializable
+@SerialName("audio")
+data class AudioInputContent(
+    val source: InputContentSource,
+    val metadata: JsonElement? = null,
+) : InputContent()
+
+/**
+ * A video part in a multimodal user message.
+ *
+ * @param source The video data or URL
+ * @param metadata Optional arbitrary metadata
+ */
+@Serializable
+@SerialName("video")
+data class VideoInputContent(
+    val source: InputContentSource,
+    val metadata: JsonElement? = null,
+) : InputContent()
+
+/**
+ * A document part in a multimodal user message (e.g., PDF, Word).
+ *
+ * @param source The document data or URL
+ * @param metadata Optional arbitrary metadata
+ */
+@Serializable
+@SerialName("document")
+data class DocumentInputContent(
+    val source: InputContentSource,
+    val metadata: JsonElement? = null,
+) : InputContent()
+
+/**
+ * Legacy binary payload reference. Prefer the typed variants ([ImageInputContent],
+ * [DocumentInputContent], etc.) for new code.
+ *
+ * At least one of [id], [url], or [data] must be provided.
  *
  * @param mimeType The MIME type of the binary content (e.g., "image/png")
  * @param id Optional identifier for retrieving the binary content
@@ -335,6 +425,7 @@ data class TextInputContent(
  * @param data Optional base64-encoded binary data
  * @param filename Optional original filename of the binary content
  */
+@Deprecated("Use ImageInputContent, DocumentInputContent, AudioInputContent or VideoInputContent instead.")
 @Serializable
 @SerialName("binary")
 data class BinaryInputContent(

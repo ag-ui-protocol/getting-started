@@ -710,4 +710,85 @@ class MessageProtocolComplianceTest {
         )
         assertEquals(Role.ACTIVITY, activityMessage.messageRole)
     }
+
+    @Test
+    fun testImageInputContentWithDataSource() {
+        val parts = listOf(
+            TextInputContent(text = "What's in this image?"),
+            ImageInputContent(source = InputContentDataSource(value = "base64data==", mimeType = "image/png"))
+        )
+        val message = UserMessage.multimodal(id = "msg_1", parts = parts)
+
+        val jsonString = json.encodeToString<Message>(message)
+        val jsonObj = json.parseToJsonElement(jsonString).jsonObject
+        val contentArray = jsonObj["content"]!!.jsonArray
+
+        val imagePart = contentArray[1].jsonObject
+        assertEquals("image", imagePart["type"]?.jsonPrimitive?.content)
+        val source = imagePart["source"]!!.jsonObject
+        assertEquals("data", source["type"]?.jsonPrimitive?.content)
+        assertEquals("base64data==", source["value"]?.jsonPrimitive?.content)
+        assertEquals("image/png", source["mimeType"]?.jsonPrimitive?.content)
+
+        val decoded = json.decodeFromString<Message>(jsonString)
+        assertTrue(decoded is UserMessage)
+        val imagePart2 = (decoded as UserMessage).contentParts!![1]
+        assertTrue(imagePart2 is ImageInputContent)
+        val src = (imagePart2 as ImageInputContent).source
+        assertTrue(src is InputContentDataSource)
+        assertEquals("base64data==", (src as InputContentDataSource).value)
+        assertEquals("image/png", src.mimeType)
+    }
+
+    @Test
+    fun testDocumentInputContentWithUrlSource() {
+        val parts = listOf(
+            DocumentInputContent(source = InputContentUrlSource(value = "https://example.com/doc.pdf"))
+        )
+        val message = UserMessage.multimodal(id = "msg_2", parts = parts)
+
+        val jsonString = json.encodeToString<Message>(message)
+        val jsonObj = json.parseToJsonElement(jsonString).jsonObject
+        val contentArray = jsonObj["content"]!!.jsonArray
+
+        val docPart = contentArray[0].jsonObject
+        assertEquals("document", docPart["type"]?.jsonPrimitive?.content)
+        val source = docPart["source"]!!.jsonObject
+        assertEquals("url", source["type"]?.jsonPrimitive?.content)
+        assertEquals("https://example.com/doc.pdf", source["value"]?.jsonPrimitive?.content)
+
+        val decoded = json.decodeFromString<Message>(jsonString)
+        assertTrue(decoded is UserMessage)
+        val docPart2 = (decoded as UserMessage).contentParts!![0]
+        assertTrue(docPart2 is DocumentInputContent)
+        val src = (docPart2 as DocumentInputContent).source
+        assertTrue(src is InputContentUrlSource)
+        assertEquals("https://example.com/doc.pdf", (src as InputContentUrlSource).value)
+    }
+
+    @Test
+    fun testAllMediaInputContentTypes() {
+        val source = InputContentDataSource(value = "data==", mimeType = "application/octet-stream")
+        val parts = listOf(
+            ImageInputContent(source = source),
+            AudioInputContent(source = source),
+            VideoInputContent(source = source),
+            DocumentInputContent(source = source),
+        )
+        val message = UserMessage.multimodal(id = "msg_3", parts = parts)
+
+        val jsonString = json.encodeToString<Message>(message)
+        val contentArray = json.parseToJsonElement(jsonString).jsonObject["content"]!!.jsonArray
+
+        assertEquals("image", contentArray[0].jsonObject["type"]?.jsonPrimitive?.content)
+        assertEquals("audio", contentArray[1].jsonObject["type"]?.jsonPrimitive?.content)
+        assertEquals("video", contentArray[2].jsonObject["type"]?.jsonPrimitive?.content)
+        assertEquals("document", contentArray[3].jsonObject["type"]?.jsonPrimitive?.content)
+
+        val decoded = json.decodeFromString<Message>(jsonString) as UserMessage
+        assertTrue(decoded.contentParts!![0] is ImageInputContent)
+        assertTrue(decoded.contentParts!![1] is AudioInputContent)
+        assertTrue(decoded.contentParts!![2] is VideoInputContent)
+        assertTrue(decoded.contentParts!![3] is DocumentInputContent)
+    }
 }
