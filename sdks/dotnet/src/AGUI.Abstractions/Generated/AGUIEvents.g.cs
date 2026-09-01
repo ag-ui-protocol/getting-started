@@ -229,9 +229,11 @@ public sealed class ToolCallArgsEvent : BaseEvent
     public string ToolCallId { get; set; } = string.Empty;
 
     /// <summary>
-    /// A fragment of the arguments, which concatenate into a JSON document.
-    /// Deliberately a string rather than parsed JSON: a fragment of JSON is not
-    /// itself JSON. May be the empty string.
+    /// A fragment of the arguments, which concatenate into the call's argument
+    /// text — conventionally a JSON document, though the protocol does not
+    /// validate it (see FunctionCall.arguments). Deliberately a string rather
+    /// than parsed JSON: a fragment is not itself a document. May be the empty
+    /// string.
     /// </summary>
     [JsonPropertyName("delta")]
     public string Delta { get; set; } = string.Empty;
