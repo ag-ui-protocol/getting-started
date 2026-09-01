@@ -895,8 +895,10 @@ export class LangGraphAgent extends AbstractAgent {
 
     this.activeRun!.prevNodeName = null;
     let latestStateValues = {} as ThreadState<State>["values"];
-    let latestRootStateValues = {} as ThreadState<State>["values"];
-    let hasOrderedRootStateValues = false;
+    // prepareStream's state is the ordered root boundary before any streamed
+    // chunk, including a first subgraph event that arrives before values mode.
+    let latestRootStateValues = state.values;
+    let hasOrderedRootStateValues = true;
     let updatedState = state;
 
     try {
@@ -1003,6 +1005,12 @@ export class LangGraphAgent extends AbstractAgent {
         }
 
         const chunkData = chunk.data;
+        // Once events-mode streaming is active, messages-tuple is a legacy
+        // fallback only. Skip it before the shared state-snapshot logic so an
+        // ignored late tuple cannot become a snapshot timing pulse.
+        if (isMessagesTupleEvent && this.eventsStreamActive) {
+          continue;
+        }
         // messages-tuple chunks arrive as [AIMessageChunk, metadata] arrays;
         // events-mode chunks are objects with metadata/event properties. Read
         // metadata from the right slot so langgraph_node is extracted in both

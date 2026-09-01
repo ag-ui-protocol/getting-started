@@ -247,6 +247,7 @@ function Recipe() {
   const agentState = agent.state as RecipeAgentState | undefined;
   const setAgentState = (s: RecipeAgentState) => agent.setState(s);
   const isLoading = agent.isRunning;
+  const isAgentReady = Boolean(copilotkit.getAgent("shared_state"));
 
   // Set initial state on mount
   useEffect(() => {
@@ -424,6 +425,7 @@ function Recipe() {
   return (
     <form
       data-testid="recipe-card"
+      data-agent-ready={isAgentReady}
       style={isMobile ? { marginBottom: "100px" } : {}}
       className="recipe-card"
     >

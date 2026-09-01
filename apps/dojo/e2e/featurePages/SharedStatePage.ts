@@ -38,6 +38,13 @@ export class SharedStatePage {
     await expect(this.agentGreeting).toBeVisible();
   }
 
+  async awaitAgentReady() {
+    await expect(this.page.getByTestId("recipe-card")).toHaveAttribute(
+      "data-agent-ready",
+      "true",
+    );
+  }
+
   async sendMessage(message: string) {
     await sendChatMessage(this.page, message);
     await awaitLLMResponseDone(this.page);
