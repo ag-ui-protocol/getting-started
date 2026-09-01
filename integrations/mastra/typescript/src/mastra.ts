@@ -413,6 +413,28 @@ export interface MastraAgentConfig extends AgentConfig {
    */
   emitInterruptOutcome?: boolean;
   /**
+   * Also open the tool-call family live (TOOL_CALL_START / ARGS / END as the
+   * args stream) for SERVER tools, not only for client generative-UI tools.
+   *
+   * Default **false** — today's behavior. A server tool's call is buffered in
+   * `pendingToolCall` and flushed by the NEXT chunk, which for an ordinary
+   * sequential tool is its own `tool-result`: the subscriber then receives
+   * START / ARGS / END / RESULT in one flush after the tool has already
+   * finished, so a long-running server tool paints no "running" step at all.
+   * Turn this on when your UI renders tool activity and you want that step to
+   * appear while the tool runs.
+   *
+   * The reason it is opt-in: a live-streamed call cannot be retracted. The
+   * buffer is what lets a following `tool-call-suspended` /
+   * `background-task-started` suppress the normal tool render, and a call that
+   * already emitted TOOL_CALL_START can only be CLOSED (TOOL_CALL_END), not
+   * un-emitted. Under this option those two paths therefore close the streamed
+   * call instead of suppressing it, and the consumer sees a tool call with no
+   * TOOL_CALL_RESULT (the interrupt / activity carries the outcome). If your
+   * server tools suspend or run as background tasks, leave this off.
+   */
+  streamServerToolCalls?: boolean;
+  /**
    * A2UI auto-injection config (local agents). When the runtime/middleware
    * forwards `injectA2UITool`, the bridge injects a backend-owned `generate_a2ui`
    * tool (recovery + subagent) per run so the developer wires nothing — the
@@ -580,6 +602,8 @@ export class MastraAgent extends AbstractAgent {
   public headers?: Record<string, string>;
   /** See MastraAgentConfig.emitInterruptOutcome. Default true. */
   emitInterruptOutcome: boolean;
+  /** See MastraAgentConfig.streamServerToolCalls. Default false. */
+  streamServerToolCalls: boolean;
   /** See MastraAgentConfig.a2ui — A2UI auto-injection config. */
   a2ui?: A2UIInjectConfig;
   /** See MastraAgentConfig.remoteClient. Set for remote agents only. */
@@ -655,6 +679,7 @@ export class MastraAgent extends AbstractAgent {
       untilIdle,
       tracingOptions,
       emitInterruptOutcome,
+      streamServerToolCalls,
       a2ui,
       remoteClient,
       useProcessedFinalText,
@@ -663,6 +688,7 @@ export class MastraAgent extends AbstractAgent {
     } = config;
     super(rest);
     this.emitInterruptOutcome = emitInterruptOutcome ?? true;
+    this.streamServerToolCalls = streamServerToolCalls ?? false;
     this.agent = agent;
     this.resourceId = resourceId;
     this.requestContext = requestContext ?? new RequestContext();
@@ -1701,6 +1727,14 @@ export class MastraAgent extends AbstractAgent {
     const isClientTool = (toolName?: string) =>
       !!toolName && clientToolNames.has(toolName);
 
+    // Opt-in (MastraAgentConfig.streamServerToolCalls): stream SERVER tools
+    // live too, so a long-running one paints a "running" step instead of
+    // appearing only once it has finished. The suspend / background arms below
+    // close such a call rather than suppressing it — an emitted START cannot be
+    // retracted.
+    const streamsLive = (toolName?: string) =>
+      isClientTool(toolName) || (this.streamServerToolCalls && !!toolName);
+
     // Floor / fall-back path: a final `tool-call` with no preceding client
     // delta stream is buffered here so a following tool-call-suspended /
     // background-task-started can suppress it (and reuse its args). Tool calls
@@ -2183,10 +2217,7 @@ export class MastraAgent extends AbstractAgent {
             workingMemoryToolCalls.add(chunk.payload.toolCallId);
             break;
           }
-          if (
-            chunk.payload.toolCallId &&
-            isClientTool(chunk.payload.toolName)
-          ) {
+          if (chunk.payload.toolCallId && streamsLive(chunk.payload.toolName)) {
             startStreamedToolCall(
               chunk.payload.toolCallId,
               chunk.payload.toolName,
@@ -2211,9 +2242,10 @@ export class MastraAgent extends AbstractAgent {
             }
             break;
           }
-          // Only forward deltas for a call we opened as a live (client) stream.
-          // Server-tool deltas are ignored; their args ride the final
-          // `tool-call` chunk into the buffered path.
+          // Only forward deltas for a call we opened as a live stream (client
+          // tools, plus server tools under streamServerToolCalls). Deltas for a
+          // buffered call are ignored; its args ride the final `tool-call`
+          // chunk into the buffered path.
           if (
             toolCallId &&
             streamedStarted.has(toolCallId) &&
@@ -2374,6 +2406,15 @@ export class MastraAgent extends AbstractAgent {
           // call is orphaned (never executed) so emitting TOOL_CALL_START/
           // ARGS/END without a TOOL_CALL_RESULT would violate the protocol.
           pendingToolCall = null;
+          // Under streamServerToolCalls the call may already be OPEN rather
+          // than buffered, and an emitted TOOL_CALL_START cannot be retracted —
+          // close it so the suspend does not leave a start without a terminal.
+          if (
+            chunk.payload.toolCallId &&
+            streamedStarted.has(chunk.payload.toolCallId)
+          ) {
+            endStreamedToolCall(chunk.payload.toolCallId);
+          }
           if (!chunk.payload.toolCallId || !chunk.payload.toolName) {
             callbacks.onError(
               new Error(
@@ -2454,6 +2495,13 @@ export class MastraAgent extends AbstractAgent {
               ? pendingToolCall.args
               : undefined;
           pendingToolCall = null;
+          // Under streamServerToolCalls the call may already be OPEN rather
+          // than buffered (same reasoning as tool-call-suspended above): close
+          // it, because the work continues as an activity and no
+          // TOOL_CALL_RESULT will follow.
+          if (toolCallId && streamedStarted.has(toolCallId)) {
+            endStreamedToolCall(toolCallId);
+          }
           if (taskId && toolCallId) {
             backgroundToolCalls.set(toolCallId, { taskId, toolName });
           }

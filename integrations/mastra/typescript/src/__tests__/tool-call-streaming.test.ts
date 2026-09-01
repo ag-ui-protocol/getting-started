@@ -225,3 +225,181 @@ describe("incremental tool-call args (chunk processor)", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Opt-in: stream SERVER tool calls live (MastraAgentConfig.streamServerToolCalls)
+// ---------------------------------------------------------------------------
+
+const SERVER_TOOL = "deep_research";
+
+function serverToolStreamingChunks(toolCallId = "tc-s1") {
+  return [
+    {
+      type: "tool-call-input-streaming-start",
+      payload: { toolCallId, toolName: SERVER_TOOL },
+    },
+    {
+      type: "tool-call-delta",
+      payload: { argsTextDelta: '{"q":', toolCallId, toolName: SERVER_TOOL },
+    },
+    {
+      type: "tool-call-delta",
+      payload: { argsTextDelta: '"x"}', toolCallId, toolName: SERVER_TOOL },
+    },
+  ];
+}
+
+describe("streamServerToolCalls (opt-in live server-tool calls)", () => {
+  describe.each([
+    ["local", makeLocalMastraAgent],
+    ["remote", makeRemoteMastraAgent],
+  ])("%s agent path", (_label, makeAgent) => {
+    it("opens the call from the arg stream, not from the flush that follows the result", async () => {
+      // The buffered (default) path emits the whole family in one flush driven
+      // by the NEXT chunk — for a sequential server tool that is its own
+      // `tool-result`, so nothing renders while the tool runs. Taking the live
+      // path is observable in the args: one ARGS per raw JSON fragment, which
+      // only the streaming path produces (the buffered path emits a single
+      // JSON.stringify of the assembled object).
+      const agent = makeAgent({
+        streamServerToolCalls: true,
+        streamChunks: [
+          ...serverToolStreamingChunks(),
+          {
+            type: "tool-call-input-streaming-end",
+            payload: { toolCallId: "tc-s1" },
+          },
+          {
+            type: "tool-call",
+            payload: {
+              toolCallId: "tc-s1",
+              toolName: SERVER_TOOL,
+              args: { q: "x" },
+            },
+          },
+          {
+            type: "tool-result",
+            payload: { toolCallId: "tc-s1", result: { ok: true } },
+          },
+        ],
+      });
+      const events = await collectEvents(agent, input()); // server tool: absent from input().tools
+
+      const args = events.filter((e) => e.type === EventType.TOOL_CALL_ARGS);
+      expect((args as any[]).map((e) => e.delta)).toEqual(['{"q":', '"x"}']);
+
+      const relevant = events
+        .filter((e) =>
+          [
+            EventType.TOOL_CALL_START,
+            EventType.TOOL_CALL_ARGS,
+            EventType.TOOL_CALL_END,
+            EventType.TOOL_CALL_RESULT,
+          ].includes(e.type),
+        )
+        .map((e) => e.type);
+      expect(relevant).toEqual([
+        EventType.TOOL_CALL_START,
+        EventType.TOOL_CALL_ARGS,
+        EventType.TOOL_CALL_ARGS,
+        EventType.TOOL_CALL_END,
+        EventType.TOOL_CALL_RESULT,
+      ]);
+    });
+
+    it("is off by default — the same stream buffers into one ARGS", async () => {
+      const agent = makeAgent({
+        streamChunks: [
+          ...serverToolStreamingChunks(),
+          {
+            type: "tool-call-input-streaming-end",
+            payload: { toolCallId: "tc-s1" },
+          },
+          {
+            type: "tool-call",
+            payload: {
+              toolCallId: "tc-s1",
+              toolName: SERVER_TOOL,
+              args: { q: "x" },
+            },
+          },
+          {
+            type: "tool-result",
+            payload: { toolCallId: "tc-s1", result: { ok: true } },
+          },
+        ],
+      });
+      const events = await collectEvents(agent, input());
+
+      const args = events.filter((e) => e.type === EventType.TOOL_CALL_ARGS);
+      expect(args).toHaveLength(1);
+      expect(JSON.parse((args[0] as any).delta)).toEqual({ q: "x" });
+    });
+  });
+
+  it("closes a live-streamed call when the tool suspends (no orphaned START)", async () => {
+    // Suppression by clearing the buffer is not available for a call that
+    // already emitted TOOL_CALL_START, so the suspend arm closes it instead.
+    const agent = makeLocalMastraAgent({
+      streamServerToolCalls: true,
+      streamChunks: [
+        ...serverToolStreamingChunks("tc-s2"),
+        {
+          type: "tool-call-suspended",
+          payload: {
+            toolCallId: "tc-s2",
+            toolName: SERVER_TOOL,
+            suspendPayload: { reason: "needs approval" },
+            args: { q: "x" },
+          },
+        },
+      ],
+    });
+    const events = await collectEvents(agent, input());
+
+    expect(
+      events.filter((e) => e.type === EventType.TOOL_CALL_START),
+    ).toHaveLength(1);
+    expect(
+      events.filter((e) => e.type === EventType.TOOL_CALL_END),
+    ).toHaveLength(1);
+    expect(
+      events.filter((e) => e.type === EventType.TOOL_CALL_RESULT),
+    ).toHaveLength(0);
+    // The interrupt itself still surfaces.
+    expect(events.filter((e) => e.type === EventType.CUSTOM)).toHaveLength(1);
+  });
+
+  it("closes a live-streamed call when the tool goes to the background", async () => {
+    const agent = makeLocalMastraAgent({
+      streamServerToolCalls: true,
+      streamChunks: [
+        ...serverToolStreamingChunks("tc-s3"),
+        {
+          type: "background-task-started",
+          payload: {
+            taskId: "task-1",
+            toolName: SERVER_TOOL,
+            toolCallId: "tc-s3",
+          },
+        },
+        { type: "finish", payload: { finishReason: "stop" } },
+      ],
+    });
+    const events = await collectEvents(agent, input());
+
+    expect(
+      events.filter((e) => e.type === EventType.TOOL_CALL_START),
+    ).toHaveLength(1);
+    expect(
+      events.filter((e) => e.type === EventType.TOOL_CALL_END),
+    ).toHaveLength(1);
+    expect(
+      events.filter((e) => e.type === EventType.TOOL_CALL_RESULT),
+    ).toHaveLength(0);
+    // The work continues as an activity.
+    expect(
+      events.filter((e) => e.type === EventType.ACTIVITY_SNAPSHOT),
+    ).toHaveLength(1);
+  });
+});
