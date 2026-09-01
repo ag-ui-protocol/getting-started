@@ -13,7 +13,6 @@ from typing import NamedTuple
 from ag_ui.core import (
     UserMessage,
     TextInputContent,
-    BinaryInputContent,
     ImageInputContent,
     AudioInputContent,
     VideoInputContent,
@@ -21,6 +20,7 @@ from ag_ui.core import (
     InputContentDataSource,
     InputContentUrlSource,
 )
+from ag_ui_langgraph.utils import BinaryInputContent
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
@@ -59,7 +59,7 @@ class TestMultimodalConversion(unittest.TestCase):
 
     def test_agui_binary_url_to_langchain(self):
         """Test converting BinaryInputContent with URL to LangChain (backwards compat)."""
-        agui_message = UserMessage(
+        agui_message = UserMessage.model_construct(
             id="test-2",
             role="user",
             content=[
@@ -92,7 +92,7 @@ class TestMultimodalConversion(unittest.TestCase):
 
     def test_agui_binary_data_to_langchain(self):
         """Test converting BinaryInputContent with base64 data to LangChain (backwards compat)."""
-        agui_message = UserMessage(
+        agui_message = UserMessage.model_construct(
             id="test-3",
             role="user",
             content=[
