@@ -82,7 +82,11 @@ specification.
 7. A late `RUN_ERROR` after `RUN_FINISHED` is admitted, reporting a failure
    that surfaced after success was already reported
    ([Runs and steps](/spec/draft/events/lifecycle)).
-8. The protocol version travels in-band: consumers declare theirs on
+8. A consumer keeps a stream it rejects apart from a run that reports its own
+   failure, and "treat the run as failed" is defined: surface it, never report
+   success, with the API shape left to the implementation
+   ([Runs and steps](/spec/draft/events/lifecycle#error-handling)).
+9. The protocol version travels in-band: consumers declare theirs on
    `RunAgentInput.protocolVersion`, producers answer with their own on
    `RUN_STARTED.protocolVersion`, and absence identifies a pre-versioning
    peer ([Versioning](/spec/draft/basic/versioning#version-negotiation)).
