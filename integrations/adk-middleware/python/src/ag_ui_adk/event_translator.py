@@ -21,6 +21,7 @@ from ag_ui.core import (
     ReasoningStartEvent, ReasoningEndEvent,
     ReasoningMessageStartEvent, ReasoningMessageContentEvent, ReasoningMessageEndEvent,
     ReasoningEncryptedValueEvent,
+    ActivitySnapshotEvent, ActivityDeltaEvent,
 )
 import json
 from google.adk.events import Event as ADKEvent
@@ -31,6 +32,18 @@ from .utils.converters import _escape_json_pointer_token
 
 import logging
 logger = logging.getLogger(__name__)
+
+# ``custom_metadata`` keys an ADK producer (tool, plugin, callback, custom agent)
+# can set to surface a background-task / progress "activity" into the AG-UI stream.
+# Absent → no ACTIVITY events emitted, so this is inherently opt-in and a no-op
+# for agents that don't set it. Mirrors how RemoteA2aAgent uses ``a2a:*`` keys.
+#   custom_metadata["ag_ui.activity"]       -> ActivitySnapshotEvent
+#       {"message_id"?: str, "activity_type": str, "content": Any}
+#   custom_metadata["ag_ui.activity_delta"] -> ActivityDeltaEvent
+#       {"message_id": str, "activity_type": str, "patch": list}  (RFC 6902)
+# Either value may also be a list to emit several activity events from one ADK event.
+ACTIVITY_METADATA_KEY = "ag_ui.activity"
+ACTIVITY_DELTA_METADATA_KEY = "ag_ui.activity_delta"
 
 # Backwards-compatible thought support detection
 # The part.thought attribute may not exist in older versions of google-genai
@@ -336,8 +349,54 @@ class EventTranslator:
         """
         return len(self._deferred_confirm_events) > 0
 
+    def _translate_activity(self, adk_event: ADKEvent):
+        """Yield ACTIVITY_* events from an ADK event's custom_metadata markers.
+
+        Producers (tools, plugins, callbacks, custom agents) opt in by setting
+        ``custom_metadata[ACTIVITY_METADATA_KEY]`` (snapshot) and/or
+        ``custom_metadata[ACTIVITY_DELTA_METADATA_KEY]`` (delta). Each may be a
+        single marker dict or a list of them. Malformed markers are skipped with
+        a warning so a bad marker never breaks the stream. No marker → nothing
+        yielded (zero behavior change for agents that don't use it).
+        """
+        metadata = getattr(adk_event, "custom_metadata", None)
+        if not isinstance(metadata, dict):
+            return
+
+        def _as_list(value):
+            if value is None:
+                return []
+            return value if isinstance(value, list) else [value]
+
+        for marker in _as_list(metadata.get(ACTIVITY_METADATA_KEY)):
+            if not isinstance(marker, dict) or "activity_type" not in marker:
+                logger.warning("Skipping malformed ag_ui.activity marker: %r", marker)
+                continue
+            yield ActivitySnapshotEvent(
+                type=EventType.ACTIVITY_SNAPSHOT,
+                message_id=marker.get("message_id") or f"activity-{uuid.uuid4().hex[:8]}",
+                activity_type=marker["activity_type"],
+                content=marker.get("content"),
+            )
+
+        for marker in _as_list(metadata.get(ACTIVITY_DELTA_METADATA_KEY)):
+            if (
+                not isinstance(marker, dict)
+                or "activity_type" not in marker
+                or "message_id" not in marker
+                or not isinstance(marker.get("patch"), list)
+            ):
+                logger.warning("Skipping malformed ag_ui.activity_delta marker: %r", marker)
+                continue
+            yield ActivityDeltaEvent(
+                type=EventType.ACTIVITY_DELTA,
+                message_id=marker["message_id"],
+                activity_type=marker["activity_type"],
+                patch=marker["patch"],
+            )
+
     async def translate(
-        self, 
+        self,
         adk_event: ADKEvent,
         thread_id: str,
         run_id: str
@@ -371,6 +430,11 @@ class EventTranslator:
             if hasattr(adk_event, 'author') and adk_event.author == "user":
                 logger.debug("Skipping user event")
                 return
+
+            # Activity passthrough: if a producer tagged this ADK event with an
+            # activity marker in custom_metadata, surface it as ACTIVITY_* first.
+            for activity_event in self._translate_activity(adk_event):
+                yield activity_event
 
             # Handle text content
             # --- THIS IS THE RESTORED LINE ---
