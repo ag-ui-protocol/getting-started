@@ -45,14 +45,15 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.17.4",
+    "@copilotkit/aimock": "1.37.4",
     "@types/node": "^20.11.19",
     "@vitest/coverage-istanbul": "^4.0.18",
     "eslint": "^9.37.0",
     "publint": "^0.3.12",
-    "@arethetypeswrong/cli": "^0.17.4",
-    "vitest": "^4.0.18",
     "tsdown": "^0.20.1",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^4.0.18"
   },
   "exports": {
     ".": {
