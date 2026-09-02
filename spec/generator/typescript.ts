@@ -109,21 +109,35 @@ function fieldTags(field: Field): string[] {
 // types always were. An interface never satisfies an index signature, and
 // nothing generated should be augmentable by declaration merging anyway.
 function emitObjectType(definition: ObjectDefinition): string {
+  let materialised = false;
   const fields = definition.fields
     .map((field) => {
-      const description =
+      const base =
         field.type.kind === "array" && field.type.itemsDescription !== undefined
           ? `${field.description} Each item: ${field.type.itemsDescription}`
           : field.description;
+      // Descriptions are copied from the schema, which describes the WIRE. For
+      // a materialised field that leaves the doc contradicting the type it sits
+      // on — the schema says "Absent means none", and absent is exactly what
+      // this type can no longer express — so the divergence is stated here
+      // rather than left for a reader to trip over.
+      const materialise = ABSENT_MEANS_EMPTY.has(`${definition.name}.${field.name}`);
+      if (materialise) materialised = true;
+      const description = materialise
+        ? `${base} Optional on the wire; the TypeScript SDK materialises an absent one as an empty list, so this type requires it.`
+        : base;
       const doc = jsdoc(description, fieldTags(field), "  ");
-      const optional =
-        field.required || ABSENT_MEANS_EMPTY.has(`${definition.name}.${field.name}`)
-          ? ""
-          : "?";
+      const optional = field.required || materialise ? "" : "?";
       return `${doc}\n  ${field.name}${optional}: ${tsType(field.type)};`;
     })
     .join("\n");
-  return `${jsdoc(definition.description)}\nexport type ${definition.name} = {\n${fields}\n};`;
+  // Same reason, one level up: a description that enumerates which fields are
+  // required is true of the schema and false of this type once anything here
+  // is materialised.
+  const description = materialised
+    ? `${definition.description} Requiredness above describes the wire; this TypeScript type additionally requires every field the SDK materialises.`
+    : definition.description;
+  return `${jsdoc(description)}\nexport type ${definition.name} = {\n${fields}\n};`;
 }
 
 function emitTypeDefinition(definition: Definition): string {
@@ -188,10 +202,18 @@ const NULL_MEANS_ABSENT = new Set(["RunAgentInput.state"]);
  * packages stopped compiling for want of it.
  *
  * So the SDK presents the one form every layer already accepts. The protobuf
- * decoder does the same on purpose and for the same reason, since the wire
- * cannot tell an absent repeated field from an empty one; this makes the JSON
- * path agree with it. Absent in, empty out — no meaning is invented, because
- * absent and empty were never different meanings.
+ * decoder already decodes these two fields to present-empty, since the wire
+ * cannot tell an absent repeated field from an empty one — though that is a
+ * per-field choice there rather than a rule: the same decoder deletes an empty
+ * `usage` on RUN_FINISHED, going the other way under the same constraint. So
+ * this aligns the JSON path with the binary one for TOOLS AND CONTEXT, and
+ * only in TypeScript: Python and .NET keep both fields optional, because the
+ * marker lives in this emitter alone.
+ *
+ * Absent in, empty out — no meaning is invented, because absent and empty were
+ * never different meanings. The default is a FACTORY, not a literal: zod stores
+ * a literal in the schema and hands the same instance to every parse, so one
+ * consumer's push would leak into every later parse in the process.
  */
 const ABSENT_MEANS_EMPTY = new Set([
   "RunAgentInput.tools",
@@ -267,7 +289,7 @@ function emitSchemaDefinition(
           const optional = field.required
             ? ""
             : ABSENT_MEANS_EMPTY.has(`${definition.name}.${field.name}`)
-              ? ".default([])"
+              ? ".default(() => [])"
               : ".optional()";
           // A field the protocol reads as absent when it arrives as null: the
           // coercion belongs with the validator because a server parsing a
@@ -291,8 +313,12 @@ function emitSchemaDefinition(
       // leave open are marked, so the stripping stage can tell "tolerated until
       // enforcement" from "allowed to stay". Today that is the RFC 6902
       // operations, which the RFC requires to ignore members they do not define
-      // rather than reject them. Mixins never reach this branch, so an open
-      // definition here is always one meant to be used as a value.
+      // rather than reject them. Mixin shapes reach this branch too, via the
+      // separate emit pass below, which is what `isMixin` is for: a mixin is
+      // not a value on the wire, so saying the spec leaves IT open states
+      // nothing. (It could not mislead the stripper either — mixin fields are
+      // flattened into each composing definition, so nothing walks the mixin's
+      // own schema — but a mark that means nothing is worth not emitting.)
       const openMark =
         definition.closed || isMixin ? "" : ".meta({ specOpen: true })";
       return `${doc}\nexport const ${definition.name}Schema = z.looseObject({\n${fields}\n})${openMark};`;
@@ -352,8 +378,8 @@ export function emitSchemas(model: ProtocolModel): string {
       emitSchemaDefinition(definition, anyAliases),
     ),
     // The mixin shapes, emitted last so everything they reference exists. Never
-    // marked spec-open: a mixin is not a value, it is folded into definitions
-    // that close, and marking it would open every object composing it.
+    // marked spec-open — see the `isMixin` branch above for why: a mixin is not
+    // a value, so the mark would say nothing about anything.
     ...model.mixinShapes.map((definition) =>
       emitSchemaDefinition(definition, anyAliases, true),
     ),

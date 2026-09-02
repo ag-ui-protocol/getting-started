@@ -56,8 +56,11 @@ for (const anchor of readdirSync(FIXTURES_DIR).sort()) {
  * Recorded wire normalisations: the binary transport cannot tell an absent
  * repeated field from an empty one, so decode materialises the optional
  * RunAgentInput arrays as present-and-empty — the one form every layer
- * accepts. (The old requiredness divergence is gone: the generated
- * RunAgentInput makes tools and context optional, as the schema always did.)
+ * accepts. The JSON path now agrees for `tools` and `context`: the schema
+ * still leaves them optional, and the generated TypeScript materialises them,
+ * so both transports hand a consumer a list either way. `resume` is normalised
+ * here too and is NOT materialised on the JSON path, so it remains a genuine
+ * divergence between the transports rather than a recorded agreement.
  */
 const BINARY_NORMALISED: Record<
   string,

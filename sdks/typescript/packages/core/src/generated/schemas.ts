@@ -637,8 +637,8 @@ export const RunAgentInputSchema = z.looseObject({
     .transform((value) => value ?? undefined)
     .optional(),
   messages: z.array(MessageSchema),
-  tools: z.array(ToolSchema).default([]),
-  context: z.array(ContextSchema).default([]),
+  tools: z.array(ToolSchema).default(() => []),
+  context: z.array(ContextSchema).default(() => []),
   forwardedProps: z.any().optional(),
   resume: z.array(ResumeEntrySchema).optional(),
 });

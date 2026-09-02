@@ -142,6 +142,18 @@ const messageContentToParts = (message: Message): A2APart[] => {
         const filePart = createFilePart(chunk);
         if (filePart) {
           parts.push(filePart);
+        } else {
+          // An id-only legacy part carries no url and no data, so there is
+          // nothing to put in an A2A file part. It was dropped silently before:
+          // an attachment left the message and nothing anywhere recorded it.
+          // The adapters that also drop it — mastra, aws-strands — log it;
+          // langgraph does not drop it at all, forwarding the id as a
+          // reference URL instead, which is why it has nothing to log.
+          console.warn(
+            `[convertAGUIMessagesToA2A] Dropping binary content: no url or data provided (id: ${
+              chunk.id ?? "none"
+            }, filename: ${chunk.filename ?? "none"})`,
+          );
         }
       } else {
         parts.push({ kind: "data", data: chunk } as A2ADataPart);

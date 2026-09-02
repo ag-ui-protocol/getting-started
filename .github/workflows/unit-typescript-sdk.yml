@@ -17,6 +17,7 @@ on:
       # too; the proto suite additionally decodes the committed .NET byte
       # fixtures.
       - "sdks/python/ag_ui/_generated/**"
+      - "sdks/dotnet/src/AGUI.Abstractions/Generated/**"
       - "sdks/dotnet/src/AGUI.Protobuf/Generated/**"
       - "sdks/dotnet/tests/AGUI.Protobuf.UnitTests/Fixtures/**"
       # The published schema is a generated file under the same drift gate, and
@@ -44,6 +45,7 @@ on:
       # too; the proto suite additionally decodes the committed .NET byte
       # fixtures.
       - "sdks/python/ag_ui/_generated/**"
+      - "sdks/dotnet/src/AGUI.Abstractions/Generated/**"
       - "sdks/dotnet/src/AGUI.Protobuf/Generated/**"
       - "sdks/dotnet/tests/AGUI.Protobuf.UnitTests/Fixtures/**"
       # The published schema is a generated file under the same drift gate, and

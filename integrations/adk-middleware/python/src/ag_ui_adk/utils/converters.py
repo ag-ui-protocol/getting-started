@@ -437,9 +437,10 @@ def convert_json_patch_to_state(patches: List[Dict[str, Any]]) -> Dict[str, Any]
     state_delta = {}
     
     for patch in patches:
-        # Since the SDK moved onto the generated models, validated events
-        # carry typed JSON Patch operation models; plain dicts still arrive
-        # from unvalidated callers. Read both, like the helpers above.
+        # This package resolves ag-ui-protocol from PyPI, where a patch entry
+        # is a plain dict; the repo's own 1.0 SDK types them as operation
+        # models. Reading both keeps this working across that gap rather than
+        # pinning which SDK is installed.
         if not isinstance(patch, dict):
             patch = patch.model_dump()
         op = patch.get("op")

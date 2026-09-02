@@ -1504,7 +1504,8 @@ export type ResumeEntry = {
  * threadId, runId and messages are required: those are the three the SDKs
  * already agree on, and for tools and context an absent key and an empty array
  * mean the same thing, so requiring them would catch nothing a producer could
- * get wrong.
+ * get wrong. Requiredness above describes the wire; this TypeScript type
+ * additionally requires every field the SDK materialises.
  */
 export type RunAgentInput = {
   /**
@@ -1528,11 +1529,15 @@ export type RunAgentInput = {
    */
   messages: Message[];
   /**
-   * The tools the agent may call. Absent means none.
+   * The tools the agent may call. Absent means none. Optional on the wire; the
+   * TypeScript SDK materialises an absent one as an empty list, so this type
+   * requires it.
    */
   tools: Tool[];
   /**
-   * Ambient information for the run. Absent means none.
+   * Ambient information for the run. Absent means none. Optional on the wire;
+   * the TypeScript SDK materialises an absent one as an empty list, so this
+   * type requires it.
    */
   context: Context[];
   /**
