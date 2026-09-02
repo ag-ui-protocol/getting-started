@@ -60,6 +60,8 @@ import {
   A2UI_STREAM_KEY,
 } from "./a2ui-tool";
 import {
+  _buildToolResultContent,
+  _coerceText,
   convertAguiContentToStrands,
   convertAguiContentToStrandsDetailed,
   createUrlFetchCache,
@@ -68,7 +70,23 @@ import {
   type MediaConversionOptions,
 } from "./utils";
 import type { SeenToolCall } from "./types";
+import {
+  activeProxyPlaceholderIds,
+  clientResultFields,
+  proxyPlaceholderProvenanceIds,
+  recordFrontendCallId,
+  recordedFrontendCallIds,
+  reconcileFrontendToolResults,
+  supportsSnapshotReconciliation,
+  uncorrectableProxyPlaceholderIds,
+} from "./session-reconcile";
+import type { PendingFrontendResult } from "./session-reconcile";
 import { DEFAULT_LOGGER, resolveLogger, type Logger } from "./logger";
+
+// `_buildToolResultContent` lives in ./utils so reconciliation can build the
+// same content without importing this module, which would be a cycle. This
+// stays its established import path.
+export { _buildToolResultContent };
 
 const LOG_PREFIX = "[@ag-ui/aws-strands]";
 
@@ -83,6 +101,15 @@ const uuid = (): string => randomUUID();
  * Changing either here is a wire-contract change.
  */
 const FORCE_STOP_ERROR_CODE = "STRANDS_FORCE_STOP";
+
+/**
+ * Assistant text Strands appends when the adapter ends the turn on a frontend
+ * tool call. `AfterToolsEvent.endTurn` always appends one, so the adapter picks
+ * the content and drops that message again before the turn is persisted: the
+ * client is mid-round-trip on the tool, and a trailing assistant turn would be
+ * replayed to the model as a message to continue.
+ */
+const FRONTEND_HALT_TURN_TEXT = "Awaiting the client's tool result.";
 const FORCE_STOP_FALLBACK_MESSAGE = "The Strands agent stopped unexpectedly.";
 
 /**
@@ -577,6 +604,16 @@ const NEWER_SDK_FIELD_PLAN = {
   // then does not keep, so there is nothing to read back. Its effect travels
   // through those two instead.
   contextManager: "notForwarded",
+  // Declared as `boolean | BackgroundTasksConfig`, but the Agent consumes it
+  // into a BackgroundTasks plugin bound to that agent and registered in its
+  // plugin registry, and keeps nothing under this name except that plugin.
+  // Forwarding what is readable would hand a plugin to a field that expects a
+  // config: every real setting (`never`, `maxConcurrency`, `timeout`) would
+  // read back as undefined and fall back to its default while background
+  // execution stayed switched on, so a tool the template excluded would become
+  // eligible for it again. The config is plain data, so per-thread background
+  // execution is set through threadAgentConfig instead.
+  backgroundTasks: "notForwarded",
   // Both hold conversation-scoped data. Handing one instance to every thread
   // is the same hazard as sharing the conversation manager, so they are
   // dropped and recorded rather than cross-wired.
@@ -773,23 +810,14 @@ function _extractTemplateFields(agent: StrandsAgentCore): {
   return { fields, ignored, unsupported };
 }
 
-/** Best-effort string view of an AG-UI message content field. */
-function _coerceText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (content == null) return "";
-  if (Array.isArray(content)) return flattenContentToText(content);
-  return String(content);
-}
-
 /**
  * Read an AG-UI tool message as the pair every consumer needs: the result body
  * as text, and the client-reported failure when there is one.
  *
  * The native `toolResult` blocks and the synthetic continuation prompt both
- * announce the same tool message to the model, so both read it through here.
- * Reading `content` without `error` is how a failed frontend tool gets
- * announced as a success, and deriving the two independently per path is how
- * they drifted apart before.
+ * announce the same tool message to the model, so both read it through here:
+ * reading `content` without `error` announces a failed frontend tool as a
+ * success, and deriving the pair per path lets the paths disagree.
  */
 function _readToolResult(msg: unknown): {
   text: string;
@@ -797,54 +825,72 @@ function _readToolResult(msg: unknown): {
   status: "success" | "error";
 } {
   const raw = (msg ?? {}) as { content?: unknown; error?: unknown };
-  const error = raw.error ? String(raw.error) : undefined;
+  // Presence is the signal, not truth: `error: ""` is a client saying its tool
+  // failed with nothing to add, and read for truth it would answer as a
+  // success. An absent `error` is the only success, `null` included, since that
+  // is how a serializer writes "no error" for an optional string.
+  const failed = raw.error != null;
   return {
     text: _coerceText(raw.content),
-    ...(error ? { error } : {}),
-    status: error ? "error" : "success",
+    ...(failed ? { error: String(raw.error) } : {}),
+    status: failed ? "error" : "success",
   };
 }
 
 /**
- * Build a Strands `toolResult` content block from an AG-UI tool message body.
+ * Read an AG-UI tool message as one client answer.
  *
- * AG-UI's wire shape requires `ToolMessage.content` to be a string. Frontends
- * (e.g. CopilotKit's `useHumanInTheLoop`) typically JSON-encode structured
- * results before transport, so the string the adapter receives looks like
- * `'{"accepted":true,"steps":[...]}'`. Forwarding that as a `text` block leaves
- * the LLM with two competing payloads: the original `toolUse.input` (full
- * args) and an opaque-looking JSON string in the result. The model often
- * defaults to the args.
- *
- * Strands' `ToolResultContentData` accepts a `JsonBlock` shape (see
- * `@strands-agents/sdk` `messages.ts`). When the message content parses as a
- * JSON object/array, emit it as `{ json: parsed }` so the LLM sees a real
- * structured result. Fall back to `{ text: ... }` for everything else.
+ * The reason travels with the failure flag so a persisted result can say why a
+ * frontend tool failed rather than only that it did, and so the reconciler and
+ * the replayed history describe the same answer to `clientResultFields`.
  */
-export function _buildToolResultContent(
-  content: unknown,
-): { text: string } | { json: unknown } {
-  const text = _coerceText(content);
-  const trimmed = text.trim();
-  // Render-only frontend tools (e.g. CopilotKit `useComponent`) legitimately
-  // produce an empty client tool result. Forwarding an empty `text` block to
-  // the Strands model reaches OpenAI, which rejects tool messages with empty
-  // content (HTTP 400). Synthesize a non-empty acknowledgement instead — this
-  // matches the Python adapter's behavior. The UI-bound TOOL_CALL_RESULT event
-  // is emitted on a separate path and stays faithfully empty.
-  if (trimmed.length === 0)
-    return { text: "Tool executed successfully with no return value." };
-  const first = trimmed[0];
-  if (first !== "{" && first !== "[") return { text };
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (parsed !== null && typeof parsed === "object") {
-      return { json: parsed };
-    }
-  } catch {
-    // Not valid JSON — fall through to text.
+function _clientResult(msg: unknown): PendingFrontendResult {
+  const { text, error, status } = _readToolResult(msg);
+  return {
+    text,
+    // The status, not the reason: a failure with an empty reason is still a
+    // failure.
+    isError: status === "error",
+    ...(error ? { errorReason: error } : {}),
+  };
+}
+
+/**
+ * One line of the continuation prompt: what the tool was, and what came back.
+ *
+ * Forwards the ACTUAL result so the model can act on the human's decision (e.g.
+ * an approval resolving to `{"approved": false}`); announcing a bare success
+ * silently breaks HITL, telling the model the tool returned nothing. The
+ * synthetic acknowledgement is only for a genuinely empty result, and a
+ * client-reported failure carries its reason with an empty body, so reading the
+ * body alone would report that failure as a success.
+ *
+ * Shared by every place a client answer has to be SAID rather than persisted.
+ * `resultText` is the same answer's persisted wording, which omits the name
+ * because a `toolResult` block is already attached to the call it answers.
+ */
+function _continuationResultLine(
+  name: string,
+  result: PendingFrontendResult,
+): string {
+  // Trimmed, and a failure with nothing usable left still reads as a failure.
+  // `resultText` renders the persisted half of the same answer and must branch
+  // identically, or a reason of blank space takes the has-a-reason branch on one
+  // side and the no-reason branch on the other. Only the wording differs,
+  // because only this line names the tool.
+  const reason = result.errorReason?.trim();
+  if (reason) {
+    return result.text.trim()
+      ? `${name} failed: ${reason} (returned: ${result.text})`
+      : `${name} failed: ${reason}`;
   }
-  return { text };
+  if (result.isError) {
+    return result.text.trim()
+      ? `${name} failed: ${result.text}`
+      : `${name} failed: no reason given.`;
+  }
+  if (result.text.trim()) return `${name} returned: ${result.text}`;
+  return `${name} executed successfully with no return value.`;
 }
 
 /** Return ``value`` if it is a non-empty string, else a fresh UUID. */
@@ -976,23 +1022,232 @@ function isToolApprovalInterrupt(interrupt: unknown): boolean {
   return typeof name === "string" && name.startsWith(TOOL_APPROVAL_NAME_PREFIX);
 }
 
+/** A frontend call cannot be correlated through Strands' native ID. */
+export class FrontendToolIdentityError extends Error {
+  constructor(message: string) {
+    super(message);
+    // Without this, name-based inspection reports the base "Error".
+    this.name = "FrontendToolIdentityError";
+  }
+}
+
+function _missingFrontendToolIdentityError(
+  toolName: string,
+): FrontendToolIdentityError {
+  return new FrontendToolIdentityError(
+    `Frontend tool '${toolName}' requires a non-empty, unique native ` +
+      "toolUseId from Strands. Upgrade the Strands model provider or use " +
+      "one that supplies stable tool-use IDs.",
+  );
+}
+
+function _duplicateFrontendToolIdentityError(
+  nativeToolUseId: string,
+): FrontendToolIdentityError {
+  return new FrontendToolIdentityError(
+    "Frontend tools require a non-empty, unique native toolUseId for each " +
+      `call, but Strands reused '${nativeToolUseId}'. Upgrade the Strands ` +
+      "model provider or avoid parallel frontend calls with that provider.",
+  );
+}
+
+function _reusedFrontendToolIdentityError(
+  nativeToolUseId: string,
+): FrontendToolIdentityError {
+  return new FrontendToolIdentityError(
+    "Frontend tools require a transcript-unique native toolUseId, but " +
+      `Strands reused '${nativeToolUseId}' from prior thread history. ` +
+      "Upgrade the Strands model provider or use one that supplies stable " +
+      "tool-use IDs.",
+  );
+}
+
+/**
+ * Every `toolUse` an assistant message carries, as `(id, name)` pairs.
+ *
+ * Accepts both shapes the SDK uses for the same block: the live `ToolUseBlock`
+ * instance held in `agent.messages`, and the serialized `{ toolUse: {...} }`
+ * form used by `MessageData` (which is how a checkpoint parks the assistant
+ * message that raised it). `name` is an empty string when the block does not
+ * carry one, so an id is still reported for the identity guards.
+ */
+function _assistantToolUses(
+  messages: readonly unknown[] | undefined,
+): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  for (const message of messages ?? []) {
+    const record = message as { role?: unknown; content?: unknown };
+    if (record?.role !== "assistant" || !Array.isArray(record.content))
+      continue;
+    for (const block of record.content) {
+      const live = block as {
+        type?: unknown;
+        toolUseId?: unknown;
+        name?: unknown;
+      };
+      const data = (block as { toolUse?: unknown }).toolUse as
+        | { toolUseId?: unknown; name?: unknown }
+        | undefined;
+      const use = live?.type === "toolUseBlock" ? live : data;
+      if (!use) continue;
+      const id = use.toolUseId;
+      if (typeof id !== "string" || !id) continue;
+      pairs.push([id, typeof use.name === "string" ? use.name : ""]);
+    }
+  }
+  return pairs;
+}
+
+/**
+ * Every text a user message of the native history carries.
+ *
+ * Reads both shapes the SDK uses, as `_assistantToolUses` does: the live
+ * `TextBlock` instance and the serialized `{ text }` form both expose the text
+ * under the same key, and no other block kind of a user message carries one at
+ * the top level (a `toolResult` nests its own one level deeper, which is the
+ * PERSISTED wording of an answer rather than a prompt's).
+ *
+ * User messages only: what a continuation prompt said is what the run itself
+ * put there, and an assistant message repeating a phrase said nothing to the
+ * model.
+ */
+function _nativeUserTexts(messages: readonly unknown[] | undefined): string[] {
+  const texts: string[] = [];
+  for (const message of messages ?? []) {
+    const record = message as { role?: unknown; content?: unknown };
+    if (record?.role !== "user" || !Array.isArray(record.content)) continue;
+    for (const block of record.content) {
+      const text = (block as { text?: unknown })?.text;
+      if (typeof text === "string" && text) texts.push(text);
+    }
+  }
+  return texts;
+}
+
+/**
+ * The assistant message a checkpoint parked, if any.
+ *
+ * Strands defers appending the assistant `toolUse` message until the whole tool
+ * batch completes, so an interrupt mid-batch leaves it OUT of `agent.messages`
+ * and inside the checkpoint. On a resume run it is therefore the only place
+ * naming the tools of that batch.
+ */
+function _parkedAssistantMessages(agent: unknown): unknown[] {
+  const parked = (agent as { _interruptState?: unknown })?._interruptState as
+    | { pendingToolExecution?: { assistantMessageData?: unknown } }
+    | undefined;
+  const message = parked?.pendingToolExecution?.assistantMessageData;
+  return message ? [message] : [];
+}
+
+/** Native tool-use IDs already present in Strands history or a checkpoint. */
+function _nativeAssistantToolCallIds(agent: unknown): Set<string> {
+  const messages = [
+    ...((agent as { messages?: unknown[] }).messages ?? []),
+    ..._parkedAssistantMessages(agent),
+  ];
+  return new Set(_assistantToolUses(messages).map(([id]) => id));
+}
+
+/**
+ * The tracked call currently holding `strandsToolId`, if any.
+ *
+ * The map is keyed by the AG-UI id, which for a backend call can differ from
+ * Strands' own, so the native id has to be searched for rather than looked up.
+ */
+function _trackedByNativeId(
+  seen: Map<string, SeenToolCall>,
+  strandsToolId: string,
+): SeenToolCall | undefined {
+  for (const data of seen.values()) {
+    if (data.strandsToolId === strandsToolId) return data;
+  }
+  return undefined;
+}
+
+interface ResolveToolUseIdArgs {
+  seen: Map<string, SeenToolCall>;
+  /** Tool name, reported when Strands supplies no usable native id. */
+  toolName: string;
+  /** Exactly what Strands supplied; frontend identity is asserted on this. */
+  nativeToolUseId: string | undefined;
+  /** Id a BACKEND tool falls back to when Strands supplied none. */
+  fallbackToolUseId: string;
+  isFrontendTool: boolean;
+  /** Native ids already in this thread's history, before this run streamed. */
+  priorToolCallIds: ReadonlySet<string>;
+  /** Called once, when a new frontend call is admitted under its native id. */
+  onNewFrontendCall: (toolUseId: string) => void;
+  /**
+   * True for the assembled `ToolUseBlock` re-delivering a call already tracked
+   * under this native id, so a closed envelope on that id is the same call
+   * rather than a reused one. Must be false for every other assembled sighting:
+   * a provider emitting no deltas at all reaches this branch with genuinely new
+   * calls, and a second sighting under an id already spent is a real reuse.
+   */
+  isAssembledRedelivery?: boolean;
+}
+
 /**
  * Resolve the AG-UI-side tool call id from an incoming Strands tool use.
  *
  * - If we've already seen this Strands tool (by internal id), reuse the
  *   existing AG-UI id so every envelope event carries the same id.
- * - Frontend tools get a fresh UUID to avoid cross-request collisions.
+ * - Frontend tools carry Strands' native identity onto the wire, so the id the
+ *   client answers under is the id Strands persisted the placeholder
+ *   `toolResult` against. A separate id here leaves that placeholder unfindable
+ *   on a later run, and so uncorrectable.
  * - Backend tools reuse Strands' own id so result lookup works.
+ *
+ * @throws FrontendToolIdentityError when a frontend call has no usable native
+ * id, because a wire id that names nothing in the persisted history is worse
+ * than refusing the call.
  */
-function _resolveToolUseId(
-  seen: Map<string, SeenToolCall>,
-  strandsToolId: string,
-  isFrontendTool: boolean,
-): string {
+function _resolveToolUseId(args: ResolveToolUseIdArgs): string {
+  const {
+    seen,
+    toolName,
+    nativeToolUseId,
+    fallbackToolUseId,
+    isFrontendTool,
+    priorToolCallIds,
+    onNewFrontendCall,
+    isAssembledRedelivery = false,
+  } = args;
+  const strandsToolId = nativeToolUseId ?? fallbackToolUseId;
+
+  // A cumulative update for a call already in flight, before cross-call
+  // uniqueness applies. A frontend entry whose envelope already closed is not
+  // one of those: it is a second call landing on a reused id.
+  let existingEntry: string | undefined;
+  let endedFrontendEntry = false;
   for (const [tid, data] of seen) {
-    if (data.strandsToolId === strandsToolId) return tid;
+    if (data.strandsToolId !== strandsToolId) continue;
+    if (isFrontendTool && data.endEmitted && !isAssembledRedelivery) {
+      endedFrontendEntry = true;
+      break;
+    }
+    existingEntry = tid;
+    break;
   }
-  if (isFrontendTool) return uuid();
+
+  if (isFrontendTool) {
+    if (typeof nativeToolUseId !== "string" || !nativeToolUseId.trim()) {
+      throw _missingFrontendToolIdentityError(toolName);
+    }
+    if (endedFrontendEntry) {
+      throw _duplicateFrontendToolIdentityError(nativeToolUseId);
+    }
+    if (existingEntry === undefined && priorToolCallIds.has(nativeToolUseId)) {
+      throw _reusedFrontendToolIdentityError(nativeToolUseId);
+    }
+  }
+
+  if (existingEntry !== undefined) return existingEntry;
+  if (isFrontendTool) {
+    onNewFrontendCall(nativeToolUseId!);
+    return nativeToolUseId!;
+  }
   return strandsToolId || uuid();
 }
 
@@ -1117,6 +1372,234 @@ export function buildSnapshotMessages(
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// The turn's tool calls, resolved once
+// ---------------------------------------------------------------------------
+//
+// A continuation turn answers the same handful of questions about a tool call in
+// several places: what the tool was, whether the client executed it, whether
+// this adapter may rewrite its persisted placeholder, and whether a history
+// built from the request can carry its answer at all. Deriving each where it is
+// needed, from whichever source is nearest (the incoming request messages, the
+// stored native history, the recorded call ids), lets the derivations disagree:
+// a name resolved off the STORE while the history built from the REQUEST drops
+// the very result it names is a re-fire loop. So the sources are read once,
+// here, and every consumer reads this.
+
+/** One `toolUse` of this turn, resolved against every source at once. */
+interface ResolvedToolCall {
+  /** The AG-UI id, which for a frontend call is Strands' own `toolUseId`. */
+  id: string;
+  /** The tool's name, or undefined when no source names it. */
+  name?: string;
+  /** Index of the request message that opens the call, if the request has one. */
+  requestCallIndex?: number;
+}
+
+/** One `tool` message of the request, resolved the same way. */
+interface ResolvedToolResult {
+  /** Exactly what the message carried, so a missing id reads as missing. */
+  toolCallId: string | undefined;
+  /** The name of the call it answers. */
+  name?: string;
+  /** The client's answer, read once through the shared reader. */
+  result: PendingFrontendResult;
+  /** Index of this message in the request. */
+  index: number;
+  /** True when the message sits in the request's TRAILING run of results. */
+  trailing: boolean;
+  /** True when either provenance signal says the client executed the call. */
+  clientExecuted: boolean;
+  /** True when a recorded call id admits the answer for reconciliation. */
+  admitted: boolean;
+  /**
+   * True when the request opens the call BEFORE this message, so a history
+   * built from the request offers the result a `toolUse` to answer.
+   */
+  offeredHome: boolean;
+  /** True when this turn reads the message as a client answer. */
+  isClientAnswer: boolean;
+  /**
+   * True when the model's own history ALREADY says this answer in words: an
+   * earlier turn carried it in a continuation prompt, and that prompt is a
+   * persisted user message.
+   *
+   * The line compared is the one the shared helper builds, so this asks what
+   * would be said against what was said. Without it, a placeholder no
+   * correction can ever repair keeps both provenance signals alive and its
+   * answer is prepended to every later prompt of the thread, without bound.
+   */
+  alreadyPrompted: boolean;
+}
+
+/** Everything a continuation turn knows about its own tool calls. */
+interface ResolvedTurn {
+  /** Every call this turn knows of, keyed by id. */
+  calls: ReadonlyMap<string, ResolvedToolCall>;
+  /** Every `tool` message of the request, in request order. */
+  results: readonly ResolvedToolResult[];
+  /** Ids of the trailing results, which duplicate suppression reads. */
+  trailingResultIds: readonly string[];
+  /** The client answers this turn carries, in request order. */
+  clientAnswers: readonly ResolvedToolResult[];
+  /** True when a user message follows the LAST client answer. */
+  hasNewerUserMessage: boolean;
+  /** Client answers a history built from the request would have to drop. */
+  unreplayableAnswerIds: readonly string[];
+  /** Call ids the request opens and never answers. */
+  unansweredRequestCallIds: ReadonlySet<string>;
+}
+
+/**
+ * Resolve this turn's tool calls from every source at once.
+ *
+ * Pure: it reads, and nothing it is handed is mutated. The request is walked
+ * once for the calls it declares and the results it carries, the native history
+ * fills in names the request never had (which is all a delta-only continuation
+ * has), and the two provenance sets say who executed what.
+ */
+function _resolveTurnToolCalls(args: {
+  messages: readonly AguiMessage[];
+  /** Stored native history plus whatever a checkpoint parked. */
+  nativeMessages: readonly unknown[];
+  frontendToolNames: ReadonlySet<string>;
+  /** Call ids this adapter recorded when it handed them to the client. */
+  recordedCallIds: ReadonlySet<string>;
+  /** Call ids whose proxy placeholder this adapter still holds. */
+  stubbedCallIds: ReadonlySet<string>;
+  /** Results this run's `resume[]` addresses through their interrupt. */
+  resumeBoundResultIds: ReadonlySet<string>;
+}): ResolvedTurn {
+  const messages = args.messages;
+  const calls = new Map<string, ResolvedToolCall>();
+  const entryFor = (id: string): ResolvedToolCall => {
+    const existing = calls.get(id);
+    if (existing) return existing;
+    const created: ResolvedToolCall = { id };
+    calls.set(id, created);
+    return created;
+  };
+
+  // First mention wins for both the name and the index: a request repeating a
+  // call describes one call, and a history built from it opens that call once.
+  const resultIndicesById = new Map<string, number[]>();
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    if (!msg) continue;
+    if (msg.role === "assistant") {
+      for (const tc of (msg as { toolCalls?: AguiToolCall[] }).toolCalls ??
+        []) {
+        if (!tc.id) continue;
+        const entry = entryFor(tc.id);
+        if (entry.requestCallIndex === undefined) entry.requestCallIndex = i;
+        const name = (tc.function as { name?: string } | undefined)?.name;
+        if (name && !entry.name) entry.name = name;
+      }
+    } else if (msg.role === "tool") {
+      const id = (msg as { toolCallId?: string }).toolCallId;
+      if (!id) continue;
+      const indices = resultIndicesById.get(id) ?? [];
+      indices.push(i);
+      resultIndicesById.set(id, indices);
+    }
+  }
+
+  // On a delta-only continuation the assistant message carrying the call is
+  // absent from the request, so the stored native history (and the batch a
+  // checkpoint parked) is the only thing naming the tool that actually ran.
+  for (const [id, name] of _assistantToolUses(args.nativeMessages)) {
+    if (!name) continue;
+    const entry = entryFor(id);
+    if (!entry.name) entry.name = name;
+  }
+
+  // The trailing run: the results at the very END of the request. That is what
+  // the continuation prompt phrases, and it is where a user message after a
+  // result puts that result out of reach.
+  let trailingFrom = messages.length;
+  while (trailingFrom > 0 && messages[trailingFrom - 1]?.role === "tool") {
+    trailingFrom--;
+  }
+
+  // Every continuation prompt this thread has already sent, as the model holds
+  // them: a prompt goes out as the run's user message and is persisted with the
+  // rest of the history. Read once, so the "was this answer already said?" test
+  // below is a search of what the model can actually see.
+  const promptedTexts = _nativeUserTexts(args.nativeMessages);
+
+  const results: ResolvedToolResult[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    if (!msg || msg.role !== "tool") continue;
+    const toolCallId = (msg as { toolCallId?: string }).toolCallId;
+    const entry = toolCallId ? calls.get(toolCallId) : undefined;
+    const name = entry?.name;
+    const result = _clientResult(msg);
+    // Unnameable answers are never said at all: the run fails closed on them.
+    const promptLine = name ? _continuationResultLine(name, result) : undefined;
+    const clientExecuted =
+      !!toolCallId &&
+      (args.recordedCallIds.has(toolCallId) ||
+        args.stubbedCallIds.has(toolCallId));
+    // Provenance is either signal, not declaration alone: a continuation that
+    // declares no tools (`tools: []`) still carries a real frontend result, and
+    // reading the declarations alone files it as a backend result and hands the
+    // model a greeting instead of the answer.
+    const isClientAnswer =
+      !!toolCallId &&
+      (i >= trailingFrom ||
+        args.resumeBoundResultIds.has(toolCallId) ||
+        clientExecuted) &&
+      ((!!name && args.frontendToolNames.has(name)) || clientExecuted);
+    const callIndex = entry?.requestCallIndex;
+    results.push({
+      toolCallId,
+      ...(name ? { name } : {}),
+      result,
+      index: i,
+      trailing: i >= trailingFrom,
+      clientExecuted,
+      admitted: !!toolCallId && args.recordedCallIds.has(toolCallId),
+      offeredHome: callIndex !== undefined && callIndex < i,
+      isClientAnswer,
+      alreadyPrompted:
+        !!promptLine && promptedTexts.some((text) => text.includes(promptLine)),
+    });
+  }
+
+  const clientAnswers = results.filter((result) => result.isClientAnswer);
+  const lastAnswerIndex =
+    clientAnswers.length > 0
+      ? clientAnswers[clientAnswers.length - 1]!.index
+      : -1;
+
+  const unansweredRequestCallIds = new Set<string>();
+  for (const entry of calls.values()) {
+    const callIndex = entry.requestCallIndex;
+    if (callIndex === undefined) continue;
+    const answers = resultIndicesById.get(entry.id) ?? [];
+    if (!answers.some((index) => index > callIndex)) {
+      unansweredRequestCallIds.add(entry.id);
+    }
+  }
+
+  return {
+    calls,
+    results,
+    trailingResultIds: results
+      .filter((result) => result.trailing && result.toolCallId)
+      .map((result) => result.toolCallId!),
+    clientAnswers,
+    hasNewerUserMessage:
+      lastAnswerIndex >= 0 &&
+      messages.slice(lastAnswerIndex + 1).some((msg) => msg?.role === "user"),
+    unreplayableAnswerIds: clientAnswers
+      .filter((result) => !result.offeredHome)
+      .map((result) => result.toolCallId!),
+    unansweredRequestCallIds,
+  };
+}
+
 /**
  * Convert ``RunAgentInput.messages`` to Strands native ``Messages``.
  *
@@ -1129,6 +1612,17 @@ export function buildSnapshotMessages(
  *
  * Multimodal content is routed through ``convertAguiContentToStrands`` so
  * image/document/video blocks reach the LLM intact across replay.
+ *
+ * Orphan tool results AND orphan tool calls are both dropped, as
+ * ``convertMessagesForStrandsSeed`` drops them: providers reject a
+ * ``toolResult`` with no answering ``toolUse`` and an unanswered ``toolUse``
+ * just as flatly, so replaying either turns a turn the fallback prompt could
+ * have carried into a generic provider failure. An abandoned frontend call or a
+ * reload mid-round-trip is how a request comes to carry one.
+ *
+ * Which of the pair is orphaned is read off the resolved view rather than
+ * re-derived here, so the decision that vetoes a replay dropping a client
+ * answer and the drop itself cannot disagree.
  */
 /**
  * Does this message content carry an attachment the converter should handle?
@@ -1158,11 +1652,17 @@ function _contentHasMedia(content: readonly unknown[]): boolean {
 
 async function _buildStrandsHistory(
   input_messages: AguiMessage[],
+  turn: ResolvedTurn,
   log: Logger,
   fetchOptions?: MediaConversionOptions,
 ): Promise<Array<{ role: "user" | "assistant"; content: unknown[] }>> {
   const out: Array<{ role: "user" | "assistant"; content: unknown[] }> = [];
-  for (const msg of input_messages ?? []) {
+  const answerByIndex = new Map(
+    turn.results.map((result) => [result.index, result] as const),
+  );
+  const messages = input_messages ?? [];
+  for (let messageIndex = 0; messageIndex < messages.length; messageIndex++) {
+    const msg = messages[messageIndex]!;
     const role = msg.role;
     if (role === "user") {
       const content: unknown[] = [];
@@ -1243,6 +1743,13 @@ async function _buildStrandsHistory(
           Array.isArray(parsed)
         )
           parsed = {};
+        if (!tc.id || turn.unansweredRequestCallIds.has(tc.id)) {
+          log.warn(
+            `${LOG_PREFIX} history replay dropped a tool call no replayed tool ` +
+              `result answers: toolCallId=${tc.id}`,
+          );
+          continue;
+        }
         blocks.push({
           toolUse: { toolUseId: tc.id, name, input: parsed },
         });
@@ -1254,18 +1761,24 @@ async function _buildStrandsHistory(
       out.push({ role: "assistant", content: blocks });
     } else if (role === "tool") {
       const toolCallId = (msg as { toolCallId?: string }).toolCallId || "";
+      if (!answerByIndex.get(messageIndex)?.offeredHome) {
+        log.warn(
+          `${LOG_PREFIX} history replay dropped a tool result no replayed tool ` +
+            `call answers: toolCallId=${toolCallId}`,
+        );
+        continue;
+      }
+      // Derived by the same helper reconciliation writes its correction from,
+      // rather than from `content` alone, so this path carries the client's
+      // failure reason as well as its status: reading `content` alone answers a
+      // failure with an empty body using the empty-result acknowledgement,
+      // which asserts success under `status: "error"`.
+      const { status, content } = clientResultFields(_clientResult(msg));
       out.push({
         role: "user",
         content: [
           {
-            toolResult: {
-              toolUseId: toolCallId,
-              content: [_buildToolResultContent(msg.content)],
-              // Carry the AG-UI failure signal onto Bedrock's toolResult status,
-              // so a client-reported tool failure is not asserted to the model as
-              // a success.
-              status: _readToolResult(msg).status,
-            },
+            toolResult: { toolUseId: toolCallId, content: [content], status },
           },
         ],
       });
@@ -2077,38 +2590,78 @@ export class StrandsAgent {
         if (t.name) frontendToolNames.add(t.name);
       }
 
-      // Collect tool_call_ids that already have results in the message
-      // history so we suppress duplicate TOOL_CALL_START events for them.
-      const pendingToolResultIds = new Set<string>();
-      if (inputData.messages) {
-        for (let i = inputData.messages.length - 1; i >= 0; i--) {
-          const msg = inputData.messages[i];
-          if (!msg) break;
-          if (msg.role === "tool") {
-            const tid = (msg as { toolCallId?: string }).toolCallId;
-            if (tid) pendingToolResultIds.add(tid);
-          } else {
-            break;
-          }
+      // The ids of the frontend calls this adapter emitted, read back from app
+      // state (restored from the store on a fresh process). Read here rather
+      // than at the reconciliation block below because the resolved view needs
+      // it too: it is one of the two signals of who executed a tool result on a
+      // delta-only payload. Kept in persisted order, which the emission-time
+      // size cap relies on to drop the oldest entries first.
+      const sessionManager = strandsAgent.sessionManager;
+      let clientCallIds: string[] = [];
+      let reconciliationSetupError: unknown;
+      if (sessionManager) {
+        try {
+          clientCallIds = recordedFrontendCallIds(strandsAgent);
+        } catch (e) {
+          reconciliationSetupError = e;
         }
-        if (pendingToolResultIds.size > 0) {
-          this._log.debug(
-            `${LOG_PREFIX} Has pending tool results detected: toolCallIds=${JSON.stringify([...pendingToolResultIds])}, threadId=${inputData.threadId}`,
-          );
+      }
+      const clientExecutedIds = new Set(clientCallIds);
+
+      // The other signal: a stored or parked result this adapter's own proxy
+      // wrote. It outlives the recorded id, which the emission-time size cap can
+      // evict, so it is what keeps a delta-only continuation from filing the
+      // client's answer as backend context. Provenance only -- admission still
+      // reads `clientExecutedIds`, because only a recorded id may be retired
+      // once its placeholder is corrected.
+      const stubbedCallIds = sessionManager
+        ? proxyPlaceholderProvenanceIds(strandsAgent)
+        : new Set<string>();
+
+      // Results a `resume[]` addresses through their interrupt. In scope for
+      // this turn however far from the end of the request they sit, so the view
+      // has to know before it decides which results are client answers.
+      const resumeBoundResultIds = new Set<string>();
+      {
+        const priorPending = this._pendingInterruptsByThread.get(threadId);
+        for (const entry of resolveResumeEntries(inputData)) {
+          const toolCallId = priorPending?.get(entry.interruptId)?.toolCallId;
+          if (toolCallId) resumeBoundResultIds.add(toolCallId);
         }
       }
 
-      // Lookup of tool_call_id -> tool_name from assistant messages.
-      const toolCallIdToName = new Map<string, string>();
-      for (const msg of inputData.messages ?? []) {
-        if (msg.role !== "assistant") continue;
-        const calls = (msg as { toolCalls?: AguiToolCall[] }).toolCalls;
-        if (!calls) continue;
-        for (const tc of calls) {
-          const fn = tc.function as { name?: string } | undefined;
-          if (tc.id && fn?.name) toolCallIdToName.set(tc.id, fn.name);
-        }
+      // ONE resolved view of this turn's tool calls, read by the orphan drop in
+      // `_buildStrandsHistory`, the tool-name lookup, the admission test, the
+      // provenance signal and the continuation decision alike.
+      const turnToolCalls = _resolveTurnToolCalls({
+        messages: inputData.messages ?? [],
+        nativeMessages: [
+          ...((strandsAgent as { messages?: unknown[] }).messages ?? []),
+          ..._parkedAssistantMessages(strandsAgent),
+        ],
+        frontendToolNames,
+        recordedCallIds: clientExecutedIds,
+        stubbedCallIds,
+        resumeBoundResultIds,
+      });
+
+      // Tool calls whose result the request already carries, so the stream
+      // below suppresses duplicate TOOL_CALL_START events for them.
+      const pendingToolResultIds = new Set(turnToolCalls.trailingResultIds);
+      if (pendingToolResultIds.size > 0) {
+        this._log.debug(
+          `${LOG_PREFIX} Has pending tool results detected: toolCallIds=${JSON.stringify([...pendingToolResultIds])}, threadId=${inputData.threadId}`,
+        );
       }
+
+      /** Record a newly emitted frontend call so a later run can admit it. */
+      const recordFrontendCall = (toolUseId: string): void => {
+        // Only maintained when a session manager is actually active for this
+        // agent (matching the continuation read/prune gate); otherwise nothing
+        // would ever read it back.
+        if (!sessionManager) return;
+        recordFrontendCallId(strandsAgent, toolUseId);
+      };
 
       // Derive the outgoing user message. For continuation runs (pending
       // tool results in history), synthesise a "frontend tool executed"
@@ -2118,44 +2671,65 @@ export class StrandsAgent {
       // below so a client can tell a partial delivery from a turn that
       // carried no attachments at all.
       let droppedMedia: DroppedMedia[] = [];
+      // Trailing tool results this derivation could not name. Whether that is
+      // fatal depends on which prompt the run ends up sending, which is only
+      // settled once `invokeArgs` is, so the report waits until then.
+      let unnameableResultIds: string[] = [];
+      // The trailing prompt line by line, each tagged with the answer it says.
+      // Kept rather than only joined because a reconcile can correct SOME of
+      // this turn's answers and decline others, and the lines whose answer the
+      // corrected history now carries have to come back out: restating one there
+      // tells the model the same answer twice.
+      const trailingPromptLines: Array<{
+        toolCallId: string | undefined;
+        line: string;
+      }> = [];
       if (pendingToolResultIds.size > 0 && inputData.messages) {
         // Collect EVERY trailing tool result, not just the last: a parallel
         // frontend-tool turn resolves N results in one continuation run and
         // the model has to see all of the answers.
         const resultParts: string[] = [];
-        for (let i = inputData.messages.length - 1; i >= 0; i--) {
-          const msg = inputData.messages[i];
-          if (!msg || msg.role !== "tool") break;
-          const toolCallId = (msg as { toolCallId?: string }).toolCallId;
-          const name = toolCallId
-            ? toolCallIdToName.get(toolCallId)
-            : undefined;
-          if (!name || !frontendToolNames.has(name)) continue;
-          // Forward the ACTUAL result so the model can act on the human's
-          // decision (e.g. an approval resolving to `{"approved": false}`).
-          // Announcing a bare success here silently breaks HITL: the model is
-          // told the tool returned nothing and proceeds as though the human
-          // had approved. The synthetic acknowledgement is only for a result
-          // that is genuinely empty, and a client-reported failure carries its
-          // reason on `error` with an empty `content` alongside it, so reading
-          // `content` alone reports that failure as a success.
-          const { text, error } = _readToolResult(msg);
-          if (error) {
-            resultParts.push(
-              text.trim()
-                ? `${name} failed: ${error} (returned: ${text})`
-                : `${name} failed: ${error}`,
+        const unresolvedResultIds: string[] = [];
+        for (const answer of turnToolCalls.results) {
+          if (!answer.trailing) continue;
+          const toolCallId = answer.toolCallId;
+          const name = answer.name;
+          if (!name) {
+            // Neither the input messages nor the native session history name
+            // this call. Guessing stays off the table: with several frontend
+            // tools declared, picking one feeds the model false context.
+            // Collected rather than skipped, because skipping leaves the
+            // prompt a bare greeting and the model re-fires the tool. What that
+            // costs is the decision's to settle: fatal wherever the run has to
+            // say what came back, harmless where replayed history carries the
+            // result in its own block.
+            if (toolCallId) unresolvedResultIds.push(toolCallId);
+            this._log.warn(
+              `${LOG_PREFIX} Could not resolve tool name for toolCallId=${toolCallId} ` +
+                "from input messages or session history (delta-only payload). " +
+                "The run fails closed unless replayed history carries the result.",
             );
-          } else if (text.trim()) {
-            resultParts.push(`${name} returned: ${text}`);
-          } else {
-            resultParts.push(
-              `${name} executed successfully with no return value.`,
-            );
+            continue;
           }
+          if (!answer.isClientAnswer) {
+            // Named, but neither signal says frontend: not in the current
+            // declarations and no recorded id. That is a tool Strands ran
+            // itself, so the model already has it in the native history and
+            // the continuation prompt has nothing to carry.
+            this._log.debug(
+              `${LOG_PREFIX} Skipping non-frontend tool result in the continuation ` +
+                `message: toolName=${name}, toolCallId=${toolCallId}`,
+            );
+            continue;
+          }
+          const line = _continuationResultLine(name, answer.result);
+          resultParts.push(line);
+          trailingPromptLines.push({ toolCallId, line });
         }
-        if (resultParts.length > 0) {
-          userMessage = resultParts.reverse().join("\n");
+        if (unresolvedResultIds.length > 0) {
+          unnameableResultIds = unresolvedResultIds;
+        } else if (resultParts.length > 0) {
+          userMessage = resultParts.join("\n");
         }
       } else if (inputData.messages) {
         for (let i = inputData.messages.length - 1; i >= 0; i--) {
@@ -2263,9 +2837,23 @@ export class StrandsAgent {
       const currentState: Record<string, unknown> = {
         ...((inputData.state ?? {}) as object),
       };
-      let stopTextStreaming = false;
+      let stopModelStreaming = false;
       let haltEventStream = false;
       let pendingHalt = false;
+      // Set when the halt came from a frontend tool call, which is the one halt
+      // that must complete through Strands rather than cancel it.
+      let frontendHalt = false;
+      // Arm the frontend-tool halt. The wire is not muted here: the rest of the
+      // tool batch still has results to deliver, and the mute waits for
+      // `afterToolsEvent`. The model's own output is the exception, text and
+      // reasoning alike, because the run ends with this batch and both belong to
+      // a turn the client will never see completed.
+      // (`stopStreamingAfterResult` sets the same flag but mutes the whole wire
+      // at once.)
+      const armFrontendHalt = (): void => {
+        pendingHalt = true;
+        stopModelStreaming = true;
+      };
 
       let reasoningStarted = false;
       let reasoningMessageId: string | undefined;
@@ -2275,6 +2863,9 @@ export class StrandsAgent {
       // modelContentBlockStopEvent.
       let currentToolUse: {
         name: string;
+        /** Exactly what Strands supplied, so the identity guards can see none. */
+        nativeToolUseId: string | undefined;
+        /** Backend fallback, minted once so both delta and stop agree on it. */
         toolUseId: string;
         inputChunks: string[];
       } | null = null;
@@ -2298,28 +2889,23 @@ export class StrandsAgent {
       // filtered unknown IDs by this point.
       const resumeEntries = resolveResumeEntries(inputData);
       if (resumeEntries.length > 0) {
-        // Collect toolCallIds from resumed interrupts for Rule 8 suppression
-        const priorPending = this._pendingInterruptsByThread.get(threadId);
-        if (priorPending) {
-          for (const entry of resumeEntries) {
-            const interrupt = priorPending.get(entry.interruptId);
-            if (interrupt?.toolCallId) {
-              pendingToolResultIds.add(interrupt.toolCallId);
-            }
-          }
-          // A cancelled tool-bound interrupt gets no synthetic result here.
-          // The denial is forwarded to Strands below, its approval hook sets
-          // `cancel`, and the SDK produces the error tool result the
-          // afterToolCallEvent branch already turns into TOOL_CALL_RESULT.
-          // Emitting one here too gave the same toolCallId two results.
-          //
-          // Note: even when ALL entries are cancelled, we still forward the
-          // denial responses to Strands via stream() below rather than
-          // short-circuiting here. This ensures native interrupt-state
-          // cleanup, hooks, snapshots, and session persistence all run
-          // through Strands' normal completion path instead of being
-          // bypassed by a synthetic RUN_FINISHED.
+        // Rule 8 suppression, from the same resolved set the view was built
+        // from rather than a second walk of the pending interrupts.
+        for (const toolCallId of resumeBoundResultIds) {
+          pendingToolResultIds.add(toolCallId);
         }
+        // A cancelled tool-bound interrupt gets no synthetic result here.
+        // The denial is forwarded to Strands below, its approval hook sets
+        // `cancel`, and the SDK produces the error tool result the
+        // afterToolCallEvent branch already turns into TOOL_CALL_RESULT.
+        // Emitting one here too gave the same toolCallId two results.
+        //
+        // Note: even when ALL entries are cancelled, we still forward the
+        // denial responses to Strands via stream() below rather than
+        // short-circuiting here. This ensures native interrupt-state
+        // cleanup, hooks, snapshots, and session persistence all run
+        // through Strands' normal completion path instead of being
+        // bypassed by a synthetic RUN_FINISHED.
         invokeArgs = resumeEntries.map(
           (entry) =>
             new InterruptResponseContent({
@@ -2327,63 +2913,379 @@ export class StrandsAgent {
               response: toResumeResponse(entry) as JSONValue,
             }),
         );
-        this._pendingInterruptsByThread.delete(threadId);
-        persistInterruptBookkeeping(strandsAgent, null, null, this._log);
       }
-      if (replayHistory && resumeEntries.length === 0) {
-        const nativeHistory = await _buildStrandsHistory(
-          inputData.messages ?? [],
-          this._log,
-          fetchOptions,
+      // Exact proxy placeholders parked by an activated checkpoint. Correcting
+      // one needs the same session-manager boundary a safe resume needs, and
+      // the check for that sits after the stream rather than here: it runs
+      // before the interrupt is ever advertised, so a checkpoint that cannot be
+      // rewritten never reaches a client and no later run can arrive carrying
+      // one.
+      const activeProxyNativeIds = activeProxyPlaceholderIds(strandsAgent);
+      // Parked stubs the exact rewrite would decline: one carrying a block this
+      // adapter did not write, or a field the proxy never wrote. Reported
+      // permissively for the same reason the message path reports them, and
+      // acted on separately below, because no mapped client result makes one
+      // correctable.
+      const uncorrectableProxyNativeIds =
+        uncorrectableProxyPlaceholderIds(strandsAgent);
+
+      // Scope: this continuation's just-returned results, plus any earlier
+      // frontend call whose placeholder is still uncorrected.
+      //
+      // The trailing run of results is not the whole of it: it misses a result
+      // the client delivers with a user message after it, and a result that
+      // never reaches reconciliation leaves the persisted placeholder forever.
+      // Either provenance signal brings such a result back into scope, and both
+      // are safe: a recorded id is dropped once its placeholder is corrected,
+      // and the stub the other signal reads IS that placeholder, so an
+      // already-reconciled result cannot re-enter on either one.
+      const frontendResults = turnToolCalls.clientAnswers;
+      const hasNewerUserMessage = turnToolCalls.hasNewerUserMessage;
+
+      // Reconcile only results whose call this adapter emitted: a persisted
+      // placeholder exists for those alone, and correcting anything else would
+      // be guesswork.
+      const resolvedNativeResults = new Map<string, PendingFrontendResult>();
+      const resumeSubmitted = resumeEntries.length > 0;
+      if (reconciliationSetupError === undefined && sessionManager) {
+        for (const answer of frontendResults) {
+          if (!answer.admitted) continue;
+          resolvedNativeResults.set(answer.toolCallId!, answer.result);
+        }
+      }
+
+      if (reconciliationSetupError !== undefined) {
+        if (_hasActiveInterrupt(strandsAgent)) {
+          this._log.error(
+            `${LOG_PREFIX} Active interrupt tool result reconciliation failed`,
+            reconciliationSetupError,
+          );
+          yield _interruptReconciliationError();
+          return;
+        }
+        this._log.warn(
+          `${LOG_PREFIX} Frontend tool result reconciliation failed; falling back ` +
+            `to the legacy continuation path: ${_errorMessage(reconciliationSetupError)}`,
         );
-        if (nativeHistory.length > 0) {
-          // Apply stateContextBuilder to the last user-text message in the
-          // reconciled history rather than to the synthetic `userMessage`
-          // string — this is what the LLM actually sees.
-          if (this.config.stateContextBuilder) {
-            for (let i = nativeHistory.length - 1; i >= 0; i--) {
-              const m = nativeHistory[i];
-              if (!m || m.role !== "user") continue;
-              const first = (m.content as Array<{ text?: string }>)[0];
-              if (first && typeof first.text === "string") {
-                try {
-                  const augmented = this.config.stateContextBuilder(
-                    inputData,
-                    first.text,
-                    buildContextExtras(inputData),
-                  );
-                  if (typeof augmented === "string") first.text = augmented;
-                } catch (e) {
-                  this._log.error(
-                    `${LOG_PREFIX} stateContextBuilder failed:`,
-                    e,
-                  );
-                  yield {
-                    type: EventType.CUSTOM,
-                    name: "hook_error",
-                    value: {
-                      hook: "stateContextBuilder",
-                      tool: "__prompt__",
-                      error: _errorMessage(e),
-                    },
-                  };
-                }
-                break;
+      }
+
+      // Resuming clears the parked context into the history the model reads, so
+      // a stub the rewrite cannot correct has nowhere left to go: this path has
+      // no continuation prompt to carry the client's answer, which is what the
+      // message path falls back to. It fails closed before any store or live
+      // checkpoint mutation begins, so the client can retry against an untouched
+      // checkpoint. Demanding a mapped result would not help: the rewrite is
+      // exact, so it declines these however many results the turn carries.
+      if (resumeSubmitted && uncorrectableProxyNativeIds.size > 0) {
+        this._log.error(
+          `${LOG_PREFIX} Active interrupt parks proxy placeholders no rewrite can ` +
+            `correct, so the resume would feed them to the model: native ids ` +
+            `${JSON.stringify([...uncorrectableProxyNativeIds].sort())}`,
+        );
+        yield _interruptReconciliationError();
+        return;
+      }
+
+      // Every exact proxy placeholder in that context needs a mapped client
+      // result, under the same "before the first write" rule. Together with the
+      // gate above this is all that path needs: a parked id is reported as
+      // exact only when its result is the exact placeholder, so once a client
+      // result is mapped to it the correction below cannot fail to apply, and a
+      // correction that throws is caught there.
+      if (resumeSubmitted && activeProxyNativeIds.size > 0) {
+        const missing = [...activeProxyNativeIds].filter(
+          (id) => !resolvedNativeResults.has(id),
+        );
+        if (missing.length > 0) {
+          this._log.error(
+            `${LOG_PREFIX} Active interrupt is missing mapped frontend results for ` +
+              `native ids ${missing.sort().join(", ")}`,
+          );
+          yield _interruptReconciliationError();
+          return;
+        }
+      }
+
+      // The history the replay path would install, built before the decision
+      // because whether it has anything in it is one of the decision's inputs:
+      // an empty replay falls through to the prompt, and the prompt is what an
+      // unnameable result is fatal for. Building it writes nothing.
+      const nativeHistory =
+        replayHistory && !resumeSubmitted
+          ? await _buildStrandsHistory(
+              inputData.messages ?? [],
+              turnToolCalls,
+              this._log,
+              fetchOptions,
+            )
+          : [];
+
+      // A replay that DROPS one of this turn's client answers is the re-fire
+      // loop, not a continuation. The orphan-result guard discards the answer
+      // whose call the request never carried, the history that then REPLACES
+      // Strands' own holds the question alone, and `stream(undefined)` throws
+      // away the prompt that could still have said what came back, so the model
+      // fires the same tool again. The single view is what makes that visible
+      // here: the absent assistant block that puts an answer out of the replay's
+      // reach is the same absence the name lookup goes to the STORE to work
+      // around.
+      const replayCarriesEveryAnswer =
+        turnToolCalls.unreplayableAnswerIds.length === 0;
+      if (nativeHistory.length > 0 && !replayCarriesEveryAnswer) {
+        this._log.warn(
+          `${LOG_PREFIX} history replay cannot carry the client's answer for ` +
+            `toolCallIds=${turnToolCalls.unreplayableAnswerIds.join(", ")}; ` +
+            "continuing from the prompt so the answer reaches the model",
+        );
+      }
+
+      // A client answer the carry below has to SAY needs its tool's name exactly
+      // as a trailing one does, and a user message after the result puts it out
+      // of the trailing derivation's reach. So it joins the same fail-closed
+      // report, under the same code, rather than being dropped from a prompt
+      // that cannot phrase it. Read per answer, because taking it from the LAST
+      // one silences the report for every older answer the same payload carries.
+      const unnameableAnswerIds = frontendResults
+        .filter((answer) => !answer.name)
+        .map((answer) => answer.toolCallId!);
+
+      // The whole decision, in one place and before the first write, so a turn
+      // that cannot be fully repaired persists nothing and takes the fallback
+      // path cleanly.
+      //
+      // A native-only live checkpoint needs no store access. Exact proxy
+      // placeholders do, including when the client result is void.
+      //
+      // `replayHistoryIntoStrands` reaches `canReconcile` not at all: it governs
+      // the replay arm, which runs only when no session manager is wired. Under
+      // one, the placeholder is this adapter's own persisted write and no caller
+      // can correct it in the adapter's place, so an opt-out would leave the
+      // store asserting "Forwarded to client" as the client's answer forever.
+      // The Python adapter reads the flag on one arm of a disjunction whose
+      // other arm, a resume with parked placeholders, bypasses it; here the arms
+      // are the plan's branches instead.
+      const plan = planContinuation({
+        unnameableResultIds: [
+          ...new Set([...unnameableResultIds, ...unnameableAnswerIds]),
+        ],
+        canReplayHistory: nativeHistory.length > 0 && replayCarriesEveryAnswer,
+        setupFailed: reconciliationSetupError !== undefined,
+        canReconcile: supportsSnapshotReconciliation(
+          sessionManager,
+          strandsAgent,
+          this._log,
+        ),
+        frontendResults: frontendResults.map((answer) => ({
+          toolCallId: answer.toolCallId!,
+          text: answer.result.text,
+          isError: answer.result.isError,
+        })),
+        admittedIds: new Set(resolvedNativeResults.keys()),
+        parkedPlaceholderCount: activeProxyNativeIds.size,
+        resumeSubmitted,
+      });
+
+      // Client answers the native history does not carry, so the prompt has to.
+      // Filled in by whichever branch below settles it.
+      let uncarriedResults: readonly string[] = [];
+
+      // Nothing named the tool behind a trailing result, and the run has to say
+      // what came back. Raised here, before reconciliation persists or prunes
+      // anything, so the retry still has the admission signal it needs.
+      if (plan.kind === "fail-unnameable") {
+        yield _continuationToolNameError(plan.toolCallIds);
+        return;
+      }
+
+      if (plan.kind === "replay-history") {
+        // Apply stateContextBuilder to the last user-text message in the
+        // reconciled history rather than to the synthetic `userMessage`
+        // string, which is what the LLM actually sees.
+        if (this.config.stateContextBuilder) {
+          for (let i = nativeHistory.length - 1; i >= 0; i--) {
+            const m = nativeHistory[i];
+            if (!m || m.role !== "user") continue;
+            const first = (m.content as Array<{ text?: string }>)[0];
+            if (first && typeof first.text === "string") {
+              try {
+                const augmented = this.config.stateContextBuilder(
+                  inputData,
+                  first.text,
+                  buildContextExtras(inputData),
+                );
+                if (typeof augmented === "string") first.text = augmented;
+              } catch (e) {
+                this._log.error(`${LOG_PREFIX} stateContextBuilder failed:`, e);
+                yield {
+                  type: EventType.CUSTOM,
+                  name: "hook_error",
+                  value: {
+                    hook: "stateContextBuilder",
+                    tool: "__prompt__",
+                    error: _errorMessage(e),
+                  },
+                };
               }
+              break;
             }
           }
-          // Convert plain-object history into real Message instances —
-          // Bedrock's request formatter dispatches on `block.type`, which
-          // only the class instances carry.
-          (strandsAgent as { messages: unknown[] }).messages =
-            nativeHistory.map((m) =>
-              StrandsMessage.fromMessageData({
-                role: m.role,
-                content: m.content as never,
-              }),
+        }
+        // Convert plain-object history into real Message instances: Bedrock's
+        // request formatter dispatches on `block.type`, which only the class
+        // instances carry.
+        (strandsAgent as { messages: unknown[] }).messages = nativeHistory.map(
+          (m) =>
+            StrandsMessage.fromMessageData({
+              role: m.role,
+              content: m.content as never,
+            }),
+        );
+        // `stream(undefined)` tells Strands to use `this.messages` as-is.
+        invokeArgs = undefined;
+      } else if (plan.kind === "reconcile") {
+        let correctedIds: ReadonlySet<string> = new Set<string>();
+        try {
+          correctedIds = await reconcileFrontendToolResults(
+            sessionManager!,
+            strandsAgent,
+            resolvedNativeResults,
+          );
+        } catch (e) {
+          if (_hasActiveInterrupt(strandsAgent)) {
+            this._log.error(
+              `${LOG_PREFIX} Active interrupt tool result reconciliation failed`,
+              e,
             );
-          // `stream(undefined)` tells Strands to use `this.messages` as-is.
-          invokeArgs = undefined;
+            yield _interruptReconciliationError();
+            return;
+          }
+          // Truthful because the reconciler leaves nothing of a failed attempt
+          // behind: the history still holds the stub, the call id is still
+          // recorded, and the prompt below is what carries the client's answer.
+          this._log.warn(
+            `${LOG_PREFIX} Frontend tool result reconciliation failed; falling back ` +
+              `to the legacy continuation path: ${_errorMessage(e)}`,
+          );
+        }
+        // Continue from the corrected native history only when every admitted
+        // result this turn carries actually ended up corrected. Admission was
+        // settled by the decision above, but a correction can still decline: a
+        // stub carrying content this adapter did not write is never overwritten.
+        //
+        // Read from what the reconciler REPORTS it corrected, across both the
+        // surfaces it writes to. Deriving it from the ABSENCE of a stub instead
+        // calls an answer corrected whenever its block is simply gone, which the
+        // SDK's default sliding message window makes routine, and cannot see a
+        // parked correction decline at all because those results live outside
+        // `agent.messages`.
+        //
+        // An empty admitted set means nothing was admitted, so nothing can have
+        // been corrected: that answers "a stub remains", not "the history is
+        // clean".
+        const declinedIds = [...resolvedNativeResults.keys()]
+          .filter((id) => !correctedIds.has(id))
+          .sort();
+        const reconciled =
+          resolvedNativeResults.size > 0 && declinedIds.length === 0;
+        if (declinedIds.length > 0) {
+          // Said out loud. A decline leaves the client's answer where only the
+          // fallback below can reach the model with it, and both of the ways
+          // that fallback can fail are silent otherwise.
+          this._log.warn(
+            `${LOG_PREFIX} Frontend tool result reconciliation corrected nothing ` +
+              `for native ids ${declinedIds.join(", ")}; the client's answer has ` +
+              `to reach the model through the continuation prompt instead`,
+          );
+        }
+        if (resumeSubmitted) {
+          // The resume path already put its `InterruptResponseContent[]` on
+          // `invokeArgs` and must keep it: a resume batch can still carry a fresh
+          // frontend tool result that needed reconciling. That is also why it has
+          // no continuation prompt to fall back on, so a decline here leaves the
+          // uncorrected stub as what the model reads for the client's answer.
+          // Refused, like the pre-write gates above, rather than answered with a
+          // stub. Later than those gates by necessity: only the attempt itself
+          // says a correction declined.
+          if (declinedIds.length > 0) {
+            this._log.error(
+              `${LOG_PREFIX} Active interrupt tool result reconciliation failed: ` +
+                `no correction landed for native ids ${declinedIds.join(", ")}`,
+            );
+            yield _interruptReconciliationError();
+            return;
+          }
+        } else {
+          // A PARTIAL decline still sends the prompt, and the prompt phrases
+          // every trailing result of the turn -- including the ones this call
+          // just wrote into the history. So the lines whose answer landed come
+          // back out, and what goes out is only what the history does not say.
+          // A decline is only knowable after a write, so this is the
+          // all-or-nothing rule of the decision above, held on the far side.
+          //
+          // With every trailing line corrected there is nothing left for the
+          // prompt to say, so the history speaks for itself and the carry below
+          // is free to prepend the non-trailing answers that declined.
+          const kept = trailingPromptLines.filter(
+            ({ toolCallId }) => !toolCallId || !correctedIds.has(toolCallId),
+          );
+          const prompt =
+            kept.length === trailingPromptLines.length
+              ? userMessage
+              : kept.length > 0
+                ? kept.map(({ line }) => line).join("\n")
+                : undefined;
+          invokeArgs = reconciled && !hasNewerUserMessage ? undefined : prompt;
+          uncarriedResults = declinedIds;
+        }
+      } else if (plan.kind === "prompt") {
+        // Nothing was repaired, so no answer is in the history.
+        uncarriedResults = frontendResults.map((answer) => answer.toolCallId!);
+      }
+
+      // Client answers no correction landed for that the trailing derivation
+      // above never phrased either, so they reach the model through neither the
+      // history nor the prompt. A user message after an answer puts it out of
+      // that derivation's reach, and it can be an EARLIER answer of the same
+      // payload, which is why this reads each answer's own place in the request
+      // rather than one flag taken from the last of them. Carried ahead of
+      // whatever prompt the run is sending rather than dropped, because dropping
+      // leaves the model to re-fire the call it is already being answered about.
+      //
+      // Bounded by `alreadyPrompted`. A placeholder no correction can EVER
+      // repair (a stub some hook decorated, which detection reports and the
+      // exact rewrite refuses) declines on every turn while both provenance
+      // signals stay alive, since a recorded id is only retired by a correction
+      // that lands; carrying it again each turn repeats the same stale answer
+      // without bound. So the carry retires an answer on the only thing that
+      // means the model has it, the history already saying it. Reconciliation
+      // never retires it, which would strand a stub a later turn could repair.
+      if (!resumeSubmitted && uncarriedResults.length > 0) {
+        const carried = new Set(uncarriedResults);
+        const lines: string[] = [];
+        for (const answer of frontendResults) {
+          if (answer.trailing) continue;
+          if (!carried.has(answer.toolCallId!)) continue;
+          if (answer.alreadyPrompted) {
+            this._log.debug(
+              `${LOG_PREFIX} Not restating a client answer the history already ` +
+                `carries in words: toolCallId=${answer.toolCallId}`,
+            );
+            continue;
+          }
+          // Always resolves: an unnameable carried answer failed the run above.
+          if (answer.name) {
+            lines.push(_continuationResultLine(answer.name, answer.result));
+          }
+        }
+        if (lines.length > 0) {
+          const preamble = lines.join("\n");
+          invokeArgs =
+            typeof invokeArgs === "string"
+              ? `${preamble}\n${invokeArgs}`
+              : [
+                  new TextBlock(preamble),
+                  ...((invokeArgs ?? []) as ContentBlock[]),
+                ];
         }
       }
 
@@ -2398,7 +3300,7 @@ export class StrandsAgent {
       // returns above with `invokeArgs = undefined`.
       if (
         !replayHistory &&
-        resumeEntries.length === 0 &&
+        !resumeSubmitted &&
         typeof invokeArgs === "string"
       ) {
         const seeded = (strandsAgent as { messages?: unknown[] }).messages;
@@ -2439,11 +3341,26 @@ export class StrandsAgent {
         }
       }
 
+      // Native ids already in this thread's history, captured after any history
+      // replacement above and before the stream appends this run's own calls.
+      // A frontend call landing on one of these cannot be told apart from the
+      // earlier call that owns the persisted placeholder.
+      const priorToolCallIds = _nativeAssistantToolCallIds(strandsAgent);
+
       this._log.debug(
         `${LOG_PREFIX} Starting agent run: threadId=${inputData.threadId}, runId=${inputData.runId}, ` +
           `pendingToolResultIds=${JSON.stringify([...pendingToolResultIds])}, ` +
           `messageCount=${inputData.messages?.length ?? 0}`,
       );
+
+      // The resume is spent here rather than where its payload was built,
+      // after the last gate that can still end the run with a RUN_ERROR, so a
+      // run refused by one of those gates leaves the record it never acted on
+      // exactly as it found it.
+      if (resumeEntries.length > 0) {
+        this._pendingInterruptsByThread.delete(threadId);
+        persistInterruptBookkeeping(strandsAgent, null, null, this._log);
+      }
 
       // AbortController wired into Strands's `cancelSignal` so that abandoning
       // the outer generator (HTTP client disconnect) stops the underlying
@@ -2486,6 +3403,19 @@ export class StrandsAgent {
             // throw is expected flow and the run finishes. A genuine provider
             // failure in the same window is not, and must not be swallowed
             // into a success.
+            //
+            // `frontendHalt` deliberately stays as it is, so the closeout below
+            // is skipped rather than reached with nothing to do. Strands defers
+            // appending BOTH the assistant `toolUse` and its `toolResult` until
+            // after the tool batch, and yields them only after the
+            // `afterToolsEvent` the latch rides, so a throw arriving here landed
+            // before either message existed: there is no stamped halt turn to
+            // trim and no placeholder to persist. What this run did record (the
+            // call id it handed the client, and any earlier cycle's messages) is
+            // already in the store, because `Agent.stream()` drains `_stream` in
+            // its own `finally` on the error path and the `AfterInvocationEvent`
+            // that comes out of the drain saves the snapshot before the throw
+            // reaches this loop. Saving again here would write the same bytes.
             if (
               (pendingHalt || haltEventStream) &&
               _isFrontendHaltSentinel(streamErr)
@@ -2500,8 +3430,6 @@ export class StrandsAgent {
             finalAgentResult = next.value as StrandsAgentResult | undefined;
             break;
           }
-          if (haltEventStream) continue;
-
           // Strands v1 wraps raw model events inside `ModelStreamUpdateEvent`
           // (type: 'modelStreamUpdateEvent', event: ModelStreamEvent) before
           // yielding them from `agent.stream()`. Unwrap once so the dispatch
@@ -2515,6 +3443,29 @@ export class StrandsAgent {
           const isAssembledBlock = isAssembledContentBlock(next.value);
           const event = unwrapStrandsEvent(next.value);
           const kind = getEventKind(event);
+
+          // End of the tool batch, and so the frontend halt's latch point: it
+          // arrives once every tool in the batch has produced its result, so a
+          // backend sibling of the frontend call still reaches the wire below.
+          // Answering `endTurn` rather than cancelling is what stops the loop
+          // before another model cycle while still letting Strands append BOTH
+          // the assistant `toolUse` and the placeholder `toolResult` a later
+          // run has to reconcile.
+          //
+          // Checked ABOVE the mute below, not after it: another halt in the same
+          // batch (a `stopStreamingAfterResult` tool) mutes the wire first, and
+          // latching after that would skip the endTurn stamp, so the turn would
+          // persist neither the call nor its placeholder and no continuation
+          // could repair what the client is already answering.
+          if (kind === "afterToolsEvent" && pendingHalt && !frontendHalt) {
+            (event as { endTurn: boolean | string }).endTurn =
+              FRONTEND_HALT_TURN_TEXT;
+            frontendHalt = true;
+            haltEventStream = true;
+            continue;
+          }
+
+          if (haltEventStream) continue;
 
           // --- Delta events (text, reasoning, tool-use input streaming) ---
           // Maps to Python's top-level "data" / "reasoningText" /
@@ -2535,7 +3486,7 @@ export class StrandsAgent {
 
             // Text data chunks.
             if (delta.type === "textDelta" && delta.text) {
-              if (stopTextStreaming) continue;
+              if (stopModelStreaming) continue;
               if (!messageStarted) {
                 yield {
                   type: EventType.TEXT_MESSAGE_START,
@@ -2569,8 +3520,11 @@ export class StrandsAgent {
             // this one is now mapped.
             if (citations.add(delta)) continue;
 
-            // Reasoning/thinking text streaming.
+            // Reasoning/thinking text streaming. Muted by the same flag as
+            // text: reasoning the model produces after the halt is armed
+            // belongs to the same turn the client will never see completed.
             if (delta.type === "reasoningContentDelta") {
+              if (stopModelStreaming) continue;
               if (delta.text) {
                 if (!reasoningStarted) {
                   reasoningMessageId = uuid();
@@ -2621,14 +3575,21 @@ export class StrandsAgent {
             // argsStreamer take the legacy burst-at-contentBlockStop path.
             if (delta.type === "toolUseInputDelta" && currentToolUse) {
               currentToolUse.inputChunks.push(delta.input);
-              const { name: toolName, toolUseId: strandsToolId } =
-                currentToolUse;
+              const {
+                name: toolName,
+                nativeToolUseId,
+                toolUseId: strandsToolId,
+              } = currentToolUse;
               const isFrontendTool = frontendToolNames.has(toolName);
-              const toolUseId = _resolveToolUseId(
-                toolCallsSeen,
-                strandsToolId,
+              const toolUseId = _resolveToolUseId({
+                seen: toolCallsSeen,
+                toolName,
+                nativeToolUseId,
+                fallbackToolUseId: strandsToolId,
                 isFrontendTool,
-              );
+                priorToolCallIds,
+                onNewFrontendCall: recordFrontendCall,
+              });
 
               let entry = toolCallsSeen.get(toolUseId);
               if (!entry) {
@@ -2780,6 +3741,7 @@ export class StrandsAgent {
             if (s?.type === "toolUseStart" && s.name) {
               currentToolUse = {
                 name: s.name,
+                nativeToolUseId: s.toolUseId,
                 toolUseId: s.toolUseId ?? uuid(),
                 inputChunks: [],
               };
@@ -2805,6 +3767,7 @@ export class StrandsAgent {
             if (currentToolUse) {
               const {
                 name: toolName,
+                nativeToolUseId,
                 toolUseId: strandsToolId,
                 inputChunks,
               } = currentToolUse;
@@ -2823,11 +3786,15 @@ export class StrandsAgent {
                 }
               }
               const isFrontendTool = frontendToolNames.has(toolName);
-              const toolUseId = _resolveToolUseId(
-                toolCallsSeen,
-                strandsToolId,
+              const toolUseId = _resolveToolUseId({
+                seen: toolCallsSeen,
+                toolName,
+                nativeToolUseId,
+                fallbackToolUseId: strandsToolId,
                 isFrontendTool,
-              );
+                priorToolCallIds,
+                onNewFrontendCall: recordFrontendCall,
+              });
               const argsStr =
                 typeof parsedInput === "string"
                   ? parsedInput
@@ -2945,7 +3912,7 @@ export class StrandsAgent {
                     `${LOG_PREFIX} Deferring halt after frontend tool call: ` +
                       `toolName=${toolName}, toolCallId=${toolUseId}, threadId=${inputData.threadId}`,
                   );
-                  pendingHalt = true;
+                  armFrontendHalt();
                 }
               } else {
                 // Legacy burst path — behavior.argsStreamer is configured,
@@ -2972,9 +3939,7 @@ export class StrandsAgent {
                   emitMessagesSnapshot,
                   toolCallsSeen,
                   currentState,
-                  onPendingHalt: () => {
-                    pendingHalt = true;
-                  },
+                  onPendingHalt: armFrontendHalt,
                 });
               }
             }
@@ -2990,11 +3955,25 @@ export class StrandsAgent {
           if (kind === "toolUseBlock") {
             const block = event as unknown as ToolUseBlock;
             const isFrontendTool = frontendToolNames.has(block.name);
-            const toolUseId = _resolveToolUseId(
-              toolCallsSeen,
-              block.toolUseId,
+            // Which of the two this sighting is. Every assembled block is
+            // delivered exactly once, so the FIRST assembled sighting of a call
+            // already tracked under this native id is that call's re-delivery,
+            // and a second sighting under the same id is a different call
+            // reusing it. On a provider that emits no deltas this branch is the
+            // only place the identity guard can see that reuse at all.
+            const tracked = _trackedByNativeId(toolCallsSeen, block.toolUseId);
+            const isAssembledRedelivery =
+              tracked !== undefined && tracked.assembledSeen !== true;
+            const toolUseId = _resolveToolUseId({
+              seen: toolCallsSeen,
+              toolName: block.name,
+              nativeToolUseId: block.toolUseId,
+              fallbackToolUseId: block.toolUseId,
               isFrontendTool,
-            );
+              priorToolCallIds,
+              onNewFrontendCall: recordFrontendCall,
+              isAssembledRedelivery,
+            });
             const argsStr =
               typeof block.input === "string"
                 ? block.input
@@ -3009,9 +3988,19 @@ export class StrandsAgent {
               });
             } else {
               const e = toolCallsSeen.get(toolUseId)!;
-              e.args = argsStr;
-              e.input = block.input;
+              // Only this same call's own sighting may refresh what it recorded.
+              // A block landing on a call whose envelope already closed is a
+              // different call, and writing its arguments here would hand them
+              // to the closed call's `stateFromResult`, `customResultHandler`
+              // and result context as if they were its own.
+              if (isAssembledRedelivery || !e.endEmitted) {
+                e.args = argsStr;
+                e.input = block.input;
+              }
             }
+            // Spent whichever entry now owns this native id, so a third sighting
+            // cannot read as a re-delivery of the second.
+            toolCallsSeen.get(toolUseId)!.assembledSeen = true;
             yield* this._emitToolCall({
               inputData,
               toolUseId,
@@ -3034,9 +4023,7 @@ export class StrandsAgent {
               emitMessagesSnapshot,
               toolCallsSeen,
               currentState,
-              onPendingHalt: () => {
-                pendingHalt = true;
-              },
+              onPendingHalt: armFrontendHalt,
             });
             continue;
           }
@@ -3044,28 +4031,24 @@ export class StrandsAgent {
           // Tool results from Strands (backend tools). Maps to Python's
           // `"message" in event and event["message"]["role"] == "user"` branch.
           if (kind === "afterToolCallEvent") {
-            if (pendingHalt) {
-              // Frontend tool: the proxy "Forwarded to client" placeholder has
-              // resolved and we don't want to feed it back to the model. Abort
-              // the Strands stream so the LLM stops emitting another cycle and
-              // we can finalise RUN_FINISHED.
-              haltEventStream = true;
-              try {
-                runAbort.abort();
-              } catch {
-                // ignore
-              }
-              break;
-            }
             const hookEvent = event as unknown as {
               toolUse: { toolUseId: string; name: string };
+              /** The tool that ran; absent when registry lookup found none. */
+              tool?: unknown;
               result: ToolResultBlock;
             };
             const resultToolId = hookEvent.toolUse.toolUseId;
             const toolName = hookEvent.toolUse.name;
 
-            // Skip placeholder results for proxied frontend tools.
-            if (frontendToolNames.has(toolName)) continue;
+            // Skip the placeholder a proxy tool returns. Keyed on the tool that
+            // actually executed rather than on the names this request declared:
+            // a proxy registered for an earlier turn outlives the declaration
+            // whenever the agent cache is shared across adapter instances
+            // (`agentsByThread`), and its placeholder would otherwise reach the
+            // client as a genuine result and the model as an answer. The reverse
+            // reading matters too: a native tool shadowing a client-declared
+            // name owns its result and has to keep delivering it.
+            if (isProxyTool(hookEvent.tool)) continue;
 
             // Parse the content into a usable value. `result.content` is
             // required by the SDK type but can be missing on errors or
@@ -3222,7 +4205,7 @@ export class StrandsAgent {
             }
 
             if (behavior?.stopStreamingAfterResult) {
-              stopTextStreaming = true;
+              stopModelStreaming = true;
               if (!messageStarted) {
                 discardOrphanCitations(
                   citations,
@@ -3261,6 +4244,12 @@ export class StrandsAgent {
                   `(threadId=${inputData.threadId}, toolName=${toolName})`,
               );
               haltEventStream = true;
+              // A frontend call in the same batch owns how this turn ends: its
+              // latch at the end of the batch is what makes Strands persist the
+              // `toolUse` and placeholder `toolResult` pair the continuation
+              // repairs. Breaking out here would leave nothing persisted, so the
+              // loop runs on to that latch with the wire already muted.
+              if (pendingHalt) continue;
               break;
             }
             continue;
@@ -3463,6 +4452,30 @@ export class StrandsAgent {
         }
       }
 
+      // The turn ends with the assistant `toolUse` and its placeholder
+      // `toolResult`, exactly the reinvokable pair Strands persists after any
+      // tool batch. Drop the assistant text `endTurn` added on top: the client
+      // is still executing the tool, and replaying a trailing assistant turn to
+      // the model on the continuation would ask it to continue that sentence.
+      if (frontendHalt) {
+        _dropFrontendHaltTurn(strandsAgent);
+        if (sessionManager) {
+          try {
+            await sessionManager.saveSnapshot({
+              target: strandsAgent,
+              isLatest: true,
+            });
+          } catch (e) {
+            // A broken backing store must not turn a delivered tool call into a
+            // failed run. The client still answers, and the continuation then
+            // fails closed on a result it cannot name.
+            this._log.warn(
+              `${LOG_PREFIX} Failed to persist the halted turn: ${_errorMessage(e)}`,
+            );
+          }
+        }
+      }
+
       if (reasoningStarted) {
         yield {
           type: EventType.REASONING_MESSAGE_END,
@@ -3520,6 +4533,53 @@ export class StrandsAgent {
       if (forcedStop.pending) {
         yield* forcedStop.emit();
         return;
+      }
+
+      // Streaming can create a mixed checkpoint that preflight could not
+      // observe. Advertising one promises a resume may finish it, so this gate
+      // asks exactly what the resume gates ask, in their order: a checkpoint
+      // advertised here and then refused on resume wedges the thread, since the
+      // refusal keeps it activated and every later plain run meets it.
+      //
+      // A parked stub no rewrite can correct is refused on resume however many
+      // results the turn carries, cancelled entries included, so it is refused
+      // here under the resume's own code. One such stub condemns the batch, as
+      // it does on the resume side: a resume consumes the parked batch entire.
+      const unrepairableParkedIds =
+        uncorrectableProxyPlaceholderIds(strandsAgent);
+      if (unrepairableParkedIds.size > 0) {
+        this._log.error(
+          `${LOG_PREFIX} Checkpoint parks proxy placeholders no rewrite can ` +
+            `correct, so no resume could complete it: native ids ` +
+            `${JSON.stringify([...unrepairableParkedIds].sort())}`,
+        );
+        _abandonUnadvertisedCheckpoint(strandsAgent);
+        this._pendingInterruptsByThread.delete(threadId);
+        yield _interruptReconciliationError();
+        return;
+      }
+      // An exact stub the resume WILL repair still repairs only through the
+      // session-manager boundary a safe resume needs, so a checkpoint parking
+      // one without that boundary is no more advertisable.
+      if (activeProxyPlaceholderIds(strandsAgent).size > 0) {
+        if (!sessionManager) {
+          _abandonUnadvertisedCheckpoint(strandsAgent);
+          this._pendingInterruptsByThread.delete(threadId);
+          yield _interruptSessionRequiredError();
+          return;
+        }
+        if (
+          !supportsSnapshotReconciliation(
+            sessionManager,
+            strandsAgent,
+            this._log,
+          )
+        ) {
+          _abandonUnadvertisedCheckpoint(strandsAgent);
+          this._pendingInterruptsByThread.delete(threadId);
+          yield _interruptSessionCapabilityError();
+          return;
+        }
       }
 
       // Final state snapshot with `currentState` verbatim. Unlike the initial
@@ -3589,9 +4649,11 @@ export class StrandsAgent {
       };
     } catch (e) {
       const code =
-        e instanceof TypeError || e instanceof ReferenceError
-          ? "ADAPTER_BUG"
-          : "STRANDS_ERROR";
+        e instanceof FrontendToolIdentityError
+          ? "FRONTEND_TOOL_IDENTITY_ERROR"
+          : e instanceof TypeError || e instanceof ReferenceError
+            ? "ADAPTER_BUG"
+            : "STRANDS_ERROR";
       this._log.error(`${LOG_PREFIX} _runSingleAgent failed:`, e);
       yield _runError(_errorMessage(e), code);
     }
@@ -3755,6 +4817,7 @@ export class StrandsAgent {
       toolCallName: toolName,
       parentMessageId: ctx.getMessageId(),
     };
+    entry.startEmitted = true;
 
     let streamerFailed = false;
     if (behavior?.argsStreamer) {
@@ -3793,10 +4856,22 @@ export class StrandsAgent {
 
     if (streamerFailed) {
       yield { type: EventType.TOOL_CALL_END, toolCallId: ctx.toolUseId };
+      entry.endEmitted = true;
+      // The call still went out, so the client still owes an answer and the halt
+      // still has to fire. Returning without arming it lets Strands run on and
+      // feed the model the proxy's placeholder as that answer.
+      if (ctx.isFrontendTool && !behavior?.continueAfterFrontendCall) {
+        this._log.debug(
+          `${LOG_PREFIX} Deferring halt after frontend tool call: ` +
+            `toolName=${toolName}, toolCallId=${ctx.toolUseId}, threadId=${ctx.inputData.threadId}`,
+        );
+        ctx.onPendingHalt();
+      }
       return;
     }
 
     yield { type: EventType.TOOL_CALL_END, toolCallId: ctx.toolUseId };
+    entry.endEmitted = true;
 
     // Splice point 2 of 4: append the assistant tool-call entry to the
     // snapshot, then rotate message_id.
@@ -4233,6 +5308,210 @@ function _runStarted(input: RunAgentInput): BaseEvent {
 
 function _runError(message: string, code: string): BaseEvent {
   return { type: EventType.RUN_ERROR, message, code };
+}
+
+/**
+ * Remove the assistant turn `AfterToolsEvent.endTurn` appended for a frontend
+ * halt, identified by the exact content the adapter asked for so no other
+ * message can be mistaken for it.
+ */
+function _dropFrontendHaltTurn(agent: unknown): void {
+  const messages = (agent as { messages?: unknown[] }).messages;
+  if (!Array.isArray(messages) || messages.length === 0) return;
+  const last = messages[messages.length - 1] as {
+    role?: unknown;
+    content?: unknown;
+  };
+  if (last?.role !== "assistant" || !Array.isArray(last.content)) return;
+  if (last.content.length !== 1) return;
+  if (
+    (last.content[0] as { text?: unknown })?.text !== FRONTEND_HALT_TURN_TEXT
+  ) {
+    return;
+  }
+  messages.pop();
+}
+
+/**
+ * Abandon a checkpoint this run has just refused to advertise.
+ *
+ * Rule 4 leaves an ACTIVATED checkpoint alone precisely because it holds parked
+ * tool execution a resume would finish. That reasoning does not reach here: this
+ * checkpoint was never advertised and never can be, so no client knows an
+ * interrupt id to resume it with. Left activated it wedges the thread for good,
+ * turning every later plain run into `PENDING_INTERRUPTS` and every resume into
+ * `UNKNOWN_INTERRUPT_ID`. The run still fails loudly with its own code, so the
+ * caller learns the turn was lost rather than silently succeeding.
+ */
+function _abandonUnadvertisedCheckpoint(agent: unknown): void {
+  const state = (agent as { _interruptState?: { deactivate?: unknown } })
+    ?._interruptState;
+  if (typeof state?.deactivate === "function") {
+    (state as { deactivate: () => void }).deactivate();
+  }
+}
+
+/** True when the agent is parked on an activated Strands checkpoint. */
+function _hasActiveInterrupt(agent: unknown): boolean {
+  return (
+    (agent as { _interruptState?: { activated?: unknown } })?._interruptState
+      ?.activated === true
+  );
+}
+
+/** One client answer as the continuation decision reads it. */
+interface ContinuationResult {
+  toolCallId: string;
+  text: string;
+  isError: boolean;
+}
+
+/**
+ * What a continuation turn does, as a single value.
+ *
+ * Four mutually exclusive actions, so the body acts on one decision instead of
+ * re-deriving it from a handful of booleans that can disagree with each other.
+ */
+type ContinuationPlan =
+  | { kind: "fail-unnameable"; toolCallIds: string[] }
+  | { kind: "replay-history" }
+  | { kind: "reconcile" }
+  | { kind: "prompt" };
+
+/** Everything the decision reads. Nothing here has been mutated yet. */
+interface ContinuationInputs {
+  /**
+   * Tool results the run would have to SAY and cannot name: the trailing ones
+   * the prompt derivation could not resolve, plus any the carry-over prompt
+   * would have to phrase.
+   */
+  unnameableResultIds: readonly string[];
+  /**
+   * True when this run can replace Strands' history wholesale and stream from
+   * it. That needs the replay to be enabled, non-empty, and able to carry every
+   * client answer this turn is answering: a replay that drops one installs the
+   * question alone and discards the prompt that could have said what came back.
+   */
+  canReplayHistory: boolean;
+  /** Reading the admission store failed, so nothing may be admitted. */
+  setupFailed: boolean;
+  /** The session manager and agent expose what reconciliation writes through. */
+  canReconcile: boolean;
+  /** Every frontend result this turn carries. */
+  frontendResults: readonly ContinuationResult[];
+  /** Those whose call id this adapter recorded at emission. */
+  admittedIds: ReadonlySet<string>;
+  /** How many exact proxy placeholders an activated checkpoint parks. */
+  parkedPlaceholderCount: number;
+  resumeSubmitted: boolean;
+}
+
+/**
+ * Decide what a continuation turn does, before anything is written.
+ *
+ * Pure, and taken in one place, because every input below interacts with the
+ * others: which prompt goes out decides whether an unnameable result is fatal,
+ * and whether the turn is repairable at all decides whether a prompt goes out.
+ * Ordering them as separate gates strung through a long body lets them be moved
+ * independently until they contradict one another.
+ */
+function planContinuation(input: ContinuationInputs): ContinuationPlan {
+  // A result nobody can name is fatal on every path, as it is in the Python
+  // sibling. Saying what came back needs the name, and guessing feeds the model
+  // false context. Replayed history looks exempt, because there the result rides
+  // its own `toolResult` block addressed by id, but the two conditions arrive
+  // together: nothing can name the call precisely BECAUSE the assistant
+  // `toolUse` block is absent from the payload, so the replay would install a
+  // `toolResult` no `toolUse` answers and real providers reject that history.
+  // Exempting it trades a designed error for a generic provider failure.
+  //
+  // Decided before any write, so a run that fails closed leaves the turn as
+  // repairable as it found it and the retry keeps its admission signal.
+  if (input.unnameableResultIds.length > 0) {
+    return {
+      kind: "fail-unnameable",
+      toolCallIds: [...input.unnameableResultIds],
+    };
+  }
+  if (input.canReplayHistory) return { kind: "replay-history" };
+
+  // Repairing a turn needs a placeholder to repair, and only an admitted call
+  // has one this adapter may rewrite. Every result that SAYS something -- a
+  // body, or a failure -- therefore has to be admitted for the turn to be
+  // repairable at all: correcting the admitted half alone leaves the other
+  // half's stub standing as the client's answer while the store reads as
+  // reconciled. The whole turn goes through the continuation prompt instead,
+  // which phrases every result of a turn nothing was corrected for. No
+  // pre-write reading says which corrections will land, so the caller handles
+  // the post-write equivalent by taking the corrected answers back out of the
+  // prompt.
+  //
+  // A failure counts even with an empty body: its status is the whole answer,
+  // and leaving it uncorrected reports a tool the human denied as a success.
+  //
+  // Counted over DISTINCT call ids. A payload repeating one id carries one
+  // answer, not two, and comparing a repeated count against the de-duplicated
+  // admission set makes a fully-admitted turn look unrepairable forever.
+  const mustRepair = new Set<string>();
+  for (const result of input.frontendResults) {
+    if (result.text.trim().length === 0 && !result.isError) continue;
+    mustRepair.add(result.toolCallId);
+  }
+  const unrepairable = [...mustRepair].some((id) => !input.admittedIds.has(id));
+
+  // An admitted VOID result still reconciles. Its stub is this adapter's own
+  // persisted write, so leaving it means the store asserts "Forwarded to
+  // client" as the client's answer forever and the call id is never pruned. The
+  // reconciler answers a void result with a synthetic acknowledgement, which is
+  // what the model should read in the stub's place.
+  const anythingToRepair =
+    input.admittedIds.size > 0 || input.parkedPlaceholderCount > 0;
+
+  // A resume is exempt from the all-or-nothing rule: the gate before this has
+  // already proved every parked placeholder has a mapped client result, and the
+  // resume path never swaps in the continuation prompt, so correcting its
+  // checkpoint cannot double-tell the model anything.
+  if (
+    !input.setupFailed &&
+    input.canReconcile &&
+    anythingToRepair &&
+    (!unrepairable || input.resumeSubmitted)
+  ) {
+    return { kind: "reconcile" };
+  }
+  return { kind: "prompt" };
+}
+
+function _continuationToolNameError(toolCallIds: string[]): BaseEvent {
+  return _runError(
+    "Cannot name the tool behind continuation tool result(s) " +
+      `${toolCallIds.join(", ")}: absent from the input messages and ` +
+      "from the native session history",
+    "CONTINUATION_TOOL_NAME_UNRESOLVED",
+  );
+}
+
+function _interruptReconciliationError(): BaseEvent {
+  return _runError(
+    "Active interrupt tool result reconciliation failed",
+    "INTERRUPT_RECONCILIATION_ERROR",
+  );
+}
+
+function _interruptSessionRequiredError(): BaseEvent {
+  return _runError(
+    "A SessionManager is required for a mixed frontend-proxy/native " +
+      "interrupt checkpoint",
+    "INTERRUPT_SESSION_REQUIRED",
+  );
+}
+
+function _interruptSessionCapabilityError(): BaseEvent {
+  return _runError(
+    "Mixed frontend-proxy/native interrupt state requires a session manager " +
+      "exposing saveSnapshot() and an agent exposing messages",
+    "INTERRUPT_SESSION_CAPABILITY_ERROR",
+  );
 }
 
 /**
@@ -4761,18 +6040,14 @@ export async function convertMessagesForStrandsSeed(
       if (!toolCallId || !pendingToolCalls || !pendingToolCalls.has(toolCallId))
         continue;
       pendingToolResults ??= [];
+      // Both halves from the producer the replay path and the reconciler use,
+      // so status and content cannot disagree: deriving them separately seeds a
+      // failure with an empty body as `status: "error"` beside a success
+      // acknowledgement. On a cold start with the replay off this seed is the
+      // whole of what the model reads.
+      const { status, content } = clientResultFields(_clientResult(msg));
       pendingToolResults.push({
-        toolResult: {
-          toolUseId: toolCallId,
-          status: _readToolResult(msg).status,
-          // Through the same builder the replay path uses. Hand-rolling the
-          // text here sent a render-only tool's empty result as a blank block,
-          // which the provider rejects; the builder substitutes the non-empty
-          // acknowledgement instead.
-          content: [
-            _buildToolResultContent((msg as { content?: unknown }).content),
-          ],
-        },
+        toolResult: { toolUseId: toolCallId, status, content: [content] },
       });
       continue;
     }

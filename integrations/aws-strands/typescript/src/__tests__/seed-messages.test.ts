@@ -166,9 +166,11 @@ describe("convertMessagesForStrandsSeed", () => {
     ]);
   });
 
-  it("carries a client-reported tool failure onto the seeded toolResult status", async () => {
-    // Same rule as _buildStrandsHistory: the flag comes from ToolMessage.error,
-    // and each result is stamped independently.
+  it("carries a client-reported tool failure onto the seeded toolResult", async () => {
+    // Same producer as `_buildStrandsHistory` and the reconciler, so the status
+    // and the body come from `ToolMessage.error` together: the reason travels
+    // with the flag rather than the raw body standing in for it. Each result is
+    // stamped independently.
     const seed = await convertMessagesForStrandsSeed([
       { id: "u", role: "user", content: "lookup" } as unknown as AguiMessage,
       {
@@ -214,7 +216,9 @@ describe("convertMessagesForStrandsSeed", () => {
         toolResult: {
           toolUseId: "tc-2",
           status: "error",
-          content: [{ text: "tool failed: invalid id" }],
+          content: [
+            { text: "Failed: invalid id (returned: tool failed: invalid id)" },
+          ],
         },
       },
     ]);

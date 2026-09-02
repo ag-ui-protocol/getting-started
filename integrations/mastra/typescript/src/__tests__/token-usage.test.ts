@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { EventType } from "@ag-ui/client";
-import { collectEvents, makeInput, makeLocalMastraAgent } from "./helpers";
+import {
+  collectEvents,
+  makeInput,
+  makeLocalMastraAgent,
+  makeRemoteMastraAgent,
+} from "./helpers";
 
 const finishChunk = { type: "finish", payload: {} };
 
@@ -41,6 +46,35 @@ describe("MastraAgent — RUN_FINISHED token usage", () => {
     const agent = makeLocalMastraAgent({ streamChunks: [finishChunk] });
     const finished = runFinished(await collectEvents(agent, makeInput()));
     expect(finished.usage).toBeUndefined();
+  });
+
+  it("reports terminal usage from a remote stream", async () => {
+    const agent = makeRemoteMastraAgent({
+      streamChunks: [
+        {
+          type: "step-finish",
+          payload: {
+            output: {
+              usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+            },
+          },
+        },
+        {
+          type: "finish",
+          payload: {
+            output: {
+              usage: { inputTokens: 30, outputTokens: 12, totalTokens: 42 },
+            },
+          },
+        },
+      ],
+    });
+
+    const finished = runFinished(await collectEvents(agent, makeInput()));
+
+    expect(finished.usage).toEqual([
+      { inputTokens: 30, outputTokens: 12, totalTokens: 42 },
+    ]);
   });
 });
 
@@ -99,5 +133,26 @@ describe("MastraAgent — RUN_FINISHED token usage on resumed runs", () => {
 
     expect(finished).toBeDefined();
     expect(finished.usage).toBeUndefined();
+  });
+
+  it("reports fallback usage from a remote resumed stream", async () => {
+    const agent = makeRemoteMastraAgent({
+      resumeChunks: [
+        {
+          type: "finish",
+          payload: {
+            usage: { inputTokens: 8, outputTokens: 3, totalTokens: 11 },
+          },
+        },
+      ],
+    });
+
+    const finished = runFinished(
+      await collectEvents(agent, makeResumeInput(resumeInterrupt)),
+    );
+
+    expect(finished.usage).toEqual([
+      { inputTokens: 8, outputTokens: 3, totalTokens: 11 },
+    ]);
   });
 });

@@ -8,8 +8,12 @@
 
 import { describe, it, expect } from "vitest";
 import { EventType, type InputContent } from "@ag-ui/core";
-import { StrandsAgent } from "../agent";
-import { collect, minimalRunInput, scriptedAgent } from "./helpers";
+import {
+  collect,
+  minimalRunInput,
+  scriptedAgent,
+  strandsAgentOverStub,
+} from "./helpers";
 
 function b64(s: string): string {
   return Buffer.from(s).toString("base64");
@@ -36,19 +40,10 @@ function recordingAgent() {
   return { stub, calls };
 }
 
-function makeAgent(stub: import("@strands-agents/sdk").Agent): StrandsAgent {
-  const sa = new StrandsAgent({ agent: stub, name: "t" });
-  const byThread = (sa as unknown as { _agentsByThread: Map<string, unknown> })
-    ._agentsByThread;
-  byThread.set("thread-1", stub);
-  byThread.set("default", stub);
-  return sa;
-}
-
 describe("history replay of an attachment that cannot be converted", () => {
   it("does not seed a blank text block", async () => {
     const { stub, calls } = recordingAgent();
-    const agent = makeAgent(stub);
+    const agent = strandsAgentOverStub(stub);
 
     const events = await collect(
       agent,
@@ -108,7 +103,7 @@ describe("history replay of an attachment that cannot be converted", () => {
 describe("replayed turns the provider would refuse", () => {
   it("never seeds a blank text block for an empty assistant turn", async () => {
     const { stub, calls } = recordingAgent();
-    const agent = makeAgent(stub);
+    const agent = strandsAgentOverStub(stub);
 
     await collect(
       agent,
@@ -136,7 +131,7 @@ describe("replayed turns the provider would refuse", () => {
 describe("multimodal pass-through", () => {
   it("passes ContentBlock[] to agent.stream when the message contains an image", async () => {
     const { stub, calls } = recordingAgent();
-    const agent = makeAgent(stub);
+    const agent = strandsAgentOverStub(stub);
     const content: InputContent[] = [
       { type: "text", text: "what is in this image?" },
       {
@@ -172,7 +167,7 @@ describe("multimodal pass-through", () => {
 
   it("errors when every media block fails and there is no text to fall back to", async () => {
     const { stub, calls } = recordingAgent();
-    const agent = makeAgent(stub);
+    const agent = strandsAgentOverStub(stub);
     const content: InputContent[] = [
       {
         type: "image",
@@ -202,7 +197,7 @@ describe("multimodal pass-through", () => {
 
   it("falls back to the text alongside a media block that fails conversion", async () => {
     const { stub, calls } = recordingAgent();
-    const agent = makeAgent(stub);
+    const agent = strandsAgentOverStub(stub);
     const events = await collect(
       agent,
       minimalRunInput({
@@ -239,7 +234,7 @@ describe("multimodal pass-through", () => {
 
   it("preserves ContentBlock[] even when stateContextBuilder is configured", async () => {
     const { stub, calls } = recordingAgent();
-    const agent = makeAgent(stub);
+    const agent = strandsAgentOverStub(stub);
     // Install a stateContextBuilder that would wrap text prompts. It MUST NOT
     // be applied to multimodal prompts — the image content would be lost.
     (agent as unknown as { config: Record<string, unknown> }).config = {
@@ -279,7 +274,7 @@ describe("multimodal pass-through", () => {
 
   it("applies stateContextBuilder to plain-text prompts as before", async () => {
     const { stub, calls } = recordingAgent();
-    const agent = makeAgent(stub);
+    const agent = strandsAgentOverStub(stub);
     (agent as unknown as { config: Record<string, unknown> }).config = {
       stateContextBuilder: (_input: unknown, prompt: string) =>
         `${prompt} [STATE: ok]`,

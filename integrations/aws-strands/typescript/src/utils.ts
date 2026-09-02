@@ -2047,3 +2047,55 @@ export function flattenContentToText(content: unknown): string {
   }
   return "";
 }
+
+/** Best-effort string view of an AG-UI message content field. */
+export function _coerceText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (content == null) return "";
+  if (Array.isArray(content)) return flattenContentToText(content);
+  return String(content);
+}
+
+/**
+ * Build a Strands `toolResult` content block from an AG-UI tool message body.
+ *
+ * AG-UI's wire shape requires `ToolMessage.content` to be a string. Frontends
+ * (e.g. CopilotKit's `useHumanInTheLoop`) typically JSON-encode structured
+ * results before transport, so the string the adapter receives looks like
+ * `'{"accepted":true,"steps":[...]}'`. Forwarding that as a `text` block leaves
+ * the LLM with two competing payloads: the original `toolUse.input` (full
+ * args) and an opaque-looking JSON string in the result. The model often
+ * defaults to the args.
+ *
+ * Strands' `ToolResultContentData` accepts a `JsonBlock` shape (see
+ * `@strands-agents/sdk` `messages.ts`). When the message content parses as a
+ * JSON object/array, emit it as `{ json: parsed }` so the LLM sees a real
+ * structured result. Fall back to `{ text: ... }` for everything else.
+ */
+export function _buildToolResultContent(
+  content: unknown,
+): { text: string } | { json: unknown } {
+  const text = _coerceText(content);
+  const trimmed = text.trim();
+  // Render-only frontend tools (e.g. CopilotKit `useComponent`) legitimately
+  // produce an empty client tool result. Forwarding an empty `text` block to
+  // the Strands model reaches OpenAI, which rejects tool messages with empty
+  // content (HTTP 400). Synthesize a non-empty acknowledgement instead. The
+  // Python adapter has no equivalent synthesis on either its history or its
+  // reconciliation path, so it still forwards the empty block; that divergence
+  // is deliberate here rather than drift. The UI-bound TOOL_CALL_RESULT event is
+  // emitted on a separate path and stays faithfully empty.
+  if (trimmed.length === 0)
+    return { text: "Tool executed successfully with no return value." };
+  const first = trimmed[0];
+  if (first !== "{" && first !== "[") return { text };
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed !== null && typeof parsed === "object") {
+      return { json: parsed };
+    }
+  } catch {
+    // Not valid JSON, so fall through to text.
+  }
+  return { text };
+}

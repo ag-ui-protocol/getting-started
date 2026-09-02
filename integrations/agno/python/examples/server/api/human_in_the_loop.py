@@ -7,6 +7,7 @@ for human-in-the-loop interactions, exposed in an AG-UI compatible way.
 from typing import List, Literal
 
 from agno.agent.agent import Agent
+from agno.db.in_memory import InMemoryDb
 from agno.models.openai import OpenAIChat
 from agno.os import AgentOS
 from agno.os.interfaces.agui import AGUI
@@ -45,6 +46,7 @@ def generate_task_steps(
 
 
 agent = Agent(
+    db=InMemoryDb(),
     model=OpenAIChat(id="gpt-4o"),
     tools=[generate_task_steps],
     description="You are a helpful task planning assistant that helps break down complex tasks into manageable steps.",

@@ -216,14 +216,23 @@ export interface StrandsAgentConfig {
    */
   emitMessagesSnapshot?: boolean;
   /**
-   * When `true` (and the cached Strands agent has no `sessionManager`),
-   * reconcile the per-thread `Agent.messages` list with
-   * `RunAgentInput.messages` before invoking `stream()`.
+   * When `true` (and the cached Strands agent has no `sessionManager`, and the
+   * run submitted no `resume[]`), reconcile the per-thread `Agent.messages`
+   * list with `RunAgentInput.messages` before invoking `stream()`. Python's
+   * `replay_history` carves out a resume the same way.
    *
    * Prevents the LLM from re-firing frontend tools every turn because
    * Strands' internal history was missing the tool result the frontend
    * produced. Disable only if you manage Strands history yourself.
    * Default: `true`.
+   *
+   * Scoped to that replay alone. When a `sessionManager` is wired it owns
+   * history, and correcting the placeholder `toolResult` the adapter persisted
+   * for a frontend call is not something a caller can do in its place, so that
+   * correction runs whatever this is set to. Python's gate is a disjunction:
+   * this flag governs one arm, and the other reconciles on a resume carrying
+   * parked proxy placeholders whatever the flag is set to. So the two adapters
+   * differ only on the ordinary non-resume continuation, deliberately.
    */
   replayHistoryIntoStrands?: boolean;
   /**

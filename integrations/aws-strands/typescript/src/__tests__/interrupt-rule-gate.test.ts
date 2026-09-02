@@ -179,12 +179,7 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
     // mid-stream leaves a populated record beside an idle checkpoint. Reading
     // the record as "something is pending" strands the thread: the block tells
     // the client to resume, and the resume finds nothing open to address.
-    parkInterrupts(
-      agent,
-      "t",
-      [{ id: "gone-1", reason: "tool_call" }],
-      new Map(),
-    );
+    parkInterrupts(agent, "t", [{ id: "gone-1", reason: "tool_call" }], {});
 
     const refusedResume = await collect(
       agent,
@@ -218,14 +213,9 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
     const agent = new NeverRanAgent();
     // The record and the checkpoint name different interrupts. Only the SDK can
     // say which question is still being asked.
-    parkInterrupts(
-      agent,
-      "t",
-      [{ id: "recorded-only", reason: "tool_call" }],
-      new Map<string, unknown>([
-        ["sdk-open", { id: "sdk-open", name: "need_input" }],
-      ]),
-    );
+    parkInterrupts(agent, "t", [{ id: "recorded-only", reason: "tool_call" }], {
+      "sdk-open": { id: "sdk-open", name: "need_input" },
+    });
 
     const events = await collect(
       agent,
@@ -258,7 +248,13 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
       minimalRunInput({
         threadId: "t",
         runId: "r1",
-        resume: [{ interruptId: "int-1", status: "resolved", payload: { approved: true } }],
+        resume: [
+          {
+            interruptId: "int-1",
+            status: "resolved",
+            payload: { approved: true },
+          },
+        ],
       }),
     );
     expect(events.map((e) => e.type)).toEqual([
@@ -279,7 +275,13 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
       minimalRunInput({
         threadId: "t",
         runId: "r1",
-        resume: [{ interruptId: "live-1", status: "resolved", payload: { approved: true } }],
+        resume: [
+          {
+            interruptId: "live-1",
+            status: "resolved",
+            payload: { approved: true },
+          },
+        ],
       }),
     );
     expect(agent.rawCalled).toBe(1);
@@ -290,7 +292,13 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
       minimalRunInput({
         threadId: "t",
         runId: "r2",
-        resume: [{ interruptId: "live-1", status: "resolved", payload: { approved: true } }],
+        resume: [
+          {
+            interruptId: "live-1",
+            status: "resolved",
+            payload: { approved: true },
+          },
+        ],
       }),
     );
     expect(agent.rawCalled).toBe(1); // NOT called again
@@ -305,7 +313,11 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
     setPending(agent, "t", ["live-1", "live-2"]);
 
     const firstResume = [
-      { interruptId: "live-1", status: "resolved" as const, payload: { approved: true } },
+      {
+        interruptId: "live-1",
+        status: "resolved" as const,
+        payload: { approved: true },
+      },
       { interruptId: "live-2", status: "cancelled" as const },
     ];
     await collect(
@@ -341,7 +353,13 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
       minimalRunInput({
         threadId: "t",
         runId: "r1",
-        resume: [{ interruptId: "exp-1", status: "resolved", payload: { approved: true } }],
+        resume: [
+          {
+            interruptId: "exp-1",
+            status: "resolved",
+            payload: { approved: true },
+          },
+        ],
       }),
     );
     expect(events.map((e) => e.type)).toEqual([
@@ -397,7 +415,13 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
         minimalRunInput({
           threadId: "t",
           runId: "r1",
-          resume: [{ interruptId: "val-1", status: "resolved", payload: { approved: invalidApproval } }],
+          resume: [
+            {
+              interruptId: "val-1",
+              status: "resolved",
+              payload: { approved: invalidApproval },
+            },
+          ],
         }),
       );
 
@@ -414,26 +438,18 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
     // without the response schema it advertised. A tool approval's contract is
     // fixed, so the SDK's own interrupt still supplies it, and a payload waved
     // through here would be recorded as "no answer" and re-raise forever.
-    parkInterrupts(
-      agent,
-      "t",
-      [{ id: "appr-1", reason: "tool_call" }],
-      new Map<string, unknown>([
-        [
-          "appr-1",
-          {
-            id: "appr-1",
-            name: "ag_ui:tool_call:deploy",
-            reason: {
-              tool_call: true,
-              tool_name: "deploy",
-              tool_input: {},
-              tool_use_id: "tc-1",
-            },
-          },
-        ],
-      ]),
-    );
+    parkInterrupts(agent, "t", [{ id: "appr-1", reason: "tool_call" }], {
+      "appr-1": {
+        id: "appr-1",
+        name: "ag_ui:tool_call:deploy",
+        reason: {
+          tool_call: true,
+          tool_name: "deploy",
+          tool_input: {},
+          tool_use_id: "tc-1",
+        },
+      },
+    });
 
     const events = await collect(
       agent,
@@ -471,11 +487,19 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
       denied,
       minimalRunInput({
         threadId: "denied",
-        resume: [{ interruptId: "val-1", status: "resolved", payload: { approved: false } }],
+        resume: [
+          {
+            interruptId: "val-1",
+            status: "resolved",
+            payload: { approved: false },
+          },
+        ],
       }),
     );
     expect(denied.rawCalled).toBe(1);
-    expect(deniedEvents.some((event) => event.type === EventType.RUN_ERROR)).toBe(false);
+    expect(
+      deniedEvents.some((event) => event.type === EventType.RUN_ERROR),
+    ).toBe(false);
 
     const edited = new NeverRanAgent();
     const editedPending = setPending(edited, "edited", ["val-2"]);
@@ -494,6 +518,8 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
       }),
     );
     expect(edited.rawCalled).toBe(1);
-    expect(editedEvents.some((event) => event.type === EventType.RUN_ERROR)).toBe(false);
+    expect(
+      editedEvents.some((event) => event.type === EventType.RUN_ERROR),
+    ).toBe(false);
   });
 });

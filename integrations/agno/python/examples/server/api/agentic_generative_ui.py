@@ -3,6 +3,7 @@
 from typing import List
 
 from agno.agent.agent import Agent
+from agno.db.in_memory import InMemoryDb
 from agno.models.openai import OpenAIChat
 from agno.os import AgentOS
 from agno.os.interfaces.agui import AGUI
@@ -25,6 +26,7 @@ def generate_task_steps_generative_ui(steps: List[Step]) -> str:
 
 
 agent = Agent(
+    db=InMemoryDb(),
     model=OpenAIChat(id="gpt-4o"),
     tools=[generate_task_steps_generative_ui],
     description="You are a helpful assistant that breaks down tasks into steps.",

@@ -4,6 +4,7 @@ This example shows how to create an Agno Agent with tools (YFinanceTools) and ex
 """
 
 from agno.agent.agent import Agent
+from agno.db.in_memory import InMemoryDb
 from agno.models.openai import OpenAIChat
 from agno.os import AgentOS
 from agno.os.interfaces.agui import AGUI
@@ -22,6 +23,7 @@ def change_background(background: str) -> str:  # pylint: disable=unused-argumen
 
 
 agent = Agent(
+    db=InMemoryDb(),
     model=OpenAIChat(id="gpt-4o"),
     tools=[
         YFinanceTools(),

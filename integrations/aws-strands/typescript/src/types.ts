@@ -14,6 +14,12 @@ export interface SeenToolCall {
    * deltas. Each subsequent chunk emits only the growth.
    */
   lastEmittedRawLen?: number;
+  /**
+   * Whether this call's assembled `ToolUseBlock` has already been sighted. The
+   * SDK re-delivers each assembled block exactly once, so this is what
+   * separates that re-delivery from a later block reusing the same native id.
+   */
+  assembledSeen?: boolean;
   isPending?: boolean;
   isFrontend?: boolean;
   useStreaming?: boolean;
