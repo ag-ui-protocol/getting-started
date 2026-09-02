@@ -327,3 +327,42 @@ describe("enforcement runs before chunk expansion", () => {
     expect(seen).toContain(EventType.TEXT_MESSAGE_END);
   });
 });
+
+describe("expansion does not repair, whichever stage reaches it first", () => {
+  // agent.ts runs enforcement before expansion on all three of its pipelines,
+  // but Middleware.runNext expands INSIDE the middleware chain — upstream of
+  // enforcement. So the expander cannot lean on having been handed valid input:
+  // whether a producer's defect was reported would otherwise depend on whether
+  // the consumer happened to install a middleware.
+  const chunk = (extra: Record<string, unknown>) =>
+    ({ type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", delta: "hi", ...extra }) as unknown as BaseEvent;
+
+  it("keeps a malformed role fatal with a middleware installed", async () => {
+    const withMiddleware = new MemoryAgent([START, chunk({ role: null }), FINISH]);
+    withMiddleware.use(new ObservingMiddleware());
+    const without = new MemoryAgent([START, chunk({ role: null }), FINISH]);
+
+    await expect(withMiddleware.runAgent()).rejects.toThrow();
+    await expect(without.runAgent()).rejects.toThrow();
+  });
+
+  it("keeps a null subagentRunId fatal with a middleware installed", async () => {
+    const withMiddleware = new MemoryAgent([START, chunk({ subagentRunId: null }), FINISH]);
+    withMiddleware.use(new ObservingMiddleware());
+    const without = new MemoryAgent([START, chunk({ subagentRunId: null }), FINISH]);
+
+    await expect(withMiddleware.runAgent()).rejects.toThrow();
+    await expect(without.runAgent()).rejects.toThrow();
+  });
+
+  // The other half: an ABSENT role still becomes assistant, which is the
+  // documented default and the only thing this stage legitimately materialises.
+  it("still fills in an absent role with a middleware installed", async () => {
+    const agent = new MemoryAgent([START, chunk({}), FINISH]);
+    agent.use(new ObservingMiddleware());
+
+    const result = await agent.runAgent();
+
+    expect(result.newMessages[0]).toHaveProperty("role", "assistant");
+  });
+});

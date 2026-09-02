@@ -19,6 +19,10 @@ import { type DebugLoggerInput, resolveDebugLogger } from "@/debug-logger";
 
 interface TextMessageFields {
   messageId: string;
+  // The role the opener ESTABLISHED — explicit, or the assistant default the
+  // synthesized START carried. Kept so a later chunk that repeats the field
+  // can be judged against what the stream already said.
+  role: TextMessageStartEvent["role"];
   name?: string;
   subagentRunId?: string;
 }
@@ -50,6 +54,28 @@ const pendingEntityId = (pending: PendingStream): string =>
 
 const missingIdFieldName = (kind: PendingStream["kind"]) =>
   kind === "tool" ? "toolCallId" : "messageId";
+
+/**
+ * A continuation chunk MAY repeat a field its opener established, but only with
+ * the same value. A conflicting repeat is a malformed known value, and fatal —
+ * the same judgment the continuation-owner rule passes on `subagentRunId`.
+ * Rejected here rather than left to verifyEvents because the repeated field
+ * never survives expansion: the synthesized content event does not carry it,
+ * so downstream stages would never see the disagreement.
+ */
+const requireOpenerAgreement = (
+  entityKind: string,
+  entityId: string,
+  field: string,
+  incoming: string | undefined,
+  established: string | undefined,
+): void => {
+  if (incoming !== undefined && incoming !== established) {
+    throw new Error(
+      `Cannot continue ${entityKind} '${entityId}': chunk ${field} '${incoming}' does not match the open stream's ${field} ${established === undefined ? "(absent)" : `'${established}'`}.`,
+    );
+  }
+};
 
 /**
  * Spreads a chunk's metadata onto an event synthesized from that chunk.
@@ -293,6 +319,20 @@ export const transformChunks =
               (messageChunkEvent.messageId === undefined ||
                 messageChunkEvent.messageId === open.fields.messageId)
             ) {
+              requireOpenerAgreement(
+                "text message",
+                open.fields.messageId,
+                "role",
+                messageChunkEvent.role,
+                open.fields.role,
+              );
+              requireOpenerAgreement(
+                "text message",
+                open.fields.messageId,
+                "name",
+                messageChunkEvent.name,
+                open.fields.name,
+              );
               textMessageFields = open.fields;
             } else {
               // Whatever else this lane had open ends before the new stream begins.
@@ -304,6 +344,18 @@ export const transformChunks =
 
               textMessageFields = {
                 messageId: messageChunkEvent.messageId,
+                // Absent means assistant, which the spec states normatively
+                // and the generated validator deliberately does not apply, so
+                // materialising it here is real work nothing else does.
+                //
+                // ABSENT, though — not merely falsy, and not null. This stage
+                // must not depend on enforcement having run first: it has, on
+                // the three pipelines in agent.ts, but Middleware.runNext
+                // expands INSIDE the middleware chain, upstream of it. So a
+                // present-but-wrong role reaching here has not been judged
+                // yet, and substituting for it would repair a producer defect
+                // that is fatal when the same value is sent unchunked.
+                role: messageChunkEvent.role === undefined ? "assistant" : messageChunkEvent.role,
                 name: messageChunkEvent.name,
                 subagentRunId: messageChunkEvent.subagentRunId,
               };
@@ -313,15 +365,12 @@ export const transformChunks =
                 {
                   type: EventType.TEXT_MESSAGE_START,
                   messageId: messageChunkEvent.messageId,
-                  // Absent means assistant, which the spec states normatively
-                  // and the generated validator deliberately does not apply, so
-                  // materialising it here is real work nothing else does. `??`
-                  // rather than `||` on purpose: a role that is present but
-                  // wrong is not this stage's to correct, and enforcement has
-                  // already rejected it by the time expansion runs.
-                  role: messageChunkEvent.role ?? "assistant",
+                  role: textMessageFields.role,
                   ...(messageChunkEvent.name !== undefined && { name: messageChunkEvent.name }),
-                  ...(messageChunkEvent.subagentRunId != null && {
+                  // `!== undefined`, not `!= null`: an absent owner is absent,
+                  // but a null one is a violation the spec names, and dropping
+                  // it here would hide it from the stage that rejects it.
+                  ...(messageChunkEvent.subagentRunId !== undefined && {
                     subagentRunId: messageChunkEvent.subagentRunId,
                   }),
                 } as TextMessageStartEvent,
@@ -400,6 +449,20 @@ export const transformChunks =
               (toolCallChunkEvent.toolCallId === undefined ||
                 toolCallChunkEvent.toolCallId === open.fields.toolCallId)
             ) {
+              requireOpenerAgreement(
+                "tool call",
+                open.fields.toolCallId,
+                "toolCallName",
+                toolCallChunkEvent.toolCallName,
+                open.fields.toolCallName,
+              );
+              requireOpenerAgreement(
+                "tool call",
+                open.fields.toolCallId,
+                "parentMessageId",
+                toolCallChunkEvent.parentMessageId,
+                open.fields.parentMessageId,
+              );
               toolCallFields = open.fields;
             } else {
               toolMessageResult.push(...closeLane(lane));
@@ -424,7 +487,10 @@ export const transformChunks =
                   toolCallId: toolCallChunkEvent.toolCallId,
                   toolCallName: toolCallChunkEvent.toolCallName,
                   parentMessageId: toolCallChunkEvent.parentMessageId,
-                  ...(toolCallChunkEvent.subagentRunId != null && {
+                  // `!== undefined`, not `!= null`: an absent owner is absent,
+                  // but a null one is a violation the spec names, and dropping
+                  // it here would hide it from the stage that rejects it.
+                  ...(toolCallChunkEvent.subagentRunId !== undefined && {
                     subagentRunId: toolCallChunkEvent.subagentRunId,
                   }),
                 } as ToolCallStartEvent,
@@ -520,7 +586,10 @@ export const transformChunks =
                   type: EventType.REASONING_MESSAGE_START,
                   messageId: reasoningChunkEvent.messageId,
                   role: "reasoning",
-                  ...(reasoningChunkEvent.subagentRunId != null && {
+                  // `!== undefined`, not `!= null`: an absent owner is absent,
+                  // but a null one is a violation the spec names, and dropping
+                  // it here would hide it from the stage that rejects it.
+                  ...(reasoningChunkEvent.subagentRunId !== undefined && {
                     subagentRunId: reasoningChunkEvent.subagentRunId,
                   }),
                 } as ReasoningMessageStartEvent,

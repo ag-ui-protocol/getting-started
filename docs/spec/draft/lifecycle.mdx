@@ -34,7 +34,7 @@ run has closed:
 A consumer MUST reject any other event that arrives after a run has closed.
 
 `RUN_FINISHED` reports how the run ended. Its `outcome` distinguishes a run that
-completed from one suspended awaiting outside input; an absent outcome means
+completed from one interrupted awaiting outside input; an absent outcome means
 success. A producer MUST NOT send an outcome value the schema does not describe.
 
 An outcome a consumer does not recognise is unrecognised material like any
@@ -103,9 +103,11 @@ right and does not reopen the call it answers.
 `TEXT_MESSAGE_CHUNK`, `REASONING_MESSAGE_CHUNK` and `TOOL_CALL_CHUNK` are a
 compact spelling of the sequences above, for producers that would otherwise have
 to buffer. A consumer MUST expand them into the start/content/end form before
-enforcement and before application code, so every rule on this page applies to
-the expanded events. Where expansion sits relative to middleware is specified
-in [Unknown and malformed](/spec/draft/unknown-and-malformed).
+verification and before application code, so every rule on this page applies to
+the expanded events. Where expansion sits relative to enforcement and middleware
+is specified in [Unknown and malformed](/spec/draft/unknown-and-malformed) —
+enforcement runs first, so a chunk is validated as the event it is before
+anything reshapes it.
 
 The first chunk of a message or call carries what opening it requires; later
 chunks MAY omit those fields and continue what is already open.
