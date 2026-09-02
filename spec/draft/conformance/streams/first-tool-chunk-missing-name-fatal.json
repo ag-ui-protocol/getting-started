@@ -5,9 +5,22 @@
   "specPage": "/spec/draft/basic/patterns/streaming",
   "kill": "let chunk expansion open a tool call with an empty or defaulted toolCallName",
   "stream": [
-    { "type": "RUN_STARTED", "threadId": "t-first-tool-chunk", "runId": "first-tool-chunk-r1", "protocolVersion": "1.0" },
-    { "type": "TOOL_CALL_CHUNK", "toolCallId": "first-tool-chunk-tc1", "delta": "{\"q\":\"agui\"}" },
-    { "type": "RUN_FINISHED", "threadId": "t-first-tool-chunk", "runId": "first-tool-chunk-r1" }
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-first-tool-chunk",
+      "runId": "first-tool-chunk-r1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TOOL_CALL_CHUNK",
+      "toolCallId": "first-tool-chunk-tc1",
+      "delta": "{\"q\":\"agui\"}"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-first-tool-chunk",
+      "runId": "first-tool-chunk-r1"
+    }
   ],
   "expect": {
     "outcome": "failed",
@@ -17,7 +30,8 @@
     "dotnet": {
       "intentional": "GAP, not a design difference: EventStreamConverter has no case for TEXT_MESSAGE_CHUNK or TOOL_CALL_CHUNK, so a chunk stream falls through to the pass-through branch. Nothing is expanded into a message and none of the chunk-stream rules are enforced. Pinned here so the gap cannot widen or close unnoticed; alignment tracked separately. With no chunk stage there is nothing to require the first chunk's toolCallName, so the stream is accepted instead of rejected.",
       "outcome": "completed",
-      "errorContains": ""
+      "errorContains": "",
+      "messageCount": 0
     }
   }
 }

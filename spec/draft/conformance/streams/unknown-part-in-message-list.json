@@ -49,12 +49,13 @@
   },
   "expectOverrides": {
     "dotnet": {
-      "intentional": "the known TS/.NET asymmetry, the same shape as unknown-outcome-stripped: .NET's input-content converter is a closed union, so an unrecognised part inside a message list is a fatal JsonException rather than stripped material.",
+      "intentional": "the known TS/.NET asymmetry, the same shape as unknown-outcome-stripped: .NET's input-content converter is a closed union, so an unrecognised part inside a message list is a fatal JsonException rather than stripped material — and being fatal, it is thrown rather than warned about. `warnings` is emptied only to displace the base expectation; `noWarnings` asserts that the rejection says nothing on the warning channel.",
       "outcome": "failed",
       "errorContains": "Unknown InputContent type",
       "warnings": [],
       "messageCount": 0,
-      "messages": []
+      "messages": [],
+      "noWarnings": true
     }
   }
 }

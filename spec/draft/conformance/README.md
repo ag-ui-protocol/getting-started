@@ -14,6 +14,42 @@ tested against the implementation that happened to hold them — which is how th
 two clients ended up disagreeing about what to do with something they do not
 recognise, with both test suites green.
 
+## What this corpus is, and is not
+
+It is a **regression suite for the first-party clients**, and it asserts two
+different kinds of thing:
+
+- **What the specification requires.** Every MUST and MUST NOT the streams
+  exercise. A client failing one of these is non-conforming.
+- **What these clients have chosen to do** where the specification leaves room.
+  The spec says a consumer SHOULD warn about material it strips; ours do, and
+  these fixtures hold them to it. It says a party MAY downgrade for an older
+  peer; ours ship four era shims, and this ticket exists partly so that none of
+  them survives untested. It says nothing about staying quiet on a clean
+  stream; `conformant-run-is-quiet` demands it anyway, because a tolerance
+  regression that starts complaining about legal traffic has no other guard.
+
+So a fixture failing does not always mean a client is non-conforming — it
+means a client changed. That is the point of a regression suite, and it is why
+`kill` names a change rather than a rule.
+
+- **What these clients do that the specification says they should NOT.** Three
+  fixtures deliberately pin an admitted gap — a closed string set checked as a
+  leaf, so an unrecognised member is fatal where the spec wants it stripped;
+  reasoning discipline that goes unverified. Each says so in its description
+  and names the spec Note that must change with it. These assert the opposite
+  of the rule, on purpose, so that closing the gap is a deliberate act rather
+  than a silent one.
+
+**If you ever point this corpus at a third-party client**, three groups need
+relaxing: the SHOULD-level `warnings` and `noWarnings`; the `era-*` fixtures'
+translation results, which the spec only permits; and the three admitted-gap
+fixtures, which assert behaviour the spec contradicts and whose `outcome` and
+`errorContains` would wrongly fail a client that gets the rule right. What
+remains after that is conformance. Nothing in the harness does this for you
+today, and nothing needs it until someone actually runs a third-party client
+through it.
+
 ## Adding a fixture
 
 Write one JSON file in `streams/`. The file name is the fixture name.
@@ -53,6 +89,13 @@ rules. Write the raw JSON you want on the wire.
 Use identifiers prefixed with the fixture name (`"threadId": "t-unknown-event"`)
 so a failure in the output names itself.
 
+One exception to "verbatim": the TypeScript lane's replay server fills in a
+`timestamp` when the event has none or carries `null`. So a fixture cannot
+test what a client does with an *absent* timestamp — that belongs in each
+client's own unit tests. A present-but-wrong one (a string, a float, a
+negative) is passed through untouched and can be tested here. Every other
+field is written exactly as you wrote it.
+
 ### `expect`
 
 Every key is optional; state what the rule actually requires and nothing more.
@@ -62,6 +105,10 @@ Every key is optional; state what the rule actually requires and nothing more.
 | `outcome` | whether the **client** accepted the stream (`"completed"`) or rejected it (`"failed"`) |
 | `errorContains` | substring of the error a client rejection surfaces |
 | `runError` | the **run** reported its own failure: `true`, or a substring of the message |
+| `eventTypes` | the exact ordered list of event types delivered to application code |
+| `eventTypesAbsent` | types that must not reach application code |
+| `eventPaths` | values inside delivered events, keyed `"<index>.<dotted path>"`, each must exist and equal |
+| `eventAbsentPaths` | paths inside delivered events that must not exist |
 | `warnings` | each string must appear in some warning |
 | `noWarnings` | no warning at all was emitted |
 | `messageCount` | how many messages the client holds afterwards |
@@ -79,6 +126,12 @@ conformance failure from a working error path.
 same length, objects are compared only on the keys you name. Assert what the
 specification requires — an exact match would fail on incidentals the two
 clients differ about for no interesting reason.
+
+The four event keys are what let a fixture tell *dropped* from *delivered*.
+Warnings and final messages cannot: a client that warns about stripping
+something and then delivers it anyway satisfies both. `eventTypes` proves an
+event survived; `eventPaths` and `eventAbsentPaths` prove what it survived
+carrying, and are the only way to assert that something was removed.
 
 `request` is how the input-direction rules are tested at all. Two of the
 compatibility shims never touch the event stream: they transform the
@@ -99,11 +152,19 @@ leaving it as a silent inconsistency:
 ```jsonc
 "expectOverrides": {
   "dotnet": {
-    "intentional": "the .NET client has no enforcement stage, so nothing is stripped and no warning is emitted; alignment is tracked separately",
-    "warnings": []
+    "intentional": "the .NET client has no enforcement stage, so nothing is stripped and it stays quiet here; alignment is tracked separately",
+    "noWarnings": true
   }
 }
 ```
+
+**`"warnings": []` does not mean "no warnings".** Both runners read `warnings`
+as "each of these substrings must appear somewhere", so an empty list asserts
+nothing at all — it only *lifts* the base expectation. If you mean the lane
+stays quiet, say `noWarnings: true`; if you mean the base's warning
+requirement does not apply, `"warnings": []` is right, but then say so in
+`intentional`. The same trap applies to `"request": {}` and any other empty
+subset: an empty object matches every object.
 
 The keys an override names replace those keys in `expect` for that lane; every
 other key still applies. `intentional` is required — an override without a
@@ -122,9 +183,11 @@ than pretending. An override says a lane *differs*; a skipped key says a lane
 
 ### Asserting that something is *gone*
 
-The matchers can require a key to equal a value; they cannot require a key to
-be absent (except in the request, via `requestAbsentPaths`). Where a fixture
-needs to prove a removal, use a shape a wrong implementation cannot produce:
+Absence inside a **delivered event** is directly assertable with
+`eventAbsentPaths`, and absence in the **sent request** with
+`requestAbsentPaths`. What the subset matchers cannot express is absence
+inside `messages` or `state` — there, use a shape a wrong implementation
+cannot produce:
 
 - **A dropped state key** — make the replacing snapshot a root-level array
   (`["only-this"]`). No merge can produce that, so a `state = {...old, ...new}`
@@ -151,6 +214,19 @@ equivalent.
 - **Protobuf.** Byte-level parity between implementations is pinned by the
   shared corpus in `sdks/typescript/packages/proto/__tests__/__fixtures__/bytes`.
 - **Python.** There is no Python client to hold to this.
+
+## A shim with no fixture
+
+There are four version-gated compatibility shims and only three of them can be
+tested here. The 0.0.45 shim translates the retired `THINKING_*` shapes — but
+so does the always-on compatibility boundary, which runs innermost and handles
+exactly the same five event types with the same output. In the shipped
+pipeline the shim never sees one. Disabling either translator alone leaves
+`era-0-0-45-thinking-translated` green; only disabling both fails it.
+
+So that fixture pins the translation, not the shim. The shim is unreachable
+code, which is a finding about the client rather than a gap in this corpus,
+and no fixture can close it while the boundary exists.
 
 ## The corpus gate
 

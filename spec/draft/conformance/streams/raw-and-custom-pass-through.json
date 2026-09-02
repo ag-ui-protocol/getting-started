@@ -3,7 +3,7 @@
   "area": "passthrough",
   "description": "RAW and an unrecognised CUSTOM name are protocol-legal traffic, not unrecognised material: the run completes and nothing warns",
   "specPage": "/spec/draft/events/passthrough",
-  "kill": "route RAW or an unrecognised CUSTOM name through the unrecognised-material path, so a legal escape hatch warns or is stripped",
+  "kill": "route RAW or an unrecognised CUSTOM name through the unrecognised-material path in enforceEvents (take \"RAW\"/\"CUSTOM\" out of the recognised set, so `!isRecognizedEvent` warns and returns `EMPTY`) — the escape hatch is then both complained about, which `noWarnings` catches, and swallowed, which `eventTypes` catches. RAW and CUSTOM being PRESENT in the delivered list is the whole point of this fixture: they are legal traffic a consumer must actually receive, and without the list a client that warned and dropped them would still pass every other key here.",
   "stream": [
     {
       "type": "RUN_STARTED",
@@ -45,6 +45,16 @@
   ],
   "expect": {
     "outcome": "completed",
+    "eventTypes": [
+      "RUN_STARTED",
+      "TEXT_MESSAGE_START",
+      "TEXT_MESSAGE_CONTENT",
+      "RAW",
+      "TEXT_MESSAGE_CONTENT",
+      "TEXT_MESSAGE_END",
+      "CUSTOM",
+      "RUN_FINISHED"
+    ],
     "noWarnings": true,
     "messageCount": 1,
     "messages": [
@@ -54,5 +64,18 @@
         "content": "before and after"
       }
     ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The .NET client's event surface is ChatResponseUpdate.RawRepresentation, and the builder-only events yield no update: TEXT_MESSAGE_START and TEXT_MESSAGE_END open and close the message being assembled and hand a consumer nothing, so they cannot appear in a delivered list however faithfully the client processes them. The list here is the base list minus exactly those; every event this fixture is actually about is still in it, in order. RAW and CUSTOM — the escape hatches this fixture exists to prove a consumer actually receives — are both in it, so the assertion still bites here.",
+      "eventTypes": [
+        "RUN_STARTED",
+        "TEXT_MESSAGE_CONTENT",
+        "RAW",
+        "TEXT_MESSAGE_CONTENT",
+        "CUSTOM",
+        "RUN_FINISHED"
+      ]
+    }
   }
 }

@@ -76,29 +76,67 @@ function matchesSubset(actual: unknown, expected: unknown): boolean {
     );
   }
   if (expected !== null && typeof expected === "object") {
-    if (actual === null || typeof actual !== "object") return false;
+    // An expected OBJECT must meet an object, never an array: `typeof` calls
+    // both "object", and the .NET lane distinguishes them, so accepting an
+    // array here would let the two lanes disagree about the same fixture.
+    if (actual === null || typeof actual !== "object" || Array.isArray(actual))
+      return false;
     return Object.entries(expected as Record<string, unknown>).every(
       ([key, value]) =>
+        Object.prototype.hasOwnProperty.call(actual, key) &&
         matchesSubset((actual as Record<string, unknown>)[key], value),
     );
   }
   return actual === expected;
 }
 
-/** Reads a dot/index path, for asserting a field is absent from the request. */
+/** Whether a dot/index path exists at all — an explicit null still exists. */
+function pathExists(value: unknown, path: string): boolean {
+  let node: unknown = value;
+  for (const key of path.split(".")) {
+    if (node === null || typeof node !== "object") return false;
+    if (Array.isArray(node)) {
+      // Only a numeric index addresses an array member. `in` would answer
+      // true for `length`, which is not a JSON member and which the .NET
+      // lane's JsonArray would never report.
+      const index = Number(key);
+      if (!Number.isInteger(index) || index < 0 || index >= node.length)
+        return false;
+      node = node[index];
+      continue;
+    }
+    // hasOwnProperty, not `in`: `in` finds inherited members such as
+    // `constructor`, so an absence assertion would silently never hold.
+    if (!Object.prototype.hasOwnProperty.call(node, key)) return false;
+    node = (node as Record<string, unknown>)[key];
+  }
+  return true;
+}
+
+/**
+ * Reads a dot/index path. Walks arrays by numeric index, exactly as
+ * `pathExists` does — otherwise a zero-padded segment like "01" would exist
+ * and then read as undefined, and the two lanes would disagree.
+ */
 function readPath(value: unknown, path: string): unknown {
-  return path
-    .split(".")
-    .reduce<unknown>(
-      (node, key) =>
-        node === null || typeof node !== "object"
-          ? undefined
-          : (node as Record<string, unknown>)[key],
-      value,
-    );
+  let node: unknown = value;
+  for (const key of path.split(".")) {
+    if (node === null || typeof node !== "object") return undefined;
+    if (Array.isArray(node)) {
+      const index = Number(key);
+      if (!Number.isInteger(index) || index < 0 || index >= node.length)
+        return undefined;
+      node = node[index];
+      continue;
+    }
+    node = (node as Record<string, unknown>)[key];
+  }
+  return node;
 }
 
 interface ReplayResult {
+  eventTypes: string[];
+  events: Array<Record<string, unknown>>;
   outcome: "completed" | "failed";
   error?: string;
   runError?: string;
@@ -136,7 +174,15 @@ async function replay(fixture: StreamFixture): Promise<ReplayResult> {
   // not reject the run — it arrives as an event, and this is where a client
   // observes it.
   let runError: string | undefined;
+  // What actually reached application code, which is the only way a fixture
+  // can tell a dropped event from one that was passed through.
+  const eventTypes: string[] = [];
+  const events: Array<Record<string, unknown>> = [];
   agent.subscribe({
+    onEvent: ({ event }) => {
+      eventTypes.push(String((event as { type?: unknown }).type));
+      events.push(event as unknown as Record<string, unknown>);
+    },
     onRunErrorEvent: ({ event }) => {
       runError = (event as { message?: string }).message ?? "";
     },
@@ -175,6 +221,8 @@ async function replay(fixture: StreamFixture): Promise<ReplayResult> {
   }
 
   return {
+    eventTypes,
+    events,
     outcome,
     error,
     runError,
@@ -196,6 +244,33 @@ function assertExpectation(
         result.error ? ` — it failed with: ${result.error}` : ""
       }`,
     ).toBe(expectation.outcome);
+  }
+  if (expectation.eventTypes !== undefined) {
+    expect(
+      result.eventTypes,
+      "the events delivered to application code",
+    ).toEqual(expectation.eventTypes);
+  }
+  for (const type of expectation.eventTypesAbsent ?? []) {
+    expect(
+      result.eventTypes,
+      `${type} must not reach application code`,
+    ).not.toContain(type);
+  }
+  for (const [path, value] of Object.entries(expectation.eventPaths ?? {})) {
+    expect(
+      pathExists(result.events, path),
+      `${path} must exist in the delivered events`,
+    ).toBe(true);
+    expect(readPath(result.events, path), `delivered event at ${path}`).toEqual(
+      value,
+    );
+  }
+  for (const path of expectation.eventAbsentPaths ?? []) {
+    expect(
+      pathExists(result.events, path),
+      `${path} must NOT exist in the delivered events`,
+    ).toBe(false);
   }
   if (expectation.errorContains !== undefined) {
     expect(result.error ?? "").toContain(expectation.errorContains);
@@ -257,10 +332,12 @@ function assertExpectation(
     ).toBe(true);
   }
   for (const path of expectation.requestAbsentPaths ?? []) {
+    // pathExists, not a value read: an explicit null is present, and raw
+    // property access would resolve inherited members like `constructor`.
     expect(
-      readPath(result.request, path),
+      pathExists(result.request, path),
       `${path} must be absent from the request the client sent`,
-    ).toBeUndefined();
+    ).toBe(false);
   }
 }
 

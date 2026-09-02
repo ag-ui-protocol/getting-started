@@ -42,8 +42,9 @@
   },
   "expectOverrides": {
     "dotnet": {
-      "intentional": ".NET does not implement the version-declaration comparison; alignment tracked separately",
-      "warnings": []
+      "intentional": ".NET does not implement the version-declaration comparison, and RUN_STARTED carrying a newer protocolVersion is otherwise an ordinary recognised event, so the replay is silent. `warnings` is emptied only to displace the base expectation — an override replaces a key rather than removing it — and `noWarnings` is what asserts the silence. Alignment tracked separately.",
+      "warnings": [],
+      "noWarnings": true
     }
   }
 }

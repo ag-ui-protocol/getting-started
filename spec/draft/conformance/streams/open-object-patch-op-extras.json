@@ -3,7 +3,7 @@
   "area": "processing",
   "description": "where the schema deliberately leaves an object open, an undescribed member is not unrecognised material: a JSON Patch remove carrying a leftover value arrives whole, applies, and draws no warning",
   "specPage": "/spec/draft/basic/processing",
-  "kill": "drop the `specOpen` check in stripAgainst so the RFC 6902 operations are stripped like the protocol's own objects — the stale `value` on the remove is then deleted and a warning names `/delta/0/value`, which is a warning about conformant data",
+  "kill": "delete the specOpen branch in the strip stage \u2014 the state still reduces the same way, so eventPaths on the delivered STATE_DELTA is what proves the leftover member arrived whole rather than being quietly removed",
   "stream": [
     {
       "type": "RUN_STARTED",
@@ -12,11 +12,23 @@
     },
     {
       "type": "STATE_SNAPSHOT",
-      "snapshot": { "items": ["keep-a", "drop-me", "keep-b"] }
+      "snapshot": {
+        "items": [
+          "keep-a",
+          "drop-me",
+          "keep-b"
+        ]
+      }
     },
     {
       "type": "STATE_DELTA",
-      "delta": [{ "op": "remove", "path": "/items/1", "value": "drop-me" }]
+      "delta": [
+        {
+          "op": "remove",
+          "path": "/items/1",
+          "value": "drop-me"
+        }
+      ]
     },
     {
       "type": "RUN_FINISHED",
@@ -26,7 +38,22 @@
   ],
   "expect": {
     "outcome": "completed",
+    "eventTypes": [
+      "RUN_STARTED",
+      "STATE_SNAPSHOT",
+      "STATE_DELTA",
+      "RUN_FINISHED"
+    ],
     "noWarnings": true,
-    "state": { "items": ["keep-a", "keep-b"] }
+    "state": {
+      "items": [
+        "keep-a",
+        "keep-b"
+      ]
+    },
+    "eventPaths": {
+      "2.delta.0.value": "drop-me",
+      "2.delta.0.op": "remove"
+    }
   }
 }
