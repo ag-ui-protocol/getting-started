@@ -205,6 +205,9 @@ class ADKAgent:
         # Message snapshot configuration
         emit_messages_snapshot: bool = False,
 
+        # Auto-derive AgentCapabilities from the wrapped ADK agent
+        discover_capabilities: bool = False,
+
         # Streaming function call arguments (Gemini 3+ via Vertex AI)
         streaming_function_call_arguments: bool = False,
 
@@ -276,6 +279,15 @@ class ADKAgent:
                 clients to discover agent features before initiating a run. Use the
                 "custom" key for application-specific feature flags (e.g.,
                 {"custom": {"predictiveChips": True, "suggestedQuestions": True}}).
+            discover_capabilities: Whether to auto-derive AgentCapabilities from
+                the wrapped ADK agent (identity from name/description, multiAgent
+                from sub_agents, reasoning from a thoughts-enabled planner, tools
+                from the tool list, humanInTheLoop when an AGUIToolset frontend
+                toolset is present, transport.streaming). Defaults to False. When
+                True, the derived capabilities are merged **under** any explicit
+                ``capabilities`` (your values win, one level deep), so clients
+                and agent marketplaces can discover features without hand-writing
+                the whole capabilities dict.
             a2ui: A2UI auto-injection config — everything A2UI-related in one place
                 (mirrors ``StrandsAgentConfig.a2ui``). When the CopilotKit runtime
                 forwards ``injectA2UITool`` (or ``a2ui["inject_a2ui_tool"]`` opts in
@@ -412,6 +424,9 @@ class ADKAgent:
         # Message snapshot configuration
         self._emit_messages_snapshot = emit_messages_snapshot
         self._capabilities = capabilities
+        # Auto-derive capabilities from the wrapped agent (merged under any
+        # explicitly-configured `capabilities`, which win per key).
+        self._discover_capabilities = discover_capabilities
         # A2UI auto-injection config (mirrors StrandsAgentConfig.a2ui). None
         # disables auto-injection unless the runtime forwards injectA2UITool.
         self._a2ui_config = a2ui
@@ -588,6 +603,7 @@ class ADKAgent:
         use_thread_id_as_session_id: bool = False,
         # Agent capabilities
         capabilities: Optional[Dict[str, Any]] = None,
+        discover_capabilities: bool = False,
     ) -> "ADKAgent":
         """Create ADKAgent from an ADK App instance.
 
@@ -675,6 +691,7 @@ class ADKAgent:
             streaming_function_call_arguments=streaming_function_call_arguments,
             use_thread_id_as_session_id=use_thread_id_as_session_id,
             capabilities=capabilities,
+            discover_capabilities=discover_capabilities,
         )
         # Store App for per-request App creation with modified agents
         instance._app = app
@@ -682,14 +699,88 @@ class ADKAgent:
         return instance
 
     def get_capabilities(self) -> Optional[Dict[str, Any]]:
-        """Return a copy of the agent's declared capabilities, or None if not configured.
+        """Return the agent's declared capabilities, or None if none are available.
 
         These capabilities conform to the AG-UI AgentCapabilities schema and are
         served by the GET /capabilities endpoint when using add_adk_fastapi_endpoint().
+
+        When ``discover_capabilities`` is enabled, capabilities auto-derived from
+        the wrapped ADK agent are merged **under** any explicitly-configured
+        ``capabilities`` (explicit values win, one level deep). When it's
+        disabled, behavior is unchanged: the configured capabilities (or None).
         """
-        if self._capabilities is None:
-            return None
-        return copy.deepcopy(self._capabilities)
+        configured = copy.deepcopy(self._capabilities) if self._capabilities else None
+        if not self._discover_capabilities:
+            return configured
+        derived = self._derive_capabilities()
+        return self._merge_capabilities(derived, configured or {})
+
+    @staticmethod
+    def _merge_capabilities(
+        derived: Dict[str, Any], configured: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """One-level deep merge; ``configured`` (explicit) values win per key."""
+        merged: Dict[str, Any] = dict(derived)
+        for key, value in configured.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
+        return merged
+
+    def _derive_capabilities(self) -> Dict[str, Any]:
+        """Best-effort AgentCapabilities derived from the wrapped ADK agent.
+
+        Inspects the agent structurally (no run needed). Everything is guarded
+        with getattr so non-LlmAgent roots (SequentialAgent, custom BaseAgent…)
+        degrade gracefully. Keys use the AG-UI JSON (camelCase) names.
+        """
+        agent = self._adk_agent
+        caps: Dict[str, Any] = {}
+
+        # identity
+        identity: Dict[str, Any] = {"type": "google-adk"}
+        if getattr(agent, "name", None):
+            identity["name"] = agent.name
+        if getattr(agent, "description", None):
+            identity["description"] = agent.description
+        caps["identity"] = identity
+
+        # multiAgent (from sub_agents)
+        sub_agents = getattr(agent, "sub_agents", None) or []
+        if sub_agents:
+            caps["multiAgent"] = {
+                "supported": True,
+                "subAgents": [
+                    {
+                        "name": getattr(s, "name", ""),
+                        **(
+                            {"description": s.description}
+                            if getattr(s, "description", None)
+                            else {}
+                        ),
+                    }
+                    for s in sub_agents
+                ],
+            }
+
+        # reasoning (planner that emits thoughts → REASONING_* events)
+        planner = getattr(agent, "planner", None)
+        thinking_config = getattr(planner, "thinking_config", None) if planner else None
+        if thinking_config is not None and getattr(thinking_config, "include_thoughts", False):
+            caps["reasoning"] = {"supported": True, "streaming": True}
+
+        # tools + humanInTheLoop (AGUIToolset = frontend/HITL tools)
+        tools = getattr(agent, "tools", None) or []
+        if tools:
+            caps["tools"] = {"supported": True}
+            if any(isinstance(t, AGUIToolset) for t in tools):
+                caps["humanInTheLoop"] = {"supported": True}
+
+        # transport: this middleware always serves SSE streaming
+        caps["transport"] = {"streaming": True}
+
+        return caps
 
     def _get_session_metadata(self, thread_id: str, user_id: str) -> Optional[Tuple[str, str, str]]:
         """Get session metadata for a (thread_id, user_id) pair efficiently.
