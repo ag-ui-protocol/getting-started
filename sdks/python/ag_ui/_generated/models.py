@@ -1477,6 +1477,14 @@ class RunAgentInput(GeneratedBaseModel):
     """The conversation this run belongs to."""
     run_id: str
     """Identifies this run."""
+    protocol_version: Optional[str] = Field(default=None)
+    """
+    The protocol version this consumer speaks, such as "1.0". Absent means
+    the input was produced before the protocol carried a version — the
+    versioning rules in the prose govern what each side does with that. Sent
+    in-band rather than by the transport, so a recorded exchange stays
+    self-describing.
+    """
     parent_run_id: Optional[str] = Field(default=None)
     """The run that spawned this one."""
     state: Optional[State] = Field(default=None)
@@ -1529,6 +1537,14 @@ class RunStartedEvent(BaseEvent):
     """The conversation this run belongs to."""
     run_id: str
     """Identifies this run."""
+    protocol_version: Optional[str] = Field(default=None)
+    """
+    The protocol version this producer speaks, such as "1.0" — the
+    producer's own version, not an echo of the input's, which is what makes
+    the pair a negotiation: each side declares itself and the consumer sees
+    a downgrade the moment it happens. Absent means a producer from before
+    the protocol carried a version.
+    """
     parent_run_id: Optional[str] = Field(default=None)
     """
     The run that spawned this one, when an agent invokes another agent as a

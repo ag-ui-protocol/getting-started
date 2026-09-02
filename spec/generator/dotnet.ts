@@ -490,6 +490,7 @@ const MAPPED_FIELDS: Record<string, Record<string, string>> = {
   RunAgentInput: {
     threadId: "required string",
     runId: "required string",
+    protocolVersion: "optional string",
     parentRunId: "optional string",
     state: "optional any",
     messages: "required Message[]",
@@ -1858,6 +1859,11 @@ internal static class ProtoMessageMapper
             RunId = input.RunId,
         };
 
+        if (input.ProtocolVersion is not null)
+        {
+            proto.ProtocolVersion = input.ProtocolVersion;
+        }
+
         if (input.ParentRunId is not null)
         {
             proto.ParentRunId = input.ParentRunId;
@@ -1915,6 +1921,7 @@ internal static class ProtoMessageMapper
         {
             ThreadId = proto.ThreadId,
             RunId = proto.RunId,
+            ProtocolVersion = proto.HasProtocolVersion ? proto.ProtocolVersion : null,
             ParentRunId = proto.HasParentRunId ? proto.ParentRunId : null,
             State = ProtoValueConverter.ToJsonElementOrNull(proto.State),
             ForwardedProperties = ProtoValueConverter.ToJsonElementOrNull(proto.ForwardedProps),

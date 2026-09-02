@@ -333,6 +333,7 @@ Opens a run. Run-scoped, so it carries no subagent attribution.
 - `metadata` — [`Metadata`](#metadata), optional. Extra information attached to this event.
 - `threadId` — `string`, **required**. The conversation this run belongs to.
 - `runId` — `string`, **required**. Identifies this run.
+- `protocolVersion` — `string`, optional. The protocol version this producer speaks, such as "1.0" — the producer's own version, not an echo of the input's, which is what makes the pair a negotiation: each side declares itself and the consumer sees a downgrade the moment it happens. Absent means a producer from before the protocol carried a version.
 - `parentRunId` — `string`, optional. The run that spawned this one, when an agent invokes another agent as a separate run rather than as a subagent within one.
 - `input` — [`RunAgentInput`](#runagentinput), optional. The request this run was started from, echoed back so a consumer that did not make the request can still see what the agent was asked.
 
@@ -952,6 +953,7 @@ A request to run an agent. Also echoed back as RUN_STARTED.input. Only threadId,
 
 - `threadId` — `string`, **required**. The conversation this run belongs to.
 - `runId` — `string`, **required**. Identifies this run.
+- `protocolVersion` — `string`, optional. The protocol version this consumer speaks, such as "1.0". Absent means the input was produced before the protocol carried a version — the versioning rules in the prose govern what each side does with that. Sent in-band rather than by the transport, so a recorded exchange stays self-describing.
 - `parentRunId` — `string`, optional. The run that spawned this one.
 - `state` — [`State`](#state), optional. The state the run starts from.
 - `messages` — array of [`Message`](#message), **required**. The conversation so far, in order.

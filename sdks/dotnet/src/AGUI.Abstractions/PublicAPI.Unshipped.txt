@@ -463,6 +463,8 @@ AGUI.Abstractions.RunAgentInput.Messages.get -> System.Collections.Generic.IList
 AGUI.Abstractions.RunAgentInput.Messages.set -> void
 AGUI.Abstractions.RunAgentInput.ParentRunId.get -> string?
 AGUI.Abstractions.RunAgentInput.ParentRunId.set -> void
+AGUI.Abstractions.RunAgentInput.ProtocolVersion.get -> string?
+AGUI.Abstractions.RunAgentInput.ProtocolVersion.set -> void
 AGUI.Abstractions.RunAgentInput.Resume.get -> System.Collections.Generic.IList<AGUI.Abstractions.AGUIResume!>?
 AGUI.Abstractions.RunAgentInput.Resume.set -> void
 AGUI.Abstractions.RunAgentInput.RunAgentInput() -> void
@@ -509,6 +511,8 @@ AGUI.Abstractions.RunStartedEvent.Input.get -> AGUI.Abstractions.RunAgentInput?
 AGUI.Abstractions.RunStartedEvent.Input.set -> void
 AGUI.Abstractions.RunStartedEvent.ParentRunId.get -> string?
 AGUI.Abstractions.RunStartedEvent.ParentRunId.set -> void
+AGUI.Abstractions.RunStartedEvent.ProtocolVersion.get -> string?
+AGUI.Abstractions.RunStartedEvent.ProtocolVersion.set -> void
 AGUI.Abstractions.RunStartedEvent.RunId.get -> string!
 AGUI.Abstractions.RunStartedEvent.RunId.set -> void
 AGUI.Abstractions.RunStartedEvent.RunStartedEvent() -> void

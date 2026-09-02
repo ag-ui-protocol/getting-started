@@ -34,7 +34,7 @@ function stripMessages(messages: MessageLike[]): MessageLike[] {
 
 /**
  * Client middleware that removes subagent-support additions when the REMOTE AGENT is
- * pre-subagent (its `maxVersion` <= 0.0.57; the shim is auto-inserted by that gate).
+ * pre-subagent (its `maxProtocolVersion` <= 0.0.57; the shim is auto-inserted by that gate).
  * The old party is the upstream agent, not the downstream consumer (the current client
  * supports subagents).
  *
@@ -60,7 +60,7 @@ function stripMessages(messages: MessageLike[]): MessageLike[] {
  * The subagent feature is purely additive, so this shim is a pure removal in both
  * directions; there is no field/event to translate (unlike 0.0.45's THINKING->REASONING).
  *
- * Who this actually fires for: `maxVersion` defaults to this library's own version, but
+ * Who this actually fires for: `maxProtocolVersion` defaults to this library's own version, but
  * agent subclasses OVERRIDE it to declare the protocol level their backend speaks. Six
  * integrations do -- llama-index, pydantic-ai, ag2 and community/spring-ai at 0.0.39,
  * agno at 0.0.53, and crew-ai pinned at exactly 0.0.57, the version before subagents. So

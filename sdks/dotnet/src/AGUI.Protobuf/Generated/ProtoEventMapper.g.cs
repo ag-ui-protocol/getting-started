@@ -316,6 +316,10 @@ internal static class ProtoEventMapper
                 };
                 proto.ThreadId = e.ThreadId;
                 proto.RunId = e.RunId;
+                if (e.ProtocolVersion is not null)
+                {
+                    proto.ProtocolVersion = e.ProtocolVersion;
+                }
                 if (e.ParentRunId is not null)
                 {
                     proto.ParentRunId = e.ParentRunId;
@@ -799,6 +803,7 @@ internal static class ProtoEventMapper
                 {
                     ThreadId = e.ThreadId,
                     RunId = e.RunId,
+                    ProtocolVersion = e.HasProtocolVersion ? e.ProtocolVersion : null,
                     ParentRunId = e.HasParentRunId ? e.ParentRunId : null,
                     Input = e.Input is null ? null : ProtoMessageMapper.FromProtoRunAgentInput(e.Input),
                 };

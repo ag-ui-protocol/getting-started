@@ -28,6 +28,15 @@ that carry identity — and each run's two boundary events MUST agree on their
 carries its own. `parentRunId` is OPTIONAL and names the run that spawned
 this one, when an agent starts another agent as a separate run.
 
+## `protocolVersion`
+
+OPTIONAL in the schema, because absence identifies a peer from before the
+protocol carried a version — but a consumer implementing this version MUST
+declare the version it speaks here, unless it knows its peer predates the
+field and omits the member rather than risk an old parser rejecting it. The
+producer answers with its own declaration on `RUN_STARTED`; the rules are in
+[Versioning](/spec/draft/basic/versioning#version-negotiation).
+
 ## `messages`
 
 REQUIRED. The conversation so far, in order. A producer MUST treat it as the

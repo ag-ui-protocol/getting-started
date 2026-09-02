@@ -307,6 +307,13 @@ export interface RunAgentInput {
    * from one.
    */
   resume: ResumeEntry[];
+  /**
+   * The protocol version this consumer speaks, such as "1.0". Absent means the
+   * input was produced before the protocol carried a version — the versioning
+   * rules in the prose govern what each side does with that. Sent in-band rather
+   * than by the transport, so a recorded exchange stays self-describing.
+   */
+  protocolVersion?: string | undefined;
 }
 
 /**
@@ -1524,6 +1531,7 @@ function createBaseRunAgentInput(): RunAgentInput {
     context: [],
     forwardedProps: undefined,
     resume: [],
+    protocolVersion: undefined,
   };
 }
 
@@ -1555,6 +1563,9 @@ export const RunAgentInput: MessageFns<RunAgentInput> = {
     }
     for (const v of message.resume) {
       ResumeEntry.encode(v!, writer.uint32(74).fork()).join();
+    }
+    if (message.protocolVersion !== undefined) {
+      writer.uint32(82).string(message.protocolVersion);
     }
     return writer;
   },
@@ -1638,6 +1649,14 @@ export const RunAgentInput: MessageFns<RunAgentInput> = {
           message.resume.push(ResumeEntry.decode(reader, reader.uint32()));
           continue;
         }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.protocolVersion = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1661,6 +1680,7 @@ export const RunAgentInput: MessageFns<RunAgentInput> = {
     message.context = object.context?.map((e) => Context.fromPartial(e)) || [];
     message.forwardedProps = object.forwardedProps ?? undefined;
     message.resume = object.resume?.map((e) => ResumeEntry.fromPartial(e)) || [];
+    message.protocolVersion = object.protocolVersion ?? undefined;
     return message;
   },
 };

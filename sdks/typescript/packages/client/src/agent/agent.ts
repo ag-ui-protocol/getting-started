@@ -47,6 +47,59 @@ import {
 } from "@/middleware";
 import packageJson from "../../package.json";
 
+/**
+ * The protocol version this client declares on every RunAgentInput it builds.
+ *
+ * Deliberately the protocol LINE, "1.0", not the generated PROTOCOL_VERSION
+ * constant (currently "draft"): the wire names what the client speaks, the
+ * constant names which spec revision the models were generated from, and at
+ * the 1.0 freeze the two collapse into the same string. Also deliberately
+ * comparable: "1.0" works with the compareVersions machinery below, where
+ * "draft" never could.
+ */
+export const WIRE_PROTOCOL_VERSION = "1.0";
+
+/** The maxVersion deprecation warns once per process, not once per call. */
+let warnedDeprecatedMaxVersion = false;
+
+/**
+ * The producer's RUN_STARTED declaration, judged against what this client
+ * speaks. Older or absent is the downgrade signal the versioning rules expect
+ * a consumer to notice quietly; NEWER means material this client may be
+ * stripping, and that deserves a voice.
+ *
+ * The grammar is exactly the published one — two numeric components — checked
+ * BEFORE any comparison: compareVersions would happily read "1", "1.0.0" or
+ * "1.x" as equal to "1.0", and the spec says a value outside the grammar is
+ * handled like a newer one, not silently accepted.
+ */
+export const compareDeclaredProtocol = (
+  declared: string,
+  spoken: string,
+): "newer" | "not-newer" | "uninterpretable" => {
+  if (!/^\d+\.\d+$/.test(declared)) return "uninterpretable";
+  return compareVersions(declared, spoken) > 0 ? "newer" : "not-newer";
+};
+
+const warnOnProducerDeclaration = (event: unknown): void => {
+  const declared = (event as { protocolVersion?: string }).protocolVersion;
+  if (declared === undefined || declared === WIRE_PROTOCOL_VERSION) return;
+  switch (compareDeclaredProtocol(declared, WIRE_PROTOCOL_VERSION)) {
+    case "uninterpretable":
+      console.warn(
+        `[ag-ui] The producer declared protocol version '${declared}', which this client cannot interpret.`,
+      );
+      return;
+    case "newer":
+      console.warn(
+        `[ag-ui] The producer speaks protocol ${declared}; this client speaks ${WIRE_PROTOCOL_VERSION}. Unrecognised material will be stripped with warnings.`,
+      );
+      return;
+    case "not-newer":
+      return;
+  }
+};
+
 export interface RunAgentResult {
   // DEFERRED (PNI-272): tightening this to `unknown` is a breaking change for
   // consumers of a published package, not a lint repair. Left for a deliberate
@@ -75,8 +128,51 @@ export abstract class AbstractAgent {
   private activeRunDetach$?: Subject<void>;
   private activeRunCompletionPromise?: Promise<void>;
 
-  get maxVersion() {
+  /** Breaks the alias cycle for an override that defers to super.maxVersion. */
+  private resolvingPeerCeiling = false;
+
+  get maxProtocolVersion(): string {
+    // A subclass that still overrides the deprecated name keeps working: the
+    // override is what this getter answers with, so every internal gate that
+    // reads maxProtocolVersion sees the pinned value the integration set.
+    let proto = Object.getPrototypeOf(this);
+    while (proto && proto !== AbstractAgent.prototype) {
+      if (Object.getOwnPropertyDescriptor(proto, "maxVersion")) {
+        // The flag is what stops an override written as
+        // `get maxVersion() { return super.maxVersion }` from recursing:
+        // the base alias below answers the in-flight resolution with the
+        // default instead of bouncing back here.
+        this.resolvingPeerCeiling = true;
+        try {
+          return this.maxVersion;
+        } finally {
+          this.resolvingPeerCeiling = false;
+        }
+      }
+      proto = Object.getPrototypeOf(proto);
+    }
     return packageJson.version;
+  }
+
+  /**
+   * @deprecated Use {@link maxProtocolVersion}. Same value, honest name: this
+   * is the ceiling the PEER speaks, not which protocol this SDK implements —
+   * that is the generated PROTOCOL_VERSION constant. Registered in the client
+   * package's DEPRECATIONS.md; removal no earlier than 2.0.
+   */
+  get maxVersion(): string {
+    if (this.resolvingPeerCeiling) {
+      // Reached via super.maxVersion from an override maxProtocolVersion is
+      // already resolving: answer with the default rather than recursing.
+      return packageJson.version;
+    }
+    if (!warnedDeprecatedMaxVersion) {
+      warnedDeprecatedMaxVersion = true;
+      console.warn(
+        "[ag-ui] AbstractAgent.maxVersion is deprecated — use maxProtocolVersion. Same value; the new name says whose version it is and that it is a ceiling.",
+      );
+    }
+    return this.maxProtocolVersion;
   }
 
   get debug(): ResolvedAgentDebugConfig {
@@ -116,25 +212,25 @@ export abstract class AbstractAgent {
     this._debug = resolveAgentDebugConfig(debug);
     this._debugLogger = createDebugLogger(this._debug);
 
-    if (compareVersions(this.maxVersion, "0.0.39") <= 0) {
+    if (compareVersions(this.maxProtocolVersion, "0.0.39") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_39());
     }
 
     // Auto-insert BackwardCompatibility_0_0_45 for backward compatibility
     // with legacy THINKING events (deprecated, will be removed in 1.0.0)
-    if (compareVersions(this.maxVersion, "0.0.45") <= 0) {
+    if (compareVersions(this.maxProtocolVersion, "0.0.45") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_45());
     }
 
     // Auto-insert BackwardCompatibility_0_0_47 for backward compatibility
     // with legacy BinaryInputContent (maps to dedicated image/audio/video/document types)
-    if (compareVersions(this.maxVersion, "0.0.47") <= 0) {
+    if (compareVersions(this.maxProtocolVersion, "0.0.47") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_47());
     }
 
     // Auto-insert BackwardCompatibility_0_0_57 for backward compatibility with
     // pre-subagent agents: strips subagentRunId and drops SUBAGENT_* lifecycle events.
-    if (compareVersions(this.maxVersion, "0.0.57") <= 0) {
+    if (compareVersions(this.maxProtocolVersion, "0.0.57") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_57());
     }
   }
@@ -183,6 +279,7 @@ export abstract class AbstractAgent {
 
       const subscribers: AgentSubscriber[] = [
         {
+          onRunStartedEvent: ({ event }) => warnOnProducerDeclaration(event),
           onRunFinishedEvent: (params) => {
             if (params.outcome === "success") {
               result = params.result;
@@ -292,6 +389,7 @@ export abstract class AbstractAgent {
 
       const subscribers: AgentSubscriber[] = [
         {
+          onRunStartedEvent: ({ event }) => warnOnProducerDeclaration(event),
           onRunFinishedEvent: (params) => {
             if (params.outcome === "success") {
               result = params.result;
@@ -429,6 +527,12 @@ export abstract class AbstractAgent {
     return {
       threadId: this.threadId,
       runId: parameters?.runId || uuidv4(),
+      // Declared only when the peer's ceiling is not pinned below this
+      // client: a downgraded peer predates the field, and an unknown input
+      // member is exactly what a strict old parser could reject.
+      ...(compareVersions(this.maxProtocolVersion, packageJson.version) >= 0 && {
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+      }),
       tools: structuredClone_(parameters?.tools ?? []),
       context: structuredClone_(parameters?.context ?? []),
       forwardedProps: structuredClone_(parameters?.forwardedProps ?? {}),

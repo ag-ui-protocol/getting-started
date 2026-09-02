@@ -34,9 +34,11 @@ stateDiagram-v2
 
 ### `RUN_STARTED`
 
-Opens the run. It carries the run's identifiers, and MAY echo the input the
-run was started from, so a consumer that did not make the request can still
-see what the agent was asked. `parentRunId` names the run that spawned this
+Opens the run. It carries the run's identifiers; the producer's own
+`protocolVersion` declaration, per the
+[versioning rules](/spec/draft/basic/versioning#version-negotiation); and MAY
+echo the input the run was started from, so a consumer that did not make the
+request can still see what the agent was asked. `parentRunId` names the run that spawned this
 one,
 when an agent invokes another agent as a separate run rather than as a
 [subagent](/spec/draft/events/subagents) within one.

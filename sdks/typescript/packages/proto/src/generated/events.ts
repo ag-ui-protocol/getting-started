@@ -504,7 +504,17 @@ export interface RunStartedEvent {
    * The request this run was started from, echoed back so a consumer that did
    * not make the request can still see what the agent was asked.
    */
-  input?: RunAgentInput | undefined;
+  input?:
+    | RunAgentInput
+    | undefined;
+  /**
+   * The protocol version this producer speaks, such as "1.0" — the producer's
+   * own version, not an echo of the input's, which is what makes the pair a
+   * negotiation: each side declares itself and the consumer sees a downgrade the
+   * moment it happens. Absent means a producer from before the protocol carried
+   * a version.
+   */
+  protocolVersion?: string | undefined;
 }
 
 /**
@@ -2441,7 +2451,14 @@ export const CustomEvent: MessageFns<CustomEvent> = {
 };
 
 function createBaseRunStartedEvent(): RunStartedEvent {
-  return { baseEvent: undefined, threadId: "", runId: "", parentRunId: undefined, input: undefined };
+  return {
+    baseEvent: undefined,
+    threadId: "",
+    runId: "",
+    parentRunId: undefined,
+    input: undefined,
+    protocolVersion: undefined,
+  };
 }
 
 export const RunStartedEvent: MessageFns<RunStartedEvent> = {
@@ -2460,6 +2477,9 @@ export const RunStartedEvent: MessageFns<RunStartedEvent> = {
     }
     if (message.input !== undefined) {
       RunAgentInput.encode(message.input, writer.uint32(42).fork()).join();
+    }
+    if (message.protocolVersion !== undefined) {
+      writer.uint32(50).string(message.protocolVersion);
     }
     return writer;
   },
@@ -2511,6 +2531,14 @@ export const RunStartedEvent: MessageFns<RunStartedEvent> = {
           message.input = RunAgentInput.decode(reader, reader.uint32());
           continue;
         }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.protocolVersion = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2534,6 +2562,7 @@ export const RunStartedEvent: MessageFns<RunStartedEvent> = {
     message.input = (object.input !== undefined && object.input !== null)
       ? RunAgentInput.fromPartial(object.input)
       : undefined;
+    message.protocolVersion = object.protocolVersion ?? undefined;
     return message;
   },
 };

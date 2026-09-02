@@ -324,6 +324,7 @@ const toWireRunAgentInput = (value: unknown): LooseRecord | undefined => {
   return {
     threadId: input.threadId,
     runId: input.runId,
+    protocolVersion: input.protocolVersion,
     parentRunId: input.parentRunId,
     state: input.state,
     messages: asArray(input.messages).map(toWireMessage),
@@ -340,6 +341,7 @@ const fromWireRunAgentInput = (value: unknown): LooseRecord | undefined => {
   const output: LooseRecord = {};
   if (rec.threadId !== undefined) output.threadId = rec.threadId;
   if (rec.runId !== undefined) output.runId = rec.runId;
+  if (rec.protocolVersion !== undefined) output.protocolVersion = rec.protocolVersion;
   if (rec.parentRunId !== undefined) output.parentRunId = rec.parentRunId;
   if (rec.state !== undefined) output.state = rec.state;
   output.messages = asArray(rec.messages)

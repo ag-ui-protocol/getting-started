@@ -632,6 +632,7 @@ export const ResumeEntrySchema = z.looseObject({
 export const RunAgentInputSchema = z.looseObject({
   threadId: z.string(),
   runId: z.string(),
+  protocolVersion: z.string().optional(),
   parentRunId: z.string().optional(),
   state: StateSchema.nullable()
     .transform((value) => value ?? undefined)
@@ -653,6 +654,7 @@ export const RunStartedEventSchema = z.looseObject({
   metadata: MetadataSchema.optional(),
   threadId: z.string(),
   runId: z.string(),
+  protocolVersion: z.string().optional(),
   parentRunId: z.string().optional(),
   input: RunAgentInputSchema.optional(),
 });

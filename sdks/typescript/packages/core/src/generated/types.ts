@@ -1519,6 +1519,14 @@ export type RunAgentInput = {
    */
   runId: string;
   /**
+   * The protocol version this consumer speaks, such as "1.0". Absent means the
+   * input was produced before the protocol carried a version — the versioning
+   * rules in the prose govern what each side does with that. Sent in-band
+   * rather than by the transport, so a recorded exchange stays
+   * self-describing.
+   */
+  protocolVersion?: string;
+  /**
    * The run that spawned this one.
    */
   parentRunId?: string;
@@ -1590,6 +1598,14 @@ export type RunStartedEvent = {
    * Identifies this run.
    */
   runId: string;
+  /**
+   * The protocol version this producer speaks, such as "1.0" — the producer's
+   * own version, not an echo of the input's, which is what makes the pair a
+   * negotiation: each side declares itself and the consumer sees a downgrade
+   * the moment it happens. Absent means a producer from before the protocol
+   * carried a version.
+   */
+  protocolVersion?: string;
   /**
    * The run that spawned this one, when an agent invokes another agent as a
    * separate run rather than as a subagent within one.

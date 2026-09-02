@@ -343,6 +343,12 @@ message RunStartedEvent {
   // The request this run was started from, echoed back so a consumer that did
   // not make the request can still see what the agent was asked.
   optional RunAgentInput input = 5;
+  // The protocol version this producer speaks, such as "1.0" — the producer's
+  // own version, not an echo of the input's, which is what makes the pair a
+  // negotiation: each side declares itself and the consumer sees a downgrade the
+  // moment it happens. Absent means a producer from before the protocol carried
+  // a version.
+  optional string protocol_version = 6;
 }
 
 // Closes a run that did not fail. Run-scoped, so it carries no subagent

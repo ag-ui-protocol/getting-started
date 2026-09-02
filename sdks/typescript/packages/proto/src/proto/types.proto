@@ -225,6 +225,11 @@ message RunAgentInput {
   // Answers to the interrupts that ended a previous run, when this run continues
   // from one.
   repeated ResumeEntry resume = 9;
+  // The protocol version this consumer speaks, such as "1.0". Absent means the
+  // input was produced before the protocol carried a version — the versioning
+  // rules in the prose govern what each side does with that. Sent in-band rather
+  // than by the transport, so a recorded exchange stays self-describing.
+  optional string protocol_version = 10;
 }
 
 // Something a run needs from outside before it can continue, such as an approval

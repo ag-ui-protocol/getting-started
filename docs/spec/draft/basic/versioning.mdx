@@ -74,21 +74,64 @@ translation, after which the shape is unrecognised like anything else.
 
 ## Version negotiation
 
-Where a party knows the other's version, it MAY select a downgrade on that
-basis. Where it does not, it MUST behave as though the peer were current: guessing
-downward would degrade streams for no reason.
+The version travels in-band, on the two messages that open each side of the
+exchange, so a recorded exchange stays self-describing and no transport has to
+carry it:
+
+- A consumer declares the protocol version it speaks on
+  [`RunAgentInput.protocolVersion`](/spec/draft/basic/run-input#protocolversion).
+- A producer declares the version *it* speaks on
+  `RUN_STARTED.protocolVersion` — its own, never an echo of the input's. The
+  pair is the whole negotiation: each side states itself once, and a consumer
+  sees a downgrade the moment it happens.
+- Both fields are optional in the schema because absence means something: a
+  peer from before the protocol carried a version. An implementation of this
+  version MUST send its declaration, except where the consumer knows its peer
+  predates the field and omits it rather than hand an unknown input member to
+  an old parser.
+- The value is a version identifier this specification publishes — the
+  segment a frozen version lives under, `MAJOR.MINOR`, compared numerically
+  component by component (so `1.10` is newer than `1.9`). A declaration a
+  party cannot interpret is handled like a newer one: proceed, and SHOULD
+  warn.
+- A producer meeting a **newer minor of a line it implements** MUST serve the
+  run — additions are safe, by the rules above — answer with its own version,
+  and SHOULD warn. It MAY reject, before `RUN_STARTED`, only a declaration
+  from a major line it does not implement; a newer minor of its own line is
+  serveable by construction and MUST NOT be rejected for its version. A
+  consumer meeting a newer producer declaration proceeds under the
+  [processing model](/spec/draft/basic/processing) and SHOULD warn.
+- The declaration names what the run's stream *speaks*, not who is relaying
+  it: a proxy that forwards a run untranslated declares what the original
+  producer spoke, and one that translates declares what it emits. On a
+  [stream carrying several runs](/spec/draft/events/lifecycle#several-runs-on-one-stream)
+  each run's `RUN_STARTED` declares its own run, which is how a replay of
+  mixed-age history stays truthful; a producer generating runs live does not
+  change what it speaks mid-stream.
+- A transport MAY mirror the declaration into its own envelope — a media-type
+  parameter, say — for intermediaries that cannot read the body. The in-band
+  field is authoritative; a binding that mirrors defines how a mismatch is
+  treated.
+
+Where a party knows the other's version — declared in-band, or configured — it
+MAY select a downgrade on that basis. Where it does not, it MUST behave as
+though the peer were current: guessing downward would degrade streams for no
+reason.
 
 A downgrade selected by version MUST be a pure transformation of the stream. It
 MUST NOT change the run's outcome, alter identifiers, or reorder events.
 
 ## What a producer owes
 
+- Declare the protocol version it speaks on `RUN_STARTED`.
 - Emit only shapes the current protocol describes.
 - Omit optional fields that have no value rather than sending `null`.
 - Never depend on the consumer understanding an addition.
 
 ## What a consumer owes
 
+- Declare the protocol version it speaks on the run input, except toward a
+  peer it knows predates the field.
 - Survive unrecognised events, properties and union members; fail on malformed
   known values.
 - Run middleware before enforcement, and enforcement before application code.

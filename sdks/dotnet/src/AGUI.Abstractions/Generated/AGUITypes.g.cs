@@ -304,6 +304,16 @@ public sealed class RunAgentInput
     public string RunId { get; set; } = string.Empty;
 
     /// <summary>
+    /// The protocol version this consumer speaks, such as "1.0". Absent means
+    /// the input was produced before the protocol carried a version — the
+    /// versioning rules in the prose govern what each side does with that. Sent
+    /// in-band rather than by the transport, so a recorded exchange stays
+    /// self-describing.
+    /// </summary>
+    [JsonPropertyName("protocolVersion")]
+    public string? ProtocolVersion { get; set; }
+
+    /// <summary>
     /// The run that spawned this one.
     /// </summary>
     [JsonPropertyName("parentRunId")]

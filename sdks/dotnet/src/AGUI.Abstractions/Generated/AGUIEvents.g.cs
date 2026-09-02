@@ -621,6 +621,16 @@ public sealed class RunStartedEvent : BaseEvent
     public string RunId { get; set; } = string.Empty;
 
     /// <summary>
+    /// The protocol version this producer speaks, such as "1.0" — the
+    /// producer's own version, not an echo of the input's, which is what makes
+    /// the pair a negotiation: each side declares itself and the consumer sees
+    /// a downgrade the moment it happens. Absent means a producer from before
+    /// the protocol carried a version.
+    /// </summary>
+    [JsonPropertyName("protocolVersion")]
+    public string? ProtocolVersion { get; set; }
+
+    /// <summary>
     /// The run that spawned this one, when an agent invokes another agent as a
     /// separate run rather than as a subagent within one.
     /// </summary>
