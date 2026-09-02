@@ -120,3 +120,15 @@ run(input: RunAgentInput): RunAgent
 - `url`: The endpoint URL for the agent service
 - `headers`: HTTP headers to include with requests
 - `abortController`: AbortController instance for request cancellation
+
+## Next.js Standalone Build
+
+When using `HttpAgent` in a Next.js application with `output: 'standalone'`, the standalone bundler may break streaming `fetch` calls at runtime, causing HTTP requests to silently fail. To fix this, add `@ag-ui/client` and `@ag-ui/core` to `serverExternalPackages` in your `next.config.mjs`:
+
+```javascript
+// next.config.mjs
+const nextConfig = {
+  output: 'standalone',
+  serverExternalPackages: ['@ag-ui/client', '@ag-ui/core'],
+}
+```
