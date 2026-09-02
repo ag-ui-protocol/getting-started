@@ -1,0 +1,25 @@
+{
+  "name": "nested-run-started-fatal",
+  "area": "lifecycle",
+  "description": "a second RUN_STARTED while a run is still active is fatal — a producer must close the current run before opening the next",
+  "specPage": "/spec/draft/events/lifecycle",
+  "kill": "drop the `runStarted && !runFinished && !runError` guard in verifyEvents so a run may be nested inside another",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-nested-run-started",
+      "runId": "nested-run-started-r-1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-nested-run-started",
+      "runId": "nested-run-started-r-2",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "Cannot send 'RUN_STARTED' while a run is still active"
+  }
+}

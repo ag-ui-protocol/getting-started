@@ -1,0 +1,32 @@
+{
+  "name": "open-object-patch-op-extras",
+  "area": "processing",
+  "description": "where the schema deliberately leaves an object open, an undescribed member is not unrecognised material: a JSON Patch remove carrying a leftover value arrives whole, applies, and draws no warning",
+  "specPage": "/spec/draft/basic/processing",
+  "kill": "drop the `specOpen` check in stripAgainst so the RFC 6902 operations are stripped like the protocol's own objects — the stale `value` on the remove is then deleted and a warning names `/delta/0/value`, which is a warning about conformant data",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-patch-extras",
+      "runId": "r-patch-extras"
+    },
+    {
+      "type": "STATE_SNAPSHOT",
+      "snapshot": { "items": ["keep-a", "drop-me", "keep-b"] }
+    },
+    {
+      "type": "STATE_DELTA",
+      "delta": [{ "op": "remove", "path": "/items/1", "value": "drop-me" }]
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-patch-extras",
+      "runId": "r-patch-extras"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "state": { "items": ["keep-a", "keep-b"] }
+  }
+}

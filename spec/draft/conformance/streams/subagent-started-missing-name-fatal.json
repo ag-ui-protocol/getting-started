@@ -1,0 +1,32 @@
+{
+  "name": "subagent-started-missing-name-fatal",
+  "area": "subagents",
+  "description": "SUBAGENT_STARTED without a name is fatal: the schema requires it, so its absence is a missing required field, not an optional a consumer may fill in",
+  "specPage": "/spec/draft/events/subagents",
+  "kill": "make SUBAGENT_STARTED's name optional, or default it when absent instead of rejecting the event",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-subagent-missing-name",
+      "runId": "r-subagent-missing-name",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "SUBAGENT_STARTED",
+      "subagentRunId": "s-subagent-missing-name-1"
+    },
+    {
+      "type": "SUBAGENT_FINISHED",
+      "subagentRunId": "s-subagent-missing-name-1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-subagent-missing-name",
+      "runId": "r-subagent-missing-name"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "name"
+  }
+}

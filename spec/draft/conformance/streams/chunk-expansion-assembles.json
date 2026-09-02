@@ -1,0 +1,26 @@
+{
+  "name": "chunk-expansion-assembles",
+  "area": "streaming",
+  "description": "chunks expand into the triad — the opener carries the id, the continuation omits it, and the run terminal closes the stream",
+  "specPage": "/spec/draft/basic/patterns/streaming",
+  "kill": "stop synthesizing the TEXT_MESSAGE_END when a run-level event closes an open chunk lane",
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-chunk-expand", "runId": "chunk-expand-r1", "protocolVersion": "1.0" },
+    { "type": "TEXT_MESSAGE_CHUNK", "messageId": "chunk-expand-m1", "role": "assistant", "delta": "Chunks " },
+    { "type": "TEXT_MESSAGE_CHUNK", "delta": "expand." },
+    { "type": "RUN_FINISHED", "threadId": "t-chunk-expand", "runId": "chunk-expand-r1" }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [{ "id": "chunk-expand-m1", "role": "assistant", "content": "Chunks expand." }]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "GAP, not a design difference: EventStreamConverter has no case for TEXT_MESSAGE_CHUNK or TOOL_CALL_CHUNK, so a chunk stream falls through to the pass-through branch. Nothing is expanded into a message and none of the chunk-stream rules are enforced. Pinned here so the gap cannot widen or close unnoticed; alignment tracked separately. Here the two chunks assemble into nothing at all.",
+      "messageCount": 0,
+      "messages": []
+    }
+  }
+}

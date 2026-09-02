@@ -1,0 +1,59 @@
+{
+  "name": "era-0-0-47-upgrades-binary-content",
+  "area": "compatibility",
+  "description": "a legacy binary content part is upgraded to a typed media part before it reaches the agent",
+  "specPage": "/spec/draft/basic/versioning",
+  "kill": "remove BackwardCompatibility_0_0_47's upgrade of {type:binary} parts, or its version gate",
+  "client": { "maxProtocolVersion": "0.0.47" },
+  "input": {
+    "messages": [
+      {
+        "id": "era47-u1",
+        "role": "user",
+        "content": [
+          { "type": "text", "text": "Describe it." },
+          {
+            "type": "binary",
+            "mimeType": "image/png",
+            "url": "https://example.com/legacy.png"
+          }
+        ]
+      }
+    ]
+  },
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-era47", "runId": "r-1" },
+    { "type": "TEXT_MESSAGE_START", "messageId": "era47-m1", "role": "assistant" },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "era47-m1", "delta": "Legacy." },
+    { "type": "TEXT_MESSAGE_END", "messageId": "era47-m1" },
+    { "type": "RUN_FINISHED", "threadId": "t-era47", "runId": "r-1" }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "request": {
+      "messages": [
+        {
+          "id": "era47-u1",
+          "role": "user",
+          "content": [
+            { "type": "text", "text": "Describe it." },
+            {
+              "type": "image",
+              "source": {
+                "type": "url",
+                "value": "https://example.com/legacy.png",
+                "mimeType": "image/png"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The compatibility shims are TypeScript client middleware; the .NET client has no equivalent and sends the legacy part unchanged. Alignment is tracked separately.",
+      "request": {}
+    }
+  }
+}

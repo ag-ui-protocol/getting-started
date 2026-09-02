@@ -1,0 +1,35 @@
+{
+  "name": "era-0-0-45-thinking-translated",
+  "area": "compatibility",
+  "description": "a retired THINKING_* stream is translated into reasoning rather than dropped as unrecognised",
+  "specPage": "/spec/draft/basic/versioning",
+  "kill": "remove the THINKING_* translation; the events then reach enforcement as unrecognised types and are dropped, losing the reasoning entirely",
+  "client": { "maxProtocolVersion": "0.0.45" },
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-era45", "runId": "r-1" },
+    { "type": "THINKING_START", "title": "Working" },
+    { "type": "THINKING_TEXT_MESSAGE_START" },
+    { "type": "THINKING_TEXT_MESSAGE_CONTENT", "delta": "Let me check." },
+    { "type": "THINKING_TEXT_MESSAGE_END" },
+    { "type": "THINKING_END" },
+    { "type": "TEXT_MESSAGE_START", "messageId": "era45-m1", "role": "assistant" },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "era45-m1", "delta": "Checked." },
+    { "type": "TEXT_MESSAGE_END", "messageId": "era45-m1" },
+    { "type": "RUN_FINISHED", "threadId": "t-era45", "runId": "r-1" }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "warnings": ["THINKING_START"],
+    "messages": [
+      { "role": "reasoning", "content": "Let me check." },
+      { "role": "assistant", "content": "Checked." }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The retired THINKING_* shapes are translated by TypeScript client middleware; the .NET client has no compatibility boundary, so it skips them as unrecognised event types and keeps only the assistant message.",
+      "warnings": [],
+      "messages": [{ "role": "assistant" }]
+    }
+  }
+}

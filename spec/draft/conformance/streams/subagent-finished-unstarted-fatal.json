@@ -1,0 +1,28 @@
+{
+  "name": "subagent-finished-unstarted-fatal",
+  "area": "subagents",
+  "description": "SUBAGENT_FINISHED for an invocation never announced is fatal: a lifecycle event closes something, and there is nothing here to close",
+  "specPage": "/spec/draft/events/subagents",
+  "kill": "make the subagent terminal handler ignore a subagentRunId that is not active instead of rejecting it",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-subagent-finished-unstarted",
+      "runId": "r-subagent-finished-unstarted",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "SUBAGENT_FINISHED",
+      "subagentRunId": "s-subagent-finished-unstarted-1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-subagent-finished-unstarted",
+      "runId": "r-subagent-finished-unstarted"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "s-subagent-finished-unstarted-1"
+  }
+}

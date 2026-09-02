@@ -1,0 +1,62 @@
+{
+  "name": "two-sequential-runs-accumulate",
+  "area": "lifecycle",
+  "description": "one stream may carry two runs in sequence, and messages accumulate across the run boundary in order",
+  "specPage": "/spec/draft/events/lifecycle",
+  "kill": "make resetRunState in verifyEvents reject a RUN_STARTED after a closed run, or make the reducer clear messages at a run boundary",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-two-sequential-runs",
+      "runId": "two-sequential-runs-r-1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "two-sequential-runs-m-a",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "two-sequential-runs-m-a",
+      "delta": "first run"
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "two-sequential-runs-m-a" },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-two-sequential-runs",
+      "runId": "two-sequential-runs-r-1"
+    },
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-two-sequential-runs",
+      "runId": "two-sequential-runs-r-2",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "two-sequential-runs-m-b",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "two-sequential-runs-m-b",
+      "delta": "second run"
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "two-sequential-runs-m-b" },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-two-sequential-runs",
+      "runId": "two-sequential-runs-r-2"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 2,
+    "messages": [
+      { "id": "two-sequential-runs-m-a", "role": "assistant", "content": "first run" },
+      { "id": "two-sequential-runs-m-b", "role": "assistant", "content": "second run" }
+    ]
+  }
+}

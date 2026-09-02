@@ -1,0 +1,44 @@
+{
+  "name": "unknown-property-stripped",
+  "area": "processing",
+  "description": "an undescribed property on a known event is stripped with a warning naming its path, and the event itself survives intact",
+  "specPage": "/spec/draft/basic/processing",
+  "kill": "make stripUnknown pass unknown object keys through instead of removing them (drop the `stripped.push(...); continue;` branch for an undescribed key) — the run still completes, but no warning names the path and the property reaches application code",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-unknown-property",
+      "runId": "r-unknown-property"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "m-unknown-property",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-unknown-property",
+      "delta": "content survives",
+      "futureProp": 1
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "m-unknown-property" },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-unknown-property",
+      "runId": "r-unknown-property"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "warnings": ["/futureProp"],
+    "messageCount": 1,
+    "messages": [{ "role": "assistant", "content": "content survives" }]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": ".NET has no enforcement stage yet; alignment tracked separately. Its converters accept the unknown property silently, drop the data, and warn about nothing — so the observable difference is the absent warning, not the surviving content.",
+      "warnings": [],
+      "noWarnings": true
+    }
+  }
+}

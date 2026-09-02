@@ -1,0 +1,28 @@
+{
+  "name": "era-0-0-57-subagent-dropped-with-warning",
+  "area": "compatibility",
+  "description": "a downgrade that loses subagent lifecycle content says so rather than dropping it in silence",
+  "specPage": "/spec/draft/basic/versioning",
+  "kill": "remove BackwardCompatibility_0_0_57's warning, or its drop of the SUBAGENT_* lifecycle events",
+  "client": { "maxProtocolVersion": "0.0.57" },
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-era57", "runId": "r-1" },
+    { "type": "SUBAGENT_STARTED", "subagentRunId": "era57-s1", "name": "researcher" },
+    { "type": "TEXT_MESSAGE_START", "messageId": "era57-m1", "role": "assistant", "subagentRunId": "era57-s1" },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "era57-m1", "delta": "Found it.", "subagentRunId": "era57-s1" },
+    { "type": "TEXT_MESSAGE_END", "messageId": "era57-m1", "subagentRunId": "era57-s1" },
+    { "type": "SUBAGENT_FINISHED", "subagentRunId": "era57-s1" },
+    { "type": "RUN_FINISHED", "threadId": "t-era57", "runId": "r-1" }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "warnings": ["dropping SUBAGENT_STARTED"],
+    "messages": [{ "role": "assistant", "content": "Found it." }]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The subagent downgrade is TypeScript client middleware; the .NET client has no equivalent, so it keeps the subagent lifecycle events and the attribution, and emits no warning.",
+      "warnings": []
+    }
+  }
+}

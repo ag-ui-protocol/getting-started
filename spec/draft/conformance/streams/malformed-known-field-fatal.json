@@ -1,0 +1,16 @@
+{
+  "name": "malformed-known-field-fatal",
+  "area": "processing",
+  "description": "a known field carrying a wrong-typed value is fatal, never coerced or ignored",
+  "specPage": "/spec/draft/basic/processing",
+  "kill": "make enforcement coerce or skip a malformed value on a described field",
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-malformed", "runId": "r-1" },
+    { "type": "TEXT_MESSAGE_START", "messageId": "m-1", "role": "assistant" },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "m-1", "delta": 42 },
+    { "type": "RUN_FINISHED", "threadId": "t-malformed", "runId": "r-1" }
+  ],
+  "expect": {
+    "outcome": "failed"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "name": "raw-and-custom-pass-through",
+  "area": "passthrough",
+  "description": "RAW and an unrecognised CUSTOM name are protocol-legal traffic, not unrecognised material: the run completes and nothing warns",
+  "specPage": "/spec/draft/events/passthrough",
+  "kill": "route RAW or an unrecognised CUSTOM name through the unrecognised-material path, so a legal escape hatch warns or is stripped",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-raw-and-custom",
+      "runId": "r-raw-and-custom",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "m-raw-and-custom-1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-raw-and-custom-1",
+      "delta": "before"
+    },
+    {
+      "type": "RAW",
+      "event": { "provider_specific": { "kind": "response.delta" } },
+      "source": "openai"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-raw-and-custom-1",
+      "delta": " and after"
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "m-raw-and-custom-1" },
+    {
+      "type": "CUSTOM",
+      "name": "com.example.cart-updated",
+      "value": { "items": 3 }
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-raw-and-custom",
+      "runId": "r-raw-and-custom"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "m-raw-and-custom-1",
+        "role": "assistant",
+        "content": "before and after"
+      }
+    ]
+  }
+}

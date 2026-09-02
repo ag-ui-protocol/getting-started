@@ -1,0 +1,77 @@
+{
+  "name": "tool-call-metadata-lands-on-the-call",
+  "area": "metadata",
+  "description": "TOOL_CALL_* metadata accumulates on the tool call itself, not on the assistant message that owns it",
+  "specPage": "/spec/draft/basic/metadata",
+  "kill": "point the TOOL_CALL_START / ARGS / END metadata merge at the parent assistant message instead of the tool call",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-tool-call-metadata",
+      "runId": "tool-call-metadata-r1"
+    },
+    {
+      "type": "TOOL_CALL_START",
+      "toolCallId": "tool-call-metadata-tc1",
+      "toolCallName": "search",
+      "parentMessageId": "tool-call-metadata-m1",
+      "metadata": { "provider": "acme", "attempt": 1 }
+    },
+    {
+      "type": "TOOL_CALL_ARGS",
+      "toolCallId": "tool-call-metadata-tc1",
+      "delta": "{\"q\":\"ag-ui\"}",
+      "metadata": { "bytes": 12 }
+    },
+    {
+      "type": "TOOL_CALL_END",
+      "toolCallId": "tool-call-metadata-tc1",
+      "metadata": { "attempt": 2 }
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-tool-call-metadata",
+      "runId": "tool-call-metadata-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "tool-call-metadata-m1",
+        "role": "assistant",
+        "toolCalls": [
+          {
+            "id": "tool-call-metadata-tc1",
+            "type": "function",
+            "function": { "name": "search", "arguments": "{\"q\":\"ag-ui\"}" },
+            "metadata": { "provider": "acme", "attempt": 2, "bytes": 12 }
+          }
+        ]
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "Tool-call metadata is a wire-level field in .NET for the same reason as message metadata: TOOL_CALL_START and TOOL_CALL_END yield no ChatResponseUpdate of their own, so nothing carried only on them reaches the assembled call. Deliberate and documented in docs/concepts/metadata.mdx; the call, its name and its arguments still land.",
+      "messages": [
+        {
+          "id": "tool-call-metadata-m1",
+          "role": "assistant",
+          "toolCalls": [
+            {
+              "id": "tool-call-metadata-tc1",
+              "type": "function",
+              "function": {
+                "name": "search",
+                "arguments": "{\"q\":\"ag-ui\"}"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

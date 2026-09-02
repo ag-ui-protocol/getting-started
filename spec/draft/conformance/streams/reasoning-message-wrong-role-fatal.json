@@ -1,0 +1,40 @@
+{
+  "name": "reasoning-message-wrong-role-fatal",
+  "area": "reasoning",
+  "description": "REASONING_MESSAGE_START carrying role 'assistant' is fatal: the schema pins the role to 'reasoning', so any other value is a malformed known value rather than an unrecognised member",
+  "specPage": "/spec/draft/events/reasoning",
+  "kill": "widen REASONING_MESSAGE_START's role from the fixed 'reasoning' to any string, or coerce a wrong role back to 'reasoning'",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-reasoning-wrong-role",
+      "runId": "r-reasoning-wrong-role",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "REASONING_MESSAGE_START",
+      "messageId": "m-reasoning-wrong-role-1",
+      "role": "assistant"
+    },
+    {
+      "type": "REASONING_MESSAGE_CONTENT",
+      "messageId": "m-reasoning-wrong-role-1",
+      "delta": "thinking"
+    },
+    { "type": "REASONING_MESSAGE_END", "messageId": "m-reasoning-wrong-role-1" },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-reasoning-wrong-role",
+      "runId": "r-reasoning-wrong-role"
+    }
+  ],
+  "expect": {
+    "outcome": "failed"
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "GAP, not a design difference: the .NET model types REASONING_MESSAGE_START.role as an open string rather than the literal the schema pins, so a wrong role is carried rather than rejected and the run completes. Alignment tracked separately.",
+      "outcome": "completed"
+    }
+  }
+}

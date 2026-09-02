@@ -1,0 +1,51 @@
+{
+  "name": "late-run-error-after-finished-admitted",
+  "area": "lifecycle",
+  "description": "ADMITTED GAP \u2014 admission is right, surfacing is not: RUN_ERROR after RUN_FINISHED is admitted (a failure that surfaced after the run reported success) and everything the run delivered before failing is kept; but the spec's \"a consumer MUST treat the run as failed in that case\" is not observable \u2014 runAgent() resolves. This pins both halves",
+  "specPage": "/spec/draft/events/lifecycle",
+  "kill": "remove the RUN_ERROR exemption from the `runFinished` guard in verifyEvents \u2014 the late failure then fails with `The run has already finished with 'RUN_FINISHED'` and this fixture's completed outcome fails. The un-surfaced failure is a gap, not a rule: making a producer-sent RUN_ERROR reject the run is the RIGHT fix, and it makes this fixture fail too. Anyone landing that MUST flip this fixture and run-error-first-admitted to `failed` + `errorContains` in the same change.",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-late-run-error",
+      "runId": "late-run-error-r-1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "late-run-error-m-1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "late-run-error-m-1",
+      "delta": "delivered before the failure"
+    },
+    {
+      "type": "TEXT_MESSAGE_END",
+      "messageId": "late-run-error-m-1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-late-run-error",
+      "runId": "late-run-error-r-1"
+    },
+    {
+      "type": "RUN_ERROR",
+      "message": "late-run-error: the transport failed while flushing"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "late-run-error-m-1",
+        "role": "assistant",
+        "content": "delivered before the failure"
+      }
+    ],
+    "runError": "late-run-error: the transport failed while flushing"
+  }
+}

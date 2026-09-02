@@ -1,0 +1,68 @@
+{
+  "name": "reasoning-discipline-not-verified",
+  "area": "reasoning",
+  "description": "ADMITTED GAP: a REASONING_MESSAGE_CONTENT with no opener is tolerated — the specification's Note on the reasoning page records that a consumer is not yet required to detect a streaming-discipline violation on reasoning messages or spans, because the reference implementation verifies that discipline for text messages and tool calls but not for reasoning, and requiring detection would declare a shipped consumer non-conformant; the producer is non-conformant either way. This pins what a consumer actually does today: the orphaned fragment is dropped, the run carries on, and no reasoning message is materialised",
+  "specPage": "/spec/draft/events/reasoning",
+  "kill": "add open/close verification for reasoning messages and spans — a deliberate change, not a repair: this fixture and the Note it quotes must be revised in the same commit, the fixture flipping to a failed outcome as the Note is withdrawn. Until then, making the orphan fatal breaks this fixture while the Note still says a consumer need not detect it",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-reasoning-discipline",
+      "runId": "r-reasoning-discipline",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "REASONING_MESSAGE_CONTENT",
+      "messageId": "m-reasoning-discipline-1",
+      "delta": "orphaned thought"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "m-reasoning-discipline-2",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-reasoning-discipline-2",
+      "delta": "the answer"
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "m-reasoning-discipline-2" },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-reasoning-discipline",
+      "runId": "r-reasoning-discipline"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "m-reasoning-discipline-2",
+        "role": "assistant",
+        "content": "the answer"
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The same admitted gap, one step wider on this lane: .NET also does not verify reasoning discipline, but it does not drop the orphaned fragment either — REASONING_MESSAGE_CONTENT yields a reasoning-content update whether or not an opener preceded it, so an extra message survives. Microsoft.Extensions.AI carries reasoning as TextReasoningContent, which AsAGUIMessages does not project into `content`.",
+      "messageCount": 2,
+      "messages": [
+        {
+          "id": "m-reasoning-discipline-1",
+          "role": "assistant"
+        },
+        {
+          "id": "m-reasoning-discipline-2",
+          "role": "assistant",
+          "content": "the answer"
+        }
+      ]
+    },
+    "typescript": {
+      "intentional": "the TypeScript reducer says out loud that it dropped the orphaned fragment, which is what makes 'tolerated' distinguishable from 'silently swallowed'; the .NET lane has no equivalent reducer-level warning, so only the tolerance itself is required of both",
+      "warnings": ["No message found with ID 'm-reasoning-discipline-1'"]
+    }
+  }
+}

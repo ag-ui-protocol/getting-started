@@ -1,0 +1,62 @@
+{
+  "name": "open-metadata-preserved",
+  "area": "processing",
+  "description": "metadata is open by key: vendor-prefixed keys the protocol has never heard of survive untouched and draw no warning, and a null under a key is data rather than an absence",
+  "specPage": "/spec/draft/basic/processing",
+  "kill": "give MetadataSchema a described shape (say z.looseObject({}) with named keys, or a recursive JSON-value schema walked by stripAgainst) instead of the opaque z.custom — every vendor key is then stripped with a warning and never reaches the message",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-open-metadata",
+      "runId": "r-open-metadata"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "m-open-metadata",
+      "role": "assistant",
+      "metadata": {
+        "acme.vendor/traceId": "trace-7",
+        "acme.vendor/parentSpan": null
+      }
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-open-metadata",
+      "delta": "metadata rides along",
+      "metadata": { "acme.vendor/chunkIndex": 0 }
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "m-open-metadata" },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-open-metadata",
+      "runId": "r-open-metadata"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "role": "assistant",
+        "content": "metadata rides along",
+        "metadata": {
+          "acme.vendor/traceId": "trace-7",
+          "acme.vendor/parentSpan": null,
+          "acme.vendor/chunkIndex": 0
+        }
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "Message metadata is a wire-level field in .NET: TEXT_MESSAGE_START and TEXT_MESSAGE_END update builder state and yield no ChatResponseUpdate, so anything carried only on them never reaches a consumer. Deliberate and documented in docs/concepts/metadata.mdx; the content still rides along.",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "metadata rides along"
+        }
+      ]
+    }
+  }
+}

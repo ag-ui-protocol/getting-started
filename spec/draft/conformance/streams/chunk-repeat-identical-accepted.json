@@ -1,0 +1,59 @@
+{
+  "name": "chunk-repeat-identical-accepted",
+  "area": "streaming",
+  "description": "a continuation chunk MAY repeat toolCallName and parentMessageId as long as the values agree with the opener",
+  "specPage": "/spec/draft/basic/patterns/streaming",
+  "kill": "make chunk expansion reject any repeated field on a continuation rather than only a conflicting one",
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-chunk-repeat", "runId": "chunk-repeat-r1", "protocolVersion": "1.0" },
+    { "type": "TEXT_MESSAGE_START", "messageId": "chunk-repeat-m1", "role": "assistant" },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "chunk-repeat-m1", "delta": "Searching." },
+    { "type": "TEXT_MESSAGE_END", "messageId": "chunk-repeat-m1" },
+    {
+      "type": "TOOL_CALL_CHUNK",
+      "toolCallId": "chunk-repeat-tc1",
+      "toolCallName": "search",
+      "parentMessageId": "chunk-repeat-m1",
+      "delta": "{\"q\":"
+    },
+    {
+      "type": "TOOL_CALL_CHUNK",
+      "toolCallId": "chunk-repeat-tc1",
+      "toolCallName": "search",
+      "parentMessageId": "chunk-repeat-m1",
+      "delta": "\"agui\"}"
+    },
+    { "type": "RUN_FINISHED", "threadId": "t-chunk-repeat", "runId": "chunk-repeat-r1" }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "chunk-repeat-m1",
+        "role": "assistant",
+        "content": "Searching.",
+        "toolCalls": [
+          {
+            "id": "chunk-repeat-tc1",
+            "type": "function",
+            "function": { "name": "search", "arguments": "{\"q\":\"agui\"}" }
+          }
+        ]
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "GAP, not a design difference: EventStreamConverter has no case for TEXT_MESSAGE_CHUNK or TOOL_CALL_CHUNK, so a chunk stream falls through to the pass-through branch. Nothing is expanded into a message and none of the chunk-stream rules are enforced. Pinned here so the gap cannot widen or close unnoticed; alignment tracked separately. The TEXT_MESSAGE_* triad still assembles; only the repeated TOOL_CALL_CHUNK pair is lost, so the message arrives without its tool call.",
+      "messages": [
+        {
+          "id": "chunk-repeat-m1",
+          "role": "assistant",
+          "content": "Searching."
+        }
+      ]
+    }
+  }
+}

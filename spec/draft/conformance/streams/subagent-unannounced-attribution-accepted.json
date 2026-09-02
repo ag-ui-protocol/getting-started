@@ -1,0 +1,54 @@
+{
+  "name": "subagent-unannounced-attribution-accepted",
+  "area": "subagents",
+  "description": "attribution without any SUBAGENT_STARTED is legal: a producer may tag work without being able to report the lifecycle, and a consumer must accept it",
+  "specPage": "/spec/draft/events/subagents",
+  "kill": "make the ownership check require a subagentRunId to name an announced, active invocation",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-subagent-unannounced",
+      "runId": "r-subagent-unannounced",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "m-subagent-unannounced-1",
+      "role": "assistant",
+      "subagentRunId": "s-subagent-unannounced-1"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-subagent-unannounced-1",
+      "delta": "delegated ",
+      "subagentRunId": "s-subagent-unannounced-1"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-subagent-unannounced-1",
+      "delta": "answer"
+    },
+    {
+      "type": "TEXT_MESSAGE_END",
+      "messageId": "m-subagent-unannounced-1",
+      "subagentRunId": "s-subagent-unannounced-1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-subagent-unannounced",
+      "runId": "r-subagent-unannounced"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "role": "assistant",
+        "content": "delegated answer",
+        "subagentRunId": "s-subagent-unannounced-1"
+      }
+    ]
+  }
+}

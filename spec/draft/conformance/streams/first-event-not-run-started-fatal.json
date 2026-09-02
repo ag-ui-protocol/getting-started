@@ -1,0 +1,18 @@
+{
+  "name": "first-event-not-run-started-fatal",
+  "area": "lifecycle",
+  "description": "a stream that opens with anything but RUN_STARTED or RUN_ERROR is a protocol violation",
+  "specPage": "/spec/draft/events/lifecycle",
+  "kill": "drop the `!firstEventReceived` first-event check in verifyEvents so any event may open a stream",
+  "stream": [
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "first-event-not-run-started-m-1",
+      "role": "assistant"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "First event must be 'RUN_STARTED'"
+  }
+}

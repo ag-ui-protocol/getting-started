@@ -1,0 +1,22 @@
+{
+  "name": "era-pinned-peer-omits-protocol-version",
+  "area": "compatibility",
+  "description": "a client talking down to a peer that predates the version field does not send it",
+  "specPage": "/spec/draft/basic/versioning",
+  "kill": "remove the gate on the protocolVersion declaration, so an old peer receives an input member it may reject",
+  "client": { "maxProtocolVersion": "0.0.57" },
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-erapin", "runId": "r-1" },
+    { "type": "RUN_FINISHED", "threadId": "t-erapin", "runId": "r-1" }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "requestAbsentPaths": ["protocolVersion"]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The .NET client does not implement the in-band version declaration at all, so the field is absent for every peer rather than gated on one.",
+      "requestAbsentPaths": ["protocolVersion"]
+    }
+  }
+}

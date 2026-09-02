@@ -1,0 +1,31 @@
+{
+  "name": "unknown-outcome-stripped",
+  "area": "processing",
+  "description": "an unrecognised RUN_FINISHED outcome member is stripped from its optional position with a warning, leaving the run to end exactly as an outcome-less RUN_FINISHED does",
+  "specPage": "/spec/draft/basic/processing",
+  "kill": "make stripAgainst return the value instead of DROP when no discriminated-union member matches — the unrecognised outcome then reaches the generated validator, which rejects it, and the run fails instead of completing",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-unknown-outcome",
+      "runId": "r-unknown-outcome"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-unknown-outcome",
+      "runId": "r-unknown-outcome",
+      "outcome": { "type": "paused" }
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "warnings": ["/outcome"]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "the known TS/.NET asymmetry: .NET's outcome converter is a closed union, so an unknown discriminator is a fatal JsonException rather than stripped material.",
+      "outcome": "failed",
+      "warnings": []
+    }
+  }
+}

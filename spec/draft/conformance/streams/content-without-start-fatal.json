@@ -1,0 +1,16 @@
+{
+  "name": "content-without-start-fatal",
+  "area": "streaming",
+  "description": "a content event for an identifier that is not open is a protocol violation, not a message the consumer invents",
+  "specPage": "/spec/draft/basic/patterns/streaming",
+  "kill": "make verification create the message on TEXT_MESSAGE_CONTENT when none is open instead of rejecting the event",
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-orphan-content", "runId": "orphan-content-r1", "protocolVersion": "1.0" },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "orphan-content-m1", "delta": "nothing is open" },
+    { "type": "RUN_FINISHED", "threadId": "t-orphan-content", "runId": "orphan-content-r1" }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "No active text message found with ID 'orphan-content-m1'"
+  }
+}

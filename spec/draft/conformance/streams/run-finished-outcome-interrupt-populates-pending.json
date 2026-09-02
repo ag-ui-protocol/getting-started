@@ -1,0 +1,47 @@
+{
+  "name": "run-finished-outcome-interrupt-populates-pending",
+  "area": "lifecycle",
+  "description": "RUN_FINISHED carrying an interrupt outcome closes the run without failing it, and the interrupt reaches the client intact rather than being stripped as unrecognised material",
+  "specPage": "/spec/draft/events/lifecycle",
+  "kill": "drop RunFinishedInterruptOutcomeSchema from the RunFinishedOutcomeSchema union — enforcement then strips the outcome and warns \"Removed unrecognised material at '/outcome' on RUN_FINISHED\", which fails `noWarnings` (verified). Making the RUN_FINISHED case in verifyEvents treat an interrupt outcome as a failure kills the `completed` expectation the same way. NOTE: the interrupt itself lands on `agent.pendingInterrupts`, which the fixture format has no key for, so `noWarnings` is what stands in for \"the outcome survived\" here.",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-run-finished-interrupt",
+      "runId": "run-finished-interrupt-r-1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "run-finished-interrupt-m-1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "run-finished-interrupt-m-1",
+      "delta": "May I proceed?"
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "run-finished-interrupt-m-1" },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-run-finished-interrupt",
+      "runId": "run-finished-interrupt-r-1",
+      "outcome": {
+        "type": "interrupt",
+        "interrupts": [
+          {
+            "id": "run-finished-interrupt-i-1",
+            "reason": "approval",
+            "message": "Approve the transfer before the run continues."
+          }
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [{ "role": "assistant", "content": "May I proceed?" }]
+  }
+}

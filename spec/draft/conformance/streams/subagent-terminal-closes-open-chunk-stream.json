@@ -1,0 +1,61 @@
+{
+  "name": "subagent-terminal-closes-open-chunk-stream",
+  "area": "subagents",
+  "description": "a subagent's terminal closes the chunk stream still open in its own lane, so the run completes cleanly with the delegated message assembled",
+  "specPage": "/spec/draft/events/subagents",
+  "kill": "make SUBAGENT_FINISHED pass through without closing its lane, so the message stays open past its owner's end",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-subagent-terminal-chunk",
+      "runId": "r-subagent-terminal-chunk",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "SUBAGENT_STARTED",
+      "subagentRunId": "s-subagent-terminal-chunk-1",
+      "name": "summariser"
+    },
+    {
+      "type": "TEXT_MESSAGE_CHUNK",
+      "messageId": "m-subagent-terminal-chunk-1",
+      "role": "assistant",
+      "delta": "half ",
+      "subagentRunId": "s-subagent-terminal-chunk-1"
+    },
+    {
+      "type": "TEXT_MESSAGE_CHUNK",
+      "delta": "assembled",
+      "subagentRunId": "s-subagent-terminal-chunk-1"
+    },
+    {
+      "type": "SUBAGENT_FINISHED",
+      "subagentRunId": "s-subagent-terminal-chunk-1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-subagent-terminal-chunk",
+      "runId": "r-subagent-terminal-chunk"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "m-subagent-terminal-chunk-1",
+        "role": "assistant",
+        "content": "half assembled",
+        "subagentRunId": "s-subagent-terminal-chunk-1"
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "GAP, not a design difference: EventStreamConverter has no case for TEXT_MESSAGE_CHUNK or TOOL_CALL_CHUNK, so a chunk stream falls through to the pass-through branch. Nothing is expanded into a message and none of the chunk-stream rules are enforced. Pinned here so the gap cannot widen or close unnoticed; alignment tracked separately. No chunk stream is opened, so no subagent terminal closes one and no message is assembled.",
+      "messageCount": 0,
+      "messages": []
+    }
+  }
+}

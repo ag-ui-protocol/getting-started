@@ -1,0 +1,55 @@
+{
+  "name": "state-delta-unknown-op-dropped",
+  "area": "state",
+  "description": "an operation whose `op` RFC 6902 does not define is an unrecognised union member: the element is dropped from the patch with a warning and the rest of the patch applies",
+  "specPage": "/spec/draft/basic/patterns/snapshots",
+  "kill": "make the strip stage treat an unrecognised union member as fatal, or pass it through to the applier",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-state-delta-unknown-op",
+      "runId": "state-delta-unknown-op-r1"
+    },
+    {
+      "type": "STATE_SNAPSHOT",
+      "snapshot": {
+        "count": 1
+      }
+    },
+    {
+      "type": "STATE_DELTA",
+      "delta": [
+        {
+          "op": "increment",
+          "path": "/count",
+          "value": 1
+        },
+        {
+          "op": "replace",
+          "path": "/count",
+          "value": 5
+        }
+      ]
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-state-delta-unknown-op",
+      "runId": "state-delta-unknown-op-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "warnings": [
+      "/delta/0"
+    ],
+    "state": {
+      "count": 5
+    }
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "the .NET client emits no warning here, and cannot assert the state clause at all: it has no state store and no JSON Patch reducer, so the unrecognised operation is neither dropped nor applied by the client. What this lane still holds .NET to is that the run stays alive. Aligning .NET is tracked separately.",
+      "warnings": []
+    }
+  }
+}

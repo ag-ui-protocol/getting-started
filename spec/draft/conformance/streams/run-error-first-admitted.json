@@ -1,0 +1,20 @@
+{
+  "name": "run-error-first-admitted",
+  "area": "lifecycle",
+  "description": "ADMITTED GAP \u2014 admission is right, surfacing is not: a stream may open with RUN_ERROR (the spec admits it because a run can fail before it begins) and the client does admit it rather than raising a first-event violation; but a producer-sent RUN_ERROR never reaches the caller as a failure \u2014 runAgent() resolves \u2014 so the `failed` outcome the fixture format defines as covering a producer-sent RUN_ERROR is not observable. This pins both halves so neither can change unnoticed",
+  "specPage": "/spec/draft/events/lifecycle",
+  "kill": "narrow the first-event check in verifyEvents (`eventType !== RUN_STARTED && eventType !== RUN_ERROR`) to RUN_STARTED alone \u2014 the leading RUN_ERROR then fails with `First event must be 'RUN_STARTED'` and this fixture's completed outcome fails. The second half is a gap, not a rule: making a producer-sent RUN_ERROR reject the run is the RIGHT fix, and it makes this fixture fail too. Anyone landing that MUST flip this fixture and late-run-error-after-finished-admitted to `failed` + `errorContains` in the same change.",
+  "stream": [
+    {
+      "type": "RUN_ERROR",
+      "message": "run-error-first: the agent was unreachable",
+      "code": "UNAVAILABLE"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 0,
+    "runError": "run-error-first: the agent was unreachable"
+  }
+}
