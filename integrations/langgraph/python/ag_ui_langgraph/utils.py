@@ -46,6 +46,41 @@ AGUIContentItem = Union[
 
 DEFAULT_SCHEMA_KEYS = ["tools"]
 
+# forwardedProps this adapter owns, and which therefore never become graph
+# state. Two groups:
+#
+#   * props the adapter consumes itself ("command" is the LangGraph-private
+#     resume slot, "node_name"/"stream_subgraphs"/"inject_a2_u_i_tool" steer
+#     the run), plus the camelCase spelling of the A2UI flag, which
+#     langgraph_default_merge_state also accepts;
+#   * channels langgraph_default_merge_state builds ("messages", "tools",
+#     "ag-ui", "copilotkit"), which a forwarded value must never replace.
+#
+# "config", "stream_mode" and "thread_metadata" are consumed by the LangGraph
+# Platform (TypeScript) adapter. They are reserved here too so both adapters
+# agree on the reserved namespace.
+#
+# Every other forwarded prop hydrates graph state. Keys are matched AFTER
+# run() snake-cases them (see camel_to_snake), so list the converted form.
+#
+# Add new adapter-control props here. test_forwarded_props_state_precedence.py
+# reads agent.py and fails when a consumed prop is missing, because an omitted
+# prop is silently written into every graph's state (CopilotKit#3168).
+ADAPTER_OWNED_FORWARDED_PROPS = frozenset({
+    "command",
+    "config",
+    "inject_a2_u_i_tool",
+    "injectA2UITool",
+    "node_name",
+    "stream_mode",
+    "stream_subgraphs",
+    "thread_metadata",
+    "messages",
+    "tools",
+    "ag-ui",
+    "copilotkit",
+})
+
 def filter_object_by_schema_keys(obj: Dict[str, Any], schema_keys: List[str]) -> Dict[str, Any]:
     if not obj:
         return {}
