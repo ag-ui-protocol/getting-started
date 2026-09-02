@@ -198,55 +198,67 @@ export const JsonPointerSchema = z.string().regex(new RegExp("^(/([^/~]|~[01])*)
 /**
  * Inserts value at path. RFC 6902 section 4.1.
  */
-export const AddOperationSchema = z.looseObject({
-  op: z.literal("add"),
-  path: JsonPointerSchema,
-  value: z.any().refine((value) => value !== undefined),
-});
+export const AddOperationSchema = z
+  .looseObject({
+    op: z.literal("add"),
+    path: JsonPointerSchema,
+    value: z.any().refine((value) => value !== undefined),
+  })
+  .meta({ specOpen: true });
 
 /**
  * Removes the value at path. RFC 6902 section 4.2.
  */
-export const RemoveOperationSchema = z.looseObject({
-  op: z.literal("remove"),
-  path: JsonPointerSchema,
-});
+export const RemoveOperationSchema = z
+  .looseObject({
+    op: z.literal("remove"),
+    path: JsonPointerSchema,
+  })
+  .meta({ specOpen: true });
 
 /**
  * Replaces the value at path. RFC 6902 section 4.3.
  */
-export const ReplaceOperationSchema = z.looseObject({
-  op: z.literal("replace"),
-  path: JsonPointerSchema,
-  value: z.any().refine((value) => value !== undefined),
-});
+export const ReplaceOperationSchema = z
+  .looseObject({
+    op: z.literal("replace"),
+    path: JsonPointerSchema,
+    value: z.any().refine((value) => value !== undefined),
+  })
+  .meta({ specOpen: true });
 
 /**
  * Moves the value at from to path. RFC 6902 section 4.4.
  */
-export const MoveOperationSchema = z.looseObject({
-  op: z.literal("move"),
-  from: JsonPointerSchema,
-  path: JsonPointerSchema,
-});
+export const MoveOperationSchema = z
+  .looseObject({
+    op: z.literal("move"),
+    from: JsonPointerSchema,
+    path: JsonPointerSchema,
+  })
+  .meta({ specOpen: true });
 
 /**
  * Copies the value at from to path. RFC 6902 section 4.5.
  */
-export const CopyOperationSchema = z.looseObject({
-  op: z.literal("copy"),
-  from: JsonPointerSchema,
-  path: JsonPointerSchema,
-});
+export const CopyOperationSchema = z
+  .looseObject({
+    op: z.literal("copy"),
+    from: JsonPointerSchema,
+    path: JsonPointerSchema,
+  })
+  .meta({ specOpen: true });
 
 /**
  * Asserts that the value at path equals value. RFC 6902 section 4.6.
  */
-export const TestOperationSchema = z.looseObject({
-  op: z.literal("test"),
-  path: JsonPointerSchema,
-  value: z.any().refine((value) => value !== undefined),
-});
+export const TestOperationSchema = z
+  .looseObject({
+    op: z.literal("test"),
+    path: JsonPointerSchema,
+    value: z.any().refine((value) => value !== undefined),
+  })
+  .meta({ specOpen: true });
 
 /**
  * A single RFC 6902 operation. Exactly one of the operation shapes must match,

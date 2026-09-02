@@ -222,6 +222,7 @@ function zodType(type: TypeExpr): string {
 function emitSchemaDefinition(
   definition: Definition,
   anyAliases: Set<string>,
+  isMixin = false,
 ): string {
   const doc = jsdoc(definition.description);
   switch (definition.kind) {
@@ -255,7 +256,17 @@ function emitSchemaDefinition(
       // looseObject on purpose: the spec is strict, the implementation is
       // tolerant, and the middleware that warns and strips needs the unknown
       // keys to survive the parse.
-      return `${doc}\nexport const ${definition.name}Schema = z.looseObject({\n${fields}\n});`;
+      //
+      // Which is why looseObject cannot itself say whether the SPEC leaves an
+      // object open — every object is loose here. The few the spec really does
+      // leave open are marked, so the stripping stage can tell "tolerated until
+      // enforcement" from "allowed to stay". Today that is the RFC 6902
+      // operations, which the RFC requires to ignore members they do not define
+      // rather than reject them. Mixins never reach this branch, so an open
+      // definition here is always one meant to be used as a value.
+      const openMark =
+        definition.closed || isMixin ? "" : ".meta({ specOpen: true })";
+      return `${doc}\nexport const ${definition.name}Schema = z.looseObject({\n${fields}\n})${openMark};`;
     }
     case "union": {
       const members = definition.members.map((member) => `${member}Schema`);
@@ -311,9 +322,11 @@ export function emitSchemas(model: ProtocolModel): string {
     ...model.definitions.map((definition) =>
       emitSchemaDefinition(definition, anyAliases),
     ),
-    // The mixin shapes, emitted last so everything they reference exists.
+    // The mixin shapes, emitted last so everything they reference exists. Never
+    // marked spec-open: a mixin is not a value, it is folded into definitions
+    // that close, and marking it would open every object composing it.
     ...model.mixinShapes.map((definition) =>
-      emitSchemaDefinition(definition, anyAliases),
+      emitSchemaDefinition(definition, anyAliases, true),
     ),
     "",
   ].join("\n\n");

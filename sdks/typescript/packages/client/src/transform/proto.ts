@@ -8,6 +8,13 @@ import * as proto from "@ag-ui/proto";
  * Each message is prefixed with a 4-byte length header (uint32 in big-endian format)
  * followed by the protocol buffer encoded message.
  */
+// The same switch the enforcement stage reads, so one variable silences both
+// halves of what is really one decision about unrecognised material.
+const suppressWarnings = (): boolean =>
+  typeof process !== "undefined" &&
+  typeof process.env !== "undefined" &&
+  Boolean(process.env.SUPPRESS_TRANSFORMATION_WARNINGS);
+
 export const parseProtoStream = (source$: Observable<HttpEvent>): Observable<BaseEvent> => {
   const eventSubject = new Subject<BaseEvent>();
   let buffer = new Uint8Array(0);
@@ -69,14 +76,32 @@ export const parseProtoStream = (source$: Observable<HttpEvent>): Observable<Bas
 
         // Emit the parsed event
         eventSubject.next(event);
-
-        // Remove the processed message from the buffer
-        buffer = buffer.slice(totalLength);
       } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        eventSubject.error(new Error(`Failed to decode protocol buffer message: ${errorMessage}`));
-        return;
+        // An event this build was never compiled against is not a failure. The
+        // SSE reader hands the same event on to enforcement, which drops it
+        // with a warning and leaves the run alive; the binary reader cannot
+        // hand it on, because an unknown envelope arm carries no type string.
+        // Dropping the frame here is that same answer spelled for this
+        // transport — otherwise a producer that adds one event kills every
+        // binary client while text clients carry on untouched.
+        if (error instanceof proto.AGUIUnknownEventTypeError) {
+          if (!suppressWarnings()) {
+            console.warn(
+              "[ag-ui][proto] Dropped an event this build does not know: the protocol has a variant this SDK predates.",
+            );
+          }
+        } else {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          eventSubject.error(
+            new Error(`Failed to decode protocol buffer message: ${errorMessage}`),
+          );
+          return;
+        }
       }
+
+      // Remove the processed message from the buffer, dropped frames included:
+      // leaving one in place would re-read it forever.
+      buffer = buffer.slice(totalLength);
     }
   }
 

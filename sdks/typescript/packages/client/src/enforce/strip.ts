@@ -75,9 +75,23 @@ function stripAgainst(
     const shape = target.shape as Record<string, z.ZodType>;
     const record = value as Record<string, unknown>;
     const result: Record<string, unknown> = {};
+    // Every generated object is a looseObject, because the layers below
+    // enforcement have to see unknown keys to translate them. That tolerance is
+    // not the same as the SPEC leaving an object open, and only the schema can
+    // tell the two apart, so the generator marks the ones it really does leave
+    // open. Today those are the RFC 6902 operations, which the RFC requires to
+    // ignore members they do not define rather than reject them: a remove
+    // carrying a leftover value is a valid patch, and removing that member
+    // while warning about it deletes conformant data and cries wolf.
+    const specOpen =
+      (target.meta() as { specOpen?: boolean } | undefined)?.specOpen === true;
     for (const key of Object.keys(record)) {
       const field = shape[key];
       if (field === undefined) {
+        if (specOpen) {
+          result[key] = record[key];
+          continue;
+        }
         stripped.push(`${path}/${key}`);
         continue;
       }

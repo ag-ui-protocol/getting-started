@@ -86,8 +86,6 @@ export const verifyEvents =
     // attribution-only producers (which tag events but never send SUBAGENT_*) stay
     // valid. Cleared per run, like every other map here.
     const closedSubagents = new Set<string>();
-    let activeThinkingStep = false;
-    let activeThinkingStepMessage = false;
     let runStarted = false; // Track if a run has started
 
     // Function to reset state for a new run
@@ -102,8 +100,6 @@ export const verifyEvents =
       activeSteps.clear();
       activeSubagents.clear();
       closedSubagents.clear();
-      activeThinkingStep = false;
-      activeThinkingStepMessage = false;
       runFinished = false;
       runError = false;
       runStarted = true;

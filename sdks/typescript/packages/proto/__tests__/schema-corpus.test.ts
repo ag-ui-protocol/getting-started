@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import { EventSchemas, EventType } from "@ag-ui/core";
 import * as protoEvents from "../src/generated/events";
 import * as protoTypes from "../src/generated/types";
+import * as protoPatch from "../src/generated/patch";
 import { decode, encode } from "../src/proto";
 
 /**
@@ -328,7 +329,11 @@ describe("nested duplicate-field guards", () => {
 });
 
 describe("content part guards", () => {
-  it("rejects a content part with no recognisable arm", () => {
+  // A part naming no arm this build knows is dropped from its array, not
+  // rejected — the same thing enforcement does to an unrecognised union member
+  // arriving as JSON. Rejecting made a media kind added after this build
+  // shipped fatal over binary and survivable over SSE.
+  it("drops a content part with no recognisable arm", () => {
     const bytes = protoEvents.Event.encode({
       messagesSnapshot: {
         baseEvent: { type: protoEvents.EventType.MESSAGES_SNAPSHOT },
@@ -342,7 +347,10 @@ describe("content part guards", () => {
         ],
       },
     } as never).finish();
-    expect(() => decode(bytes)).toThrow(/unreadable content part/);
+    const decoded = decode(bytes) as unknown as {
+      messages: Array<{ content?: unknown }>;
+    };
+    expect(decoded.messages[0].content).toEqual([]);
   });
 });
 
@@ -401,85 +409,119 @@ describe("flattened outcome guards", () => {
     protoEvents.Event.encode(payload as never).finish();
   const base = { type: protoEvents.EventType.RUN_FINISHED };
 
-  it("rejects an unknown outcome value", () => {
-    expect(() =>
-      decode(
-        wrap({
-          runFinished: {
-            baseEvent: base,
-            threadId: "t1",
-            runId: "r1",
-            outcome: "cancelled",
-            interrupts: [],
-            usage: [],
-          },
-        }),
-      ),
-    ).toThrow(/unknown outcome/);
+  // Decoding is transport work: it reconstitutes the JSON an SSE producer would
+  // have sent and leaves the judging to enforcement, which is the one stage both
+  // transports share. Throwing here instead would make the same stream survive
+  // over SSE and fail over binary.
+  it("rebuilds an unknown outcome rather than rejecting it", () => {
+    const decoded = decode(
+      wrap({
+        runFinished: {
+          baseEvent: base,
+          threadId: "t1",
+          runId: "r1",
+          outcome: "cancelled",
+          interrupts: [],
+          usage: [],
+        },
+      }),
+    ) as unknown as { outcome?: unknown };
+
+    expect(decoded.outcome).toEqual({ type: "cancelled" });
   });
 
-  it("rejects a success outcome carrying interrupts", () => {
-    expect(() =>
-      decode(
-        wrap({
-          runFinished: {
-            baseEvent: base,
-            threadId: "t1",
-            runId: "r1",
-            outcome: "success",
-            interrupts: [{ id: "i1", reason: "r" }],
-            usage: [],
-          },
-        }),
-      ),
-    ).toThrow(/cannot carry interrupts/);
+  // Which payload an unknown case owns is unknowable here, so whatever arrived
+  // rides along rather than being silently dropped by the decoder.
+  it("carries an unknown outcome's payload through", () => {
+    const decoded = decode(
+      wrap({
+        runFinished: {
+          baseEvent: base,
+          threadId: "t1",
+          runId: "r1",
+          outcome: "cancelled",
+          interrupts: [{ id: "i1", reason: "r" }],
+          usage: [],
+        },
+      }),
+    ) as unknown as { outcome?: { type?: string; interrupts?: unknown[] } };
+
+    expect(decoded.outcome?.type).toBe("cancelled");
+    expect(decoded.outcome?.interrupts).toHaveLength(1);
   });
 
-  it("rejects an absent outcome carrying interrupts", () => {
-    expect(() =>
-      decode(
-        wrap({
-          runFinished: {
-            baseEvent: base,
-            threadId: "t1",
-            runId: "r1",
-            outcome: "",
-            interrupts: [{ id: "i1", reason: "r" }],
-            usage: [],
-          },
-        }),
-      ),
-    ).toThrow(/cannot carry interrupts/);
+  // Payload belonging to another case is a contradiction, but one the JSON
+  // form can express too — there it reads as an undescribed property on a
+  // closed object and enforcement strips it. So it is rebuilt as it arrived and
+  // judged at the stage both transports share, not decided here for one.
+  it("carries a success outcome's foreign payload through to enforcement", () => {
+    const decoded = decode(
+      wrap({
+        runFinished: {
+          baseEvent: base,
+          threadId: "t1",
+          runId: "r1",
+          outcome: "success",
+          interrupts: [{ id: "i1", reason: "r" }],
+          usage: [],
+        },
+      }),
+    ) as unknown as { outcome?: { type?: string; interrupts?: unknown[] } };
+
+    expect(decoded.outcome?.type).toBe("success");
+    expect(decoded.outcome?.interrupts).toHaveLength(1);
   });
 
-  it("rejects an unknown subagent outcome value", () => {
-    expect(() =>
-      decode(
-        wrap({
-          subagentFinished: {
-            baseEvent: { type: protoEvents.EventType.SUBAGENT_FINISHED },
-            subagentRunId: "s1",
-            outcome: "cancelled",
-            interruptIds: [],
-          },
-        }),
-      ),
-    ).toThrow(/unknown outcome/);
+  // With no outcome the payload belongs nowhere, so it rides at the top level
+  // as an undescribed property — which is what a JSON producer's stray
+  // property is, and enforcement strips it with a warning.
+  it("carries an absent outcome's foreign payload through to enforcement", () => {
+    const decoded = decode(
+      wrap({
+        runFinished: {
+          baseEvent: base,
+          threadId: "t1",
+          runId: "r1",
+          outcome: "",
+          interrupts: [{ id: "i1", reason: "r" }],
+          usage: [],
+        },
+      }),
+    ) as unknown as { outcome?: unknown; interrupts?: unknown[] };
+
+    expect(decoded.outcome).toBeUndefined();
+    expect(decoded.interrupts).toHaveLength(1);
   });
 
-  it("rejects an absent subagent outcome carrying interrupt ids", () => {
-    expect(() =>
-      decode(
-        wrap({
-          subagentFinished: {
-            baseEvent: { type: protoEvents.EventType.SUBAGENT_FINISHED },
-            subagentRunId: "s1",
-            outcome: "",
-            interruptIds: ["i1"],
-          },
-        }),
-      ),
-    ).toThrow(/cannot carry interruptIds/);
+  it("rebuilds an unknown subagent outcome rather than rejecting it", () => {
+    const decoded = decode(
+      wrap({
+        subagentFinished: {
+          baseEvent: { type: protoEvents.EventType.SUBAGENT_FINISHED },
+          subagentRunId: "s1",
+          outcome: "cancelled",
+          interruptIds: [],
+        },
+      }),
+    ) as unknown as { outcome?: unknown };
+
+    expect(decoded.outcome).toEqual({ type: "cancelled" });
+  });
+
+  it("carries an absent subagent outcome's foreign payload through", () => {
+    const decoded = decode(
+      wrap({
+        subagentFinished: {
+          baseEvent: { type: protoEvents.EventType.SUBAGENT_FINISHED },
+          subagentRunId: "s1",
+          outcome: "",
+          interruptIds: ["i1"],
+        },
+      }),
+    ) as unknown as { outcome?: unknown; interruptIds?: unknown[] };
+
+    expect(decoded.outcome).toBeUndefined();
+    expect(decoded.interruptIds).toEqual(["i1"]);
   });
 
   it("rejects content parts on a role that has none", () => {
@@ -549,16 +591,37 @@ describe("flattened outcome guards", () => {
     expect((decode(extended) as { stepName?: string }).stepName).toBe("plan");
   });
 
-  it.each([99, -1])("rejects an out-of-enum patch operation (%s)", (op) => {
-    // 99 reverse-maps to undefined; -1 to ts-proto's synthetic
-    // UNRECOGNIZED. Both must reject rather than invent an operation.
+  it.each([99, -1])("drops an out-of-enum patch operation (%s)", (op) => {
+    // 99 reverse-maps to undefined; -1 to ts-proto's synthetic UNRECOGNIZED.
+    // Neither may invent an operation — but neither is fatal either. An
+    // operation added to JSON Patch after this build shipped reaches the SSE
+    // reader as an unrecognised union member, which enforcement removes from
+    // the array, so removing it here is what keeps the two transports
+    // agreeing. Rejecting made the same patch fatal over binary alone.
     const bytes = protoEvents.Event.encode({
       stateDelta: {
         baseEvent: { type: protoEvents.EventType.STATE_DELTA },
         delta: [{ op, path: "/x" }],
       },
     } as never).finish();
-    expect(() => decode(bytes)).toThrow(/unknown patch operation/);
+    expect((decode(bytes) as unknown as { delta: unknown[] }).delta).toEqual([]);
+  });
+
+  it("keeps the operations it can name beside one it cannot", () => {
+    const bytes = protoEvents.Event.encode({
+      stateDelta: {
+        baseEvent: { type: protoEvents.EventType.STATE_DELTA },
+        delta: [
+          { op: 99, path: "/x" },
+          { op: protoPatch.JsonPatchOperationType.REPLACE, path: "/y", value: undefined },
+        ],
+      },
+    } as never).finish();
+    const delta = (decode(bytes) as unknown as { delta: Array<{ op?: string; path?: string }> })
+      .delta;
+    expect(delta).toHaveLength(1);
+    expect(delta[0].op).toBe("replace");
+    expect(delta[0].path).toBe("/y");
   });
 
   it("ignores unknown group fields, per protobuf rules", () => {
@@ -636,19 +699,20 @@ describe("flattened outcome guards", () => {
     expect(() => decode(concatenated)).toThrow();
   });
 
-  it("rejects a subagent success carrying interrupt ids", () => {
-    expect(() =>
-      decode(
-        wrap({
-          subagentFinished: {
-            baseEvent: { type: protoEvents.EventType.SUBAGENT_FINISHED },
-            subagentRunId: "s1",
-            outcome: "success",
-            interruptIds: ["i1"],
-          },
-        }),
-      ),
-    ).toThrow(/cannot carry interruptIds/);
+  it("carries a subagent success outcome's foreign payload through", () => {
+    const decoded = decode(
+      wrap({
+        subagentFinished: {
+          baseEvent: { type: protoEvents.EventType.SUBAGENT_FINISHED },
+          subagentRunId: "s1",
+          outcome: "success",
+          interruptIds: ["i1"],
+        },
+      }),
+    ) as unknown as { outcome?: { type?: string; interruptIds?: unknown[] } };
+
+    expect(decoded.outcome?.type).toBe("success");
+    expect(decoded.outcome?.interruptIds).toEqual(["i1"]);
   });
 });
 

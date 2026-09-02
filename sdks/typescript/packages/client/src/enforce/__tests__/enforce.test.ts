@@ -241,3 +241,43 @@ describe("enforceOutgoingInput", () => {
     expect(agent.isRunning).toBe(false);
   });
 });
+
+describe("objects the spec leaves open", () => {
+  // RFC 6902 section 4 requires an operation to IGNORE members it does not
+  // define rather than reject them, so the schema leaves the six operations
+  // open while closing everything else. Enforcement has to honour that: a
+  // conformant patch must arrive whole, and warning about it would train
+  // readers to ignore warnings that are usually real.
+  it("keeps extra members on a JSON Patch operation", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const event = {
+      type: EventType.STATE_DELTA,
+      delta: [{ op: "remove", path: "/a", value: 1, ext: "keep me" }],
+    } as unknown as BaseEvent;
+
+    const [result] = await lastValueFrom(of(event).pipe(enforceEvents(), toArray()));
+
+    expect((result as unknown as { delta: unknown[] }).delta).toEqual([
+      { op: "remove", path: "/a", value: 1, ext: "keep me" },
+    ]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  // The mark is per object, not a general loosening: everything else stays
+  // closed, so the tolerance middleware relies on is unchanged.
+  it("still strips extra members on an object the spec closes", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const event = {
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: "m1",
+      bogus: 1,
+    } as unknown as BaseEvent;
+
+    const [result] = await lastValueFrom(of(event).pipe(enforceEvents(), toArray()));
+
+    expect(result).not.toHaveProperty("bogus");
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+});

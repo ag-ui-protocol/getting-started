@@ -94,6 +94,10 @@ export function emitProtoTranslation(wire: WireModel): string {
   };
 
   const fromPartCase = (entry: { entry: string; payload: Field[] }): string => {
+    const sources = entry.payload.filter((field) => {
+      const resolved = resolveAlias(defs, field.type);
+      return resolved.kind === "ref" && resolved.name === "InputContentSource";
+    });
     const fields = entry.payload
       .map((field) => {
         const resolved = resolveAlias(defs, field.type);
@@ -103,7 +107,26 @@ export function emitProtoTranslation(wire: WireModel): string {
         return `${field.name}: part.${field.name}`;
       })
       .join(", ");
-    return `  if (rec.${entry.entry}) {\n    const part = rec.${entry.entry} as LooseRecord;\n    return { type: ${JSON.stringify(entry.entry)}, ${fields} };\n  }`;
+    // A source kind this build does not know takes its whole part with it.
+    // The source is required, so on the JSON path the drop CASCADES: an
+    // unrecognisable value in a required position removes the object
+    // containing it, leaving the array one part shorter. Emitting a known
+    // part with no source instead would hand enforcement something the schema
+    // calls malformed, and a media kind added after this build shipped would
+    // be fatal over binary while surviving over SSE.
+    //
+    // Only when the source is PRESENT and unreadable, though. An absent one is
+    // a required field the producer omitted — malformed, not from the future —
+    // and dropping that too would hide a defect the JSON path reports. Message
+    // fields carry presence on the wire, so the two really are distinguishable
+    // here: absent reads as undefined, present-but-empty as {}.
+    const sourceGuards = sources
+      .map(
+        (field) =>
+          `    if (part.${field.name} !== undefined && fromProtoSource(part.${field.name}) === undefined) {\n      return undefined;\n    }\n`,
+      )
+      .join("");
+    return `  if (rec.${entry.entry}) {\n    const part = rec.${entry.entry} as LooseRecord;\n${sourceGuards}    return { type: ${JSON.stringify(entry.entry)}, ${fields} };\n  }`;
   };
 
   /* ---------------- merged Message ---------------- */
@@ -251,7 +274,9 @@ export function emitProtoTranslation(wire: WireModel): string {
           : `asArray(input.${field.name})`;
         to.push(`    ${field.name}: ${encodeExpr},`);
         const decodeMapper =
-          itemDef?.kind === "union" ? ".map(fromWireMessage)" : "";
+          itemDef?.kind === "union"
+            ? ".map(fromWireMessage).filter((message) => message !== undefined)"
+            : "";
         // Always present on decode, empty included: the wire cannot tell an
         // absent array from an empty one, and present-empty is the one form
         // every layer accepts (the handwritten input schema requires the keys).
@@ -306,7 +331,9 @@ ${from.join("\n")}
     rest.messages = rest.messages.map(toWireMessage);
   }`);
     decodeCases.push(`  if (decoded.type === ${JSON.stringify(type)} && Array.isArray(decoded.messages)) {
-    decoded.messages = (decoded.messages as unknown[]).map(fromWireMessage);
+    decoded.messages = (decoded.messages as unknown[])
+      .map(fromWireMessage)
+      .filter((message) => message !== undefined);
   }`);
   }
 
@@ -353,9 +380,12 @@ ${branches}
               : `, ...(asArray(payload.${field.name}).length > 0 ? { ${field.name}: payload.${field.name} } : {})`,
           )
           .join("");
-        // Payload that belongs to a different case is a contradiction — a
-        // success carrying interrupts would finish the run with one pending —
-        // so it rejects rather than silently vanishing.
+        // Payload belonging to a different case is a contradiction — a success
+        // carrying interrupts would finish the run with one pending — but it is
+        // the SAME contradiction the JSON form can express, where it reads as an
+        // unknown property on a closed object and enforcement strips it. So it
+        // is rebuilt as it arrived and judged there, on both transports alike,
+        // rather than being decided here for one of them.
         const ownNames = new Set(entry.payload.map((field) => field.name));
         const foreign = [
           ...new Set(
@@ -366,16 +396,14 @@ ${branches}
             ),
           ),
         ];
-        const foreignChecks = foreign
+        const foreignPairs = foreign
           .map(
-            (name) => `
-      if (asArray(payload.${name}).length > 0) {
-        throw new Error("Invalid event: ${spec.jsonField} ${entry.value} cannot carry ${name}");
-      }`,
+            (name) =>
+              `, ...(asArray(payload.${name}).length > 0 ? { ${name}: payload.${name} } : {})`,
           )
           .join("");
-        return `    if (wireOutcome === ${JSON.stringify(entry.value)}) {${foreignChecks}
-      record.${spec.jsonField} = { type: ${JSON.stringify(entry.value)}${pairs} };
+        return `    if (wireOutcome === ${JSON.stringify(entry.value)}) {
+      record.${spec.jsonField} = { type: ${JSON.stringify(entry.value)}${pairs}${foreignPairs} };
     }`;
       })
       .join("\n");
@@ -384,11 +412,15 @@ ${branches}
         spec.cases.flatMap((entry) => entry.payload.map((f) => f.name)),
       ),
     ];
+    // With no outcome at all the payload belongs nowhere, so it rides
+    // at the top level, where it is an undescribed property and enforcement
+    // strips it with a warning — the same reading a JSON producer's stray
+    // property gets.
     const absentChecks = allPayloadNames
       .map(
         (name) => `
       if (asArray(payload.${name}).length > 0) {
-        throw new Error("Invalid event: absent ${spec.jsonField} cannot carry ${name}");
+        record.${name} = payload.${name};
       }`,
       )
       .join("");
@@ -399,17 +431,25 @@ ${branches}
       typeof record.${spec.jsonField} === "string" && record.${spec.jsonField} !== ""
         ? (record.${spec.jsonField} as string)
         : undefined;
-    // An unknown discriminator must not silently decode to "no ${spec.jsonField}",
-    // which would imply success; the JSON path errors on it, so this does too.
-    if (wireOutcome !== undefined && !${JSON.stringify(knownValues)}.includes(wireOutcome)) {
-      throw new Error("Invalid event: unknown ${spec.jsonField} " + wireOutcome);
-    }
     const payload: LooseRecord = {};
 ${payloadNames.map((name) => `    payload.${name} = record.${name};\n    delete record.${name};`).join("\n")}
     delete record.${spec.jsonField};
     if (wireOutcome === undefined) {${absentChecks}
     }
 ${rebuild}
+    // An unrecognised ${spec.jsonField} is still representable as JSON, so it
+    // is rebuilt as it was sent rather than judged here. Decoding bytes into
+    // events is transport work; deciding what an unrecognised value MEANS
+    // belongs to the one enforcement stage every transport shares, so that a
+    // stream cannot survive over SSE and fail over binary. Which payload an
+    // unknown case owns is unknowable, so whatever arrived rides along for
+    // enforcement to strip with the rest.
+    if (wireOutcome !== undefined && !${JSON.stringify(knownValues)}.includes(wireOutcome)) {
+      record.${spec.jsonField} = {
+        type: wireOutcome${payloadNames.map((name) => `,
+        ...(asArray(payload.${name}).length > 0 ? { ${name}: payload.${name} } : {})`).join("")}
+      };
+    }
   }`);
   }
 
@@ -425,22 +465,27 @@ ${rebuild}
     }));
   }`);
     decodeCases.push(`  if (decoded.type === ${JSON.stringify(entry.eventType)} && Array.isArray(decoded.${entry.jsonField})) {
-    for (const operation of decoded.${entry.jsonField} as LooseRecord[]) {
-      const opName =
-        protoPatch.JsonPatchOperationType[
-          operation.op as protoPatch.JsonPatchOperationType
-        ];
-      // A wire value outside the enum must not invent an operation.
-      if (typeof opName !== "string" || opName === "UNRECOGNIZED") {
-        throw new Error("Invalid event: unknown patch operation");
-      }
-      operation.op = opName.toLowerCase();
-      Object.keys(operation).forEach((key) => {
-        if (operation[key] === undefined) {
-          delete operation[key];
-        }
-      });
-    }
+    // An operation this build cannot name is DROPPED from the patch, never
+    // invented and never fatal. An operation added to JSON Patch after this
+    // build shipped arrives over SSE as an unrecognised union member, which
+    // enforcement removes from the array; throwing here made the same patch
+    // fatal over binary and survivable over SSE.
+    decoded.${entry.jsonField} = (decoded.${entry.jsonField} as LooseRecord[]).filter(
+      (operation) => {
+        const opName =
+          protoPatch.JsonPatchOperationType[
+            operation.op as protoPatch.JsonPatchOperationType
+          ];
+        if (typeof opName !== "string" || opName === "UNRECOGNIZED") return false;
+        operation.op = opName.toLowerCase();
+        Object.keys(operation).forEach((key) => {
+          if (operation[key] === undefined) {
+            delete operation[key];
+          }
+        });
+        return true;
+      },
+    );
   }`);
   }
 
@@ -646,6 +691,8 @@ ${partEntries.map(fromPartCase).join("\n")}
  */
 const MAP_CONTENT_ROLES = new Set<string>(${JSON.stringify(mapModeRoles)});
 const PARTS_CONTENT_ROLES = new Set<string>(${JSON.stringify(partsModeRoles)});
+/** Every role the Message union declares, for telling unknown from misused. */
+const KNOWN_ROLES = new Set<string>(${JSON.stringify(contentModes.map((entry) => entry.role))});
 
 const toWireMessage = (value: unknown): LooseRecord => {
   const message = asRecord(value) ?? {};
@@ -670,10 +717,17 @@ const toWireMessage = (value: unknown): LooseRecord => {
   return wire;
 };
 
-const fromWireMessage = (value: unknown): LooseRecord => {
+const fromWireMessage = (value: unknown): LooseRecord | undefined => {
   const wire = asRecord(value) ?? {};
   const message: LooseRecord = { ...wire };
   const role = typeof wire.role === "string" ? wire.role : "";
+  // A role this build does not know makes the whole message an unrecognised
+  // member of the Message union, and the caller drops it from the array —
+  // which is what enforcement does with the same message as JSON. The
+  // carrier-exclusivity checks below stay fatal because they concern roles
+  // this build DOES know, where a mismatched carrier is malformed on both
+  // transports rather than a message from a later protocol.
+  if (!KNOWN_ROLES.has(role)) return undefined;
   // Content carriers are role-exclusive; a message carrying a carrier its
   // role does not use would lose data whichever one decode preferred.
   if (
@@ -708,16 +762,15 @@ const fromWireMessage = (value: unknown): LooseRecord => {
   if (PARTS_CONTENT_ROLES.has(role) && wire.content === undefined) {
     // String content rides the content field; anything else is the parts
     // array — including an empty one, which is valid content of its own. A
-    // part with no recognisable arm is rejected, not erased: the JSON path
-    // rejects an unknown part type too, and a vanishing image changes what
-    // the message says.
-    message.content = asArray(wire.contentParts).map((part: unknown) => {
-      const converted = fromProtoContentPart(part);
-      if (converted === undefined) {
-        throw new Error("Invalid event: unreadable content part");
-      }
-      return converted;
-    });
+    // part naming no arm this build knows is DROPPED rather than rejected,
+    // because that is what the same part does on the JSON path: an
+    // unrecognised member of a union is stripped from its array, and a media
+    // kind added after this build shipped must not kill the message carrying
+    // it. Rejecting here made a future content part fatal over binary and
+    // survivable over SSE.
+    message.content = asArray(wire.contentParts)
+      .map((part: unknown) => fromProtoContentPart(part))
+      .filter((part: unknown) => part !== undefined);
   }
   if (MAP_CONTENT_ROLES.has(role) && wire.activityContent !== undefined) {
     message.content = wire.activityContent;
@@ -966,6 +1019,192 @@ function assertNoRepeatedTopLevelTags(data: Uint8Array): void {
   if (groupDepth !== 0) throw new Error("Invalid event");
 }
 
+/**
+ * The envelope carried nothing but variants this build was not compiled
+ * against — an event from a later protocol, rather than broken bytes.
+ *
+ * Kept distinct from a decode failure on purpose. An SSE reader hands such an
+ * event to the pipeline, which drops it with a warning and carries on; the
+ * binary reader cannot hand it over at all, because an unknown arm has no type
+ * string to put on it. Naming the case lets the caller drop the frame the same
+ * way, so a producer that adds an event does not kill every binary client
+ * while text clients sail past it.
+ */
+export class AGUIUnknownEventTypeError extends Error {
+  constructor(message = "Unknown event type") {
+    super(message);
+    this.name = "AGUIUnknownEventTypeError";
+  }
+}
+
+/**
+ * Reads a varint that must fit the width its position allows, returning -1 for
+ * anything unreadable or too wide.
+ *
+ * readVarint above deliberately MASKS the overflow bits instead, mirroring the
+ * wire reader so that an overlong tag cannot dodge duplicate detection. The
+ * walkers below want the opposite: masking would quietly turn a field number
+ * or a length that no protobuf encoder can produce into a smaller, plausible
+ * one, and broken bytes would read as a well-formed message.
+ *
+ * The line these walkers hold is well-formed PROTOBUF, never conformance to a
+ * schema. A tag or a length that overflows its width is not protobuf at all; a
+ * field number protobuf reserves by convention still is, and judging that would
+ * be judging the shape of an arm this build was never compiled against.
+ */
+function boundedVarint(
+  data: Uint8Array,
+  cursor: { offset: number },
+  maxBytes: number,
+  lastByteMax: number,
+): number {
+  let result = 0;
+  let shift = 0;
+  let bytes = 0;
+  for (;;) {
+    if (cursor.offset >= data.length || bytes >= maxBytes) return -1;
+    const byte = data[cursor.offset++];
+    bytes += 1;
+    // The final byte carries only the bits the width has left over, so a bigger
+    // one encodes a number the field could never hold. A continuation bit here
+    // fails the same test, since it asks for a byte the width does not have.
+    if (bytes === maxBytes && byte > lastByteMax) return -1;
+    result += (byte & 0x7f) * 2 ** shift;
+    shift += 7;
+    if ((byte & 0x80) === 0) return result;
+  }
+}
+
+/**
+ * A tag and a length are both uint32 on the wire: five bytes, the last holding
+ * four bits. Capping a tag there caps the field number at protobuf's own
+ * maximum, since the tag is the field number shifted left by three.
+ */
+const varint32 = (data: Uint8Array, cursor: { offset: number }): number =>
+  boundedVarint(data, cursor, 5, 0x0f);
+
+/** A varint-typed VALUE is uint64: ten bytes, the last holding one bit. */
+const varint64 = (data: Uint8Array, cursor: { offset: number }): number =>
+  boundedVarint(data, cursor, 10, 0x01);
+
+/**
+ * Whether the given bytes walk cleanly as a protobuf message.
+ *
+ * Used on the payload of an arm this build does not know, where nothing else
+ * can vouch for it: the generated parser skips an unknown field without ever
+ * reading inside it, so bytes that encode no message at all would otherwise be
+ * indistinguishable from an event from the future.
+ *
+ * Deliberately a WELL-FORMEDNESS check and nothing more. It asks whether the
+ * bytes are a protobuf message, never whether they are an AG-UI event — an arm
+ * this build has not been compiled against may be shaped in ways this version
+ * cannot anticipate, and demanding a familiar shape would reject exactly the
+ * future events this whole path exists to survive. For the same reason it does
+ * not recurse: at this level a length-delimited run of bytes is equally a
+ * nested message, a string or a blob, so its insides settle nothing either way.
+ */
+function walksAsMessage(data: Uint8Array): boolean {
+  const cursor = { offset: 0 };
+  const groups: number[] = [];
+  while (cursor.offset < data.length) {
+    const tag = varint32(data, cursor);
+    if (tag < 0) return false;
+    const field = Math.floor(tag / 8);
+    const wireType = tag % 8;
+    if (field === 0) return false;
+    if (wireType === 3) {
+      groups.push(field);
+    } else if (wireType === 4) {
+      // A legacy group closes with the field number it opened with; any other
+      // pairing is a frame no encoder produces.
+      if (groups.pop() !== field) return false;
+    } else if (wireType === 0) {
+      if (varint64(data, cursor) < 0) return false;
+    } else if (wireType === 1) {
+      cursor.offset += 8;
+    } else if (wireType === 5) {
+      cursor.offset += 4;
+    } else if (wireType === 2) {
+      const length = varint32(data, cursor);
+      if (length < 0 || cursor.offset + length > data.length) return false;
+      cursor.offset += length;
+    } else {
+      return false;
+    }
+    if (cursor.offset > data.length) return false;
+  }
+  return groups.length === 0;
+}
+
+/**
+ * Whether the frame names one or more arms from a later protocol and nothing
+ * this build could have read.
+ *
+ * Only consulted once the generated parser has found no known arm, because a
+ * frame that DOES carry one is already answered: protobuf ignores unknown
+ * fields, and this envelope is no exception — a later version may add fields
+ * beside the arms, and rejecting a frame for carrying one would break every
+ * older reader the moment it shipped. That rule is settled and tested.
+ *
+ * With no known arm the frame is either an event this build predates or broken
+ * bytes, and the two must not share an answer. A known tag that failed to
+ * parse, or any tag of a wire type no arm uses, means broken; at least one
+ * unknown length-delimited field whose payload walks as a message means an
+ * event from the future, which the caller drops the way enforcement drops an
+ * unrecognised event off an SSE stream.
+ */
+function namesOnlyFutureArms(data: Uint8Array): boolean {
+  const cursor = { offset: 0 };
+  const groups: number[] = [];
+  let future = 0;
+  while (cursor.offset < data.length) {
+    const tag = varint32(data, cursor);
+    if (tag < 0) return false;
+    const field = Math.floor(tag / 8);
+    const wireType = tag % 8;
+    if (field === 0) return false;
+    // Inside an unknown group every field is that group's business, so it is
+    // skipped wholesale rather than read as a tag of the envelope.
+    const atTopLevel = groups.length === 0;
+    if (wireType === 3) {
+      // Every arm of the envelope is a length-delimited message, so a known tag
+      // opening a group names an event this build knows in a shape no encoder
+      // writes. Checked before descending, because inside the group the tags
+      // belong to the group rather than to the envelope.
+      if (atTopLevel && ENVELOPE_TAGS.has(field)) return false;
+      groups.push(field);
+    } else if (wireType === 4) {
+      if (groups.pop() !== field) return false;
+    } else if (wireType === 0) {
+      if (atTopLevel && ENVELOPE_TAGS.has(field)) return false;
+      if (varint64(data, cursor) < 0) return false;
+    } else if (wireType === 1) {
+      if (atTopLevel && ENVELOPE_TAGS.has(field)) return false;
+      cursor.offset += 8;
+    } else if (wireType === 5) {
+      if (atTopLevel && ENVELOPE_TAGS.has(field)) return false;
+      cursor.offset += 4;
+    } else if (wireType === 2) {
+      const length = varint32(data, cursor);
+      if (length < 0 || cursor.offset + length > data.length) return false;
+      if (atTopLevel) {
+        // A known arm the parser could not populate: the frame names an event
+        // this build knows and failed to read it, which is broken input.
+        if (ENVELOPE_TAGS.has(field)) return false;
+        if (!walksAsMessage(data.subarray(cursor.offset, cursor.offset + length))) {
+          return false;
+        }
+        future += 1;
+      }
+      cursor.offset += length;
+    } else {
+      return false;
+    }
+    if (cursor.offset > data.length) return false;
+  }
+  return groups.length === 0 && future > 0;
+}
+
 export function decode(data: Uint8Array): BaseEvent {
   assertNoRepeatedTopLevelTags(data);
   const envelope = protoEvents.Event.decode(data);
@@ -977,6 +1216,15 @@ export function decode(data: Uint8Array): BaseEvent {
     ([, value]) => value !== undefined,
   );
   if (populated.length !== 1) {
+    // No arm this build knows. If the frame names one from a later protocol
+    // instead, the two transports must agree about it: over SSE such an event
+    // reaches enforcement and is dropped with a warning, so over binary it must
+    // not be fatal either. Anything else here is malformed and stays fatal — an
+    // empty envelope names nothing, and bytes that encode no message are broken
+    // rather than a message to learn about later.
+    if (populated.length === 0 && namesOnlyFutureArms(data)) {
+      throw new AGUIUnknownEventTypeError();
+    }
     throw new Error("Invalid event");
   }
   const entry = populated[0];
@@ -1014,10 +1262,15 @@ ${decodeCases.join("\n")}
 
   dropUndefinedDeep(decoded);
 
-  // Same gate as encode: validate what the SDK knows, carry the rest.
-  if (KNOWN_TO_CORE.has(decoded.type as string)) {
-    return EventSchemas.parse(decoded) as BaseEvent;
-  }
+  // Deliberately unvalidated. Decoding turns bytes into the event a producer
+  // sent, which is the same job the SSE reader does with JSON.parse and no
+  // more; the client pipeline then strips, enforces and verifies whatever
+  // arrives, identically for both transports. Validating here as well made the
+  // binary path strictly harsher than the text one — an event carrying
+  // anything this build did not recognise threw at the transport instead of
+  // reaching enforcement, so the same stream succeeded over SSE and failed
+  // over protobuf. The structural guards above stay: bytes that map to no
+  // valid event at all are a decode failure, and that IS transport work.
   return decoded as unknown as BaseEvent;
 }
 `;

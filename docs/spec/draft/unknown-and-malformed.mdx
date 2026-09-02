@@ -31,6 +31,37 @@ has no basis to call it invalid. But `messageId` holding a number is not a newer
 protocol; it is a defect, and a consumer that quietly coerces it hides the defect
 until it surfaces as something harder to diagnose.
 
+## Every transport answers the same way
+
+These rules bind the protocol, not a wire format. A consumer that supports more
+than one transport MUST reach the same verdict on the same event however it
+arrived: if a stream survives as JSON, it MUST survive as protobuf, and if it
+fails, it MUST fail the same way.
+
+That puts a limit on what a reader may decide for itself. Turning bytes into
+events is the reader's whole job — a frame whose bytes map to no event at all is
+a decode failure, and that judgement is properly the reader's. Whether a
+successfully read event carries something the implementation recognises is not:
+that question belongs to the one stage every transport shares. A reader that
+also validates makes its transport strictly harsher than the others, and a
+producer's choice of content type then decides whether a run survives.
+
+The binary case needs one accommodation. A text reader can hand on an event of
+an unknown type, because the type travels as a string and the shared stage can
+drop it by name. A binary reader cannot: an envelope variant it was not compiled
+against carries no name to hand on. Such a frame MUST be dropped, with a
+warning, rather than failing the run — that is the same answer the shared stage
+would have given, spelled for a transport that cannot defer the question.
+
+<Note>
+  A binary encoding cannot honour this wherever it gives a field no presence.
+  In protobuf that covers required scalars and required lists alike: a required
+  string a producer omitted arrives as an empty string, a required array as an
+  empty array, and each is accepted where the same event as JSON is rejected as
+  malformed. The schema already forbids omitting them, so this changes how a
+  defective producer is diagnosed rather than what a conformant one may send.
+</Note>
+
 ## What a consumer does with unrecognised material
 
 A consumer that exposes events to application code MUST NOT deliver unrecognised
@@ -45,6 +76,15 @@ MUST do one of:
 
 A consumer MUST NOT let a stripped property survive into the value application
 code receives, and MUST NOT let a dropped event reach it at all.
+
+This applies only where the schema closes an object, which is everywhere it
+describes one of the protocol's own. Where the schema deliberately leaves an
+object open, a member it does not describe is not unrecognised material at all
+and MUST be preserved. The JSON Patch operations are the case: RFC 6902 section
+4 requires an operation to ignore members it does not define rather than reject
+them, so a `remove` carrying a leftover `value` is a valid patch and arrives
+whole. A consumer that strips there deletes conformant data, and the warning it
+emits is about nothing.
 
 This binds the pipeline, not the parser. A library layer that only parses an
 event — the generated models in each SDK, say — keeps unknown properties on

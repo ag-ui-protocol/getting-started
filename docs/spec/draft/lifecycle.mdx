@@ -37,17 +37,18 @@ A consumer MUST reject any other event that arrives after a run has closed.
 completed from one suspended awaiting outside input; an absent outcome means
 success. A producer MUST NOT send an outcome value the schema does not describe.
 
-A consumer MUST NOT report a run as successful on the strength of an outcome it
-could not read. An outcome value the consumer does not recognise is not an
-absent outcome: absent means success because the protocol says so, whereas
-unrecognised means a terminal state named after this consumer shipped.
+An outcome a consumer does not recognise is unrecognised material like any
+other, and is stripped on the same terms as the rest. Stripping an optional
+field leaves it absent, and an absent outcome means success — so a consumer is
+not required to tell a run that completed from one that ended for a reason named
+after that consumer shipped.
 
 <Note>
-  The reference implementation does not yet honour this: enforcement strips the
-  unrecognised outcome, after which the reducer sees an absent one and reports
-  success. Correcting that is tracked against the client rather than resolved by
-  softening the rule, because a future terminal state silently reported as
-  success is the worst available failure.
+  This bounds how far the outcome set can usefully grow. A terminal state added
+  in a later version reaches an older consumer as a successful run, so a version
+  that needs older consumers to *notice* a new way of ending cannot say so
+  through `outcome` alone — it needs a carrier those consumers already treat as
+  significant.
 </Note>
 
 A single stream MAY carry several runs in sequence — a replayed thread is the
