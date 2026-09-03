@@ -18,7 +18,7 @@ from ag_ui.core import (
     RunAgentInput, BaseEvent, EventType,
     RunStartedEvent, RunFinishedEvent, RunErrorEvent,
     ToolCallEndEvent, SystemMessage, ToolCallResultEvent,
-    MessagesSnapshotEvent
+    MessagesSnapshotEvent, Interrupt, RunFinishedInterruptOutcome
 )
 
 from google.adk import Runner
@@ -205,6 +205,9 @@ class ADKAgent:
         # Message snapshot configuration
         emit_messages_snapshot: bool = False,
 
+        # Surface HITL pauses as AG-UI interrupts on RUN_FINISHED.outcome
+        emit_interrupts: bool = False,
+
         # Streaming function call arguments (Gemini 3+ via Vertex AI)
         streaming_function_call_arguments: bool = False,
 
@@ -260,6 +263,15 @@ class ADKAgent:
                 full message history (e.g., for client-side persistence or AG-UI
                 protocol compliance). Note: Clients using CopilotKit can use the
                 /agents/state endpoint instead for on-demand history retrieval.
+            emit_interrupts: Whether to surface HITL pauses as AG-UI interrupts.
+                Defaults to False. When True, a run that pauses awaiting a
+                human/long-running (frontend) tool call finishes with a
+                ``RunFinishedInterruptOutcome`` on ``RunFinishedEvent.outcome``,
+                carrying one ``Interrupt`` per unresolved tool call (``id`` and
+                ``tool_call_id`` set to the pending tool call id). This lets
+                spec-compliant AG-UI clients populate ``pendingInterrupts``.
+                Opt-in so existing CopilotKit-style resume flows (which resume via
+                a tool-result message) are unaffected.
             streaming_function_call_arguments: Whether to enable streaming of function
                 call arguments from Gemini 3+ models via Vertex AI. When enabled,
                 TOOL_CALL_ARGS events are emitted incrementally as the model streams
@@ -411,6 +423,8 @@ class ADKAgent:
         self._predict_state = predict_state
         # Message snapshot configuration
         self._emit_messages_snapshot = emit_messages_snapshot
+        # Surface HITL pauses as AG-UI interrupts on RUN_FINISHED.outcome (opt-in)
+        self._emit_interrupts = emit_interrupts
         self._capabilities = capabilities
         # A2UI auto-injection config (mirrors StrandsAgentConfig.a2ui). None
         # disables auto-injection unless the runtime forwards injectA2UITool.
@@ -583,6 +597,7 @@ class ADKAgent:
         # AG-UI specific
         predict_state: Optional[Iterable[PredictStateMapping]] = None,
         emit_messages_snapshot: bool = False,
+        emit_interrupts: bool = False,
         streaming_function_call_arguments: bool = False,
         # Session identity
         use_thread_id_as_session_id: bool = False,
@@ -672,6 +687,7 @@ class ADKAgent:
             save_session_to_memory_on_cleanup=save_session_to_memory_on_cleanup,
             predict_state=predict_state,
             emit_messages_snapshot=emit_messages_snapshot,
+            emit_interrupts=emit_interrupts,
             streaming_function_call_arguments=streaming_function_call_arguments,
             use_thread_id_as_session_id=use_thread_id_as_session_id,
             capabilities=capabilities,
@@ -2185,6 +2201,29 @@ class ADKAgent:
                     logger.debug(f"Task completed without sending None signal (thread {execution.thread_id})")
                     break
     
+    @staticmethod
+    def _build_interrupt_outcome(
+        pending_tool_call_ids: List[str],
+        *,
+        emit_interrupts: bool,
+    ) -> Optional[RunFinishedInterruptOutcome]:
+        """Build a ``RunFinishedInterruptOutcome`` from unresolved tool calls.
+
+        Returns ``None`` (→ legacy ``outcome``-less ``RUN_FINISHED``) when the
+        feature is disabled or the run didn't pause on any tool call. Otherwise
+        one ``Interrupt`` per pending tool call, with both ``id`` and
+        ``tool_call_id`` set to the tool call id so the client can correlate and
+        address it in the ``resume`` array of the next ``RunAgentInput``.
+        """
+        if not (emit_interrupts and pending_tool_call_ids):
+            return None
+        return RunFinishedInterruptOutcome(
+            interrupts=[
+                Interrupt(id=tcid, reason="tool_call", tool_call_id=tcid)
+                for tcid in pending_tool_call_ids
+            ]
+        )
+
     async def _start_new_execution(
         self,
         input: RunAgentInput,
@@ -2265,6 +2304,12 @@ class ADKAgent:
             # terminal event per run, and @ag-ui/client's state machine rejects
             # a RUN_FINISHED that follows a RUN_ERROR. See issue #1892.
             run_errored = False
+            # Track tool calls that end without a result within this run. A
+            # frontend / long-running (HITL) tool call emits TOOL_CALL_START/
+            # ARGS/END but no TOOL_CALL_RESULT, so whatever remains here at
+            # RUN_FINISHED is the set the run is paused on. Only used when
+            # emit_interrupts is enabled.
+            pending_tool_call_ids: List[str] = []
             async for event in self._stream_events(execution):
                 # HITL pending_tool_calls persistence happens on the producer
                 # side via _HitlDeferringQueue: HITL TOOL_CALL_END events are
@@ -2279,11 +2324,18 @@ class ADKAgent:
                 # observed, so replay logic skips it on resumption (fixes #437
                 # replay bug). This is in-memory bookkeeping; it does NOT
                 # touch session.state or any DB marker.
+                if isinstance(event, ToolCallEndEvent):
+                    if event.tool_call_id not in pending_tool_call_ids:
+                        pending_tool_call_ids.append(event.tool_call_id)
+
                 if isinstance(event, ToolCallResultEvent):
                     logger.info(f"Detected ToolCallResultEvent with id: {event.tool_call_id}")
                     self._session_manager.mark_messages_processed(
                         app_name, execution.thread_id, [event.tool_call_id]
                     )
+                    # Resolved in-stream (backend tool) — not a pending interrupt.
+                    if event.tool_call_id in pending_tool_call_ids:
+                        pending_tool_call_ids.remove(event.tool_call_id)
 
                 if isinstance(event, RunErrorEvent):
                     run_errored = True
@@ -2303,10 +2355,22 @@ class ADKAgent:
                 )
             else:
                 logger.debug(f"Emitting RUN_FINISHED for thread {input.thread_id}, run {input.run_id}")
+                # If the run paused on HITL/long-running tool calls, surface them
+                # as AG-UI interrupts on the outcome (opt-in). See issue for the
+                # resume-consumption follow-up.
+                outcome = self._build_interrupt_outcome(
+                    pending_tool_call_ids, emit_interrupts=self._emit_interrupts
+                )
+                if outcome is not None:
+                    logger.debug(
+                        f"RUN_FINISHED with {len(pending_tool_call_ids)} interrupt(s) "
+                        f"for thread {input.thread_id}"
+                    )
                 yield RunFinishedEvent(
                     type=EventType.RUN_FINISHED,
                     thread_id=input.thread_id,
-                    run_id=input.run_id
+                    run_id=input.run_id,
+                    outcome=outcome,
                 )
             
         except Exception as e:
