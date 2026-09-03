@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@ag-ui/core": "workspace:*",
+    "zod": "^3.25.76",
     "@bufbuild/protobuf": "^2.2.5",
     "@protobuf-ts/protoc": "^2.11.1"
   },

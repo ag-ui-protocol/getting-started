@@ -1,4 +1,4 @@
-import { EventSchemas } from "@ag-ui/core";
+import { EventSchemas } from "@ag-ui/core/schemas";
 
 import fixture from "../../../../../fixtures/null-omission.json";
 

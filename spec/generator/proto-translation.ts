@@ -560,7 +560,8 @@ ${rebuild}
 // Source: ${model.schemaId}
 // Regenerate: pnpm --filter @ag-ui/spec generate
 
-import { BaseEvent, AGUIEvent, EventSchemas, EventType } from "@ag-ui/core";
+import { BaseEvent, AGUIEvent, EventType } from "@ag-ui/core";
+import { EventSchemas } from "@ag-ui/core/schemas";
 import * as protoEvents from "./generated/events";
 import * as protoPatch from "./generated/patch";
 

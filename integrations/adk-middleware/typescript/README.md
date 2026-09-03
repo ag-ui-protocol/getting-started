@@ -15,7 +15,7 @@ pnpm add @ag-ui/adk
 ### Peer Dependencies
 
 - `@ag-ui/client` (>=0.0.55)
-- `@ag-ui/core` (>=0.0.55)
+- `@ag-ui/core` (>=0.0.59)
 - `rxjs` (7.8.1)
 
 ## TypeScript Client Usage

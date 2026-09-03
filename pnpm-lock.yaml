@@ -440,6 +440,9 @@ importers:
       rxjs:
         specifier: 7.8.1
         version: 7.8.1
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -532,6 +535,10 @@ importers:
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
 
   integrations/aws-strands/typescript:
+    dependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@ag-ui/a2ui-toolkit':
         specifier: workspace:*
@@ -590,9 +597,6 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
 
   integrations/aws-strands/typescript/examples:
     dependencies:
@@ -1284,6 +1288,9 @@ importers:
       '@ag-ui/client':
         specifier: workspace:*
         version: link:../../sdks/typescript/packages/client
+      '@ag-ui/core':
+        specifier: workspace:*
+        version: link:../../sdks/typescript/packages/core
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
         version: 0.17.4
@@ -1635,10 +1642,6 @@ importers:
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
 
   sdks/typescript/packages/core:
-    dependencies:
-      zod:
-        specifier: 3.25.76
-        version: 3.25.76
     devDependencies:
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
@@ -1646,6 +1649,9 @@ importers:
       '@vitest/coverage-istanbul':
         specifier: ^4.0.18
         version: 4.0.18(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4))
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.10
       eslint:
         specifier: ^9.37.0
         version: 9.37.0(jiti@2.6.1)
@@ -1661,6 +1667,9 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
 
   sdks/typescript/packages/encoder:
     dependencies:
@@ -1704,6 +1713,9 @@ importers:
       '@protobuf-ts/protoc':
         specifier: ^2.11.1
         version: 2.11.1
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
     devDependencies:
       '@arethetypeswrong/cli':
         specifier: ^0.17.4

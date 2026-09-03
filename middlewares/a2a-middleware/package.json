@@ -29,14 +29,16 @@
   "dependencies": {
     "@a2a-js/sdk": "^0.2.2",
     "ai": "^4.3.16",
-    "zod": "^3.22.4"
+    "zod": "^3.25.18"
   },
   "peerDependencies": {
     "@ag-ui/client": ">=0.0.40",
+    "@ag-ui/core": ">=0.0.59",
     "rxjs": "7.8.1"
   },
   "devDependencies": {
     "@ag-ui/client": "workspace:*",
+    "@ag-ui/core": "workspace:*",
     "@types/node": "^20.11.19",
     "@vitest/coverage-istanbul": "^4.0.18",
     "publint": "^0.3.12",
