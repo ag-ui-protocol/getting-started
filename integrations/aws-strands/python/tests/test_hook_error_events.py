@@ -1009,8 +1009,8 @@ class TestTheLogContract:
 
     Eight sites log with ``exc_info``; ``args_streamer`` is the documented
     exception and is asserted as such, so adding a traceback there fails and
-    sends whoever did it to the sentence in ARCHITECTURE.md that has to change
-    with it.
+    sends whoever did it to the sentence in ``_hook_error``'s docstring that
+    has to change with it.
     """
 
     async def _records_for(self, caplog, thread, config, stream, messages=None):
@@ -1041,7 +1041,7 @@ class TestTheLogContract:
             f"{[r.getMessage() for r in records]}"
         )
         assert all(r.levelno == logging.WARNING for r in records), (
-            f"{label} logs at warning, which ARCHITECTURE.md states; got "
+            f"{label} must log at warning level; got "
             f"{[r.levelname for r in records]}"
         )
         assert all(r.exc_info for r in records), (
@@ -1069,8 +1069,8 @@ class TestTheLogContract:
         assert len(records) == 1
         assert records[0].levelno == logging.WARNING
         assert not records[0].exc_info, (
-            "if this site gained exc_info, ARCHITECTURE.md's "
-            "'eight of the nine sites' claim needs updating with it"
+            "if this site gained exc_info, _hook_error's docstring and this "
+            "file's 'eight of the nine sites' claim need updating with it"
         )
 
 
@@ -1081,7 +1081,7 @@ class TestEverySwallowSiteReports:
     guards is the opposite and likelier: a future hook site that catches, logs
     and carries on, and forgets to report. That site would be invisible to every
     other test here, and it would quietly falsify the "nine sites" arithmetic
-    the docstrings and ARCHITECTURE.md are written around.
+    the docstrings are written around.
 
     The set of hooks is read off the config dataclasses rather than listed here,
     so adding a hook field extends this check automatically. The rule keys on
@@ -1204,12 +1204,12 @@ class TestEverySwallowSiteReports:
             f"{[lineno for lineno, _ in offenders]} (hooks: "
             f"{sorted({hook for _, hook in offenders})}). Add "
             "`yield _hook_error(<hook>, <tool>, <exc>)` beside the log, and "
-            "update the site count in the three places that state it: this "
-            "file's docstring, _hook_error's docstring and ARCHITECTURE.md."
+            "update the site count in the two places that state it: this "
+            "file's docstring and _hook_error's docstring."
         )
 
     def test_the_site_count_is_what_everything_else_claims(self):
-        """Nine. Written down in four places, so it is asserted in one."""
+        """Nine. Written down in three places, so it is asserted in one."""
         reporting = {
             lineno
             for lineno, _hook, _handler, body in self._guarded_hook_calls()
@@ -1217,9 +1217,9 @@ class TestEverySwallowSiteReports:
         }
         assert len(reporting) == 9, (
             f"found {len(reporting)} reporting hook handlers at agent.py "
-            f"{sorted(reporting)}, not the nine that this file's docstring, "
-            "_hook_error's docstring and ARCHITECTURE.md all state. Whichever "
-            "moved, move the other three."
+            f"{sorted(reporting)}, not the nine that this file's docstring "
+            "and _hook_error's docstring both state. Whichever moved, move "
+            "the other two."
         )
 
     def test_the_carve_out_is_still_a_carve_out(self):

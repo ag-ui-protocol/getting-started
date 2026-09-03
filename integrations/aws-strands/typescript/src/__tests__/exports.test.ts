@@ -97,7 +97,7 @@ describe("public export surface", () => {
  * nothing reads it: `UrlFetchPolicy` and `DEFAULT_URL_FETCH_POLICY` were
  * documented as exports of this package while neither entry re-exported them.
  *
- * Every expectation below is derived: from the documents by parsing them, and
+ * Every expectation below is derived: from the README by parsing it, and
  * from the real manifests and the namespace objects imported above. Nothing
  * here restates a package list or a count as a literal, because a literal
  * drifts in exactly the same way the prose does.
@@ -105,7 +105,7 @@ describe("public export surface", () => {
  * Each assertion is also scoped to a structured region: a fenced block, a
  * single import statement, an anchored comment line. A looser rule ("every
  * backticked token must exist") is cheapest to satisfy by un-backticking the
- * token, which makes the documents vaguer while CI goes green; deleting a
+ * token, which makes the README vaguer while CI goes green; deleting a
  * fence or an anchored line is visible in review.
  */
 
@@ -113,14 +113,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(HERE, "..", "..");
 const README_PATH = join(PACKAGE_ROOT, "README.md");
 
-/** ARCHITECTURE.md has no `ts` fences today; scanned so one added there is covered. */
-const SCANNED_DOCS = [
-  { label: "typescript/README.md", path: README_PATH },
-  {
-    label: "ARCHITECTURE.md",
-    path: resolve(PACKAGE_ROOT, "..", "ARCHITECTURE.md"),
-  },
-];
+/** The one document that carries `ts` fences naming this package's entries. */
+const SCANNED_DOCS = [{ label: "typescript/README.md", path: README_PATH }];
 
 const ENTRY_NAMESPACES: Record<string, object> = {
   "@ag-ui/aws-strands": pkg,
@@ -293,7 +287,7 @@ function pnpmAddPackages(fenceBody: string): string[] {
 }
 
 describe("documented export and install surface", () => {
-  it("resolves every named import in the docs' ts fences against the real entry namespaces", () => {
+  it("resolves every named import in the README's ts fences against the real entry namespaces", () => {
     const imports = SCANNED_DOCS.flatMap(documentedEntryImports);
     // A regex that silently matches nothing is a test that asserts nothing.
     expect(

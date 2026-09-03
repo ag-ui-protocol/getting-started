@@ -14,7 +14,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AddressInfo } from "node:net";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -698,7 +698,18 @@ describe("prompts the dojo suites depend on", () => {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const API_DIR = join(HERE, "api");
+const EXAMPLES_DIR = resolve(HERE, "..");
 const README = readFileSync(resolve(HERE, "../../README.md"), "utf8");
+
+/**
+ * The examples package's own README.
+ *
+ * It repeats the package README's claims about which demos exist and how they
+ * start, so the same derived sets have to be held against both. A claim that is
+ * machine-checked in one copy and prose in the other is the copy that goes
+ * stale.
+ */
+const EXAMPLES_README = readFileSync(join(EXAMPLES_DIR, "README.md"), "utf8");
 
 /** Every demo file under `server/api/`, by the name the README calls it. */
 const apiDemos = readdirSync(API_DIR)
@@ -746,6 +757,12 @@ const scriptedDemos = new Set(
  * the whole reason the lookup exists.
  */
 const NUMBER_WORDS: Record<string, number> = {
+  // Ordinals as well as cardinals: the examples README names a file as the
+  // eleventh runner, and the same lookup has to refuse an ordinal it does not
+  // know rather than let the sentence go unchecked.
+  tenth: 10,
+  eleventh: 11,
+  twelfth: 12,
   one: 1,
   two: 2,
   three: 3,
@@ -773,16 +790,31 @@ function numberWord(word: string, where: string): number {
   return value!;
 }
 
-/** The README slice under one `##` heading. */
-function section(name: string): string {
-  const start = README.indexOf(`\n## ${name}\n`);
+/** A README slice under one `##` heading. */
+function section(doc: string, name: string): string {
+  const start = doc.indexOf(`\n## ${name}\n`);
   expect(
     start,
     `the README has no "## ${name}" section, so the claims this test scopes to it cannot be found`,
   ).toBeGreaterThan(-1);
-  const rest = README.slice(start + 1);
+  const rest = doc.slice(start + 1);
   const end = rest.indexOf("\n## ", 1);
   return end === -1 ? rest : rest.slice(0, end);
+}
+
+/**
+ * A README's lead-in, above its first `##` heading.
+ *
+ * A region like any other, so a numeral in the opening sentence is checked
+ * against the same derived set rather than against a search of the whole file.
+ */
+function preamble(doc: string): string {
+  const end = doc.indexOf("\n## ");
+  expect(
+    end,
+    "the README has no `##` heading, so its lead-in cannot be told from the rest of the file",
+  ).toBeGreaterThan(-1);
+  return doc.slice(0, end);
 }
 
 /**
@@ -791,21 +823,78 @@ function section(name: string): string {
  * Collapsed because the prose is hard-wrapped and the sentences below cross
  * line breaks; scoped to a block because an unscoped search for a numeral
  * would be satisfied by any incidental occurrence elsewhere in the file.
+ *
+ * The opening may be a pattern, which is how a paragraph that begins with a
+ * numeral gets anchored without writing that numeral into the test.
  */
-function block(region: string, opening: string): string {
+function block(region: string, opening: string | RegExp): string {
   const found = region
     .split(/\n{2,}/)
-    .filter((part) => part.trimStart().startsWith(opening));
+    .filter((part) =>
+      typeof opening === "string"
+        ? part.trimStart().startsWith(opening)
+        : opening.test(part.trimStart()),
+    );
   expect(
     found,
-    `the README has no paragraph starting ${JSON.stringify(opening)}`,
+    `the README has no paragraph starting ${JSON.stringify(String(opening))}`,
   ).toHaveLength(1);
   return unwrapped(found[0]!);
 }
 
+/**
+ * The data rows of a pipe table in a region, cell by cell.
+ *
+ * Anchored on the header's first cell and on the separator line under it, so a
+ * table that is retitled or restructured fails here instead of yielding an
+ * empty row list that every later assertion would pass over.
+ */
+function tableRows(region: string, headerCell: string): string[][] {
+  const lines = region.split("\n");
+  const start = lines.findIndex((line) => line.startsWith(`| ${headerCell}`));
+  expect(
+    start,
+    `the README has no table whose first column is "${headerCell}"`,
+  ).toBeGreaterThan(-1);
+  expect(
+    lines[start + 1] ?? "",
+    `the "${headerCell}" table has no separator row under its header`,
+  ).toMatch(/^\|\s*-/);
+
+  const rows: string[][] = [];
+  for (const line of lines.slice(start + 2)) {
+    if (!line.startsWith("|")) break;
+    rows.push(
+      line
+        .split("|")
+        .slice(1, -1)
+        .map((cell) => cell.replace(/`/g, "").trim()),
+    );
+  }
+  expect(
+    rows.length,
+    `the "${headerCell}" table has a header but no rows`,
+  ).toBeGreaterThan(0);
+  return rows;
+}
+
+/** The fenced blocks of a region, each as its content lines. */
+function fences(region: string): string[][] {
+  const parts = region.split(/^```.*$/m);
+  // An odd number of fence markers leaves a block unterminated, and the odd
+  // split below would then read prose as code.
+  expect(
+    parts.length % 2,
+    "the README has an unterminated code fence in this region",
+  ).toBe(1);
+  return parts
+    .filter((_, index) => index % 2 === 1)
+    .map((part) => part.split("\n").filter((line) => line.trim().length > 0));
+}
+
 /** One row of the Key Files table, by the file it describes. */
-function keyFilesRow(file: string): string {
-  const rows = section("Key Files")
+function keyFilesRow(doc: string, file: string): string {
+  const rows = section(doc, "Key Files")
     .split("\n")
     .filter((line) => line.startsWith(`| \`${file}\``));
   expect(rows, `the Key Files table has no row for \`${file}\``).toHaveLength(
@@ -835,15 +924,16 @@ function claim(
 }
 
 /** Route table rows: the first cell of every line that starts a `/` path. */
-function documentedRoutes(): string[] {
-  return README.split("\n")
+function documentedRoutes(doc: string): string[] {
+  return doc
+    .split("\n")
     .filter((line) => line.startsWith("| `/"))
     .map((line) => line.split("|")[1]!.replace(/`/g, "").trim());
 }
 
 describe("README claims about the demos", () => {
   it("advertises exactly the routes the dojo mounts", () => {
-    const documented = documentedRoutes();
+    const documented = documentedRoutes(README);
     const mounted = Object.keys(DEMOS).map((path) => `/${path}`);
 
     // Length as well as set membership, so a duplicated row cannot hide
@@ -856,7 +946,7 @@ describe("README claims about the demos", () => {
 
   it("counts the runnable demos the way the scripts do", () => {
     const intro = block(
-      section("Quick Start"),
+      section(README, "Quick Start"),
       "The `examples/` package ships a",
     );
     const [, word] = claim(
@@ -874,7 +964,7 @@ describe("README claims about the demos", () => {
   it("counts the scripted demos the way the scripts do", () => {
     const [, word] = claim(
       block(
-        section("Quick Start"),
+        section(README, "Quick Start"),
         "Every file under `examples/server/api/*.ts`",
       ),
       /The (\w+) with a `pnpm run <demo>` script/,
@@ -889,7 +979,7 @@ describe("README claims about the demos", () => {
 
   it("counts standalone runners the way the files do", () => {
     const [, runners, scripted] = claim(
-      keyFilesRow("examples/server/api/*.ts"),
+      keyFilesRow(README, "examples/server/api/*.ts"),
       /(\w+) carry a standalone runner, (\w+) of those scripted/,
       "that N api files carry a standalone runner, M of those scripted",
     );
@@ -908,7 +998,7 @@ describe("README claims about the demos", () => {
     const factoryOnly = apiDemos.filter((demo) => !runnerDemos.has(demo));
     const [, word] = claim(
       block(
-        section("Quick Start"),
+        section(README, "Quick Start"),
         "Every file under `examples/server/api/*.ts`",
       ),
       /The multi-agent and (\w+) a2ui files export the factory only/,
@@ -936,7 +1026,7 @@ describe("README claims about the demos", () => {
     // README tells the reader to start with `tsx` by hand.
     const [, file] = claim(
       block(
-        section("Quick Start"),
+        section(README, "Quick Start"),
         "Every file under `examples/server/api/*.ts`",
       ),
       /`([\w.-]+)\.ts` sits between the two: it carries the same standalone runner, but no `pnpm` script points at it/,
@@ -948,5 +1038,350 @@ describe("README claims about the demos", () => {
       scriptedDemos.has(file!),
       `a pnpm script now points at ${file}.ts, so the README should list it with the scripted demos`,
     ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What the examples README says about these demos, checked against them
+// ---------------------------------------------------------------------------
+
+/** The "Available agents" prose, which carries all of that page's counts. */
+function agentsProse(): string {
+  return block(
+    section(EXAMPLES_README, "Available agents"),
+    // Anchored on a pattern because the paragraph opens with the numeral this
+    // test is here to check, and spelling that numeral into the anchor would
+    // make the anchor agree with the claim by construction.
+    /^\w+ demos have a `pnpm run <demo>` script/,
+  );
+}
+
+/** The demo table's rows: which file, which route, how it starts alone. */
+function demoRows(): { file: string; route: string; standalone: string }[] {
+  return tableRows(section(EXAMPLES_README, "Available agents"), "File").map(
+    (cells) => {
+      expect(
+        cells,
+        `the demo table row ${JSON.stringify(cells.join(" | "))} does not have the three cells this test reads`,
+      ).toHaveLength(3);
+      return { file: cells[0]!, route: cells[1]!, standalone: cells[2]! };
+    },
+  );
+}
+
+/** The demo a table row is about, from the file it names. */
+function demoOf(file: string): string {
+  expect(
+    file,
+    `the demo table lists "${file}", which is not spelled as one of the .ts files under server/api/`,
+  ).toMatch(/\.ts$/);
+  return file.replace(/\.ts$/, "");
+}
+
+/**
+ * The project tree, read out of its fence as paths plus what each one is.
+ *
+ * Indented one four-character unit per level, so an entry's name alone does not
+ * say where it lives and the depth of its prefix has to be counted. A line this
+ * cannot parse fails loudly rather than being skipped, because a skipped line
+ * is a path nobody checks.
+ */
+function projectTree(): { path: string; directory: boolean }[] {
+  const blocks = fences(section(EXAMPLES_README, "Project structure"));
+  expect(
+    blocks,
+    'the "Project structure" section no longer holds exactly one code fence',
+  ).toHaveLength(1);
+  const [root, ...lines] = blocks[0]!;
+
+  // The root line is a claim too: a package that moves leaves the tree naming
+  // a path the repo no longer has.
+  expect(
+    EXAMPLES_DIR.endsWith(`/${root!.trim()}`),
+    `the project tree is rooted at "${root?.trim()}", which is not where this package sits`,
+  ).toBe(true);
+  expect(
+    lines.length,
+    "the project tree fence has a root line and nothing under it",
+  ).toBeGreaterThan(0);
+
+  const parents: string[] = [];
+  return lines.map((line) => {
+    const parsed = /^((?:│   |    )*)(?:├──|└──) (\S+)/.exec(line);
+    expect(
+      parsed,
+      `the project tree has a line this test cannot parse: ${JSON.stringify(line)}`,
+    ).not.toBeNull();
+    const depth = parsed![1]!.length / 4;
+    const name = parsed![2]!;
+    const directory = name.endsWith("/");
+    const bare = directory ? name.slice(0, -1) : name;
+    // Truncate first: the entry sits under however many levels its prefix
+    // spelled, whatever the deeper listing before it was.
+    parents.length = depth;
+    const path = [...parents, bare].join("/");
+    if (directory) parents.push(bare);
+    return { path, directory };
+  });
+}
+
+describe("examples README claims about the demos", () => {
+  it("lists exactly the demos the dojo mounts", () => {
+    const listed = demoRows().map((row) => demoOf(row.file));
+    const mounted = Object.keys(DEMOS);
+
+    // Length as well as set membership, the same way the package README's
+    // route table is held: a row repeated for one demo, which is how a
+    // hand-edited table drifts, vanishes inside a set comparison.
+    expect(listed).toHaveLength(mounted.length);
+    expect(new Set(listed)).toEqual(new Set(mounted));
+  });
+
+  it("points every row at the route its own demo is served on", () => {
+    const rows = demoRows();
+    const documented = rows.map((row) => row.route);
+    const mounted = Object.keys(DEMOS).map((path) => `/${path}`);
+
+    expect(documented).toHaveLength(mounted.length);
+    expect(new Set(documented)).toEqual(new Set(mounted));
+    // Row by row as well as column by column: two routes swapped between rows
+    // leave both sets identical and still send the reader to another demo.
+    for (const row of rows) {
+      expect(row.route, row.file).toBe(`/${demoOf(row.file)}`);
+    }
+  });
+
+  it("counts the demos the way the dojo mounts them", () => {
+    const [, word] = claim(
+      unwrapped(preamble(EXAMPLES_README)),
+      /(\w+) runnable AG-UI demos built on/,
+      "how many runnable demos it opens with",
+    );
+
+    expect(
+      numberWord(word!, "runnable demos ship, in the examples README"),
+      "the examples README's opening numeral disagrees with the demos the dojo mounts",
+    ).toBe(Object.keys(DEMOS).length);
+  });
+
+  it("counts the scripted demos the way the scripts do", () => {
+    const [, word] = claim(
+      agentsProse(),
+      /^(\w+) demos have a `pnpm run <demo>` script/,
+      "that N demos have a `pnpm run <demo>` script",
+    );
+
+    expect(
+      numberWord(word!, "demos have a run script, in the examples README"),
+      "the examples README disagrees with the scripts in examples/package.json",
+    ).toBe(scriptedDemos.size);
+  });
+
+  it("counts the standalone runners the way the files do", () => {
+    const [, word] = claim(
+      agentsProse(),
+      /(\w+) carry a standalone runner, guarded so importing the file starts no server/,
+      "that N files carry a standalone runner",
+    );
+
+    expect(
+      numberWord(
+        word!,
+        "files carry a standalone runner, in the examples README",
+      ),
+      "the examples README disagrees with the files that call `runIfMain`",
+    ).toBe(runnerDemos.size);
+  });
+
+  it("marks each row the way the scripts and the files start it", () => {
+    const rows = demoRows();
+    const marked = (pattern: RegExp, what: string): Set<string> => {
+      const found = rows.filter((row) => pattern.test(row.standalone));
+      expect(
+        found.length,
+        `the demo table marks no row as ${what}, so that column now says something this test cannot read`,
+      ).toBeGreaterThan(0);
+      return new Set(found.map((row) => demoOf(row.file)));
+    };
+
+    const scripted = marked(/pnpm/, "started by a `pnpm` script");
+    const dojoOnly = marked(/dojo/, "reachable through the dojo only");
+    const byHand = marked(/tsx/, "started with `tsx` by hand");
+
+    // The three groups against the three derived sets, not against each
+    // other's totals: a demo moved between two groups keeps every count in
+    // this file right and still tells the reader to run it a way that fails.
+    expect(
+      scripted,
+      "the demo table's scripted rows disagree with examples/package.json",
+    ).toEqual(scriptedDemos);
+    expect(
+      dojoOnly,
+      "the demo table's dojo-only rows disagree with the files that call `runIfMain`",
+    ).toEqual(new Set(apiDemos.filter((demo) => !runnerDemos.has(demo))));
+    expect(
+      byHand,
+      "the demo table's tsx rows disagree with the runners that have no script",
+    ).toEqual(
+      new Set([...runnerDemos].filter((demo) => !scriptedDemos.has(demo))),
+    );
+
+    // Exhaustive, so a row given some fourth marking is not quietly left out
+    // of all three checks above.
+    expect(
+      scripted.size + dojoOnly.size + byHand.size,
+      "some demo table row is marked in a way none of the three checks above read",
+    ).toBe(rows.length);
+  });
+
+  it("names every file that exports a factory and nothing else", () => {
+    const factoryOnly = apiDemos.filter((demo) => !runnerDemos.has(demo));
+    const [, word] = claim(
+      agentsProse(),
+      /The multi-agent and (\w+) a2ui files export their factory only/,
+      "that multi-agent and N a2ui files export their factory only",
+    );
+
+    expect(
+      numberWord(
+        word!,
+        "a2ui files export the factory only, in the examples README",
+      ),
+      "the examples README disagrees with the a2ui files that carry no runner",
+    ).toBe(factoryOnly.filter((demo) => demo.startsWith("a2ui")).length);
+    // The naming too, not just its numeral: a file that quietly loses its
+    // runner keeps the count honest only by making the sentence name the wrong
+    // files.
+    expect(new Set(factoryOnly)).toEqual(
+      new Set([
+        "multi-agent",
+        ...apiDemos.filter((demo) => demo.startsWith("a2ui")),
+      ]),
+    );
+  });
+
+  it("keeps true the one demo that runs standalone unscripted", () => {
+    const [, file, ordinal] = claim(
+      agentsProse(),
+      /`([\w.-]+)\.ts` is the (\w+), with no script pointing at it/,
+      "that one named file is the last runner and has no `pnpm` script pointing at it",
+    );
+
+    expect(runnerDemos.has(file!), `${file}.ts calls runIfMain`).toBe(true);
+    expect(
+      scriptedDemos.has(file!),
+      `a pnpm script now points at ${file}.ts, so the examples README should list it with the scripted demos`,
+    ).toBe(false);
+    // The ordinal says this file is the last of the runners, so it is a claim
+    // about the runner count as well as about the file.
+    expect(
+      numberWord(ordinal!, "runners the unscripted demo is the last of"),
+      "the examples README's ordinal disagrees with the files that call `runIfMain`",
+    ).toBe(runnerDemos.size);
+  });
+
+  it("draws a project tree whose every entry is on disk", () => {
+    for (const { path, directory } of projectTree()) {
+      const full = join(EXAMPLES_DIR, path);
+      expect(
+        existsSync(full),
+        `the project tree lists ${path}, which is not in this package`,
+      ).toBe(true);
+      expect(
+        statSync(full).isDirectory(),
+        `the project tree draws ${path} as a ${directory ? "directory" : "file"}`,
+      ).toBe(directory);
+    }
+  });
+
+  it("draws every file in the directories the tree opens up", () => {
+    // The drift a per-path existence check cannot see, and the way the
+    // LangGraph tree is wrong: right about everything it names, silent about
+    // what has been added since. Only the directories the tree opens up are
+    // held to this, and the package root is not one of them: the tree leaves
+    // out this README on purpose, so the same rule there would fail on an
+    // omission that is deliberate.
+    const listed = new Map<string, Set<string>>();
+    for (const { path } of projectTree()) {
+      const cut = path.lastIndexOf("/");
+      if (cut === -1) continue;
+      const parent = path.slice(0, cut);
+      const names = listed.get(parent) ?? new Set<string>();
+      names.add(path.slice(cut + 1));
+      listed.set(parent, names);
+    }
+
+    expect(
+      listed.size,
+      "the project tree opens up no directory at all, so this test would check nothing",
+    ).toBeGreaterThan(0);
+    for (const [parent, names] of listed) {
+      expect(
+        [...names].sort(),
+        `the project tree's ${parent}/ listing`,
+      ).toEqual(readdirSync(join(EXAMPLES_DIR, parent)).sort());
+    }
+  });
+
+  it("names the flag every demo script actually passes", () => {
+    const [, flag] = claim(
+      block(section(EXAMPLES_README, "How to run"), "Create a `.env` beside"),
+      /Every demo script passes `([^`]+)`/,
+      "that every demo script passes a named flag",
+    );
+
+    // Which scripts those are is derived: a script that runs a file under
+    // `server/` starts a demo, which leaves `test` and `typecheck` out
+    // without either of them being named here.
+    const demoScripts = Object.entries(exampleScripts).filter(([, command]) =>
+      command.includes("server/"),
+    );
+    expect(
+      demoScripts.length,
+      "no script in examples/package.json runs anything under server/",
+    ).toBeGreaterThan(0);
+    for (const [name, command] of demoScripts) {
+      expect(command, `the \`${name}\` script`).toContain(flag);
+    }
+  });
+
+  it("runs the demos with commands this package defines", () => {
+    const blocks = fences(section(EXAMPLES_README, "How to run"));
+    // Scoped to the fences from the one that changes directory here onward.
+    // The fences above it run from the repo root, where `pnpm install` is not
+    // one of this package's scripts and should not be read as one.
+    const arrived = blocks.findIndex((lines) =>
+      lines.some((line) => line.startsWith("cd ")),
+    );
+    expect(
+      arrived,
+      "no fence under How to run changes directory into this package, so its `pnpm` lines cannot be scoped to these scripts",
+    ).toBeGreaterThan(-1);
+
+    const target = blocks[arrived]!.find((line) => line.startsWith("cd "))!
+      .slice("cd ".length)
+      .trim();
+    expect(
+      EXAMPLES_DIR.endsWith(`/${target}`),
+      `How to run changes directory to "${target}", which is not where this package sits`,
+    ).toBe(true);
+
+    const named = blocks
+      .slice(arrived)
+      .flatMap((lines) =>
+        lines.map((line) => /^pnpm ([\w-]+)$/.exec(line.trim())),
+      )
+      .filter((match): match is RegExpExecArray => match !== null)
+      .map((match) => match[1]!);
+    expect(
+      named.length,
+      "no fence under How to run runs a bare `pnpm <script>`, so this test would check nothing",
+    ).toBeGreaterThan(0);
+    for (const script of named) {
+      expect(
+        Object.keys(exampleScripts),
+        `the examples README runs \`pnpm ${script}\``,
+      ).toContain(script);
+    }
   });
 });

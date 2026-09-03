@@ -191,8 +191,9 @@ const ABNORMAL_STOP_REASONS = new Map<string, string>([
  * `ModelThrottledException`, and every other exception is re-raised with no
  * `ForceStopEvent` at all, so a provider 5xx reports `STRANDS_ERROR` there
  * while it reports `STRANDS_FORCE_STOP` here. This adapter carries no version
- * branching for that and is not going to: it mirrors current Python. See
- * `ARCHITECTURE.md` for the releases that were driven to establish it.
+ * branching for that and is not going to: it mirrors current Python. Each of
+ * those releases was driven with a `Model` raising a plain `RuntimeError`
+ * through `Agent.stream_async` to establish which code it reports.
  *
  * `ContextWindowOverflowError` is deliberately absent even though Python lists
  * `ContextWindowOverflowException` in the same re-raise tuple: providers raise
@@ -438,7 +439,7 @@ class ForcedStop {
    * and on a healthy one alike. Harmless on a failed run, which is the one
    * this method ends, since the client verifier checks nothing on `RUN_ERROR`.
    * On a healthy run the same open step is a pre-existing protocol gap rather
-   * than a decision this reporter makes; see `ARCHITECTURE.md`.
+   * than a decision this reporter makes.
    *
    * A forced stop is a failed run, not a short success, so the caller returns
    * on these rather than falling through to STATE_SNAPSHOT and RUN_FINISHED.
@@ -5368,7 +5369,7 @@ export class StrandsAgent {
       // `_resolveStatus` (`multiagent/state.js`) marks it FAILED when ANY node
       // failed, so a Graph that lost one parallel branch and answered from
       // another is FAILED too. What a partially failed Graph owes a client is a
-      // design question, not missing plumbing. See `ARCHITECTURE.md`.
+      // design question, not missing plumbing.
       try {
         for await (const rawEvent of _foreignStreamFaults(orchestratorStream)) {
           const event = unwrapStrandsEvent(rawEvent);

@@ -34,7 +34,9 @@ EXAMPLES = Path(__file__).parent.parent / "examples"
 DEMOS = EXAMPLES / "server" / "api"
 README = Path(__file__).parent.parent / "README.md"
 EXAMPLES_README = EXAMPLES / "README.md"
-ARCHITECTURE = Path(__file__).parent.parent.parent / "ARCHITECTURE.md"
+# How a failure message names that file, derived from the path rather than
+# spelled again: "README.md" alone would not say which of the two it read.
+EXAMPLES_README_LABEL = f"{EXAMPLES.name}/{EXAMPLES_README.name}"
 
 ALLOWED_ORIGIN = "http://localhost:3000"
 DISALLOWED_ORIGIN = "https://evil.example"
@@ -767,7 +769,9 @@ def _example_table_rows() -> list[tuple[str, str]]:
     """
     return [
         (match.group("module"), match.group("config"))
-        for match in (EXAMPLE_ROW.match(line) for line in ARCHITECTURE.read_text().splitlines())
+        for match in (
+            EXAMPLE_ROW.match(line) for line in EXAMPLES_README.read_text().splitlines()
+        )
         if match
     ]
 
@@ -839,10 +843,10 @@ def test_the_example_table_documents_exactly_the_demo_modules():
     """
     modules = [module for module, _ in EXAMPLE_TABLE_ROWS]
 
-    assert modules, f"{ARCHITECTURE.name} example table parsed to no rows"
+    assert modules, f"the {EXAMPLES_README_LABEL} example table parsed to no rows"
     assert set(modules) == {settings.mount_name(p) for p in settings.DEMO_PATHS}
     assert len(modules) == len(settings.DEMO_PATHS), (
-        f"the {ARCHITECTURE.name} example table lists "
+        f"the {EXAMPLES_README_LABEL} example table lists "
         f"{sorted({m for m in modules if modules.count(m) > 1})} more than once"
     )
 
@@ -870,7 +874,7 @@ def test_every_example_row_names_exactly_the_config_it_uses(path):
     configured = _configured_concepts((DEMOS / f"{module}.py").read_text())
 
     assert documented == configured, (
-        f"the `{module}.py` row of the {ARCHITECTURE.name} example table is out of step "
+        f"the `{module}.py` row of the {EXAMPLES_README_LABEL} example table is out of step "
         f"with the demo: it names {sorted(documented - configured) or 'nothing'} that "
         f"{module}.py does not use, and omits "
         f"{sorted(configured - documented) or 'nothing'} that it does"

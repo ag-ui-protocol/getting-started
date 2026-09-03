@@ -92,8 +92,8 @@ describe("cross-runtime error-code table", () => {
    *
    * A code named here for TypeScript that no longer appears in `src` has been
    * renamed or removed without the table following. The reverse, a code added
-   * to the source and never written down here, is not caught: see the
-   * error-code contract section of `ARCHITECTURE.md`.
+   * to the source and never written down here, is not caught: that known limit
+   * is recorded in the `about` block of `error-codes.json`.
    */
   it("still finds every code on this side in the source", () => {
     const missing = [...CODES.values()]

@@ -107,6 +107,34 @@ version you get is resolved fresh at install time. Earlier releases ship the
 Responses model without the URL-citation mapping, and the run then succeeds and
 cites nothing there too.
 
+## What each example shows
+
+One module per demo under `server/api/`. Each builds a Strands SDK agent, or
+a `Graph` of them, wraps it with `StrandsAgent`, and exposes it via
+`create_strands_app`. The third column names the adapter configuration the
+module actually reaches for, and `tests/test_example_server.py` reads it back
+against the source in both directions, so a row cannot name a primitive the
+demo does not use or stay quiet about one it does. For anything the row does
+not say, read the module: the demo is the documentation.
+
+| Module | Focus | Relevant Configuration |
+| --- | --- | --- |
+| `agentic_chat.py` | Baseline text generation with a frontend-only `change_background` tool. | No custom config; demonstrates automatic text streaming and frontend tool short-circuiting. |
+| `agentic_chat_reasoning.py` | Reasoning/thinking event streaming with extended thinking models. | No custom config; demonstrates REASONING\_\* event emission. Pins a reasoning-capable model mode in `model_factory.py`. |
+| `agentic_chat_citations.py` | Answers carrying the sources they came from. | No custom config; asks for OpenAI's Responses API with the built-in `web_search` tool, which is honoured only on `MODEL_PROVIDER=openai`. |
+| `agentic_chat_multimodal.py` | Multimodal image/document analysis with vision-capable model. | No custom config; demonstrates automatic multimodal content conversion. |
+| `backend_tool_rendering.py` | Backend-executed tools (`render_chart`, `get_weather`). | Shows how tool results become `ToolCallResultEvent`s and can be rendered directly in the UI. |
+| `shared_state.py` | Collaborative recipe editor that streams server-side state. | Uses `state_context_builder` and `state_from_args` to keep the UI's recipe object synchronized. |
+| `agentic_generative_ui.py` | Predictive and reactive state updates for generative UI surfaces. | Demonstrates `PredictStateMapping` alongside `state_context_builder` and `state_from_result`. |
+| `predictive_state_updates.py` | Document editor painted from a frontend tool's streaming arguments. | A `PredictStateMapping` on `write_document` projects the streaming args into `state.document` before the result arrives; `state_from_args` then publishes the finished document as authoritative state, and `state_context_builder` feeds that document back into the prompt so edits stay incremental. |
+| `tool_based_generative_ui.py` | Frontend-rendered tool (`generate_haiku`) auto-registered as a proxy. | No custom config; exercises the `TOOL_CALL_*` stream the dojo's page consumes. |
+| `human_in_the_loop.py` | Human-in-the-loop confirmation flow with frontend tools. | Explicitly configures `generate_task_steps` with `continue_after_frontend_call=False`; the shared frontend remains unchanged. |
+| `interrupt.py` | A backend tool pauses itself mid-body to ask the user for a time. | No custom config; the tool calls `tool_context.interrupt(...)` and reads the user's choice back from that same call on resume. |
+| `multi_agent.py` | A `Graph` of agents, streamed as steps. | Built with `GraphBuilder`; the adapter detects the orchestrator and drives its stream rather than cloning a per-thread agent. |
+| `a2ui_dynamic_schema.py` | A2UI surfaces composed on the fly. | Sets `StrandsAgentConfig.a2ui` to name the catalog; `generate_a2ui` is auto-injected rather than wired here. |
+| `a2ui_fixed_schema.py` | A2UI from fixed-layout backend tools. | Backend tools return an `a2ui_operations` envelope directly, so nothing is auto-injected. |
+| `a2ui_recovery.py` | A2UI validate-and-retry recovery loop. | Sets `StrandsAgentConfig.a2ui` the way the dynamic demo does; the auto-injected tool validates each surface and retries up to three attempts before failing. |
+
 ## Environment Variables
 
 | Variable             | Required           | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                     |

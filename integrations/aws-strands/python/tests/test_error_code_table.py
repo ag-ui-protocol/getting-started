@@ -97,8 +97,8 @@ def test_every_code_on_this_side_still_appears_in_the_source():
 
     A code named here for Python that no longer appears in ``ag_ui_strands``
     has been renamed or removed without the table following. The reverse, a
-    code added to the source and never written down here, is not caught: see
-    the error-code contract section of ``ARCHITECTURE.md``.
+    code added to the source and never written down here, is not caught: that
+    known limit is recorded in the ``about`` block of ``error-codes.json``.
     """
     missing = [
         code

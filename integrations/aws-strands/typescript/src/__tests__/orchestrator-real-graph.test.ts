@@ -21,7 +21,7 @@
  *     throw into a FAILED `NodeResult`, then returns normally, so nothing
  *     reaches the adapter's outer handler. The run finishes with no error. That
  *     is a real gap; it is pinned so that closing it is a visible change rather
- *     than a silent one. See `ARCHITECTURE.md`.
+ *     than a silent one.
  *
  * What DOES escape a real `Graph` is an orchestration budget violation, which
  * is not a model stop reason and is reported as `STRANDS_ERROR`.

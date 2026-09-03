@@ -5,7 +5,7 @@
     "One table, two runtimes. Both suites read this file: Python through tests/error_code_table.py, TypeScript through src/__tests__/error-code-table.ts. Each drives its own bridge to the terminal paths below and asserts the emitted RUN_ERROR against the entry here, so a code marked shared carries the same text on both sides because both sides are matched against this one copy of it.",
     "Message templates render every interpolated value as {} so the two languages can be compared without their interpolation syntax getting in the way, and are otherwise the literal text exactly, whitespace included: a run of spaces or a newline a bridge puts on the wire is text a client matching literally has to match, and a bridge that pads or wraps its sentence differently from the other one has diverged.",
     "'messages' must hold identical text on every side listed in 'sides'. 'sideOnlyMessages' carries text one side alone can produce, and needs a note saying why.",
-    "Known limit: this is data, not a reading of either source. Adding a code to one bridge without adding it here fails nothing. See the error-code contract section of ARCHITECTURE.md."
+    "Known limit: this is data, not a reading of either source. Adding a code to one bridge without adding it here fails nothing, so adding a code means adding it here in the same change."
   ],
   "codes": [
     {

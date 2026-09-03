@@ -1,4 +1,4 @@
-"""The load-bearing claims of README.md and ARCHITECTURE.md, checked against the code.
+"""The load-bearing claims of README.md, checked against the code.
 
 Review of this package repeatedly found documentation that named a constant the
 adapter does not emit, or a shape it does not produce. Prose drifts because
@@ -22,9 +22,8 @@ from ag_ui_strands import INTERRUPT_CANCELLED, __all__
 _ROOT = Path(__file__).resolve().parent.parent
 README = (_ROOT / "README.md").read_text()
 SOURCE = (_ROOT / "src" / "ag_ui_strands" / "agent.py").read_text()
-ARCHITECTURE = (_ROOT.parent / "ARCHITECTURE.md").read_text()
 
-_PACKAGING_HEADING = "### Packaging Surface"
+_PACKAGING_HEADING = "## Packaging surface"
 
 
 def test_the_readme_never_names_a_near_miss_of_a_real_error_code():
@@ -104,13 +103,13 @@ def test_the_readme_documents_every_approval_metadata_key_published():
 
 
 def _packaging_surface_region() -> str:
-    """The Packaging Surface subsection of ARCHITECTURE.md, heading to next heading."""
-    start = ARCHITECTURE.find(_PACKAGING_HEADING)
+    """The packaging-surface section of README.md, heading to next heading."""
+    start = README.find(_PACKAGING_HEADING)
     assert start != -1, (
         f"the packaging-surface heading {_PACKAGING_HEADING!r} moved or was reworded"
     )
-    end = ARCHITECTURE.find("\n### ", start + 1)
-    return ARCHITECTURE[start:] if end == -1 else ARCHITECTURE[start:end]
+    end = README.find("\n## ", start + 1)
+    return README[start:] if end == -1 else README[start:end]
 
 
 def _packaging_surface_names() -> list[str]:
@@ -140,7 +139,7 @@ def _packaging_surface_names() -> list[str]:
     return names
 
 
-def test_architecture_lists_exactly_the_names_the_package_exports():
+def test_the_readme_lists_exactly_the_names_the_package_exports():
     """Set, block size and prose numeral, all three against ``__all__``.
 
     The audited drift was a fence listing 8 of 32 names beside a prose numeral
@@ -248,7 +247,7 @@ _SIGNATURE_SPAN = re.compile(
     re.MULTILINE,
 )
 
-# Which callables the documents currently quote a signature for. Pinned so a
+# Which callables the README currently quotes a signature for. Pinned so a
 # signature quietly vanishing from the prose fails here instead of shrinking the
 # scan to nothing. Parameter names are never pinned; those come from the code.
 DOCUMENTED_SIGNATURES = {"add_strands_fastapi_endpoint", "create_strands_app"}
@@ -265,7 +264,7 @@ def test_every_quoted_signature_matches_the_parameters_the_code_declares():
     declared = _code_parameter_names()
     found: dict[str, set[str]] = {}
 
-    for label, document in (("ARCHITECTURE.md", ARCHITECTURE), ("README.md", README)):
+    for label, document in (("README.md", README),):
         for match in _SIGNATURE_SPAN.finditer(document):
             name, arguments = match.group(1), match.group(2)
             if name not in declared:
@@ -278,6 +277,6 @@ def test_every_quoted_signature_matches_the_parameters_the_code_declares():
             )
 
     assert set(found) == DOCUMENTED_SIGNATURES, (
-        f"the documents quote signatures for {sorted(found)}, expected "
+        f"the README quotes signatures for {sorted(found)}, expected "
         f"{sorted(DOCUMENTED_SIGNATURES)}"
     )
