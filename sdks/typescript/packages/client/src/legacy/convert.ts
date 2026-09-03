@@ -97,7 +97,7 @@ export const convertToLegacyEvents =
             const startEvent = event as TextMessageStartEvent;
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.TextMessageStart,
+                type: LegacyRuntimeEventTypes.TextMessageStart,
                 messageId: startEvent.messageId,
                 role: startEvent.role,
               } as LegacyTextMessageStart,
@@ -107,7 +107,7 @@ export const convertToLegacyEvents =
             const contentEvent = event as TextMessageContentEvent;
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.TextMessageContent,
+                type: LegacyRuntimeEventTypes.TextMessageContent,
                 messageId: contentEvent.messageId,
                 content: contentEvent.delta,
               } as LegacyTextMessageContent,
@@ -117,7 +117,7 @@ export const convertToLegacyEvents =
             const endEvent = event as TextMessageEndEvent;
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.TextMessageEnd,
+                type: LegacyRuntimeEventTypes.TextMessageEnd,
                 messageId: endEvent.messageId,
               } as LegacyTextMessageEnd,
             ];
@@ -139,7 +139,7 @@ export const convertToLegacyEvents =
 
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.ActionExecutionStart,
+                type: LegacyRuntimeEventTypes.ActionExecutionStart,
                 actionExecutionId: startEvent.toolCallId,
                 actionName: startEvent.toolCallName,
                 parentMessageId: startEvent.parentMessageId,
@@ -195,14 +195,14 @@ export const convertToLegacyEvents =
 
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.ActionExecutionArgs,
+                type: LegacyRuntimeEventTypes.ActionExecutionArgs,
                 actionExecutionId: argsEvent.toolCallId,
                 args: argsEvent.delta,
               } as LegacyActionExecutionArgs,
               ...(didUpdateState
                 ? [
                     {
-                      type: LegacyRuntimeEventTypes.enum.AgentStateMessage,
+                      type: LegacyRuntimeEventTypes.AgentStateMessage,
                       threadId,
                       agentName,
                       nodeName,
@@ -220,7 +220,7 @@ export const convertToLegacyEvents =
             const endEvent = event as ToolCallEndEvent;
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.ActionExecutionEnd,
+                type: LegacyRuntimeEventTypes.ActionExecutionEnd,
                 actionExecutionId: endEvent.toolCallId,
               } as LegacyActionExecutionEnd,
             ];
@@ -229,7 +229,7 @@ export const convertToLegacyEvents =
             const resultEvent = event as ToolCallResultEvent;
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.ActionExecutionResult,
+                type: LegacyRuntimeEventTypes.ActionExecutionResult,
                 actionExecutionId: resultEvent.toolCallId,
                 result: resultEvent.content,
                 actionName: toolCallNames[resultEvent.toolCallId] || "unknown",
@@ -253,7 +253,7 @@ export const convertToLegacyEvents =
 
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.MetaEvent,
+                type: LegacyRuntimeEventTypes.MetaEvent,
                 name: customEvent.name,
                 value: customEvent.value,
               } as LegacyMetaEvent,
@@ -265,7 +265,7 @@ export const convertToLegacyEvents =
 
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.AgentStateMessage,
+                type: LegacyRuntimeEventTypes.AgentStateMessage,
                 threadId,
                 agentName,
                 nodeName,
@@ -287,7 +287,7 @@ export const convertToLegacyEvents =
 
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.AgentStateMessage,
+                type: LegacyRuntimeEventTypes.AgentStateMessage,
                 threadId,
                 agentName,
                 nodeName,
@@ -304,7 +304,7 @@ export const convertToLegacyEvents =
             syncedMessages = messagesSnapshot.messages;
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.AgentStateMessage,
+                type: LegacyRuntimeEventTypes.AgentStateMessage,
                 threadId,
                 agentName,
                 nodeName,
@@ -342,7 +342,7 @@ export const convertToLegacyEvents =
                 // with an opaque JSON parsing error.
                 return [
                   {
-                    type: LegacyRuntimeEventTypes.enum.RunError,
+                    type: LegacyRuntimeEventTypes.RunError,
                     message: (error as Error).message,
                   } as LegacyRunError,
                 ];
@@ -351,7 +351,7 @@ export const convertToLegacyEvents =
 
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.AgentStateMessage,
+                type: LegacyRuntimeEventTypes.AgentStateMessage,
                 threadId,
                 agentName,
                 nodeName,
@@ -370,7 +370,7 @@ export const convertToLegacyEvents =
             const errorEvent = event as RunErrorEvent;
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.RunError,
+                type: LegacyRuntimeEventTypes.RunError,
                 message: errorEvent.message,
                 code: errorEvent.code,
               } as LegacyRunError,
@@ -385,7 +385,7 @@ export const convertToLegacyEvents =
 
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.AgentStateMessage,
+                type: LegacyRuntimeEventTypes.AgentStateMessage,
                 threadId,
                 agentName,
                 nodeName,
@@ -403,7 +403,7 @@ export const convertToLegacyEvents =
 
             return [
               {
-                type: LegacyRuntimeEventTypes.enum.AgentStateMessage,
+                type: LegacyRuntimeEventTypes.AgentStateMessage,
                 threadId,
                 agentName,
                 nodeName,

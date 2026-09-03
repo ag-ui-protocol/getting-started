@@ -8,7 +8,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -38,6 +38,37 @@ const check = (core, schemas, label) => {
 module.exports = { check };
 `;
 
+// Drives the client's full pipeline — enforce → strip → verify → apply — through a real
+// AbstractAgent: an unknown member must be stripped with a warning, a malformed known value
+// must be fatal. Both depend on the per-type validator map the client builds from core's
+// schemas, which is exactly what breaks when the two packages hold different zod copies.
+const CLIENT_SMOKE = `
+import { AbstractAgent, EventType } from "@ag-ui/client";
+import { of } from "rxjs";
+const fail = (m) => { throw new Error("client: " + m); };
+const agent = (mutate) => new (class extends AbstractAgent {
+  run(input) {
+    return of(
+      { type: EventType.RUN_STARTED, threadId: input.threadId, runId: input.runId },
+      { type: EventType.TEXT_MESSAGE_START, messageId: "m1", role: "assistant" },
+      mutate({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: "m1", delta: "hi" }),
+      { type: EventType.TEXT_MESSAGE_END, messageId: "m1" },
+      { type: EventType.RUN_FINISHED, threadId: input.threadId, runId: input.runId },
+    );
+  }
+})({ threadId: "t" });
+const warns = []; const warn = console.warn; console.warn = (...a) => warns.push(a.join(" "));
+const ok = await agent((e) => ({ ...e, xUnknownKey: 1 })).runAgent({}, {});
+console.warn = warn;
+if (ok.newMessages?.[0]?.content !== "hi") fail("pipeline lost the message");
+if (!warns.some((w) => /xUnknownKey/.test(w))) fail("unknown member not stripped with a warning");
+// The client logs the failure it is about to throw; that is the expected outcome here, so keep it out of the CI log.
+const error = console.error; console.error = () => {};
+let fatal = false; try { await agent((e) => ({ ...e, delta: 123 })).runAgent({}, {}); } catch { fatal = true; } finally { console.error = error; }
+if (!fatal) fail("malformed known value was not fatal");
+console.log("client pipeline: ok (unknown stripped + warned, malformed fatal)");
+`;
+
 const SMOKE_CJS = `
 const { check } = require("./check.cjs");
 check(require("@ag-ui/core"), require("@ag-ui/core/schemas"), "require");
@@ -56,13 +87,27 @@ const run = (command, args, cwd) =>
 
 const packDir = mkdtempSync(join(tmpdir(), "agui-zod-matrix-"));
 try {
-  const tarball = execFileSync("npm", ["pack", "--pack-destination", packDir], {
-    cwd: PACKAGE_DIR,
-    encoding: "utf8",
-  })
-    .trim()
-    .split("\n")
-    .pop();
+  // pnpm, not npm: the siblings depend on each other as `workspace:*`, which only
+  // pnpm rewrites to the concrete version when packing. npm would ship the
+  // literal `workspace:*` and the consumer install would refuse it.
+  // pnpm prints the tarball's absolute path as its last line (npm printed a bare
+  // filename); basename() makes the join below correct for either.
+  const pack = (dir) =>
+    basename(
+      execFileSync("pnpm", ["pack", "--pack-destination", packDir], { cwd: dir, encoding: "utf8" })
+        .trim()
+        .split("\n")
+        .pop(),
+    );
+  const tarball = pack(PACKAGE_DIR);
+  // The client cell: core is an optional peer, but @ag-ui/client pins its own zod, so an
+  // application on a different zod holds TWO copies — client's enforcement then introspects
+  // schemas built by the copy it did not resolve. That is where a core-only matrix is blind
+  // (zod@3.25.18 next to client's 3.25.76 once keyed every event schema under "undefined").
+  const SIBLINGS = ["proto", "encoder", "client"];
+  const siblingTarballs = Object.fromEntries(
+    SIBLINGS.map((name) => [name, pack(join(PACKAGE_DIR, "..", name))]),
+  );
 
   for (const zodVersion of ZOD_VERSIONS) {
     const consumer = mkdtempSync(join(tmpdir(), `agui-zod-${zodVersion.replace(/[^0-9]/g, "")}-`));
@@ -75,11 +120,15 @@ try {
             private: true,
             dependencies: {
               "@ag-ui/core": `file:${join(packDir, tarball)}`,
+              ...Object.fromEntries(
+                SIBLINGS.map((name) => [`@ag-ui/${name}`, `file:${join(packDir, siblingTarballs[name])}`]),
+              ),
+              rxjs: "7.8.1",
               zod: zodVersion,
             },
-            // Forces the package's own zod dependency onto this major too, so
-            // exactly one zod exists in the tree — the one under test.
-            overrides: { zod: zodVersion },
+            // No override: the point of the cell is the layout npm actually
+            // produces — client's pinned zod nested beside the consumer's — so
+            // two copies coexist whenever they differ.
           },
           null,
           2,
@@ -88,6 +137,7 @@ try {
       writeFileSync(join(consumer, "check.cjs"), SMOKE);
       writeFileSync(join(consumer, "smoke.cjs"), SMOKE_CJS);
       writeFileSync(join(consumer, "smoke.mjs"), SMOKE_MJS);
+      writeFileSync(join(consumer, "client-smoke.mjs"), CLIENT_SMOKE);
       run("npm", ["install", "--no-audit", "--no-fund", "--silent"], consumer);
       const installed = execFileSync("node", ["-p", "require('zod/package.json').version"], {
         cwd: consumer,
@@ -99,6 +149,7 @@ try {
       console.log(`\n== zod@${installed} ==`);
       run("node", ["smoke.cjs"], consumer);
       run("node", ["smoke.mjs"], consumer);
+      run("node", ["client-smoke.mjs"], consumer);
     } finally {
       rmSync(consumer, { recursive: true, force: true });
     }
@@ -132,7 +183,7 @@ console.log("no zod: main entry ok, subpath unavailable as expected");`,
   } finally {
     rmSync(bare, { recursive: true, force: true });
   }
-  console.log("\nzod matrix: every supported zod passes in both module formats, and the main entry needs none");
+  console.log("\nzod matrix: every supported zod passes in both module formats, the client pipeline runs on each, and the main entry needs none");
 } finally {
   rmSync(packDir, { recursive: true, force: true });
 }

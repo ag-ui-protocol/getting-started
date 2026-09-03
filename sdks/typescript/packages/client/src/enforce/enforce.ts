@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { Observable, of, EMPTY } from "rxjs";
 import { mergeMap } from "rxjs/operators";
 import { type DebugLoggerInput, resolveDebugLogger } from "@/debug-logger";
-import { stripUnknown } from "./strip";
+import { literalValue, stripUnknown } from "./strip";
 
 /**
  * An event whose `type` the protocol does not know.
@@ -33,9 +33,7 @@ export function isRecognizedEvent(event: BaseEvent | UnrecognizedEvent): event i
 const EVENT_SCHEMA_BY_TYPE = new Map<string, z.ZodType>(
   (EventSchema.options as z.ZodType[]).map((option) => {
     const shape = (option as unknown as { shape: Record<string, z.ZodType> }).shape;
-    const literal = shape.type as unknown as { values?: unknown[]; value?: unknown };
-    const value = Array.isArray(literal.values) ? literal.values[0] : literal.value;
-    return [String(value), option];
+    return [String(literalValue(shape.type)), option];
   }),
 );
 

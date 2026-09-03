@@ -50,14 +50,33 @@ function discriminatorOf(schema: z.ZodType): string | undefined {
   return typeof def?.discriminator === "string" ? def.discriminator : undefined;
 }
 
+/**
+ * The single value a literal schema admits, read from `def.values` — the one
+ * surface that is an array on every zod that ships `zod/v4`. The instance-level
+ * `.values` is a Set on all of them, and the `.value` convenience getter only
+ * exists from zod 3.25.7x on: a consumer holding an older copy of zod 3.25 (the
+ * declared peer floor is 3.25.18) has literals with no `.value` at all, and a
+ * reader that leaned on it silently keyed every event schema under
+ * "undefined". Exported for enforce.ts, which builds its per-type map with it.
+ */
+export function literalValue(schema: z.ZodType): unknown {
+  const probe = schema as unknown as {
+    def?: { values?: unknown[] };
+    values?: Iterable<unknown>;
+    value?: unknown;
+  };
+  const values = Array.isArray(probe.def?.values)
+    ? probe.def.values
+    : probe.values
+      ? Array.from(probe.values)
+      : undefined;
+  if (values && values.length === 1) return values[0];
+  return probe.value;
+}
+
 function literalValueOf(schema: z.ZodType): unknown {
   const unwrapped = unwrap(schema);
-  if (unwrapped instanceof z.ZodLiteral) {
-    const probe = unwrapped as unknown as { values?: unknown[]; value?: unknown };
-    if (Array.isArray(probe.values) && probe.values.length === 1) return probe.values[0];
-    return probe.value;
-  }
-  return undefined;
+  return unwrapped instanceof z.ZodLiteral ? literalValue(unwrapped) : undefined;
 }
 
 function stripAgainst(
