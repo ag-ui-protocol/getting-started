@@ -233,4 +233,145 @@ describe("load-dependent stream ordering", () => {
       messagesSnapshot?.messages.map((message) => message.id),
     ).not.toContain("experience-1");
   });
+
+  it("seeds the first subgraph boundary from root on_chain_end object output without a values chunk", async () => {
+    const agent = new LangGraphAgent({
+      deploymentUrl: "http://localhost:2024",
+      graphId: "test-graph",
+    });
+    const user: LangGraphMessage = {
+      id: "user-1",
+      type: "human",
+      content: "Plan my trip",
+    };
+    const preEntryState = threadState({
+      messages: [user],
+      itinerary: { city: "Amsterdam" },
+    });
+    const getState = vi
+      .spyOn(agent.client.threads, "getState")
+      .mockResolvedValue(
+        threadState({
+          messages: [
+            user,
+            { id: "live-1", type: "ai", content: "Live thread state" },
+          ],
+          itinerary: { city: "Rotterdam" },
+        }),
+      );
+
+    const events = await runUntilStreamError(
+      agent,
+      [
+        eventChunk(
+          "on_chain_end",
+          { langgraph_node: "planner", langgraph_checkpoint_ns: "" },
+          { output: { itinerary: { city: "Amsterdam", hotel: "Hotel Zoe" } } },
+        ),
+        eventChunk(
+          "on_chain_start",
+          {
+            langgraph_node: "experiences_agent",
+            langgraph_checkpoint_ns:
+              "experiences_agent:outer|experiences_agent_node:inner",
+          },
+          {},
+        ),
+      ],
+      preEntryState,
+    );
+
+    expect(getState).not.toHaveBeenCalled();
+    // The boundary snapshot is the one without a rawEvent; per-chunk node
+    // change snapshots carry the triggering chunk.
+    const boundarySnapshot = events.find(
+      (event): event is StateSnapshotEvent =>
+        event.type === EventType.STATE_SNAPSHOT && event.rawEvent === undefined,
+    );
+    expect(boundarySnapshot?.snapshot).toEqual({
+      messages: [user],
+      itinerary: { city: "Amsterdam", hotel: "Hotel Zoe" },
+    });
+    const messagesSnapshot = events.find(
+      (event): event is MessagesSnapshotEvent =>
+        event.type === EventType.MESSAGES_SNAPSHOT,
+    );
+    expect(messagesSnapshot?.messages.map((message) => message.id)).toEqual([
+      "user-1",
+    ]);
+  });
+
+  it("seeds the first subgraph boundary from root on_chain_end Command.update without a values chunk", async () => {
+    const agent = new LangGraphAgent({
+      deploymentUrl: "http://localhost:2024",
+      graphId: "test-graph",
+    });
+    const user: LangGraphMessage = {
+      id: "user-1",
+      type: "human",
+      content: "Plan my trip",
+    };
+    const preEntryState = threadState({
+      messages: [user],
+      itinerary: { city: "Amsterdam" },
+    });
+    const getState = vi
+      .spyOn(agent.client.threads, "getState")
+      .mockResolvedValue(
+        threadState({
+          messages: [
+            user,
+            { id: "live-1", type: "ai", content: "Live thread state" },
+          ],
+          itinerary: { city: "Rotterdam" },
+        }),
+      );
+
+    const events = await runUntilStreamError(
+      agent,
+      [
+        eventChunk(
+          "on_chain_end",
+          { langgraph_node: "planner", langgraph_checkpoint_ns: "" },
+          {
+            output: [
+              {
+                lg_name: "Command",
+                update: {
+                  itinerary: { city: "Amsterdam", hotel: "Hotel Zoe" },
+                },
+              },
+            ],
+          },
+        ),
+        eventChunk(
+          "on_chain_start",
+          {
+            langgraph_node: "experiences_agent",
+            langgraph_checkpoint_ns:
+              "experiences_agent:outer|experiences_agent_node:inner",
+          },
+          {},
+        ),
+      ],
+      preEntryState,
+    );
+
+    expect(getState).not.toHaveBeenCalled();
+    const boundarySnapshot = events.find(
+      (event): event is StateSnapshotEvent =>
+        event.type === EventType.STATE_SNAPSHOT && event.rawEvent === undefined,
+    );
+    expect(boundarySnapshot?.snapshot).toEqual({
+      messages: [user],
+      itinerary: { city: "Amsterdam", hotel: "Hotel Zoe" },
+    });
+    const messagesSnapshot = events.find(
+      (event): event is MessagesSnapshotEvent =>
+        event.type === EventType.MESSAGES_SNAPSHOT,
+    );
+    expect(messagesSnapshot?.messages.map((message) => message.id)).toEqual([
+      "user-1",
+    ]);
+  });
 });
