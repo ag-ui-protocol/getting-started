@@ -14,6 +14,9 @@
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AddressInfo } from "node:net";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const builtModels = vi.hoisted(() => [] as Record<string, unknown>[]);
 
@@ -686,5 +689,264 @@ describe("prompts the dojo suites depend on", () => {
     } finally {
       restore();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What the README says about this package, checked against this package
+// ---------------------------------------------------------------------------
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const API_DIR = join(HERE, "api");
+const README = readFileSync(resolve(HERE, "../../README.md"), "utf8");
+
+/** Every demo file under `server/api/`, by the name the README calls it. */
+const apiDemos = readdirSync(API_DIR)
+  .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
+  .map((file) => file.replace(/\.ts$/, ""));
+
+/**
+ * The demos that can be started on their own, read off the files.
+ *
+ * `runIfMain` is the guard that turns a factory module into a server, so its
+ * presence is the fact the README's "carry a standalone runner" describes.
+ */
+const runnerDemos = new Set(
+  apiDemos.filter((demo) =>
+    readFileSync(join(API_DIR, `${demo}.ts`), "utf8").includes("runIfMain"),
+  ),
+);
+
+/**
+ * The demos a `pnpm run <demo>` starts, read off the manifest.
+ *
+ * Derived from the relationship rather than counted: a script only belongs
+ * here if its key is the basename its command runs, so `dojo` (which runs
+ * `server/server.ts`) drops out on its own instead of by being listed as an
+ * exception here.
+ */
+const exampleScripts: Record<string, string> = JSON.parse(
+  readFileSync(resolve(HERE, "../package.json"), "utf8"),
+).scripts;
+
+const scriptedDemos = new Set(
+  Object.entries(exampleScripts)
+    .filter(([name, command]) => {
+      const target = /server\/api\/([^\s]+)\.ts/.exec(command)?.[1];
+      return target !== undefined && target === name;
+    })
+    .map(([name]) => name),
+);
+
+/**
+ * English numerals the README uses, plus their neighbours.
+ *
+ * This table maps language, not facts, so it does not drift with the code. A
+ * word missing from it fails rather than quietly matching nothing, which is
+ * the whole reason the lookup exists.
+ */
+const NUMBER_WORDS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+};
+
+function numberWord(word: string, where: string): number {
+  const value = NUMBER_WORDS[word.toLowerCase()];
+  expect(
+    value,
+    `the README says "${word}" ${where}, which is not in this test's number-word table; add the word rather than leaving the count unchecked`,
+  ).toBeDefined();
+  return value!;
+}
+
+/** The README slice under one `##` heading. */
+function section(name: string): string {
+  const start = README.indexOf(`\n## ${name}\n`);
+  expect(
+    start,
+    `the README has no "## ${name}" section, so the claims this test scopes to it cannot be found`,
+  ).toBeGreaterThan(-1);
+  const rest = README.slice(start + 1);
+  const end = rest.indexOf("\n## ", 1);
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/**
+ * One blank-line-separated block of a region, whitespace-collapsed.
+ *
+ * Collapsed because the prose is hard-wrapped and the sentences below cross
+ * line breaks; scoped to a block because an unscoped search for a numeral
+ * would be satisfied by any incidental occurrence elsewhere in the file.
+ */
+function block(region: string, opening: string): string {
+  const found = region
+    .split(/\n{2,}/)
+    .filter((part) => part.trimStart().startsWith(opening));
+  expect(
+    found,
+    `the README has no paragraph starting ${JSON.stringify(opening)}`,
+  ).toHaveLength(1);
+  return unwrapped(found[0]!);
+}
+
+/** One row of the Key Files table, by the file it describes. */
+function keyFilesRow(file: string): string {
+  const rows = section("Key Files")
+    .split("\n")
+    .filter((line) => line.startsWith(`| \`${file}\``));
+  expect(rows, `the Key Files table has no row for \`${file}\``).toHaveLength(
+    1,
+  );
+  return rows[0]!;
+}
+
+/**
+ * Pull a claim out of a region, failing if the sentence itself has moved.
+ *
+ * An optional-chained match would turn a reworded sentence into a test that
+ * silently stops asserting, which is worse than the drift it was added to
+ * catch.
+ */
+function claim(
+  region: string,
+  pattern: RegExp,
+  description: string,
+): RegExpExecArray {
+  const match = pattern.exec(region);
+  expect(
+    match,
+    `the README no longer says ${description}; reword the assertion with it, because as written it now checks nothing`,
+  ).not.toBeNull();
+  return match!;
+}
+
+/** Route table rows: the first cell of every line that starts a `/` path. */
+function documentedRoutes(): string[] {
+  return README.split("\n")
+    .filter((line) => line.startsWith("| `/"))
+    .map((line) => line.split("|")[1]!.replace(/`/g, "").trim());
+}
+
+describe("README claims about the demos", () => {
+  it("advertises exactly the routes the dojo mounts", () => {
+    const documented = documentedRoutes();
+    const mounted = Object.keys(DEMOS).map((path) => `/${path}`);
+
+    // Length as well as set membership, so a duplicated row cannot hide
+    // inside the set comparison. Both directions matter: a row for a route
+    // nothing serves sends readers at a 404, and a mounted route with no row
+    // is a demo nobody can find.
+    expect(documented).toHaveLength(mounted.length);
+    expect(new Set(documented)).toEqual(new Set(mounted));
+  });
+
+  it("counts the runnable demos the way the scripts do", () => {
+    const intro = block(
+      section("Quick Start"),
+      "The `examples/` package ships a",
+    );
+    const [, word] = claim(
+      intro,
+      /a standalone server for each of the (\w+) demos that ship a run script/,
+      "that it ships a standalone server for each of the N demos that ship a run script",
+    );
+
+    expect(
+      numberWord(word!, "demos ship a run script"),
+      "the Quick Start numeral disagrees with the scripts in examples/package.json",
+    ).toBe(scriptedDemos.size);
+  });
+
+  it("counts the scripted demos the way the scripts do", () => {
+    const [, word] = claim(
+      block(
+        section("Quick Start"),
+        "Every file under `examples/server/api/*.ts`",
+      ),
+      /The (\w+) with a `pnpm run <demo>` script/,
+      "that N files carry a `pnpm run <demo>` script",
+    );
+
+    expect(
+      numberWord(word!, "files have a `pnpm run <demo>` script"),
+      "the file-pattern paragraph disagrees with the scripts in examples/package.json",
+    ).toBe(scriptedDemos.size);
+  });
+
+  it("counts standalone runners the way the files do", () => {
+    const [, runners, scripted] = claim(
+      keyFilesRow("examples/server/api/*.ts"),
+      /(\w+) carry a standalone runner, (\w+) of those scripted/,
+      "that N api files carry a standalone runner, M of those scripted",
+    );
+
+    expect(
+      numberWord(runners!, "api files carry a standalone runner"),
+      "the Key Files row disagrees with the files that call `runIfMain`",
+    ).toBe(runnerDemos.size);
+    expect(
+      numberWord(scripted!, "of the runners are scripted"),
+      "the Key Files row disagrees with the scripts in examples/package.json",
+    ).toBe(scriptedDemos.size);
+  });
+
+  it("names every file that exports a factory and nothing else", () => {
+    const factoryOnly = apiDemos.filter((demo) => !runnerDemos.has(demo));
+    const [, word] = claim(
+      block(
+        section("Quick Start"),
+        "Every file under `examples/server/api/*.ts`",
+      ),
+      /The multi-agent and (\w+) a2ui files export the factory only/,
+      "that multi-agent and N a2ui files export the factory only",
+    );
+
+    expect(
+      numberWord(word!, "a2ui files export the factory only"),
+      "the numeral disagrees with the a2ui files that carry no runner",
+    ).toBe(factoryOnly.filter((demo) => demo.startsWith("a2ui")).length);
+    // The sentence too, not just its numeral: a file that quietly loses its
+    // runner would keep the count honest only by making the naming wrong, so
+    // the derived complement has to match what the sentence names.
+    expect(new Set(factoryOnly)).toEqual(
+      new Set([
+        "multi-agent",
+        ...apiDemos.filter((demo) => demo.startsWith("a2ui")),
+      ]),
+    );
+  });
+
+  it("keeps true the one demo that runs standalone unscripted", () => {
+    // The claim a bare count check would pass straight over: the totals stay
+    // right whichever file is the unscripted one, and this is the file the
+    // README tells the reader to start with `tsx` by hand.
+    const [, file] = claim(
+      block(
+        section("Quick Start"),
+        "Every file under `examples/server/api/*.ts`",
+      ),
+      /`([\w.-]+)\.ts` sits between the two: it carries the same standalone runner, but no `pnpm` script points at it/,
+      "that one named file carries a standalone runner with no `pnpm` script pointing at it",
+    );
+
+    expect(runnerDemos.has(file!), `${file}.ts calls runIfMain`).toBe(true);
+    expect(
+      scriptedDemos.has(file!),
+      `a pnpm script now points at ${file}.ts, so the README should list it with the scripted demos`,
+    ).toBe(false);
   });
 });

@@ -11,7 +11,9 @@ separate test reads the demo sources for it.
 from __future__ import annotations
 
 import ast
+import dataclasses
 import importlib.util
+import re
 import runpy
 import sys
 import types
@@ -24,12 +26,15 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.routing import Mount
 
+import ag_ui_strands
+from ag_ui_strands import StrandsAgentConfig, ToolBehavior
 from ag_ui_strands.utils import create_strands_app
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 DEMOS = EXAMPLES / "server" / "api"
 README = Path(__file__).parent.parent / "README.md"
 EXAMPLES_README = EXAMPLES / "README.md"
+ARCHITECTURE = Path(__file__).parent.parent.parent / "ARCHITECTURE.md"
 
 ALLOWED_ORIGIN = "http://localhost:3000"
 DISALLOWED_ORIGIN = "https://evil.example"
@@ -690,6 +695,186 @@ def test_every_readme_route_table_lists_every_mounted_route(readme):
     # Length too, so a duplicated row cannot hide inside the set comparison.
     assert len(documented) == len(settings.DEMO_PATHS)
     assert set(documented) == set(settings.DEMO_PATHS)
+
+
+# ---------------------------------------------------------------------------
+# The documented example table
+# ---------------------------------------------------------------------------
+
+
+def _config_concepts() -> dict[str, set[str]]:
+    """One concept per configuration primitive, with the names it goes by.
+
+    Derived from the live dataclasses rather than listed here, so a field added
+    to either one joins the vocabulary without anybody remembering to.
+
+    A concept's aliases are its field name plus any exported type named in that
+    field's annotation, which is what lets a documentation row saying
+    `PredictStateMapping` and a demo writing `predict_state=` be recognised as
+    naming the same thing instead of as a mismatch.
+
+    Two exclusions, both falling out of the annotations rather than picked by
+    hand. The field whose annotation names `ToolBehavior` is skipped: that is
+    `tool_behaviors`, the mapping the behaviours live in and not a behaviour
+    itself, and every configured demo constructs it while no row names it.
+    And `cls.__name__` is dropped so the class the fields hang off is not
+    itself a concept, which also keeps a row written as
+    `StrandsAgentConfig.a2ui` yielding just the `a2ui` concept. `StrandsAgent`
+    is a construction scaffold rather than a configuration primitive and never
+    enters this vocabulary at all, which is what lets the rows reading "No
+    custom config" come out empty on both sides.
+    """
+    types_exported = {
+        name
+        for name in ag_ui_strands.__all__
+        if isinstance(getattr(ag_ui_strands, name), type)
+    }
+    concepts: dict[str, set[str]] = {}
+    for cls in (StrandsAgentConfig, ToolBehavior):
+        for field in dataclasses.fields(cls):
+            aliases = {
+                token
+                for token in re.split(r"[^A-Za-z0-9_]+", str(field.type))
+                if token in types_exported
+            } - {cls.__name__}
+            if ToolBehavior.__name__ in aliases:
+                continue
+            concepts[field.name] = {field.name} | aliases
+    return concepts
+
+
+CONFIG_CONCEPTS = _config_concepts()
+# Every name a concept answers to, mapped back to the one canonical name, so
+# both sides of the comparison below can be reduced to the same vocabulary.
+CONFIG_ALIASES = {
+    alias: concept for concept, aliases in CONFIG_CONCEPTS.items() for alias in aliases
+}
+
+# `| \`<module>.py\` | Focus | Relevant Configuration |`. Digits are in the
+# character class on purpose: `[a-z_]+` silently drops the three a2ui rows and
+# leaves them unchecked.
+EXAMPLE_ROW = re.compile(
+    r"^\|\s*`(?P<module>[a-z0-9_]+)\.py`\s*\|(?P<focus>[^|]*)\|(?P<config>[^|]*)\|\s*$"
+)
+
+
+def _example_table_rows() -> list[tuple[str, str]]:
+    """Each Python example row as its module and its Relevant Configuration cell.
+
+    A sequence rather than a mapping, so a duplicated row stays two rows for
+    the count below instead of collapsing into one entry before anything can
+    see it.
+    """
+    return [
+        (match.group("module"), match.group("config"))
+        for match in (EXAMPLE_ROW.match(line) for line in ARCHITECTURE.read_text().splitlines())
+        if match
+    ]
+
+
+EXAMPLE_TABLE_ROWS = _example_table_rows()
+# The by-module lookup the per-row test reads its cell out of.
+EXAMPLE_TABLE_CONFIG = dict(EXAMPLE_TABLE_ROWS)
+
+
+def _documented_concepts(cell: str) -> set[str]:
+    """The configuration concepts a row's prose names, in backticks."""
+    return {
+        CONFIG_ALIASES[token]
+        for span in re.findall(r"`([^`]*)`", cell)
+        for token in re.split(r"[^A-Za-z0-9_]+", span)
+        if token in CONFIG_ALIASES
+    }
+
+
+def _configured_concepts(source: str) -> set[str]:
+    """The configuration concepts a demo module actually reaches for.
+
+    An AST walk rather than a substring search over the text: a primitive named
+    in a docstring or a comment is a primitive the demo talks about, not one it
+    uses, and counting those would let a row stay green by prose alone.
+    """
+    used: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.keyword):
+            token = node.arg
+        elif isinstance(node, ast.Attribute):
+            token = node.attr
+        elif isinstance(node, ast.Name):
+            token = node.id
+        else:
+            continue
+        if token in CONFIG_ALIASES:
+            used.add(CONFIG_ALIASES[token])
+    return used
+
+
+def test_the_config_vocabulary_is_derived_from_the_live_dataclasses():
+    """Without this, an empty vocabulary would pass every row below.
+
+    Both sides of that comparison are filtered through this alias table, so a
+    derivation that yielded nothing would reduce every row to the empty set and
+    report fifteen agreements about nothing. The aliasing has to be real too:
+    at least one concept must answer to a second name, or the row prose is
+    forced to spell field names it has no reason to prefer over type names.
+    """
+    assert CONFIG_CONCEPTS, "no configuration primitives derived"
+    assert len(CONFIG_ALIASES) > len(CONFIG_CONCEPTS), "no concept has a type alias"
+    # The scaffolding every configured demo builds and no row names. Counting
+    # it would fail all fifteen rows at once, which is the signal that it is
+    # not what these rows are about.
+    assert "tool_behaviors" not in CONFIG_ALIASES
+    assert "StrandsAgent" not in CONFIG_ALIASES
+
+
+def test_the_example_table_documents_exactly_the_demo_modules():
+    """A regex that matched nothing would be a test that asserted nothing.
+
+    Equality against the route table, not a count: a demo missing from the
+    table entirely is the drift that hides best, because a row that is not
+    there cannot be wrong. Then the length, over the rows as parsed, so a
+    duplicated row cannot hide inside that set comparison. Once the sets agree
+    a length that does not is a duplicate and nothing else, which is why the
+    message can name one.
+    """
+    modules = [module for module, _ in EXAMPLE_TABLE_ROWS]
+
+    assert modules, f"{ARCHITECTURE.name} example table parsed to no rows"
+    assert set(modules) == {settings.mount_name(p) for p in settings.DEMO_PATHS}
+    assert len(modules) == len(settings.DEMO_PATHS), (
+        f"the {ARCHITECTURE.name} example table lists "
+        f"{sorted({m for m in modules if modules.count(m) > 1})} more than once"
+    )
+
+
+@pytest.mark.parametrize("path", settings.DEMO_PATHS)
+def test_every_example_row_names_exactly_the_config_it_uses(path):
+    """Documentation drifts because nothing reads it, so this reads it.
+
+    Set equality, in both directions, because each direction catches drift the
+    other cannot see. Naming a primitive the file does not use is how a row
+    came to advertise `state_from_result` for a demo built on
+    `state_from_args`. Using a primitive the row does not name is the quieter
+    half: a one-way check that only walked the row's own words would have
+    called two of these rows correct while they described the wrong demo.
+
+    The rows reading "No custom config" are the empty set on both sides, which
+    is a real assertion rather than a skipped one: it fails the moment such a
+    demo starts configuring something and nobody updates the prose.
+
+    Only the identifier half of a row is checked here. Whether "delta
+    streaming" describes what the demo does is left to a human reader.
+    """
+    module = settings.mount_name(path)
+    documented = _documented_concepts(EXAMPLE_TABLE_CONFIG[module])
+    configured = _configured_concepts((DEMOS / f"{module}.py").read_text())
+
+    assert documented == configured, (
+        f"the `{module}.py` row of the {ARCHITECTURE.name} example table is out of step "
+        f"with the demo: it names {sorted(documented - configured) or 'nothing'} that "
+        f"{module}.py does not use, and omits "
+        f"{sorted(configured - documented) or 'nothing'} that it does"
+    )
 
 
 # ---------------------------------------------------------------------------
