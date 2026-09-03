@@ -453,6 +453,10 @@ describe("closure", () => {
       "/$defs/ActivitySnapshotEvent/properties/content",
       "/$defs/ActivityMessage/properties/content",
       "/$defs/Interrupt/properties/responseSchema",
+      // The capability model's escape hatch: an integration declares whatever
+      // the standard categories do not cover, so the protocol cannot know the
+      // keys and does not constrain the values.
+      "/$defs/AgentCapabilities/properties/custom",
     ]);
     const offenders: string[] = [];
     const seen = new Set<string>();

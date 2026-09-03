@@ -359,6 +359,524 @@ public sealed class RunAgentInput
 }
 
 /// <summary>
+/// Describes a subagent that can be invoked by a parent agent.
+/// </summary>
+public sealed class SubagentInfo
+{
+    /// <summary>
+    /// Unique name or identifier of the subagent.
+    /// </summary>
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What this subagent specializes in. Helps clients build agent selection
+    /// UIs.
+    /// </summary>
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+}
+
+/// <summary>
+/// Basic metadata about the agent. Useful for discovery UIs, agent
+/// marketplaces, and debugging. Set these when you want clients to display
+/// agent information or when multiple agents are available and users need to
+/// pick one.
+/// </summary>
+public sealed class IdentityCapabilities
+{
+    /// <summary>
+    /// Human-readable name shown in UIs and agent selectors.
+    /// </summary>
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    /// <summary>
+    /// The framework or platform powering this agent (e.g., "langgraph",
+    /// "mastra", "crewai").
+    /// </summary>
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
+    /// <summary>
+    /// What this agent does — helps users and routing logic decide when to use
+    /// it.
+    /// </summary>
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    /// <summary>
+    /// Semantic version of the agent (e.g., "1.2.0"). Useful for compatibility
+    /// checks.
+    /// </summary>
+    [JsonPropertyName("version")]
+    public string? Version { get; set; }
+
+    /// <summary>
+    /// Organization or team that maintains this agent.
+    /// </summary>
+    [JsonPropertyName("provider")]
+    public string? Provider { get; set; }
+
+    /// <summary>
+    /// URL to the agent's documentation or homepage.
+    /// </summary>
+    [JsonPropertyName("documentationUrl")]
+    public string? DocumentationUrl { get; set; }
+
+    /// <summary>
+    /// Arbitrary key-value pairs for integration-specific identity info.
+    /// </summary>
+    [JsonPropertyName("metadata")]
+    public JsonElement? Metadata { get; set; }
+}
+
+/// <summary>
+/// Declares which transport mechanisms the agent supports. Clients use this to
+/// pick the best connection strategy. Only set flags to true for transports
+/// your agent actually handles — omit or set false for unsupported ones.
+/// </summary>
+public sealed class TransportCapabilities
+{
+    /// <summary>
+    /// Set true if the agent streams responses via SSE. Most agents enable
+    /// this.
+    /// </summary>
+    [JsonPropertyName("streaming")]
+    public bool? Streaming { get; set; }
+
+    /// <summary>
+    /// Set true if the agent accepts persistent WebSocket connections.
+    /// </summary>
+    [JsonPropertyName("websocket")]
+    public bool? Websocket { get; set; }
+
+    /// <summary>
+    /// Set true if the agent supports the AG-UI binary protocol (protobuf over
+    /// HTTP).
+    /// </summary>
+    [JsonPropertyName("httpBinary")]
+    public bool? HttpBinary { get; set; }
+
+    /// <summary>
+    /// Set true if the agent can send async updates via webhooks after a run
+    /// finishes.
+    /// </summary>
+    [JsonPropertyName("pushNotifications")]
+    public bool? PushNotifications { get; set; }
+
+    /// <summary>
+    /// Set true if the agent supports resuming interrupted streams via sequence
+    /// numbers.
+    /// </summary>
+    [JsonPropertyName("resumable")]
+    public bool? Resumable { get; set; }
+}
+
+/// <summary>
+/// Tool calling capabilities. Distinguishes between tools the agent itself
+/// provides (listed in items) and tools the client passes at runtime via
+/// RunAgentInput.tools. Enable this when your agent can call functions, search
+/// the web, execute code, etc.
+/// </summary>
+public sealed class ToolsCapabilities
+{
+    /// <summary>
+    /// Set true if the agent can make tool calls at all. Set false to
+    /// explicitly signal tool calling is disabled even if items are present.
+    /// </summary>
+    [JsonPropertyName("supported")]
+    public bool? Supported { get; set; }
+
+    /// <summary>
+    /// The tools this agent provides on its own (full JSON Schema definitions).
+    /// These are distinct from client-provided tools passed in
+    /// RunAgentInput.tools.
+    /// </summary>
+    [JsonPropertyName("items")]
+    public IList<AGUITool>? Items { get; set; }
+
+    /// <summary>
+    /// Set true if the agent can invoke multiple tools concurrently within a
+    /// single step.
+    /// </summary>
+    [JsonPropertyName("parallelCalls")]
+    public bool? ParallelCalls { get; set; }
+
+    /// <summary>
+    /// Set true if the agent accepts and uses tools provided by the client at
+    /// runtime.
+    /// </summary>
+    [JsonPropertyName("clientProvided")]
+    public bool? ClientProvided { get; set; }
+}
+
+/// <summary>
+/// Output format support. Enable structuredOutput when your agent can return
+/// responses conforming to a JSON schema, which is useful for programmatic
+/// consumption.
+/// </summary>
+public sealed class OutputCapabilities
+{
+    /// <summary>
+    /// Set true if the agent can produce structured JSON output matching a
+    /// provided schema.
+    /// </summary>
+    [JsonPropertyName("structuredOutput")]
+    public bool? StructuredOutput { get; set; }
+
+    /// <summary>
+    /// MIME types the agent can produce (e.g., ["text/plain",
+    /// "application/json"]). Omit if the agent only produces plain text.
+    /// </summary>
+    [JsonPropertyName("supportedMimeTypes")]
+    public IList<string>? SupportedMimeTypes { get; set; }
+}
+
+/// <summary>
+/// State and memory management capabilities. These tell the client how the
+/// agent handles shared state and whether conversation context persists across
+/// runs.
+/// </summary>
+public sealed class StateCapabilities
+{
+    /// <summary>
+    /// Set true if the agent emits STATE_SNAPSHOT events (full state
+    /// replacement).
+    /// </summary>
+    [JsonPropertyName("snapshots")]
+    public bool? Snapshots { get; set; }
+
+    /// <summary>
+    /// Set true if the agent emits STATE_DELTA events (JSON Patch incremental
+    /// updates).
+    /// </summary>
+    [JsonPropertyName("deltas")]
+    public bool? Deltas { get; set; }
+
+    /// <summary>
+    /// Set true if the agent has long-term memory beyond the current thread
+    /// (e.g., vector store, knowledge base, or cross-session recall).
+    /// </summary>
+    [JsonPropertyName("memory")]
+    public bool? Memory { get; set; }
+
+    /// <summary>
+    /// Set true if state is preserved across multiple runs within the same
+    /// thread. When false, state resets on each run.
+    /// </summary>
+    [JsonPropertyName("persistentState")]
+    public bool? PersistentState { get; set; }
+}
+
+/// <summary>
+/// Multi-agent coordination capabilities. Enable these when your agent can
+/// orchestrate or hand off work to other agents.
+/// </summary>
+public sealed class MultiAgentCapabilities
+{
+    /// <summary>
+    /// Set true if the agent participates in any form of multi-agent
+    /// coordination.
+    /// </summary>
+    [JsonPropertyName("supported")]
+    public bool? Supported { get; set; }
+
+    /// <summary>
+    /// Set true if the agent can delegate subtasks to other agents while
+    /// retaining control.
+    /// </summary>
+    [JsonPropertyName("delegation")]
+    public bool? Delegation { get; set; }
+
+    /// <summary>
+    /// Set true if the agent can transfer the conversation entirely to another
+    /// agent.
+    /// </summary>
+    [JsonPropertyName("handoffs")]
+    public bool? Handoffs { get; set; }
+
+    /// <summary>
+    /// List of subagents this agent can invoke. Helps clients build agent
+    /// selection UIs.
+    /// </summary>
+    [JsonPropertyName("subagents")]
+    public IList<SubagentInfo>? Subagents { get; set; }
+}
+
+/// <summary>
+/// Reasoning and thinking capabilities. Enable these when your agent exposes
+/// its internal thought process (e.g., chain-of-thought, extended thinking).
+/// </summary>
+public sealed class ReasoningCapabilities
+{
+    /// <summary>
+    /// Set true if the agent produces reasoning/thinking tokens visible to the
+    /// client.
+    /// </summary>
+    [JsonPropertyName("supported")]
+    public bool? Supported { get; set; }
+
+    /// <summary>
+    /// Set true if reasoning tokens are streamed incrementally (vs. returned
+    /// all at once).
+    /// </summary>
+    [JsonPropertyName("streaming")]
+    public bool? Streaming { get; set; }
+
+    /// <summary>
+    /// Set true if reasoning content is encrypted (zero-data-retention mode).
+    /// Clients should expect opaque encryptedValue fields instead of readable
+    /// content.
+    /// </summary>
+    [JsonPropertyName("encrypted")]
+    public bool? Encrypted { get; set; }
+}
+
+/// <summary>
+/// Modalities the agent can accept as input. Clients use this to show or hide
+/// file upload buttons, audio recorders, image pickers, etc.
+/// </summary>
+public sealed class MultimodalInputCapabilities
+{
+    /// <summary>
+    /// Set true if the agent can process image inputs (e.g., screenshots,
+    /// photos).
+    /// </summary>
+    [JsonPropertyName("image")]
+    public bool? Image { get; set; }
+
+    /// <summary>
+    /// Set true if the agent can process audio inputs (speech, recordings).
+    /// </summary>
+    [JsonPropertyName("audio")]
+    public bool? Audio { get; set; }
+
+    /// <summary>
+    /// Set true if the agent can process video inputs.
+    /// </summary>
+    [JsonPropertyName("video")]
+    public bool? Video { get; set; }
+
+    /// <summary>
+    /// Set true if the agent can process PDF documents.
+    /// </summary>
+    [JsonPropertyName("pdf")]
+    public bool? Pdf { get; set; }
+
+    /// <summary>
+    /// Set true if the agent can process arbitrary file uploads.
+    /// </summary>
+    [JsonPropertyName("file")]
+    public bool? File { get; set; }
+}
+
+/// <summary>
+/// Modalities the agent can produce as output. Clients use this to anticipate
+/// rich content in the agent's response.
+/// </summary>
+public sealed class MultimodalOutputCapabilities
+{
+    /// <summary>
+    /// Set true if the agent can generate images as part of its response.
+    /// </summary>
+    [JsonPropertyName("image")]
+    public bool? Image { get; set; }
+
+    /// <summary>
+    /// Set true if the agent can produce audio output (text-to-speech, audio
+    /// files).
+    /// </summary>
+    [JsonPropertyName("audio")]
+    public bool? Audio { get; set; }
+}
+
+/// <summary>
+/// Multimodal input and output support. Organized into input and output
+/// sub-objects so clients can independently query what the agent accepts versus
+/// what it produces.
+/// </summary>
+public sealed class MultimodalCapabilities
+{
+    /// <summary>
+    /// Modalities the agent can accept as input (images, audio, video, PDFs,
+    /// files).
+    /// </summary>
+    [JsonPropertyName("input")]
+    public MultimodalInputCapabilities? Input { get; set; }
+
+    /// <summary>
+    /// Modalities the agent can produce as output (images, audio).
+    /// </summary>
+    [JsonPropertyName("output")]
+    public MultimodalOutputCapabilities? Output { get; set; }
+}
+
+/// <summary>
+/// Execution control and limits. Declare these so clients can set expectations
+/// about how long or how many steps an agent run might take.
+/// </summary>
+public sealed class ExecutionCapabilities
+{
+    /// <summary>
+    /// Set true if the agent can execute code (e.g., Python, JavaScript) during
+    /// a run.
+    /// </summary>
+    [JsonPropertyName("codeExecution")]
+    public bool? CodeExecution { get; set; }
+
+    /// <summary>
+    /// Set true if code execution happens in a sandboxed or isolated
+    /// environment. Only meaningful when codeExecution is true.
+    /// </summary>
+    [JsonPropertyName("sandboxed")]
+    public bool? Sandboxed { get; set; }
+
+    /// <summary>
+    /// Maximum number of tool-call/reasoning iterations the agent will perform
+    /// per run. Helps clients display progress or set timeout expectations.
+    /// </summary>
+    [JsonPropertyName("maxIterations")]
+    public long? MaxIterations { get; set; }
+
+    /// <summary>
+    /// Maximum wall-clock time (in milliseconds) the agent will run before
+    /// timing out.
+    /// </summary>
+    [JsonPropertyName("maxExecutionTime")]
+    public long? MaxExecutionTime { get; set; }
+}
+
+/// <summary>
+/// Human-in-the-loop interaction support. Enable these when your agent can
+/// pause execution to request human input, approval, or feedback before
+/// continuing.
+/// </summary>
+public sealed class HumanInTheLoopCapabilities
+{
+    /// <summary>
+    /// Set true if the agent supports any form of human-in-the-loop
+    /// interaction.
+    /// </summary>
+    [JsonPropertyName("supported")]
+    public bool? Supported { get; set; }
+
+    /// <summary>
+    /// Set true if the agent can pause and request explicit approval before
+    /// performing sensitive actions (e.g., sending emails, deleting data).
+    /// </summary>
+    [JsonPropertyName("approvals")]
+    public bool? Approvals { get; set; }
+
+    /// <summary>
+    /// Set true if the agent allows humans to intervene and modify its plan
+    /// mid-execution.
+    /// </summary>
+    [JsonPropertyName("interventions")]
+    public bool? Interventions { get; set; }
+
+    /// <summary>
+    /// Set true if the agent can incorporate user feedback (thumbs up/down,
+    /// corrections) to improve its behavior within the current session.
+    /// </summary>
+    [JsonPropertyName("feedback")]
+    public bool? Feedback { get; set; }
+
+    /// <summary>
+    /// Set true if the agent participates in the AG-UI interrupt protocol: it
+    /// ends a run with RUN_FINISHED carrying an interrupt outcome, and accepts
+    /// the answers back in RunAgentInput.resume.
+    /// </summary>
+    [JsonPropertyName("interrupts")]
+    public bool? Interrupts { get; set; }
+
+    /// <summary>
+    /// Set true if tool-call interrupts accept editedArgs in the resume
+    /// payload. Only meaningful when interrupts is true.
+    /// </summary>
+    [JsonPropertyName("approveWithEdits")]
+    public bool? ApproveWithEdits { get; set; }
+}
+
+/// <summary>
+/// A typed, categorized snapshot of an agent's current capabilities. All fields
+/// are optional — agents only declare what they support. An omitted field means
+/// the capability is not declared (unknown), not that it is unsupported. The
+/// custom field is an escape hatch for integration-specific capabilities that
+/// do not fit into the standard categories.
+/// </summary>
+public sealed class AgentCapabilities
+{
+    /// <summary>
+    /// Agent identity and metadata.
+    /// </summary>
+    [JsonPropertyName("identity")]
+    public IdentityCapabilities? Identity { get; set; }
+
+    /// <summary>
+    /// Supported transport mechanisms (SSE, WebSocket, binary, etc.).
+    /// </summary>
+    [JsonPropertyName("transport")]
+    public TransportCapabilities? Transport { get; set; }
+
+    /// <summary>
+    /// Tools the agent provides and tool calling configuration.
+    /// </summary>
+    [JsonPropertyName("tools")]
+    public ToolsCapabilities? Tools { get; set; }
+
+    /// <summary>
+    /// Output format support (structured output, MIME types).
+    /// </summary>
+    [JsonPropertyName("output")]
+    public OutputCapabilities? Output { get; set; }
+
+    /// <summary>
+    /// State and memory management (snapshots, deltas, persistence).
+    /// </summary>
+    [JsonPropertyName("state")]
+    public StateCapabilities? State { get; set; }
+
+    /// <summary>
+    /// Multi-agent coordination (delegation, handoffs, subagents).
+    /// </summary>
+    [JsonPropertyName("multiAgent")]
+    public MultiAgentCapabilities? MultiAgent { get; set; }
+
+    /// <summary>
+    /// Reasoning and thinking support (chain-of-thought, encrypted thinking).
+    /// </summary>
+    [JsonPropertyName("reasoning")]
+    public ReasoningCapabilities? Reasoning { get; set; }
+
+    /// <summary>
+    /// Multimodal input/output support (images, audio, video, files).
+    /// </summary>
+    [JsonPropertyName("multimodal")]
+    public MultimodalCapabilities? Multimodal { get; set; }
+
+    /// <summary>
+    /// Execution control and limits (code execution, timeouts, iteration caps).
+    /// </summary>
+    [JsonPropertyName("execution")]
+    public ExecutionCapabilities? Execution { get; set; }
+
+    /// <summary>
+    /// Human-in-the-loop support (approvals, interventions, feedback).
+    /// </summary>
+    [JsonPropertyName("humanInTheLoop")]
+    public HumanInTheLoopCapabilities? HumanInTheLoop { get; set; }
+
+    /// <summary>
+    /// Integration-specific capabilities not covered by the standard
+    /// categories. Open by key: any JSON value is allowed under a key, because
+    /// the categories above cannot anticipate what an integration declares.
+    /// </summary>
+    [JsonPropertyName("custom")]
+    public JsonElement? Custom { get; set; }
+}
+
+/// <summary>
 /// Why a run ended.
 /// </summary>
 [JsonConverter(typeof(RunFinishedOutcomeJsonConverter))]

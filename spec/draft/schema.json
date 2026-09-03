@@ -1514,6 +1514,371 @@
       "required": ["threadId", "runId", "messages"],
       "unevaluatedProperties": false
     },
+    "SubagentInfo": {
+      "$anchor": "SubagentInfo",
+      "type": "object",
+      "description": "Describes a subagent that can be invoked by a parent agent.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique name or identifier of the subagent."
+        },
+        "description": {
+          "type": "string",
+          "description": "What this subagent specializes in. Helps clients build agent selection UIs."
+        }
+      },
+      "required": ["name"],
+      "unevaluatedProperties": false
+    },
+    "IdentityCapabilities": {
+      "$anchor": "IdentityCapabilities",
+      "type": "object",
+      "description": "Basic metadata about the agent. Useful for discovery UIs, agent marketplaces, and debugging. Set these when you want clients to display agent information or when multiple agents are available and users need to pick one.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable name shown in UIs and agent selectors."
+        },
+        "type": {
+          "type": "string",
+          "description": "The framework or platform powering this agent (e.g., \"langgraph\", \"mastra\", \"crewai\")."
+        },
+        "description": {
+          "type": "string",
+          "description": "What this agent does — helps users and routing logic decide when to use it."
+        },
+        "version": {
+          "type": "string",
+          "description": "Semantic version of the agent (e.g., \"1.2.0\"). Useful for compatibility checks."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Organization or team that maintains this agent."
+        },
+        "documentationUrl": {
+          "type": "string",
+          "description": "URL to the agent's documentation or homepage."
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Arbitrary key-value pairs for integration-specific identity info."
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "TransportCapabilities": {
+      "$anchor": "TransportCapabilities",
+      "type": "object",
+      "description": "Declares which transport mechanisms the agent supports. Clients use this to pick the best connection strategy. Only set flags to true for transports your agent actually handles — omit or set false for unsupported ones.",
+      "properties": {
+        "streaming": {
+          "type": "boolean",
+          "description": "Set true if the agent streams responses via SSE. Most agents enable this."
+        },
+        "websocket": {
+          "type": "boolean",
+          "description": "Set true if the agent accepts persistent WebSocket connections."
+        },
+        "httpBinary": {
+          "type": "boolean",
+          "description": "Set true if the agent supports the AG-UI binary protocol (protobuf over HTTP)."
+        },
+        "pushNotifications": {
+          "type": "boolean",
+          "description": "Set true if the agent can send async updates via webhooks after a run finishes."
+        },
+        "resumable": {
+          "type": "boolean",
+          "description": "Set true if the agent supports resuming interrupted streams via sequence numbers."
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "ToolsCapabilities": {
+      "$anchor": "ToolsCapabilities",
+      "type": "object",
+      "description": "Tool calling capabilities. Distinguishes between tools the agent itself provides (listed in items) and tools the client passes at runtime via RunAgentInput.tools. Enable this when your agent can call functions, search the web, execute code, etc.",
+      "properties": {
+        "supported": {
+          "type": "boolean",
+          "description": "Set true if the agent can make tool calls at all. Set false to explicitly signal tool calling is disabled even if items are present."
+        },
+        "items": {
+          "type": "array",
+          "description": "The tools this agent provides on its own (full JSON Schema definitions). These are distinct from client-provided tools passed in RunAgentInput.tools.",
+          "items": { "$ref": "#/$defs/Tool" }
+        },
+        "parallelCalls": {
+          "type": "boolean",
+          "description": "Set true if the agent can invoke multiple tools concurrently within a single step."
+        },
+        "clientProvided": {
+          "type": "boolean",
+          "description": "Set true if the agent accepts and uses tools provided by the client at runtime."
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "OutputCapabilities": {
+      "$anchor": "OutputCapabilities",
+      "type": "object",
+      "description": "Output format support. Enable structuredOutput when your agent can return responses conforming to a JSON schema, which is useful for programmatic consumption.",
+      "properties": {
+        "structuredOutput": {
+          "type": "boolean",
+          "description": "Set true if the agent can produce structured JSON output matching a provided schema."
+        },
+        "supportedMimeTypes": {
+          "type": "array",
+          "description": "MIME types the agent can produce (e.g., [\"text/plain\", \"application/json\"]). Omit if the agent only produces plain text.",
+          "items": { "type": "string" }
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "StateCapabilities": {
+      "$anchor": "StateCapabilities",
+      "type": "object",
+      "description": "State and memory management capabilities. These tell the client how the agent handles shared state and whether conversation context persists across runs.",
+      "properties": {
+        "snapshots": {
+          "type": "boolean",
+          "description": "Set true if the agent emits STATE_SNAPSHOT events (full state replacement)."
+        },
+        "deltas": {
+          "type": "boolean",
+          "description": "Set true if the agent emits STATE_DELTA events (JSON Patch incremental updates)."
+        },
+        "memory": {
+          "type": "boolean",
+          "description": "Set true if the agent has long-term memory beyond the current thread (e.g., vector store, knowledge base, or cross-session recall)."
+        },
+        "persistentState": {
+          "type": "boolean",
+          "description": "Set true if state is preserved across multiple runs within the same thread. When false, state resets on each run."
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "MultiAgentCapabilities": {
+      "$anchor": "MultiAgentCapabilities",
+      "type": "object",
+      "description": "Multi-agent coordination capabilities. Enable these when your agent can orchestrate or hand off work to other agents.",
+      "properties": {
+        "supported": {
+          "type": "boolean",
+          "description": "Set true if the agent participates in any form of multi-agent coordination."
+        },
+        "delegation": {
+          "type": "boolean",
+          "description": "Set true if the agent can delegate subtasks to other agents while retaining control."
+        },
+        "handoffs": {
+          "type": "boolean",
+          "description": "Set true if the agent can transfer the conversation entirely to another agent."
+        },
+        "subagents": {
+          "type": "array",
+          "description": "List of subagents this agent can invoke. Helps clients build agent selection UIs.",
+          "items": { "$ref": "#/$defs/SubagentInfo" }
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "ReasoningCapabilities": {
+      "$anchor": "ReasoningCapabilities",
+      "type": "object",
+      "description": "Reasoning and thinking capabilities. Enable these when your agent exposes its internal thought process (e.g., chain-of-thought, extended thinking).",
+      "properties": {
+        "supported": {
+          "type": "boolean",
+          "description": "Set true if the agent produces reasoning/thinking tokens visible to the client."
+        },
+        "streaming": {
+          "type": "boolean",
+          "description": "Set true if reasoning tokens are streamed incrementally (vs. returned all at once)."
+        },
+        "encrypted": {
+          "type": "boolean",
+          "description": "Set true if reasoning content is encrypted (zero-data-retention mode). Clients should expect opaque encryptedValue fields instead of readable content."
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "MultimodalInputCapabilities": {
+      "$anchor": "MultimodalInputCapabilities",
+      "type": "object",
+      "description": "Modalities the agent can accept as input. Clients use this to show or hide file upload buttons, audio recorders, image pickers, etc.",
+      "properties": {
+        "image": {
+          "type": "boolean",
+          "description": "Set true if the agent can process image inputs (e.g., screenshots, photos)."
+        },
+        "audio": {
+          "type": "boolean",
+          "description": "Set true if the agent can process audio inputs (speech, recordings)."
+        },
+        "video": {
+          "type": "boolean",
+          "description": "Set true if the agent can process video inputs."
+        },
+        "pdf": {
+          "type": "boolean",
+          "description": "Set true if the agent can process PDF documents."
+        },
+        "file": {
+          "type": "boolean",
+          "description": "Set true if the agent can process arbitrary file uploads."
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "MultimodalOutputCapabilities": {
+      "$anchor": "MultimodalOutputCapabilities",
+      "type": "object",
+      "description": "Modalities the agent can produce as output. Clients use this to anticipate rich content in the agent's response.",
+      "properties": {
+        "image": {
+          "type": "boolean",
+          "description": "Set true if the agent can generate images as part of its response."
+        },
+        "audio": {
+          "type": "boolean",
+          "description": "Set true if the agent can produce audio output (text-to-speech, audio files)."
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "MultimodalCapabilities": {
+      "$anchor": "MultimodalCapabilities",
+      "type": "object",
+      "description": "Multimodal input and output support. Organized into input and output sub-objects so clients can independently query what the agent accepts versus what it produces.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/MultimodalInputCapabilities",
+          "description": "Modalities the agent can accept as input (images, audio, video, PDFs, files)."
+        },
+        "output": {
+          "$ref": "#/$defs/MultimodalOutputCapabilities",
+          "description": "Modalities the agent can produce as output (images, audio)."
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "ExecutionCapabilities": {
+      "$anchor": "ExecutionCapabilities",
+      "type": "object",
+      "description": "Execution control and limits. Declare these so clients can set expectations about how long or how many steps an agent run might take.",
+      "properties": {
+        "codeExecution": {
+          "type": "boolean",
+          "description": "Set true if the agent can execute code (e.g., Python, JavaScript) during a run."
+        },
+        "sandboxed": {
+          "type": "boolean",
+          "description": "Set true if code execution happens in a sandboxed or isolated environment. Only meaningful when codeExecution is true."
+        },
+        "maxIterations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Maximum number of tool-call/reasoning iterations the agent will perform per run. Helps clients display progress or set timeout expectations."
+        },
+        "maxExecutionTime": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Maximum wall-clock time (in milliseconds) the agent will run before timing out."
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "HumanInTheLoopCapabilities": {
+      "$anchor": "HumanInTheLoopCapabilities",
+      "type": "object",
+      "description": "Human-in-the-loop interaction support. Enable these when your agent can pause execution to request human input, approval, or feedback before continuing.",
+      "properties": {
+        "supported": {
+          "type": "boolean",
+          "description": "Set true if the agent supports any form of human-in-the-loop interaction."
+        },
+        "approvals": {
+          "type": "boolean",
+          "description": "Set true if the agent can pause and request explicit approval before performing sensitive actions (e.g., sending emails, deleting data)."
+        },
+        "interventions": {
+          "type": "boolean",
+          "description": "Set true if the agent allows humans to intervene and modify its plan mid-execution."
+        },
+        "feedback": {
+          "type": "boolean",
+          "description": "Set true if the agent can incorporate user feedback (thumbs up/down, corrections) to improve its behavior within the current session."
+        },
+        "interrupts": {
+          "type": "boolean",
+          "description": "Set true if the agent participates in the AG-UI interrupt protocol: it ends a run with RUN_FINISHED carrying an interrupt outcome, and accepts the answers back in RunAgentInput.resume."
+        },
+        "approveWithEdits": {
+          "type": "boolean",
+          "description": "Set true if tool-call interrupts accept editedArgs in the resume payload. Only meaningful when interrupts is true."
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "AgentCapabilities": {
+      "$anchor": "AgentCapabilities",
+      "type": "object",
+      "description": "A typed, categorized snapshot of an agent's current capabilities. All fields are optional — agents only declare what they support. An omitted field means the capability is not declared (unknown), not that it is unsupported. The custom field is an escape hatch for integration-specific capabilities that do not fit into the standard categories.",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/IdentityCapabilities",
+          "description": "Agent identity and metadata."
+        },
+        "transport": {
+          "$ref": "#/$defs/TransportCapabilities",
+          "description": "Supported transport mechanisms (SSE, WebSocket, binary, etc.)."
+        },
+        "tools": {
+          "$ref": "#/$defs/ToolsCapabilities",
+          "description": "Tools the agent provides and tool calling configuration."
+        },
+        "output": {
+          "$ref": "#/$defs/OutputCapabilities",
+          "description": "Output format support (structured output, MIME types)."
+        },
+        "state": {
+          "$ref": "#/$defs/StateCapabilities",
+          "description": "State and memory management (snapshots, deltas, persistence)."
+        },
+        "multiAgent": {
+          "$ref": "#/$defs/MultiAgentCapabilities",
+          "description": "Multi-agent coordination (delegation, handoffs, subagents)."
+        },
+        "reasoning": {
+          "$ref": "#/$defs/ReasoningCapabilities",
+          "description": "Reasoning and thinking support (chain-of-thought, encrypted thinking)."
+        },
+        "multimodal": {
+          "$ref": "#/$defs/MultimodalCapabilities",
+          "description": "Multimodal input/output support (images, audio, video, files)."
+        },
+        "execution": {
+          "$ref": "#/$defs/ExecutionCapabilities",
+          "description": "Execution control and limits (code execution, timeouts, iteration caps)."
+        },
+        "humanInTheLoop": {
+          "$ref": "#/$defs/HumanInTheLoopCapabilities",
+          "description": "Human-in-the-loop support (approvals, interventions, feedback)."
+        },
+        "custom": {
+          "type": "object",
+          "description": "Integration-specific capabilities not covered by the standard categories. Open by key: any JSON value is allowed under a key, because the categories above cannot anticipate what an integration declares.",
+          "additionalProperties": true
+        }
+      },
+      "unevaluatedProperties": false
+    },
     "JsonPatch": {
       "$anchor": "JsonPatch",
       "type": "array",

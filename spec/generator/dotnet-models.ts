@@ -1031,6 +1031,23 @@ export function emitDotnetModels(
     "ResumeEntry",
     "TokenUsage",
     "RunAgentInput",
+    // The capability model. Listed after the run types because a capabilities
+    // snapshot describes the agent rather than a run, and in schema order so
+    // the emitted file reads the way the schema declares them.
+    "SubagentInfo",
+    "IdentityCapabilities",
+    "TransportCapabilities",
+    "ToolsCapabilities",
+    "OutputCapabilities",
+    "StateCapabilities",
+    "MultiAgentCapabilities",
+    "ReasoningCapabilities",
+    "MultimodalInputCapabilities",
+    "MultimodalOutputCapabilities",
+    "MultimodalCapabilities",
+    "ExecutionCapabilities",
+    "HumanInTheLoopCapabilities",
+    "AgentCapabilities",
   ];
   const plain = plainNames.map((name) =>
     emitClass(context, objectDef(name), {}),

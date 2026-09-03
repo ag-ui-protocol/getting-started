@@ -1000,6 +1000,180 @@ export const RoleSchema = z.enum([
 ]);
 
 /**
+ * Describes a subagent that can be invoked by a parent agent.
+ */
+export const SubagentInfoSchema = z.looseObject({
+  name: z.string(),
+  description: z.string().optional(),
+});
+
+/**
+ * Basic metadata about the agent. Useful for discovery UIs, agent
+ * marketplaces, and debugging. Set these when you want clients to display
+ * agent information or when multiple agents are available and users need to
+ * pick one.
+ */
+export const IdentityCapabilitiesSchema = z.looseObject({
+  name: z.string().optional(),
+  type: z.string().optional(),
+  description: z.string().optional(),
+  version: z.string().optional(),
+  provider: z.string().optional(),
+  documentationUrl: z.string().optional(),
+  metadata: MetadataSchema.optional(),
+});
+
+/**
+ * Declares which transport mechanisms the agent supports. Clients use this to
+ * pick the best connection strategy. Only set flags to true for transports
+ * your agent actually handles — omit or set false for unsupported ones.
+ */
+export const TransportCapabilitiesSchema = z.looseObject({
+  streaming: z.boolean().optional(),
+  websocket: z.boolean().optional(),
+  httpBinary: z.boolean().optional(),
+  pushNotifications: z.boolean().optional(),
+  resumable: z.boolean().optional(),
+});
+
+/**
+ * Tool calling capabilities. Distinguishes between tools the agent itself
+ * provides (listed in items) and tools the client passes at runtime via
+ * RunAgentInput.tools. Enable this when your agent can call functions, search
+ * the web, execute code, etc.
+ */
+export const ToolsCapabilitiesSchema = z.looseObject({
+  supported: z.boolean().optional(),
+  items: z.array(ToolSchema).optional(),
+  parallelCalls: z.boolean().optional(),
+  clientProvided: z.boolean().optional(),
+});
+
+/**
+ * Output format support. Enable structuredOutput when your agent can return
+ * responses conforming to a JSON schema, which is useful for programmatic
+ * consumption.
+ */
+export const OutputCapabilitiesSchema = z.looseObject({
+  structuredOutput: z.boolean().optional(),
+  supportedMimeTypes: z.array(z.string()).optional(),
+});
+
+/**
+ * State and memory management capabilities. These tell the client how the
+ * agent handles shared state and whether conversation context persists across
+ * runs.
+ */
+export const StateCapabilitiesSchema = z.looseObject({
+  snapshots: z.boolean().optional(),
+  deltas: z.boolean().optional(),
+  memory: z.boolean().optional(),
+  persistentState: z.boolean().optional(),
+});
+
+/**
+ * Multi-agent coordination capabilities. Enable these when your agent can
+ * orchestrate or hand off work to other agents.
+ */
+export const MultiAgentCapabilitiesSchema = z.looseObject({
+  supported: z.boolean().optional(),
+  delegation: z.boolean().optional(),
+  handoffs: z.boolean().optional(),
+  subagents: z.array(SubagentInfoSchema).optional(),
+});
+
+/**
+ * Reasoning and thinking capabilities. Enable these when your agent exposes
+ * its internal thought process (e.g., chain-of-thought, extended thinking).
+ */
+export const ReasoningCapabilitiesSchema = z.looseObject({
+  supported: z.boolean().optional(),
+  streaming: z.boolean().optional(),
+  encrypted: z.boolean().optional(),
+});
+
+/**
+ * Modalities the agent can accept as input. Clients use this to show or hide
+ * file upload buttons, audio recorders, image pickers, etc.
+ */
+export const MultimodalInputCapabilitiesSchema = z.looseObject({
+  image: z.boolean().optional(),
+  audio: z.boolean().optional(),
+  video: z.boolean().optional(),
+  pdf: z.boolean().optional(),
+  file: z.boolean().optional(),
+});
+
+/**
+ * Modalities the agent can produce as output. Clients use this to anticipate
+ * rich content in the agent's response.
+ */
+export const MultimodalOutputCapabilitiesSchema = z.looseObject({
+  image: z.boolean().optional(),
+  audio: z.boolean().optional(),
+});
+
+/**
+ * Multimodal input and output support. Organized into input and output
+ * sub-objects so clients can independently query what the agent accepts versus
+ * what it produces.
+ */
+export const MultimodalCapabilitiesSchema = z.looseObject({
+  input: MultimodalInputCapabilitiesSchema.optional(),
+  output: MultimodalOutputCapabilitiesSchema.optional(),
+});
+
+/**
+ * Execution control and limits. Declare these so clients can set expectations
+ * about how long or how many steps an agent run might take.
+ */
+export const ExecutionCapabilitiesSchema = z.looseObject({
+  codeExecution: z.boolean().optional(),
+  sandboxed: z.boolean().optional(),
+  maxIterations: z.int().min(0).max(9007199254740991).optional(),
+  maxExecutionTime: z.int().min(0).max(9007199254740991).optional(),
+});
+
+/**
+ * Human-in-the-loop interaction support. Enable these when your agent can
+ * pause execution to request human input, approval, or feedback before
+ * continuing.
+ */
+export const HumanInTheLoopCapabilitiesSchema = z.looseObject({
+  supported: z.boolean().optional(),
+  approvals: z.boolean().optional(),
+  interventions: z.boolean().optional(),
+  feedback: z.boolean().optional(),
+  interrupts: z.boolean().optional(),
+  approveWithEdits: z.boolean().optional(),
+});
+
+/**
+ * A typed, categorized snapshot of an agent's current capabilities. All fields
+ * are optional — agents only declare what they support. An omitted field means
+ * the capability is not declared (unknown), not that it is unsupported. The
+ * custom field is an escape hatch for integration-specific capabilities that
+ * do not fit into the standard categories.
+ */
+export const AgentCapabilitiesSchema = z.looseObject({
+  identity: IdentityCapabilitiesSchema.optional(),
+  transport: TransportCapabilitiesSchema.optional(),
+  tools: ToolsCapabilitiesSchema.optional(),
+  output: OutputCapabilitiesSchema.optional(),
+  state: StateCapabilitiesSchema.optional(),
+  multiAgent: MultiAgentCapabilitiesSchema.optional(),
+  reasoning: ReasoningCapabilitiesSchema.optional(),
+  multimodal: MultimodalCapabilitiesSchema.optional(),
+  execution: ExecutionCapabilitiesSchema.optional(),
+  humanInTheLoop: HumanInTheLoopCapabilitiesSchema.optional(),
+  custom: z
+    .custom<
+      Record<string, any>
+    >((value) => typeof value === "object" && value !== null && !Array.isArray(value))
+    .optional(),
+});
+
+/**
  * Composed into everything that can belong to a subagent's work: the events
  * that describe content or progress, the message types, and each interrupt.
  * Run-scoped events omit it — RUN_STARTED, RUN_FINISHED and RUN_ERROR describe
