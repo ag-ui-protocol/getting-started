@@ -1,0 +1,47 @@
+[project]
+name = "cli-agent-orchestrator-server"
+version = "0.0.1"
+description = "CLI Agent Orchestrator (CAO) example server for the AG-UI Dojo (keyless mock_cli fleet)"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+# Base install is zero-dependency and runs the self-contained MOCK backend, so
+# the example server and the keyless CI e2e need only the AG-UI protocol.
+dependencies = [
+    "ag-ui-protocol>=0.1.19,<0.2.0",
+    "fastapi>=0.115.12",
+    "uvicorn>=0.34.3",
+]
+
+[project.optional-dependencies]
+# High-fidelity PROJECTION backend: CAO's merged AG-UI run plane
+# (cli_agent_orchestrator.services.agui). Phase 2 reached PyPI in 2.4.1
+# (2026-08-04), which publishes the `agui` extra, so this is an ordinary version
+# constraint — no VCS pin and no local checkout. Floor is 2.4.1: it is the release
+# this suite is verified against, and it carries 2.4.0's dependency fixes. Capped
+# below 3 because a major bump may move or rename `services.agui.run_plane`,
+# `services.agui.base`, or `services.agui.handoff_approval`, which the projection
+# backend imports directly. Enable with: uv sync --extra cao
+cao = [
+    "cli-agent-orchestrator[agui]>=2.4.1,<3",
+]
+test = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+dev = "server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# Required so the pinned VCS dependency in the optional 'cao' extra is accepted.
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["server"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

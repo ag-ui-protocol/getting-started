@@ -374,6 +374,17 @@ export const menuIntegrations = [
     ],
   },
   {
+    id: "cli-agent-orchestrator",
+    name: "CLI Agent Orchestrator (awslabs)",
+    features: [
+      "agentic_chat",
+      "shared_state",
+      "human_in_the_loop",
+      "agentic_generative_ui",
+      "interrupt",
+    ],
+  },
+  {
     id: "claude-agent-sdk-python",
     name: "Claude Agent SDK (Python)",
     features: [

@@ -200,6 +200,10 @@ jobs:
             test_path: tests/awsStrandsTypescriptTests
             services: ["dojo", "aws-strands-typescript"]
             wait_on: http://localhost:9999,tcp:localhost:8022
+          - suite: cli-agent-orchestrator
+            test_path: tests/caoTests
+            services: ["dojo", "cli-agent-orchestrator"]
+            wait_on: http://localhost:9999,tcp:localhost:8027
           - suite: claude-agent-sdk-python
             test_path: tests/claudeAgentSdkPythonTests
             services: ["dojo", "claude-agent-sdk-python"]

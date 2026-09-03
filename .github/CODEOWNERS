@@ -11,4 +11,6 @@ docs/sdk/dart @mattsp1290
 
 integrations/agent-spec @sonleoracle
 
+integrations/cli-agent-orchestrator @ag-ui-protocol/copilotkit @plauzy @haofeif
+
 .github/config-allowlist.txt @AlemTuzlak @atai

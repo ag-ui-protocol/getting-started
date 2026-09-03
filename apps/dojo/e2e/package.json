@@ -6,6 +6,7 @@
   "description": "Scheduled Playwright smoke tests for CopilotKit demo apps",
   "scripts": {
     "postinstall": "playwright install chromium",
+    "pretest": "node -e \"process.exit(process.env.CI === 'true' || process.env.CI === '1' ? 0 : 1)\" || playwright install chromium chromium-headless-shell",
     "test": "playwright test",
     "check:event-trace-types": "tsc -p tsconfig.event-trace.json",
     "test:event-trace-unit": "tsx --test lib/event-trace-*.test.ts",
@@ -14,7 +15,7 @@
     "report": "playwright show-report"
   },
   "devDependencies": {
-    "@playwright/test": "^1.43.1",
+    "@playwright/test": "1.52.0",
     "@slack/types": "^2.14.0",
     "@types/node": "^22.15.28",
     "playwright-slack-report": "^1.1.93",
