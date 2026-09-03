@@ -26,13 +26,8 @@ import {
   ModelMetadataEvent,
   type ModelStreamEvent,
 } from "@strands-agents/sdk";
-import {
-  EventType,
-  RunErrorEventSchema,
-  RunFinishedEventSchema,
-  type BaseEvent,
-  type TokenUsage,
-} from "@ag-ui/core";
+import { EventType, type BaseEvent, type TokenUsage } from "@ag-ui/core";
+import { RunErrorEventSchema, RunFinishedEventSchema } from "@ag-ui/core/schemas";
 
 import { StrandsAgent } from "../agent";
 import {
@@ -197,11 +192,14 @@ describe("terminal-event token usage", () => {
     ]);
 
     // What the guard is actually protecting, spelled out so the case above is
-    // not mistaken for belt-and-braces: `TokenUsageSchema` bounds counts to
-    // non-negative integers and stops there, so it accepts the oversized value
-    // and the failure lands later, inside the protobuf transport's int64
-    // decoder. Dropping it at the source is what keeps the SSE and binary
-    // wires reporting the same run.
+    // not mistaken for belt-and-braces. The generated `TokenUsageSchema` bounds
+    // counts to the wire ceiling (the schema's `maximum`, 2^53 - 1), so an
+    // oversized count on RUN_FINISHED is a MALFORMED known value — fatal at the
+    // client's enforcement stage, ending the run over a number nobody can carry.
+    // Dropping it at the source is what turns that into a run that finishes with
+    // one count missing, and keeps the SSE and binary wires reporting the same
+    // thing. This pins the premise: if the schema ever stops rejecting it, the
+    // guard becomes belt-and-braces and this comment is wrong.
     expect(
       RunFinishedEventSchema.safeParse({
         type: EventType.RUN_FINISHED,
@@ -209,8 +207,8 @@ describe("terminal-event token usage", () => {
         runId: "r",
         usage: [{ inputTokens: oversized }],
       }).success,
-      "TokenUsageSchema now bounds counts itself; revisit this guard",
-    ).toBe(true);
+      "TokenUsageSchema no longer bounds counts; the guard is now belt-and-braces — revisit",
+    ).toBe(false);
   });
 
   it("omits usage entirely when the provider reports none", async () => {
