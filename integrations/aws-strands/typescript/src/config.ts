@@ -5,6 +5,7 @@ import type { AgentConfig, SessionManager } from "@strands-agents/sdk";
 import type { A2UIInjectConfig } from "./a2ui-tool";
 
 import type { Logger } from "./logger";
+import type { UrlFetchPolicy } from "./utils";
 
 export type StatePayload = Record<string, unknown>;
 
@@ -277,6 +278,57 @@ export interface StrandsAgentConfig {
    * (modulo camelCase / snake_case) so cross-SDK log diffs are straightforward.
    */
   logger?: Logger;
+  /**
+   * The policy applied to every server-side fetch of a URL content source.
+   *
+   * A user message may carry an image, document, video or audio clip as a URL
+   * instead of inline data, and the adapter fetches it, so the fetch runs
+   * with the server's own network reach rather than the client's. Anyone who
+   * can post a `RunAgentInput` can name the URL.
+   *
+   * `undefined` uses `DEFAULT_URL_FETCH_POLICY`, which fetches only `http`
+   * and `https`, refuses any host that resolves outside the public internet
+   * (loopback, private, link-local, multicast, reserved, unspecified,
+   * including the cloud metadata endpoints), pins the connection to the
+   * address it validated so a second DNS answer cannot move it, re-checks
+   * every redirect hop under this same policy, refuses a redirect that drops
+   * TLS, and caps one attachment's size and the time it may take.
+   *
+   * Private-network access is opt-in and is the host's decision, never the
+   * client's. A deployment whose attachments live on a private CDN or behind
+   * split DNS spreads the opt-in over the default:
+   *
+   * ```ts
+   * import { DEFAULT_URL_FETCH_POLICY } from "@ag-ui/aws-strands";
+   *
+   * config: {
+   *   urlFetchPolicy: {
+   *     ...DEFAULT_URL_FETCH_POLICY,
+   *     allowPrivateNetworks: true,
+   *   },
+   * }
+   * ```
+   *
+   * Link-local addresses and the cloud metadata endpoints stay blocked even
+   * under that opt-in. `allowedSchemes` can only be narrowed, never widened:
+   * an http/https request is issued through a transport pinned to the
+   * addresses that passed validation, and any other scheme would go through a
+   * client that resolves the host again at connection time, reopening the
+   * rebinding window this policy exists to close. Narrow it with
+   * `allowedSchemes: new Set(["https"])`.
+   *
+   * An unusable policy (a limit below one, a fractional redirect cap, a
+   * scheme outside http/https, a non-boolean `allowPrivateNetworks`) fails
+   * the run with `RUN_ERROR { code: "URL_FETCH_POLICY_INVALID" }` before any
+   * attachment is fetched. It never silently reverts to the default.
+   *
+   * Python's `url_fetch_policy` is the same option, and the two policies do
+   * not carry quite the same fields: Python adds a run-wide attachment,
+   * byte and time budget, and TypeScript adds `maxRedirects` and
+   * `nat64Prefixes`. That divergence predates this option being configurable
+   * at all.
+   */
+  urlFetchPolicy?: UrlFetchPolicy;
 }
 
 // Prototype-pollution guard for keys flattened from `context[]`. Plain

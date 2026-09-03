@@ -1,9 +1,12 @@
 # AWS Strands Example Server
 
 Demo FastAPI server that wires the Strands Agents SDK into the AG-UI protocol
-with support for multiple model providers (OpenAI, Anthropic, Gemini). Each route
-mounts a ready-made agent that showcases different UI patterns (vanilla chat,
-backend tool rendering, shared state, and generative UI).
+with support for multiple model providers (OpenAI, Anthropic, Gemini). Each of
+the fifteen routes mounts a ready-made agent showing one thing the adapter does:
+plain chat, reasoning, citations, multimodal input, backend and frontend tools,
+shared state, generative UI, predictive state updates, human-in-the-loop, native
+interrupts, a multi-agent graph, and the three A2UI surfaces. The table below is
+the list that matters; this sentence is a summary of it.
 
 ## Requirements
 
@@ -40,8 +43,8 @@ PORT=8000                 # FastAPI listen port
 # literal comment text, not as an empty value.
 # MODEL_ID=
 
-# Comma-separated browser origins to allow. Unset allows every origin; a value
-# that names none refuses them all rather than widening.
+# Comma-separated browser origins to allow. Unset or blank allows every origin;
+# a value that was written but names none refuses them all rather than widening.
 # CORS_ALLOW_ORIGINS=https://app.example,https://admin.example
 ```
 
@@ -70,9 +73,9 @@ The root route lists the available demos:
 | `/agentic-chat-citations`   | Answers carrying the sources they came from                     |
 | `/agentic-chat-multimodal`  | Multimodal image / document analysis                            |
 | `/backend-tool-rendering`   | Backend-executed tools (charts, faux weather) rendered in AG-UI |
-| `/agentic-generative-ui`    | Demonstrates `PredictState` + delta streaming for plan tracking |
+| `/agentic-generative-ui`    | Demonstrates `PredictState` + state snapshots for plan tracking |
 | `/shared-state`             | Recipe builder showing shared JSON state + tool arguments       |
-| `/human-in-the-loop`        | Frontend proxy tool with halt-after-call                        |
+| `/human-in-the-loop`        | Frontend tool parked in a native Strands wait                   |
 | `/interrupt`                | Tool pauses to ask the user for a meeting time                  |
 | `/predictive-state-updates` | Document editor driven by streaming tool args                   |
 | `/tool-based-generative-ui` | Frontend-rendered tool (`generate_haiku`)                       |
@@ -81,21 +84,47 @@ The root route lists the available demos:
 Point the AG-UI Dojo (or any AG-UI client) at these SSE endpoints to see the
 Strands wrapper translate provider events into protocol-native messages.
 
+### Demos that pin their own model
+
+`MODEL_PROVIDER` still selects the provider for every demo. Two of them ask
+`model_factory.py` for OpenAI's Responses API on top of that, because the feature
+they show is reachable there with the key the dojo already has. The request is
+honoured only when the selected provider is `openai`; on the others it is ignored
+rather than overriding anything:
+
+- `agentic_chat_citations.py` asks for the Responses API plus the built-in
+  `web_search` tool, the one built-in whose annotations Strands maps to
+  citations. `create_model` still dispatches on `MODEL_PROVIDER`, so on
+  `anthropic` or `gemini` the request is ignored and the run succeeds while
+  citing nothing.
+- `agentic_chat_reasoning.py` asks for the Responses API with reasoning
+  summaries. On `anthropic` the factory requests extended thinking instead and
+  `REASONING_*` events still arrive; on `gemini` they do not.
+
+The citations demo also needs `strands-agents>=1.35.0`. This server's
+`pyproject.toml` asks for `^1.35.0` and there is no lockfile beside it, so the
+version you get is resolved fresh at install time. Earlier releases ship the
+Responses model without the URL-citation mapping, and the run then succeeds and
+cites nothing there too.
+
 ## Environment Variables
 
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `MODEL_PROVIDER` | No | Model provider: `openai` (default), `anthropic`, or `gemini` |
-| `MODEL_ID` | No | Override the default model ID for the chosen provider |
-| `OPENAI_API_KEY` | If using OpenAI | OpenAI API key |
-| `ANTHROPIC_API_KEY` | If using Anthropic | Anthropic API key |
-| `GOOGLE_API_KEY` | If using Gemini | Google Gemini API key |
-| `PORT` | No | Listen port, default 8000. Plain decimal digits, no leading zero or sign, giving 1 to 65535. Anything else is refused at startup naming the variable and the value |
-| `CORS_ALLOW_ORIGINS` | No | Comma-separated browser origins to allow, applied to the dojo app and to every mounted demo. Matched against the `Origin` header exactly; a trailing slash and letter case are repaired, nothing else is validated. Unset or blank allows every origin, the local-development default. A value that was written but names no usable origin refuses every cross-origin request rather than widening. Both cases are reported once at startup |
+| Variable             | Required           | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MODEL_PROVIDER`     | No                 | Model provider: `openai` (default), `anthropic`, or `gemini`                                                                                                                                                                                                                                                                                                                                                                                |
+| `MODEL_ID`           | No                 | Override the default model ID for the chosen provider                                                                                                                                                                                                                                                                                                                                                                                       |
+| `OPENAI_API_KEY`     | If using OpenAI    | OpenAI API key                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `ANTHROPIC_API_KEY`  | If using Anthropic | Anthropic API key                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `GOOGLE_API_KEY`     | If using Gemini    | Google Gemini API key                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `PORT`               | No                 | Listen port, default 8000. Plain decimal digits, no leading zero or sign, giving 1 to 65535. Anything else is refused at startup naming the variable and the value                                                                                                                                                                                                                                                                          |
+| `CORS_ALLOW_ORIGINS` | No                 | Comma-separated browser origins to allow, applied to the dojo app and to every mounted demo. Matched against the `Origin` header exactly; a trailing slash and letter case are repaired, nothing else is validated. Unset or blank allows every origin, the local-development default. A value that was written but names no usable origin refuses every cross-origin request rather than widening. Both cases are reported once at startup |
 
-All OpenTelemetry exporters are disabled by default in code (`OTEL_SDK_DISABLED`
-and `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS`), so you do not need to set those
-manually.
+OpenTelemetry exporters are off, so `OTEL_SDK_DISABLED` and
+`OTEL_PYTHON_DISABLED_INSTRUMENTATIONS` need no setting. That is stronger than a
+default, though. `server/__init__.py` uses `setdefault`, which an operator value
+would survive, but most `server/api/*.py` modules then assign both variables
+outright and overwrite whatever you set, so turning telemetry back on means
+editing those modules rather than the environment.
 
 ## How it works
 
@@ -105,8 +134,11 @@ manually.
 - `server/__init__.py` mounts every demo app listed in `server/settings.py`
   as its own sub-application and exposes the `main()` entrypoint that
   `poetry run dev` calls.
-- `server/settings.py` holds the demo route table, the `PORT` contract, and the
-  CORS allowlist that the dojo app and each mounted demo are both given.
+- `server/settings.py` holds the demo route table (`DEMO_PATHS`), the `PORT`
+  contract, and the CORS allowlist that the dojo app and each mounted demo are
+  both given. Adding a demo means adding its module under `server/api/` and its
+  path here; `server/__init__.py` derives the mount name and the `server.api`
+  attribute from the path rather than keeping a second list.
 - The project depends on `ag_ui_strands` via a path dependency (`..`) so you can
   develop the integration and server side-by-side without publishing a wheel.
 - `server/model_factory.py` centralises model construction. Set `MODEL_PROVIDER`

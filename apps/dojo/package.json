@@ -11,7 +11,8 @@
     "generate-content-json": "npx tsx scripts/generate-content-json.ts",
     "test:crewai-config": "tsx --test src/crewai.test.ts",
     "run-everything": "./scripts/prep-dojo-everything.js && ./scripts/run-dojo-everything.js",
-    "local-install": "bash scripts/local-install.sh"
+    "local-install": "bash scripts/local-install.sh",
+    "test:a2ui-config": "tsx --test src/a2ui-config.test.ts"
   },
   "dependencies": {
     "@a2a-js/sdk": "0.2.5",
@@ -91,7 +92,8 @@
     "tailwindcss-animate": "^1.0.7",
     "untruncate-json": "^0.0.1",
     "uuid": "^11.1.0",
-    "zod": "^3.25.75"
+    "zod": "^3.25.75",
+    "zod-to-json-schema": "3.25.2"
   },
   "peerDependencies": {
     "@ag-ui/client": "workspace:*",

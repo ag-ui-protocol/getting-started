@@ -13,14 +13,14 @@ wheels = [
 
 [[package]]
 name = "ag-ui-protocol"
-version = "0.1.21"
+version = "0.1.22"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3e/a8/86e3dec527a47a798f4aba5cddc68deedacd78dcf0f638d0cf7c9ac21525/ag_ui_protocol-0.1.21.tar.gz", hash = "sha256:42f6fb809399cd2ced5417ed928f821feda2534f4e55aebeada170823a6b1a5f", size = 15102, upload-time = "2026-08-27T11:48:28.235Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/f7/9bf788e7d3608725d022a248a58427040f4f930ab87ddb54bd29ee4d9a51/ag_ui_protocol-0.1.22.tar.gz", hash = "sha256:d21f265284a50d9fc87ad7bcbd58f737b4b16eef7b5375f13a6e925117b52046", size = 18110, upload-time = "2026-08-31T18:20:04.334Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/e5/4229590a6c0561ef9979e251d12962b85df5c5e88685c6dd2fbdf221ba7d/ag_ui_protocol-0.1.21-py3-none-any.whl", hash = "sha256:628203b9decd66eb98995f86edca5536de330ecdfbcb809809863e4408ddeb57", size = 18527, upload-time = "2026-08-27T11:48:27.343Z" },
+    { url = "https://files.pythonhosted.org/packages/be/6c/af3d577e68c9474c99600e65b2c6283772aae187edca6f0f2f5cbd9f565a/ag_ui_protocol-0.1.22-py3-none-any.whl", hash = "sha256:fca13ee7820f8f53e869c19e09ddd75826c1799b27c2adb6f2e567295433c704", size = 22068, upload-time = "2026-08-31T18:20:03.43Z" },
 ]
 
 [[package]]
@@ -46,7 +46,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "ag-ui-a2ui-toolkit", specifier = ">=0.0.4" },
-    { name = "ag-ui-protocol", specifier = ">=0.1.21" },
+    { name = "ag-ui-protocol", specifier = ">=0.1.22" },
     { name = "fastapi", specifier = ">=0.115.12" },
     { name = "pydantic", specifier = ">=2.11.2" },
     { name = "strands-agents", specifier = ">=1.15.0" },

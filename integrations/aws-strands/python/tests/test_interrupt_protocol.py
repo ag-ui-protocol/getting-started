@@ -1069,6 +1069,123 @@ class TestResumeValidation:
         assert [event.code for event in errors] == ["INVALID_PAYLOAD"]
         assert "environment" in errors[0].message
 
+    # ``required`` holds whatever the integrator's schema put there, and the
+    # rendered sentence is a wire contract the TypeScript bridge builds with
+    # ``Array.prototype.join``. A non-string entry must therefore still refuse
+    # the payload, under the same code and the same text as that bridge,
+    # rather than escaping to the outer handler as an adapter fault.
+    async def test_non_string_required_keys_still_refuse_the_payload(self):
+        cases = {
+            "integer": (1, "1"),
+            "boolean": (True, "true"),
+            "null": (None, ""),
+            "array": ([1, "a"], "1,a"),
+            "object": ({"a": 1}, "[object Object]"),
+        }
+        for json_type, (required_key, expected) in cases.items():
+            generic = _make_generic_strands_interrupt()
+            thread = f"{self.THREAD}-required-{json_type}"
+            agent, _ = self._agent_with_pending_schema(
+                {"type": "object", "required": [required_key]},
+                native_interrupt=generic,
+                reason="need_clarification",
+                thread=thread,
+            )
+
+            events = await _collect(
+                agent,
+                _run_input(
+                    thread,
+                    resume=[
+                        ResumeEntry(
+                            interrupt_id=generic.id,
+                            status="resolved",
+                            payload={},
+                        )
+                    ],
+                ),
+            )
+
+            errors = [event for event in events if event.type == EventType.RUN_ERROR]
+            assert [event.code for event in errors] == ["INVALID_PAYLOAD"]
+            assert errors[0].message == (
+                f"Invalid payload for interrupt '{generic.id}': "
+                f"missing required keys: {expected}."
+            )
+
+    # Membership is a second contract with that bridge, and not the same one:
+    # ``k in payload`` keys the object with ``String(k)`` where the sentence
+    # renders the entry with ``join``. The two differ over ``null``, so a
+    # payload has to be looked up under the key that bridge looks under rather
+    # than under the text the sentence would show.
+    async def test_non_string_required_keys_are_looked_up_as_javascript_keys(self):
+        satisfying = {
+            "integer": (1, {"1": "present"}),
+            "boolean": (True, {"true": "present"}),
+            "null": (None, {"null": "present"}),
+            "array": ([1, "a"], {"1,a": "present"}),
+            "object": ({"a": 1}, {"[object Object]": "present"}),
+        }
+        for json_type, (required_key, payload) in satisfying.items():
+            generic = _make_generic_strands_interrupt()
+            thread = f"{self.THREAD}-satisfied-{json_type}"
+            agent, _ = self._agent_with_pending_schema(
+                {"type": "object", "required": [required_key]},
+                native_interrupt=generic,
+                reason="need_clarification",
+                thread=thread,
+            )
+
+            events = await _collect(
+                agent,
+                _run_input(
+                    thread,
+                    resume=[
+                        ResumeEntry(
+                            interrupt_id=generic.id,
+                            status="resolved",
+                            payload=payload,
+                        )
+                    ],
+                ),
+            )
+
+            assert not [
+                event for event in events if event.type == EventType.RUN_ERROR
+            ], f"{json_type} key was not found under the key JavaScript uses"
+
+    async def test_a_null_required_key_is_not_looked_up_as_its_sentence(self):
+        """``[None]`` joins to empty text but keys the object as ``"null"``."""
+        generic = _make_generic_strands_interrupt()
+        thread = f"{self.THREAD}-null-key-text"
+        agent, _ = self._agent_with_pending_schema(
+            {"type": "object", "required": [None]},
+            native_interrupt=generic,
+            reason="need_clarification",
+            thread=thread,
+        )
+
+        events = await _collect(
+            agent,
+            _run_input(
+                thread,
+                resume=[
+                    ResumeEntry(
+                        interrupt_id=generic.id,
+                        status="resolved",
+                        payload={"": "present"},
+                    )
+                ],
+            ),
+        )
+
+        errors = [event for event in events if event.type == EventType.RUN_ERROR]
+        assert [event.code for event in errors] == ["INVALID_PAYLOAD"]
+        assert errors[0].message == (
+            f"Invalid payload for interrupt '{generic.id}': "
+            "missing required keys: ."
+        )
+
     async def test_generic_interrupt_payload_of_wrong_type_is_rejected(self):
         generic = _make_generic_strands_interrupt()
         agent, _ = self._agent_with_pending_schema(
@@ -1095,6 +1212,50 @@ class TestResumeValidation:
         errors = [event for event in events if event.type == EventType.RUN_ERROR]
         assert [event.code for event in errors] == ["INVALID_PAYLOAD"]
         assert "environment" in errors[0].message
+
+    # The rendered sentence is a wire contract clients match literally, so the
+    # article has to be right for every supported type and identical to the
+    # TypeScript bridge's.
+    async def test_type_mismatch_message_uses_the_right_article(self):
+        cases = {
+            "array": (3, "an array"),
+            "boolean": (3, "a boolean"),
+            "integer": ("3", "an integer"),
+            "null": (3, "a null"),
+            "number": ("3", "a number"),
+            "object": (3, "an object"),
+            "string": (3, "a string"),
+        }
+        for json_type, (invalid_value, expected) in cases.items():
+            generic = _make_generic_strands_interrupt()
+            thread = f"{self.THREAD}-article-{json_type}"
+            agent, _ = self._agent_with_pending_schema(
+                {"type": "object", "properties": {"value": {"type": json_type}}},
+                native_interrupt=generic,
+                reason="need_clarification",
+                thread=thread,
+            )
+
+            events = await _collect(
+                agent,
+                _run_input(
+                    thread,
+                    resume=[
+                        ResumeEntry(
+                            interrupt_id=generic.id,
+                            status="resolved",
+                            payload={"value": invalid_value},
+                        )
+                    ],
+                ),
+            )
+
+            errors = [event for event in events if event.type == EventType.RUN_ERROR]
+            assert [event.code for event in errors] == ["INVALID_PAYLOAD"]
+            assert errors[0].message == (
+                f"Invalid payload for interrupt '{generic.id}': "
+                f"field 'value' must be {expected}."
+            )
 
     async def test_generic_interrupt_payload_matching_recorded_schema_is_valid(self):
         generic = _make_generic_strands_interrupt()

@@ -21,7 +21,10 @@ import pytest
 from ag_ui.core import Context, EventType
 from strands.models.model import Model
 
+import ag_ui_strands.agent as agent_module
 from ag_ui_strands.agent import StrandsAgent
+
+from tests.error_code_table import assert_contract_error
 
 
 class FakeOrchestrator:
@@ -549,7 +552,7 @@ async def test_second_run_on_a_busy_thread_is_rejected():
     assert second[-1].code == "THREAD_BUSY"
     assert second[-1].message == (
         'Another run is already in progress on thread "test-thread". Wait for '
-        "RUN_FINISHED before starting a new run on the same thread."
+        "RUN_FINISHED before starting another."
     )
 
 
@@ -792,8 +795,63 @@ async def test_orchestrator_failure_becomes_run_error():
 
 
 @pytest.mark.asyncio
-async def test_adapter_bug_is_reported_separately_from_orchestrator_failure():
+async def test_a_node_failure_is_not_reported_as_this_adapters_bug():
+    """A graph node raising is the node author's fault, whatever the type."""
+
     orchestrator = FakeOrchestrator([], raises=AttributeError("no such attr"))
+    events = await collect(make_agent(orchestrator))
+
+    assert events[-1].type == EventType.RUN_ERROR
+    assert events[-1].code == "STRANDS_ERROR"
+    assert events[-1].message == "no such attr"
+
+
+@pytest.mark.asyncio
+async def test_a_failing_orchestrator_factory_is_not_this_adapters_bug():
+    """The factory belongs to the integrator, so its raise is not our defect.
+
+    Built per run rather than once, so a factory can construct cleanly and
+    still fail on a later turn. The exception type it raises is one this
+    adapter's own defects also raise, which is exactly why the call has to be
+    marked foreign rather than left to the classifier.
+    """
+    builds = {"count": 0}
+
+    def factory() -> FakeOrchestrator:
+        builds["count"] += 1
+        if builds["count"] <= 2:
+            return FakeOrchestrator([])
+        raise TypeError("caller's factory failed")
+
+    agent = StrandsAgent(factory, name="test", description="test")
+
+    first = await collect(agent)
+    assert first[-1].type == EventType.RUN_FINISHED
+
+    second = await collect(agent)
+    assert second[-1].type == EventType.RUN_ERROR
+    assert second[-1].code == "STRANDS_ERROR"
+    assert "caller's factory failed" in second[-1].message
+
+
+@pytest.mark.asyncio
+async def test_adapter_bug_is_reported_separately_from_orchestrator_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The regression guard: a defect in this adapter still says so.
+
+    The fault has to be raised by this adapter's own translation code rather
+    than handed to it by the orchestrator, which is the distinction
+    ``ADAPTER_BUG`` claims.
+    """
+
+    def broken_step_name(*_args, **_kwargs):
+        raise TypeError("step name is not subscriptable")
+
+    monkeypatch.setattr(agent_module, "_multiagent_step_name", broken_step_name)
+    orchestrator = FakeOrchestrator(
+        [{"type": "multiagent_node_start", "node_id": "a", "node_type": "agent"}]
+    )
     events = await collect(make_agent(orchestrator))
 
     assert events[-1].type == EventType.RUN_ERROR
@@ -1200,6 +1258,47 @@ async def test_concurrent_runs_are_allowed_when_each_builds_its_own_graph():
         assert EventType.RUN_ERROR not in [e.type for e in events]
 
 
+@pytest.mark.asyncio
+async def test_a_factory_refuses_a_second_run_on_the_same_thread():
+    # A fresh orchestrator per run only removes the CROSS-thread collision; a
+    # thread still cannot overlap itself. The refusal has to name that thread,
+    # since the shared-instance sentence would tell the caller their other
+    # threads are blocked too.
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class ParkedOrchestrator:
+        nodes: dict = {}
+
+        async def stream_async(self, task, invocation_state=None, **kwargs):
+            started.set()
+            await release.wait()
+            yield {"type": "multiagent_node_start", "node_id": "a", "node_type": "agent"}
+
+    agent = StrandsAgent(lambda: ParkedOrchestrator(), name="multi_agent")
+
+    first_input = FakeInput()
+    first_input.thread_id = "thread-a"
+    task = asyncio.create_task(_drain(agent.run(first_input)))
+    await asyncio.wait_for(started.wait(), timeout=5)
+
+    same_thread = FakeInput()
+    same_thread.thread_id = "thread-a"
+    second = await asyncio.wait_for(_drain(agent.run(same_thread)), timeout=5)
+    release.set()
+    await asyncio.wait_for(task, timeout=5)
+
+    assert [e.type for e in second] == [
+        EventType.RUN_STARTED,
+        EventType.RUN_ERROR,
+    ]
+    assert second[-1].code == "THREAD_BUSY"
+    assert second[-1].message == (
+        'Another run is already in progress on thread "thread-a". '
+        "Wait for RUN_FINISHED before starting another."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Nested orchestrators
 # ---------------------------------------------------------------------------
@@ -1590,7 +1689,7 @@ async def test_a_parked_factory_refuses_a_run_that_answers_nothing(resume_entrie
     events = await collect(agent, second)
 
     assert [e.type for e in events] == [EventType.RUN_STARTED, EventType.RUN_ERROR]
-    assert events[-1].code == "THREAD_BUSY"
+    assert_contract_error(events[-1], "THREAD_BUSY")
     assert events[-1].message == (
         'This orchestrator is paused at an interrupt on thread "test-thread". '
         "Answer that interrupt before starting another run."

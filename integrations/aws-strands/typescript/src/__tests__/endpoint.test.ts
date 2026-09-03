@@ -50,7 +50,7 @@ async function startApp(agent: StrandsAgent): Promise<{
   addStrandsExpressEndpoint(app, agent, { path: "/" });
   addPing(app, "/ping");
   const server = await new Promise<import("http").Server>((resolve) => {
-    const s = app.listen(0, () => resolve(s));
+    const s = app.listen(0, "127.0.0.1", () => resolve(s));
   });
   const port = (server.address() as AddressInfo).port;
   return {

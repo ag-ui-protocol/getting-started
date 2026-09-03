@@ -42,7 +42,6 @@ import {
 import {
   collect,
   durableRecoveryState,
-  errorCodes,
   expectCompletedRun,
   expectDurableRecovery,
   expectNoRunError,
@@ -63,6 +62,7 @@ import {
   threadAgent,
   type CheckpointPicture,
 } from "./helpers";
+import { expectContractErrors } from "./error-code-table";
 
 const TOOL = "set_color";
 const NATIVE_ID = "native-tool-use-1";
@@ -514,7 +514,7 @@ describe("frontend tool identity", () => {
 
     const events = await collect(agent, firstRun());
 
-    expect(errorCodes(events)).toEqual(["FRONTEND_TOOL_IDENTITY_ERROR"]);
+    expectContractErrors(events, ["FRONTEND_TOOL_IDENTITY_ERROR"]);
   });
 
   it("refuses two frontend calls sharing one native id in a turn", async () => {
@@ -528,7 +528,7 @@ describe("frontend tool identity", () => {
 
     const events = await collect(agent, firstRun());
 
-    expect(errorCodes(events)).toEqual(["FRONTEND_TOOL_IDENTITY_ERROR"]);
+    expectContractErrors(events, ["FRONTEND_TOOL_IDENTITY_ERROR"]);
   });
 
   it("refuses two burst-emitted frontend calls sharing one native id", async () => {
@@ -559,7 +559,7 @@ describe("frontend tool identity", () => {
 
     const events = await collect(agent, firstRun());
 
-    expect(errorCodes(events)).toEqual(["FRONTEND_TOOL_IDENTITY_ERROR"]);
+    expectContractErrors(events, ["FRONTEND_TOOL_IDENTITY_ERROR"]);
   });
 
   it("refuses a frontend call reusing a native id from prior history", async () => {
@@ -587,7 +587,7 @@ describe("frontend tool identity", () => {
       }),
     );
 
-    expect(errorCodes(events)).toEqual(["FRONTEND_TOOL_IDENTITY_ERROR"]);
+    expectContractErrors(events, ["FRONTEND_TOOL_IDENTITY_ERROR"]);
   });
 });
 
@@ -777,7 +777,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
 
     const events = await collect(agent, firstMixedRun());
 
-    expect(errorCodes(events)).toEqual(["INTERRUPT_SESSION_REQUIRED"]);
+    expectContractErrors(events, ["INTERRUPT_SESSION_REQUIRED"]);
     // The code alone would not say where the refusal leaves the thread. It has
     // to leave it usable: the checkpoint is abandoned rather than held, because
     // a checkpoint parking a placeholder that can never be corrected is one no
@@ -799,7 +799,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
         messages: [{ id: "u2", role: "user", content: "again" } as never],
       }),
     );
-    expect(errorCodes(next)).toEqual([]);
+    expectContractErrors(next, []);
   });
 
   it("refuses to advertise a checkpoint parking a stub no rewrite can correct", async () => {
@@ -815,7 +815,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
     // to approve a resume that cannot happen, and the refusal keeps the
     // checkpoint activated, so every later plain run meets it too: a thread no
     // client action can leave.
-    expect(errorCodes(events)).toEqual(["INTERRUPT_RECONCILIATION_ERROR"]);
+    expectContractErrors(events, ["INTERRUPT_RECONCILIATION_ERROR"]);
     expect(events.filter((e) => e.type === EventType.RUN_FINISHED)).toEqual([]);
     // Abandoned rather than held, on the same reasoning as the refusals above:
     // a checkpoint no client was told about and no resume could finish is one
@@ -833,7 +833,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
         messages: [{ id: "u2", role: "user", content: "again" } as never],
       }),
     );
-    expect(errorCodes(next)).toEqual([]);
+    expectContractErrors(next, []);
   });
 
   it("refuses to advertise a batch only some of whose stubs can be corrected", async () => {
@@ -857,7 +857,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
     // An exact sibling does not make the batch resumable: a resume consumes the
     // parked batch entire, and the resume gate refuses on the unrepairable one
     // without asking what the rest of the batch looks like.
-    expect(errorCodes(events)).toEqual(["INTERRUPT_RECONCILIATION_ERROR"]);
+    expectContractErrors(events, ["INTERRUPT_RECONCILIATION_ERROR"]);
     expect(events.filter((e) => e.type === EventType.RUN_FINISHED)).toEqual([]);
     expect(
       liveCheckpoint(agent),
@@ -871,7 +871,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
         messages: [{ id: "u2", role: "user", content: "again" } as never],
       }),
     );
-    expect(errorCodes(next)).toEqual([]);
+    expectContractErrors(next, []);
   });
 
   it("refuses to resume until the client's result is mapped", async () => {
@@ -893,7 +893,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
       } as Partial<RunAgentInput>),
     );
 
-    expect(errorCodes(resumed)).toEqual(["INTERRUPT_RECONCILIATION_ERROR"]);
+    expectContractErrors(resumed, ["INTERRUPT_RECONCILIATION_ERROR"]);
     // Refusing before any write is what keeps the retry below possible: the
     // checkpoint, its placeholder and the recorded call id all stand.
     expectDurableRecovery(
@@ -927,7 +927,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
         resume,
       } as Partial<RunAgentInput>),
     );
-    expect(errorCodes(refused)).toEqual(["INTERRUPT_RECONCILIATION_ERROR"]);
+    expectContractErrors(refused, ["INTERRUPT_RECONCILIATION_ERROR"]);
 
     // The same resume, now carrying the result it was missing. Refusing must
     // not have spent the checkpoint: the parked batch is what Strands replays,
@@ -1010,7 +1010,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
       } as Partial<RunAgentInput>),
     );
 
-    expect(errorCodes(resumed)).toEqual(["INTERRUPT_RECONCILIATION_ERROR"]);
+    expectContractErrors(resumed, ["INTERRUPT_RECONCILIATION_ERROR"]);
     // Refusing has to happen BEFORE anything is rewritten. Correcting the
     // answered half and then failing would leave the checkpoint half-repaired
     // with no run able to finish it.
@@ -1051,7 +1051,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
     // write. On the message path such a stub falls back to the continuation
     // prompt; a resume has no fallback, so the only way not to feed the stub to
     // the model is to refuse the resume.
-    expect(errorCodes(resumed)).toEqual(["INTERRUPT_RECONCILIATION_ERROR"]);
+    expectContractErrors(resumed, ["INTERRUPT_RECONCILIATION_ERROR"]);
     expect(
       model.seenMessages.flatMap((turn) => historyTexts(turn)),
     ).not.toContain(PROXY_RESULT_PLACEHOLDER);
@@ -1100,7 +1100,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
     // uncorrectable, not dropped from both parked sets. Dropped from both it is
     // invisible to every gate at once, and resuming clears the stub into the
     // history the model reads as the tool's own answer.
-    expect(errorCodes(resumed)).toEqual(["INTERRUPT_RECONCILIATION_ERROR"]);
+    expectContractErrors(resumed, ["INTERRUPT_RECONCILIATION_ERROR"]);
     expect(
       model.seenMessages.flatMap((turn) => historyTexts(turn)),
     ).not.toContain(PROXY_RESULT_PLACEHOLDER);
@@ -1145,7 +1145,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
       } as Partial<RunAgentInput>);
 
     const refused = await collect(agent, resumeRun("run-2"));
-    expect(errorCodes(refused)).toEqual(["INTERRUPT_RECONCILIATION_ERROR"]);
+    expectContractErrors(refused, ["INTERRUPT_RECONCILIATION_ERROR"]);
 
     // The hook's edit reverted, and the same resume sent again. Refusing must
     // not have spent anything the retry needs: the parked batch and the
@@ -1188,7 +1188,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
 
     const events = await collect(agent, firstMixedRun());
 
-    expect(errorCodes(events)).toEqual(["INTERRUPT_SESSION_CAPABILITY_ERROR"]);
+    expectContractErrors(events, ["INTERRUPT_SESSION_CAPABILITY_ERROR"]);
     // Same shape of refusal, same place it leaves the thread: abandoned rather
     // than held, so the thread stays usable.
     expect(events.filter((e) => e.type === EventType.RUN_FINISHED)).toEqual([]);
@@ -1352,7 +1352,7 @@ describe("a checkpoint parking a proxy placeholder", () => {
         } as Partial<RunAgentInput>),
       );
 
-      expect(errorCodes(refused)).toEqual(["INTERRUPT_RECONCILIATION_ERROR"]);
+      expectContractErrors(refused, ["INTERRUPT_RECONCILIATION_ERROR"]);
       expect(second.approval.calls).toHaveLength(0);
       // Refusing a restored checkpoint has to leave it exactly as restored:
       // consuming any part of it here would strand the thread in a process
@@ -1967,7 +1967,7 @@ describe("frontend tool result recovery across a restart", () => {
       }),
     );
 
-    expect(errorCodes(events)).toEqual(["CONTINUATION_TOOL_NAME_UNRESOLVED"]);
+    expectContractErrors(events, ["CONTINUATION_TOOL_NAME_UNRESOLVED"]);
   });
 });
 
@@ -2885,7 +2885,7 @@ describe("a halt armed on a turn Strands ended by throwing", () => {
     const second = bootProcess(dir, ANSWERS);
     const events = await collect(second.agent, deltaOnlyContinuation());
 
-    expect(errorCodes(events)).toEqual(["CONTINUATION_TOOL_NAME_UNRESOLVED"]);
+    expectContractErrors(events, ["CONTINUATION_TOOL_NAME_UNRESOLVED"]);
     expect(second.model.calls).toBe(0);
   });
 });
@@ -2995,7 +2995,7 @@ describe("a provider that emits only assembled blocks", () => {
     // re-delivery: the client is told about ONE call while the store ends up
     // holding two `toolUse` blocks and two placeholders under the same id, so
     // the client's single answer can never say which one it settles.
-    expect(errorCodes(events)).toEqual(["FRONTEND_TOOL_IDENTITY_ERROR"]);
+    expectContractErrors(events, ["FRONTEND_TOOL_IDENTITY_ERROR"]);
     // Refusing costs the turn: the abort that follows leaves the SDK's own
     // cancel turn and nothing else. No `toolUse`, no placeholder, so no half
     // of a pair for a later run to repair.

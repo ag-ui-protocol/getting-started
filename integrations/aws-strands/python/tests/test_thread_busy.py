@@ -53,7 +53,7 @@ def _busy_message(thread_id: str) -> str:
     """The refusal text, spelled out here so a reworded source string fails."""
     return (
         f'Another run is already in progress on thread "{thread_id}". Wait for '
-        "RUN_FINISHED before starting a new run on the same thread."
+        "RUN_FINISHED before starting another."
     )
 
 

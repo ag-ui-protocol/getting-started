@@ -112,7 +112,7 @@ describe("Concurrent runs on same thread → THREAD_BUSY", () => {
     // reword here would silently break that parity.
     expect(err.message).toBe(
       'Another run is already in progress on thread "thread-1". Wait for ' +
-        "RUN_FINISHED before starting a new run on the same thread.",
+        "RUN_FINISHED before starting another.",
     );
 
     // The refusal must not have disturbed the incumbent: released, it runs to

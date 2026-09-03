@@ -25,12 +25,14 @@ import {
 } from "@strands-agents/sdk";
 import {
   EventType,
+  aggregateTokenUsage,
   type AssistantMessage as AguiAssistantMessage,
   type BaseEvent,
   type Interrupt as AguiInterrupt,
   type Message as AguiMessage,
   type ResumeEntry,
   type RunAgentInput,
+  type TokenUsage,
   type ToolCall as AguiToolCall,
   type ToolMessage as AguiToolMessage,
   type UserMessage as AguiUserMessage,
@@ -62,6 +64,7 @@ import {
 import {
   _buildToolResultContent,
   _coerceText,
+  assertUsablePolicy,
   convertAguiContentToStrands,
   convertAguiContentToStrandsDetailed,
   createUrlFetchCache,
@@ -82,6 +85,11 @@ import {
 } from "./session-reconcile";
 import type { PendingFrontendResult } from "./session-reconcile";
 import { DEFAULT_LOGGER, resolveLogger, type Logger } from "./logger";
+import {
+  strandsModelIdentity,
+  tokenUsageFromStrandsUsage,
+  type StrandsModelIdentity,
+} from "./token-usage";
 
 // `_buildToolResultContent` lives in ./utils so reconciliation can build the
 // same content without importing this module, which would be a cycle. This
@@ -89,6 +97,22 @@ import { DEFAULT_LOGGER, resolveLogger, type Logger } from "./logger";
 export { _buildToolResultContent };
 
 const LOG_PREFIX = "[@ag-ui/aws-strands]";
+
+/**
+ * Marks a RUN_FINISHED that reports success while the run's agent stays parked
+ * with nothing to hand the client. `run()` reads it to decide whether the
+ * resume may be remembered as completed.
+ *
+ * Carried on the event rather than in per-thread state so that it belongs to
+ * exactly one run by construction. Per-thread state cannot: the pause is
+ * recorded while the run holds its thread and acted on after it lets go, so
+ * another run starting in between could consume a record whose owner had not
+ * read it yet.
+ *
+ * A unique symbol, not a registry one, so no other code can mint this key by
+ * name. `JSON.stringify` drops symbol keys, so it never reaches the wire.
+ */
+const PAUSED_PARKED = Symbol("agui.strands.pausedWhileParked");
 
 // Strands' `randomUUID` return type is branded; normalise to plain string.
 const uuid = (): string => randomUUID();
@@ -373,10 +397,13 @@ class ForcedStop {
    * recorded provider failure. Latching before logging and swallowing a logger
    * failure means neither can be lost.
    *
-   * An adapter code defect (`TypeError` / `ReferenceError`) is not classified
-   * here. The caller checks for one itself, ahead of its frontend-halt swallow,
-   * which the check would otherwise reach first, so one never arrives here. A
-   * second copy of that check would be a guard nothing can drive.
+   * No type is classified here beyond the bypass names above. A `TypeError`
+   * out of the SDK call arrived from where the model, the SDK and the
+   * integrator's tools all run, so it is recorded like any other failure from
+   * there rather than singled out; Python classifies nothing by exception type
+   * at the matching point either. The caller does test for one, but only to
+   * keep it out of its frontend-halt swallow, and it reaches this method
+   * either way.
    *
    * Nothing guards against a second `record` on the same run, deliberately:
    * the call site `break`s out of its consume loop the moment one returns, so
@@ -422,10 +449,14 @@ class ForcedStop {
    *
    * A forced stop is a failed run, not a short success, so the caller returns
    * on these rather than falling through to STATE_SNAPSHOT and RUN_FINISHED.
+   *
+   * `usage` is the caller's accumulator rather than this reporter's own state:
+   * a forced stop is reached from inside the stream loop, so model calls it
+   * already made are real spend and travel with the failure.
    */
-  *emit(): Generator<BaseEvent, void, void> {
+  *emit(usage: TokenUsage[] = []): Generator<BaseEvent, void, void> {
     if (this._message === undefined) return;
-    yield _runError(this._message, FORCE_STOP_ERROR_CODE);
+    yield _runError(this._message, FORCE_STOP_ERROR_CODE, usage);
   }
 }
 
@@ -898,9 +929,173 @@ function _coerceId(value: unknown): string {
   return typeof value === "string" && value.length > 0 ? value : uuid();
 }
 
+/**
+ * Human-readable description of what the busy guard is protecting.
+ *
+ * A thread is the only scope this side guards, so a thread is the only scope
+ * this renders. Python's `_busy_scope` takes the guard key rather than a
+ * thread id and also renders a whole shared orchestrator, which it needs
+ * because a single orchestrator instance there refuses every overlapping run
+ * whatever its thread. Both sides emit the same `THREAD_BUSY` template; only
+ * the set of scopes that can fill it differs.
+ */
+function _busyScope(threadId: string): string {
+  return `thread "${threadId}"`;
+}
+
 /** Extract a human-readable message from an unknown error. */
 function _errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * A failure this adapter reports but did not cause.
+ *
+ * `TypeError` and `ReferenceError` are what a defect in this adapter's own
+ * code throws, which is why the terminal-error classifier reads them as
+ * `ADAPTER_BUG`. They are also what an integrator's tool throws, and what
+ * `JSON.stringify` throws over a value from outside this adapter. Throwing
+ * this instead at the places that know the fault came from outside keeps
+ * `ADAPTER_BUG` pointing at code the maintainer of this adapter can fix.
+ *
+ * It carries the original failure's message so the wire text is unchanged, and
+ * the original value as `cause` so the stack still names the real origin. A
+ * `prefix` is how a caller adds its own framing without replacing either.
+ * Python's `_ForeignFault` is the same arm.
+ *
+ * Constructing one is total. Deriving the message is a call into arbitrary
+ * code (`_errorMessage` reads `message` off the thrown value, which a getter
+ * or a `Proxy` trap can define), and a wrapper that throws while wrapping
+ * hands the classifier the very `TypeError` it was built to suppress.
+ */
+class _ForeignFault extends Error {
+  constructor(cause: unknown, prefix?: string) {
+    const text = _safeErrorMessage(cause);
+    super(prefix ? `${prefix}: ${text}` : text);
+    this.name = "ForeignFault";
+    this.cause = cause;
+  }
+}
+
+/**
+ * `_errorMessage` that cannot itself throw.
+ *
+ * A value whose text cannot be read falls back to its name, which is what
+ * Python's `_exception_text` falls back to, and to a constant when there is no
+ * readable name either.
+ */
+function _safeErrorMessage(e: unknown): string {
+  try {
+    return _errorMessage(e);
+  } catch {
+    return _errorName(e) ?? "Unknown error";
+  }
+}
+
+/**
+ * The RUN_ERROR code for a failure that escaped a run loop.
+ *
+ * `FRONTEND_TOOL_IDENTITY_ERROR` is claimed first and on identity alone: a
+ * frontend call this bridge cannot correlate through Strands' native tool-use
+ * id is neither a fault from outside nor a defect here, and the exception
+ * carries the sentence the client reads. Only what gets past it is classified
+ * by type below.
+ *
+ * `ADAPTER_BUG` says the fault is in this adapter and sends the developer
+ * reading it here rather than to the provider or the SDK, so it is claimed
+ * only for the types a code defect throws AND only when nothing upstream has
+ * established that the fault came from elsewhere. A `_ForeignFault` is that
+ * establishment: the orchestrator's stream boundary and the tool-result
+ * serializer throw it for failures this adapter merely reported.
+ *
+ * The claim is still made on type alone, so it is a claim and not a proof.
+ * Adapter code that runs inside the Strands call (a registered hook, a proxy
+ * tool) throws from where the SDK does and so is never reported as this
+ * adapter's defect either, which is the direction that costs a developer a
+ * wrong-looking code rather than a wrong place to look.
+ */
+function _terminalErrorCode(e: unknown): string {
+  if (e instanceof FrontendToolIdentityError) {
+    return "FRONTEND_TOOL_IDENTITY_ERROR";
+  }
+  return e instanceof TypeError || e instanceof ReferenceError
+    ? "ADAPTER_BUG"
+    : "STRANDS_ERROR";
+}
+
+/**
+ * Re-yield `source`, reporting anything it throws as a `_ForeignFault`.
+ *
+ * The orchestrator pulls its stream through a `for await`, which leaves no
+ * boundary between what the SDK raised and what this adapter's translation of
+ * an event raised. This restores one, as Python's
+ * `_stream_with_model_context` does for both of its loops. The single-agent
+ * loop needs no equivalent: it reports every failure out of its own `next()`
+ * as the forced stop, which never reaches the classifier at all. Teardown
+ * stays with the caller, which already returns the underlying stream in its
+ * own `finally`.
+ */
+async function* _foreignStreamFaults<T>(
+  source: AsyncIterable<T>,
+): AsyncGenerator<T, void, void> {
+  const iterator = source[Symbol.asyncIterator]();
+  while (true) {
+    let next: IteratorResult<T, unknown>;
+    try {
+      next = await iterator.next();
+    } catch (e) {
+      throw new _ForeignFault(e);
+    }
+    if (next.done) return;
+    yield next.value;
+  }
+}
+
+/**
+ * Serialize a tool result for the AG-UI string field.
+ *
+ * The value comes from an integrator's tool, and `JSON.stringify` throws a
+ * `TypeError` over two shapes a tool can hold without noticing: a `BigInt`,
+ * and a structure that refers back to itself. Both are that tool's contract to
+ * fix rather than a defect here, which is what the terminal-error classifier
+ * would otherwise read them as. Python's `_serialize_tool_result_data` is the
+ * same arm over `json.dumps`.
+ */
+function _serializeToolResultData(resultData: unknown): string {
+  if (resultData == null) return "";
+  try {
+    return JSON.stringify(resultData);
+  } catch (e) {
+    throw new _ForeignFault(e, "Tool result is not JSON serializable");
+  }
+}
+
+/**
+ * The initial STATE_SNAPSHOT payload, or `undefined` for no snapshot.
+ *
+ * AG-UI types `state` as any value, so a client is free to send something that
+ * is not a keyed object. Only a keyed object can carry the `messages` key the
+ * frontend manages separately and does not want echoed back, which is what the
+ * filter is for; an array taken through the same filter reaches the wire as an
+ * index-keyed object nobody asked for, and a scalar reaches it as a snapshot
+ * that is not an object at all. Neither is a payload this event has carried
+ * before, so a non-object gets no snapshot. Python's
+ * `_state_snapshot_payload` is the same arm.
+ */
+function _stateSnapshotPayload(
+  state: unknown,
+): Record<string, unknown> | undefined {
+  if (!_isPlainStateObject(state)) return undefined;
+  const snapshot: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(state as Record<string, unknown>)) {
+    if (k !== "messages") snapshot[k] = v;
+  }
+  return snapshot;
+}
+
+/** Whether a client-supplied `state` is a keyed object rather than a value. */
+function _isPlainStateObject(state: unknown): boolean {
+  return state !== null && typeof state === "object" && !Array.isArray(state);
 }
 
 /**
@@ -990,16 +1185,87 @@ function _replaysRecordedAnswers(
     addressed.add(entry.interruptId);
     const answer = (interrupt as { response?: unknown }).response;
     if (answer === undefined) return false;
-    if (!_sameRecordedAnswer(answer, toResumeResponse(entry))) return false;
+    if (_sameRecordedAnswer(answer, toResumeResponse(entry, interrupt)))
+      continue;
+    // The legacy fallback exists only for a checkpoint written before the
+    // envelope, so it must not fire for an answer this release could have
+    // written itself. Without that guard a client that pre-wrapped its payload
+    // matches on the legacy shape and is then resumed with a second envelope
+    // around the first, silently. A pre-envelope payload that happened to look
+    // like an envelope is refused instead of accepted, which is the safe way to
+    // be wrong here.
+    if (_isCurrentGenericAnswer(answer)) return false;
+    if (!_sameRecordedAnswer(answer, _legacyResumeResponse(entry)))
+      return false;
   }
   return true;
 }
 
 /**
+ * True when `answer` is an envelope this release wraps a resolved answer in.
+ *
+ * Only the wrapped-answer key belongs here. The cancellation shape looks the
+ * same as a pre-envelope cancel PAYLOAD, which the shipped example's Cancel
+ * button submitted, so treating it as one of ours would refuse exactly the
+ * migration the legacy fallback exists for.
+ *
+ * That leaves one genuinely undecidable case, accepted knowingly: a resolved
+ * entry whose payload is `{cancelled:true}` matches both a pre-envelope raw
+ * payload and a cancellation this release recorded, and nothing in the entry or
+ * the checkpoint tells the two apart. It is treated as the migration, because
+ * that case is real and the other needs a client to resolve an interrupt with a
+ * payload that is exactly a cancellation.
+ */
+function _isCurrentGenericAnswer(answer: unknown): boolean {
+  if (typeof answer !== "object" || answer === null || Array.isArray(answer)) {
+    return false;
+  }
+  const keys = Object.keys(answer);
+  return keys.length === 1 && keys[0] === "response";
+}
+
+/**
+ * The answer the release before the resume envelope would have submitted.
+ *
+ * Read ONLY by the replay comparison. A checkpoint the SDK parked mid-resume
+ * before that release carries answers in this older shape, and an exact replay
+ * is the only way to finish the execution it holds, so a batch matching what the
+ * old code submitted still has to be recognised. Nothing else may use it: what
+ * this release submits is always the current shape.
+ *
+ * Python needs no counterpart for the envelope itself, which predates this
+ * change, so a checkpoint parked there already holds the shape it still
+ * computes. The one Python answer this change does move is the degenerate
+ * approval whose reason did not survive: the relaxed classifier now answers it
+ * raw when resolved and `{approved:false}` when cancelled, where both were
+ * previously enveloped. That side has its own narrow equivalent of this
+ * function for exactly that interrupt, and nothing wider.
+ */
+function _legacyResumeResponse(entry: ResumeEntry): unknown {
+  if (entry.status === "cancelled") return { status: "cancelled" };
+  return entry.payload === undefined ? {} : (entry.payload as unknown);
+}
+
+/**
  * Reserved native-interrupt name prefix for interrupts this adapter's
  * `interruptOnCall` hook raises. Anything else is a generic native interrupt.
+ *
+ * Reserved means reserved: an interrupt raised anywhere else under this prefix
+ * is classified, schema-checked and answered as an approval.
  */
 const TOOL_APPROVAL_NAME_PREFIX = "ag_ui:tool_call:";
+
+/**
+ * The shape a paused `context.interrupt()` is answered with when the client
+ * cancels (`ResumeEntry.status === "cancelled"`) rather than resolving, so a
+ * generic tool can treat the pause as a denial.
+ *
+ * Compare by value, not by identity: every answer is a fresh copy, so that a
+ * tool mutating what it received cannot poison later cancellations. Frozen for
+ * the same reason. A cancelled tool approval is answered `{ approved: false }`
+ * instead, which is the denial its own hook reads.
+ */
+export const INTERRUPT_CANCELLED = Object.freeze({ cancelled: true } as const);
 
 /**
  * The response contract advertised for a tool-approval interrupt.
@@ -1016,7 +1282,14 @@ function toolApprovalResponseSchema(): Record<string, unknown> {
   };
 }
 
-/** True when a native Strands interrupt came from the approval hook. */
+/**
+ * True when a native Strands interrupt came from the approval hook.
+ *
+ * The reserved name prefix is the whole test. It also decides whether a resume
+ * is answered raw or wrapped, so it deliberately does not additionally require
+ * the reason: an approval whose reason did not survive a restart still has to
+ * be answered in the shape its own hook reads.
+ */
 function isToolApprovalInterrupt(interrupt: unknown): boolean {
   const name = (interrupt as { name?: unknown } | null)?.name;
   return typeof name === "string" && name.startsWith(TOOL_APPROVAL_NAME_PREFIX);
@@ -1875,7 +2148,12 @@ export class StrandsAgent {
    * Threads with an in-flight run. Strands `Agent.stream()` throws if a
    * second invocation is started on a busy agent; we detect the collision
    * up front and emit a protocol-shaped RUN_ERROR/THREAD_BUSY instead.
-   * The Python adapter carries the same guard, with the same code and text.
+   * Python refuses the same per-thread collision before entering its own run
+   * body, with the same code and the same message text. It additionally
+   * guards a shared orchestrator instance across every thread, since such an
+   * instance cannot be multiplexed at all; that arm narrows back to per-thread
+   * when a callable builds a fresh orchestrator per run. It also refuses a run
+   * against an orchestrator parked at an interrupt.
    */
   private readonly _activeRunsByThread = new Set<string>();
   /** Outstanding AG-UI interrupt objects per thread, used to validate
@@ -1886,6 +2164,7 @@ export class StrandsAgent {
   >();
   /** Fingerprint of last successfully-processed resume per thread (idempotency). */
   private readonly _lastResumeFingerprint = new Map<string, string>();
+
   /**
    * When non-null, the adapter bypasses per-thread cloning and invokes
    * the orchestrator directly. See `StrandsAgentOptions.agent`.
@@ -1955,25 +2234,31 @@ export class StrandsAgent {
       );
     }
 
-    // Detect unconnected MCP clients passed directly into `tools: [...]`.
-    // Strands resolves a connected `McpClient`'s tools into `agent.tools` at
-    // construction time; an unconnected one stays as the bare client and the
-    // resolved tool list never appears here. The fix is on the caller's
-    // side: `await client.connect()` and spread `await client.listTools()`
-    // into the `tools` array.
-    for (const tool of this._templateFields.tools ?? []) {
-      if (
-        tool != null &&
-        typeof (tool as { connect?: unknown }).connect === "function" &&
-        typeof (tool as { name?: unknown }).name !== "string"
-      ) {
-        this._log.warn(
-          `${LOG_PREFIX} an entry in the template Agent's \`tools\` looks like ` +
-            "an unconnected McpClient — its tools will not be available to the " +
-            "model. Call `await client.connect()` and spread the resolved tool " +
-            "list into `tools: [...]` before constructing the Agent.",
-        );
-      }
+    // Detect MCP clients passed directly into `tools: [...]`, whose tools are
+    // therefore absent from the resolved list this adapter clones.
+    //
+    // Strands routes an `McpClient` out of `tools` into an internal client
+    // list rather than into the tool registry, and registers its tools only
+    // inside `Agent.initialize()`, which runs on the first invocation. The
+    // template Agent is never invoked, so the `agent.tools` list cloned onto
+    // every per-thread agent never gains them. Connecting the client first
+    // changes nothing, because `listTools()` connects lazily; the distinction
+    // is resolved-versus-unresolved, not connected-versus-unconnected.
+    //
+    // The client list is private, so it is read through `_readTemplateField`,
+    // which tries the public name before the underscore one and returns
+    // `undefined` rather than throwing when neither is there.
+    const templateMcpClients = _readTemplateField(agentCore, "mcpClients");
+    if (Array.isArray(templateMcpClients) && templateMcpClients.length > 0) {
+      this._log.warn(
+        `${LOG_PREFIX} the template Agent's \`tools\` holds ` +
+          `${templateMcpClients.length} McpClient ` +
+          `${templateMcpClients.length === 1 ? "entry" : "entries"} whose ` +
+          "tools are not in `agent.tools`, so they will not be available to " +
+          "the model. Resolve them yourself and spread the result in: " +
+          "`await client.connect()`, then `tools: [...(await " +
+          "client.listTools())]`. Drop the client from `tools` once you do.",
+      );
     }
   }
 
@@ -2285,7 +2570,8 @@ export class StrandsAgent {
       if (missing.length > 0) {
         yield _runStarted(inputData);
         yield _runError(
-          `Partial resume: missing interrupt IDs: ${missing.join(", ")}. All open interrupts must be addressed.`,
+          `Partial resume: missing interrupt IDs: ${missing.sort().join(", ")}. ` +
+            "All open interrupts must be addressed.",
           "PARTIAL_RESUME",
         );
         return;
@@ -2369,11 +2655,33 @@ export class StrandsAgent {
     // Run the agent. Track whether an error was emitted so we only store
     // the idempotency fingerprint after successful processing.
     let hadError = false;
+    let pausedSilently = false;
+    // A resume that ends on a NEW interrupt has not completed the turn it was
+    // answering, so it must not be remembered as a finished resume. The
+    // interrupt branch clears the fingerprint and persists the new interrupt
+    // deliberately; storing either here would undo both, and an exact retry of
+    // the stale batch would then be answered from the fingerprint with a
+    // success the client can act on while the tool stays parked for good.
+    let rePaused = false;
     const source = this._runRaw(inputData);
     const tracked = (async function* () {
       for await (const ev of source) {
-        if ((ev as { type: string }).type === EventType.RUN_ERROR)
-          hadError = true;
+        const kind = (ev as { type: string }).type;
+        if (kind === EventType.RUN_ERROR) hadError = true;
+        if (
+          kind === EventType.RUN_FINISHED &&
+          (ev as { outcome?: { type?: string } }).outcome?.type === "interrupt"
+        ) {
+          rePaused = true;
+        }
+        // Read off this run's own finish event, the same way `rePaused` is.
+        // Nothing else can reach it, so no other run can consume or clear it.
+        if (
+          kind === EventType.RUN_FINISHED &&
+          (ev as Record<symbol, unknown>)[PAUSED_PARKED] === true
+        ) {
+          pausedSilently = true;
+        }
         yield ev;
       }
     })();
@@ -2382,7 +2690,7 @@ export class StrandsAgent {
     } else {
       yield* tracked;
     }
-    if (!hadError && fingerprint) {
+    if (!hadError && !rePaused && !pausedSilently && fingerprint) {
       this._lastResumeFingerprint.set(threadId, fingerprint);
       const strandsAgent = this._agentsByThread.get(threadId);
       if (strandsAgent) {
@@ -2402,7 +2710,8 @@ export class StrandsAgent {
     if (this._activeRunsByThread.has(threadId)) {
       yield _runStarted(inputData);
       yield _runError(
-        `Another run is already in progress on thread "${threadId}". Wait for RUN_FINISHED before starting a new run on the same thread.`,
+        `Another run is already in progress on ${_busyScope(threadId)}. ` +
+          "Wait for RUN_FINISHED before starting another.",
         "THREAD_BUSY",
       );
       return;
@@ -2463,6 +2772,9 @@ export class StrandsAgent {
     threadId: string,
     runAbort: AbortController,
   ): AsyncGenerator<BaseEvent, void, void> {
+    // Set only by the pause below, and read only by the finish this method
+    // yields, so the two cannot be separated by anything.
+    let pausedWithNothingToReport = false;
     yield _runStarted(inputData);
 
     // One memo for the whole run. A cold run converts the same turns more than
@@ -2470,7 +2782,42 @@ export class StrandsAgent {
     // remote attachment in the thread is downloaded once per conversion.
     const fetchCache = createUrlFetchCache();
 
-    const fetchOptions = { fetchCache, signal: runAbort.signal };
+    // Checked once here, not per attachment, and before the first fetch.
+    // `fetchUrlContent` refuses an unusable policy too, but the replay path
+    // converts inside a try/catch that reports a throw as "conversion failed;
+    // falling back to text", so a misconfigured adapter would otherwise show
+    // up as messages quietly stripped of their attachments, once per message,
+    // with the reason only in a log line. A configuration mistake belongs to
+    // the run, so it ends the run and says which field is wrong. The one thing
+    // it must never do is fall back to the default policy: that would ignore
+    // an intended restriction.
+    //
+    // Single-agent runs only. The orchestrator path takes text alone (see the
+    // prompt extraction in `_runOrchestrator`), so it fetches nothing and has
+    // no policy to check.
+    const urlFetchPolicy = this.config.urlFetchPolicy;
+    if (urlFetchPolicy !== undefined) {
+      try {
+        assertUsablePolicy(urlFetchPolicy);
+      } catch (e) {
+        const msg = _errorMessage(e);
+        this._log.error(
+          `${LOG_PREFIX} config.urlFetchPolicy is unusable: ${msg}`,
+          e,
+        );
+        yield _runError(
+          `Unusable urlFetchPolicy: ${msg}`,
+          "URL_FETCH_POLICY_INVALID",
+        );
+        return;
+      }
+    }
+
+    const fetchOptions = {
+      fetchCache,
+      signal: runAbort.signal,
+      urlFetchPolicy,
+    };
 
     // Get or create agent instance for this thread.
     const agentResult = await this._ensureAgent(
@@ -2554,6 +2901,21 @@ export class StrandsAgent {
       );
     }
 
+    // Provider-reported usage, one entry per model call, aggregated onto this
+    // run's terminal event. A local rather than per-thread state, so it is
+    // seeded per run by construction: a second sequential run on the same
+    // thread enters this method again and cannot inherit the first's counts.
+    //
+    // Declared outside the try so the terminal RUN_ERROR in its catch reports
+    // the spend a failed run had already made.
+    const runUsage: TokenUsage[] = [];
+    // One read of the model's labels for the whole run: the per-thread agent's
+    // model is fixed for the invocation, and `modelMetadataEvent` carries usage
+    // without saying which model produced it.
+    const modelIdentity = strandsModelIdentity(
+      (strandsAgent as { model?: unknown }).model,
+    );
+
     try {
       // Seed the running ``MessagesSnapshotEvent`` payload from the full
       // conversation history so each emitted snapshot carries prior turns
@@ -2566,14 +2928,9 @@ export class StrandsAgent {
       // Emit state snapshot if provided. Filter out `messages` from state to
       // avoid "Unknown message role" errors — the frontend manages messages
       // separately and doesn't recognize the "tool" role.
-      if (inputData.state && typeof inputData.state === "object") {
-        const snapshot: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(
-          inputData.state as Record<string, unknown>,
-        )) {
-          if (k !== "messages") snapshot[k] = v;
-        }
-        yield { type: EventType.STATE_SNAPSHOT, snapshot };
+      const initialSnapshot = _stateSnapshotPayload(inputData.state);
+      if (initialSnapshot !== undefined) {
+        yield { type: EventType.STATE_SNAPSHOT, snapshot: initialSnapshot };
       }
 
       // Splice point 1 of 4: emit the initial messages snapshot so the
@@ -2834,9 +3191,15 @@ export class StrandsAgent {
       // message snapshots are being emitted.
       const citations = new CitationAccumulator(this._log);
       const toolCallsSeen = new Map<string, SeenToolCall>();
-      const currentState: Record<string, unknown> = {
-        ...((inputData.state ?? {}) as object),
-      };
+      // Tracks state for the final snapshot. Seeded from a plain object only:
+      // the tool-driven updates below are key/value merges, and a client is
+      // free to send a state that is not one, which a spread takes apart into
+      // index keys rather than leaving alone.
+      const currentState: Record<string, unknown> = _isPlainStateObject(
+        inputData.state,
+      )
+        ? { ...(inputData.state as Record<string, unknown>) }
+        : {};
       let stopModelStreaming = false;
       let haltEventStream = false;
       let pendingHalt = false;
@@ -2906,11 +3269,26 @@ export class StrandsAgent {
         // cleanup, hooks, snapshots, and session persistence all run
         // through Strands' normal completion path instead of being
         // bypassed by a synthetic RUN_FINISHED.
+
+        // A tool approval is answered raw and everything else with the
+        // envelope, so the checkpoint decides the shape. Read it through the
+        // same helper as the replay comparison, which keeps what is submitted
+        // and what a replay is checked against from ever disagreeing.
+        const nativeInterrupts = _nativeInterruptsById(
+          (
+            strandsAgent as unknown as {
+              _interruptState?: { interrupts?: unknown };
+            }
+          )._interruptState?.interrupts,
+        );
         invokeArgs = resumeEntries.map(
           (entry) =>
             new InterruptResponseContent({
               interruptId: entry.interruptId,
-              response: toResumeResponse(entry) as JSONValue,
+              response: toResumeResponse(
+                entry,
+                nativeInterrupts.get(entry.interruptId),
+              ) as JSONValue,
             }),
         );
       }
@@ -3387,16 +3765,6 @@ export class StrandsAgent {
           try {
             next = await agentStream.next();
           } catch (streamErr) {
-            // A code defect in the adapter is neither a provider failure nor
-            // the halt sentinel, so it keeps its own classification whether or
-            // not a halt is armed. Checked before the halt swallow rather than
-            // left to `record`, which the swallow would otherwise reach first.
-            if (
-              streamErr instanceof TypeError ||
-              streamErr instanceof ReferenceError
-            ) {
-              throw streamErr;
-            }
             // Strands throws "Stream ended without completing a message" when
             // a frontend tool call halts the agent before the model emits a
             // final assistant message. Once we have decided to halt, that
@@ -3404,8 +3772,9 @@ export class StrandsAgent {
             // failure in the same window is not, and must not be swallowed
             // into a success.
             //
-            // `frontendHalt` deliberately stays as it is, so the closeout below
-            // is skipped rather than reached with nothing to do. Strands defers
+            // `frontendHalt` deliberately stays as it is, so the halt-turn
+            // closeout below is skipped rather than reached with nothing to do.
+            // Strands defers
             // appending BOTH the assistant `toolUse` and its `toolResult` until
             // after the tool batch, and yields them only after the
             // `afterToolsEvent` the latch rides, so a throw arriving here landed
@@ -3416,7 +3785,20 @@ export class StrandsAgent {
             // its own `finally` on the error path and the `AfterInvocationEvent`
             // that comes out of the drain saves the snapshot before the throw
             // reaches this loop. Saving again here would write the same bytes.
+            //
+            // A `TypeError` or `ReferenceError` is never that throw, so it is
+            // held out of the swallow: the sentinel is identified by shape
+            // rather than by type, and `stop-reasons.test.ts` drives one of
+            // these wearing that shape. Held out of the SWALLOW only. What it
+            // reports is not decided here: like every other failure out of
+            // this call it is recorded as the forced stop, so the message and
+            // tool-call closeout still runs, which is what Python does with an
+            // exception Strands caught mid-cycle whatever its type.
+            const cannotBeHaltSentinel =
+              streamErr instanceof TypeError ||
+              streamErr instanceof ReferenceError;
             if (
+              !cannotBeHaltSentinel &&
               (pendingHalt || haltEventStream) &&
               _isFrontendHaltSentinel(streamErr)
             ) {
@@ -4119,8 +4501,7 @@ export class StrandsAgent {
             // history. A fresh message id ensures CopilotKit creates a
             // standalone ToolMessage and closes the spinner correctly.
             const toolResultMessageId = uuid();
-            const toolResultContent =
-              resultData == null ? "" : JSON.stringify(resultData);
+            const toolResultContent = _serializeToolResultData(resultData);
             yield {
               type: EventType.TOOL_CALL_RESULT,
               toolCallId: resultToolId,
@@ -4364,6 +4745,20 @@ export class StrandsAgent {
             continue;
           }
 
+          // Per-call token usage. One entry per model invocation, which is why
+          // this reads the metadata event rather than the terminal result's
+          // pre-summed `accumulatedUsage`. No `continue`: the same event is
+          // deliberately forwarded as RAW below, since its latency metrics have
+          // no AG-UI equivalent and dropping them would trade one report for
+          // another.
+          if (kind === "modelMetadataEvent") {
+            const entry = tokenUsageFromStrandsUsage(
+              (event as { usage?: unknown }).usage,
+              modelIdentity,
+            );
+            if (entry) runUsage.push(entry);
+          }
+
           // Terminal `AgentResult`. Mirrors Python's `"result" in event`
           // branch: a non-normal stop gets a hint event so a client can say
           // why an answer is short or empty, instead of the run reading as an
@@ -4531,7 +4926,7 @@ export class StrandsAgent {
       // Same code and same message as Python, and in the same position
       // relative to the closeout events above.
       if (forcedStop.pending) {
-        yield* forcedStop.emit();
+        yield* forcedStop.emit(runUsage);
         return;
       }
 
@@ -4555,7 +4950,7 @@ export class StrandsAgent {
         );
         _abandonUnadvertisedCheckpoint(strandsAgent);
         this._pendingInterruptsByThread.delete(threadId);
-        yield _interruptReconciliationError();
+        yield _interruptReconciliationError(runUsage);
         return;
       }
       // An exact stub the resume WILL repair still repairs only through the
@@ -4565,7 +4960,7 @@ export class StrandsAgent {
         if (!sessionManager) {
           _abandonUnadvertisedCheckpoint(strandsAgent);
           this._pendingInterruptsByThread.delete(threadId);
-          yield _interruptSessionRequiredError();
+          yield _interruptSessionRequiredError(runUsage);
           return;
         }
         if (
@@ -4577,7 +4972,7 @@ export class StrandsAgent {
         ) {
           _abandonUnadvertisedCheckpoint(strandsAgent);
           this._pendingInterruptsByThread.delete(threadId);
-          yield _interruptSessionCapabilityError();
+          yield _interruptSessionCapabilityError(runUsage);
           return;
         }
       }
@@ -4594,7 +4989,9 @@ export class StrandsAgent {
       if (finalAgentResult?.stopReason === "interrupt") {
         const strandsInterrupts = finalAgentResult.interrupts ?? [];
         if (strandsInterrupts.length > 0) {
-          const aguiInterrupts = strandsInterrupts.map(strandsInterruptToAgui);
+          const aguiInterrupts = strandsInterrupts.map((raised) =>
+            strandsInterruptToAgui(raised, this._log),
+          );
           const interruptMap = new Map<string, AguiInterrupt>();
           for (const i of aguiInterrupts) interruptMap.set(i.id, i);
           this._pendingInterruptsByThread.set(threadId, interruptMap);
@@ -4622,6 +5019,9 @@ export class StrandsAgent {
               `${LOG_PREFIX} Failed to persist interrupt snapshot: ${_errorMessage(e)}`,
             );
           }
+          // An interrupted run is a finished run as far as usage goes: the
+          // model calls that got it here were real, and the resume that
+          // continues the turn reports its own.
           yield {
             type: EventType.RUN_FINISHED,
             threadId: inputData.threadId,
@@ -4630,32 +5030,57 @@ export class StrandsAgent {
               type: "interrupt",
               interrupts: aguiInterrupts,
             },
+            ..._runUsage(runUsage),
           };
           return;
         }
-        // The run paused with nothing to hand back, so it falls through to the
-        // success finish below while the native checkpoint may stay parked.
-        // Mirrors the Python sibling's trace for the same blind spot.
+        // The run reported an interrupt and handed back nothing. Where the
+        // checkpoint is still parked, this finish is indistinguishable from a
+        // real success in the event stream, so it is recorded rather than
+        // inferred: remembering it as a completed resume would let a retry be
+        // answered from the fingerprint without ever reaching the parked tool.
+        //
+        // The stop reason alone is not enough to record it. A run that left no
+        // active checkpoint behind has finished its work, and withholding the
+        // fingerprint there would cost the client its idempotent retry and
+        // leave the answered interrupt recorded as pending.
+        //
+        // Not the same test the Python adapter applies, and the difference is
+        // upstream of this line rather than in it. That side falls back to the
+        // live checkpoint when the terminal result reports nothing, so a
+        // checkpoint still holding an unanswered interrupt is republished there
+        // as a pending-interrupt outcome, where this side reports a plain
+        // finish. Both then withhold the fingerprint, so neither answers a
+        // retry from it, but the events a client sees are not identical.
+        // Closing that would mean changing what this side reports, which is a
+        // wider change than the resume contract.
+        const parked =
+          (
+            strandsAgent as unknown as {
+              _interruptState?: { activated?: boolean };
+            }
+          )._interruptState?.activated === true;
+        pausedWithNothingToReport = parked;
         this._log.debug(
           `${LOG_PREFIX} Strands stopped for an interrupt with an empty interrupts list; reporting no pending interrupts`,
         );
       }
 
+      // The pause fact travels with the finish it describes. A symbol key so it
+      // cannot collide with the event schema and does not survive JSON, which
+      // keeps it off the wire; `run()` reads it before any transform runs.
       yield {
         type: EventType.RUN_FINISHED,
         threadId: inputData.threadId,
         runId: inputData.runId,
         outcome: { type: "success" },
+        ..._runUsage(runUsage),
+        ...(pausedWithNothingToReport ? { [PAUSED_PARKED]: true } : {}),
       };
     } catch (e) {
-      const code =
-        e instanceof FrontendToolIdentityError
-          ? "FRONTEND_TOOL_IDENTITY_ERROR"
-          : e instanceof TypeError || e instanceof ReferenceError
-            ? "ADAPTER_BUG"
-            : "STRANDS_ERROR";
+      const code = _terminalErrorCode(e);
       this._log.error(`${LOG_PREFIX} _runSingleAgent failed:`, e);
-      yield _runError(_errorMessage(e), code);
+      yield _runError(_errorMessage(e), code, runUsage);
     }
   }
 
@@ -4916,16 +5341,25 @@ export class StrandsAgent {
     inputData: RunAgentInput,
     threadId: string,
   ): AsyncGenerator<BaseEvent, void, void> {
+    // Provider-reported usage for the whole orchestrator run, one entry per
+    // model call. Local, so it is seeded per run the same way the single-agent
+    // path's is, and declared outside the try so the terminal RUN_ERROR in its
+    // catch reports what the nodes that did run had already spent.
+    const runUsage: TokenUsage[] = [];
+    // Labels per node, since a Graph or Swarm can run a different model at each
+    // one and summing them together would report spend against a model that
+    // never made the call. A node's `beforeModelCallEvent` carries the `Model`
+    // and arrives before that node's `modelMetadataEvent`, which is the only
+    // place the pairing is available: the metadata event itself carries counts
+    // and nothing that identifies the model. Only the labels are kept, never
+    // the model object.
+    const nodeIdentities = new Map<string, StrandsModelIdentity>();
+
     yield _runStarted(inputData);
     try {
-      if (inputData.state && typeof inputData.state === "object") {
-        const snapshot: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(
-          inputData.state as Record<string, unknown>,
-        )) {
-          if (k !== "messages") snapshot[k] = v;
-        }
-        yield { type: EventType.STATE_SNAPSHOT, snapshot };
+      const initialSnapshot = _stateSnapshotPayload(inputData.state);
+      if (initialSnapshot !== undefined) {
+        yield { type: EventType.STATE_SNAPSHOT, snapshot: initialSnapshot };
       }
 
       // Orchestrators take string | ContentBlock[] (MultiAgentInput); extract
@@ -4995,7 +5429,7 @@ export class StrandsAgent {
       // another is FAILED too. What a partially failed Graph owes a client is a
       // design question, not missing plumbing. See `ARCHITECTURE.md`.
       try {
-        for await (const rawEvent of orchestratorStream) {
+        for await (const rawEvent of _foreignStreamFaults(orchestratorStream)) {
           const event = unwrapStrandsEvent(rawEvent);
           const kind = getEventKind(event);
 
@@ -5103,6 +5537,21 @@ export class StrandsAgent {
               }
               continue;
             }
+            if (innerKind === "beforeModelCallEvent") {
+              nodeIdentities.set(
+                ev.nodeId ?? "",
+                strandsModelIdentity((inner as { model?: unknown }).model),
+              );
+              continue;
+            }
+            if (innerKind === "modelMetadataEvent") {
+              const entry = tokenUsageFromStrandsUsage(
+                (inner as { usage?: unknown }).usage,
+                nodeIdentities.get(ev.nodeId ?? "") ?? {},
+              );
+              if (entry) runUsage.push(entry);
+              continue;
+            }
             if (innerKind === "modelContentBlockDeltaEvent") {
               const delta = (
                 inner as { delta?: { type?: string; text?: string } }
@@ -5188,14 +5637,14 @@ export class StrandsAgent {
         threadId: inputData.threadId,
         runId: inputData.runId,
         outcome: { type: "success" },
+        ..._runUsage(runUsage),
       };
     } catch (e) {
-      const code =
-        e instanceof TypeError || e instanceof ReferenceError
-          ? "ADAPTER_BUG"
-          : "STRANDS_ERROR";
+      const code = _terminalErrorCode(e);
       this._log.error(`${LOG_PREFIX} _runOrchestrator failed:`, e);
-      yield _runError(_errorMessage(e), code);
+      // A budget violation escapes mid-run, so the nodes that already ran
+      // report what they spent.
+      yield _runError(_errorMessage(e), code, runUsage);
     }
   }
 
@@ -5306,8 +5755,40 @@ function _runStarted(input: RunAgentInput): BaseEvent {
   };
 }
 
-function _runError(message: string, code: string): BaseEvent {
-  return { type: EventType.RUN_ERROR, message, code };
+/**
+ * A terminal failure, optionally carrying the usage the run had already
+ * accumulated.
+ *
+ * The counts are real spend whatever the run went on to do with them, so a
+ * failure after one or more model calls reports what it used. `usage` is passed
+ * only by the sites a model call can precede; everywhere else the default
+ * leaves the field off, which is what tells a consumer nothing was measured
+ * rather than that nothing was spent.
+ */
+function _runError(
+  message: string,
+  code: string,
+  usage: TokenUsage[] = [],
+): BaseEvent {
+  return {
+    type: EventType.RUN_ERROR,
+    message,
+    code,
+    ..._runUsage(usage),
+  };
+}
+
+/**
+ * The `usage` field for a terminal event, or nothing at all.
+ *
+ * Aggregated per `(provider, model)` through the published shared helper rather
+ * than a local sum, so every AG-UI producer groups identically. An empty result
+ * omits the field: `[]` and a zeroed entry both read as a measured zero, and
+ * "not measured" has to stay distinguishable from "measured as nothing".
+ */
+function _runUsage(entries: TokenUsage[]): { usage?: TokenUsage[] } {
+  const aggregated = aggregateTokenUsage(entries);
+  return aggregated.length > 0 ? { usage: aggregated } : {};
 }
 
 /**
@@ -5491,26 +5972,29 @@ function _continuationToolNameError(toolCallIds: string[]): BaseEvent {
   );
 }
 
-function _interruptReconciliationError(): BaseEvent {
+function _interruptReconciliationError(usage: TokenUsage[] = []): BaseEvent {
   return _runError(
     "Active interrupt tool result reconciliation failed",
     "INTERRUPT_RECONCILIATION_ERROR",
+    usage,
   );
 }
 
-function _interruptSessionRequiredError(): BaseEvent {
+function _interruptSessionRequiredError(usage: TokenUsage[] = []): BaseEvent {
   return _runError(
     "A SessionManager is required for a mixed frontend-proxy/native " +
       "interrupt checkpoint",
     "INTERRUPT_SESSION_REQUIRED",
+    usage,
   );
 }
 
-function _interruptSessionCapabilityError(): BaseEvent {
+function _interruptSessionCapabilityError(usage: TokenUsage[] = []): BaseEvent {
   return _runError(
     "Mixed frontend-proxy/native interrupt state requires a session manager " +
       "exposing saveSnapshot() and an agent exposing messages",
     "INTERRUPT_SESSION_CAPABILITY_ERROR",
+    usage,
   );
 }
 
@@ -5535,7 +6019,8 @@ function validateResumePayload(
     const missingKeys = required.filter((k) => !(k in payload));
     if (missingKeys.length > 0) {
       return _runError(
-        `Invalid payload for interrupt '${entry.interruptId}': missing required keys ${JSON.stringify(missingKeys)}.`,
+        `Invalid payload for interrupt '${entry.interruptId}': ` +
+          `missing required keys: ${missingKeys.join(", ")}.`,
         "INVALID_PAYLOAD",
       );
     }
@@ -5559,18 +6044,42 @@ function resolveResumeEntries(input: RunAgentInput): ResumeEntry[] {
 /**
  * AG-UI `ResumeEntry` → Strands `InterruptResponseContent.response`.
  *
- * A present payload is passed through raw, because that is what tools
- * destructure. It just can never be `undefined`: Strands reads
- * `response === undefined` as "still awaiting a human" and re-raises the same
- * interrupt forever. A generic interrupt publishes no responseSchema, so an
- * empty payload reaches here unchecked; stand in an empty object, which the
- * SDK counts as answered and a destructuring tool can still take.
+ * One contract with the Python adapter, so a tool body ports between them: a
+ * generic interrupt is answered with an envelope, `{ response: payload }` on
+ * resolve and {@link INTERRUPT_CANCELLED} on cancel, and unwraps via
+ * `.response` / `.cancelled`.
+ *
+ * The envelope is also what makes a falsy answer answerable. Strands reads a
+ * recorded answer either by presence (`response !== undefined`) or, on the
+ * oldest releases the Python adapter still supports, by truthiness, and an
+ * answer it reads as absent re-raises the same interrupt and re-runs the tool
+ * body forever. An envelope is always present and always truthy. An absent
+ * payload becomes `null` inside it rather than being dropped, so the recorded
+ * answer survives the JSON round trip through session persistence unchanged.
+ *
+ * Tool approvals are the exception in both languages: the approval hook reads
+ * `approved` off the answer directly, so a resolved approval's payload is passed
+ * through raw and anything else is spelled as the denial the hook expects. Rule 6
+ * schema-checks a resolved approval's payload before it reaches here.
+ *
+ * `nativeInterrupt` is required rather than optional: it is the whole
+ * discriminator, and omitting it would silently answer an approval with the
+ * envelope, which its hook reads as a denial.
  */
-function toResumeResponse(entry: ResumeEntry): unknown {
-  if (entry.status === "cancelled") {
-    return { status: "cancelled" };
+function toResumeResponse(
+  entry: ResumeEntry,
+  nativeInterrupt: unknown,
+): unknown {
+  if (isToolApprovalInterrupt(nativeInterrupt)) {
+    // Only a resolved entry can grant. Rule 6 schema-checks the payload of a
+    // resolved approval before it reaches here, and nothing else is a grant, so
+    // an unrecognised status denies rather than forwarding an unchecked answer.
+    return entry.status === "resolved"
+      ? (entry.payload as unknown)
+      : { approved: false };
   }
-  return entry.payload === undefined ? {} : (entry.payload as unknown);
+  if (entry.status === "cancelled") return { ...INTERRUPT_CANCELLED };
+  return { response: entry.payload === undefined ? null : entry.payload };
 }
 
 // ---------------------------------------------------------------------------
@@ -5687,7 +6196,10 @@ function persistInterruptBookkeeping(
 }
 
 /** Strands `Interrupt` → AG-UI `Interrupt`. */
-function strandsInterruptToAgui(interrupt: StrandsInterrupt): AguiInterrupt {
+function strandsInterruptToAgui(
+  interrupt: StrandsInterrupt,
+  log?: Logger,
+): AguiInterrupt {
   const reasonRaw = interrupt.reason;
   // Only interrupts raised by our own interruptOnCall hook (identified by
   // the "ag_ui:tool_call:" name prefix it always uses) are tool-call
@@ -5708,28 +6220,133 @@ function strandsInterruptToAgui(interrupt: StrandsInterrupt): AguiInterrupt {
     return out;
   }
 
-  const reason = "tool_call";
-  const out: AguiInterrupt = { id: interrupt.id, reason };
-  if (typeof reasonRaw === "object" && reasonRaw != null) {
-    const tn = (reasonRaw as Record<string, unknown>).tool_name;
-    if (typeof tn === "string") {
-      out.message = `Approve call to ${tn}?`;
-    }
+  // An approval carries the same keys on both bridges, so a client renders one
+  // the same way whichever language served it: a message, the response schema,
+  // and tool_name / tool_input / strandsName in metadata are always present,
+  // standing in the same defaults as the Python adapter. Two keys are
+  // conditional: toolCallId, which an approval raised without a native tool use
+  // has none of, and reason, added below only when nothing else carried it.
+  const { toolName, toolInput } = approvalReasonFields(reasonRaw, log);
+  const out: AguiInterrupt = {
+    id: interrupt.id,
+    reason: "tool_call",
+    message: `Approve call to ${toolName}?`,
+    responseSchema: toolApprovalResponseSchema(),
+    metadata: {
+      tool_name: toolName,
+      tool_input: toolInput,
+      strandsName: interrupt.name,
+    },
+  };
+  // Reported only when it is a usable string, matching the Python adapter,
+  // whose `Interrupt.tool_call_id` rejects anything else outright.
+  const toolUseId = plainObject(reasonRaw).tool_use_id;
+  if (typeof toolUseId === "string" && toolUseId) out.toolCallId = toolUseId;
+  // An approval whose reason carried nothing the three keys above could hold
+  // still publishes that reason, rather than reaching the client as nothing but
+  // the defaults. The test is what was actually extracted, not whether the
+  // reason was empty: a mapping like `{ question: "..." }` has keys and is still
+  // entirely unrepresented by tool_name / tool_input / toolCallId. Detached like
+  // everything else published, since a reason can be an array or a nested object.
+  const carriedNothing =
+    toolName === "unknown" &&
+    Object.keys(toolInput).length === 0 &&
+    out.toolCallId === undefined;
+  if (reasonRaw !== undefined && reasonRaw !== null && carriedNothing) {
+    (out.metadata as Record<string, unknown>).reason = detachedValue(
+      reasonRaw,
+      log,
+    );
   }
-  // Extract toolCallId from reason object if available
-  if (typeof reasonRaw === "object" && reasonRaw != null) {
-    const toolUseId = (reasonRaw as Record<string, unknown>).tool_use_id;
-    if (typeof toolUseId === "string") out.toolCallId = toolUseId;
-  }
-  out.responseSchema = toolApprovalResponseSchema();
-  const meta: Record<string, unknown> = { strandsName: interrupt.name };
-  if (typeof reasonRaw === "object" && reasonRaw != null) {
-    const r = reasonRaw as Record<string, unknown>;
-    if (r.tool_name) meta.tool_name = r.tool_name;
-    if (r.tool_input) meta.tool_input = r.tool_input;
-  }
-  out.metadata = meta;
   return out;
+}
+
+/** `value` as a plain object, or an empty one. */
+function plainObject(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/**
+ * A detached copy of any JSON-shaped value, at every depth.
+ *
+ * The object form below is the common case; this one also takes an array, a
+ * string or a number, which is what an unusable interrupt reason can be.
+ */
+function detachedValue(value: unknown, log?: Logger): unknown {
+  try {
+    return structuredClone(value);
+  } catch (e) {
+    // Saying so matters: the caller published this expecting a copy, and what
+    // it actually got is a handle on the live interrupt reason. Inside its own
+    // `try` because a caller-supplied logger is arbitrary code that can throw,
+    // and a throw escaping here would turn a successfully raised interrupt into
+    // a run error.
+    try {
+      log?.warn(
+        `${LOG_PREFIX} could not detach an interrupt reason for publication; it is shared with the live checkpoint: ${_errorMessage(e)}`,
+      );
+    } catch {
+      // Nothing to do: the value below is still returned either way.
+    }
+    return value;
+  }
+}
+
+/**
+ * A detached copy of JSON-shaped data, at every depth.
+ *
+ * A shallow copy is not enough for anything published to a client: the nested
+ * values would still be handles on the live native interrupt's reason. Falls
+ * back to a shallow copy for the rare reason carrying something unclonable,
+ * which is still better than aliasing the whole object.
+ */
+function detachedCopy(
+  value: Record<string, unknown>,
+  log?: Logger,
+): Record<string, unknown> {
+  try {
+    return structuredClone(value);
+  } catch (e) {
+    // A shallow copy still leaves the nested values shared, so this is a
+    // degraded result and not the guarantee the caller asked for. Logged inside
+    // its own `try` for the same reason as above.
+    try {
+      log?.warn(
+        `${LOG_PREFIX} could not fully detach a tool input for publication; its nested values are shared with the live checkpoint: ${_errorMessage(e)}`,
+      );
+    } catch {
+      // Nothing to do: the copy below is still returned either way.
+    }
+    return { ...value };
+  }
+}
+
+/**
+ * The tool identity an approval publishes, read out of its native reason.
+ *
+ * The reason can be missing or malformed, most plausibly because it did not
+ * survive a restart, so both fields fall back. The same defaults and the same
+ * "is it usable?" tests as the Python adapter, so an approval published from
+ * either language reads identically.
+ */
+function approvalReasonFields(
+  reasonRaw: unknown,
+  log?: Logger,
+): {
+  toolName: string;
+  toolInput: Record<string, unknown>;
+} {
+  const reason = plainObject(reasonRaw);
+  const name = reason.tool_name;
+  return {
+    toolName: typeof name === "string" && name ? name : "unknown",
+    // Detached at every depth, not merely copied at the top: the published
+    // metadata must not be a handle on the live native interrupt's reason at
+    // ANY level. Same guarantee in Python.
+    toolInput: detachedCopy(plainObject(reason.tool_input), log),
+  };
 }
 
 function getEventKind(event: unknown): string | undefined {
@@ -6142,12 +6759,17 @@ function _sortKeys(val: unknown): unknown {
 function resumeFingerprint(entries: ResumeEntry[]): string {
   const canonicalEntries = entries
     .map((entry) =>
-      // A resolved entry without a payload is not the same resume as one
-      // carrying an explicit null: `toResumeResponse` sends `{}` for the first
-      // and `null` for the second. Omit the slot rather than serializing
-      // `undefined`, which JSON would collapse into the null it must differ
-      // from. A cancelled entry's payload never reaches the SDK, so its
-      // canonical form is left alone.
+      // Omit the slot for a resolved entry without a payload rather than
+      // serializing `undefined`, which JSON would collapse into null. The two
+      // now submit the same answer, so keeping them distinct here means a
+      // retry that varies only in that spelling misses the idempotency
+      // short-circuit and is refused as having nothing open to address, rather
+      // than answered as the replay it is. Left as it stands because collapsing
+      // them changes idempotency behaviour, which is not this change's subject;
+      // the parked-checkpoint path bypasses the fingerprint entirely and
+      // compares submitted answers, so it already treats them as one. A
+      // cancelled entry's payload never reaches the SDK, so its canonical form
+      // is left alone.
       entry.status !== "cancelled" && entry.payload === undefined
         ? ([entry.interruptId, entry.status] as const)
         : ([
@@ -6231,6 +6853,11 @@ function jsonSchemaTypeMatches(value: unknown, type: string): boolean {
   }
 }
 
+// JSON Schema type names that take "an". The Python bridge keys off the same
+// set: the rendered message is a wire contract clients match literally.
+const VOWEL_INITIAL_JSON_SCHEMA_TYPES = new Set(["array", "integer", "object"]);
+
 function jsonSchemaTypeDescription(type: string): string {
-  return type === "object" || type === "array" ? `an ${type}` : `a ${type}`;
+  const article = VOWEL_INITIAL_JSON_SCHEMA_TYPES.has(type) ? "an" : "a";
+  return `${article} ${type}`;
 }

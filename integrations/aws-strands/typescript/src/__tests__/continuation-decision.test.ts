@@ -72,6 +72,7 @@ import {
   type PersistedSnapshot,
   type PersistedToolResult,
 } from "./helpers";
+import { expectContractErrors } from "./error-code-table";
 
 const TOOL = "set_color";
 /** The frontend call the rows revolve around. */
@@ -566,6 +567,10 @@ async function runRow(row: Row): Promise<Observed> {
   const firstEvents = await collect(first.agent, firstRun());
   const hasStore = !row.replay && !row.unwritableSession;
 
+  // Every code this row observes is also pinned to the shared error-code
+  // table, so a reworded sentence fails here and not only on the other bridge.
+  expectContractErrors(firstEvents, errorCodes(firstEvents));
+
   const turn1 = {
     errors: errorCodes(firstEvents),
     results: hasStore ? persistedToolResults(dir) : null,
@@ -592,6 +597,8 @@ async function runRow(row: Row): Promise<Observed> {
   const { path, prompt } = reached
     ? classifyPath(second.model, call, clientUserText(continuation))
     : { path: "none" as const, prompt: null };
+
+  expectContractErrors(events, errorCodes(events));
 
   return {
     turn1,

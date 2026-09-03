@@ -432,6 +432,52 @@ describe("StrandsAgent resume[] gate (interrupts.mdx rules 2-7)", () => {
     }
   });
 
+  // The rendered sentence is a wire contract clients match literally, so the
+  // article has to be right for every supported type and identical to the
+  // Python bridge's.
+  it("Rule 6: renders the right article for every supported type", async () => {
+    const cases: Array<[string, unknown, string]> = [
+      ["array", 3, "an array"],
+      ["boolean", 3, "a boolean"],
+      ["integer", "3", "an integer"],
+      ["null", 3, "a null"],
+      ["number", "3", "a number"],
+      ["object", 3, "an object"],
+      ["string", 3, "a string"],
+    ];
+
+    for (const [jsonType, invalidValue, expected] of cases) {
+      const agent = new NeverRanAgent();
+      const pending = setPending(agent, "t", ["val-1"]);
+      pending.get("val-1")!.responseSchema = {
+        type: "object",
+        properties: { value: { type: jsonType } },
+      };
+
+      const events = await collect(
+        agent,
+        minimalRunInput({
+          threadId: "t",
+          runId: "r1",
+          resume: [
+            {
+              interruptId: "val-1",
+              status: "resolved",
+              payload: { value: invalidValue },
+            },
+          ],
+        }),
+      );
+
+      expect(agent.rawCalled).toBe(0);
+      const err = events[1] as unknown as { code: string; message: string };
+      expect(err.code).toBe("INVALID_PAYLOAD");
+      expect(err.message).toBe(
+        `Invalid payload for interrupt 'val-1': field 'value' must be ${expected}.`,
+      );
+    }
+  });
+
   it("Rule 6: validates a tool approval whose record lost its schema", async () => {
     const agent = new NeverRanAgent();
     // A restart can restore the checkpoint while the AG-UI record comes back
