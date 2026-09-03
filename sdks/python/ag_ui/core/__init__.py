@@ -93,7 +93,7 @@ from ag_ui.core.token_usage import (
 )
 
 from ag_ui.core.capabilities import (
-    SubAgentInfo,
+    SubagentInfo,
     IdentityCapabilities,
     TransportCapabilities,
     ToolsCapabilities,
@@ -195,7 +195,7 @@ __all__ = [
     "InputContent",
     "InputContentPart",
     # Capabilities
-    "SubAgentInfo",
+    "SubagentInfo",
     "IdentityCapabilities",
     "TransportCapabilities",
     "ToolsCapabilities",

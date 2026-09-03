@@ -151,14 +151,19 @@ describe("the generator", () => {
     const packageDir = join(PY_OUTPUT_DIR, "..", "core");
     const events = readFileSync(join(packageDir, "events.py"), "utf8");
     const types = readFileSync(join(packageDir, "types.py"), "utf8");
+    const capabilities = readFileSync(join(packageDir, "capabilities.py"), "utf8");
     expect(events).toContain("from ag_ui._generated.models import");
     expect(types).toContain("from ag_ui._generated.models import");
+    // capabilities.py became a re-export wrapper when AgentCapabilities moved
+    // into the schema; a hand-written model returning there is the same
+    // regression as one returning to events.py.
+    expect(capabilities).toContain("from ag_ui._generated.models import");
     // No hand-written module may re-declare the protocol surface: an
-    // EventType enum or a pydantic event class outside generated/ is a
-    // duplicate. (capabilities.py is not protocol and may keep its models.)
+    // EventType enum or a pydantic class outside generated/ is a duplicate.
     for (const [name, content] of [
       ["events.py", events],
       ["types.py", types],
+      ["capabilities.py", capabilities],
     ] as const) {
       expect(
         /class\s+\w+\((BaseModel|ConfiguredBaseModel|MetadataMixin|BaseEvent|BaseMessage)\)/.test(

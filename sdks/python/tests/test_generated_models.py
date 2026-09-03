@@ -56,13 +56,22 @@ def adapter_for(anchor):
 
 
 # The invalid fixtures the tolerant layer accepts, each one a recorded
-# tolerance rather than an oversight. Three classes:
+# tolerance rather than an oversight. Four classes:
 #   unknown-keys — closure belongs to the spec; unknown fields survive here.
 #   null-means-absent — idiomatic Python passes None for optionals; the
 #     encoder's exclude_none keeps it off the wire.
 #   const-fills-in — a field with exactly one legal value defaults to it,
 #     so nothing is invented by accepting its omission.
+#   lax-coercion — pydantic's default coercion, kept deliberately (see
+#     PublicErgonomics.test_lax_coercion_is_the_public_layer): "yes" becomes
+#     True here, and the spec's own corpus is what rejects it.
 TOLERATED_INVALID = {
+    # The pre-1.0 `subAgents` spelling is an unknown key now, not an alias:
+    # it survives the parse as an extra but never reaches `subagents`.
+    "AgentCapabilities/invalid/old-subagents-key.json": "unknown-keys",
+    "AgentCapabilities/invalid/metadata-null.json": "null-means-absent",
+    "AgentCapabilities/invalid/streaming-not-boolean.json": "lax-coercion",
+    "MultiAgentCapabilities/invalid/old-subagents-key.json": "unknown-keys",
     "MessagesSnapshotEvent/invalid/message-metadata-null.json": "null-means-absent",
     "ReasoningMessageStartEvent/invalid/role-missing.json": "const-fills-in",
     "RunFinishedEvent/invalid/outcome-null.json": "null-means-absent",
