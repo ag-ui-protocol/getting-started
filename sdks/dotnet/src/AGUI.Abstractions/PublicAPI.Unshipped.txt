@@ -28,7 +28,7 @@ AGUI.Abstractions.ActivitySnapshotEvent.SubagentRunId.get -> string?
 AGUI.Abstractions.ActivitySnapshotEvent.SubagentRunId.set -> void
 AGUI.Abstractions.AgentCapabilities
 AGUI.Abstractions.AgentCapabilities.AgentCapabilities() -> void
-AGUI.Abstractions.AgentCapabilities.Custom.get -> System.Collections.Generic.IDictionary<string!, object?>?
+AGUI.Abstractions.AgentCapabilities.Custom.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.AgentCapabilities.Custom.set -> void
 AGUI.Abstractions.AgentCapabilities.Execution.get -> AGUI.Abstractions.ExecutionCapabilities?
 AGUI.Abstractions.AgentCapabilities.Execution.set -> void
@@ -284,9 +284,9 @@ AGUI.Abstractions.ExecutionCapabilities
 AGUI.Abstractions.ExecutionCapabilities.CodeExecution.get -> bool?
 AGUI.Abstractions.ExecutionCapabilities.CodeExecution.set -> void
 AGUI.Abstractions.ExecutionCapabilities.ExecutionCapabilities() -> void
-AGUI.Abstractions.ExecutionCapabilities.MaxExecutionTime.get -> int?
+AGUI.Abstractions.ExecutionCapabilities.MaxExecutionTime.get -> long?
 AGUI.Abstractions.ExecutionCapabilities.MaxExecutionTime.set -> void
-AGUI.Abstractions.ExecutionCapabilities.MaxIterations.get -> int?
+AGUI.Abstractions.ExecutionCapabilities.MaxIterations.get -> long?
 AGUI.Abstractions.ExecutionCapabilities.MaxIterations.set -> void
 AGUI.Abstractions.ExecutionCapabilities.Sandboxed.get -> bool?
 AGUI.Abstractions.ExecutionCapabilities.Sandboxed.set -> void
@@ -310,7 +310,7 @@ AGUI.Abstractions.IdentityCapabilities.Description.set -> void
 AGUI.Abstractions.IdentityCapabilities.DocumentationUrl.get -> string?
 AGUI.Abstractions.IdentityCapabilities.DocumentationUrl.set -> void
 AGUI.Abstractions.IdentityCapabilities.IdentityCapabilities() -> void
-AGUI.Abstractions.IdentityCapabilities.Metadata.get -> System.Collections.Generic.IDictionary<string!, object?>?
+AGUI.Abstractions.IdentityCapabilities.Metadata.get -> System.Text.Json.JsonElement?
 AGUI.Abstractions.IdentityCapabilities.Metadata.set -> void
 AGUI.Abstractions.IdentityCapabilities.Name.get -> string?
 AGUI.Abstractions.IdentityCapabilities.Name.set -> void
@@ -351,8 +351,8 @@ AGUI.Abstractions.MultiAgentCapabilities.Delegation.set -> void
 AGUI.Abstractions.MultiAgentCapabilities.Handoffs.get -> bool?
 AGUI.Abstractions.MultiAgentCapabilities.Handoffs.set -> void
 AGUI.Abstractions.MultiAgentCapabilities.MultiAgentCapabilities() -> void
-AGUI.Abstractions.MultiAgentCapabilities.SubAgents.get -> System.Collections.Generic.IList<AGUI.Abstractions.SubAgentInfo!>?
-AGUI.Abstractions.MultiAgentCapabilities.SubAgents.set -> void
+AGUI.Abstractions.MultiAgentCapabilities.Subagents.get -> System.Collections.Generic.IList<AGUI.Abstractions.SubagentInfo!>?
+AGUI.Abstractions.MultiAgentCapabilities.Subagents.set -> void
 AGUI.Abstractions.MultiAgentCapabilities.Supported.get -> bool?
 AGUI.Abstractions.MultiAgentCapabilities.Supported.set -> void
 AGUI.Abstractions.MultimodalCapabilities
@@ -578,12 +578,12 @@ AGUI.Abstractions.SubagentFinishedSuspendedOutcome
 AGUI.Abstractions.SubagentFinishedSuspendedOutcome.InterruptIds.get -> System.Collections.Generic.IList<string!>?
 AGUI.Abstractions.SubagentFinishedSuspendedOutcome.InterruptIds.set -> void
 AGUI.Abstractions.SubagentFinishedSuspendedOutcome.SubagentFinishedSuspendedOutcome() -> void
-AGUI.Abstractions.SubAgentInfo
-AGUI.Abstractions.SubAgentInfo.Description.get -> string?
-AGUI.Abstractions.SubAgentInfo.Description.set -> void
-AGUI.Abstractions.SubAgentInfo.Name.get -> string!
-AGUI.Abstractions.SubAgentInfo.Name.set -> void
-AGUI.Abstractions.SubAgentInfo.SubAgentInfo() -> void
+AGUI.Abstractions.SubagentInfo
+AGUI.Abstractions.SubagentInfo.Description.get -> string?
+AGUI.Abstractions.SubagentInfo.Description.set -> void
+AGUI.Abstractions.SubagentInfo.Name.get -> string!
+AGUI.Abstractions.SubagentInfo.Name.set -> void
+AGUI.Abstractions.SubagentInfo.SubagentInfo() -> void
 AGUI.Abstractions.SubagentStartedEvent
 AGUI.Abstractions.SubagentStartedEvent.Description.get -> string?
 AGUI.Abstractions.SubagentStartedEvent.Description.set -> void
@@ -900,7 +900,7 @@ static AGUI.Abstractions.AGUIUserContent.implicit operator AGUI.Abstractions.AGU
 ~AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUITool.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUITool>>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.IListAGUIToolCall.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.AGUIToolCall>>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.IListString.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<string>>
-~AGUI.Abstractions.AGUIJsonSerializerContext.IListSubAgentInfo.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.SubAgentInfo>>
+~AGUI.Abstractions.AGUIJsonSerializerContext.IListSubagentInfo.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.SubagentInfo>>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.IListTokenUsage.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IList<AGUI.Abstractions.TokenUsage>>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.Int32.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<int>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.Int64.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<long>
@@ -912,7 +912,6 @@ static AGUI.Abstractions.AGUIUserContent.implicit operator AGUI.Abstractions.AGU
 ~AGUI.Abstractions.AGUIJsonSerializerContext.MultimodalInputCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.MultimodalInputCapabilities>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.MultimodalOutputCapabilities.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.MultimodalOutputCapabilities>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.NullableBoolean.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<bool?>
-~AGUI.Abstractions.AGUIJsonSerializerContext.NullableInt32.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<int?>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.NullableInt64.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<long?>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.NullableJsonElement.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Text.Json.JsonElement?>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.Object.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<object>
@@ -944,7 +943,7 @@ static AGUI.Abstractions.AGUIUserContent.implicit operator AGUI.Abstractions.AGU
 ~AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedOutcome>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedSuccessOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedSuccessOutcome>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.SubagentFinishedSuspendedOutcome.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentFinishedSuspendedOutcome>
-~AGUI.Abstractions.AGUIJsonSerializerContext.SubAgentInfo.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubAgentInfo>
+~AGUI.Abstractions.AGUIJsonSerializerContext.SubagentInfo.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentInfo>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.SubagentStartedEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.SubagentStartedEvent>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.TextMessageChunkEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TextMessageChunkEvent>
 ~AGUI.Abstractions.AGUIJsonSerializerContext.TextMessageContentEvent.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<AGUI.Abstractions.TextMessageContentEvent>

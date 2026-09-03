@@ -22,6 +22,8 @@
          rather than copied so there is one copy of the expectations for all three. -->
     <EmbeddedResource Include="..\..\..\fixtures\null-omission.json"
                       LogicalName="AGUI.Abstractions.UnitTests.CrossLanguageFixtures.null-omission.json" />
+    <EmbeddedResource Include="..\..\..\fixtures\agent-capabilities.json"
+                      LogicalName="AGUI.Abstractions.UnitTests.CrossLanguageFixtures.agent-capabilities.json" />
   </ItemGroup>
 
 </Project>

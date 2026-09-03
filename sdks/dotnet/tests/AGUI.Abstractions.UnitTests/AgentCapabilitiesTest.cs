@@ -58,9 +58,9 @@ public sealed class AgentCapabilitiesTest
                 Supported = true,
                 Delegation = true,
                 Handoffs = false,
-                SubAgents = new List<SubAgentInfo>
+                Subagents = new List<SubagentInfo>
                 {
-                    new SubAgentInfo { Name = "helper", Description = "A helper agent" }
+                    new SubagentInfo { Name = "helper", Description = "A helper agent" }
                 }
             },
             Reasoning = new ReasoningCapabilities
@@ -133,8 +133,8 @@ public sealed class AgentCapabilitiesTest
         Assert.True(result.MultiAgent?.Supported);
         Assert.True(result.MultiAgent?.Delegation);
         Assert.False(result.MultiAgent?.Handoffs);
-        Assert.Single(result.MultiAgent!.SubAgents!);
-        Assert.Equal("helper", result.MultiAgent.SubAgents![0].Name);
+        Assert.Single(result.MultiAgent!.Subagents!);
+        Assert.Equal("helper", result.MultiAgent.Subagents![0].Name);
 
         Assert.True(result.Reasoning?.Supported);
         Assert.True(result.Reasoning?.Streaming);
@@ -262,7 +262,7 @@ public sealed class AgentCapabilitiesTest
                 "supported": true,
                 "delegation": true,
                 "handoffs": false,
-                "subAgents": [
+                "subagents": [
                     { "name": "sub-1", "description": "Sub agent 1" }
                 ]
             },
@@ -323,7 +323,7 @@ public sealed class AgentCapabilitiesTest
         Assert.True(result.State?.Memory);
 
         Assert.True(result.MultiAgent?.Supported);
-        Assert.Equal("sub-1", result.MultiAgent!.SubAgents![0].Name);
+        Assert.Equal("sub-1", result.MultiAgent!.Subagents![0].Name);
 
         Assert.True(result.Reasoning?.Supported);
         Assert.True(result.Reasoning?.Streaming);
@@ -359,6 +359,6 @@ public sealed class AgentCapabilitiesTest
         Assert.NotNull(result);
         Assert.Equal("test", result.Identity?.Name);
         Assert.NotNull(result.Custom);
-        Assert.True(result.Custom!.ContainsKey("rateLimit"));
+        Assert.Equal(42, result.Custom!.Value.GetProperty("rateLimit").GetInt32());
     }
 }
