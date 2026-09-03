@@ -88,6 +88,44 @@ jobs:
             exit 1
           fi
 
+  a2ui-config-unit:
+    name: dojo / a2ui-config-unit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+        with:
+          version: 10.33.4
+
+      # This test cannot use the install-free npx form the CrewAI config test
+      # uses next to `check-generated-files`: it loads @ag-ui/a2ui-middleware
+      # and @ag-ui/core from node_modules, so the workspace has to be installed
+      # and those dists built before it can run. Hence its own job rather than
+      # a step on the gate that fans out to the matrix below.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build A2UI middleware
+        run: pnpm exec nx run-many -t build -p @ag-ui/a2ui-middleware
+
+      # Mirrors the `test:a2ui-config` package script. Guards that every dojo
+      # A2UIMiddleware wiring forwards the rendered dynamic catalog, not just
+      # the tool and the catalog id: without the schema the model is asked to
+      # generate A2UI and never told which components exist.
+      - name: Validate A2UI dojo config (dynamic catalog forwarding)
+        working-directory: apps/dojo
+        run: pnpm test:a2ui-config
+
   event-trace-unit:
     name: dojo / event-trace-unit
     runs-on: ubuntu-latest
