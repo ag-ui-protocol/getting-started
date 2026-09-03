@@ -13,9 +13,6 @@ import { EventType } from "./generated/types";
  * file only aliases, derives, and carries the package's own error types.
  */
 
-/** The discriminated union of every event validator, under its historic name. */
-export { EventSchema as EventSchemas } from "./generated/schemas";
-
 /** Every protocol event, under its historic name (the generated name is Event). */
 export type AGUIEvent = Event;
 
@@ -124,14 +121,9 @@ export type SubagentErrorEventProps = EventProps<import("./generated/types").Sub
 /**
  * Historic aliases for the media input parts: the schema names them
  * ...InputContent, and this package has always also exported them as
- * ...InputPart.
+ * ...InputPart. The matching validator aliases live in src/schemas.ts, which
+ * is where every runtime validator this package ships lives.
  */
-export {
-  ImageInputContentSchema as ImageInputPartSchema,
-  AudioInputContentSchema as AudioInputPartSchema,
-  VideoInputContentSchema as VideoInputPartSchema,
-  DocumentInputContentSchema as DocumentInputPartSchema,
-} from "./generated/schemas";
 export type {
   ImageInputContent as ImageInputPart,
   AudioInputContent as AudioInputPart,

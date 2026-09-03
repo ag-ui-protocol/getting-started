@@ -1,4 +1,3 @@
-import { MetadataSchema } from "./generated/schemas";
 import type { Metadata } from "./generated/types";
 
 /**
@@ -29,26 +28,11 @@ export const AGUI_METADATA_KEY = "ag-ui";
  * src/generated/schemas.ts); this comment survives as the recorded reasoning.
  */
 /**
- * How metadata is declared on events and messages.
- *
- * The object itself is absent or an object, never `null` — and parsing enforces
- * that invariant rather than coercing a `null` to absent. The schema pinning it
- * now lives in the generated source (MetadataSchema in
- * src/generated/schemas.ts); this comment survives as the recorded reasoning.
- *
- * This is deliberately NOT the treatment `parentMessageId` and `outcome`
- * receive. Those tolerate `null` because released producers emitted it before
- * the producer-side omission fix, and rejecting it would break agents already
- * in the wild — which is why they, and only they, move into the compatibility
- * middleware with PNI-207. Metadata has no such history: it postdates that fix,
- * and no released Python or .NET package has ever emitted `"metadata": null`.
- * Adding a tolerance here would grandfather in a fourth exception with nobody
- * to protect; enforcing from day one means there is never anything to retire.
- *
- * A `null` *value under a key* is meaningful data and is preserved. Only a
- * `null` in place of the whole object is a contract violation.
+ * How metadata is declared on events and messages: the object is absent or an
+ * object, never `null`. The validator pinning that invariant is
+ * `OptionalMetadataSchema`, which lives in src/schemas.ts along with every
+ * other runtime validator this package ships.
  */
-export const OptionalMetadataSchema = MetadataSchema.optional();
 
 /**
  * Folds `incoming` metadata into `existing`, key by key, with the last write

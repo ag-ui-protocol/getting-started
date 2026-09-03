@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { EventType } from "../index";
 import {
   EventSchemas,
-  EventType,
   RunErrorEventSchema,
   RunFinishedEventSchema,
   TokenUsageSchema,
-} from "../index";
+} from "../schemas";
 
 describe("TokenUsageSchema — numeric-only usage shape", () => {
   it("parses a full usage entry with all allowed fields", () => {

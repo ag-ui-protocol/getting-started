@@ -7,10 +7,17 @@ TypeScript definitions & runtime schemas for the **Agent-User Interaction (AG-UI
 ## Installation
 
 ```bash
+# types and constants only — no runtime dependencies
 npm install @ag-ui/core
 pnpm add @ag-ui/core
 yarn add @ag-ui/core
+
+# to use the validators on @ag-ui/core/schemas, add zod (3.25.18+ or 4.x)
+npm install @ag-ui/core zod
 ```
+
+zod is an optional peer dependency: the main entry never loads it, so an
+application that only needs the types installs nothing else.
 
 ## Features
 
@@ -22,7 +29,10 @@ yarn add @ag-ui/core
 ## Quick example
 
 ```ts
-import { EventSchemas, EventType } from "@ag-ui/core";
+import { EventType } from "@ag-ui/core";
+// Validators live on the /schemas subpath and need zod installed; the main
+// entry is types and constants only, so type-only consumers need no zod.
+import { EventSchemas } from "@ag-ui/core/schemas";
 
 // Validate an incoming event
 EventSchemas.parse({

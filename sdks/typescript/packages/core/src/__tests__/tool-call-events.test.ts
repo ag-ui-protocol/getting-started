@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { EventType } from "../index";
+import type { ToolCallStartEvent, ToolCallStartEventProps } from "../index";
 import {
   EventSchemas,
-  EventType,
   ToolCallChunkEventSchema,
-  type ToolCallStartEvent,
-  type ToolCallStartEventProps,
   ToolCallStartEventSchema,
-} from "../index";
+} from "../schemas";
 
 describe("ToolCallStartEventSchema — parentMessageId is optional and back-compat", () => {
   it("parses an event with no parentMessageId", () => {

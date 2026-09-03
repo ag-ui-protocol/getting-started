@@ -1,4 +1,5 @@
-import { TextMessageStartEventSchema, TextMessageChunkEventSchema, EventType } from "../index";
+import { EventType } from "../index";
+import { TextMessageStartEventSchema, TextMessageChunkEventSchema } from "../schemas";
 
 describe("Event role defaults", () => {
   it("leaves an absent TextMessageStartEvent role absent (absent means assistant)", () => {

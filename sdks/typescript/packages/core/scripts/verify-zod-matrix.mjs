@@ -1,6 +1,6 @@
 // Proves the built package works under both supported zod majors, in both
-// module formats. The package declares zod ^3.25.76 (unchanged until
-// activation), but all runtime code uses the `zod/v4` subpath API, which zod
+// module formats, and that the main entry works with NO zod installed. zod is
+// an optional peer; all runtime code uses the `zod/v4` subpath API, which zod
 // ships in 3.25+ and in 4.x — so a consumer forcing either major must get a
 // working package. Each matrix cell installs the packed tarball next to a
 // pinned zod (an npm override forces the package's own dependency onto that
@@ -12,7 +12,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const ZOD_VERSIONS = ["3.25.76", "4"];
+// The declared peer range is ^3.25.18 || ^4.0.0: its floor, the workspace pin, and current 4.x.
+const ZOD_VERSIONS = ["3.25.18", "3.25.76", "4"];
 
 const SMOKE = `
 const check = (core, schemas, label) => {
@@ -20,7 +21,8 @@ const check = (core, schemas, label) => {
     if (!condition) throw new Error(label + ": " + message);
   };
   assert(core.EventType.TEXT_MESSAGE_START === "TEXT_MESSAGE_START", "EventType constant");
-  assert(typeof core.EventSchemas.parse === "function", "main entry serves EventSchemas");
+  assert(core.EventSchemas === undefined, "main entry must not serve validators (zod is optional)");
+  assert(typeof schemas.EventSchemas.parse === "function", "subpath serves EventSchemas under its historic name");
   const parsed = schemas.EventSchema.parse({
     type: "TEXT_MESSAGE_CONTENT",
     messageId: "m1",
@@ -101,7 +103,36 @@ try {
       rmSync(consumer, { recursive: true, force: true });
     }
   }
-  console.log("\nzod matrix: both majors pass in both module formats");
+  // The optional-peer guarantee itself: with no zod in the tree, the main entry
+  // still imports and serves its constants, and only the subpath is unavailable.
+  const bare = mkdtempSync(join(tmpdir(), "agui-zod-none-"));
+  try {
+    writeFileSync(
+      join(bare, "package.json"),
+      JSON.stringify(
+        { name: "agui-zod-none-consumer", private: true, dependencies: { "@ag-ui/core": `file:${join(packDir, tarball)}` } },
+        null,
+        2,
+      ),
+    );
+    writeFileSync(
+      join(bare, "smoke.cjs"),
+      `const core = require("@ag-ui/core");
+if (core.EventType.TEXT_MESSAGE_START !== "TEXT_MESSAGE_START") throw new Error("no zod: EventType constant");
+if (core.EventSchemas !== undefined) throw new Error("no zod: main entry served a validator");
+let threw = false; try { require("@ag-ui/core/schemas"); } catch { threw = true; }
+if (!threw) throw new Error("no zod: the schemas subpath should fail without zod");
+console.log("no zod: main entry ok, subpath unavailable as expected");`,
+    );
+    run("npm", ["install", "--no-audit", "--no-fund", "--silent"], bare);
+    const zodPresent = execFileSync("node", ["-e", "try{require.resolve('zod');process.stdout.write('yes')}catch{process.stdout.write('no')}"], { cwd: bare, encoding: "utf8" });
+    if (zodPresent !== "no") throw new Error("no-zod cell: zod was installed anyway (optional peer not honoured?)");
+    console.log("\n== no zod ==");
+    run("node", ["smoke.cjs"], bare);
+  } finally {
+    rmSync(bare, { recursive: true, force: true });
+  }
+  console.log("\nzod matrix: every supported zod passes in both module formats, and the main entry needs none");
 } finally {
   rmSync(packDir, { recursive: true, force: true });
 }

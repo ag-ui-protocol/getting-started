@@ -7,7 +7,7 @@ import {
   ImageInputPartSchema,
   InputContentDataSourceSchema,
   InputContentUrlSourceSchema,
-} from "../index";
+} from "../schemas";
 
 const MODALITIES = ["image", "audio", "video", "document"] as const;
 

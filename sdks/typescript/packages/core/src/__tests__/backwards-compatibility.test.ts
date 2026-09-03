@@ -1,3 +1,4 @@
+import { EventType } from "../index";
 import {
   UserMessageSchema,
   AssistantMessageSchema,
@@ -6,8 +7,7 @@ import {
   RunStartedEventSchema,
   ToolSchema,
   ContextSchema,
-  EventType,
-} from "../index";
+} from "../schemas";
 
 describe("Backwards Compatibility", () => {
   describe("Message Schemas", () => {

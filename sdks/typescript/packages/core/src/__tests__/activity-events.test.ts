@@ -1,5 +1,9 @@
-import { ActivitySnapshotEventSchema, ActivityDeltaEventSchema, EventType } from "../index";
-import { ActivityMessageSchema } from "../index";
+import { EventType } from "../index";
+import {
+  ActivitySnapshotEventSchema,
+  ActivityDeltaEventSchema,
+  ActivityMessageSchema,
+} from "../schemas";
 
 describe("Activity events", () => {
   it("parses ActivitySnapshotEvent", () => {

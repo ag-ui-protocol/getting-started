@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HumanInTheLoopCapabilitiesSchema } from "../capabilities";
+import { HumanInTheLoopCapabilitiesSchema } from "../schemas";
 
 describe("HumanInTheLoopCapabilities — interrupt flags", () => {
   it("accepts interrupts: true", () => {

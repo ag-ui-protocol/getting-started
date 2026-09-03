@@ -180,7 +180,15 @@ describe("the generator", () => {
     const srcDir = join(TS_OUTPUT_DIR, "..");
     const index = readFileSync(join(srcDir, "index.ts"), "utf8");
     expect(index).toContain('"./generated/types"');
-    expect(index).toContain('"./generated/schemas"');
+    // The validators are zod, and zod is an optional peer of core: the main
+    // entry MUST NOT reach them, or importing a type drags zod in at runtime.
+    // They are consumed only through the `@ag-ui/core/schemas` subpath entry.
+    expect(
+      index.includes('"./generated/schemas"'),
+      "index.ts re-exports the zod validators; that puts zod on the main entry",
+    ).toBe(false);
+    const schemasEntry = readFileSync(join(srcDir, "schemas.ts"), "utf8");
+    expect(schemasEntry).toContain('"./generated/schemas"');
     for (const retired of ["events.ts", "types.ts"]) {
       expect(
         existsSync(join(srcDir, retired)),

@@ -5,8 +5,8 @@ import {
   ToolMessageSchema,
   ActivityMessageSchema,
   ReasoningMessageSchema,
-} from "../index";
-import { TextMessageContentEventSchema } from "../index";
+  TextMessageContentEventSchema,
+} from "../schemas";
 import { EventType } from "../index";
 
 describe("message subagentRunId attribution", () => {

@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { AGUI_METADATA_KEY, EventType, mergeMetadata } from "../index";
 import {
-  AGUI_METADATA_KEY,
   ActivityMessageSchema,
   AssistantMessageSchema,
   BaseEventSchema,
   DeveloperMessageSchema,
-  EventType,
   MetadataSchema,
   OptionalMetadataSchema,
   ReasoningMessageSchema,
@@ -15,8 +14,7 @@ import {
   ToolCallResultEventSchema,
   ToolMessageSchema,
   UserMessageSchema,
-  mergeMetadata,
-} from "../index";
+} from "../schemas";
 
 // Every JSON shape the protocol promises survives a round trip.
 const VALUE_SHAPES = {
