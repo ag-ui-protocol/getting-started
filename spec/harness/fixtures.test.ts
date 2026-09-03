@@ -194,3 +194,36 @@ describe("the document root", () => {
     ).toBe(true);
   });
 });
+
+describe("the shared capabilities fixture", () => {
+  // sdks/fixtures/agent-capabilities.json is what the three SDKs are held to;
+  // the documents under AgentCapabilities/valid are what the schema is held
+  // to. The shared fixture claims they are the same documents. Nothing else
+  // checks that, so both copies could drift while every suite stayed green.
+  const shared = readJson<{
+    cases: Array<{ name: string; input: unknown; expected: unknown }>;
+  }>(join(DRAFT_DIR, "..", "..", "sdks", "fixtures", "agent-capabilities.json"));
+  const SPEC_FIXTURE_FOR: Record<string, string> = {
+    full_every_group_populated: "full.json",
+    minimal_nothing_declared: "minimal.json",
+    partial_as_a_real_producer_declares: "partial.json",
+    open_values_may_be_null: "open-values-null.json",
+  };
+  const validDir = join(FIXTURES_DIR, "AgentCapabilities", "valid");
+
+  it("maps every shared case to a spec fixture, and every spec fixture to a case", () => {
+    expect(shared.cases.map((c) => c.name).sort()).toEqual(Object.keys(SPEC_FIXTURE_FOR).sort());
+    expect(readdirSync(validDir).filter((f) => f.endsWith(".json")).sort()).toEqual(
+      Object.values(SPEC_FIXTURE_FOR).sort(),
+    );
+  });
+
+  it.each(shared.cases.map((c) => [c.name, c] as const))(
+    "%s is the same document the schema validates, on both sides of the round trip",
+    (_name, c) => {
+      const spec = readJson<unknown>(join(validDir, SPEC_FIXTURE_FOR[c.name]));
+      expect(c.input).toEqual(spec);
+      expect(c.expected).toEqual(spec);
+    },
+  );
+});

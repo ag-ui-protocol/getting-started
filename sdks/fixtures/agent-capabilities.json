@@ -1,0 +1,309 @@
+{
+  "description": "AgentCapabilities is generated from one schema definition for every SDK. Each case is parsed into the SDK's model and serialized back; the result must equal `expected` as JSON (key order aside). Optional members that were never set do not appear \u2014 never as null. The documents are the same ones the spec harness validates under spec/draft/fixtures/AgentCapabilities/valid.",
+  "cases": [
+    {
+      "name": "full_every_group_populated",
+      "producedBy": ["typescript", "python", "dotnet"],
+      "note": "Every group and every field, including the two open-JSON members that .NET used to type as dictionaries (identity.metadata, custom) and the one-word subagents key.",
+      "input": {
+        "identity": {
+          "name": "Research Assistant",
+          "type": "langgraph",
+          "description": "Finds, reads and summarises sources.",
+          "version": "1.2.0",
+          "provider": "Example Org",
+          "documentationUrl": "https://example.com/agents/research",
+          "metadata": {
+            "team": "platform",
+            "tier": 2,
+            "flags": ["beta"]
+          }
+        },
+        "transport": {
+          "streaming": true,
+          "websocket": false,
+          "httpBinary": true,
+          "pushNotifications": false,
+          "resumable": false
+        },
+        "tools": {
+          "supported": true,
+          "items": [
+            {
+              "name": "search",
+              "description": "Search the web.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "q": {
+                    "type": "string"
+                  }
+                },
+                "required": ["q"]
+              }
+            },
+            {
+              "name": "now",
+              "description": "The current time. Takes no arguments."
+            }
+          ],
+          "parallelCalls": true,
+          "clientProvided": true
+        },
+        "output": {
+          "structuredOutput": true,
+          "supportedMimeTypes": ["text/plain", "application/json"]
+        },
+        "state": {
+          "snapshots": true,
+          "deltas": true,
+          "memory": false,
+          "persistentState": true
+        },
+        "multiAgent": {
+          "supported": true,
+          "delegation": true,
+          "handoffs": false,
+          "subagents": [
+            {
+              "name": "researcher",
+              "description": "Gathers sources."
+            },
+            {
+              "name": "writer"
+            }
+          ]
+        },
+        "reasoning": {
+          "supported": true,
+          "streaming": true,
+          "encrypted": false
+        },
+        "multimodal": {
+          "input": {
+            "image": true,
+            "audio": false,
+            "video": false,
+            "pdf": true,
+            "file": true
+          },
+          "output": {
+            "image": false,
+            "audio": false
+          }
+        },
+        "execution": {
+          "codeExecution": true,
+          "sandboxed": true,
+          "maxIterations": 25,
+          "maxExecutionTime": 120000
+        },
+        "humanInTheLoop": {
+          "supported": true,
+          "approvals": true,
+          "interventions": false,
+          "feedback": true,
+          "interrupts": true,
+          "approveWithEdits": true
+        },
+        "custom": {
+          "vendor:feature": true,
+          "nested": {
+            "a": [1, 2]
+          }
+        }
+      },
+      "expected": {
+        "identity": {
+          "name": "Research Assistant",
+          "type": "langgraph",
+          "description": "Finds, reads and summarises sources.",
+          "version": "1.2.0",
+          "provider": "Example Org",
+          "documentationUrl": "https://example.com/agents/research",
+          "metadata": {
+            "team": "platform",
+            "tier": 2,
+            "flags": ["beta"]
+          }
+        },
+        "transport": {
+          "streaming": true,
+          "websocket": false,
+          "httpBinary": true,
+          "pushNotifications": false,
+          "resumable": false
+        },
+        "tools": {
+          "supported": true,
+          "items": [
+            {
+              "name": "search",
+              "description": "Search the web.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "q": {
+                    "type": "string"
+                  }
+                },
+                "required": ["q"]
+              }
+            },
+            {
+              "name": "now",
+              "description": "The current time. Takes no arguments."
+            }
+          ],
+          "parallelCalls": true,
+          "clientProvided": true
+        },
+        "output": {
+          "structuredOutput": true,
+          "supportedMimeTypes": ["text/plain", "application/json"]
+        },
+        "state": {
+          "snapshots": true,
+          "deltas": true,
+          "memory": false,
+          "persistentState": true
+        },
+        "multiAgent": {
+          "supported": true,
+          "delegation": true,
+          "handoffs": false,
+          "subagents": [
+            {
+              "name": "researcher",
+              "description": "Gathers sources."
+            },
+            {
+              "name": "writer"
+            }
+          ]
+        },
+        "reasoning": {
+          "supported": true,
+          "streaming": true,
+          "encrypted": false
+        },
+        "multimodal": {
+          "input": {
+            "image": true,
+            "audio": false,
+            "video": false,
+            "pdf": true,
+            "file": true
+          },
+          "output": {
+            "image": false,
+            "audio": false
+          }
+        },
+        "execution": {
+          "codeExecution": true,
+          "sandboxed": true,
+          "maxIterations": 25,
+          "maxExecutionTime": 120000
+        },
+        "humanInTheLoop": {
+          "supported": true,
+          "approvals": true,
+          "interventions": false,
+          "feedback": true,
+          "interrupts": true,
+          "approveWithEdits": true
+        },
+        "custom": {
+          "vendor:feature": true,
+          "nested": {
+            "a": [1, 2]
+          }
+        }
+      }
+    },
+    {
+      "name": "minimal_nothing_declared",
+      "producedBy": ["typescript", "python", "dotnet"],
+      "note": "A declaration that says nothing is conforming. Omitted means undeclared, not unsupported, so no SDK may fill anything in.",
+      "input": {},
+      "expected": {}
+    },
+    {
+      "name": "partial_as_a_real_producer_declares",
+      "producedBy": ["typescript", "python", "dotnet"],
+      "note": "The langgraph integration's actual declaration: four groups, everything else silent. Unset members must stay absent on the way out.",
+      "input": {
+        "identity": {
+          "type": "langgraph"
+        },
+        "humanInTheLoop": {
+          "supported": true,
+          "interrupts": true,
+          "approveWithEdits": true
+        },
+        "state": {
+          "snapshots": true,
+          "deltas": false,
+          "persistentState": true
+        },
+        "transport": {
+          "streaming": true
+        }
+      },
+      "expected": {
+        "identity": {
+          "type": "langgraph"
+        },
+        "humanInTheLoop": {
+          "supported": true,
+          "interrupts": true,
+          "approveWithEdits": true
+        },
+        "state": {
+          "snapshots": true,
+          "deltas": false,
+          "persistentState": true
+        },
+        "transport": {
+          "streaming": true
+        }
+      }
+    },
+    {
+      "name": "open_values_may_be_null",
+      "producedBy": ["typescript", "python", "dotnet"],
+      "note": "A null VALUE under an open-by-key member (identity.metadata, custom) is data and MUST be preserved \u2014 it is only a null standing in for a whole absent field that the protocol forbids. Every SDK must carry these through unchanged.",
+      "input": {
+        "identity": {
+          "name": "Research Assistant",
+          "metadata": {
+            "region": null,
+            "tier": 2
+          }
+        },
+        "custom": {
+          "flag": null,
+          "nested": {
+            "a": null
+          }
+        }
+      },
+      "expected": {
+        "identity": {
+          "name": "Research Assistant",
+          "metadata": {
+            "region": null,
+            "tier": 2
+          }
+        },
+        "custom": {
+          "flag": null,
+          "nested": {
+            "a": null
+          }
+        }
+      }
+    }
+  ]
+}

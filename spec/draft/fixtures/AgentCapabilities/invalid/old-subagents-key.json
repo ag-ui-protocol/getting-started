@@ -1,0 +1,10 @@
+{
+  "multiAgent": {
+    "supported": true,
+    "subAgents": [
+      {
+        "name": "researcher"
+      }
+    ]
+  }
+}

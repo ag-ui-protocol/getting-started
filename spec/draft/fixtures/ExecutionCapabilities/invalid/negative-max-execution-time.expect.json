@@ -1,0 +1,5 @@
+{
+  "keyword": "minimum",
+  "instanceLocation": "/maxExecutionTime",
+  "keywordLocation": "#/properties/maxExecutionTime/minimum"
+}

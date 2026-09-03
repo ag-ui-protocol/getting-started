@@ -115,3 +115,57 @@ contract, not a limitation. `state` is optional, absent means "no state", and a 
 read as absent — a survey of every integration found none that distinguishes the two, so all three
 SDKs converge on omission (see the `run_started_input_with_bare_null_state_converges_on_omission`
 case). Nulls _inside_ a state object are values and survive.
+
+## `agent-capabilities.json`
+
+`AgentCapabilities` is defined once, in `spec/draft/schema.json`, and generated for every SDK. Until
+1.0 each SDK carried its own hand-written copy, and they had drifted: .NET typed
+`identity.metadata` and `custom` as dictionaries where the others carried open JSON, and all three
+spelled the subagent list `subAgents` while the rest of the protocol spells the word as one
+(`subagentRunId`). The fixture pins the generated model's wire
+shape so the three cannot drift apart again.
+
+### Shape
+
+```jsonc
+{
+  "cases": [
+    {
+      "name": "partial_as_a_real_producer_declares",
+      "producedBy": ["typescript", "python", "dotnet"],
+      "note": "why this case is here",
+      "input": {
+        "identity": { "type": "langgraph" },
+        "transport": { "streaming": true },
+      },
+      "expected": {
+        "identity": { "type": "langgraph" },
+        "transport": { "streaming": true },
+      },
+    },
+  ],
+}
+```
+
+Each SDK's test walks `cases` and, for every case listing its own name in `producedBy`:
+
+1. parses `input` into the SDK's `AgentCapabilities` model,
+2. serializes it back through the SDK's official JSON path,
+3. asserts the result parses to exactly `expected`.
+
+`expected` is exact, so an unset optional member appearing as `null` fails the case, and so does any
+SDK inventing a value for a group the input left out — omitted means _undeclared_, and no SDK may
+fill it in. A `null` _value_ under an open-by-key member (`identity.metadata`, `custom`) is the
+opposite case: it is data, the protocol says it MUST be preserved, and the `open_values_may_be_null`
+case holds every SDK to carrying it through unchanged. The `full_every_group_populated` case exercises every field, including the two .NET
+gained and the one-word `subagents` key. The same three documents sit under
+`spec/draft/fixtures/AgentCapabilities/valid/`, where the spec harness validates them against the
+schema; this file is where the SDKs are held to each other.
+
+### Consumers
+
+| SDK        | Test                                                                             |
+| ---------- | -------------------------------------------------------------------------------- |
+| TypeScript | `sdks/typescript/packages/core/src/__tests__/agent-capabilities-fixture.test.ts` |
+| Python     | `sdks/python/tests/test_capabilities.py`                                         |
+| .NET       | `sdks/dotnet/tests/AGUI.Abstractions.UnitTests/AgentCapabilitiesFixtureTest.cs`  |
