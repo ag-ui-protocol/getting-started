@@ -64,6 +64,15 @@ specification.
    generated from the same schema, with cross-implementation parity pinned by
    a shared byte corpus.
 
+9. **Capabilities are in the schema.** The `AgentCapabilities` declaration
+   the SDKs carried as three hand-written copies is now defined once, in the
+   schema, and generated for every SDK. Its semantics are stated:
+   omitted means undeclared, declarations are informative and the stream is
+   authoritative, and retrieval is deliberately left to the implementation
+   ([Capabilities](/spec/draft/basic/capabilities)). The subagent list is
+   spelled `subagents`, matching `subagentRunId`; the earlier `subAgents`
+   key is not read.
+
 ## Minor changes
 
 1. `tools` and `context` on the run input are optional: absent and empty mean
