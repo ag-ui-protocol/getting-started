@@ -275,6 +275,9 @@ export const agentsIntegrations = {
         shared_state: "shared_state",
         tool_based_generative_ui: "tool_based_generative_ui",
         subgraphs: "subgraphs",
+        // deepagents_subagents is deliberately absent: LangGraphAgent (the
+        // TypeScript client) does not emit the SUBAGENT_* events the demo needs.
+        // See the matching note in menu.ts; the demo lives on langgraph-fastapi.
       },
     ),
     a2ui_dynamic_schema: new LangGraphAgent({
@@ -309,6 +312,7 @@ export const agentsIntegrations = {
         shared_state: "shared_state",
         tool_based_generative_ui: "tool_based_generative_ui",
         subgraphs: "subgraphs",
+        deepagents_subagents: "deepagents_subagents",
       },
     ),
     a2ui_fixed_schema: new LangGraphHttpAgent({
