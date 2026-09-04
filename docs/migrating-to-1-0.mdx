@@ -90,21 +90,9 @@ is `forwardedProps`, which carries any JSON to the agent untouched.
 
 ### Behaviour that is stricter in 1.0
 
-Three rules the client used to apply loosely, or on one path only, now apply
+Two rules the client used to apply loosely, or on one path only, now apply
 everywhere. Each of them turns something that quietly succeeded into a run
 that fails.
-
-**A producer-sent `RUN_ERROR` fails the run.** `runAgent()` rejects where it
-previously resolved: the error carries the producer's `message`, and its
-`code` rides as a property so a caller can branch on it without parsing prose.
-Whatever arrived before the failure is still applied — the updates gathered so
-far are emitted, then the error — and the agent instance stays usable, so the
-next run on it works. If your application read `RUN_ERROR` in a subscriber and
-relied on the promise resolving anyway, the failure now reaches you as the
-rejection instead; a subscriber that stops the event's propagation still takes
-the failure on itself and the run resolves. Aborting is unaffected: the
-`RUN_ERROR` the HTTP transport synthesizes on abort carries `code: "abort"`
-and is recognised and swallowed as before.
 
 **Reasoning open/close discipline is verified.** A `REASONING_MESSAGE_CONTENT`
 or `REASONING_MESSAGE_END` naming a message nothing opened, a reasoning span
@@ -123,6 +111,15 @@ the plain SSE path. Material that used to vanish silently on those paths —
 an unrecognised property on a chunk expanded inside a middleware chain, an
 unknown message role or patch operation crossing the protobuf decoder — now
 rides through to enforcement and is reported where it is dropped.
+
+**`RUN_ERROR` is unchanged, and that is deliberate.** A producer-sent
+`RUN_ERROR` is a well-formed stream — an agent honestly reporting that its run
+failed is not a protocol violation — so the client accepts it: the event is
+delivered to `onRunErrorEvent`, the stream continues, and `runAgent()`
+resolves, exactly as in 0.x. A `RUN_STARTED` after a `RUN_ERROR` begins a new
+run in the same stream, and everything that run produces is applied. If you
+need a rejected promise when a run reports its own failure, raise it from your
+own `onRunErrorEvent` subscriber; the client will not do it for you.
 
 ### Retired from the public API
 

@@ -81,31 +81,11 @@ export const transformHttpEventStream = (
             },
             error: (err) => {
               if ((err as DOMException)?.name === "AbortError") {
-                // An abort is not a failure: the run ends gracefully, which is
-                // what abortRun() has always meant. The reducer recognises
-                // this event by its `rawEvent` — the abort ERROR OBJECT, which
-                // no producer can send, because every transport parses its
-                // frames with `JSON.parse` and that never yields an Error
-                // instance. `code: "abort"` rides along as information only;
-                // it is an open string a conformant producer may legitimately
-                // use for its own failure, so nothing may branch on it.
-                //
-                // Wrapped when the runtime handed back something that is not
-                // an Error. WebIDL has DOMException inherit Error, and every
-                // current runtime implements that, but the marker must not
-                // rest on the host doing so; the original is kept as `cause`.
-                const abortError =
-                  err instanceof Error
-                    ? err
-                    : Object.assign(
-                        new Error((err as DOMException)?.message || "Request aborted"),
-                        { name: "AbortError", cause: err },
-                      );
                 eventSubject.next({
                   type: EventType.RUN_ERROR,
                   message: (err as DOMException).message || "Request aborted",
                   code: "abort",
-                  rawEvent: abortError,
+                  rawEvent: err,
                 });
                 eventSubject.complete();
                 return;

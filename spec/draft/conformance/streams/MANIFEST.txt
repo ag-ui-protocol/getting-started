@@ -27,7 +27,7 @@ event-after-run-finished-fatal.json
 first-chunk-missing-id-fatal.json
 first-event-not-run-started-fatal.json
 first-tool-chunk-missing-name-fatal.json
-late-run-error-after-finished-fails-the-run.json
+late-run-error-after-finished-run-continues.json
 malformed-known-field-fatal.json
 messages-snapshot-reconciles-by-id.json
 metadata-merges-last-write-wins.json
@@ -44,7 +44,8 @@ reasoning-discipline-verified.json
 reasoning-message-wrong-role-fatal.json
 reasoning-span-and-message.json
 reopen-closed-message-appends.json
-run-error-first-fails-the-run.json
+run-error-first-run-continues.json
+run-error-then-new-run-continues.json
 run-finished-interrupt-outcome-accepted.json
 run-finished-with-active-subagent-fatal.json
 state-delta-applies.json

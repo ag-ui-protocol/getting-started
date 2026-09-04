@@ -513,18 +513,28 @@ describe("the conformance fixture corpus", () => {
       "the era version gates are killable",
       "era-current-peer-keeps-modern-content",
     ],
-    // Three rules that stopped being admitted gaps and became asserted
-    // behaviour — each was a fixture pinning what the client DID, and flipping
-    // one back is now a deliberate rename that fails here rather than a quiet
-    // regression, which is the whole reason the flip was worth doing — plus
-    // `unknown-outcome-array-fatal`, which was never an admitted gap and has
-    // asserted the rule from the start. It sits here because it belongs to the
-    // same processing rule, not because it was ever an admission.
-    ["a stream may open with RUN_ERROR, and the run fails", "run-error-first-fails-the-run"],
+    // The RUN_ERROR contract, in three fixtures: the event is DELIVERED and the
+    // stream carries on. It is admitted as the first event, admitted after a
+    // RUN_FINISHED, and a RUN_STARTED after it begins a new run in the same
+    // stream. Naming all three here is what makes ending the stream at
+    // RUN_ERROR — the shape that reads plausible every time someone meets this
+    // code — a rename someone has to make on purpose.
+    ["a stream may open with RUN_ERROR, and the run continues", "run-error-first-run-continues"],
     [
-      "RUN_ERROR after RUN_FINISHED still fails the run",
-      "late-run-error-after-finished-fails-the-run",
+      "RUN_ERROR after RUN_FINISHED is delivered, and the run continues",
+      "late-run-error-after-finished-run-continues",
     ],
+    [
+      "a RUN_STARTED after a RUN_ERROR begins a new run in the same stream",
+      "run-error-then-new-run-continues",
+    ],
+    // `reasoning-discipline-verified` stopped being an admitted gap and became
+    // asserted behaviour — it was a fixture pinning what the client DID, and
+    // flipping it back is now a deliberate rename that fails here rather than a
+    // quiet regression — plus `unknown-outcome-array-fatal`, which was never an
+    // admitted gap and has asserted the rule from the start. It sits here
+    // because it belongs to the same processing rule, not because it was ever
+    // an admission.
     ["reasoning messages are bracketed like any other", "reasoning-discipline-verified"],
     [
       "a malformed value in the outcome slot is fatal, not stripped",

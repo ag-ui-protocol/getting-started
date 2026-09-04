@@ -80,11 +80,7 @@ describe("transformHttpEventStream", () => {
       headers: new Headers([["content-type", "text/event-stream"]]),
     });
 
-    // A real abort arrives as a DOMException, which WebIDL makes an Error.
-    // The identity matters: `rawEvent` being the abort ERROR OBJECT is what
-    // marks this event as the client's own abort rather than a producer's
-    // failure, and no wire frame can carry one (see runFailure in apply/).
-    const abortError = Object.assign(new Error("Request aborted"), { name: "AbortError" });
+    const abortError = { name: "AbortError" } as DOMException;
     mockHttpSource.error(abortError);
 
     expect(receivedEvents).toHaveLength(1);
@@ -94,40 +90,6 @@ describe("transformHttpEventStream", () => {
     expect(runErrorEvent.code).toBe("abort");
     expect(completed).toBe(true);
     expect(receivedError).toBeUndefined();
-  });
-
-  test("wraps a non-Error abort so the marker survives any runtime", () => {
-    // Every current runtime makes DOMException inherit Error, so the branch
-    // above is the real path. The marker must not REST on that, though: a host
-    // that throws a bare object named "AbortError" would otherwise produce a
-    // RUN_ERROR the reducer could not tell from a producer's failure, and an
-    // abortRun() would start rejecting. Wrapped, with the original kept as
-    // `cause` so nothing is lost.
-    const mockHttpSource = new Subject<HttpEvent>();
-    const receivedEvents: BaseEvent[] = [];
-    let completed = false;
-
-    transformHttpEventStream(mockHttpSource).subscribe({
-      next: (event) => receivedEvents.push(event),
-      complete: () => {
-        completed = true;
-      },
-    });
-
-    mockHttpSource.next({
-      type: HttpEventType.HEADERS,
-      status: 200,
-      headers: new Headers([["content-type", "text/event-stream"]]),
-    });
-
-    const exotic = { name: "AbortError", message: "Request aborted" } as DOMException;
-    mockHttpSource.error(exotic);
-
-    const runErrorEvent = receivedEvents[0] as any;
-    expect(runErrorEvent.rawEvent).toBeInstanceOf(Error);
-    expect(runErrorEvent.rawEvent.name).toBe("AbortError");
-    expect(runErrorEvent.rawEvent.cause).toBe(exotic);
-    expect(completed).toBe(true);
   });
 
   test("should handle parseProtoStream errors", () => {

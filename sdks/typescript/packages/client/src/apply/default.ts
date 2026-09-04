@@ -44,10 +44,9 @@ import {
   type ToolCall,
   type ToolCallStartEvent,
   type ToolMessage,
-  AGUIError,
 } from "@ag-ui/core";
 import jsonpatch from "fast-json-patch";
-import { EMPTY, concat, of, throwError } from "rxjs";
+import { EMPTY, of } from "rxjs";
 import type { Observable } from "rxjs";
 import { concatMap, defaultIfEmpty, mergeAll } from "rxjs/operators";
 import untruncateJson from "untruncate-json";
@@ -130,48 +129,6 @@ function applyEventMetadata(
   }
   target.metadata = mergeMetadata(target.metadata, structuredClone_(event.metadata));
   return true;
-}
-
-/**
- * The error a producer-sent RUN_ERROR fails its run with.
- *
- * The `code` rides as a property rather than being folded into the message, so
- * a caller can branch on it without parsing prose.
- *
- * One RUN_ERROR is not a failure at all: the HTTP transport synthesises one
- * when a request is aborted and then COMPLETES the stream, which is how
- * abortRun() has always ended a run gracefully. Naming that error "AbortError"
- * is what keeps the contract — AbstractAgent.onError recognises it by name and
- * swallows it, exactly as it did before this stage began failing runs at all.
- *
- * What identifies it is `rawEvent`, NOT `code`. `RunErrorEvent.code` is an open
- * string the specification defines no vocabulary for, so `code: "abort"` is a
- * perfectly conformant thing for a producer to send about its own failure —
- * "the user cancelled" is the obvious case — and keying the carve-out on it let
- * a genuine failure resolve as though the run had succeeded. The transport
- * instead attaches the ABORT ERROR OBJECT ITSELF as the synthesized event's
- * `rawEvent`, and that cannot be forged from the wire: every transport parses
- * its frames with `JSON.parse`, which produces plain objects, arrays and
- * primitives and never an Error instance. The object survives the trip because
- * `rawEvent` is `z.any()` — an opaque position both the stripper and the
- * validator pass through by reference. `code: "abort"` stays on the synthesized
- * event as information for callers who read it; nothing branches on it here.
- *
- * Matching on the error's NAME rather than its message is deliberate: the
- * DOMException message varies per runtime, so a message test would make the
- * abort path depend on which fetch implementation is installed.
- */
-function runFailure(event: RunErrorEvent): AGUIError {
-  const failure = new AGUIError(event.message ?? "The run failed.");
-  const code = (event as { code?: unknown }).code;
-  if (typeof code === "string") {
-    (failure as AGUIError & { code?: string }).code = code;
-  }
-  const raw = (event as { rawEvent?: unknown }).rawEvent;
-  if (raw instanceof Error && raw.name === "AbortError") {
-    failure.name = "AbortError";
-  }
-  return failure;
 }
 
 export const defaultApplyEvents = (
@@ -1168,23 +1125,7 @@ export const defaultApplyEvents = (
           );
           applyMutation(mutation);
 
-          // A subscriber that stopped propagation took the failure on itself.
-          if (mutation.stopPropagation === true) {
-            return emitUpdates();
-          }
-
-          // Otherwise the run FAILS. The stream is well formed -- a producer
-          // reporting its own failure is not a protocol violation, which is
-          // why verification admits RUN_ERROR anywhere, first event or after
-          // RUN_FINISHED -- but the caller must not be handed a resolved
-          // runAgent() as though the run had succeeded. Applying the event and
-          // returning updates, which is all this case used to do, meant a run
-          // that failed and a run that worked were indistinguishable to
-          // anything awaiting the promise.
-          //
-          // Whatever was delivered BEFORE the failure is kept: the updates
-          // gathered so far are emitted first, and the error follows.
-          return concat(emitUpdates(), throwError(() => runFailure(event as RunErrorEvent)));
+          return emitUpdates();
         }
 
         case EventType.STEP_STARTED: {

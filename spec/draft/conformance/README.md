@@ -41,21 +41,26 @@ means a client changed. That is the point of a regression suite, and it is why
   asserts the opposite of the rule, on purpose, so that closing the gap is a
   deliberate act rather than a silent one.
 
-  It used to be four: `run-error-first-admitted`,
-  `late-run-error-after-finished-admitted` and
-  `reasoning-discipline-not-verified` were admitted gaps alongside it. Each of
-  those three now asserts the RULE on the TypeScript lane, and each was renamed
-  to say so — `run-error-first-fails-the-run`,
-  `late-run-error-after-finished-fails-the-run`, `reasoning-discipline-verified`.
-  A run that reports a failure fails, and a reasoning message is bracketed like
-  any other. What is left of those divergences is on the .NET lane, recorded as
+  It used to be two: `reasoning-discipline-not-verified` was an admitted gap
+  alongside it, and now asserts the RULE on the TypeScript lane under the name
+  `reasoning-discipline-verified` — a reasoning message is bracketed like any
+  other. What is left of that divergence is on the .NET lane, recorded as
   `expectOverrides.dotnet` with a stated reason, which is the ordinary mechanism
   rather than an admission against the spec.
 
-  The corpus gate's `required` list names those three renamed fixtures, so
-  flipping one back is a rename someone has to make on purpose. Two things it
-  does not do: it does not name `unknown-enum-value-role-fatal` — the gap that
-  is still open is held by its description alone, not by a `required` entry — and the fourth
+  Two more fixtures used to sit here, `run-error-first-admitted` and
+  `late-run-error-after-finished-admitted`, on the reading that a client
+  surfacing a producer's RUN_ERROR without failing the run was a gap. It is
+  not: RUN_ERROR is delivered to the application and the stream continues, a
+  RUN_STARTED after one begins a new run, and `runAgent()` resolves. They are
+  named for that contract now — `run-error-first-run-continues`,
+  `late-run-error-after-finished-run-continues` — and a third,
+  `run-error-then-new-run-continues`, pins the in-stream restart end to end.
+
+  The corpus gate's `required` list names those four fixtures, so flipping one
+  back is a rename someone has to make on purpose. Two things it does not do:
+  it does not name `unknown-enum-value-role-fatal` — the gap that
+  is still open is held by its description alone, not by a `required` entry — and the fifth
   fixture it names in that neighbourhood, `unknown-outcome-array-fatal`, was
   never an admitted gap at all. That one pins the rule from the start: a
   malformed value in the outcome slot is fatal rather than stripped.
@@ -124,7 +129,7 @@ Every key is optional; state what the rule actually requires and nothing more.
 
 | Key | Asserts |
 | --- | --- |
-| `outcome` | whether the run finished cleanly (`"completed"`) or ended in failure (`"failed"`) — a `"failed"` outcome is either a client rejection or a producer `RUN_ERROR` the client surfaces as a failed run |
+| `outcome` | whether the **client** consumed the stream (`"completed"`) or rejected it (`"failed"`) — a producer `RUN_ERROR` is not a rejection: it is delivered as an event and pinned with `runError` |
 | `errorContains` | substring of the error a client rejection surfaces |
 | `runError` | the **run** reported its own failure: `true`, or a substring of the message |
 | `eventTypes` | the exact ordered list of event types delivered to application code |

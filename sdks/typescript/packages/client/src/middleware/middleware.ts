@@ -55,18 +55,20 @@ export abstract class Middleware {
 
     // Subscribe to track state changes.
     //
-    // The `error` handler is not optional, and it is deliberately empty. This
-    // reducer is a PRIVATE bookkeeping copy: its only job is to keep
+    // The `error` handler is deliberately empty, and deliberately present.
+    // This reducer is a PRIVATE bookkeeping copy: its only job is to keep
     // `currentMessages`/`currentState` current for the events handed back
-    // below. The reducer now ENDS IN FAILURE when the producer sends
-    // RUN_ERROR (apply/default.ts hands the run's failure to whoever consumes
-    // it), and a next-only observer makes RxJS treat that failure as
-    // unhandled — reported to `reportUnhandledError`, which rethrows from a
-    // macrotask and takes the host process down with an `uncaughtException`.
-    // The failure is not lost by swallowing it here: the caller's own stream
-    // carries the same RUN_ERROR to the agent's reducer, which is what
-    // actually fails `runAgent()`. There is nothing left to track once this
-    // stream has ended, so there is nothing for this handler to do.
+    // below. No event reaching it today can make it fail — a producer-sent
+    // RUN_ERROR is applied like any other event, and the three sequences the
+    // reducer refuses outright are the unexpanded chunks, which `runNext`
+    // above has already expanded. The handler guards the shape of this
+    // subscription rather than a live failure: a next-only observer would make
+    // RxJS treat any future reducer failure as UNHANDLED, reported to
+    // `reportUnhandledError`, which rethrows from a macrotask and takes the
+    // host process down with an `uncaughtException` — from a bookkeeping copy
+    // whose failure the caller neither sees nor needs. The caller's own stream
+    // is a separate subscription that succeeds or fails on its own terms, and
+    // there is nothing left to track once this one has ended.
     mutations$.subscribe({
       next: (mutation) => {
         if (mutation.messages !== undefined) {
