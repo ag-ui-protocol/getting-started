@@ -288,11 +288,25 @@ export class ClaudeAgentAdapter extends AbstractAgent {
       }
     }
 
-    // Append state and context to the system prompt
+    // Append state and context to the system prompt.
+    // systemPrompt may be a string or a preset object ({ type, preset, append }).
+    // Each shape requires different handling so the original value is not
+    // destroyed by string interpolation.
     const addendum = buildStateContextAddendum(input);
     if (addendum) {
-      const base = (merged.systemPrompt as string) ?? "";
-      merged.systemPrompt = base ? `${base}\n\n${addendum}` : addendum;
+      const base = merged.systemPrompt;
+      if (base && typeof base === "object" && !Array.isArray(base)) {
+        // Preset object form — fold addendum into `append` so the preset survives.
+        const preset = base as { append?: string; [k: string]: unknown };
+        merged.systemPrompt = {
+          ...preset,
+          append: preset.append ? `${preset.append}\n\n${addendum}` : addendum,
+        };
+      } else {
+        // String (or nullish) — concatenate.
+        const str = (base as string) ?? "";
+        merged.systemPrompt = str ? `${str}\n\n${addendum}` : addendum;
+      }
       console.debug(
         `[ClaudeAdapter] Appended state/context (${addendum.length} chars) to systemPrompt`,
       );
