@@ -108,6 +108,7 @@ export function handleToolUseBlock(
     runId,
     toolCallId: toolId,
     toolCallName: toolDisplayName, // Use unprefixed name
+    metadata: { rawName: toolName }, // Original name including any mcp__ prefix
     parentMessageId: parentToolUseId,
   });
 

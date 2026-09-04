@@ -370,6 +370,7 @@ export function buildAguiAssistantMessage(
           name: stripMcpPrefix(rawName),
           arguments: JSON.stringify(toolBlock.input ?? {}),
         },
+        metadata: { rawName },
       });
     }
     // Reasoning/ThinkingBlocks are intentionally skipped — not conversation history
