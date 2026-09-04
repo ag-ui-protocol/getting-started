@@ -108,7 +108,12 @@ export type LegacyRuntimeProtocolEvent =
   | LegacyMetaEvent
   | LegacyRunError;
 
-// Message type exports (with kind discriminator)
+// Message type exports. Undiscriminated: none of the three carries a `kind`
+// tag, so narrowing the union goes by which field is present — `content` for a
+// text message, `name` for an action execution, `result`/`actionExecutionId`
+// for a result. `name`, not `arguments`: `arguments` is optional on an action
+// execution, so its absence proves nothing, and a narrowing that tested it
+// would misread every argument-less tool call as some other shape.
 export interface LegacyTextMessage {
   id: string;
   role: string;

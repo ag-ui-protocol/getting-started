@@ -70,7 +70,7 @@ export function convertBinaryToNewFormat(
     !process.env.SUPPRESS_TRANSFORMATION_WARNINGS
   ) {
     console.warn(
-      `[ag-ui][compat] A binary content part carries only an id ('${binary.id ?? ""}') and cannot be converted to a modern media part; a 1.0 peer will not accept it. Provide data or a url. See DEPRECATIONS.md.`,
+      `[ag-ui][compat] A binary content part carries only an id ('${binary.id ?? ""}') and cannot be converted to a modern media part; a 1.0 peer will not accept it. Provide data or a url. See the repo-root DEPRECATIONS.md.`,
     );
   }
   return binary;

@@ -330,7 +330,13 @@ describe("Event Compaction", () => {
       expect(compacted[2].type).toBe(EventType.RUN_FINISHED);
     });
 
-    it("should compact deltas-only into a single snapshot (starting from empty)", () => {
+    it("should leave a deltas-only window as deltas, not synthesise a snapshot", () => {
+      // This used to seed `{}` and emit the result as a STATE_SNAPSHOT. A
+      // snapshot is an authoritative statement about the WHOLE document, and
+      // deltas alone are relative to a state this window never saw — so the
+      // synthesised snapshot claimed every pre-existing key was absent, and
+      // replaying it wiped state the consumer legitimately held. See
+      // compact.state-window.test.ts for the full argument.
       const events = [
         { type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" },
         { type: EventType.STATE_DELTA, delta: [{ op: "add", path: "/foo", value: "bar" }] },
@@ -340,11 +346,13 @@ describe("Event Compaction", () => {
 
       const compacted = compactEvents(events);
 
-      expect(compacted).toHaveLength(3);
-      expect(compacted[0].type).toBe(EventType.RUN_STARTED);
-      expect(compacted[1].type).toBe(EventType.STATE_SNAPSHOT);
-      expect((compacted[1] as StateSnapshotEvent).snapshot).toEqual({ foo: "bar", baz: 42 });
-      expect(compacted[2].type).toBe(EventType.RUN_FINISHED);
+      expect(compacted).toHaveLength(4);
+      expect(compacted.map((e) => e.type)).toEqual([
+        EventType.RUN_STARTED,
+        EventType.STATE_DELTA,
+        EventType.STATE_DELTA,
+        EventType.RUN_FINISHED,
+      ]);
     });
 
     it("should handle snapshot followed by delta that overwrites it", () => {

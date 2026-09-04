@@ -62,6 +62,25 @@ const flattenMessageContentToText = (content: Message["content"]) => {
   return textParts.join("\n");
 };
 
+/**
+ * Every warning this bridge emits, behind the same switch as the rest of the
+ * package. `SUPPRESS_TRANSFORMATION_WARNINGS` is the one control an operator
+ * has over transformation chatter (enforce.ts, transform/proto.ts and the
+ * compatibility middlewares all honour it); a warning that ignored it was
+ * unsilenceable, which in a per-chunk hot path is a reason to patch the
+ * library out rather than to set the flag.
+ */
+const warnLegacy = (message: string): void => {
+  if (
+    typeof process !== "undefined" &&
+    typeof process.env !== "undefined" &&
+    Boolean(process.env.SUPPRESS_TRANSFORMATION_WARNINGS)
+  ) {
+    return;
+  }
+  console.warn(message);
+};
+
 interface PredictStateValue {
   state_key: string;
   tool: string;
@@ -79,6 +98,13 @@ export const convertToLegacyEvents =
     let predictState: PredictStateValue[] | null = null;
     let currentToolCalls: ToolCall[] = [];
     const toolCallNames: Record<string, string> = {};
+    // RAW is a PER-CHUNK event for most providers, so warning per event turns
+    // one lossy translation into thousands of identical lines and buries
+    // everything else. What is lost is a property of the bridge rather than of
+    // any one event, so it is stated once per stream. Per stream, not per
+    // process: the flag lives in this closure, so a second bridge still
+    // reports its own loss.
+    let rawDropReported = false;
 
     const updateCurrentState = (newState: Record<string, unknown>) => {
       // the legacy protocol will only support object state
@@ -152,7 +178,13 @@ export const convertToLegacyEvents =
             // Find the tool call by ID instead of using the last one
             const currentToolCall = currentToolCalls.find((tc) => tc.id === argsEvent.toolCallId);
             if (!currentToolCall) {
-              console.warn(`TOOL_CALL_ARGS: No tool call found with ID '${argsEvent.toolCallId}'`);
+              // Through the gate like the rest of the bridge. TOOL_CALL_ARGS is
+              // the per-chunk hot path that gate exists for: one line per
+              // streamed token of a tool call's arguments, unsilenceable, is a
+              // reason to patch the library out rather than to set the flag.
+              warnLegacy(
+                `[ag-ui][legacy] TOOL_CALL_ARGS: No tool call found with ID '${argsEvent.toolCallId}'`,
+              );
               return [];
             }
 
@@ -227,17 +259,48 @@ export const convertToLegacyEvents =
           }
           case EventType.TOOL_CALL_RESULT: {
             const resultEvent = event as ToolCallResultEvent;
+            const knownName = toolCallNames[resultEvent.toolCallId];
+            // `=== ""` as well as `=== undefined`, and `||` rather than `??`
+            // on the substitution below. `toolCallName` is `z.string()`, so an
+            // EMPTY name is a value a conformant producer may send — and the
+            // legacy protocol routes on the action name, where "" names
+            // nothing any more than an absent name does. Narrowing this to
+            // `undefined` alone bridged `actionName: ""` in silence, which is
+            // the same unroutable result as before minus the notice.
+            if (knownName === undefined || knownName === "") {
+              // "unknown" is a FABRICATED action name, and downstream consumers
+              // of the legacy protocol route on it — an integration reported
+              // exactly this reaching a renderer that then had no component to
+              // pick. It happens when the result names a call whose
+              // TOOL_CALL_START this bridge never saw: a result replayed from
+              // history, or a producer that emits results without openers; or
+              // when the opener named the call with the empty string.
+              // Whatever the cause, the invention must not be silent.
+              warnLegacy(
+                `[ag-ui][legacy] No usable tool name was seen for tool call '${resultEvent.toolCallId}' (${knownName === undefined ? "no TOOL_CALL_START reached this bridge" : "its TOOL_CALL_START carried an empty toolCallName"}), so its result is being bridged with the fabricated action name "unknown". Downstream consumers route on that name.`,
+              );
+            }
             return [
               {
                 type: LegacyRuntimeEventTypes.ActionExecutionResult,
                 actionExecutionId: resultEvent.toolCallId,
                 result: resultEvent.content,
-                actionName: toolCallNames[resultEvent.toolCallId] || "unknown",
+                // `||`, not `??`: see the guard above — an empty name is as
+                // unroutable as an absent one, and the two must agree.
+                actionName: knownName || "unknown",
               } as LegacyActionExecutionResult,
             ];
           }
           case EventType.RAW: {
-            // The legacy protocol doesn't support raw events
+            // The legacy protocol has no place for a provider payload, so it is
+            // dropped — a lossy translation, which the versioning rules say has
+            // to name what went. Once per stream; see `rawDropReported` above.
+            if (!rawDropReported) {
+              rawDropReported = true;
+              warnLegacy(
+                "[ag-ui][legacy] Dropping RAW events: the legacy runtime protocol has no equivalent, so the provider payloads they carry do not reach the legacy stream. Reported once per stream.",
+              );
+            }
             return [];
           }
           case EventType.CUSTOM: {
@@ -279,11 +342,23 @@ export const convertToLegacyEvents =
           }
           case EventType.STATE_DELTA: {
             const deltaEvent = event as StateDeltaEvent;
-            const result = jsonpatch.applyPatch(currentState, deltaEvent.delta, true, false);
-            if (!result) {
+            // `validate = true` makes applyPatch THROW on a bad patch rather
+            // than answer falsy, so the `if (!result) return []` that stood
+            // here was dead code and one malformed delta tore the whole bridge
+            // down mid-run. Caught and warned, matching what the reducer in
+            // apply/default.ts does with the same failure.
+            let patched: Record<string, unknown>;
+            try {
+              patched = jsonpatch.applyPatch(currentState, deltaEvent.delta, true, false)
+                .newDocument;
+            } catch (error: unknown) {
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              warnLegacy(
+                `[ag-ui][legacy] Failed to apply state patch:\nCurrent state: ${JSON.stringify(currentState, null, 2)}\nPatch operations: ${JSON.stringify(deltaEvent.delta, null, 2)}\nError: ${errorMessage}`,
+              );
               return [];
             }
-            updateCurrentState(result.newDocument);
+            updateCurrentState(patched);
 
             return [
               {

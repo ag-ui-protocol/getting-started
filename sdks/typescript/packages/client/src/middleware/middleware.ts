@@ -53,14 +53,30 @@ export abstract class Middleware {
     // Set up defaultApplyEvents to process events
     const mutations$ = defaultApplyEvents(input, eventSubject, next, []);
 
-    // Subscribe to track state changes
-    mutations$.subscribe((mutation) => {
-      if (mutation.messages !== undefined) {
-        currentMessages = mutation.messages;
-      }
-      if (mutation.state !== undefined) {
-        currentState = mutation.state;
-      }
+    // Subscribe to track state changes.
+    //
+    // The `error` handler is not optional, and it is deliberately empty. This
+    // reducer is a PRIVATE bookkeeping copy: its only job is to keep
+    // `currentMessages`/`currentState` current for the events handed back
+    // below. The reducer now ENDS IN FAILURE when the producer sends
+    // RUN_ERROR (apply/default.ts hands the run's failure to whoever consumes
+    // it), and a next-only observer makes RxJS treat that failure as
+    // unhandled — reported to `reportUnhandledError`, which rethrows from a
+    // macrotask and takes the host process down with an `uncaughtException`.
+    // The failure is not lost by swallowing it here: the caller's own stream
+    // carries the same RUN_ERROR to the agent's reducer, which is what
+    // actually fails `runAgent()`. There is nothing left to track once this
+    // stream has ended, so there is nothing for this handler to do.
+    mutations$.subscribe({
+      next: (mutation) => {
+        if (mutation.messages !== undefined) {
+          currentMessages = mutation.messages;
+        }
+        if (mutation.state !== undefined) {
+          currentState = mutation.state;
+        }
+      },
+      error: () => {},
     });
 
     return this.runNext(input, next).pipe(

@@ -8,7 +8,9 @@ import { randomUUID } from "@/utils";
 import { upgradeMessageContent } from "./backward-compatibility-0-0-47";
 
 // Deprecated inbound shapes, retired from the 1.0 contract. Each entry here
-// has a row in DEPRECATIONS.md with its replacement and expiry date.
+// has a row in the repo-root DEPRECATIONS.md — not this package's own
+// DEPRECATIONS.md, which tracks a different set under a different schema —
+// with its replacement and expiry date.
 const THINKING_START = "THINKING_START";
 const THINKING_END = "THINKING_END";
 const THINKING_TEXT_MESSAGE_START = "THINKING_TEXT_MESSAGE_START";
@@ -28,12 +30,16 @@ const THINKING_TEXT_MESSAGE_END = "THINKING_TEXT_MESSAGE_END";
  * because what to SEND must be decided before the server has said anything.)
  *
  * Inbound conversions, each warned once per occurrence with a pointer to
- * DEPRECATIONS.md:
- * - THINKING_* events -> their REASONING_* equivalents (same state machine
- *   the version-gated BackwardCompatibility_0_0_45 has always used; that
- *   middleware keeps its threshold and behaviour untouched, and whichever of
- *   the two sees a thinking event first converts it — the other then finds
- *   nothing to do).
+ * the repo-root DEPRECATIONS.md:
+ * - THINKING_* events -> their REASONING_* equivalents. The version-gated
+ *   BackwardCompatibility_0_0_45 runs the same state machine and keeps its
+ *   0.0.45 threshold, but it is not untouched: its synthesized
+ *   REASONING_MESSAGE_START now says `role: "reasoning"` where it used to say
+ *   "assistant", the same correction made here, because enforcement moved
+ *   behind the middleware chain and made the invalid role fatal. In practice
+ *   only this translation runs: THIS middleware is appended innermost, so it
+ *   sees every thinking event first and the shim always finds nothing to do
+ *   (see the corpus README's "A shim with no fixture").
  * - Legacy binary content parts inside inbound messages (MESSAGES_SNAPSHOT,
  *   RUN_STARTED input) -> the modern media parts.
  * - The three legacy nulls -> absent: parentMessageId on TOOL_CALL_START and
@@ -51,8 +57,43 @@ export class CompatibilityBoundary extends Middleware {
     )
       return;
     console.warn(
-      `[ag-ui][compat] Converting deprecated ${what} to ${replacement}. The old shape leaves the protocol after its shim window — see DEPRECATIONS.md. Set SUPPRESS_TRANSFORMATION_WARNINGS=true to silence.`,
+      `[ag-ui][compat] Converting deprecated ${what} to ${replacement}. The old shape leaves the protocol after its shim window — see the repo-root DEPRECATIONS.md. Set SUPPRESS_TRANSFORMATION_WARNINGS=true to silence.`,
     );
+  }
+
+  /**
+   * A THINKING_* continuation names nothing: the id it belongs to lives in
+   * this middleware's state, put there by the matching opener. When no opener
+   * preceded it, there is no id to reuse and one is MINTED — which turns a
+   * producer's "content with no start" into a REASONING_* event naming an id
+   * nothing ever opened. Verification rejects that a few stages later, with a
+   * message about an id no producer ever wrote, so the mint is announced here:
+   * without this line the rejection is untraceable to its cause.
+   */
+  private mintedContinuationId(from: string, established: string | null): string {
+    if (established !== null) return established;
+    const minted = randomUUID();
+    this.warnAside(
+      `Minting a messageId ('${minted}') for ${from}: no THINKING opener preceded it, so there was no id to continue. The id is this client's invention, not the producer's, and verification will reject the translated event for naming something nothing opened.`,
+    );
+    return minted;
+  }
+
+  /**
+   * A conversion side effect the caller has to be told about in its own
+   * sentence: something lost, or something invented. Separate from `warn`,
+   * which only announces that a retired shape was translated — a reader who
+   * saw only that would have no way to know the translation was not
+   * information-preserving.
+   */
+  private warnAside(sentence: string) {
+    if (
+      typeof process !== "undefined" &&
+      typeof process.env !== "undefined" &&
+      process.env.SUPPRESS_TRANSFORMATION_WARNINGS
+    )
+      return;
+    console.warn(`[ag-ui][compat] ${sentence} Set SUPPRESS_TRANSFORMATION_WARNINGS=true to silence.`);
   }
 
   override run(input: RunAgentInput, next: AbstractAgent): Observable<BaseEvent> {
@@ -70,8 +111,17 @@ export class CompatibilityBoundary extends Middleware {
     switch (event.type as string) {
       case THINKING_START: {
         this.currentReasoningId = randomUUID();
-        const { title: _title, ...rest } = event as BaseEvent & { title?: string };
+        const { title, ...rest } = event as BaseEvent & { title?: string };
         this.warn(THINKING_START, EventType.REASONING_START);
+        // REASONING_START has no `title`, so the span's label is dropped here
+        // and nothing downstream can recover it. Named separately from the
+        // conversion notice above because it is a LOSS, not a translation, and
+        // the versioning rules require a lossy downgrade to say what went.
+        if (title !== undefined) {
+          this.warnAside(
+            `Dropping ${THINKING_START}.title ${JSON.stringify(title)}: ${EventType.REASONING_START} has no title field, so the span's label cannot be carried and nothing downstream can recover it.`,
+          );
+        }
         return {
           ...rest,
           type: EventType.REASONING_START,
@@ -99,13 +149,16 @@ export class CompatibilityBoundary extends Middleware {
         return {
           ...rest,
           type: EventType.REASONING_MESSAGE_CONTENT,
-          messageId: this.currentMessageId ?? randomUUID(),
+          messageId: this.mintedContinuationId(THINKING_TEXT_MESSAGE_CONTENT, this.currentMessageId),
           delta,
         };
       }
 
       case THINKING_TEXT_MESSAGE_END: {
-        const messageId = this.currentMessageId ?? randomUUID();
+        const messageId = this.mintedContinuationId(
+          THINKING_TEXT_MESSAGE_END,
+          this.currentMessageId,
+        );
         this.currentMessageId = null;
         this.warn(THINKING_TEXT_MESSAGE_END, EventType.REASONING_MESSAGE_END);
         return {
@@ -116,7 +169,7 @@ export class CompatibilityBoundary extends Middleware {
       }
 
       case THINKING_END: {
-        const reasoningId = this.currentReasoningId ?? randomUUID();
+        const reasoningId = this.mintedContinuationId(THINKING_END, this.currentReasoningId);
         this.currentReasoningId = null;
         this.warn(THINKING_END, EventType.REASONING_END);
         return {

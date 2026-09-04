@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AbstractAgent } from "@/agent";
 import { BaseEvent, EventType, RunAgentInput } from "@ag-ui/core";
 import { Observable, from, lastValueFrom, toArray } from "rxjs";
@@ -355,9 +355,25 @@ describe("BackwardCompatibility_0_0_47", () => {
 });
 
 describe("BackwardCompatibility_0_0_47 (lossy path warning)", () => {
+  // The warning gates on SUPPRESS_TRANSFORMATION_WARNINGS, so the flag has to
+  // be off here whatever the ambient environment sets — and PUT BACK, because
+  // a bare `delete` leaks into every file vitest runs next in this worker.
+  // Same shape as backward-compatibility-0-0-57.test.ts.
+  let priorSuppress: string | undefined;
+  beforeEach(() => {
+    priorSuppress = process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
+    delete process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
+  });
+  afterEach(() => {
+    if (priorSuppress === undefined) {
+      delete process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
+    } else {
+      process.env.SUPPRESS_TRANSFORMATION_WARNINGS = priorSuppress;
+    }
+  });
+
   it("warns when an id-only binary part cannot be converted", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    delete process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
     const middleware = new BackwardCompatibility_0_0_47();
     const agent = new MockAgent([]);
     const input = {

@@ -35,15 +35,28 @@ async function materialise(
   return { messages: agent.messages, seen };
 }
 
+// These suites assert on warnings that gate on SUPPRESS_TRANSFORMATION_WARNINGS.
+// Cleared for the duration and PUT BACK, so the suite neither depends on the
+// ambient environment — a dev or CI shell may well export it, since the warning
+// text itself tells users to — nor changes it for whatever vitest runs next in
+// this worker. Same shape as backward-compatibility-0-0-57.test.ts.
 let warnSpy: ReturnType<typeof vi.spyOn>;
+let priorSuppress: string | undefined;
 beforeEach(() => {
   vi.mock("@/utils", async (importOriginal) => ({
     ...(await importOriginal<object>()),
   }));
   warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  priorSuppress = process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
+  delete process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
 });
 afterEach(() => {
   warnSpy.mockRestore();
+  if (priorSuppress === undefined) {
+    delete process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
+  } else {
+    process.env.SUPPRESS_TRANSFORMATION_WARNINGS = priorSuppress;
+  }
 });
 
 describe("the inbound compatibility boundary (thinking events)", () => {
@@ -206,19 +219,34 @@ describe("the inbound compatibility boundary (legacy nulls)", () => {
     const { enforceEvents } = await import("@/enforce");
     const { lastValueFrom } = await import("rxjs");
     const { toArray } = await import("rxjs/operators");
-    for (const event of [
-      {
-        type: EventType.TOOL_CALL_START,
-        toolCallId: "tc1",
-        toolCallName: "f",
-        parentMessageId: null,
-      },
-      { type: EventType.TOOL_CALL_CHUNK, toolCallId: "tc1", parentMessageId: null },
-      { type: EventType.RUN_FINISHED, ...run, outcome: null },
-    ]) {
-      await expect(
-        lastValueFrom(enforceEvents()(of(event as unknown as BaseEvent)).pipe(toArray())),
-      ).rejects.toThrow();
+    // Paired with the field each rejection must be ABOUT. A bare toThrow()
+    // passes for any failure the fixture happens to contain — a missing
+    // required key, a mistyped id — which would let the test keep passing
+    // while the null itself became tolerated.
+    for (const [event, offendingField] of [
+      [
+        {
+          type: EventType.TOOL_CALL_START,
+          toolCallId: "tc1",
+          toolCallName: "f",
+          parentMessageId: null,
+        },
+        "parentMessageId",
+      ],
+      [
+        { type: EventType.TOOL_CALL_CHUNK, toolCallId: "tc1", parentMessageId: null },
+        "parentMessageId",
+      ],
+      [{ type: EventType.RUN_FINISHED, ...run, outcome: null }, "outcome"],
+    ] as const) {
+      let message = "";
+      try {
+        await lastValueFrom(enforceEvents()(of(event as unknown as BaseEvent)).pipe(toArray()));
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message, `${event.type} was accepted`).toContain(`"${offendingField}"`);
+      expect(message).toContain("received null");
     }
   });
 
@@ -291,5 +319,45 @@ describe("the boundary sees raw chunks (before chunk transformation)", () => {
     ]);
     expect(seen.some((event) => event.type === EventType.TOOL_CALL_START)).toBe(true);
     expect(warnSpy.mock.calls.some((c: unknown[]) => String(c[0]).includes("null"))).toBe(true);
+  });
+});
+
+describe("the inbound compatibility boundary (what the translation costs)", () => {
+  const warned = () =>
+    warnSpy.mock.calls.map((call: unknown[]) => String(call[0])).join("\n");
+
+  it("says that a THINKING_START title is dropped", async () => {
+    // REASONING_START has no title field. The conversion notice alone said
+    // only that a shape was translated, which reads as lossless.
+    await materialise([
+      START,
+      { type: "THINKING_START", title: "Working" } as unknown as BaseEvent,
+      { type: "THINKING_END" } as unknown as BaseEvent,
+      FINISH,
+    ]);
+
+    expect(warned()).toContain("THINKING_START.title");
+    expect(warned()).toContain("Working");
+  });
+
+  it("says that it minted an id for a continuation with no opener", async () => {
+    // A THINKING continuation names nothing, so with no opener the boundary
+    // invents an id — and verification then rejects the translated event for
+    // naming a message nothing opened. Without this notice the rejection
+    // cannot be traced back to the mint.
+    // The rejection has to be the one the comment describes — verification
+    // refusing a content event for a message nothing opened. A bare toThrow()
+    // would also be satisfied by the boundary crashing outright, which is the
+    // opposite of the behaviour under test.
+    await expect(
+      materialise([
+        START,
+        { type: "THINKING_TEXT_MESSAGE_CONTENT", delta: "orphan" } as unknown as BaseEvent,
+        FINISH,
+      ]),
+    ).rejects.toThrow(/REASONING_MESSAGE_CONTENT/);
+
+    expect(warned()).toContain("Minting a messageId");
+    expect(warned()).toContain("THINKING_TEXT_MESSAGE_CONTENT");
   });
 });

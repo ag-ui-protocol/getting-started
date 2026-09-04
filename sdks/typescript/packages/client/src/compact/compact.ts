@@ -361,6 +361,23 @@ function flushToolCall(
   }
 }
 
+/**
+ * Compaction's warnings, behind the same switch as the rest of the package.
+ * `SUPPRESS_TRANSFORMATION_WARNINGS` is the one control an operator has over
+ * transformation chatter (enforce.ts, transform/proto.ts and the compatibility
+ * middlewares all honour it); a warning that ignored it was unsilenceable.
+ */
+const warnCompact = (message: string): void => {
+  if (
+    typeof process !== "undefined" &&
+    typeof process.env !== "undefined" &&
+    Boolean(process.env.SUPPRESS_TRANSFORMATION_WARNINGS)
+  ) {
+    return;
+  }
+  console.warn(message);
+};
+
 function flushState(
   stateEvents: (StateSnapshotEvent | StateDeltaEvent)[],
   compacted: BaseEvent[],
@@ -369,14 +386,59 @@ function flushState(
     return;
   }
 
+  // A window with no SNAPSHOT in it cannot be collapsed into one. Collapsing
+  // `SNAPSHOT + deltas` is sound because the snapshot states the whole
+  // document and the deltas refine it. Deltas ALONE are relative to a state
+  // this window never saw, so seeding `{}` and calling the result a snapshot
+  // manufactures an authoritative claim that everything else was absent —
+  // replaying it wipes state the consumer legitimately holds from before the
+  // window. Passed through unchanged instead: two deltas are barely worth
+  // collapsing anyway, and correctness is not negotiable for the saving.
+  // The LAST snapshot, not merely "is there one": everything before it is
+  // unobservable by definition, because a snapshot restates the whole document
+  // and replaces whatever the deltas ahead of it had built. Folding those
+  // deltas anyway applied them to the seeded `{}`, where their paths do not
+  // resolve — `applyPatch` validates, so it threw, and the catch below warned
+  // about a patch whose failure changed nothing. Right answer, wrong
+  // diagnosis. Starting at the last snapshot means the catch only ever fires
+  // for a patch that genuinely could not be applied to the state it names.
+  //
+  // A reverse loop rather than `findLastIndex`: this package targets es2017,
+  // and the method is ES2023.
+  let lastSnapshot = -1;
+  for (let index = stateEvents.length - 1; index >= 0; index--) {
+    if (stateEvents[index].type === EventType.STATE_SNAPSHOT) {
+      lastSnapshot = index;
+      break;
+    }
+  }
+  if (lastSnapshot === -1) {
+    compacted.push(...stateEvents);
+    return;
+  }
+
+  // From here the window DOES contain a snapshot, so it collapses exactly as
+  // it always has: seeding `{}` is harmless because the snapshot replaces the
+  // document wholesale before anything relative is applied to it.
   let state: Record<string, unknown> = {};
 
-  for (const event of stateEvents) {
+  for (const event of stateEvents.slice(lastSnapshot)) {
     if (event.type === EventType.STATE_SNAPSHOT) {
       state = structuredClone_(event.snapshot);
     } else {
-      const result = jsonpatch.applyPatch(state, structuredClone_(event.delta), true, false);
-      state = result.newDocument;
+      // Uncaught, a single unappliable patch took down every consumer that
+      // compacts a stream — `applyPatch` validates, so it THROWS rather than
+      // answering falsy. Warned and skipped, matching the reducer in
+      // apply/default.ts, which faces exactly the same failure.
+      try {
+        state = jsonpatch.applyPatch(state, structuredClone_(event.delta), true, false)
+          .newDocument;
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        warnCompact(
+          `[ag-ui][compact] Failed to apply state patch while compacting:\nCurrent state: ${JSON.stringify(state, null, 2)}\nPatch operations: ${JSON.stringify(event.delta, null, 2)}\nError: ${errorMessage}`,
+        );
+      }
     }
   }
 

@@ -15,6 +15,11 @@ import {
   ReasoningMessageStartEvent,
 } from "@ag-ui/core";
 import { EventType } from "@ag-ui/core";
+import {
+  TextMessageChunkEventSchema,
+  ToolCallChunkEventSchema,
+  ReasoningMessageChunkEventSchema,
+} from "@ag-ui/core/schemas";
 import { type DebugLoggerInput, resolveDebugLogger } from "@/debug-logger";
 
 interface TextMessageFields {
@@ -111,6 +116,140 @@ const withChunkOrigin = <T extends BaseEvent>(event: T, chunk: BaseEvent): T => 
     : { ...withMetadata, rawEvent: chunk.rawEvent };
 };
 
+/**
+ * The properties each chunk shape actually describes, read once at module load
+ * from the generated schema's own field list.
+ *
+ * DERIVED, not hand-copied. A copied set matches the schema on the day it is
+ * written and nothing afterwards keeps it honest: a field added to a chunk in
+ * a later protocol revision would arrive here as "unrecognised", ride onto the
+ * synthesized event as remainder, and be stripped again by enforcement with a
+ * warning naming a property the protocol had just adopted. That is the same
+ * silent drift the remainder below exists to prevent, one layer up.
+ *
+ * Deriving is not the same as running enforcement here, which this stage
+ * genuinely cannot do — it runs upstream of enforcement on the middleware
+ * path. Nothing is validated or stripped at this line: it reads the list of
+ * names the schema declares, once per shape at import time.
+ * `@ag-ui/core/schemas` is already a runtime import of this package
+ * (enforce/) and zod is already a hard dependency, so this adds no edge.
+ */
+const describedFields = (schema: { shape: Record<string, unknown> }): ReadonlySet<string> =>
+  new Set(Object.keys(schema.shape));
+
+const TEXT_CHUNK_FIELDS = describedFields(TextMessageChunkEventSchema);
+const TOOL_CHUNK_FIELDS = describedFields(ToolCallChunkEventSchema);
+const REASONING_CHUNK_FIELDS = describedFields(ReasoningMessageChunkEventSchema);
+
+/**
+ * Whatever the chunk carries that this stage has no field for — a property
+ * from a protocol version newer than this client, or a producer's mistake.
+ *
+ * Expansion builds the synthesized events field by field, so anything not
+ * named above simply vanished. On the plain pipeline that is harmless, because
+ * enforcement has already stripped the chunk's unrecognised material and
+ * warned about it by the time expansion runs. On the middleware path
+ * expansion runs FIRST — `Middleware.runNext` expands inside the chain,
+ * because middleware written with `runNext` is written against whole events
+ * rather than chunks (a middleware that wants the raw stream calls `next.run`
+ * itself, as `CompatibilityBoundary` and `FunctionMiddleware` do) — so there
+ * is nothing left for enforcement to find and the material disappeared in
+ * silence. The guarantee is that nothing is dropped without a warning, so the
+ * remainder rides through instead and enforcement judges it after the chain.
+ *
+ * Where it rides: the CONTENT event whenever the chunk produces one, for the
+ * same reason `rawEvent` does — the content event is what the producer
+ * actually sent, the opener is this stage's invention — and never both, which
+ * would warn twice about one property. A chunk that produces no content event
+ * at all is the remaining case; see `carryRemainderOnOpener` below.
+ */
+const unrecognisedChunkProperties = (
+  chunk: BaseEvent,
+  described: ReadonlySet<string>,
+): Record<string, unknown> | undefined => {
+  let remainder: Record<string, unknown> | undefined;
+  for (const key of Object.keys(chunk)) {
+    if (described.has(key)) continue;
+    (remainder ??= {})[key] = (chunk as unknown as Record<string, unknown>)[key];
+  }
+  return remainder;
+};
+
+/**
+ * The opener's share of the same guarantee.
+ *
+ * "It rides on the CONTENT event" above holds only when there IS one. An
+ * OPENING chunk pushes its synthesized `*_START` first, so the empty-result
+ * fallback each arm ends with can never fire for it; and a chunk with neither
+ * `delta` nor `rawEvent` synthesizes no content event to carry the remainder
+ * either. Between the two, an opener-only chunk carrying an unrecognised
+ * property expanded into a bare `*_START` and the property was gone — dropped
+ * with nothing said, which is exactly what this whole mechanism exists to
+ * prevent.
+ *
+ * So when nothing else took the remainder, it goes onto the last event
+ * synthesized for the chunk — the `*_START` — and enforcement, running after
+ * the middleware chain, strips it there and names it. Spread FIRST, like every
+ * other site: a described field can never be shadowed by something the
+ * producer also sent under that name.
+ *
+ * Spreading first has one cost, and it is announced rather than paid in
+ * silence. When the OPENER declares a key the remainder also carries, the
+ * opener's value wins and the producer's is overwritten before enforcement can
+ * see it. Reachable on one arm today: REASONING_MESSAGE_START declares `role`
+ * (set to "reasoning" below) while REASONING_MESSAGE_CHUNK does not declare
+ * `role` at all, so a producer's `role` on such a chunk is remainder and
+ * collides. The text and tool arms are safe — their opener's keys are a subset
+ * of their chunk's.
+ *
+ * Letting the REMAINDER win instead is not the fix. The synthesized opener's
+ * described value is this stage's own, and a producer value in its place would
+ * be judged by enforcement — `role: "wizard"` on a REASONING_MESSAGE_START is a
+ * malformed known field, so the run would fail behind a shim and succeed
+ * without one. Same stream, two verdicts, which is exactly the divergence this
+ * file exists to prevent. So the opener keeps its value and the collision is
+ * reported, which is what "nothing is dropped without a warning" asks for.
+ */
+const warnChunkAside = (sentence: string): void => {
+  if (
+    typeof process !== "undefined" &&
+    typeof process.env !== "undefined" &&
+    Boolean(process.env.SUPPRESS_TRANSFORMATION_WARNINGS)
+  ) {
+    return;
+  }
+  console.warn(
+    `[ag-ui][transform] ${sentence} Set SUPPRESS_TRANSFORMATION_WARNINGS=true to silence.`,
+  );
+};
+
+const carryRemainderOnOpener = (
+  synthesized: BaseEvent[],
+  remainder: Record<string, unknown> | undefined,
+  alreadyCarried: boolean,
+  chunkType: string,
+): void => {
+  if (remainder === undefined || alreadyCarried || synthesized.length === 0) return;
+  const last = synthesized[synthesized.length - 1];
+
+  // `hasOwnProperty`, not `in`. The spread below copies OWN enumerable
+  // properties, so the opener's value wins only for keys the opener OWNS —
+  // whereas `in` also answers true for everything on Object.prototype, and a
+  // producer sending `toString` or `constructor` on a chunk would then be told
+  // its value had been dropped when the spread had in fact kept it. A warning
+  // has to describe what actually happened.
+  const shadowed = Object.keys(remainder).filter((key) =>
+    Object.prototype.hasOwnProperty.call(last, key),
+  );
+  if (shadowed.length > 0) {
+    warnChunkAside(
+      `A ${chunkType} carried ${shadowed.map((key) => `'${key}'`).join(", ")}, which the synthesized ${String(last.type)} already describes. The synthesized value is kept and the chunk's is dropped — this stage does not judge a described field, so the producer's value cannot be substituted for its own.`,
+    );
+  }
+
+  synthesized[synthesized.length - 1] = { ...remainder, ...last };
+};
+
 export const transformChunks =
   (debugLogger?: DebugLoggerInput) =>
   (events$: Observable<BaseEvent>): Observable<BaseEvent> => {
@@ -136,7 +275,12 @@ export const transformChunks =
           const event = {
             type: EventType.TEXT_MESSAGE_END,
             messageId: pending.fields.messageId,
-            ...(pending.fields.subagentRunId != null && {
+            // `!== undefined`, not `!= null`, matching every other site in
+            // this file: an absent owner is absent, but a null one is a
+            // violation the spec names, and dropping it here would hide it
+            // from the stage that rejects it (see the note on the opener
+            // below).
+            ...(pending.fields.subagentRunId !== undefined && {
               subagentRunId: pending.fields.subagentRunId,
             }),
           } as TextMessageEndEvent;
@@ -147,7 +291,12 @@ export const transformChunks =
           const event = {
             type: EventType.TOOL_CALL_END,
             toolCallId: pending.fields.toolCallId,
-            ...(pending.fields.subagentRunId != null && {
+            // `!== undefined`, not `!= null`, matching every other site in
+            // this file: an absent owner is absent, but a null one is a
+            // violation the spec names, and dropping it here would hide it
+            // from the stage that rejects it (see the note on the opener
+            // below).
+            ...(pending.fields.subagentRunId !== undefined && {
               subagentRunId: pending.fields.subagentRunId,
             }),
           } as ToolCallEndEvent;
@@ -158,7 +307,12 @@ export const transformChunks =
           const event = {
             type: EventType.REASONING_MESSAGE_END,
             messageId: pending.fields.messageId,
-            ...(pending.fields.subagentRunId != null && {
+            // `!== undefined`, not `!= null`, matching every other site in
+            // this file: an absent owner is absent, but a null one is a
+            // violation the spec names, and dropping it here would hide it
+            // from the stage that rejects it (see the note on the opener
+            // below).
+            ...(pending.fields.subagentRunId !== undefined && {
               subagentRunId: pending.fields.subagentRunId,
             }),
           } as ReasoningMessageEndEvent;
@@ -302,6 +456,7 @@ export const transformChunks =
           }
           case EventType.TEXT_MESSAGE_CHUNK: {
             const messageChunkEvent = event as TextMessageChunkEvent;
+            const textChunkRemainder = unrecognisedChunkProperties(event, TEXT_CHUNK_FIELDS);
             const lane = resolveLane(
               "text",
               messageChunkEvent.messageId,
@@ -311,6 +466,9 @@ export const transformChunks =
             );
             const open = lanes.get(lane);
             const textMessageResult: BaseEvent[] = [];
+            // Whether the remainder found a carrier below. Only the two
+            // branches that spread it set this; see carryRemainderOnOpener.
+            let textRemainderCarried = false;
 
             let textMessageFields: TextMessageFields;
             if (
@@ -395,16 +553,43 @@ export const transformChunks =
               // spec names, and `??` read it as absence, so a continuation's
               // null fell back to the opener's owner and never reached the
               // stage that rejects it. Preserved, it rides the synthesized
-              // event to enforcement, exactly as an opener's null does.
+              // event onward, exactly as an opener's null does.
+              //
+              // WHICH stage rejects it depends on the path, and both do:
+              //
+              // - Plain pipeline (`enforce -> expand`): ENFORCEMENT rejects,
+              //   and it rejects the raw CHUNK before this stage ever runs.
+              //   `SubagentRunIdSchema` is `z.string()`, so `null` is a
+              //   malformed value on a described field, which enforcement
+              //   keeps fatal. Nothing this stage synthesises is involved.
+              // - `Middleware.runNext` (`expand` inside the chain, enforce
+              //   after it): expansion is handed the raw chunk, so preserving
+              //   the null is what lets enforcement — and then VERIFICATION
+              //   (verify.ts's "'subagentRunId: null'. The field is optional"
+              //   check) — see it at all.
+              //
+              // Reading it as absence with `??` is what removed it from the
+              // second path entirely, which is the divergence this file
+              // exists to prevent.
               const contentOwner =
                 messageChunkEvent.subagentRunId !== undefined
                   ? messageChunkEvent.subagentRunId
                   : textMessageFields.subagentRunId;
               const textMessageContentEvent = withChunkOrigin(
                 {
+                  // Spread FIRST so a described field can never be shadowed by
+                  // something the producer also sent under that name.
+                  ...textChunkRemainder,
                   type: EventType.TEXT_MESSAGE_CONTENT,
                   messageId: textMessageFields.messageId,
-                  delta: messageChunkEvent.delta ?? "",
+                  // `=== undefined`, not `??` — exactly how the opener's `role` is
+                  // handled above. The gate that reached this line is itself
+                  // `!== undefined`, so a `delta: null` passes it, and `??` then
+                  // repaired the malformed value into "". That made the same
+                  // producer defect fatal when sent unchunked and invisible when
+                  // sent as a chunk behind a middleware. Preserved, it is fatal on
+                  // both paths.
+                  delta: messageChunkEvent.delta === undefined ? "" : messageChunkEvent.delta,
                   // Prefer the INCOMING chunk's tag over the opener's, so a producer that
                   // attributes every chunk sees its own attribution on the output rather
                   // than a value this transform remembered.
@@ -414,6 +599,7 @@ export const transformChunks =
               );
 
               textMessageResult.push(textMessageContentEvent);
+              textRemainderCarried = true;
 
               log?.event("TRANSFORM", "TEXT_MESSAGE_CONTENT", textMessageContentEvent, {
                 messageId: textMessageFields.messageId,
@@ -436,7 +622,11 @@ export const transformChunks =
               textMessageResult.length === 0 &&
               (messageChunkEvent.metadata !== undefined ||
                 messageChunkEvent.rawEvent !== undefined ||
-                messageChunkEvent.subagentRunId === null)
+                messageChunkEvent.subagentRunId === null ||
+                // A continuation carrying ONLY unrecognised material expanded
+                // into nothing at all, so there was no event left for
+                // enforcement to strip it from and warn about.
+                textChunkRemainder !== undefined)
             ) {
               // Attribution follows the same rule as the delta path above: the
               // incoming chunk's tag first, the opener's owner as fallback —
@@ -446,6 +636,7 @@ export const transformChunks =
                   ? messageChunkEvent.subagentRunId
                   : textMessageFields!.subagentRunId;
               textMessageResult.push({
+                ...textChunkRemainder,
                 type: EventType.TEXT_MESSAGE_CONTENT,
                 messageId: textMessageFields!.messageId,
                 delta: "",
@@ -455,11 +646,20 @@ export const transformChunks =
                 }),
                 ...(metadataOwner !== undefined && { subagentRunId: metadataOwner }),
               } as TextMessageContentEvent);
+              textRemainderCarried = true;
             }
+
+            carryRemainderOnOpener(
+              textMessageResult,
+              textChunkRemainder,
+              textRemainderCarried,
+              "TEXT_MESSAGE_CHUNK",
+            );
             return textMessageResult;
           }
           case EventType.TOOL_CALL_CHUNK: {
             const toolCallChunkEvent = event as ToolCallChunkEvent;
+            const toolChunkRemainder = unrecognisedChunkProperties(event, TOOL_CHUNK_FIELDS);
             const lane = resolveLane(
               "tool",
               toolCallChunkEvent.toolCallId,
@@ -469,6 +669,8 @@ export const transformChunks =
             );
             const open = lanes.get(lane);
             const toolMessageResult: BaseEvent[] = [];
+            // As in the text arm above.
+            let toolRemainderCarried = false;
 
             let toolCallFields: ToolCallFields;
             if (
@@ -513,7 +715,13 @@ export const transformChunks =
                   type: EventType.TOOL_CALL_START,
                   toolCallId: toolCallChunkEvent.toolCallId,
                   toolCallName: toolCallChunkEvent.toolCallName,
-                  parentMessageId: toolCallChunkEvent.parentMessageId,
+                  // Conditional, like its siblings: set unconditionally this
+                  // wrote an explicit `parentMessageId: undefined` key onto
+                  // every synthesized opener, which is a present member with
+                  // no value rather than the absent field the schema means.
+                  ...(toolCallChunkEvent.parentMessageId !== undefined && {
+                    parentMessageId: toolCallChunkEvent.parentMessageId,
+                  }),
                   // `!== undefined`, not `!= null`: an absent owner is absent,
                   // but a null one is a violation the spec names, and dropping
                   // it here would hide it from the stage that rejects it.
@@ -539,9 +747,17 @@ export const transformChunks =
                   : toolCallFields.subagentRunId;
               const toolCallArgsEvent = withChunkOrigin(
                 {
+                  ...toolChunkRemainder,
                   type: EventType.TOOL_CALL_ARGS,
                   toolCallId: toolCallFields.toolCallId,
-                  delta: toolCallChunkEvent.delta ?? "",
+                  // `=== undefined`, not `??` — exactly how the opener's `role` is
+                  // handled above. The gate that reached this line is itself
+                  // `!== undefined`, so a `delta: null` passes it, and `??` then
+                  // repaired the malformed value into "". That made the same
+                  // producer defect fatal when sent unchunked and invisible when
+                  // sent as a chunk behind a middleware. Preserved, it is fatal on
+                  // both paths.
+                  delta: toolCallChunkEvent.delta === undefined ? "" : toolCallChunkEvent.delta,
                   // Prefer the INCOMING chunk's tag over the opener's, so a producer that
                   // attributes every chunk sees its own attribution on the output rather
                   // than a value this transform remembered.
@@ -551,6 +767,7 @@ export const transformChunks =
               );
 
               toolMessageResult.push(toolCallArgsEvent);
+              toolRemainderCarried = true;
 
               log?.event("TRANSFORM", "TOOL_CALL_ARGS", toolCallArgsEvent, {
                 toolCallId: toolCallFields.toolCallId,
@@ -562,7 +779,8 @@ export const transformChunks =
               toolMessageResult.length === 0 &&
               (toolCallChunkEvent.metadata !== undefined ||
                 toolCallChunkEvent.rawEvent !== undefined ||
-                toolCallChunkEvent.subagentRunId === null)
+                toolCallChunkEvent.subagentRunId === null ||
+                toolChunkRemainder !== undefined)
             ) {
               // Same attribution rule as the args path above.
               const metadataOwner =
@@ -570,6 +788,7 @@ export const transformChunks =
                   ? toolCallChunkEvent.subagentRunId
                   : toolCallFields!.subagentRunId;
               toolMessageResult.push({
+                ...toolChunkRemainder,
                 type: EventType.TOOL_CALL_ARGS,
                 toolCallId: toolCallFields!.toolCallId,
                 delta: "",
@@ -579,11 +798,20 @@ export const transformChunks =
                 }),
                 ...(metadataOwner !== undefined && { subagentRunId: metadataOwner }),
               } as ToolCallArgsEvent);
+              toolRemainderCarried = true;
             }
+
+            carryRemainderOnOpener(
+              toolMessageResult,
+              toolChunkRemainder,
+              toolRemainderCarried,
+              "TOOL_CALL_CHUNK",
+            );
             return toolMessageResult;
           }
           case EventType.REASONING_MESSAGE_CHUNK: {
             const reasoningChunkEvent = event as ReasoningMessageChunkEvent;
+            const reasoningChunkRemainder = unrecognisedChunkProperties(event, REASONING_CHUNK_FIELDS);
             const lane = resolveLane(
               "reasoning",
               reasoningChunkEvent.messageId,
@@ -593,6 +821,8 @@ export const transformChunks =
             );
             const open = lanes.get(lane);
             const reasoningMessageResult: BaseEvent[] = [];
+            // As in the text arm above.
+            let reasoningRemainderCarried = false;
 
             let reasoningMessageFields: ReasoningMessageFields;
             if (
@@ -646,9 +876,17 @@ export const transformChunks =
                   : reasoningMessageFields.subagentRunId;
               const reasoningMessageContentEvent = withChunkOrigin(
                 {
+                  ...reasoningChunkRemainder,
                   type: EventType.REASONING_MESSAGE_CONTENT,
                   messageId: reasoningMessageFields.messageId,
-                  delta: reasoningChunkEvent.delta ?? "",
+                  // `=== undefined`, not `??` — exactly how the opener's `role` is
+                  // handled above. The gate that reached this line is itself
+                  // `!== undefined`, so a `delta: null` passes it, and `??` then
+                  // repaired the malformed value into "". That made the same
+                  // producer defect fatal when sent unchunked and invisible when
+                  // sent as a chunk behind a middleware. Preserved, it is fatal on
+                  // both paths.
+                  delta: reasoningChunkEvent.delta === undefined ? "" : reasoningChunkEvent.delta,
                   // Prefer the INCOMING chunk's tag over the opener's, so a producer that
                   // attributes every chunk sees its own attribution on the output rather
                   // than a value this transform remembered.
@@ -658,6 +896,7 @@ export const transformChunks =
               );
 
               reasoningMessageResult.push(reasoningMessageContentEvent);
+              reasoningRemainderCarried = true;
 
               log?.event("TRANSFORM", "REASONING_MESSAGE_CONTENT", reasoningMessageContentEvent, {
                 messageId: reasoningMessageFields.messageId,
@@ -669,7 +908,8 @@ export const transformChunks =
               reasoningMessageResult.length === 0 &&
               (reasoningChunkEvent.metadata !== undefined ||
                 reasoningChunkEvent.rawEvent !== undefined ||
-                reasoningChunkEvent.subagentRunId === null)
+                reasoningChunkEvent.subagentRunId === null ||
+                reasoningChunkRemainder !== undefined)
             ) {
               // Same attribution rule as the content path above.
               const metadataOwner =
@@ -677,6 +917,7 @@ export const transformChunks =
                   ? reasoningChunkEvent.subagentRunId
                   : reasoningMessageFields!.subagentRunId;
               reasoningMessageResult.push({
+                ...reasoningChunkRemainder,
                 type: EventType.REASONING_MESSAGE_CONTENT,
                 messageId: reasoningMessageFields!.messageId,
                 delta: "",
@@ -686,7 +927,15 @@ export const transformChunks =
                 }),
                 ...(metadataOwner !== undefined && { subagentRunId: metadataOwner }),
               } as ReasoningMessageContentEvent);
+              reasoningRemainderCarried = true;
             }
+
+            carryRemainderOnOpener(
+              reasoningMessageResult,
+              reasoningChunkRemainder,
+              reasoningRemainderCarried,
+              "REASONING_MESSAGE_CHUNK",
+            );
             return reasoningMessageResult;
           }
         }

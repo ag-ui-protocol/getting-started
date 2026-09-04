@@ -8,18 +8,20 @@
  * arrives there, because the two clients expose different surfaces.
  *
  * The files live at `spec/draft/conformance/streams/*.json`; adding one is
- * documented in that directory's README.
+ * documented in `spec/draft/conformance/README.md`, one level up, because
+ * `streams/` itself holds only the fixtures and the `MANIFEST.txt` listing
+ * them.
  */
 
 /** What must hold after a fixture's stream has been consumed. */
 export interface StreamExpectation {
   /**
-   * Whether the client accepted the stream, or rejected it. "failed" means the
-   * client refused — a protocol violation it detected. It does NOT mean the
-   * run failed: a producer that reports its own failure with RUN_ERROR has
-   * sent a well-formed stream, which a client accepts and reports through
-   * `runError` below. Conflating the two would make a client's rejection and
-   * an agent's honest failure indistinguishable.
+   * Whether the client carried the stream to a clean finish, or the run ended
+   * in failure. "failed" covers two roads to the same observable end: a
+   * protocol violation the client itself detected and refused, and a failure
+   * the producer signalled with RUN_ERROR that the client surfaces as a failed
+   * run (also reported through `runError` below, whose message the fixture can
+   * pin). "completed" is a run neither the client nor the producer failed.
    */
   outcome?: "completed" | "failed";
   /** Substring of the error a client rejection must surface. */
