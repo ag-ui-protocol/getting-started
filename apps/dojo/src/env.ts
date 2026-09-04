@@ -7,6 +7,7 @@ type envVars = {
   langgraphFastApiUrl: string;
   langgraphTypescriptUrl: string;
   agnoUrl: string;
+  agnoAuthToken: string;
   springAiUrl: string;
   llamaIndexUrl: string;
   crewAiUrl: string;
@@ -59,6 +60,7 @@ export default function getEnvVars(): envVars {
     langgraphTypescriptUrl:
       process.env.LANGGRAPH_TYPESCRIPT_URL || "http://localhost:2024",
     agnoUrl: process.env.AGNO_URL || "http://localhost:9001",
+    agnoAuthToken: process.env.AGNO_AUTH_TOKEN || "",
     llamaIndexUrl: process.env.LLAMA_INDEX_URL || "http://localhost:9000",
     crewAiUrl: process.env.CREW_AI_URL || "http://localhost:8003",
     agentSpecUrl: process.env.AGENT_SPEC_URL || "http://localhost:9003",

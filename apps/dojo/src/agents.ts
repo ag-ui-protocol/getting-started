@@ -391,7 +391,13 @@ export const agentsIntegrations = {
 
   agno: async () =>
     mapAgents(
-      (path) => new AgnoAgent({ url: `${envVars.agnoUrl}/${path}/agui` }),
+      (path) =>
+        new AgnoAgent({
+          url: `${envVars.agnoUrl}/${path}/agui`,
+          ...(envVars.agnoAuthToken && {
+            headers: { Authorization: `Bearer ${envVars.agnoAuthToken}` },
+          }),
+        }),
       {
         agentic_chat: "agentic_chat",
         agentic_chat_reasoning: "agentic_chat_reasoning",
