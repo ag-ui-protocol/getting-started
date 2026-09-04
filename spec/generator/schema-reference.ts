@@ -198,6 +198,29 @@ const sectionize = (model: ProtocolModel): Section[] => {
       .filter((name) => name.includes("Outcome") || name === "Interrupt"),
   );
 
+  // Two of the four sets are computed by substring, so nothing stops a name
+  // from matching both — and a definition in two sets is rendered twice, under
+  // two headings, with the same anchor. The last section takes whatever is
+  // left over, so it cannot overlap; these four can.
+  const named: Array<[string, Set<string>]> = [
+    ["Events", events],
+    ["Messages", messages],
+    ["Run Input", input],
+    ["Outcomes and Interrupts", outcomes],
+  ];
+  for (let i = 0; i < named.length; i += 1) {
+    for (let j = i + 1; j < named.length; j += 1) {
+      const both = [...named[i][1]].filter((name) => named[j][1].has(name));
+      if (both.length > 0) {
+        throw new Error(
+          `${both.join(", ")} would be rendered in both "${named[i][0]}" and ` +
+            `"${named[j][0]}", twice on the page and twice under the same anchor — ` +
+            "narrow whichever rule claims it by mistake",
+        );
+      }
+    }
+  }
+
   const pick = (names: Set<string>): Definition[] =>
     model.definitions.filter((d) => names.has(d.name));
   const claimed = new Set([...events, ...messages, ...input, ...outcomes]);

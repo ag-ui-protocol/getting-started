@@ -22,6 +22,12 @@ import type {
   ProtocolModel,
   TypeExpr,
 } from "./ir";
+import {
+  NULLABLE_REQUIRED_ANY,
+  NULLABLE_REQUIRED_STRINGS,
+  PROP_NAME,
+} from "./dotnet-idioms";
+import { assertTableKeys } from "./tables";
 
 /* ------------------------------------------------------------------ */
 /* .NET idiom tables                                                    */
@@ -54,31 +60,10 @@ const TYPE_NAME: Record<string, string> = {
   InputContentUrlSource: "AGUIInputContentUrlSource",
 };
 
-/** Field -> .NET property name, where PascalCase is not the property's name. */
-const PROP_NAME: Record<string, string> = {
-  "RunAgentInput.forwardedProps": "ForwardedProperties",
-};
-
-/**
- * Required wire strings whose property is nullable rather than an empty
- * default, so a field the producer never set stays distinguishable from one set
- * to "". The protobuf mapper names the missing one (RequireProvided) instead of
- * letting the setter raise a bare ArgumentNullException, and the client's own
- * RequireProvided reads them the same way.
- *
- * The three subagent events declare their required strings this way; the older
- * events predate the choice and keep the empty default.
- */
-const NULLABLE_REQUIRED_STRINGS = new Set([
-  "SubagentStartedEvent.subagentRunId",
-  "SubagentStartedEvent.name",
-  "SubagentFinishedEvent.subagentRunId",
-  "SubagentErrorEvent.subagentRunId",
-  "SubagentErrorEvent.message",
-]);
-
-/** Required any-JSON fields the .NET model keeps nullable (JsonElement?). */
-const NULLABLE_REQUIRED_ANY = new Set(["CustomEvent.value"]);
+// PROP_NAME, NULLABLE_REQUIRED_STRINGS and NULLABLE_REQUIRED_ANY live in
+// dotnet-idioms.ts: this emitter declares those properties and the protobuf
+// mapper carries them, so the two have to read one table rather than two
+// copies that can drift apart.
 
 /** Non-discriminator const/enum strings with an idiomatic default. */
 const STRING_DEFAULT: Record<string, string> = {
@@ -491,8 +476,6 @@ function csProperty(
     if (field.required) {
       lines.push(`    public JsonElement ${propName} { get; set; }`);
     } else {
-      lines.push(
-      );
       lines.push(`    public JsonElement? ${propName} { get; set; }`);
     }
     return lines;
@@ -527,7 +510,6 @@ function csProperty(
   // No per-property [JsonIgnore(WhenWritingNull)]: the omission rule lives once,
   // on the serializer context's DefaultIgnoreCondition, and a per-property
   // spelling would make a green omission sweep stop proving that setting works.
-  const optionalAttr = () => {};
   const prop = (type: string, init = "") =>
     lines.push(`    public ${type} ${propName} { get; set; }${init}`);
 
@@ -542,7 +524,6 @@ function csProperty(
       if (field.required && !NULLABLE_REQUIRED_STRINGS.has(key)) {
         prop("string", ` = ${defaulted ?? "string.Empty"};`);
       } else {
-        optionalAttr();
         prop("string?");
       }
       return lines;
@@ -552,7 +533,6 @@ function csProperty(
         prop("long");
         return lines;
       }
-      optionalAttr();
       prop("long?");
       return lines;
     case "boolean":
@@ -560,7 +540,6 @@ function csProperty(
         prop("bool");
         return lines;
       }
-      optionalAttr();
       prop("bool?");
       return lines;
     case "any":
@@ -579,7 +558,6 @@ function csProperty(
         prop("JsonElement?");
         return lines;
       }
-      optionalAttr();
       prop("JsonElement?");
       return lines;
     case "openMap":
@@ -587,7 +565,6 @@ function csProperty(
         prop("JsonElement");
         return lines;
       }
-      optionalAttr();
       prop("JsonElement?");
       return lines;
     case "array": {
@@ -596,7 +573,6 @@ function csProperty(
       if (field.required) {
         prop(`IList<${element}>`, " = [];");
       } else {
-        optionalAttr();
         prop(`IList<${element}>?`);
       }
       return lines;
@@ -608,7 +584,6 @@ function csProperty(
         if (field.required) {
           prop("string", ` = ${STRING_DEFAULT[key] ?? "string.Empty"};`);
         } else {
-          optionalAttr();
           prop("string?");
         }
         return lines;
@@ -621,7 +596,6 @@ function csProperty(
         prop(csName(resolved.name), isUnionBase ? " = null!;" : " = new();");
         return lines;
       }
-      optionalAttr();
       prop(`${csName(resolved.name)}?`);
       return lines;
     }
@@ -744,9 +718,59 @@ export interface GeneratedDotnetModelFile {
   content: string;
 }
 
+/**
+ * Definitions this emitter deliberately writes no C# class for, each with the
+ * reason. Everything else the schema declares as an object or a union has to be
+ * emitted: the class list below is written by hand, so a definition the schema
+ * gains and nobody adds to it is simply absent from .NET — while TypeScript and
+ * Python emit it, and the drift gate, which compares the generator only against
+ * its own output, stays green.
+ */
+const NOT_IN_DOTNET = new Set([
+  // JSON Patch rides as opaque JsonElement in this SDK (see OPAQUE_REFS): the
+  // operations have no C# classes, so neither does the union over them.
+  "JsonPatchOperation",
+  "AddOperation",
+  "RemoveOperation",
+  "ReplaceOperation",
+  "MoveOperation",
+  "CopyOperation",
+  "TestOperation",
+]);
+
+/** Every object and union either becomes a C# class or says why it does not. */
+function assertEveryDefinitionIsEmitted(
+  model: ProtocolModel,
+  emitted: Iterable<string>,
+): void {
+  const written = new Set(emitted);
+  const missing = model.definitions
+    .filter(
+      (definition) =>
+        (definition.kind === "object" || definition.kind === "union") &&
+        !written.has(definition.name) &&
+        !NOT_IN_DOTNET.has(definition.name),
+    )
+    .map((definition) => definition.name);
+  if (missing.length > 0) {
+    throw new Error(
+      `the .NET models write no class for ${missing.join(", ")} — the class list is written ` +
+        "by hand, so a definition nobody adds to it silently has no .NET representation at " +
+        "all; add it to the plain types (or to whichever union family it belongs to), or to " +
+        "NOT_IN_DOTNET with the reason it has none",
+    );
+  }
+}
+
 export function emitDotnetModels(
   model: ProtocolModel,
 ): GeneratedDotnetModelFile[] {
+  assertTableKeys("TYPE_NAME", Object.keys(TYPE_NAME), model);
+  assertTableKeys("PROP_NAME", Object.keys(PROP_NAME), model);
+  assertTableKeys("STRING_DEFAULT", Object.keys(STRING_DEFAULT), model);
+  assertTableKeys("BESPOKE_PROPERTY", Object.keys(BESPOKE_PROPERTY), model);
+  assertTableKeys("NULLABLE_REQUIRED_STRINGS", NULLABLE_REQUIRED_STRINGS, model);
+  assertTableKeys("NULLABLE_REQUIRED_ANY", NULLABLE_REQUIRED_ANY, model);
   const defs = new Map(model.definitions.map((d) => [d.name, d]));
   const memberOf = new Map<string, string>();
   for (const definition of model.definitions) {
@@ -1053,29 +1077,32 @@ export function emitDotnetModels(
     emitClass(context, objectDef(name), {}),
   );
 
+  const emittedUnions = [
+    "Event",
+    "Message",
+    "InputContent",
+    "InputContentSource",
+    "RunFinishedOutcome",
+    "SubagentFinishedOutcome",
+  ];
+  const emittedObjects = [
+    ...emittedUnions.flatMap((name) => unionDef(name).members),
+    ...plainNames,
+  ];
+
   assertEveryReferencedObjectIsEmitted(
     defs,
-    [
-      ...unionDef("Event").members,
-      ...unionDef("Message").members,
-      ...unionDef("InputContent").members,
-      ...unionDef("InputContentSource").members,
-      ...unionDef("RunFinishedOutcome").members,
-      ...unionDef("SubagentFinishedOutcome").members,
-      ...plainNames,
-    ],
+    emittedObjects,
     // The union families emitted above, base and members alike. Event is among
     // them: BaseEvent and its event classes are written here too.
-    [
-      "Event",
-      "Message",
-      "InputContent",
-      "InputContentSource",
-      "RunFinishedOutcome",
-      "SubagentFinishedOutcome",
-    ],
+    emittedUnions,
     [baseEventShape],
   );
+  // The check above walks outwards from what is written and insists every
+  // reference lands somewhere. This one walks the other way: from the schema,
+  // insisting nothing it declares is left out — a definition nothing references
+  // yet is invisible to a reference walk.
+  assertEveryDefinitionIsEmitted(model, [...emittedObjects, ...emittedUnions]);
 
   return [
     file("AGUIEventTypes.g.cs", eventTypes),

@@ -18,6 +18,7 @@ import type {
   ProtocolModel,
   TypeExpr,
 } from "./ir";
+import { assertTableKeys } from "./tables";
 
 /** The one enum emitted as a TS enum rather than a literal union. */
 const TS_ENUM = "EventType";
@@ -404,6 +405,9 @@ export interface GeneratedFile {
 }
 
 export function emitTypeScript(model: ProtocolModel): GeneratedFile[] {
+  assertTableKeys("TS_ENUM", [TS_ENUM], model);
+  assertTableKeys("NULL_MEANS_ABSENT", NULL_MEANS_ABSENT, model);
+  assertTableKeys("ABSENT_MEANS_EMPTY", ABSENT_MEANS_EMPTY, model);
   return [
     { name: "types.ts", content: emitTypes(model) },
     { name: "schemas.ts", content: emitSchemas(model) },

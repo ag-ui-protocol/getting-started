@@ -12,6 +12,11 @@
  */
 
 import type { Definition, Field, ObjectDefinition, TypeExpr } from "./ir";
+import {
+  NULLABLE_REQUIRED_ANY,
+  NULLABLE_REQUIRED_STRINGS,
+  PROP_NAME,
+} from "./dotnet-idioms";
 import { buildScanGraph } from "./protobuf";
 import type { WireModel } from "./protobuf";
 
@@ -19,34 +24,11 @@ import type { WireModel } from "./protobuf";
 /* .NET idiom tables                                                    */
 /* ------------------------------------------------------------------ */
 
-/** Field -> .NET property, where PascalCase is not the property's name. */
-const PROP_OVERRIDE: Record<string, string> = {
-  "RunAgentInput.forwardedProps": "ForwardedProperties",
-};
-
-/**
- * Required arbitrary-JSON fields whose .NET model property is nullable
- * (JsonElement?) rather than a bare JsonElement.
- */
-const NULLABLE_REQUIRED_ANY = new Set(["CustomEvent.value"]);
-
-/**
- * Required wire strings whose .NET property is nullable rather than an empty
- * default, so a field the producer never set stays distinguishable from one set
- * to "". Encoding one that is still null is a mistake worth naming, which
- * RequireProvided does — the protobuf setter would otherwise raise a bare
- * ArgumentNullException about "value".
- *
- * The three subagent events declare their required strings this way; the older
- * events predate the choice and keep the empty default.
- */
-const NULLABLE_REQUIRED_STRINGS = new Set([
-  "SubagentStartedEvent.subagentRunId",
-  "SubagentStartedEvent.name",
-  "SubagentFinishedEvent.subagentRunId",
-  "SubagentErrorEvent.subagentRunId",
-  "SubagentErrorEvent.message",
-]);
+// PROP_NAME, NULLABLE_REQUIRED_STRINGS and NULLABLE_REQUIRED_ANY live in
+// dotnet-idioms.ts: the model emitter declares those properties and these
+// mappers carry them, so the two have to read one table rather than two copies
+// that can drift apart — a divergence here produces exactly the bare
+// ArgumentNullException the nullable-strings table exists to prevent.
 
 /**
  * The union-valued event fields the wire flattens into sibling fields, each with
@@ -63,9 +45,7 @@ function pascalCase(name: string): string {
 }
 
 function propertyOf(definitionName: string, field: Field): string {
-  return (
-    PROP_OVERRIDE[`${definitionName}.${field.name}`] ?? pascalCase(field.name)
-  );
+  return PROP_NAME[`${definitionName}.${field.name}`] ?? pascalCase(field.name);
 }
 
 function banner(schemaId: string): string {
@@ -289,7 +269,10 @@ function encodeField(
     case "skip":
       return [];
     default:
-      throw new Error(`encode: unhandled kind ${plan.kind}`);
+      throw new Error(
+        `encode: unhandled kind ${plan.kind} for ${plan.property} ` +
+          `(the schema's ${plan.field.name})`,
+      );
   }
 }
 
@@ -335,8 +318,20 @@ function decodeField(plan: EventFieldPlan, proto: string): string | undefined {
         : `${plan.property} = ${p} is null ? null : ProtoMessageMapper.FromProtoRunAgentInput(${p}),`;
     case "skip":
       return undefined;
-    default:
+    // Not an initializer, but not unhandled either: both are decoded by the
+    // loop that follows the object initializer, because a repeated field is
+    // added into rather than assigned.
+    case "messageArray":
+    case "patchArray":
       return undefined;
+    default:
+      // Same as encodeField's default, deliberately: a kind only one half of
+      // the pair knows about is a field that crosses the wire in one direction
+      // and silently vanishes in the other.
+      throw new Error(
+        `decode: unhandled kind ${plan.kind} for ${plan.property} ` +
+          `(the schema's ${plan.field.name})`,
+      );
   }
 }
 

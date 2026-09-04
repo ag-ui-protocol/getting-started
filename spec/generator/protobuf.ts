@@ -23,12 +23,19 @@ import type {
   TypeExpr,
   UnionDefinition,
 } from "./ir";
+import { assertTableKeys } from "./tables";
 
 /* ------------------------------------------------------------------ */
 /* Naming                                                              */
 /* ------------------------------------------------------------------ */
 
-function snakeCase(name: string): string {
+/**
+ * A schema field name in the .proto's spelling. Exported because the
+ * translation emitter has to reach MERGE_SPLIT's buckets, which are named in
+ * this spelling: one function, so the .proto and the mapper cannot drift into
+ * two ideas of what a wire field is called.
+ */
+export function snakeCase(name: string): string {
   return name
     .replace(/([A-Z])/g, "_$1")
     .toLowerCase()
@@ -59,8 +66,12 @@ function protoName(definitionName: string): string {
  * - flatten:  the union dissolves into its parent as a discriminator string
  *             plus the members' fields
  * - tagged:   one message with the discriminator as a proto enum (JSON Patch)
+ *
+ * Exported because the translation layer has to branch on the same decision
+ * this table records; branching on definition names instead would let the two
+ * disagree about what a union does on the wire.
  */
-const UNION_STRATEGY: Record<string, string> = {
+export const UNION_STRATEGY: Record<string, string> = {
   Event: "envelope",
   Message: "merge",
   InputContent: "oneof",
@@ -74,12 +85,42 @@ const UNION_STRATEGY: Record<string, string> = {
  * Where a merged union member's clashing field lands, by the member field's
  * shape: the string form keeps the field's name, the parts array and the
  * open-map form get wire fields of their own.
+ *
+ * Keyed by TypeExpr kind. A UNION's variants are looked up through mergeSplit,
+ * so a variant kind with no bucket fails generation. A field that is not a
+ * union is not split at all — it keeps its own name — except an openMap, which
+ * mergeVariants reads out of this table directly rather than through
+ * mergeSplit: routing it through would demand a bucket for every non-union kind
+ * the merged message carries, and most of them have none. Two variants sharing
+ * a bucket share a wire field, and only the first of them survives. Exported
+ * for the same reason UNION_STRATEGY is.
  */
-const MERGE_SPLIT: Record<string, (field: string) => string> = {
+export const MERGE_SPLIT: Record<string, (field: string) => string> = {
   string: (field) => field,
   array: (field) => `${field}_parts`,
   openMap: (field) => `activity_${field}`,
 };
+
+/**
+ * The bucket a merged union variant lands in, or a hard error. A variant with
+ * no bucket of its own would collide with another variant's wire field and be
+ * dropped in silence — the message would still emit, and the freeze, which
+ * pins numbers rather than meanings, would still agree with it.
+ */
+function mergeSplit(
+  kind: TypeExpr["kind"],
+  fieldName: string,
+): (field: string) => string {
+  const split = MERGE_SPLIT[kind];
+  if (split === undefined) {
+    throw new WireError(
+      `merged union field ${fieldName}: a "${kind}" variant has no MERGE_SPLIT bucket — ` +
+        "decide the wire field it lands on, or it silently shares another variant's " +
+        "field and all but the first are dropped",
+    );
+  }
+  return split;
+}
 
 /**
  * Fields whose deployed proto type differs from the mechanical mapping.
@@ -254,10 +295,18 @@ function resolveAlias(defs: Map<string, Definition>, type: TypeExpr): TypeExpr {
   return type;
 }
 
-/** Maps a TypeExpr to a proto type + label, or null when it must flatten. */
+/**
+ * Maps a TypeExpr to a proto type + label, or null when it must flatten.
+ *
+ * `where` is the `Message.field` this position sits in, carried only so the
+ * refusals below can name it: a position this mapper will not write is a
+ * schema edit somebody has to find, and "somewhere in the schema" is not a
+ * place.
+ */
 function protoType(
   defs: Map<string, Definition>,
   type: TypeExpr,
+  where: string,
 ): { type: string; repeated: boolean } | { flatten: UnionDefinition } {
   switch (type.kind) {
     case "string":
@@ -273,7 +322,7 @@ function protoType(
     case "openMap":
       return { type: "google.protobuf.Struct", repeated: false };
     case "array": {
-      const items = protoType(defs, type.items);
+      const items = protoType(defs, type.items, where);
       if ("flatten" in items || items.repeated) {
         throw new WireError("unsupported nested repetition");
       }
@@ -284,7 +333,7 @@ function protoType(
     case "ref": {
       const target = defOf(defs, type.name);
       if (target.kind === "alias") {
-        return protoType(defs, resolveAlias(defs, type));
+        return protoType(defs, resolveAlias(defs, type), where);
       }
       if (target.kind === "enum") return { type: "string", repeated: false };
       if (target.kind === "union") {
@@ -301,6 +350,19 @@ function protoType(
           `union ${target.name} has no wire strategy for field use`,
         );
       }
+      // FunctionCall has no message of its own: it is written as the nested
+      // Function message of whatever declares it, which emitObjectMessage
+      // reaches only through a direct reference. Any other position — an
+      // array of them, a merged or tagged union member — would emit a .proto
+      // naming a type no file declares, and protoc would be the first to say
+      // so, long after generation succeeded.
+      if (target.name === "FunctionCall") {
+        throw new WireError(
+          `${where}: FunctionCall is only carried as the nested Function message of a ` +
+            "direct reference, so this position would name a type no .proto declares — " +
+            "give it a message of its own before the schema puts it here",
+        );
+      }
       return { type: protoName(target.name), repeated: false };
     }
   }
@@ -310,6 +372,7 @@ function protoType(
 function fieldWireType(
   defs: Map<string, Definition>,
   field: Field,
+  where: string,
 ): { type: string; repeated: boolean } | { flatten: UnionDefinition } {
   let type = field.type;
   // Follow aliases so `delta: JsonPatch` becomes `repeated JsonPatchOperation`.
@@ -324,7 +387,7 @@ function fieldWireType(
     // merge strategy before this is reached.
     throw new WireError(`inline union on field ${field.name}`);
   }
-  return protoType(defs, type);
+  return protoType(defs, type, where);
 }
 
 function makeField(
@@ -361,7 +424,7 @@ function messageFields(
   const out: WireField[] = [];
   for (const field of fields) {
     if (exclude.has(field.name)) continue;
-    const wire = fieldWireType(defs, field);
+    const wire = fieldWireType(defs, field, `${scope}.${field.name}`);
     if ("flatten" in wire) {
       // The union dissolves: a string discriminator named after the field,
       // then every member's non-discriminator field.
@@ -385,7 +448,11 @@ function messageFields(
           if (memberField.name === discriminator || seen.has(memberField.name))
             continue;
           seen.add(memberField.name);
-          const memberWire = fieldWireType(defs, memberField);
+          const memberWire = fieldWireType(
+            defs,
+            memberField,
+            `${scope}.${memberField.name}`,
+          );
           if ("flatten" in memberWire) {
             throw new WireError("nested flatten unions are not modelled");
           }
@@ -419,6 +486,30 @@ function messageFields(
   return out;
 }
 
+/**
+ * The wire fields one merged member field lands on. A union-typed field splits
+ * across a wire field per variant — only one of which is ever present, so none
+ * of them can be required — and everything else keeps a field of its own.
+ */
+function mergeVariants(
+  field: Field,
+): Array<{ wireName: string; type: TypeExpr }> {
+  const name = snakeCase(field.name);
+  if (field.type.kind === "union") {
+    return field.type.members.map((variant) => ({
+      wireName: mergeSplit(variant.kind, field.name)(name),
+      type: variant,
+    }));
+  }
+  return [
+    {
+      wireName:
+        field.type.kind === "openMap" ? MERGE_SPLIT.openMap(name) : name,
+      type: field.type,
+    },
+  ];
+}
+
 /** Builds the merged Message: the union of every member's fields. */
 function mergeUnion(
   defs: Map<string, Definition>,
@@ -427,33 +518,19 @@ function mergeUnion(
 ): WireMessage {
   const scope = protoName(union.name);
   const fields = new Map<string, WireField>();
-  const requiredEverywhere = new Map<string, boolean>();
+  /** Per member: the wire fields it carries, and whether it requires each. */
+  const carried: Array<Map<string, boolean>> = [];
 
   for (const memberName of union.members) {
     const member = defOf(defs, memberName);
     if (member.kind !== "object") {
       throw new WireError(`merge union member ${memberName} is not an object`);
     }
+    const mine = new Map<string, boolean>();
     for (const field of member.fields) {
-      const variants: Array<{ wireName: string; type: TypeExpr }> =
-        field.type.kind === "union"
-          ? field.type.members.map((variant) => ({
-              wireName: MERGE_SPLIT[
-                variant.kind === "array" ? "array" : "string"
-              ](snakeCase(field.name)),
-              type: variant,
-            }))
-          : [
-              {
-                wireName:
-                  field.type.kind === "openMap"
-                    ? MERGE_SPLIT.openMap(snakeCase(field.name))
-                    : snakeCase(field.name),
-                type: field.type,
-              },
-            ];
+      const variants = mergeVariants(field);
       for (const variant of variants) {
-        const wire = protoType(defs, variant.type);
+        const wire = protoType(defs, variant.type, `${scope}.${field.name}`);
         if ("flatten" in wire) {
           throw new WireError("flatten union inside a merged message");
         }
@@ -467,42 +544,25 @@ function mergeUnion(
               jsonName: field.name,
             }),
           );
-          requiredEverywhere.set(
-            variant.wireName,
-            field.required && variants.length === 1,
-          );
-        } else if (
-          !(field.required && variants.length === 1) ||
-          !requiredEverywhere.get(variant.wireName)
-        ) {
-          requiredEverywhere.set(variant.wireName, false);
         }
+        mine.set(variant.wireName, field.required && variants.length === 1);
       }
     }
-    // A member missing a field means the field is not required everywhere.
-    for (const name of fields.keys()) {
-      const present = member.fields.some(
-        (field) =>
-          snakeCase(field.name) === name ||
-          (field.type.kind === "union" &&
-            field.type.members.some(
-              (variant) =>
-                MERGE_SPLIT[variant.kind === "array" ? "array" : "string"](
-                  snakeCase(field.name),
-                ) === name,
-            )) ||
-          (field.type.kind === "openMap" &&
-            MERGE_SPLIT.openMap(snakeCase(field.name)) === name),
-      );
-      if (!present) requiredEverywhere.set(name, false);
-    }
+    carried.push(mine);
   }
 
+  // Requiredness is a fact about the whole union, so it is settled only once
+  // every member has been read: computing it as the members go past leaves a
+  // field first introduced by the third member never tested against the first
+  // two, and the answer then depends on the order the schema happens to list
+  // them in. On the wire that is the difference between explicit and implicit
+  // presence on the same field number — a semantic difference the freeze,
+  // which pins numbers alone, cannot see.
   const wireFields = [...fields.values()].map((field) => ({
     ...field,
     label: (field.label === "repeated "
       ? "repeated "
-      : requiredEverywhere.get(field.name)
+      : carried.every((member) => member.get(field.name) === true)
         ? ""
         : "optional ") as WireField["label"],
   }));
@@ -517,15 +577,85 @@ function mergeUnion(
   };
 }
 
+/**
+ * Definitions the binary transport deliberately does not carry, each with the
+ * reason it does not. Everything else the schema declares as an object or a
+ * union must reach a message, or it is simply absent from the wire while the
+ * JSON targets emit it — with generation succeeding and the drift gate, which
+ * compares the generator only against its own output, agreeing.
+ */
+const NOT_ON_THE_WIRE = new Set([
+  // The capability model describes an AGENT, not a run: it is served over
+  // HTTP as JSON, never streamed as an event, so it has no wire slot. Adding
+  // one is a transport decision, not a mechanical consequence of the schema.
+  "AgentCapabilities",
+  "ExecutionCapabilities",
+  "HumanInTheLoopCapabilities",
+  "IdentityCapabilities",
+  "MultiAgentCapabilities",
+  "MultimodalCapabilities",
+  "MultimodalInputCapabilities",
+  "MultimodalOutputCapabilities",
+  "OutputCapabilities",
+  "ReasoningCapabilities",
+  "StateCapabilities",
+  "ToolsCapabilities",
+  "TransportCapabilities",
+  // Reached only from MultiAgentCapabilities.subagents, so it is off the wire
+  // for exactly the same reason the capabilities are.
+  "SubagentInfo",
+]);
+
+/**
+ * Every object and union either reaches a message or says why it does not.
+ * `emitted` is what the walk wrote; `dissolved` is what a union strategy
+ * absorbed into another message rather than writing on its own.
+ */
+function assertEveryDefinitionIsOnTheWire(
+  model: ProtocolModel,
+  emitted: Set<string>,
+  dissolved: Set<string>,
+): void {
+  const missing = model.definitions
+    .filter(
+      (definition) =>
+        (definition.kind === "object" || definition.kind === "union") &&
+        !emitted.has(definition.name) &&
+        !dissolved.has(definition.name) &&
+        !NOT_ON_THE_WIRE.has(definition.name),
+    )
+    .map((definition) => definition.name);
+  if (missing.length > 0) {
+    throw new WireError(
+      `nothing on the wire carries ${missing.join(", ")} — the walk starts at the events, ` +
+        "so a definition they cannot reach is silently absent from the binary transport " +
+        "while TypeScript and Python emit it; give it a field an event reaches, or add it " +
+        "to NOT_ON_THE_WIRE with the reason it is not carried",
+    );
+  }
+}
+
 export function buildWireModel(
   model: ProtocolModel,
   freezeText: string,
 ): WireModel {
+  assertTableKeys("PROTO_NAME", Object.keys(PROTO_NAME), model);
+  assertTableKeys("UNION_STRATEGY", Object.keys(UNION_STRATEGY), model);
+  assertTableKeys("FILE_OF", Object.keys(FILE_OF), model);
+  assertTableKeys(
+    "WIRE_TYPE_OVERRIDE",
+    Object.keys(WIRE_TYPE_OVERRIDE),
+    model,
+    // Keyed by the wire's spelling of both halves, not the schema's.
+    { definitionName: protoName, fieldName: snakeCase },
+  );
   const freeze = new WireFreeze(freezeText);
   const defs = new Map(model.definitions.map((d) => [d.name, d]));
   const enums: WireEnum[] = [];
   const messages: WireMessage[] = [];
   const emitted = new Set<string>();
+  /** Definitions a union strategy absorbed into another message. */
+  const dissolved = new Set<string>();
 
   const eventUnion = defOf(defs, "Event");
   if (eventUnion.kind !== "union") throw new WireError("Event is not a union");
@@ -560,7 +690,7 @@ export function buildWireModel(
         const wire =
           field.name === "type"
             ? { type: "EventType", repeated: false }
-            : (fieldWireType(defs, field) as {
+            : (fieldWireType(defs, field, `BaseEvent.${field.name}`) as {
                 type: string;
                 repeated: boolean;
               });
@@ -706,6 +836,7 @@ export function buildWireModel(
           // The union dissolves into its parent; nothing to emit, but the
           // members' field types (Interrupt, ...) must still be reached.
           for (const member of definition.members) {
+            dissolved.add(member);
             const memberDef = defOf(defs, member);
             if (memberDef.kind === "object") {
               for (const field of memberDef.fields) visitField(field);
@@ -715,6 +846,7 @@ export function buildWireModel(
         }
         if (strategy === "merge") {
           for (const member of definition.members) {
+            dissolved.add(member);
             const memberDef = defOf(defs, member);
             if (memberDef.kind === "object") {
               for (const field of memberDef.fields) visitField(field);
@@ -778,6 +910,7 @@ export function buildWireModel(
           const merged = new Map<string, WireField>();
           const requiredEverywhere = new Map<string, number>();
           for (const memberName of definition.members) {
+            dissolved.add(memberName);
             const member = defOf(defs, memberName);
             if (member.kind !== "object")
               throw new WireError(`${memberName} shape`);
@@ -799,7 +932,11 @@ export function buildWireModel(
               visitField(field);
               const wireName = snakeCase(field.name);
               if (!merged.has(wireName)) {
-                const wire = fieldWireType(defs, field);
+                const wire = fieldWireType(
+                  defs,
+                  field,
+                  `${scope}.${field.name}`,
+                );
                 if ("flatten" in wire)
                   throw new WireError("flatten in tagged union");
                 merged.set(
@@ -903,6 +1040,8 @@ export function buildWireModel(
       for (const field of definition.fields) visitField(field);
     }
   }
+
+  assertEveryDefinitionIsOnTheWire(model, emitted, dissolved);
 
   return {
     enums,
@@ -1010,6 +1149,25 @@ export function emitProtoFiles(
   wire: WireModel,
 ): Array<{ name: string; content: string }> {
   const files = ["events.proto", "patch.proto", "types.proto"];
+  // Each message and enum names the file it belongs in, and the rendering
+  // below filters by that name — so a FILE_OF entry naming a file this list
+  // does not have drops its message from the output entirely, with generation
+  // still succeeding and nothing anywhere saying the type is gone.
+  const known = new Set(files);
+  const homeless = [
+    ...wire.enums
+      .filter((wireEnum) => !known.has(wireEnum.file))
+      .map((wireEnum) => `enum ${wireEnum.name} -> ${wireEnum.file}`),
+    ...wire.messages
+      .filter((message) => !known.has(message.file))
+      .map((message) => `message ${message.name} -> ${message.file}`),
+  ];
+  if (homeless.length > 0) {
+    throw new WireError(
+      `no .proto file is emitted for ${homeless.join(", ")} — add the file to the list ` +
+        "here, or fix the FILE_OF entry that routes it there",
+    );
+  }
   return files.map((file) => {
     const sections: string[] = [
       protoBanner(wire.model),

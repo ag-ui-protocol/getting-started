@@ -134,10 +134,31 @@ const KNOWN_KEYWORDS = new Set([
   "pattern",
   "properties",
   "required",
-  "title",
   "type",
   "unevaluatedProperties",
 ]);
+
+/**
+ * `title` names the document, and only the document: the root keywords the
+ * reader carries into the model are `$id` and the `$defs` under it, and nothing
+ * anywhere carries a title, so one on a definition would be dropped in silence
+ * by every emitter. Admitted at the root, where the published file needs it,
+ * and refused everywhere else — read it into the model first if a definition is
+ * ever to have one.
+ */
+const ROOT_KEYWORDS = new Set([...KNOWN_KEYWORDS, "title"]);
+
+/**
+ * The keywords that say nothing about a value's shape. A position carrying
+ * only these is genuinely unconstrained — arbitrary JSON — and anything else
+ * alongside them is a constraint the reader would be dropping.
+ */
+const PURE_ANNOTATIONS = [
+  "description",
+  "default",
+  "contentEncoding",
+  "$anchor",
+];
 
 class SchemaReadError extends Error {
   constructor(path: string, message: string) {
@@ -146,9 +167,13 @@ class SchemaReadError extends Error {
   }
 }
 
-function assertKnownKeywords(node: Json, path: string): void {
+function assertKnownKeywords(
+  node: Json,
+  path: string,
+  known: Set<string> = KNOWN_KEYWORDS,
+): void {
   for (const key of Object.keys(node)) {
-    if (!KNOWN_KEYWORDS.has(key)) {
+    if (!known.has(key)) {
       throw new SchemaReadError(
         path,
         `keyword "${key}" is not modelled by the generator — teach ir.ts what it means before the schema relies on it`,
@@ -202,9 +227,7 @@ function readType(
     // to one would combine with the target — a construct this reader does not
     // model and must not silently drop. Annotations are fine.
     for (const key of Object.keys(node)) {
-      if (
-        !["$ref", "description", "default", "contentEncoding"].includes(key)
-      ) {
+      if (key !== "$ref" && !PURE_ANNOTATIONS.includes(key)) {
         throw new SchemaReadError(
           path,
           `unmodelled sibling "${key}" next to a $ref`,
@@ -215,6 +238,17 @@ function readType(
   }
 
   if ("const" in node) {
+    // Same reasoning as the $ref branch, down to the same allow-list: in
+    // 2020-12 a constraint next to a const applies alongside it, and a literal
+    // type expression cannot carry one. Annotations are fine.
+    for (const key of Object.keys(node)) {
+      if (key !== "const" && !PURE_ANNOTATIONS.includes(key)) {
+        throw new SchemaReadError(
+          path,
+          `unmodelled sibling "${key}" next to a const`,
+        );
+      }
+    }
     return { kind: "literal", value: requireString(node.const, path, "const") };
   }
 
@@ -284,6 +318,24 @@ function readType(
       return expr;
     }
     case undefined: {
+      // No `type`, so nothing above matched — which is only "any JSON value"
+      // when what remains says nothing about the value. A keyword the branches
+      // above do not read (a bare `minimum`, a `properties` without a `type`, a
+      // constraint-carrying `allOf`) is modelled by nobody: it would leave here
+      // as `any` in TypeScript, `Any` in Python, `JsonElement` in .NET and
+      // google.protobuf.Value on the wire, with the constraint dropped and
+      // nothing said anywhere.
+      const constraints = Object.keys(node).filter(
+        (key) => !PURE_ANNOTATIONS.includes(key),
+      );
+      if (constraints.length > 0) {
+        throw new SchemaReadError(
+          path,
+          `typeless position carrying ${constraints.map((key) => `"${key}"`).join(", ")} — ` +
+            "the reader models no such combination and would read it as arbitrary JSON, " +
+            "dropping the constraint from every target; teach ir.ts what it means",
+        );
+      }
       // Only annotations left: an unconstrained position, i.e. any JSON value.
       return { kind: "any" };
     }
@@ -410,6 +462,7 @@ function flattenObject(
 
 /** The field every union member pins to a distinct const, if there is one. */
 function findDiscriminator(
+  name: string,
   members: string[],
   defs: Record<string, Json>,
   mixins: Set<string>,
@@ -420,22 +473,57 @@ function findDiscriminator(
   const candidates = flattened[0].fields
     .filter((field) => field.type.kind === "literal" && field.required)
     .map((field) => field.name);
+  /** Candidates every member pins, to values that neither tell them apart
+   * nor agree. */
+  const collisions: string[] = [];
   for (const candidate of candidates) {
-    const values = new Set<string>();
+    const values: string[] = [];
     const pinnedEverywhere = flattened.every((definition) => {
       const field = definition.fields.find((entry) => entry.name === candidate);
       if (!field || field.type.kind !== "literal" || !field.required)
         return false;
-      values.add(field.type.value);
+      values.push(field.type.value);
       return true;
     });
-    if (pinnedEverywhere && values.size === members.length) return candidate;
+    if (!pinnedEverywhere) continue;
+    const distinct = new Set(values);
+    if (distinct.size === members.length) return candidate;
+    // Every member pinning the SAME value is a constant they share — a version
+    // tag each member repeats, say — not a discriminator that failed to
+    // discriminate. Nothing is wrong with such a union and nothing is lost by
+    // it: the members are told apart by their shapes, as a tagless union is.
+    if (distinct.size === 1) continue;
+    const duplicates = [
+      ...new Set(
+        values.filter((value, index) => values.indexOf(value) !== index),
+      ),
+    ];
+    collisions.push(`${candidate} (${duplicates.join(", ")})`);
+  }
+  // A field every member pins to colliding values — some members alike, others
+  // differently — is a discriminator that does not discriminate: the union
+  // would fall back to an un-narrowed z.union and a bare `A | B`, with no
+  // narrowing anywhere and nothing said about why. A union with no field pinned
+  // everywhere, or one every member pins to the same value, is genuinely
+  // tagless and still answers undefined.
+  if (collisions.length > 0) {
+    throw new SchemaReadError(
+      `#/$defs/${name}`,
+      `every member pins ${collisions.join(", ")} to a value another member also uses ` +
+        "while others pin it differently, so the field neither discriminates the union " +
+        "nor is a constant every member shares — give each member its own value, or pin " +
+        "them all to the same one",
+    );
   }
   return undefined;
 }
 
-/** Definition names a definition references, for dependency ordering. */
-function referencesOf(definition: Definition): string[] {
+/**
+ * Definition names a definition references, for dependency ordering. Exported
+ * because an emitter that places a shape by hand (Python's mixin classes) has
+ * to place it after everything it names, by the same reckoning.
+ */
+export function referencesOf(definition: Definition): string[] {
   const refs = new Set<string>();
   const walkType = (type: TypeExpr): void => {
     switch (type.kind) {
@@ -482,7 +570,7 @@ function assertVocabulary(root: Json): void {
     if (typeof node !== "object" || node === null || Array.isArray(node))
       return;
     const object = node as Json;
-    assertKnownKeywords(object, path);
+    assertKnownKeywords(object, path, path === "#" ? ROOT_KEYWORDS : undefined);
     for (const [key, value] of Object.entries(object)) {
       if (key === "properties" || key === "$defs") {
         for (const [name, child] of Object.entries(value as Json)) {
@@ -560,11 +648,22 @@ export function buildModel(schema: Json): ProtocolModel {
     const description = requireString(def.description, path, "description");
 
     if (Array.isArray(def.enum)) {
+      // The same check the field position makes: every emitter renders an enum
+      // definition as strings — a TS literal union, a Python Literal, a proto
+      // `string` — so a non-string member would be emitted as something the
+      // wire cannot carry.
+      if (def.type !== "string" && def.type !== undefined) {
+        throw new SchemaReadError(path, "enum on a non-string definition");
+      }
+      const values = def.enum as unknown[];
+      if (!values.every((value) => typeof value === "string")) {
+        throw new SchemaReadError(path, "enum with a non-string member");
+      }
       definitions.set(name, {
         kind: "enum",
         name,
         description,
-        values: def.enum as string[],
+        values: values as string[],
       });
     } else if (Array.isArray(def.oneOf)) {
       const members = (def.oneOf as Json[]).map((member, index) => {
@@ -582,7 +681,7 @@ export function buildModel(schema: Json): ProtocolModel {
         name,
         description,
         members,
-        discriminator: findDiscriminator(members, defs, mixins),
+        discriminator: findDiscriminator(name, members, defs, mixins),
       });
     } else if (def.properties !== undefined || def.allOf !== undefined) {
       definitions.set(name, flattenObject(name, def, defs, mixins));

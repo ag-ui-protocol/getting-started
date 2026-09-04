@@ -20,6 +20,8 @@ import type {
   ProtocolModel,
   TypeExpr,
 } from "./ir";
+import { referencesOf } from "./ir";
+import { assertTableKeys } from "./tables";
 
 /** The one enum emitted as a Python Enum rather than a Literal alias. */
 const PY_ENUM = "EventType";
@@ -137,8 +139,15 @@ function pyType(type: TypeExpr): string {
       // Definitions are emitted in dependency order, so the target is always
       // already defined — no forward references, no rebuild step.
       return type.name;
-    case "array":
-      return `List[${pyType(type.items)}]`;
+    case "array": {
+      // The items' own constraints ride in the annotation, because nothing
+      // else carries them: Field(...) on the property constrains the LIST, so
+      // a minimum on an integer item would simply be gone. zodType keeps them
+      // by recursing; this is the pydantic spelling of the same thing.
+      const items = pyType(type.items);
+      const args = constraintArguments(type.items);
+      return `List[${args.length > 0 ? `Annotated[${items}, Field(${args.join(", ")})]` : items}]`;
+    }
     case "union":
       return `Union[${type.members.map(pyType).join(", ")}]`;
   }
@@ -366,6 +375,7 @@ class GeneratedBaseModel(BaseModel):
         }`;
 
 export function emitModels(model: ProtocolModel): string {
+  assertTableKeys("PY_ENUM", [PY_ENUM], model);
   anyAliasNames = new Set<string>();
   let grew = true;
   while (grew) {
@@ -395,20 +405,134 @@ export function emitModels(model: ProtocolModel): string {
 
   // The mixin shapes become real classes (BaseEvent, BaseMessage,
   // Attributable): the hand-written SDK's public hierarchy, which consumers
-  // isinstance-check against. Inserted immediately before the first
-  // definition that inherits one, after the aliases and enums they depend on.
-  const mixinClasses = model.mixinShapes.map((shape) =>
-    emitObject({ ...shape, composedMixins: [] }),
+  // isinstance-check against. Inserted before the first definition that
+  // inherits one — and, since Python is read top to bottom with no forward
+  // references, after everything the mixin itself names. Both bounds matter:
+  // too early and a mixin annotates a class not declared yet, too late and a
+  // subclass names a base that is not declared yet. The model orders every
+  // definition after its own references, but a mixin is placed by hand here,
+  // so its references are looked up by hand too.
+  const indexOf = new Map(
+    model.definitions.map((definition, index) => [definition.name, index]),
   );
-  const emitted = model.definitions.map(emitDefinition);
   const firstInheritor = model.definitions.findIndex(
     (definition) =>
       definition.kind === "object" && definition.composedMixins.length > 0,
   );
-  const insertAt = firstInheritor === -1 ? emitted.length : firstInheritor;
-  emitted.splice(insertAt, 0, ...mixinClasses);
+  const emitted = model.definitions.map(emitDefinition);
+  const floor = firstInheritor === -1 ? emitted.length : firstInheritor;
 
-  return [banner(model), imports, BASE_MODEL, ...emitted, ""].join("\n\n\n");
+  // A third bound the two above say nothing about: a mixin may annotate a
+  // field with ANOTHER mixin, whose class is placed by hand here too and is
+  // therefore in neither `indexOf` nor `floor`. The model hands the shapes over
+  // alphabetically, so left alone they would be written in whatever order their
+  // names happen to sort in. Ordering them among themselves first, then letting
+  // each one's floor rise to its referenced mixins' placements, settles it.
+  const mixinNames = new Set(model.mixinShapes.map((shape) => shape.name));
+  const byName = new Map(model.mixinShapes.map((shape) => [shape.name, shape]));
+  const refsOf = (shape: ObjectDefinition): string[] =>
+    referencesOf({ ...shape, composedMixins: [] });
+  const orderedShapes: ObjectDefinition[] = [];
+  const state = new Map<string, "visiting" | "done">();
+  const visit = (name: string): void => {
+    if (state.get(name) === "done") return;
+    if (state.get(name) === "visiting") {
+      throw new Error(
+        `the ${name} mixin reaches itself through another mixin's fields — ` +
+          "no order of declarations satisfies that",
+      );
+    }
+    state.set(name, "visiting");
+    const shape = byName.get(name);
+    if (!shape) throw new Error(`no mixin shape named ${name}`);
+    for (const ref of refsOf(shape)) {
+      if (mixinNames.has(ref)) visit(ref);
+    }
+    state.set(name, "done");
+    orderedShapes.push(shape);
+  };
+  for (const shape of model.mixinShapes) visit(shape.name);
+
+  const placedAt = new Map<string, number>();
+  const placed = orderedShapes.map((shape) => {
+    const refs = refsOf(shape);
+    const after = refs.reduce(
+      (highest, name) => Math.max(highest, indexOf.get(name) ?? -1),
+      -1,
+    );
+    // Everything above is in `model.definitions`; a referenced MIXIN is not,
+    // and reports -1 there. Its own placement is the bound instead, which the
+    // topological order above has already computed.
+    const afterMixin = refs.reduce(
+      (highest, name) => Math.max(highest, placedAt.get(name) ?? -1),
+      -1,
+    );
+    // The first definition composing this mixin subclasses it, so the class
+    // has to be declared before that one. A mixin's references are among that
+    // definition's own references, so this holds — but it is the invariant the
+    // placement depends on, and a silent NameError at import time is what
+    // breaking it costs.
+    const inheritor = model.definitions.findIndex(
+      (definition) =>
+        definition.kind === "object" &&
+        definition.composedMixins.includes(shape.name),
+    );
+    const at = Math.max(floor, after + 1, afterMixin);
+    if (inheritor !== -1 && at > inheritor) {
+      const heir = model.definitions[inheritor].name;
+      const blockingMixin = refs.find(
+        (name) => mixinNames.has(name) && placedAt.get(name) === afterMixin,
+      );
+      const blocker =
+        afterMixin > after && blockingMixin !== undefined
+          ? `the ${blockingMixin} mixin`
+          : model.definitions[after].name;
+      throw new Error(
+        blocker === heir
+          ? `the ${shape.name} mixin references ${heir}, which itself inherits ` +
+            `${shape.name} — the class would have to be declared both before and ` +
+            "after the same definition, so there is no point in the file where it can go"
+          : `the ${shape.name} mixin references ${blocker}, which is placed after ` +
+            `${heir}, which inherits ${shape.name} — there is no point in the file ` +
+            "where the class can go",
+      );
+    }
+    placedAt.set(shape.name, at);
+    return { name: shape.name, refs, at, source: emitObject({ ...shape, composedMixins: [] }) };
+  });
+
+  // What the ordering above buys, asserted rather than assumed: the insertion
+  // loop below writes mixins sharing an `at` in `placed` order, so both the
+  // position and the tie-break have to come out right for a mixin to reach the
+  // file after the mixin it names.
+  for (const mixin of placed) {
+    for (const ref of mixin.refs) {
+      if (!mixinNames.has(ref)) continue;
+      const target = placed.find((entry) => entry.name === ref);
+      if (
+        !target ||
+        target.at > mixin.at ||
+        (target.at === mixin.at &&
+          placed.indexOf(target) > placed.indexOf(mixin))
+      ) {
+        throw new Error(
+          `the ${mixin.name} mixin annotates a field with the ${ref} mixin but is ` +
+            "written before it — Python is read top to bottom, so that is a NameError " +
+            "at import time",
+        );
+      }
+    }
+  }
+
+  const withMixins: string[] = [];
+  for (let index = 0; index <= emitted.length; index += 1) {
+    for (const mixin of placed) {
+      if (mixin.at === index) withMixins.push(mixin.source);
+    }
+    if (index < emitted.length) withMixins.push(emitted[index]);
+  }
+
+  return [banner(model), imports, BASE_MODEL, ...withMixins, ""].join("\n\n\n");
 }
 
 export function emitPythonVersion(model: ProtocolModel): string {
