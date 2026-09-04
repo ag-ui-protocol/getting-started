@@ -59,6 +59,13 @@ export type ClaudeAgentAdapterConfig = AgentConfig & Options & {
   sessionTtlMs?: number;
   /** Timeout in ms for query() calls. Default: undefined (no timeout) */
   queryTimeoutMs?: number;
+  /**
+   * When true, tool-result content blocks are concatenated instead of
+   * returning only the first block. Text blocks are joined with `\n`;
+   * mixed content (text + non-text) is serialized as JSON to avoid
+   * silently dropping non-text blocks. Default: false (single-block).
+   */
+  concatenateToolResultBlocks?: boolean;
 };
 
 /**

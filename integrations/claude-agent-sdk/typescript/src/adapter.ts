@@ -803,7 +803,11 @@ export class ClaudeAgentAdapter extends AbstractAgent {
                 const toolUseId = block.tool_use_id as string;
                 const resultContent = block.content;
 
-                const toolMsg = buildAguiToolMessage(toolUseId, resultContent);
+                const toolMsg = buildAguiToolMessage(
+                  toolUseId,
+                  resultContent,
+                  this.config.concatenateToolResultBlocks,
+                );
                 upsertMessage(toolMsg);
 
                 subscriber.next({
