@@ -28,8 +28,8 @@ describe("TokenUsageSchema — numeric-only usage shape", () => {
 
   it("keeps unknown fields through the parse, like every other validator", () => {
     // The tolerant layer's promise is uniform: unknown keys survive so the
-    // strip-and-warn middleware can see them. Keeping content-bearing fields
-    // out of usage telemetry is that middleware's job (and the producer's),
+    // strip-and-warn enforcement stage can see them. Keeping content-bearing
+    // fields out of usage telemetry is that stage's job (and the producer's),
     // not a special stripping rule on this one schema.
     const parsed = TokenUsageSchema.parse({
       inputTokens: 5,

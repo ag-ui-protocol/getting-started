@@ -24,8 +24,9 @@ part its media type names, and a `null` standing in for an absent
 `parentMessageId` or `outcome` becomes absent. Every inbound translation warns.
 These shims are recorded, with their replacements and their expiry, in
 [`DEPRECATIONS.md`](https://github.com/ag-ui-protocol/ag-ui/blob/main/DEPRECATIONS.md);
-they expire on **2027-08-24**, twelve months after they shipped, after which
-the retired shapes stop working entirely.
+they expire, provisionally, on **2027-08-24** — twelve months from when the
+shims were written, re-dated at the 1.0 release if it slips — after which the
+retired shapes stop working entirely.
 
 **A 1.0 agent keeps working against a 0.x client.** Everything 1.0 adds —
 `RUN_FINISHED.outcome`, the subagent events, `protocolVersion`, activity
@@ -87,6 +88,42 @@ The same applies to what you send: unknown keys on `RunAgentInput` are
 stripped before transmission. The field that exists for exactly that purpose
 is `forwardedProps`, which carries any JSON to the agent untouched.
 
+### Behaviour that is stricter in 1.0
+
+Three rules the client used to apply loosely, or on one path only, now apply
+everywhere. Each of them turns something that quietly succeeded into a run
+that fails.
+
+**A producer-sent `RUN_ERROR` fails the run.** `runAgent()` rejects where it
+previously resolved: the error carries the producer's `message`, and its
+`code` rides as a property so a caller can branch on it without parsing prose.
+Whatever arrived before the failure is still applied — the updates gathered so
+far are emitted, then the error — and the agent instance stays usable, so the
+next run on it works. If your application read `RUN_ERROR` in a subscriber and
+relied on the promise resolving anyway, the failure now reaches you as the
+rejection instead; a subscriber that stops the event's propagation still takes
+the failure on itself and the run resolves. Aborting is unaffected: the
+`RUN_ERROR` the HTTP transport synthesizes on abort carries `code: "abort"`
+and is recognised and swallowed as before.
+
+**Reasoning open/close discipline is verified.** A `REASONING_MESSAGE_CONTENT`
+or `REASONING_MESSAGE_END` naming a message nothing opened, a reasoning span
+closed without being opened, and a span or message still open when the run
+finishes all fail the run. Orphaned fragments and reopens were rejected for
+`THINKING_*` before 1.0; failing the run for a span or message left open at
+`RUN_FINISHED` is new, and matches what text messages and tool calls already
+did. Spans and reasoning messages are separate namespaces — unlike
+`THINKING_*`, a reasoning message does not have to sit inside a span, and a
+`REASONING_START` id does not open a reasoning message.
+
+**The enforcement guarantee holds on every path.** Unknown material is
+stripped *with* a warning and a malformed known value is fatal — and that is
+now true with middleware installed and over the protobuf binding, not only on
+the plain SSE path. Material that used to vanish silently on those paths —
+an unrecognised property on a chunk expanded inside a middleware chain, an
+unknown message role or patch operation crossing the protobuf decoder — now
+rides through to enforcement and is reported where it is dropped.
+
 ### Retired from the public API
 
 - The five `THINKING_*` events — enum members, types, schemas, factories.
@@ -116,8 +153,9 @@ is `forwardedProps`, which carries any JSON to the agent untouched.
 
 The client declares `protocolVersion: "1.0"` on every `RunAgentInput` and
 reads the producer's answer on `RUN_STARTED`, warning when a producer speaks
-a newer or uninterpretable version. Setting `maxProtocolVersion` below `1.0`
-omits the field, for a peer whose parser would reject an unknown member.
+a newer or uninterpretable version. Pinning `maxProtocolVersion` below this
+client package's own version omits the field, for a peer whose parser would
+reject an unknown member.
 
 ---
 
@@ -139,9 +177,10 @@ preserved exactly; only a `null` standing in for a whole absent field is gone.
 
 ### Generated models replace the hand-written ones
 
-`ag_ui.core` keeps every name it exported, now re-exported from the generated
-source, and construction is unchanged: snake_case keyword arguments, aliases
-on the wire. Three behaviours differ:
+`ag_ui.core` keeps every name it exported except the ones retired and renamed
+below, now re-exported from the generated source, and construction is
+unchanged: snake_case keyword arguments, aliases on the wire. Three behaviours
+differ:
 
 - Single-value literals (`type`, a fixed `role`) default to their only legal
   value; you no longer spell them.
@@ -201,8 +240,12 @@ with it.
 - `AGUIBinaryInputContent`, its type constant, and its converter arms. A
   `DataContent` or `UriContent` crossing the Microsoft.Extensions.AI boundary
   becomes the media part its media type names, filename in the part's
-  metadata. .NET has no middleware layer, so an incoming legacy part is
-  dropped rather than translated.
+  metadata. .NET has no middleware layer and nothing translates an incoming
+  legacy part: a `{ "type": "binary" }` part is an unknown discriminator, and
+  the converter throws a `JsonException` that fails deserialisation of the
+  whole message — and of the snapshot or run input carrying it. A producer
+  still emitting the legacy part must be upgraded before a 1.0 .NET consumer
+  can read it.
 
 ### Renames and type changes
 
@@ -213,9 +256,9 @@ with it.
   `JsonSerializer.SerializeToElement(...)`.
 - `ExecutionCapabilities.MaxIterations` and `MaxExecutionTime` are `long?`
   rather than `int?`.
-- `Tool.Parameters` and `RunAgentInput.ForwardedProps` are nullable
-  `JsonElement?`, as the schema says; a message's `Id` is a non-nullable
-  string that is always written.
+- `Tool.Parameters` and `RunAgentInput.ForwardedProperties` (wire key
+  `forwardedProps`) are nullable `JsonElement?`, as the schema says; a
+  message's `Id` is a non-nullable string that is always written.
 
 ### AOT
 

@@ -9,8 +9,16 @@ pieces (the reserved metadata key, historic aliases) are declared here.
 
 The legacy ``BinaryInputContent`` part left the protocol in 1.0 (see
 DEPRECATIONS.md): producers send the media parts (image, audio, video,
-document) with a ``source``; the TypeScript client's version-gated
-``BackwardCompatibility_0_0_47`` middleware keeps converting for old peers.
+document) with a ``source``. Two TypeScript shims cover it, and both move in
+the SAME direction — legacy to modern. The always-on inbound compatibility
+boundary (``CompatibilityBoundary``) upgrades a legacy part arriving inside a
+message, and the version-gated ``BackwardCompatibility_0_0_47`` middleware
+upgrades one on the way out, rewriting ``RunAgentInput.messages`` through
+``convertBinaryToNewFormat`` before the request is sent. Nothing converts a
+modern media part back to ``{"type": "binary"}``. The version gate is about
+the CALLER rather than the payload: an application still assembling messages
+the pre-0.0.48 way is the only place a legacy part can still enter, so the
+upgrade is installed for exactly those peers and skipped for everyone else.
 """
 
 from typing import Literal

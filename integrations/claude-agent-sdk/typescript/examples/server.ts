@@ -11,6 +11,7 @@
 import http from "node:http";
 import { EventEncoder } from "@ag-ui/encoder";
 import type { RunAgentInput } from "@ag-ui/core";
+import { RunAgentInputSchema } from "@ag-ui/core/schemas";
 import type { ClaudeAgentAdapter } from "../src";
 
 import { createAgenticChatAdapter } from "./agentic_chat";
@@ -59,14 +60,36 @@ async function handleRequest(
     }
     const body = Buffer.concat(chunks).toString("utf-8");
 
-    let inputData: RunAgentInput;
+    let parsedBody: unknown;
     try {
-      inputData = JSON.parse(body) as RunAgentInput;
+      parsedBody = JSON.parse(body);
     } catch {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Invalid JSON body" }));
       return;
     }
+
+    // Parsed, not cast. A conformant client MAY omit `tools` and `context` —
+    // absent and empty mean the same thing on the wire — so `as RunAgentInput`
+    // promised `Tool[]` for a value that is `undefined` at runtime, and the
+    // first `input.tools.length` downstream threw inside an already-open
+    // response. The schema supplies the defaults and rejects the rest at the
+    // edge, where a 400 is still possible.
+    const parsed = RunAgentInputSchema.safeParse(parsedBody);
+    if (!parsed.success) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: "Invalid RunAgentInput",
+          issues: parsed.error.issues.map((issue) => ({
+            path: issue.path,
+            message: issue.message,
+          })),
+        }),
+      );
+      return;
+    }
+    const inputData: RunAgentInput = parsed.data;
 
     const encoder = new EventEncoder({
       accept: req.headers.accept ?? "text/event-stream",

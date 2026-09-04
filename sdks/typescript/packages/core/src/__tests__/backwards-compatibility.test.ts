@@ -28,8 +28,8 @@ describe("Backwards Compatibility", () => {
         expect(result.data.role).toBe("user");
         expect(result.data.content).toBe("Hello");
         // Unknown keys SURVIVE the parse: dropping them is the strip-and-warn
-        // middleware's job, and a re-serialising intermediary must not lose
-        // a future version's fields.
+        // enforcement stage's job, and a re-serialising intermediary must not
+        // lose a future version's fields.
         expect('futureField' in result.data).toBe(true);
         expect('anotherNewProp' in result.data).toBe(true);
       }

@@ -54,7 +54,8 @@
     "tsx": "^4.20.6",
     "vitest": "^4.0.18",
     "tsdown": "^0.20.1",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "zod": "3.25.76"
   },
   "exports": {
     ".": {

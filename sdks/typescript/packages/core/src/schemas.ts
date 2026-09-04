@@ -34,10 +34,14 @@ export {
  * src/generated/schemas.ts); this comment survives as the recorded reasoning.
  *
  * This is deliberately NOT the treatment `parentMessageId` and `outcome`
- * receive. Those tolerate `null` because released producers emitted it before
- * the producer-side omission fix, and rejecting it would break agents already
- * in the wild — which is why they, and only they, move into the compatibility
- * middleware with PNI-207. Metadata has no such history: it postdates that fix,
+ * receive. Those USED to tolerate `null`, because released producers emitted it
+ * before the producer-side omission fix and rejecting it would have broken
+ * agents already in the wild. The generated schema no longer does
+ * (`parentMessageId: z.string().optional()`, `outcome:
+ * RunFinishedOutcomeSchema.optional()` in src/generated/schemas.ts) — which is
+ * exactly WHY they, and only they, moved into the compatibility boundary with
+ * PNI-207: the tolerance had to go somewhere, and a validator that mirrors the
+ * schema is not it. Metadata has no such history: it postdates that fix,
  * and no released Python or .NET package has ever emitted `"metadata": null`.
  * Adding a tolerance here would grandfather in a fourth exception with nobody
  * to protect; enforcing from day one means there is never anything to retire.

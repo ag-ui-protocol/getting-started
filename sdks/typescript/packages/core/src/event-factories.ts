@@ -1,3 +1,23 @@
+/**
+ * Event factories: constructors that validate what they build.
+ *
+ * This module has a RUNTIME dependency on zod — it imports the generated
+ * validators (`./generated/schemas`, a value import, not a type-only one) to
+ * parse each event it constructs. So it MUST NEVER be re-exported from
+ * `src/index.ts`, directly or through anything index.ts re-exports. The main
+ * entry's contract is that importing `@ag-ui/core` pulls no zod at runtime,
+ * which is what lets zod be an OPTIONAL peer dependency; one edge from
+ * index.ts to this file breaks that for every type-only consumer, and it
+ * breaks it at install time, not at build time.
+ *
+ * Nothing re-exports this module today — the tests import it by relative
+ * path. If it is ever given a public home, that home is the
+ * `@ag-ui/core/schemas` subpath, alongside the validators it uses, never the
+ * main entry. `src/__tests__/main-entry-zod-free.test.ts` guards the rule
+ * structurally: it bundles src/index.ts with zod marked external and fails if
+ * a `zod` import survives into the output, so a re-export three files deep is
+ * caught even though a grep of index.ts would miss it.
+ */
 import type { z } from "zod/v4";
 import { EventType } from "./generated/types";
 import type {
