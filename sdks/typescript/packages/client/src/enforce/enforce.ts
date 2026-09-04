@@ -48,10 +48,18 @@ function warnDeviation(message: string): void {
 }
 
 /**
- * The enforcement stage: sits after the middleware chain (and chunk
- * transformation) on every path — streaming, binary and in-memory alike —
- * and guarantees that nothing unrecognised survives to verification,
- * subscribers or application code.
+ * The enforcement stage: on each of the agent's three pipelines — streaming,
+ * binary and in-memory alike — it sits after the middleware chain and before
+ * THAT PIPELINE's chunk expansion, and guarantees that nothing unrecognised
+ * survives to verification, subscribers or application code.
+ *
+ * Both halves of that placement need a qualifier. Chunk expansion also happens
+ * INSIDE the chain, in `Middleware.runNext`, and that expansion is upstream of
+ * this stage rather than downstream — which is why chunks/transform.ts must
+ * carry through whatever it cannot vouch for instead of repairing or dropping
+ * it. And "after the middleware chain" says nothing on `connect`, where there
+ * is no chain to be after: this stage still runs, on events arriving straight
+ * off the transport.
  *
  * - An event whose type nothing translated is dropped, with a warning.
  * - Unknown properties and unrecognised union members on a known event are
@@ -83,7 +91,7 @@ export const enforceEvents =
         const { value, stripped } = stripUnknown(event, schema);
         for (const path of stripped) {
           warnDeviation(
-            `Removed unrecognised material at '${path}' on ${String(event.type)}. Nothing handled it; see DEPRECATIONS.md if it is a retired shape.`,
+            `Removed unrecognised material at '${path}' on ${String(event.type)}. Nothing handled it; see the repo-root DEPRECATIONS.md if it is a retired shape.`,
           );
         }
         // Malformed known fields are fatal, by design.
@@ -102,5 +110,9 @@ export function enforceOutgoingInput(input: RunAgentInput): RunAgentInput {
   for (const path of stripped) {
     warnDeviation(`Removed unrecognised material at '${path}' from the outgoing input.`);
   }
-  return RunAgentInputSchema.parse(value) as RunAgentInput;
+  // Unasserted on purpose: the generated schema's output and the generated
+  // type are two files that must agree, and this is the one place where a
+  // divergence between them can be made to fail the build rather than pass
+  // silently through a cast.
+  return RunAgentInputSchema.parse(value);
 }

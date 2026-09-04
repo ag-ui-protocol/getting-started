@@ -1,0 +1,41 @@
+{
+  "name": "unknown-outcome-array-fatal",
+  "area": "processing",
+  "description": "an ARRAY in the RUN_FINISHED outcome slot is a malformed value on a described field, so it is fatal — never treated as an unrecognised union member and stripped, which would report success for a run that was paused and lose the interrupt with it",
+  "specPage": "/spec/draft/basic/processing",
+  "kill": "remove the Array.isArray guard from the discriminated-union branch of stripAgainst — an array's discriminator then reads as undefined, no option matches, and the value is reported as removable: /outcome is stripped, the RUN_FINISHED validates as an outcome-less success, and this run completes with the pending interrupt silently gone. The sibling unknown-outcome-stripped fixture is what keeps the fix from being 'make every unmatched member fatal': the two together pin the line between an unrecognised MEMBER (stripped) and a malformed VALUE (fatal)",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-outcome-array",
+      "runId": "r-outcome-array"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-outcome-array",
+      "runId": "r-outcome-array",
+      "outcome": [
+        {
+          "type": "interrupt",
+          "interrupts": [
+            {
+              "id": "outcome-array-i-1",
+              "reason": "approval"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "expected object, received array",
+    "eventTypes": ["RUN_STARTED"]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "the two clients reject this for the same reason but say it in their own words, and the base string is zod's. .NET's converter names the union type it could not build; the `Path: $.outcome` and `LineNumber`/`BytePositionInLine` that System.Text.Json appends are deliberately not pinned — the byte offset moves with any edit to the stream above, and matching on `outcome` alone would pass on that decoration rather than on the converter having refused the value",
+      "errorContains": "could not be converted to AGUI.Abstractions.RunFinishedOutcome"
+    }
+  }
+}

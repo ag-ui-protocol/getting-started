@@ -42,7 +42,7 @@ export const transformHttpEventStream = (
         // Choose parser based on content type
         if (contentType === proto.AGUI_MEDIA_TYPE) {
           // Use protocol buffer parser
-          parseProtoStream(bufferSubject).subscribe({
+          parseProtoStream(bufferSubject, log).subscribe({
             next: (event) => eventSubject.next(event),
             error: (err) => eventSubject.error(err),
             complete: () => eventSubject.complete(),
@@ -56,6 +56,19 @@ export const transformHttpEventStream = (
               // pipeline), so a translator for a deprecated or unrecognised
               // event stays reachable. The transport only requires the one
               // thing nothing downstream can work without: a string type.
+              // `null`, a number, a string and an array are all valid JSON
+              // documents, and `JSON.parse` hands them on as readily as an
+              // object. Reading `.type` off `null` throws inside this `next`
+              // handler, where the throw is reported to the host rather than
+              // to `eventSubject.error` — the run would then RESOLVE, claiming
+              // success for a stream nobody read. So the shape is checked
+              // before anything is read off it.
+              if (typeof json !== "object" || json === null || Array.isArray(json)) {
+                const err = new Error("Invalid event: the frame is not a JSON object.");
+                log?.event("HTTP", "Event invalid:", { json, error: String(err) });
+                eventSubject.error(err);
+                return;
+              }
               const record = json as { type?: unknown };
               if (typeof record.type !== "string" || record.type.length === 0) {
                 const err = new Error("Invalid event: the frame carries no event type.");
@@ -68,11 +81,31 @@ export const transformHttpEventStream = (
             },
             error: (err) => {
               if ((err as DOMException)?.name === "AbortError") {
+                // An abort is not a failure: the run ends gracefully, which is
+                // what abortRun() has always meant. The reducer recognises
+                // this event by its `rawEvent` — the abort ERROR OBJECT, which
+                // no producer can send, because every transport parses its
+                // frames with `JSON.parse` and that never yields an Error
+                // instance. `code: "abort"` rides along as information only;
+                // it is an open string a conformant producer may legitimately
+                // use for its own failure, so nothing may branch on it.
+                //
+                // Wrapped when the runtime handed back something that is not
+                // an Error. WebIDL has DOMException inherit Error, and every
+                // current runtime implements that, but the marker must not
+                // rest on the host doing so; the original is kept as `cause`.
+                const abortError =
+                  err instanceof Error
+                    ? err
+                    : Object.assign(
+                        new Error((err as DOMException)?.message || "Request aborted"),
+                        { name: "AbortError", cause: err },
+                      );
                 eventSubject.next({
                   type: EventType.RUN_ERROR,
                   message: (err as DOMException).message || "Request aborted",
                   code: "abort",
-                  rawEvent: err,
+                  rawEvent: abortError,
                 });
                 eventSubject.complete();
                 return;

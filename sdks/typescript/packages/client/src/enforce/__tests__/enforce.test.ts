@@ -34,12 +34,25 @@ const run = (threadId = "t1", runId = "r1") => ({ threadId, runId });
 const START = { type: EventType.RUN_STARTED, ...run() } as BaseEvent;
 const FINISH = { type: EventType.RUN_FINISHED, ...run() } as BaseEvent;
 
+// These suites assert on warnings that gate on SUPPRESS_TRANSFORMATION_WARNINGS.
+// Cleared for the duration and PUT BACK, so the suite neither depends on the
+// ambient environment — a dev or CI shell may well export it, since the warning
+// text itself tells users to — nor changes it for whatever vitest runs next in
+// this worker. Same shape as backward-compatibility-0-0-57.test.ts.
 let warnSpy: ReturnType<typeof vi.spyOn>;
+let priorSuppress: string | undefined;
 beforeEach(() => {
   warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  priorSuppress = process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
+  delete process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
 });
 afterEach(() => {
   warnSpy.mockRestore();
+  if (priorSuppress === undefined) {
+    delete process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
+  } else {
+    process.env.SUPPRESS_TRANSFORMATION_WARNINGS = priorSuppress;
+  }
 });
 
 describe("the enforcement boundary (in-memory path)", () => {

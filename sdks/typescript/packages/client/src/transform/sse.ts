@@ -84,7 +84,12 @@ export const parseSSEStream = (
         // Join multi-line data and parse JSON
         const jsonStr = dataLines.join("\n");
         const json = JSON.parse(jsonStr);
-        log?.event("SSE", "Event received:", json, { type: json.type });
+        // `json` is whatever the frame held — `null` and primitives included,
+        // so the type is read defensively: a throw here would surface as an
+        // unhandled host error rather than as a stream failure.
+        log?.event("SSE", "Event received:", json, {
+          type: (json as { type?: unknown } | null)?.type,
+        });
         jsonSubject.next(json);
       } catch (err) {
         jsonSubject.error(err);

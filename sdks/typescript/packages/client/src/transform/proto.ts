@@ -2,6 +2,7 @@ import { Observable, Subject } from "rxjs";
 import { HttpEvent, HttpEventType } from "../run/http-request";
 import { BaseEvent } from "@ag-ui/core";
 import * as proto from "@ag-ui/proto";
+import { type DebugLoggerInput, resolveDebugLogger } from "@/debug-logger";
 
 /**
  * Parses a stream of HTTP events into a stream of BaseEvent objects using Protocol Buffer format.
@@ -15,9 +16,17 @@ const suppressWarnings = (): boolean =>
   typeof process.env !== "undefined" &&
   Boolean(process.env.SUPPRESS_TRANSFORMATION_WARNINGS);
 
-export const parseProtoStream = (source$: Observable<HttpEvent>): Observable<BaseEvent> => {
+export const parseProtoStream = (
+  source$: Observable<HttpEvent>,
+  debugLogger?: DebugLoggerInput,
+): Observable<BaseEvent> => {
+  const log = resolveDebugLogger(debugLogger);
   const eventSubject = new Subject<BaseEvent>();
   let buffer = new Uint8Array(0);
+  // A decode failure leaves its frame in the buffer, so without this the
+  // stream end would blame the leftovers on truncation and report the wrong
+  // cause for a stream that had already failed for a different reason.
+  let failed = false;
 
   source$.subscribe({
     next: (event: HttpEvent) => {
@@ -38,13 +47,20 @@ export const parseProtoStream = (source$: Observable<HttpEvent>): Observable<Bas
     },
     error: (err) => eventSubject.error(err),
     complete: () => {
-      // Try to process any remaining data in the buffer
+      // Drain whatever whole frames are left, then account for the remainder.
+      // A short final frame never throws — the framing loop just breaks,
+      // waiting for bytes that will not come — so nothing but this check can
+      // notice it. Losing a message and completing anyway would report success
+      // for a stream that was cut in half.
+      processBuffer();
+      if (failed) return;
       if (buffer.length > 0) {
-        try {
-          processBuffer();
-        } catch (_error: unknown) {
-          console.warn("Incomplete or invalid protocol buffer data at stream end");
-        }
+        eventSubject.error(
+          new Error(
+            `The binary stream ended mid-frame: ${buffer.length} trailing bytes could not be read as a complete message.`,
+          ),
+        );
+        return;
       }
       eventSubject.complete();
     },
@@ -54,6 +70,9 @@ export const parseProtoStream = (source$: Observable<HttpEvent>): Observable<Bas
    * Process as many complete messages as possible from the buffer
    */
   function processBuffer() {
+    // Once the stream has failed the undecodable frame is still at the head of
+    // the buffer; re-entering would re-read it for every chunk that follows.
+    if (failed) return;
     // Keep processing while we have enough data for at least a header (4 bytes)
     while (buffer.length >= 4) {
       // Read message length from the first 4 bytes (big-endian uint32)
@@ -75,6 +94,7 @@ export const parseProtoStream = (source$: Observable<HttpEvent>): Observable<Bas
         const event = proto.decode(message);
 
         // Emit the parsed event
+        log?.event("PROTO", "Event received:", event, { type: event.type });
         eventSubject.next(event);
       } catch (error: unknown) {
         // An event this build was never compiled against is not a failure. The
@@ -92,6 +112,7 @@ export const parseProtoStream = (source$: Observable<HttpEvent>): Observable<Bas
           }
         } else {
           const errorMessage = error instanceof Error ? error.message : String(error);
+          failed = true;
           eventSubject.error(
             new Error(`Failed to decode protocol buffer message: ${errorMessage}`),
           );
