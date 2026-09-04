@@ -16,8 +16,6 @@ on:
       - "integrations/langroid/python/**"
       - "integrations/crew-ai/python/**"
       - "integrations/claude-managed-agents/python/**"
-      # agent-spec and claude-agent-sdk have no test lane, but they ship
-      # committed lockfiles that the `lockfiles` job below verifies.
       - "integrations/agent-spec/python/**"
       - "integrations/claude-agent-sdk/python/**"
       # Globs, not another hand-maintained list: the lockfiles job discovers locks
@@ -1119,6 +1117,132 @@ jobs:
   # in CI. Five of the 13 are stale today, which is why closing this needs its own
   # change: freezing them as-is turns dojo-e2e red, and relocking all 13
   # pulls in dependency churn well beyond a toolchain pin.
+  agent-spec-python:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        # id so the lockfile assertion below can gate on this step's outcome — see
+        # the comment there for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect fork PR
+        id: fork-check
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" && \
+                "${GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME}" != "${{ github.repository }}" ]]; then
+            echo "prefix=fork-" >> "$GITHUB_OUTPUT"
+          else
+            echo "prefix=" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Load cached venv
+        id: cached-uv-dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: integrations/agent-spec/python/.venv
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-agent-spec-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/agent-spec/python/uv.lock') }}
+
+      - name: Install dependencies
+        working-directory: integrations/agent-spec/python
+        run: uv sync --locked
+
+      - name: Run tests
+        working-directory: integrations/agent-spec/python
+        run: uv run --locked python -m pytest tests/ -v
+
+      - name: Assert no lockfile was rewritten
+        # Must run when the tests FAIL: a job that rewrote a lockfile and then failed
+        # its tests would otherwise skip this step and report only the test failure,
+        # losing the signal this guard exists to produce.
+        #
+        # !cancelled() rather than always(), because always() also fires on
+        # cancellation, and concurrency cancels supersede runs constantly here — each
+        # one would otherwise spend a step re-checking a job nobody is waiting on.
+        #
+        # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
+        # when an earlier step failed, including `Checkout code` — and this step is a
+        # local `uses:`, so with no repo on disk it dies with "Can't find 'action.yml'
+        # under .../assert-lockfiles-unchanged". That lands AFTER the real error and
+        # reads as though the guard itself is broken, which is precisely the misleading
+        # signal action.yml's header argues against.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
+
+  claude-agent-sdk-python:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        # id so the lockfile assertion below can gate on this step's outcome — see
+        # the comment there for why !cancelled() alone is not enough.
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect fork PR
+        id: fork-check
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" && \
+                "${GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME}" != "${{ github.repository }}" ]]; then
+            echo "prefix=fork-" >> "$GITHUB_OUTPUT"
+          else
+            echo "prefix=" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Load cached venv
+        id: cached-uv-dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: integrations/claude-agent-sdk/python/.venv
+          key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-claude-agent-sdk-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/claude-agent-sdk/python/uv.lock') }}
+
+      - name: Install dependencies
+        working-directory: integrations/claude-agent-sdk/python
+        run: uv sync --locked
+
+      - name: Run tests
+        working-directory: integrations/claude-agent-sdk/python
+        run: uv run --locked python -m pytest tests/ -v
+
+      - name: Assert no lockfile was rewritten
+        # Must run when the tests FAIL: a job that rewrote a lockfile and then failed
+        # its tests would otherwise skip this step and report only the test failure,
+        # losing the signal this guard exists to produce.
+        #
+        # !cancelled() rather than always(), because always() also fires on
+        # cancellation, and concurrency cancels supersede runs constantly here — each
+        # one would otherwise spend a step re-checking a job nobody is waiting on.
+        #
+        # The checkout gate is NOT redundant with !cancelled(). !cancelled() is TRUE
+        # when an earlier step failed, including `Checkout code` — and this step is a
+        # local `uses:`, so with no repo on disk it dies with "Can't find 'action.yml'
+        # under .../assert-lockfiles-unchanged". That lands AFTER the real error and
+        # reads as though the guard itself is broken, which is precisely the misleading
+        # signal action.yml's header argues against.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: ./.github/actions/assert-lockfiles-unchanged
+
   lockfiles:
     name: lockfiles
     runs-on: ubuntu-latest
