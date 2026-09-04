@@ -264,9 +264,6 @@
     }
   },
   "seo": {
-    "metatags": {
-      "og:image": "https://raw.githubusercontent.com/ag-ui-protocol/docs/logo/light.png"
-    },
     "indexing": "navigable"
   },
   "integrations": {
