@@ -18,7 +18,7 @@ import {
 import { DebugLogger, createDebugLogger } from "@/debug-logger";
 import { v4 as uuidv4 } from "uuid";
 import { structuredClone_ } from "@/utils";
-import { compareVersions } from "compare-versions";
+import { compareVersions, validate as validateVersion } from "compare-versions";
 import { catchError, map, tap } from "rxjs/operators";
 import { finalize } from "rxjs/operators";
 import { takeUntil } from "rxjs/operators";
@@ -124,29 +124,52 @@ export abstract class AbstractAgent {
    *  Cleared when a subsequent run completes successfully. */
   public pendingInterrupts: Interrupt[] = [];
   private middlewares: Middleware[] = [];
-  // Emits to immediately detach from the active run (stop processing its stream)
-  private activeRunDetach$?: Subject<void>;
-  private activeRunCompletionPromise?: Promise<void>;
+  /**
+   * One entry per run currently in flight: the subject that detaches it, and
+   * the promise that resolves when its pipeline has finished unwinding.
+   *
+   * A SET, not a single field. Concurrent runs on one agent are supported (see
+   * agent-concurrent.test.ts), and a single slot meant the second run
+   * overwrote the first one's handle: `detachActiveRun()` then tore down only
+   * the newest run and returned immediately, while the older one kept
+   * processing its stream with nothing left that could ever stop it.
+   */
+  private activeRuns = new Set<{ detach$: Subject<void>; completion: Promise<void> }>();
 
   /** Breaks the alias cycle for an override that defers to super.maxVersion. */
   private resolvingPeerCeiling = false;
 
   get maxProtocolVersion(): string {
+    // Already resolving: a `maxVersion` override has deferred back to the
+    // alias it is standing in for. Both spellings of that deferral land here —
+    // `super.maxVersion` reaches the base alias below, and
+    // `this.maxProtocolVersion` reaches this getter — so the guard has to be
+    // read on BOTH sides or the second spelling recurses until the stack
+    // blows. Answering with the default ends the cycle in one hop.
+    if (this.resolvingPeerCeiling) {
+      return packageJson.version;
+    }
     // A subclass that still overrides the deprecated name keeps working: the
     // override is what this getter answers with, so every internal gate that
     // reads maxProtocolVersion sees the pinned value the integration set.
     let proto = Object.getPrototypeOf(this);
     while (proto && proto !== AbstractAgent.prototype) {
       if (Object.getOwnPropertyDescriptor(proto, "maxVersion")) {
-        // The flag is what stops an override written as
-        // `get maxVersion() { return super.maxVersion }` from recursing:
-        // the base alias below answers the in-flight resolution with the
-        // default instead of bouncing back here.
+        // Save/restore rather than a bare `= false` in `finally`. Today the
+        // two are equivalent and provably so: the early return at the top of
+        // this getter fires whenever the flag is already set, so this line is
+        // only ever reached with it false and `wasResolving` can never be
+        // true. It is written this way so that the clearing stays correct if
+        // that early return is ever relaxed to allow a nested resolution — the
+        // shape a reader would otherwise have to re-derive. What the tests can
+        // pin is the property that matters, that the flag does not stay SET
+        // (agent-peer-ceiling.test.ts, "clears the guard after a resolution").
+        const wasResolving = this.resolvingPeerCeiling;
         this.resolvingPeerCeiling = true;
         try {
           return this.maxVersion;
         } finally {
-          this.resolvingPeerCeiling = false;
+          this.resolvingPeerCeiling = wasResolving;
         }
       }
       proto = Object.getPrototypeOf(proto);
@@ -196,6 +219,23 @@ export abstract class AbstractAgent {
     }
   }
 
+  /**
+   * The peer ceiling as the constructor's version gates need it: a string
+   * compareVersions can actually read. A subclass getter is the only writer,
+   * and it can answer with something unusable — most often `undefined`,
+   * because class fields initialise after `super()` returns — so the value is
+   * judged here rather than deep inside the comparison.
+   */
+  private resolvedCeilingDuringConstruction(): string {
+    const ceiling: unknown = this.maxProtocolVersion;
+    if (typeof ceiling !== "string" || !validateVersion(ceiling)) {
+      throw new AGUIError(
+        `maxProtocolVersion resolved to ${JSON.stringify(ceiling)} during construction, which is not a version this client can compare. A ceiling read from an instance field is not available yet — return a literal from the getter.`,
+      );
+    }
+    return ceiling;
+  }
+
   constructor({
     agentId,
     description,
@@ -212,25 +252,37 @@ export abstract class AbstractAgent {
     this._debug = resolveAgentDebugConfig(debug);
     this._debugLogger = createDebugLogger(this._debug);
 
-    if (compareVersions(this.maxProtocolVersion, "0.0.39") <= 0) {
+    // Resolved ONCE, and checked before it is compared. A subclass ceiling is
+    // read through a getter, and this constructor runs before the subclass's
+    // instance fields exist — so `get maxProtocolVersion() { return this.pin }`
+    // hands back `undefined` here and compareVersions threw "Invalid argument
+    // expected string", which named neither the getter nor the field.
+    const peerCeiling = this.resolvedCeilingDuringConstruction();
+
+    if (compareVersions(peerCeiling, "0.0.39") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_39());
     }
 
-    // Auto-insert BackwardCompatibility_0_0_45 for backward compatibility
-    // with legacy THINKING events (deprecated, will be removed in 1.0.0)
-    if (compareVersions(this.maxProtocolVersion, "0.0.45") <= 0) {
+    // Auto-insert BackwardCompatibility_0_0_45 for backward compatibility with
+    // the retired THINKING_* events. Registered in the repo-root
+    // DEPRECATIONS.md (not this package's own, which tracks a different set
+    // under a different schema) with an expiry of 2027-08-24, not removed in
+    // 1.0 — see also the note on
+    // CompatibilityBoundary, which translates the same shapes innermost and so
+    // usually gets to them first.
+    if (compareVersions(peerCeiling, "0.0.45") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_45());
     }
 
     // Auto-insert BackwardCompatibility_0_0_47 for backward compatibility
     // with legacy BinaryInputContent (maps to dedicated image/audio/video/document types)
-    if (compareVersions(this.maxProtocolVersion, "0.0.47") <= 0) {
+    if (compareVersions(peerCeiling, "0.0.47") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_47());
     }
 
     // Auto-insert BackwardCompatibility_0_0_57 for backward compatibility with
     // pre-subagent agents: strips subagentRunId and drops SUBAGENT_* lifecycle events.
-    if (compareVersions(this.maxProtocolVersion, "0.0.57") <= 0) {
+    if (compareVersions(peerCeiling, "0.0.57") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_57());
     }
   }
@@ -292,12 +344,16 @@ export abstract class AbstractAgent {
 
       await this.onInitialize(input, subscribers);
 
-      // Per-run detachment signal + completion promise
-      this.activeRunDetach$ = new Subject<void>();
+      // Per-run detachment signal + completion promise. Held in locals as well
+      // as in the set, so every stage below closes over THIS run's handle
+      // rather than reading whichever run registered last.
+      const detach$ = new Subject<void>();
       let resolveActiveRunCompletion: (() => void) | undefined;
-      this.activeRunCompletionPromise = new Promise<void>((resolve) => {
+      const completion = new Promise<void>((resolve) => {
         resolveActiveRunCompletion = resolve;
       });
+      const activeRun = { detach$, completion };
+      this.activeRuns.add(activeRun);
 
       const pipeline = pipe(
         () => {
@@ -335,7 +391,7 @@ export abstract class AbstractAgent {
         transformChunks(this.debugLogger),
         verifyEvents(this.debugLogger),
         // Stop processing immediately when this run is detached
-        (source$) => source$.pipe(takeUntil(this.activeRunDetach$!)),
+        (source$) => source$.pipe(takeUntil(detach$)),
         (source$) => this.apply(input, source$, subscribers),
         (source$) => this.processApplyEvents(input, source$, subscribers),
         catchError((error) => {
@@ -353,10 +409,11 @@ export abstract class AbstractAgent {
           });
           this.isRunning = false;
           void this.onFinalize(input, subscribers);
+          // Only THIS run leaves the set: a run that ends on its own must not
+          // disarm detach for a sibling still in flight.
+          this.activeRuns.delete(activeRun);
           resolveActiveRunCompletion?.();
           resolveActiveRunCompletion = undefined;
-          this.activeRunCompletionPromise = undefined;
-          this.activeRunDetach$ = undefined;
         }),
       );
 
@@ -402,12 +459,16 @@ export abstract class AbstractAgent {
 
       await this.onInitialize(input, subscribers);
 
-      // Per-run detachment signal + completion promise
-      this.activeRunDetach$ = new Subject<void>();
+      // Per-run detachment signal + completion promise. Held in locals as well
+      // as in the set, so every stage below closes over THIS run's handle
+      // rather than reading whichever run registered last.
+      const detach$ = new Subject<void>();
       let resolveActiveRunCompletion: (() => void) | undefined;
-      this.activeRunCompletionPromise = new Promise<void>((resolve) => {
+      const completion = new Promise<void>((resolve) => {
         resolveActiveRunCompletion = resolve;
       });
+      const activeRun = { detach$, completion };
+      this.activeRuns.add(activeRun);
 
       const pipeline = pipe(
         () => defer(() => this.connect(input)),
@@ -419,7 +480,7 @@ export abstract class AbstractAgent {
         transformChunks(this.debugLogger),
         verifyEvents(this.debugLogger),
         // Stop processing immediately when this run is detached
-        (source$) => source$.pipe(takeUntil(this.activeRunDetach$!)),
+        (source$) => source$.pipe(takeUntil(detach$)),
         (source$) => this.apply(input, source$, subscribers),
         (source$) => this.processApplyEvents(input, source$, subscribers),
         catchError((error) => {
@@ -432,10 +493,11 @@ export abstract class AbstractAgent {
         finalize(() => {
           this.isRunning = false;
           void this.onFinalize(input, subscribers);
+          // Only THIS run leaves the set: a run that ends on its own must not
+          // disarm detach for a sibling still in flight.
+          this.activeRuns.delete(activeRun);
           resolveActiveRunCompletion?.();
           resolveActiveRunCompletion = undefined;
-          this.activeRunCompletionPromise = undefined;
-          this.activeRunDetach$ = undefined;
         }),
       );
 
@@ -454,13 +516,18 @@ export abstract class AbstractAgent {
   public abortRun() {}
 
   public async detachActiveRun(): Promise<void> {
-    if (!this.activeRunDetach$) {
+    // Snapshotted first: signalling a run makes it finalize, which removes it
+    // from the set, and iterating the live set while it shrinks would skip
+    // entries.
+    const running = [...this.activeRuns];
+    if (running.length === 0) {
       return;
     }
-    const completion = this.activeRunCompletionPromise ?? Promise.resolve();
-    this.activeRunDetach$.next();
-    this.activeRunDetach$?.complete();
-    await completion;
+    for (const run of running) {
+      run.detach$.next();
+      run.detach$.complete();
+    }
+    await Promise.all(running.map((run) => run.completion));
   }
 
   protected apply(
@@ -588,7 +655,15 @@ export abstract class AbstractAgent {
             delete (message as { subagentRunId?: string | null }).subagentRunId;
           }
         }
-        input.messages = onRunInitializedMutation.messages;
+        // The activity filter from prepareRunAgentInput has to be re-applied
+        // for the same reason the null-tag sanitisation above does: this
+        // assignment lands AFTER that filter ran, and a subscriber replacing
+        // the message list is the one writer that can still put an activity
+        // message — the consumer's own display state, which no producer owns —
+        // onto the wire. The AGENT keeps it; only the input copy is filtered.
+        input.messages = onRunInitializedMutation.messages.filter(
+          (message) => message.role !== "activity",
+        );
         subscribers.forEach((subscriber) => {
           subscriber.onMessagesChanged?.({
             messages: this.messages,
@@ -728,6 +803,11 @@ export abstract class AbstractAgent {
     cloned.subscribers = [...this.subscribers];
     cloned.middlewares = [...this.middlewares];
     cloned.pendingInterrupts = structuredClone_(this.pendingInterrupts);
+    // Object.create skips class field initializers, so every field this clone
+    // needs has to be set here. A clone has no runs in flight of its own — the
+    // original's are the original's — so it starts with an empty set rather
+    // than a share of the source's.
+    cloned.activeRuns = new Set();
 
     return cloned;
   }

@@ -231,6 +231,32 @@ export interface AgentSubscriber {
   ): MaybePromise<void>;
 }
 
+/**
+ * Whether an exception is the freeze guard firing rather than an ordinary bug.
+ *
+ * Matched on the message because that is the only thing the engines expose:
+ * a write to a frozen property, an addition to a non-extensible object and a
+ * delete from one all raise a plain TypeError, indistinguishable by type from
+ * `Cannot read properties of undefined`. The wordings differ per engine, so
+ * the fragments below cover the three this library ships to — V8 (Chrome,
+ * Node, Edge), SpiderMonkey (Firefox) and JavaScriptCore (Safari) — rather
+ * than V8's alone. It is a table of what those engines say TODAY, not a
+ * closed set: an engine is free to reword, and a spelling missing from here
+ * shows up as a freeze violation reported as an ordinary subscriber error.
+ * subscriber-errors.test.ts pins the current wordings one engine at a time.
+ */
+function isFrozenWriteError(error: unknown): boolean {
+  if (!(error instanceof TypeError)) return false;
+  // `can't be deleted` is SpiderMonkey's delete-from-frozen wording and
+  // `unable to delete property` is JavaScriptCore's; neither shares any
+  // fragment with V8's `cannot delete property`, so both were read as
+  // ordinary bugs on Firefox and Safari — the exact mis-attribution this
+  // guard exists to end, pointing the other way.
+  return /read[- ]?only|not extensible|cannot add property|cannot delete property|can't be deleted|unable to delete property|object is frozen|is not writable/i.test(
+    error.message,
+  );
+}
+
 function deepFreeze<T>(obj: T): T {
   Object.freeze(obj);
   if (obj !== null && typeof obj === "object") {
@@ -373,8 +399,14 @@ export async function runSubscribersWithMutation(
         break;
       }
     } catch (error) {
-      if (isDev && error instanceof TypeError) {
-        // Likely a freeze violation: subscriber attempted to mutate frozen inputs in-place.
+      // Two different failures used to be conflated here. `error instanceof
+      // TypeError` alone attributed EVERY TypeError to the freeze guard --
+      // including the everyday `Cannot read properties of undefined`, which
+      // has nothing to do with it -- and told the author to stop mutating
+      // inputs they never touched. Only an actual write to a frozen or
+      // non-extensible object is a freeze violation, and the engine says so in
+      // the message.
+      if (freezeInputs && isDev && isFrozenWriteError(error)) {
         // In test environments, re-throw so tests fail fast and the violation is visible.
         // In development (non-test), log a specific message to distinguish freeze violations
         // from ordinary subscriber errors.
@@ -386,7 +418,10 @@ export async function runSubscribersWithMutation(
             "Return mutations via AgentStateMutation instead of mutating directly.",
           error,
         );
-      } else if (!isTestEnvironment) {
+      } else {
+        // Logged in EVERY environment. Suppressing this under vitest meant a
+        // subscriber that threw was neither logged nor rethrown, so a broken
+        // subscriber looked exactly like one that never ran.
         console.error("Subscriber error:", error);
       }
       // Skip this subscriber's mutation and continue
