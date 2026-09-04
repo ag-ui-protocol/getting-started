@@ -4,6 +4,17 @@ import { BaseEvent } from "@ag-ui/core";
 import * as proto from "@ag-ui/proto";
 
 /**
+ * Maximum size the framing buffer is allowed to reach before the stream fails.
+ *
+ * processBuffer waits until the buffer holds the whole message named by the
+ * 4-byte length prefix, so a prefix that is never satisfied grows the buffer
+ * without bound. Mirrors SseParser::kMaxBufferSize in the C++ SDK
+ * (sdks/community/c++/src/stream/sse_parser.h), which caps the same
+ * accumulation at 10 MB.
+ */
+export const MAX_BUFFER_SIZE = 10 * 1024 * 1024;
+
+/**
  * Parses a stream of HTTP events into a stream of BaseEvent objects using Protocol Buffer format.
  * Each message is prefixed with a 4-byte length header (uint32 in big-endian format)
  * followed by the protocol buffer encoded message.
@@ -19,6 +30,17 @@ export const parseProtoStream = (source$: Observable<HttpEvent>): Observable<Bas
       }
 
       if (event.type === HttpEventType.DATA && event.data) {
+        // Checked before the allocation, so the buffer never passes the limit
+        // even briefly.
+        if (buffer.length + event.data.length > MAX_BUFFER_SIZE) {
+          eventSubject.error(
+            new Error(
+              `Protobuf buffer size exceeded maximum limit of ${MAX_BUFFER_SIZE / (1024 * 1024)} MB`,
+            ),
+          );
+          return;
+        }
+
         // Append the new data to our buffer
         const newBuffer = new Uint8Array(buffer.length + event.data.length);
         newBuffer.set(buffer, 0);

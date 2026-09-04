@@ -9,6 +9,7 @@ import {
 } from "@ag-ui/core";
 import * as proto from "@ag-ui/proto";
 import { transformHttpEventStream } from "../http";
+import { MAX_BUFFER_SIZE } from "../proto";
 import * as encoder from "@ag-ui/encoder";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -469,5 +470,106 @@ describe("parseProtoStream", () => {
 
     // Complete the stream
     chunk$.complete();
+  });
+
+  it("should emit error when the protobuf buffer exceeds the maximum size", async () => {
+    const chunk$ = new Subject<HttpEvent>();
+    const event$ = transformHttpEventStream(chunk$);
+
+    const errors: any[] = [];
+    event$.subscribe({
+      next: () => {
+        expect.fail("Should not emit events while the length prefix is unsatisfied");
+      },
+      error: (err) => errors.push(err),
+      complete: () => {
+        expect.fail("Stream should not complete once the buffer limit is passed");
+      },
+    });
+
+    const headers = new Headers();
+    headers.append("Content-Type", proto.AGUI_MEDIA_TYPE);
+
+    chunk$.next({
+      type: HttpEventType.HEADERS,
+      status: 200,
+      headers: headers,
+    });
+
+    // A length prefix naming a message far larger than anything that will
+    // arrive, so processBuffer keeps waiting while the buffer keeps growing.
+    const lengthPrefix = new Uint8Array(4);
+    new DataView(lengthPrefix.buffer).setUint32(0, 0xffffffff, false);
+
+    chunk$.next({
+      type: HttpEventType.DATA,
+      data: lengthPrefix,
+    });
+
+    const filler = new Uint8Array(1024 * 1024);
+    const chunkCount = Math.floor(MAX_BUFFER_SIZE / filler.length) + 1;
+
+    for (let i = 0; i < chunkCount; i++) {
+      chunk$.next({
+        type: HttpEventType.DATA,
+        data: filler,
+      });
+    }
+
+    // The check runs inside the DATA handler, so the failure is already
+    // delivered by the time the last chunk above returns.
+    await Promise.resolve();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("Protobuf buffer size exceeded maximum limit");
+  });
+
+  it("should not emit error when complete messages exceed the limit in total", async () => {
+    const chunk$ = new Subject<HttpEvent>();
+    const event$ = transformHttpEventStream(chunk$);
+
+    const received: any[] = [];
+    let errored: any = null;
+    const settled = new Promise<void>((resolve) => {
+      event$.subscribe({
+        next: (event) => received.push(event),
+        error: (err) => {
+          errored = err;
+          resolve();
+        },
+        complete: () => resolve(),
+      });
+    });
+
+    const headers = new Headers();
+    headers.append("Content-Type", proto.AGUI_MEDIA_TYPE);
+
+    chunk$.next({
+      type: HttpEventType.HEADERS,
+      status: 200,
+      headers: headers,
+    });
+
+    // Each message is complete, so processBuffer slices it away as soon as it
+    // lands. The total crosses the limit; the live buffer never does.
+    const encoded = eventEncoder.encodeBinary({
+      type: EventType.TEXT_MESSAGE_CONTENT,
+      messageId: "msg123",
+      delta: "A".repeat(1024 * 1024),
+    });
+    const chunkCount = Math.floor(MAX_BUFFER_SIZE / encoded.length) + 1;
+
+    for (let i = 0; i < chunkCount; i++) {
+      chunk$.next({
+        type: HttpEventType.DATA,
+        data: encoded,
+      });
+    }
+    chunk$.complete();
+
+    await settled;
+
+    expect(errored).toBeNull();
+    expect(received).toHaveLength(chunkCount);
   });
 });

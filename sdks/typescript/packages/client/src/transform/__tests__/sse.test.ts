@@ -4,6 +4,7 @@ import { take } from "rxjs/operators";
 import { transformHttpEventStream } from "../http";
 import { EventType } from "@ag-ui/core";
 import { HttpEvent, HttpEventType } from "../../run/http-request";
+import { MAX_BUFFER_SIZE } from "../sse";
 
 describe("transformHttpEventStream", () => {
   it("should emit events as soon as complete SSE events are encountered", async () => {
@@ -382,5 +383,129 @@ describe("transformHttpEventStream", () => {
       messageId: "1",
       delta: "Split JSON Test",
     });
+  });
+
+  it("should emit error when the SSE buffer exceeds the maximum size", async () => {
+    const chunk$ = new Subject<HttpEvent>();
+    const event$ = transformHttpEventStream(chunk$);
+
+    const errors: any[] = [];
+    event$.subscribe({
+      next: () => {
+        expect.fail("Should not emit events for a stream with no event boundary");
+      },
+      error: (err) => errors.push(err),
+      complete: () => {
+        expect.fail("Stream should not complete once the buffer limit is passed");
+      },
+    });
+
+    const headers = new Headers();
+    headers.append("Content-Type", "text/event-stream");
+
+    chunk$.next({
+      type: HttpEventType.HEADERS,
+      status: 200,
+      headers: headers,
+    });
+
+    // A data line that never reaches a \n\n boundary, so the tail buffer keeps
+    // every character of it instead of releasing a completed event.
+    chunk$.next({
+      type: HttpEventType.DATA,
+      data: new TextEncoder().encode("A".repeat(MAX_BUFFER_SIZE + 1)),
+    });
+
+    // The check runs inside the DATA handler, so the failure is already
+    // delivered by the time the chunk above returns.
+    await Promise.resolve();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("SSE buffer size exceeded maximum limit");
+  });
+
+  it("should not emit error when the buffer reaches exactly the maximum size", async () => {
+    const chunk$ = new Subject<HttpEvent>();
+    const event$ = transformHttpEventStream(chunk$);
+
+    let errored: any = null;
+    const settled = new Promise<void>((resolve) => {
+      event$.subscribe({
+        next: () => {},
+        error: (err) => {
+          errored = err;
+          resolve();
+        },
+        complete: () => resolve(),
+      });
+    });
+
+    const headers = new Headers();
+    headers.append("Content-Type", "text/event-stream");
+
+    chunk$.next({
+      type: HttpEventType.HEADERS,
+      status: 200,
+      headers: headers,
+    });
+
+    // Exactly at the limit is still allowed: the check is on passing it, not
+    // on reaching it.
+    chunk$.next({
+      type: HttpEventType.DATA,
+      data: new TextEncoder().encode("A".repeat(MAX_BUFFER_SIZE)),
+    });
+    chunk$.complete();
+
+    await settled;
+
+    expect(errored).toBeNull();
+  });
+
+  it("should not emit error when complete events exceed the limit in total", async () => {
+    const chunk$ = new Subject<HttpEvent>();
+    const event$ = transformHttpEventStream(chunk$);
+
+    const received: any[] = [];
+    let errored: any = null;
+    const settled = new Promise<void>((resolve) => {
+      event$.subscribe({
+        next: (event) => received.push(event),
+        error: (err) => {
+          errored = err;
+          resolve();
+        },
+        complete: () => resolve(),
+      });
+    });
+
+    const headers = new Headers();
+    headers.append("Content-Type", "text/event-stream");
+
+    chunk$.next({
+      type: HttpEventType.HEADERS,
+      status: 200,
+      headers: headers,
+    });
+
+    // Every chunk carries one complete event, so the boundary releases the tail
+    // each time. The total crosses the limit; the live buffer never does.
+    const delta = "A".repeat(1024 * 1024);
+    const chunkCount = Math.floor(MAX_BUFFER_SIZE / delta.length) + 1;
+
+    for (let i = 0; i < chunkCount; i++) {
+      chunk$.next({
+        type: HttpEventType.DATA,
+        data: new TextEncoder().encode(
+          `data: {"type": "TEXT_MESSAGE_CONTENT", "messageId": "1", "delta": "${delta}"}\n\n`,
+        ),
+      });
+    }
+    chunk$.complete();
+
+    await settled;
+
+    expect(errored).toBeNull();
+    expect(received).toHaveLength(chunkCount);
   });
 });
