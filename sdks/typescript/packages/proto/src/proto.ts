@@ -18,9 +18,70 @@ const asRecord = (value: unknown): LooseRecord | undefined =>
 
 const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
+/**
+ * The same switch the client's enforcement stage reads, so one variable
+ * silences both halves of what is really one decision about unrecognised
+ * material.
+ */
+const suppressWarnings = (): boolean =>
+  typeof process !== "undefined" &&
+  typeof process.env !== "undefined" &&
+  Boolean(process.env.SUPPRESS_TRANSFORMATION_WARNINGS);
+
+/**
+ * The one drop this layer makes that it cannot hand on to enforcement.
+ *
+ * An unrecognised role or patch operation still has a NAME — the string or the
+ * enum value arrived on the wire — so it rides along and enforcement strips it
+ * and says which path it stripped. An unset protobuf oneof has no name at all:
+ * the bytes say only that no arm this build knows was populated. There is
+ * nothing to pass on, so the drop has to happen here, and a drop that happens
+ * here is a drop enforcement will never mention. Saying so is the difference
+ * between the two transports losing the same part loudly and one of them
+ * losing it in silence.
+ */
+const warnDroppedContentPart = (): void => {
+  if (suppressWarnings()) return;
+  console.warn(
+    "[ag-ui][proto] Dropped a content part this build does not know: the protocol has a variant this SDK predates.",
+  );
+};
+
+/**
+ * The encode-side twin, and the only one that can say WHERE.
+ *
+ * Reached only with validation bypassed, since the schema would have rejected
+ * the part first. There is no wire arm to put it on, so it cannot be encoded —
+ * but the message then arrives at the far end one part shorter, and until this
+ * warning existed nothing said which part went missing or from which message.
+ */
+const warnUnencodableContentPart = (at: string, index: number): void => {
+  if (suppressWarnings()) return;
+  console.warn(
+    `[ag-ui][proto.encode] Dropped ${at}.${CONTENT_FIELD}[${index}]: no wire form for this content part, so it is not encoded.`,
+  );
+};
+
 function toCamelCase(str: string): string {
   return str.toLowerCase().replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
 }
+
+/**
+ * A validation failure as the list of places it failed.
+ *
+ * Read structurally rather than by instanceof: a zod error crossing a package
+ * boundary may come from a different copy of zod, and an instanceof that
+ * quietly missed would leave the warning naming nothing at all.
+ */
+const issuePaths = (err: unknown): string => {
+  const issues = (err as { issues?: unknown })?.issues;
+  if (!Array.isArray(issues) || issues.length === 0) return String(err);
+  const paths = issues.map((issue) => {
+    const path = (issue as { path?: unknown }).path;
+    return Array.isArray(path) && path.length > 0 ? `/${path.join("/")}` : "the event itself";
+  });
+  return [...new Set(paths)].join(", ");
+};
 
 /**
  * The event types the handwritten SDK models know. The schema — and this
@@ -216,7 +277,10 @@ const KNOWN_ROLES = new Set<string>([
   "reasoning",
 ]);
 
-const toWireMessage = (value: unknown): LooseRecord => {
+/** The JSON field the merged Message splits, for naming a part in a warning. */
+const CONTENT_FIELD = "content";
+
+const toWireMessage = (value: unknown, at = "message"): LooseRecord => {
   const message = asRecord(value) ?? {};
   const wire: LooseRecord = { ...message, contentParts: [] };
   wire.metadata = normalizeMetadata(message.metadata);
@@ -226,7 +290,11 @@ const toWireMessage = (value: unknown): LooseRecord => {
   }));
   if (Array.isArray(message.content)) {
     wire.contentParts = message.content
-      .map((part: unknown) => toProtoContentPart(part))
+      .map((part: unknown, index: number) => {
+        const mapped = toProtoContentPart(part);
+        if (mapped === undefined) warnUnencodableContentPart(at, index);
+        return mapped;
+      })
       .filter((part: unknown) => part !== undefined);
     wire.content = undefined;
   } else if (typeof message.role === "string" && MAP_CONTENT_ROLES.has(message.role)) {
@@ -241,33 +309,63 @@ const fromWireMessage = (value: unknown): LooseRecord | undefined => {
   const message: LooseRecord = { ...wire };
   const role = typeof wire.role === "string" ? wire.role : "";
   // A role this build does not know makes the whole message an unrecognised
-  // member of the Message union, and the caller drops it from the array —
-  // which is what enforcement does with the same message as JSON. The
-  // carrier-exclusivity checks below stay fatal because they concern roles
-  // this build DOES know, where a mismatched carrier is malformed on both
-  // transports rather than a message from a later protocol.
-  if (!KNOWN_ROLES.has(role)) return undefined;
-  // Content carriers are role-exclusive; a message carrying a carrier its
-  // role does not use would lose data whichever one decode preferred.
-  if (!PARTS_CONTENT_ROLES.has(role) && asArray(wire.contentParts).length > 0) {
-    throw new Error("Invalid event: message carries content parts for a role that has none");
-  }
-  if (wire.activityContent !== undefined && !MAP_CONTENT_ROLES.has(role)) {
-    throw new Error("Invalid event: message carries activity content for a non-activity role");
-  }
-  if (MAP_CONTENT_ROLES.has(role) && wire.content !== undefined) {
-    throw new Error("Invalid event: activity content cannot ride with other content forms");
-  }
+  // member of the Message union — which is exactly what the same message is on
+  // the JSON path, where enforcement's discriminated-union walk removes it from
+  // the array and NAMES the path it removed. So it is rebuilt as it arrived and
+  // judged there, on both transports alike. Dropping it here instead removed it
+  // just as surely, but silently: enforcement then saw a snapshot with nothing
+  // wrong in it, and the same stream lost a message loudly over SSE and quietly
+  // over protobuf.
+  const known = KNOWN_ROLES.has(role);
+  // Which carrier feeds `content` is a fact about the ROLE, for a role this
+  // build knows. For one it does not, there is no rule to look up and no way to
+  // invent one, so the carrier the producer actually populated decides.
+  // An unknown role's EMPTY parts array reads as no content — enforcement drops the message anyway.
+  const usesParts = known ? PARTS_CONTENT_ROLES.has(role) : asArray(wire.contentParts).length > 0;
+  const usesMap = known
+    ? MAP_CONTENT_ROLES.has(role)
+    : !usesParts && wire.activityContent !== undefined;
+  // Carrier exclusivity comes in two kinds, and only one of them survives not
+  // knowing the role.
+  //
+  // WHICH carrier a role uses is a fact about the role, so it can only be
+  // checked for a role this build knows; applying it to an unknown one would
+  // make a role added after this build shipped fatal over binary and
+  // survivable over SSE — the very split this layer exists to prevent.
+  //
+  // Carrying SEVERAL at once is different: they are competing spellings of one
+  // JSON field, so no role, present or future, can mean anything by it. That
+  // half holds whatever the role is. Without it an unknown role carrying two
+  // would have kept whichever this code happened to read first and dropped the
+  // rest in silence — the same quiet loss this whole change is about.
   if (
-    PARTS_CONTENT_ROLES.has(role) &&
-    wire.content !== undefined &&
-    asArray(wire.contentParts).length > 0
+    !known &&
+    (wire.content !== undefined ? 1 : 0) +
+      (asArray(wire.contentParts).length > 0 ? 1 : 0) +
+      (wire.activityContent !== undefined ? 1 : 0) >
+      1
   ) {
-    // String content and parts together is a contradiction the encoder never
-    // writes; resolving it either way would silently discard the other half.
-    throw new Error("Invalid event: message carries both string content and content parts");
+    throw new Error("Invalid event: message carries more than one content form");
   }
-  if (PARTS_CONTENT_ROLES.has(role) && wire.content === undefined) {
+  if (known) {
+    // Content carriers are role-exclusive; a message carrying a carrier its
+    // role does not use would lose data whichever one decode preferred.
+    if (!usesParts && asArray(wire.contentParts).length > 0) {
+      throw new Error("Invalid event: message carries content parts for a role that has none");
+    }
+    if (wire.activityContent !== undefined && !usesMap) {
+      throw new Error("Invalid event: message carries activity content for a non-activity role");
+    }
+    if (usesMap && wire.content !== undefined) {
+      throw new Error("Invalid event: activity content cannot ride with other content forms");
+    }
+    if (usesParts && wire.content !== undefined && asArray(wire.contentParts).length > 0) {
+      // String content and parts together is a contradiction the encoder never
+      // writes; resolving it either way would silently discard the other half.
+      throw new Error("Invalid event: message carries both string content and content parts");
+    }
+  }
+  if (usesParts && wire.content === undefined) {
     // String content rides the content field; anything else is the parts
     // array — including an empty one, which is valid content of its own. A
     // part naming no arm this build knows is DROPPED rather than rejected,
@@ -277,10 +375,14 @@ const fromWireMessage = (value: unknown): LooseRecord | undefined => {
     // it. Rejecting here made a future content part fatal over binary and
     // survivable over SSE.
     message.content = asArray(wire.contentParts)
-      .map((part: unknown) => fromProtoContentPart(part))
+      .map((part: unknown) => {
+        const mapped = fromProtoContentPart(part);
+        if (mapped === undefined) warnDroppedContentPart();
+        return mapped;
+      })
       .filter((part: unknown) => part !== undefined);
   }
-  if (MAP_CONTENT_ROLES.has(role) && wire.activityContent !== undefined) {
+  if (usesMap && wire.activityContent !== undefined) {
     message.content = wire.activityContent;
   }
   delete message.activityContent;
@@ -328,7 +430,9 @@ const toWireRunAgentInput = (value: unknown): LooseRecord | undefined => {
     protocolVersion: input.protocolVersion,
     parentRunId: input.parentRunId,
     state: input.state,
-    messages: asArray(input.messages).map(toWireMessage),
+    messages: asArray(input.messages).map((item: unknown, index: number) =>
+      toWireMessage(item, `messages[${index}]`),
+    ),
     tools: asArray(input.tools).map(normalizeItemMetadata),
     context: asArray(input.context),
     forwardedProps: input.forwardedProps,
@@ -368,10 +472,16 @@ export function encode(event: BaseEvent): Uint8Array {
     try {
       validatedEvent = EventSchemas.parse(event) as AGUIEvent;
     } catch (err) {
+      // The paths the schema objected to, and nothing else. The event itself
+      // used to ride along as a second console argument: on a stream that is a
+      // wall of text around the one line that matters, and it prints whatever
+      // the event was carrying — message content, raw provider payloads — into
+      // logs that may have no business holding it. The paths say what to fix.
+      //
+      // Encoding continues regardless: the tolerance is the contract here, and
+      // this only changes what the tolerance says on its way past.
       console.warn(
-        "[ag-ui][proto.encode] Malformed event detected, falling back to unvalidated event",
-        err,
-        event,
+        `[ag-ui][proto.encode] Encoding ${String(event.type)} without validation: the schema rejected it at ${issuePaths(err)}. Encoded as given.`,
       );
       validatedEvent = event;
     }
@@ -380,7 +490,9 @@ export function encode(event: BaseEvent): Uint8Array {
   const { type, timestamp, rawEvent, metadata, ...rest } = validatedEvent as unknown as LooseRecord;
 
   if (type === "MESSAGES_SNAPSHOT" && Array.isArray(rest.messages)) {
-    rest.messages = rest.messages.map(toWireMessage);
+    rest.messages = rest.messages.map((message: unknown, index: number) =>
+      toWireMessage(message, `messages[${index}]`),
+    );
   }
   if (type === "RUN_FINISHED") {
     const outcomeRecord = asRecord(rest.outcome);
@@ -1032,41 +1144,59 @@ export function decode(data: Uint8Array): BaseEvent {
     }
   }
   if (decoded.type === "STATE_DELTA" && Array.isArray(decoded.delta)) {
-    // An operation this build cannot name is DROPPED from the patch, never
-    // invented and never fatal. An operation added to JSON Patch after this
-    // build shipped arrives over SSE as an unrecognised union member, which
-    // enforcement removes from the array; throwing here made the same patch
-    // fatal over binary and survivable over SSE.
-    decoded.delta = (decoded.delta as LooseRecord[]).filter((operation) => {
+    // An operation this build cannot name is never invented and never fatal —
+    // and never dropped here either. An operation added to JSON Patch after
+    // this build shipped arrives over SSE as an unrecognised union member,
+    // which enforcement removes from the array and NAMES; throwing here made
+    // the same patch fatal over binary and survivable over SSE, and filtering
+    // it out here made it vanish over binary with nothing said, while the same
+    // patch over SSE printed the path it lost.
+    //
+    // The enum value is all the wire carries for an operation this build has no
+    // name for, so it rides on as its own decimal spelling. That is not a valid
+    // JSON Patch op either — which is the point: enforcement reads it as the
+    // unrecognised union member it is, strips the operation and says so.
+    decoded.delta = (decoded.delta as LooseRecord[]).map((operation) => {
       const opName =
         protoPatch.JsonPatchOperationType[operation.op as protoPatch.JsonPatchOperationType];
-      if (typeof opName !== "string" || opName === "UNRECOGNIZED") return false;
-      operation.op = opName.toLowerCase();
+      operation.op =
+        typeof opName === "string" && opName !== "UNRECOGNIZED"
+          ? opName.toLowerCase()
+          : String(operation.op);
       Object.keys(operation).forEach((key) => {
         if (operation[key] === undefined) {
           delete operation[key];
         }
       });
-      return true;
+      return operation;
     });
   }
   if (decoded.type === "ACTIVITY_DELTA" && Array.isArray(decoded.patch)) {
-    // An operation this build cannot name is DROPPED from the patch, never
-    // invented and never fatal. An operation added to JSON Patch after this
-    // build shipped arrives over SSE as an unrecognised union member, which
-    // enforcement removes from the array; throwing here made the same patch
-    // fatal over binary and survivable over SSE.
-    decoded.patch = (decoded.patch as LooseRecord[]).filter((operation) => {
+    // An operation this build cannot name is never invented and never fatal —
+    // and never dropped here either. An operation added to JSON Patch after
+    // this build shipped arrives over SSE as an unrecognised union member,
+    // which enforcement removes from the array and NAMES; throwing here made
+    // the same patch fatal over binary and survivable over SSE, and filtering
+    // it out here made it vanish over binary with nothing said, while the same
+    // patch over SSE printed the path it lost.
+    //
+    // The enum value is all the wire carries for an operation this build has no
+    // name for, so it rides on as its own decimal spelling. That is not a valid
+    // JSON Patch op either — which is the point: enforcement reads it as the
+    // unrecognised union member it is, strips the operation and says so.
+    decoded.patch = (decoded.patch as LooseRecord[]).map((operation) => {
       const opName =
         protoPatch.JsonPatchOperationType[operation.op as protoPatch.JsonPatchOperationType];
-      if (typeof opName !== "string" || opName === "UNRECOGNIZED") return false;
-      operation.op = opName.toLowerCase();
+      operation.op =
+        typeof opName === "string" && opName !== "UNRECOGNIZED"
+          ? opName.toLowerCase()
+          : String(operation.op);
       Object.keys(operation).forEach((key) => {
         if (operation[key] === undefined) {
           delete operation[key];
         }
       });
-      return true;
+      return operation;
     });
   }
   if (decoded.type === "RUN_FINISHED") {

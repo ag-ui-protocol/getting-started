@@ -1,5 +1,5 @@
 import { Subject, firstValueFrom, toArray } from "rxjs";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BaseEvent } from "@ag-ui/core";
 import * as proto from "@ag-ui/proto";
 import { transformHttpEventStream } from "../http";
@@ -75,11 +75,64 @@ const bothTransports = async (events: unknown[]) => ({
   binary: await readOverProto(encodeAll(events)),
 });
 
+/**
+ * Runs one lane with console.warn captured.
+ *
+ * Comparing only the events cannot see this file's failure mode in its
+ * quietest form. A reader that drops material BEFORE enforcement gets there
+ * produces the same events as one that hands the material on — enforcement
+ * would have removed it either way — while the operator loses the one line
+ * that said a message, a part or a patch operation went missing. So the
+ * warnings are the second half of parity, not decoration.
+ */
+const watch = async <T>(
+  run: () => Promise<T>,
+): Promise<{ value: T; warnings: string[] }> => {
+  const warnings: string[] = [];
+  const spy = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+    warnings.push(args.map((arg) => String(arg)).join(" "));
+  });
+  try {
+    return { value: await run(), warnings };
+  } finally {
+    spy.mockRestore();
+  }
+};
+
+/**
+ * The paths enforcement named as stripped, in order.
+ *
+ * Only enforcement's warnings, deliberately: it is the one stage both
+ * transports share, so what it names is directly comparable. A lane may warn
+ * about other things on the way — the encoder says so when it is handed an
+ * event the schema rejects — and that is not part of this comparison.
+ */
+const strippedPaths = (warnings: string[]): string[] =>
+  warnings
+    .map((warning) => /Removed unrecognised material at '([^']*)'/.exec(warning)?.[1])
+    .filter((path): path is string => path !== undefined);
+
+/** Both lanes, each watched. `binaryBodies` overrides what the binary lane reads. */
+const bothTransportsWatched = async (events: unknown[], binaryBodies?: Uint8Array[]) => {
+  const sse = await watch(() => readOverSSE(events));
+  const binary = await watch(() =>
+    readOverProto(binaryBodies ?? encodeAll(events)),
+  );
+  return {
+    sse: sse.value,
+    binary: binary.value,
+    sseStripped: strippedPaths(sse.warnings),
+    binaryStripped: strippedPaths(binary.warnings),
+    sseWarnings: sse.warnings,
+    binaryWarnings: binary.warnings,
+  };
+};
+
 // Frames our own encoder cannot produce, written as a differently-versioned
 // producer's encoder would write them. Field numbers come from events.proto:
 // Event.run_finished = 13, Event.messages_snapshot = 9.
 const HAND_BUILT = {
-  // An envelope arm far outside the oneof this build knows: field 900,
+  // An envelope arm far outside the oneof this build knows: field 908,
   // length-delimited, carrying a base_event whose type is one this build has
   // no name for. An event type from a later protocol, shaped as a later
   // producer's encoder would actually write it.
@@ -92,13 +145,13 @@ const HAND_BUILT = {
   // refuses to write this, which is itself the point: only a defective producer
   // emits it, and the wire cannot tell the omission from an empty list.
   snapshotWithoutMessages: new Uint8Array([0x4a, 0x04, 0x0a, 0x02, 0x08, 0x08]),
-  // MESSAGES_SNAPSHOT whose one image part carries a source kind from a later
-  // protocol — the future arm is one level deeper than the part itself.
-  // The same snapshot whose image part omits its required source entirely.
+  // MESSAGES_SNAPSHOT whose one image part omits its required source entirely.
   contentPartWithoutSource: new Uint8Array([
     0x4a, 0x13, 0x0a, 0x02, 0x08, 0x08, 0x12, 0x0d, 0x0a, 0x01, 0x6d, 0x12, 0x04, 0x75, 0x73,
     0x65, 0x72, 0x42, 0x02, 0x12, 0x00,
   ]),
+  // The same snapshot whose one image part carries a source kind from a later
+  // protocol — the future arm is one level deeper than the part itself.
   futureContentSource: new Uint8Array([
     0x4a, 0x17, 0x0a, 0x02, 0x08, 0x08, 0x12, 0x11, 0x0a, 0x01, 0x6d, 0x12, 0x04, 0x75, 0x73,
     0x65, 0x72, 0x42, 0x06, 0x12, 0x04, 0x0a, 0x02, 0x1a, 0x00,
@@ -311,9 +364,9 @@ describe("transport parity", () => {
     const fatal: Record<string, number[]> = {
       // An empty envelope names nothing at all.
       "empty envelope": [],
-      // Field 900 as a varint. Every arm is length-delimited, so this is no arm.
+      // Field 908 as a varint. Every arm is length-delimited, so this is no arm.
       "future tag, wrong wire type": [0xe0, 0x38, 0x01],
-      // Field 900 length-delimited, but its payload is an unterminated varint:
+      // Field 908 length-delimited, but its payload is an unterminated varint:
       // bytes that encode no message, so not an event to learn about later.
       "future arm, unwalkable payload": [0xe2, 0x38, 0x01, 0x80],
       // A group closing with a different field number than it opened with.
@@ -433,5 +486,107 @@ describe("transport parity", () => {
       HAND_BUILT.snapshotWithoutMessages,
     ]);
     expect(binary[1]).toHaveProperty("messages", []);
+  });
+});
+
+/**
+ * The other half of interchangeability: the two transports must lose the same
+ * material AND say so the same way.
+ *
+ * Enforcement is the one stage both share, and it names what it strips. A
+ * reader that quietly removes a message, a content part or a patch operation
+ * on the way in reaches enforcement with a clean event, so nothing is warned
+ * about at all — the events still match, and an operator watching the binary
+ * lane sees a silent hole where the text lane printed a line.
+ */
+describe("transport parity: what each transport says it dropped", () => {
+  const cleared: string | undefined = process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
+  beforeEach(() => {
+    delete process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
+  });
+  afterEach(() => {
+    if (cleared !== undefined) process.env.SUPPRESS_TRANSFORMATION_WARNINGS = cleared;
+  });
+
+  it("names the same dropped message for a role neither build recognises", async () => {
+    const { sse, binary, sseStripped, binaryStripped } = await bothTransportsWatched([
+      RUN_STARTED,
+      {
+        type: "MESSAGES_SNAPSHOT",
+        messages: [
+          { id: "m0", role: "user", content: [{ type: "text", text: "hi" }] },
+          { id: "m1", role: "oracle", content: [{ type: "text", text: "hi" }] },
+        ],
+      },
+    ]);
+
+    expect(binary).toEqual(sse);
+    expect(sseStripped).toEqual(["/messages/1"]);
+    expect(binaryStripped).toEqual(sseStripped);
+  });
+
+  it("names the same dropped operation for a patch op neither build recognises", async () => {
+    // STATE_DELTA carrying one operation whose enum value is 99.
+    const { sse, binary, sseStripped, binaryStripped } = await bothTransportsWatched(
+      [RUN_STARTED, { type: "STATE_DELTA", delta: [{ op: "increment", path: "/x" }] }],
+      [
+        ...encodeAll([RUN_STARTED]),
+        new Uint8Array([0x42, 0x0c, 0x0a, 0x02, 0x08, 0x07, 0x12, 0x06, 0x08, 0x63, 0x12, 0x02, 0x2f, 0x78]),
+      ],
+    );
+
+    expect(binary).toEqual(sse);
+    expect(sseStripped).toEqual(["/delta/0"]);
+    expect(binaryStripped).toEqual(sseStripped);
+  });
+
+  /**
+   * The one drop the binary reader cannot hand on, and so the one warning that
+   * cannot match word for word.
+   *
+   * An unrecognised ROLE or patch OP still has a name — the string arrived on
+   * the wire — so the reader passes it to enforcement and enforcement names the
+   * path. An unset protobuf oneof has no name at all: the bytes say only that
+   * no arm this build knows was populated. There is nothing to hand on, so the
+   * drop stays in the reader, and the reader has to say so itself — the same
+   * answer this SDK already gives for an envelope arm it cannot name.
+   */
+  it("warns on both lanes for a content part neither build recognises", async () => {
+    const { sse, binary, sseStripped, binaryStripped, binaryWarnings } =
+      await bothTransportsWatched(
+        [
+          RUN_STARTED,
+          {
+            type: "MESSAGES_SNAPSHOT",
+            messages: [{ id: "m", role: "user", content: [{ type: "future_part" }] }],
+          },
+        ],
+        [...encodeAll([RUN_STARTED]), HAND_BUILT.futureContentPart],
+      );
+
+    expect(binary).toEqual(sse);
+    expect(sseStripped).toEqual(["/messages/0/content/0"]);
+    // No path to name, but never silent.
+    expect(binaryStripped).toEqual([]);
+    expect(binaryWarnings.join("\n")).toMatch(/content part this build does not know/);
+  });
+
+  it("warns on both lanes for a content source neither build recognises", async () => {
+    const { sse, binary, sseStripped, binaryWarnings } = await bothTransportsWatched(
+      [
+        RUN_STARTED,
+        {
+          type: "MESSAGES_SNAPSHOT",
+          messages: [
+            { id: "m", role: "user", content: [{ type: "image", source: { type: "future_source" } }] },
+          ],
+        },
+      ],
+      [...encodeAll([RUN_STARTED]), HAND_BUILT.futureContentSource],
+    );
+
+    expect(binary).toEqual(sse);
+    expect(sseStripped).toEqual(["/messages/0/content/0"]);
+    expect(binaryWarnings.join("\n")).toMatch(/content part this build does not know/);
   });
 });

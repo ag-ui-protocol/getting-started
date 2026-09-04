@@ -595,20 +595,30 @@ describe("flattened outcome guards", () => {
     expect((decode(extended) as { stepName?: string }).stepName).toBe("plan");
   });
 
-  it.each([99, -1])("drops an out-of-enum patch operation (%s)", (op) => {
+  it.each([99, -1])("carries an out-of-enum patch operation on (%s)", (op) => {
     // 99 reverse-maps to undefined; -1 to ts-proto's synthetic UNRECOGNIZED.
-    // Neither may invent an operation — but neither is fatal either. An
-    // operation added to JSON Patch after this build shipped reaches the SSE
-    // reader as an unrecognised union member, which enforcement removes from
-    // the array, so removing it here is what keeps the two transports
-    // agreeing. Rejecting made the same patch fatal over binary alone.
+    // Neither may invent an operation, and neither is fatal — and neither is
+    // dropped HERE either. An operation added to JSON Patch after this build
+    // shipped reaches the SSE reader as an unrecognised union member, and
+    // enforcement removes it from the array and NAMES the path it removed.
+    // Removing it in the decoder removed it just as surely but said nothing,
+    // so the same patch lost an operation loudly over SSE and silently over
+    // binary — the split this layer exists to prevent, pointed at the warning
+    // rather than at the event.
+    //
+    // The enum value is all the wire carries for an op this build cannot name,
+    // so it rides on as its own decimal spelling. That is not a valid JSON
+    // Patch op either, which is the point: enforcement reads it as the
+    // unrecognised union member it is and strips the operation, saying so.
     const bytes = protoEvents.Event.encode({
       stateDelta: {
         baseEvent: { type: protoEvents.EventType.STATE_DELTA },
         delta: [{ op, path: "/x" }],
       },
     } as never).finish();
-    expect((decode(bytes) as unknown as { delta: unknown[] }).delta).toEqual([]);
+    expect((decode(bytes) as unknown as { delta: unknown[] }).delta).toEqual([
+      { op: String(op), path: "/x" },
+    ]);
   });
 
   it("keeps the operations it can name beside one it cannot", () => {
@@ -623,9 +633,14 @@ describe("flattened outcome guards", () => {
     } as never).finish();
     const delta = (decode(bytes) as unknown as { delta: Array<{ op?: string; path?: string }> })
       .delta;
-    expect(delta).toHaveLength(1);
-    expect(delta[0].op).toBe("replace");
-    expect(delta[0].path).toBe("/y");
+    // Both survive the decoder: the one it can name spelled as the schema
+    // spells it, the one it cannot spelled as the wire carried it. Enforcement
+    // is the stage that tells them apart, on both transports alike.
+    expect(delta).toHaveLength(2);
+    expect(delta[0].op).toBe("99");
+    expect(delta[0].path).toBe("/x");
+    expect(delta[1].op).toBe("replace");
+    expect(delta[1].path).toBe("/y");
   });
 
   it("ignores unknown group fields, per protobuf rules", () => {

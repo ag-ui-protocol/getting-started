@@ -13,7 +13,13 @@
  */
 
 import type { Definition, Field, ObjectDefinition, TypeExpr } from "./ir";
-import { buildScanGraph } from "./protobuf";
+import {
+  buildScanGraph,
+  MERGE_SPLIT,
+  snakeCase,
+  UNION_STRATEGY,
+} from "./protobuf";
+import { assertTableKeys } from "./tables";
 import type { WireModel } from "./protobuf";
 
 function resolveAlias(defs: Map<string, Definition>, type: TypeExpr): TypeExpr {
@@ -23,6 +29,20 @@ function resolveAlias(defs: Map<string, Definition>, type: TypeExpr): TypeExpr {
     type = target.type;
   }
   return type;
+}
+
+/**
+ * The far half of the round trip between a wire field's two spellings.
+ *
+ * MERGE_SPLIT names its buckets in the .proto's snake_case — which is why
+ * snakeCase is imported from protobuf.ts rather than written again here — and
+ * ts-proto hands the generated TypeScript the camelCase of the same name.
+ * Going through both functions is what keeps this emitter from writing a wire
+ * field name of its own: the .proto and the mapper end up spelling one
+ * decision, not two.
+ */
+function camelCase(name: string): string {
+  return name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
 }
 
 /** The event's EventType value, from its narrowed `type` field. */
@@ -45,7 +65,44 @@ export function emitProtoTranslation(wire: WireModel): string {
   const eventUnion = defs.get("Event");
   if (eventUnion?.kind !== "union") throw new Error("Event union missing");
   const events = eventUnion.members.map(objectDef);
-  const baseNames = new Set(wire.baseFieldNames);
+  const baseFieldNames = wire.baseFieldNames;
+  const baseNames = new Set(baseFieldNames);
+
+  /**
+   * The base fields encode does not simply pass through, and what it writes
+   * instead: `type` becomes the proto enum, `metadata` is narrowed to the
+   * object Struct can carry. Every other base field rides as it arrived, so a
+   * field added to BaseEvent reaches the wire without an entry here.
+   *
+   * Keyed by name and asserted, like every other idiom table: a rename would
+   * not fail the lookup, it would silently revert the field to a pass-through
+   * and quietly stop encoding the enum.
+   */
+  const BASE_FIELD_ENCODING: Record<string, string> = {
+    "BaseEvent.type":
+      "protoEvents.EventType[event.type as keyof typeof protoEvents.EventType]",
+    "BaseEvent.metadata": "normalizeMetadata(metadata)",
+  };
+  assertTableKeys(
+    "BASE_FIELD_ENCODING",
+    Object.keys(BASE_FIELD_ENCODING),
+    model,
+  );
+
+  // Both halves of encode's base handling come from the one list, so they
+  // cannot disagree about which fields exist: the destructuring pattern that
+  // takes them off the event, and the literal that puts them back on
+  // base_event. Repeating them by hand let a new BaseEvent field regenerate
+  // every file byte for byte while silently failing to cross the wire.
+  const baseDestructuring = baseFieldNames.join(", ");
+  const baseEventLiteral = baseFieldNames
+    .map((name) => {
+      const written = BASE_FIELD_ENCODING[`BaseEvent.${name}`];
+      return written
+        ? `        ${name}: ${written},`
+        : `        ${name},`;
+    })
+    .join("\n");
 
   /* ---------------- content parts ---------------- */
 
@@ -133,6 +190,52 @@ export function emitProtoTranslation(wire: WireModel): string {
 
   const messageUnion = defs.get("Message");
   if (messageUnion?.kind !== "union") throw new Error("Message union missing");
+
+  /**
+   * The one field the merged Message has to split, found the way protobuf.ts
+   * decides to split it: the members disagree about its shape.
+   *
+   * Naming it here instead would be this emitter deciding for itself which
+   * field rides several wire fields, and a schema that moved the disagreement
+   * to another field would leave the mapper reading a field the .proto no
+   * longer splits — with the drift gate green, because it only compares the
+   * generator against its own output.
+   */
+  const contentField = (() => {
+    const shapes = new Map<string, Set<string>>();
+    for (const memberName of messageUnion.members) {
+      for (const field of objectDef(memberName).fields) {
+        const kinds = shapes.get(field.name) ?? new Set<string>();
+        kinds.add(resolveAlias(defs, field.type).kind);
+        shapes.set(field.name, kinds);
+      }
+    }
+    const split = [...shapes]
+      .filter(([, kinds]) => kinds.size > 1)
+      .map(([name]) => name);
+    if (split.length !== 1) {
+      throw new Error(
+        `the merged Message splits ${split.length} fields (${split.join(", ")}) — ` +
+          "this emitter is written for exactly one, so decide how the others " +
+          "ride before regenerating",
+      );
+    }
+    return split[0];
+  })();
+
+  /**
+   * That field's three wire spellings, straight out of MERGE_SPLIT and through
+   * ts-proto's camelCase. Which bucket a member lands in is its TypeExpr kind,
+   * which is what `mode` below records.
+   */
+  const wireContent = camelCase(MERGE_SPLIT.string(snakeCase(contentField)));
+  const wireContentParts = camelCase(
+    MERGE_SPLIT.array(snakeCase(contentField)),
+  );
+  const wireActivityContent = camelCase(
+    MERGE_SPLIT.openMap(snakeCase(contentField)),
+  );
+
   // role value -> how its content field rides the wire
   const contentModes = messageUnion.members.map((memberName) => {
     const member = objectDef(memberName);
@@ -140,7 +243,9 @@ export function emitProtoTranslation(wire: WireModel): string {
       (field) => field.name === messageUnion.discriminator,
     );
     if (role?.type.kind !== "literal") throw new Error("message discriminator");
-    const content = member.fields.find((field) => field.name === "content");
+    const content = member.fields.find(
+      (field) => field.name === contentField,
+    );
     const mode =
       content === undefined
         ? "none"
@@ -165,6 +270,26 @@ export function emitProtoTranslation(wire: WireModel): string {
     jsonField: string;
     cases: Array<{ value: string; payload: Field[] }>;
   }
+  /**
+   * Definitions that never get a nested-input converter, however their fields
+   * are shaped.
+   *
+   * The converter below exists for RunAgentInput: an event field that is a
+   * whole nested OBJECT carrying arrays of union members, which the generic
+   * spread cannot map because those members need toWireMessage. These two are
+   * carried by the generic path on purpose — Interrupt because its payload is
+   * schema-free by design, TokenUsage because it is flat counters — and a
+   * converter for either would rewrite a shape the wire is frozen against.
+   *
+   * Neither carries an array of union members today, so the exclusion matches
+   * nothing; it is a standing decision about these two, not a live filter, and
+   * the point of naming them is that a field added to either does not quietly
+   * acquire a converter. Keyed by name, so the keys are asserted: a rename
+   * would not fail the list, it would just stop matching.
+   */
+  const NO_INPUT_CONVERTER = ["Interrupt", "TokenUsage"];
+  assertTableKeys("NO_INPUT_CONVERTER", NO_INPUT_CONVERTER, model);
+
   const flattenSpecs: FlattenSpec[] = [];
   const patchFields: Array<{ eventType: string; jsonField: string }> = [];
   const optionalArrays: Array<{ eventType: string; jsonField: string }> = [];
@@ -180,7 +305,12 @@ export function emitProtoTranslation(wire: WireModel): string {
       if (baseNames.has(field.name)) continue;
       const resolved =
         field.type.kind === "ref" ? defs.get(field.type.name) : undefined;
-      if (resolved?.kind === "union") {
+      // Only a FLATTEN union dissolves into the event carrying it. protobuf.ts
+      // decides that per union in UNION_STRATEGY, so reading the same table is
+      // what keeps the mapper and the .proto agreeing about what a union does
+      // on the wire; treating every union as flattened would emit a mapper for
+      // a shape the .proto never wrote.
+      if (resolved?.kind === "union" && UNION_STRATEGY[resolved.name] === "flatten") {
         flattenSpecs.push({
           eventType: type,
           jsonField: field.name,
@@ -202,6 +332,17 @@ export function emitProtoTranslation(wire: WireModel): string {
         });
         continue;
       }
+      if (resolved?.kind === "union") {
+        // A union in a direct field position that protobuf.ts does NOT flatten
+        // has no mapper here at all, and the field would simply stop crossing
+        // the wire while every generated file still regenerated byte for byte.
+        throw new Error(
+          `${event.name}.${field.name} references union ${resolved.name}, whose ` +
+            `wire strategy is "${UNION_STRATEGY[resolved.name]}" — this emitter ` +
+            "only maps flattened unions in a direct field position; add the mapper " +
+            "for that strategy before regenerating",
+        );
+      }
       const aliased = resolveAlias(defs, field.type);
       const arrayType =
         field.type.kind === "array"
@@ -221,7 +362,11 @@ export function emitProtoTranslation(wire: WireModel): string {
         const items = arrayType.items;
         const itemsDef =
           items.kind === "ref" ? defs.get(items.name) : undefined;
-        if (itemsDef?.name === "JsonPatchOperation") {
+        // A TAGGED union rides with its discriminator as a proto enum, which
+        // is the whole reason the encode/decode pair below exists. Keying on
+        // the definition's name instead would let this emitter and the .proto
+        // disagree about which union is tagged.
+        if (itemsDef !== undefined && UNION_STRATEGY[itemsDef.name] === "tagged") {
           patchFields.push({ eventType: type, jsonField: field.name });
         }
         if (!field.required) {
@@ -231,7 +376,7 @@ export function emitProtoTranslation(wire: WireModel): string {
       }
       if (
         resolved?.kind === "object" &&
-        !["Interrupt", "TokenUsage"].includes(resolved.name) &&
+        !NO_INPUT_CONVERTER.includes(resolved.name) &&
         resolved.fields.some((entry) => {
           const inner = resolveAlias(defs, entry.type);
           return (
@@ -269,9 +414,15 @@ export function emitProtoTranslation(wire: WireModel): string {
                 itemDef.fields.some((entry) => entry.name === "metadata")
               ? "normalizeItemMetadata"
               : undefined;
-        const encodeExpr = mapper
-          ? `asArray(input.${field.name}).map(${mapper})`
-          : `asArray(input.${field.name})`;
+        // toWireMessage is told where it is, so a part it cannot encode is
+        // named rather than merely missing; the other mappers have nothing to
+        // say about position.
+        const encodeExpr =
+          mapper === "toWireMessage"
+            ? `asArray(input.${field.name}).map((item: unknown, index: number) =>\n      toWireMessage(item, \`${field.name}[$\{index}]\`),\n    )`
+            : mapper
+              ? `asArray(input.${field.name}).map(${mapper})`
+              : `asArray(input.${field.name})`;
         to.push(`    ${field.name}: ${encodeExpr},`);
         const decodeMapper =
           itemDef?.kind === "union"
@@ -328,7 +479,9 @@ ${from.join("\n")}
   if (messagesSnapshotType) {
     const type = eventTypeOf(messagesSnapshotType);
     encodeCases.push(`  if (type === ${JSON.stringify(type)} && Array.isArray(rest.messages)) {
-    rest.messages = rest.messages.map(toWireMessage);
+    rest.messages = rest.messages.map((message: unknown, index: number) =>
+      toWireMessage(message, \`messages[\${index}]\`),
+    );
   }`);
     decodeCases.push(`  if (decoded.type === ${JSON.stringify(type)} && Array.isArray(decoded.messages)) {
     decoded.messages = (decoded.messages as unknown[])
@@ -465,25 +618,34 @@ ${rebuild}
     }));
   }`);
     decodeCases.push(`  if (decoded.type === ${JSON.stringify(entry.eventType)} && Array.isArray(decoded.${entry.jsonField})) {
-    // An operation this build cannot name is DROPPED from the patch, never
-    // invented and never fatal. An operation added to JSON Patch after this
-    // build shipped arrives over SSE as an unrecognised union member, which
-    // enforcement removes from the array; throwing here made the same patch
-    // fatal over binary and survivable over SSE.
-    decoded.${entry.jsonField} = (decoded.${entry.jsonField} as LooseRecord[]).filter(
+    // An operation this build cannot name is never invented and never fatal —
+    // and never dropped here either. An operation added to JSON Patch after
+    // this build shipped arrives over SSE as an unrecognised union member,
+    // which enforcement removes from the array and NAMES; throwing here made
+    // the same patch fatal over binary and survivable over SSE, and filtering
+    // it out here made it vanish over binary with nothing said, while the same
+    // patch over SSE printed the path it lost.
+    //
+    // The enum value is all the wire carries for an operation this build has no
+    // name for, so it rides on as its own decimal spelling. That is not a valid
+    // JSON Patch op either — which is the point: enforcement reads it as the
+    // unrecognised union member it is, strips the operation and says so.
+    decoded.${entry.jsonField} = (decoded.${entry.jsonField} as LooseRecord[]).map(
       (operation) => {
         const opName =
           protoPatch.JsonPatchOperationType[
             operation.op as protoPatch.JsonPatchOperationType
           ];
-        if (typeof opName !== "string" || opName === "UNRECOGNIZED") return false;
-        operation.op = opName.toLowerCase();
+        operation.op =
+          typeof opName === "string" && opName !== "UNRECOGNIZED"
+            ? opName.toLowerCase()
+            : String(operation.op);
         Object.keys(operation).forEach((key) => {
           if (operation[key] === undefined) {
             delete operation[key];
           }
         });
-        return true;
+        return operation;
       },
     );
   }`);
@@ -549,10 +711,24 @@ ${rebuild}
   const envelopeTypeEntries = wire.envelope
     .map((entry) => {
       const definition = objectDef(entry.definition);
-      const key = entry.entry.replace(/_([a-z])/g, (_, letter: string) =>
-        letter.toUpperCase(),
-      );
-      return `  ${key}: ${JSON.stringify(eventTypeOf(definition))},`;
+      const eventType = eventTypeOf(definition);
+      const key = camelCase(entry.entry);
+      // One identity, derived twice. encode picks the envelope arm by
+      // camelCasing the EventType VALUE; this table — which decode reads — is
+      // keyed by the entry protobuf.ts names after the definition NAME. They
+      // agree for every event today by convention alone, and nothing made
+      // them: a schema where they parted would have encode writing an arm
+      // decode cannot read, and only a round trip at runtime would say so.
+      const encodeKey = camelCase(eventType.toLowerCase());
+      if (encodeKey !== key) {
+        throw new Error(
+          `${definition.name}: encode writes the envelope arm "${encodeKey}" ` +
+            `(from the EventType value ${eventType}) but decode reads "${key}" ` +
+            `(from the definition name) — the two spellings of one arm have ` +
+            "parted, and an event encoded here could not be decoded back",
+        );
+      }
+      return `  ${key}: ${JSON.stringify(eventType)},`;
     })
     .join("\n");
 
@@ -577,9 +753,72 @@ const asRecord = (value: unknown): LooseRecord | undefined =>
 const asArray = (value: unknown): unknown[] =>
   Array.isArray(value) ? value : [];
 
+/**
+ * The same switch the client's enforcement stage reads, so one variable
+ * silences both halves of what is really one decision about unrecognised
+ * material.
+ */
+const suppressWarnings = (): boolean =>
+  typeof process !== "undefined" &&
+  typeof process.env !== "undefined" &&
+  Boolean(process.env.SUPPRESS_TRANSFORMATION_WARNINGS);
+
+/**
+ * The one drop this layer makes that it cannot hand on to enforcement.
+ *
+ * An unrecognised role or patch operation still has a NAME — the string or the
+ * enum value arrived on the wire — so it rides along and enforcement strips it
+ * and says which path it stripped. An unset protobuf oneof has no name at all:
+ * the bytes say only that no arm this build knows was populated. There is
+ * nothing to pass on, so the drop has to happen here, and a drop that happens
+ * here is a drop enforcement will never mention. Saying so is the difference
+ * between the two transports losing the same part loudly and one of them
+ * losing it in silence.
+ */
+const warnDroppedContentPart = (): void => {
+  if (suppressWarnings()) return;
+  console.warn(
+    "[ag-ui][proto] Dropped a content part this build does not know: the protocol has a variant this SDK predates.",
+  );
+};
+
+/**
+ * The encode-side twin, and the only one that can say WHERE.
+ *
+ * Reached only with validation bypassed, since the schema would have rejected
+ * the part first. There is no wire arm to put it on, so it cannot be encoded —
+ * but the message then arrives at the far end one part shorter, and until this
+ * warning existed nothing said which part went missing or from which message.
+ */
+const warnUnencodableContentPart = (at: string, index: number): void => {
+  if (suppressWarnings()) return;
+  console.warn(
+    \`[ag-ui][proto.encode] Dropped \${at}.\${CONTENT_FIELD}[\${index}]: no wire form for this content part, so it is not encoded.\`,
+  );
+};
+
 function toCamelCase(str: string): string {
   return str.toLowerCase().replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
 }
+
+/**
+ * A validation failure as the list of places it failed.
+ *
+ * Read structurally rather than by instanceof: a zod error crossing a package
+ * boundary may come from a different copy of zod, and an instanceof that
+ * quietly missed would leave the warning naming nothing at all.
+ */
+const issuePaths = (err: unknown): string => {
+  const issues = (err as { issues?: unknown })?.issues;
+  if (!Array.isArray(issues) || issues.length === 0) return String(err);
+  const paths = issues.map((issue) => {
+    const path = (issue as { path?: unknown }).path;
+    return Array.isArray(path) && path.length > 0
+      ? \`/\${path.join("/")}\`
+      : "the event itself";
+  });
+  return [...new Set(paths)].join(", ");
+};
 
 /**
  * The event types the handwritten SDK models know. The schema — and this
@@ -695,25 +934,32 @@ const PARTS_CONTENT_ROLES = new Set<string>(${JSON.stringify(partsModeRoles)});
 /** Every role the Message union declares, for telling unknown from misused. */
 const KNOWN_ROLES = new Set<string>(${JSON.stringify(contentModes.map((entry) => entry.role))});
 
-const toWireMessage = (value: unknown): LooseRecord => {
+/** The JSON field the merged Message splits, for naming a part in a warning. */
+const CONTENT_FIELD = ${JSON.stringify(contentField)};
+
+const toWireMessage = (value: unknown, at = "message"): LooseRecord => {
   const message = asRecord(value) ?? {};
-  const wire: LooseRecord = { ...message, contentParts: [] };
+  const wire: LooseRecord = { ...message, ${wireContentParts}: [] };
   wire.metadata = normalizeMetadata(message.metadata);
   wire.toolCalls = asArray(message.toolCalls).map((toolCall: unknown) => ({
     ...(toolCall as LooseRecord),
     metadata: normalizeMetadata(asRecord(toolCall)?.metadata),
   }));
-  if (Array.isArray(message.content)) {
-    wire.contentParts = message.content
-      .map((part: unknown) => toProtoContentPart(part))
+  if (Array.isArray(message.${contentField})) {
+    wire.${wireContentParts} = message.${contentField}
+      .map((part: unknown, index: number) => {
+        const mapped = toProtoContentPart(part);
+        if (mapped === undefined) warnUnencodableContentPart(at, index);
+        return mapped;
+      })
       .filter((part: unknown) => part !== undefined);
-    wire.content = undefined;
+    wire.${wireContent} = undefined;
   } else if (
     typeof message.role === "string" &&
     MAP_CONTENT_ROLES.has(message.role)
   ) {
-    wire.activityContent = normalizeMetadata(message.content) ?? {};
-    wire.content = undefined;
+    wire.${wireActivityContent} = normalizeMetadata(message.${contentField}) ?? {};
+    wire.${wireContent} = undefined;
   }
   return wire;
 };
@@ -723,44 +969,79 @@ const fromWireMessage = (value: unknown): LooseRecord | undefined => {
   const message: LooseRecord = { ...wire };
   const role = typeof wire.role === "string" ? wire.role : "";
   // A role this build does not know makes the whole message an unrecognised
-  // member of the Message union, and the caller drops it from the array —
-  // which is what enforcement does with the same message as JSON. The
-  // carrier-exclusivity checks below stay fatal because they concern roles
-  // this build DOES know, where a mismatched carrier is malformed on both
-  // transports rather than a message from a later protocol.
-  if (!KNOWN_ROLES.has(role)) return undefined;
-  // Content carriers are role-exclusive; a message carrying a carrier its
-  // role does not use would lose data whichever one decode preferred.
+  // member of the Message union — which is exactly what the same message is on
+  // the JSON path, where enforcement's discriminated-union walk removes it from
+  // the array and NAMES the path it removed. So it is rebuilt as it arrived and
+  // judged there, on both transports alike. Dropping it here instead removed it
+  // just as surely, but silently: enforcement then saw a snapshot with nothing
+  // wrong in it, and the same stream lost a message loudly over SSE and quietly
+  // over protobuf.
+  const known = KNOWN_ROLES.has(role);
+  // Which carrier feeds \`content\` is a fact about the ROLE, for a role this
+  // build knows. For one it does not, there is no rule to look up and no way to
+  // invent one, so the carrier the producer actually populated decides.
+  // An unknown role's EMPTY parts array reads as no content — enforcement drops the message anyway.
+  const usesParts = known
+    ? PARTS_CONTENT_ROLES.has(role)
+    : asArray(wire.${wireContentParts}).length > 0;
+  const usesMap = known
+    ? MAP_CONTENT_ROLES.has(role)
+    : !usesParts && wire.${wireActivityContent} !== undefined;
+  // Carrier exclusivity comes in two kinds, and only one of them survives not
+  // knowing the role.
+  //
+  // WHICH carrier a role uses is a fact about the role, so it can only be
+  // checked for a role this build knows; applying it to an unknown one would
+  // make a role added after this build shipped fatal over binary and
+  // survivable over SSE — the very split this layer exists to prevent.
+  //
+  // Carrying SEVERAL at once is different: they are competing spellings of one
+  // JSON field, so no role, present or future, can mean anything by it. That
+  // half holds whatever the role is. Without it an unknown role carrying two
+  // would have kept whichever this code happened to read first and dropped the
+  // rest in silence — the same quiet loss this whole change is about.
   if (
-    !PARTS_CONTENT_ROLES.has(role) &&
-    asArray(wire.contentParts).length > 0
+    !known &&
+    (wire.${wireContent} !== undefined ? 1 : 0) +
+      (asArray(wire.${wireContentParts}).length > 0 ? 1 : 0) +
+      (wire.${wireActivityContent} !== undefined ? 1 : 0) >
+      1
   ) {
     throw new Error(
-      "Invalid event: message carries content parts for a role that has none",
+      "Invalid event: message carries more than one content form",
     );
   }
-  if (wire.activityContent !== undefined && !MAP_CONTENT_ROLES.has(role)) {
-    throw new Error(
-      "Invalid event: message carries activity content for a non-activity role",
-    );
+  if (known) {
+    // Content carriers are role-exclusive; a message carrying a carrier its
+    // role does not use would lose data whichever one decode preferred.
+    if (!usesParts && asArray(wire.${wireContentParts}).length > 0) {
+      throw new Error(
+        "Invalid event: message carries content parts for a role that has none",
+      );
+    }
+    if (wire.${wireActivityContent} !== undefined && !usesMap) {
+      throw new Error(
+        "Invalid event: message carries activity content for a non-activity role",
+      );
+    }
+    if (usesMap && wire.${wireContent} !== undefined) {
+      throw new Error(
+        "Invalid event: activity content cannot ride with other content forms",
+      );
+    }
+    if (
+      usesParts &&
+      wire.${wireContent} !== undefined &&
+      asArray(wire.${wireContentParts}).length > 0
+    ) {
+      // String content and parts together is a contradiction the encoder never
+      // writes; resolving it either way would silently discard the other half.
+      throw new Error(
+        "Invalid event: message carries both string content and content parts",
+      );
+    }
   }
-  if (MAP_CONTENT_ROLES.has(role) && wire.content !== undefined) {
-    throw new Error(
-      "Invalid event: activity content cannot ride with other content forms",
-    );
-  }
-  if (
-    PARTS_CONTENT_ROLES.has(role) &&
-    wire.content !== undefined &&
-    asArray(wire.contentParts).length > 0
-  ) {
-    // String content and parts together is a contradiction the encoder never
-    // writes; resolving it either way would silently discard the other half.
-    throw new Error(
-      "Invalid event: message carries both string content and content parts",
-    );
-  }
-  if (PARTS_CONTENT_ROLES.has(role) && wire.content === undefined) {
+  if (usesParts && wire.${wireContent} === undefined) {
     // String content rides the content field; anything else is the parts
     // array — including an empty one, which is valid content of its own. A
     // part naming no arm this build knows is DROPPED rather than rejected,
@@ -769,15 +1050,19 @@ const fromWireMessage = (value: unknown): LooseRecord | undefined => {
     // kind added after this build shipped must not kill the message carrying
     // it. Rejecting here made a future content part fatal over binary and
     // survivable over SSE.
-    message.content = asArray(wire.contentParts)
-      .map((part: unknown) => fromProtoContentPart(part))
+    message.${contentField} = asArray(wire.${wireContentParts})
+      .map((part: unknown) => {
+        const mapped = fromProtoContentPart(part);
+        if (mapped === undefined) warnDroppedContentPart();
+        return mapped;
+      })
       .filter((part: unknown) => part !== undefined);
   }
-  if (MAP_CONTENT_ROLES.has(role) && wire.activityContent !== undefined) {
-    message.content = wire.activityContent;
+  if (usesMap && wire.${wireActivityContent} !== undefined) {
+    message.${contentField} = wire.${wireActivityContent};
   }
-  delete message.activityContent;
-  delete message.contentParts;
+  delete message.${wireActivityContent};
+  delete message.${wireContentParts};
   if (asArray(wire.toolCalls).length === 0) {
     delete message.toolCalls;
   }
@@ -825,16 +1110,22 @@ export function encode(event: BaseEvent): Uint8Array {
     try {
       validatedEvent = EventSchemas.parse(event) as AGUIEvent;
     } catch (err) {
+      // The paths the schema objected to, and nothing else. The event itself
+      // used to ride along as a second console argument: on a stream that is a
+      // wall of text around the one line that matters, and it prints whatever
+      // the event was carrying — message content, raw provider payloads — into
+      // logs that may have no business holding it. The paths say what to fix.
+      //
+      // Encoding continues regardless: the tolerance is the contract here, and
+      // this only changes what the tolerance says on its way past.
       console.warn(
-        "[ag-ui][proto.encode] Malformed event detected, falling back to unvalidated event",
-        err,
-        event,
+        \`[ag-ui][proto.encode] Encoding \${String(event.type)} without validation: the schema rejected it at \${issuePaths(err)}. Encoded as given.\`,
       );
       validatedEvent = event;
     }
   }
   const oneofField = toCamelCase(validatedEvent.type as string);
-  const { type, timestamp, rawEvent, metadata, ...rest } =
+  const { ${baseDestructuring}, ...rest } =
     validatedEvent as unknown as LooseRecord;
 
 ${encodeCases.join("\n")}
@@ -842,10 +1133,7 @@ ${encodeCases.join("\n")}
   const eventMessage = {
     [oneofField]: {
       baseEvent: {
-        type: protoEvents.EventType[event.type as keyof typeof protoEvents.EventType],
-        timestamp,
-        rawEvent,
-        metadata: normalizeMetadata(metadata),
+${baseEventLiteral}
       },
       ...rest,
     },
