@@ -69,6 +69,7 @@ TOLERATED_INVALID = {
     # The pre-1.0 `subAgents` spelling is an unknown key now, not an alias:
     # it survives the parse as an extra but never reaches `subagents`.
     "AgentCapabilities/invalid/old-subagents-key.json": "unknown-keys",
+    "AgentCapabilities/invalid/custom-null.json": "null-means-absent",
     "AgentCapabilities/invalid/metadata-null.json": "null-means-absent",
     "AgentCapabilities/invalid/streaming-not-boolean.json": "lax-coercion",
     "MultiAgentCapabilities/invalid/old-subagents-key.json": "unknown-keys",
@@ -126,8 +127,8 @@ class GeneratedModelsAgainstFixtures(unittest.TestCase):
 
     def test_unknown_fields_survive_the_parse(self):
         # The tolerant layer's promise: unknown fields are kept, not dropped,
-        # so the strip-and-warn middleware can see them and a re-serialising
-        # intermediary does not lose them.
+        # so the strip-and-warn enforcement stage can see them and a
+        # re-serialising intermediary does not lose them.
         for name, anchor, document in collect("valid"):
             if not isinstance(document, dict):
                 continue

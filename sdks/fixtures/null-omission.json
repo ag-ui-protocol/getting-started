@@ -186,9 +186,10 @@
       "name": "text_message_chunk_with_nothing_set",
       "producedBy": [
         "typescript",
-        "python"
+        "python",
+        "dotnet"
       ],
-      "note": "Every field is optional. .NET does not implement the chunk events.",
+      "note": "Every field is optional; nothing may be written for any of them.",
       "input": {
         "type": "TEXT_MESSAGE_CHUNK"
       },
@@ -253,9 +254,10 @@
       "name": "tool_call_chunk_without_parent_message_id",
       "producedBy": [
         "typescript",
-        "python"
+        "python",
+        "dotnet"
       ],
-      "note": "Second tolerance patch site. .NET does not implement the chunk events.",
+      "note": "Second tolerance patch site.",
       "input": {
         "type": "TOOL_CALL_CHUNK",
         "toolCallId": "tc_1",

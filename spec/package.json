@@ -25,5 +25,12 @@
     "typescript": "^5.8.2",
     "vitest": "^4.0.18",
     "prettier": "^3.5.3"
+  },
+  "nx": {
+    "targets": {
+      "test": {
+        "cache": false
+      }
+    }
   }
 }

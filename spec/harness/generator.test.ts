@@ -15,11 +15,17 @@ import {
   TS_OUTPUT_DIR,
 } from "../generator/generate";
 import { schema } from "./validator";
+import {
+  RECONCILIATION_PATH,
+  render as renderReconciliation,
+} from "../tools/reconcile";
 import * as generatedSchemas from "../../sdks/typescript/packages/core/src/generated/schemas";
 
 const files = await generateFiles();
 const PUBLISHED_SCHEMA_PATH = join(DOCS_SPEC_OUTPUT_DIR, "schema.json");
 const model = buildModel(schema);
+/** Where the emitters live, for the two exemption sets neither of them exports. */
+const GENERATOR_DIR = join(SCHEMA_PATH, "..", "..", "generator");
 
 describe("the generator", () => {
   it("is deterministic: generating twice produces identical output", async () => {
@@ -66,6 +72,22 @@ describe("the generator", () => {
         `${file.path} is stale — run: pnpm --filter @ag-ui/spec generate`,
       ).toBe(file.content);
     }
+  });
+
+  it("keeps RECONCILIATION.md in step with the SDK sources it reads", () => {
+    // reconcile.ts is a separate script from generate.ts, so the gate above
+    // never looked at its output and the committed report sat stale for weeks.
+    // It reads the three SDKs' own sources, which means an SDK edit can make it
+    // stale without anything in spec/ moving — hence a check rather than trust.
+    //
+    // This only means anything because importing reconcile.ts writes nothing:
+    // its `main()` is behind an entry-point guard, so `render()` is a pure
+    // read. Drop that guard and this assertion passes by rewriting its own
+    // expectation.
+    expect(
+      readFileSync(RECONCILIATION_PATH, "utf8"),
+      "spec/RECONCILIATION.md is stale — run: pnpm --filter @ag-ui/spec reconcile",
+    ).toBe(renderReconciliation());
   });
 
   it("emits exactly 31 events", () => {
@@ -185,13 +207,16 @@ describe("the generator", () => {
     const srcDir = join(TS_OUTPUT_DIR, "..");
     const index = readFileSync(join(srcDir, "index.ts"), "utf8");
     expect(index).toContain('"./generated/types"');
-    // The validators are zod, and zod is an optional peer of core: the main
-    // entry MUST NOT reach them, or importing a type drags zod in at runtime.
-    // They are consumed only through the `@ag-ui/core/schemas` subpath entry.
-    expect(
-      index.includes('"./generated/schemas"'),
-      "index.ts re-exports the zod validators; that puts zod on the main entry",
-    ).toBe(false);
+    // "the main entry must not reach the zod validators" is NOT asserted here.
+    // A substring search for `"./generated/schemas"` in index.ts is satisfied
+    // by `'./generated/schemas'`, by `./generated/schemas.js`, by a new
+    // `./validators/` barrel and by any re-export one file deeper — every
+    // shape that would actually break the optional peer. The real gate is
+    // `sdks/typescript/packages/core/src/__tests__/main-entry-zod-free.test.ts`,
+    // which bundles the entry with zod marked external and fails on a
+    // surviving `zod` import, module graph and all, with a vacuity control
+    // that proves the check can fail. Two greps that a rename defeats read as
+    // a second opinion and are not one.
     const schemasEntry = readFileSync(join(srcDir, "schemas.ts"), "utf8");
     expect(schemasEntry).toContain('"./generated/schemas"');
     for (const retired of ["events.ts", "types.ts"]) {
@@ -203,12 +228,33 @@ describe("the generator", () => {
     // No hand-written module may re-declare the protocol surface: looseObject
     // is the generated validators' signature shape, and an EventType enum
     // outside generated/ is a duplicate constant table.
-    for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
-      const content = readFileSync(join(srcDir, entry.name), "utf8");
+    //
+    // Recursive, because the scan used to read only the top level and `continue`
+    // past every directory: a hand-written `src/validators/events.ts` — the
+    // most natural place for exactly this regression to land — was never
+    // opened. `generated/` is the one directory skipped, since it IS the
+    // generated source, and `__tests__/` because a test may legitimately spell
+    // a validator shape to assert against it.
+    const SKIP = new Set(["generated", "__tests__"]);
+    const handWritten = (dir: string, prefix: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? SKIP.has(entry.name)
+            ? []
+            : handWritten(join(dir, entry.name), `${prefix}${entry.name}/`)
+          : entry.isFile() && entry.name.endsWith(".ts")
+            ? [`${prefix}${entry.name}`]
+            : [],
+      );
+    const scanned = handWritten(srcDir, "");
+    // A scan that walked nothing would pass every assertion in the loop below.
+    expect(scanned, "the hand-written scan found no files").not.toEqual([]);
+    expect(scanned, "index.ts is not being scanned").toContain("index.ts");
+    for (const name of scanned) {
+      const content = readFileSync(join(srcDir, name), "utf8");
       expect(
         /z\.looseObject|enum EventType/.test(content),
-        `${entry.name} re-declares protocol semantics that belong to generated/`,
+        `${name} re-declares protocol semantics that belong to generated/`,
       ).toBe(false);
     }
   });
@@ -222,6 +268,119 @@ describe("the generator", () => {
       "utf8",
     );
     expect(manifest).not.toContain("generated");
+  });
+});
+
+/**
+ * Every definition reaches every language, in the COMMITTED output.
+ *
+ * `accounts for every schema definition` above compares the IR to `$defs`: it
+ * says the READER dropped nothing. Nothing said the EMITTERS dropped nothing —
+ * a definition the TypeScript emitter skipped would leave `covered` complete,
+ * the byte-for-byte gate green (the committed file matches what the generator
+ * produces, which is the file with the hole in it), and the SDK simply
+ * missing a type.
+ *
+ * Read from the committed files rather than from `files`, because the
+ * committed files are what consumers get; the byte gate above is what keeps
+ * the two the same.
+ */
+describe("every definition reaches the committed output", () => {
+  // Mixins included: they are flattened INTO the definitions that compose
+  // them, but both languages also emit them as types in their own right, and
+  // an SDK consumer composing one is entitled to find it.
+  const expected = [
+    ...model.definitions.map((definition) => definition.name),
+    ...model.mixins,
+  ].sort();
+
+  const tsTypes = readFileSync(join(TS_OUTPUT_DIR, "types.ts"), "utf8");
+  const tsSchemas = readFileSync(join(TS_OUTPUT_DIR, "schemas.ts"), "utf8");
+  const pyModels = readFileSync(join(PY_OUTPUT_DIR, "models.py"), "utf8");
+
+  /** A vacuity control: the probe must find the name it is looking for. */
+  const missing = (
+    source: string,
+    pattern: (name: string) => RegExp,
+  ): string[] => expected.filter((name) => !pattern(name).test(source));
+
+  it("as an exported TypeScript type", () => {
+    expect(
+      missing(
+        tsTypes,
+        (name) => new RegExp(`^export (type|enum|const) ${name}\\b`, "m"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("as a generated zod validator", () => {
+    expect(
+      missing(tsSchemas, (name) => new RegExp(`^export const ${name}Schema\\b`, "m")),
+    ).toEqual([]);
+  });
+
+  it("as a Python model", () => {
+    // A class for an object, a union or a mixin; a module-level assignment for
+    // an alias or a Literal enum. Either is the name a consumer imports.
+    expect(
+      missing(
+        pyModels,
+        (name) => new RegExp(`^(class ${name}\\b|${name}(: TypeAlias)? =)`, "m"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("finds the names it looks for, so the three checks above can fail", () => {
+    // Without this, a probe whose regex stopped matching anything would report
+    // "nothing missing" for a corpus it never found.
+    expect(expected.length).toBeGreaterThan(50);
+    expect(
+      missing(tsTypes, () => /^export (type|enum|const) ZZNoSuchDefinition\b/m),
+    ).toEqual(expected);
+  });
+
+  /**
+   * The two languages whose emitters reshape the names — .NET prefixes every
+   * class with `AGUI`, protobuf dissolves the message union into one
+   * `Message` and renames the content parts — cannot be checked by name from
+   * here without reimplementing those mappings, and their emitters already
+   * assert coverage while generating (`assertEveryDefinitionIsOnTheWire`,
+   * `assertEveryDefinitionIsEmitted`), which runs on every `generateFiles()`
+   * above.
+   *
+   * What those assertions do NOT check is their own exemption lists. An
+   * exemption naming a definition that has since been renamed or deleted stays
+   * in the file forever and silently applies to the next definition that
+   * reuses the name — the same stale-pin hole `OPEN_DEFINITIONS` closes in
+   * schema.test.ts. Read out of the generator source rather than imported,
+   * because neither set is exported; a rename of the set itself fails here
+   * rather than quietly matching nothing.
+   */
+  const exemptionSet = (file: string, constName: string): string[] => {
+    const source = readFileSync(join(GENERATOR_DIR, file), "utf8");
+    const start = source.indexOf(`const ${constName} = new Set([`);
+    expect(start, `${file} no longer declares ${constName}`).toBeGreaterThan(-1);
+    const end = source.indexOf("]);", start);
+    expect(end, `${constName} is not a closed literal`).toBeGreaterThan(start);
+    const body = source.slice(start, end);
+    return [...body.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  };
+
+  const definitionNames = new Set(
+    model.definitions.map((definition) => definition.name),
+  );
+
+  it.each([
+    ["protobuf.ts", "NOT_ON_THE_WIRE"],
+    ["dotnet-models.ts", "NOT_IN_DOTNET"],
+  ])("keeps no stale exemption in %s's %s", (file, constName) => {
+    const names = exemptionSet(file, constName);
+    expect(names.length, `${constName} parsed as empty`).toBeGreaterThan(0);
+    expect(
+      names.filter((name) => !definitionNames.has(name)),
+      `${constName} exempts a definition that no longer exists — delete the entry, or a ` +
+        "future definition reusing the name is exempted without anyone deciding so",
+    ).toEqual([]);
   });
 });
 
@@ -261,8 +420,8 @@ describe("the generated zod schemas against the fixture corpus", () => {
   // The fixtures are the behavioural contract, so the generated validators
   // must agree with them wherever the semantics are meant to coincide. The one
   // deliberate divergence is closure: the spec is strict and the generated zod
-  // is loose (unknown keys survive for the strip-and-warn middleware), so a
-  // fixture rejected only by unevaluatedProperties is expected to parse.
+  // is loose (unknown keys survive for the strip-and-warn enforcement stage),
+  // so a fixture rejected only by unevaluatedProperties is expected to parse.
   const FIXTURES_DIR = join(dirname(SCHEMA_PATH), "fixtures");
   const schemas = generatedSchemas as unknown as Record<
     string,
@@ -344,9 +503,10 @@ describe("the generated zod schemas against the fixture corpus", () => {
   });
 
   // The tolerant layer's whole promise is that unknown keys SURVIVE the parse
-  // — the strip-and-warn middleware needs to see them, and a re-serialising
-  // intermediary must not lose them. A silent switch from looseObject to a
-  // stripping z.object would pass every assertion above; this is what fails.
+  // — the strip-and-warn enforcement stage needs to see them, and a
+  // re-serialising intermediary must not lose them. A silent switch from
+  // looseObject to a stripping z.object would pass every assertion above; this
+  // is what fails.
   const objectAnchors = new Set(
     model.definitions
       .filter((definition) => definition.kind === "object")

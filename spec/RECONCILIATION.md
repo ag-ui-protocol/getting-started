@@ -1,8 +1,15 @@
 # Reconciliation
 
 0 fields where TypeScript and
-Python disagree with each other or with the schema. Each one is a decision the schema
+Python disagree with the schema about required-ness. Each one is a decision the schema
 had to make, not a transcription.
+
+Read the count for exactly what it covers. Only required-ness is compared: nullability
+is reported in each column but never enters the comparison, and the .NET column is
+informational — it is printed, not checked against anything. The TypeScript column is
+read off the zod validator rather than the generated type, so a field the schema gives
+a default reads `optional` here even where the generated TypeScript type requires it —
+`tools` and `context` on RunAgentInput are the two.
 
 | field | TypeScript | Python | schema |
 | ----- | ---------- | ------ | ------ |
@@ -34,7 +41,7 @@ as optional.
 | metadata      | optional   | optional, nullable | optional, nullable | optional |
 | name          | optional   | optional, nullable | optional, nullable | optional |
 | rawEvent      | optional   | optional, nullable | optional, nullable | optional |
-| role          | optional   | optional, nullable | optional           | optional |
+| role          | optional   | optional, nullable | optional, nullable | optional |
 | subagentRunId | optional   | optional, nullable | optional, nullable | optional |
 | timestamp     | optional   | optional, nullable | optional, nullable | optional |
 | type          | required   | required           | required           | required |
@@ -225,16 +232,17 @@ as optional.
 
 ## RunStartedEvent
 
-| field       | TypeScript | Python             | .NET               | schema   |
-| ----------- | ---------- | ------------------ | ------------------ | -------- |
-| input       | optional   | optional, nullable | optional, nullable | optional |
-| metadata    | optional   | optional, nullable | optional, nullable | optional |
-| parentRunId | optional   | optional, nullable | optional, nullable | optional |
-| rawEvent    | optional   | optional, nullable | optional, nullable | optional |
-| runId       | required   | required           | optional           | required |
-| threadId    | required   | required           | optional           | required |
-| timestamp   | optional   | optional, nullable | optional, nullable | optional |
-| type        | required   | required           | required           | required |
+| field           | TypeScript | Python             | .NET               | schema   |
+| --------------- | ---------- | ------------------ | ------------------ | -------- |
+| input           | optional   | optional, nullable | optional, nullable | optional |
+| metadata        | optional   | optional, nullable | optional, nullable | optional |
+| parentRunId     | optional   | optional, nullable | optional, nullable | optional |
+| protocolVersion | optional   | optional, nullable | optional, nullable | optional |
+| rawEvent        | optional   | optional, nullable | optional, nullable | optional |
+| runId           | required   | required           | optional           | required |
+| threadId        | required   | required           | optional           | required |
+| timestamp       | optional   | optional, nullable | optional, nullable | optional |
+| type            | required   | required           | required           | required |
 
 ## RunFinishedEvent
 
@@ -372,7 +380,7 @@ as optional.
 | ------------------- | ---------- | ------------------ | ------------------ | -------- |
 | description         | optional   | optional, nullable | optional, nullable | optional |
 | metadata            | optional   | optional, nullable | optional, nullable | optional |
-| name                | required   | required           | optional           | required |
+| name                | required   | required           | optional, nullable | required |
 | parentMessageId     | optional   | optional, nullable | optional, nullable | optional |
 | parentSubagentRunId | optional   | optional, nullable | optional, nullable | optional |
 | parentToolCallId    | optional   | optional, nullable | optional, nullable | optional |
@@ -398,7 +406,7 @@ as optional.
 | field         | TypeScript | Python             | .NET               | schema   |
 | ------------- | ---------- | ------------------ | ------------------ | -------- |
 | code          | optional   | optional, nullable | optional, nullable | optional |
-| message       | required   | required           | optional           | required |
+| message       | required   | required           | optional, nullable | required |
 | metadata      | optional   | optional, nullable | optional, nullable | optional |
 | rawEvent      | optional   | optional, nullable | optional, nullable | optional |
 | subagentRunId | required   | required           | optional, nullable | required |
@@ -471,7 +479,7 @@ as optional.
 | -------------- | ---------- | ------------------ | ------------------ | -------- |
 | content        | required   | required           | optional           | required |
 | encryptedValue | optional   | optional, nullable | optional, nullable | optional |
-| id             | required   | required           | optional, nullable | required |
+| id             | required   | required           | optional           | required |
 | metadata       | optional   | optional, nullable | optional, nullable | optional |
 | name           | optional   | optional, nullable | optional, nullable | optional |
 | role           | required   | required           | required           | required |
@@ -483,7 +491,7 @@ as optional.
 | -------------- | ---------- | ------------------ | ------------------ | -------- |
 | content        | required   | required           | optional           | required |
 | encryptedValue | optional   | optional, nullable | optional, nullable | optional |
-| id             | required   | required           | optional, nullable | required |
+| id             | required   | required           | optional           | required |
 | metadata       | optional   | optional, nullable | optional, nullable | optional |
 | name           | optional   | optional, nullable | optional, nullable | optional |
 | role           | required   | required           | required           | required |
@@ -495,7 +503,7 @@ as optional.
 | -------------- | ---------- | ------------------ | ------------------ | -------- |
 | content        | optional   | optional, nullable | optional, nullable | optional |
 | encryptedValue | optional   | optional, nullable | optional, nullable | optional |
-| id             | required   | required           | optional, nullable | required |
+| id             | required   | required           | optional           | required |
 | metadata       | optional   | optional, nullable | optional, nullable | optional |
 | name           | optional   | optional, nullable | optional, nullable | optional |
 | role           | required   | required           | required           | required |
@@ -508,7 +516,7 @@ as optional.
 | -------------- | ---------- | ------------------ | ------------------ | -------- |
 | content        | required   | required           | —                  | required |
 | encryptedValue | optional   | optional, nullable | optional, nullable | optional |
-| id             | required   | required           | optional, nullable | required |
+| id             | required   | required           | optional           | required |
 | metadata       | optional   | optional, nullable | optional, nullable | optional |
 | name           | optional   | optional, nullable | optional, nullable | optional |
 | role           | required   | required           | required           | required |
@@ -521,7 +529,7 @@ as optional.
 | content        | required   | required           | optional           | required |
 | encryptedValue | optional   | optional, nullable | optional, nullable | optional |
 | error          | optional   | optional, nullable | optional, nullable | optional |
-| id             | required   | required           | optional, nullable | required |
+| id             | required   | required           | optional           | required |
 | metadata       | optional   | optional, nullable | optional, nullable | optional |
 | role           | required   | required           | required           | required |
 | subagentRunId  | optional   | optional, nullable | optional, nullable | optional |
@@ -533,7 +541,7 @@ as optional.
 | ------------- | ---------- | ------------------ | ------------------ | -------- |
 | activityType  | required   | required           | optional           | required |
 | content       | required   | required           | optional           | required |
-| id            | required   | required           | optional, nullable | required |
+| id            | required   | required           | optional           | required |
 | metadata      | optional   | optional, nullable | optional, nullable | optional |
 | role          | required   | required           | required           | required |
 | subagentRunId | optional   | optional, nullable | optional, nullable | optional |
@@ -544,7 +552,7 @@ as optional.
 | -------------- | ---------- | ------------------ | ------------------ | -------- |
 | content        | required   | required           | optional           | required |
 | encryptedValue | optional   | optional, nullable | optional, nullable | optional |
-| id             | required   | required           | optional, nullable | required |
+| id             | required   | required           | optional           | required |
 | metadata       | optional   | optional, nullable | optional, nullable | optional |
 | role           | required   | required           | required           | required |
 | subagentRunId  | optional   | optional, nullable | optional, nullable | optional |
@@ -639,14 +647,146 @@ as optional.
 
 ## RunAgentInput
 
+| field           | TypeScript         | Python             | .NET               | schema   |
+| --------------- | ------------------ | ------------------ | ------------------ | -------- |
+| context         | optional           | optional, nullable | optional, nullable | optional |
+| forwardedProps  | optional           | optional, nullable | optional, nullable | optional |
+| messages        | required           | required           | optional           | required |
+| parentRunId     | optional           | optional, nullable | optional, nullable | optional |
+| protocolVersion | optional           | optional, nullable | optional, nullable | optional |
+| resume          | optional           | optional, nullable | optional, nullable | optional |
+| runId           | required           | required           | optional           | required |
+| state           | optional, nullable | optional, nullable | optional, nullable | optional |
+| threadId        | required           | required           | optional           | required |
+| tools           | optional           | optional, nullable | optional, nullable | optional |
+
+## SubagentInfo
+
+| field       | TypeScript | Python             | .NET               | schema   |
+| ----------- | ---------- | ------------------ | ------------------ | -------- |
+| description | optional   | optional, nullable | optional, nullable | optional |
+| name        | required   | required           | optional           | required |
+
+## IdentityCapabilities
+
+| field            | TypeScript | Python             | .NET               | schema   |
+| ---------------- | ---------- | ------------------ | ------------------ | -------- |
+| description      | optional   | optional, nullable | optional, nullable | optional |
+| documentationUrl | optional   | optional, nullable | optional, nullable | optional |
+| metadata         | optional   | optional, nullable | optional, nullable | optional |
+| name             | optional   | optional, nullable | optional, nullable | optional |
+| provider         | optional   | optional, nullable | optional, nullable | optional |
+| type             | optional   | optional, nullable | optional, nullable | optional |
+| version          | optional   | optional, nullable | optional, nullable | optional |
+
+## TransportCapabilities
+
+| field             | TypeScript | Python             | .NET               | schema   |
+| ----------------- | ---------- | ------------------ | ------------------ | -------- |
+| httpBinary        | optional   | optional, nullable | optional, nullable | optional |
+| pushNotifications | optional   | optional, nullable | optional, nullable | optional |
+| resumable         | optional   | optional, nullable | optional, nullable | optional |
+| streaming         | optional   | optional, nullable | optional, nullable | optional |
+| websocket         | optional   | optional, nullable | optional, nullable | optional |
+
+## ToolsCapabilities
+
 | field          | TypeScript | Python             | .NET               | schema   |
 | -------------- | ---------- | ------------------ | ------------------ | -------- |
-| context        | optional   | optional, nullable | optional, nullable | optional |
-| forwardedProps | optional   | optional, nullable | optional, nullable | optional |
-| messages       | required   | required           | optional           | required |
-| parentRunId    | optional   | optional, nullable | optional, nullable | optional |
-| resume         | optional   | optional, nullable | optional, nullable | optional |
-| runId          | required   | required           | optional           | required |
+| clientProvided | optional   | optional, nullable | optional, nullable | optional |
+| items          | optional   | optional, nullable | optional, nullable | optional |
+| parallelCalls  | optional   | optional, nullable | optional, nullable | optional |
+| supported      | optional   | optional, nullable | optional, nullable | optional |
+
+## OutputCapabilities
+
+| field              | TypeScript | Python             | .NET               | schema   |
+| ------------------ | ---------- | ------------------ | ------------------ | -------- |
+| structuredOutput   | optional   | optional, nullable | optional, nullable | optional |
+| supportedMimeTypes | optional   | optional, nullable | optional, nullable | optional |
+
+## StateCapabilities
+
+| field           | TypeScript | Python             | .NET               | schema   |
+| --------------- | ---------- | ------------------ | ------------------ | -------- |
+| deltas          | optional   | optional, nullable | optional, nullable | optional |
+| memory          | optional   | optional, nullable | optional, nullable | optional |
+| persistentState | optional   | optional, nullable | optional, nullable | optional |
+| snapshots       | optional   | optional, nullable | optional, nullable | optional |
+
+## MultiAgentCapabilities
+
+| field      | TypeScript | Python             | .NET               | schema   |
+| ---------- | ---------- | ------------------ | ------------------ | -------- |
+| delegation | optional   | optional, nullable | optional, nullable | optional |
+| handoffs   | optional   | optional, nullable | optional, nullable | optional |
+| subagents  | optional   | optional, nullable | optional, nullable | optional |
+| supported  | optional   | optional, nullable | optional, nullable | optional |
+
+## ReasoningCapabilities
+
+| field     | TypeScript | Python             | .NET               | schema   |
+| --------- | ---------- | ------------------ | ------------------ | -------- |
+| encrypted | optional   | optional, nullable | optional, nullable | optional |
+| streaming | optional   | optional, nullable | optional, nullable | optional |
+| supported | optional   | optional, nullable | optional, nullable | optional |
+
+## MultimodalInputCapabilities
+
+| field | TypeScript | Python             | .NET               | schema   |
+| ----- | ---------- | ------------------ | ------------------ | -------- |
+| audio | optional   | optional, nullable | optional, nullable | optional |
+| file  | optional   | optional, nullable | optional, nullable | optional |
+| image | optional   | optional, nullable | optional, nullable | optional |
+| pdf   | optional   | optional, nullable | optional, nullable | optional |
+| video | optional   | optional, nullable | optional, nullable | optional |
+
+## MultimodalOutputCapabilities
+
+| field | TypeScript | Python             | .NET               | schema   |
+| ----- | ---------- | ------------------ | ------------------ | -------- |
+| audio | optional   | optional, nullable | optional, nullable | optional |
+| image | optional   | optional, nullable | optional, nullable | optional |
+
+## MultimodalCapabilities
+
+| field  | TypeScript | Python             | .NET               | schema   |
+| ------ | ---------- | ------------------ | ------------------ | -------- |
+| input  | optional   | optional, nullable | optional, nullable | optional |
+| output | optional   | optional, nullable | optional, nullable | optional |
+
+## ExecutionCapabilities
+
+| field            | TypeScript | Python             | .NET               | schema   |
+| ---------------- | ---------- | ------------------ | ------------------ | -------- |
+| codeExecution    | optional   | optional, nullable | optional, nullable | optional |
+| maxExecutionTime | optional   | optional, nullable | optional, nullable | optional |
+| maxIterations    | optional   | optional, nullable | optional, nullable | optional |
+| sandboxed        | optional   | optional, nullable | optional, nullable | optional |
+
+## HumanInTheLoopCapabilities
+
+| field            | TypeScript | Python             | .NET               | schema   |
+| ---------------- | ---------- | ------------------ | ------------------ | -------- |
+| approvals        | optional   | optional, nullable | optional, nullable | optional |
+| approveWithEdits | optional   | optional, nullable | optional, nullable | optional |
+| feedback         | optional   | optional, nullable | optional, nullable | optional |
+| interrupts       | optional   | optional, nullable | optional, nullable | optional |
+| interventions    | optional   | optional, nullable | optional, nullable | optional |
+| supported        | optional   | optional, nullable | optional, nullable | optional |
+
+## AgentCapabilities
+
+| field          | TypeScript | Python             | .NET               | schema   |
+| -------------- | ---------- | ------------------ | ------------------ | -------- |
+| custom         | optional   | optional, nullable | optional, nullable | optional |
+| execution      | optional   | optional, nullable | optional, nullable | optional |
+| humanInTheLoop | optional   | optional, nullable | optional, nullable | optional |
+| identity       | optional   | optional, nullable | optional, nullable | optional |
+| multiAgent     | optional   | optional, nullable | optional, nullable | optional |
+| multimodal     | optional   | optional, nullable | optional, nullable | optional |
+| output         | optional   | optional, nullable | optional, nullable | optional |
+| reasoning      | optional   | optional, nullable | optional, nullable | optional |
 | state          | optional   | optional, nullable | optional, nullable | optional |
-| threadId       | required   | required           | optional           | required |
 | tools          | optional   | optional, nullable | optional, nullable | optional |
+| transport      | optional   | optional, nullable | optional, nullable | optional |

@@ -54,6 +54,39 @@ function collect(kind: "valid" | "invalid"): Fixture[] {
 const valid = collect("valid");
 const invalid = collect("invalid");
 
+describe("the fixture corpus", () => {
+  it("matches the committed manifest", () => {
+    // `has fixtures to run` is satisfied by one document, so nothing stopped
+    // the corpus from shrinking: deleting every ReasoningMessageStartEvent
+    // fixture would have left this suite green and the closure probes, the
+    // root-union checks and the generated-zod comparison all running over
+    // whatever survived. A committed listing makes that a diff — asserted in
+    // BOTH directions, so a NEW fixture missing from the manifest fails too.
+    const walk = (dir: string, prefix: string): string[] =>
+      readdirSync(dir, { withFileTypes: true })
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+        .flatMap((entry) =>
+          entry.isDirectory()
+            ? walk(join(dir, entry.name), `${prefix}${entry.name}/`)
+            : entry.name.endsWith(".json")
+              ? [`${prefix}${entry.name}`]
+              : [],
+        );
+    const found = walk(FIXTURES_DIR, "").sort();
+    const manifest = readFileSync(join(FIXTURES_DIR, "MANIFEST.txt"), "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("#"))
+      .sort();
+    expect(
+      manifest,
+      "spec/draft/fixtures/MANIFEST.txt is out of date. If you added or removed a fixture, " +
+        "regenerate it in the same commit (the command is in the file's header) and say so in " +
+        "the message; if you did not, a fixture has gone missing.",
+    ).toEqual(found);
+  });
+});
+
 describe("accepted documents", () => {
   it("has fixtures to run", () => {
     expect(valid.length).toBeGreaterThan(0);

@@ -20,6 +20,16 @@
   ],
   "expect": {
     "outcome": "completed",
-    "state": 0
+    "eventTypes": [
+      "RUN_STARTED",
+      "STATE_SNAPSHOT",
+      "STATE_SNAPSHOT",
+      "RUN_FINISHED"
+    ],
+    "noWarnings": true,
+    "state": 0,
+    "eventPaths": {
+      "2.snapshot": 0
+    }
   }
 }

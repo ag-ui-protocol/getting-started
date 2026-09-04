@@ -52,8 +52,11 @@ Because `expected` is exact, a stray `null` fails the case, and a `null` that th
 carry (an individual metadata value, a value inside a state snapshot or a JSON Patch operation) must
 still be there. Cases are meant to be read as one plausible stream of events, top to bottom.
 
-`producedBy` exists only for event types an SDK genuinely does not implement — protobuf-era chunk
-events are absent from .NET, for instance. It is not an escape hatch for a case an SDK fails.
+`producedBy` exists only for event types an SDK genuinely does not implement. It is not an escape
+hatch for a case an SDK fails. Every case here currently lists all three SDKs — the chunk events
+were the last exemption, and .NET has implemented them since; if you find yourself reaching for a
+shorter list, say in `note` exactly what the missing SDK lacks, so the entry can be deleted when it
+gains it.
 
 ### Consumers
 
@@ -82,6 +85,14 @@ with explicitly, or an edit here can leave a stale green result behind:
   in it. `@ag-ui/encoder` therefore sets `nx.targets.test.cache: false` in its `package.json`; its
   suite takes well under a second, so always running it is cheaper than the risk.
 
+A second thing a new consumer needs: **a CI trigger**. This directory sits outside every path list
+in `.github/workflows/unit-*.yml`, so until `sdks/fixtures/**` was added to each of them a PR
+editing only a fixture here ran no SDK **test** job. Not no job at all: `typecheck-typescript.yml`
+matched it through its blanket `sdks/**` entry and compiled the workspace, which cannot fail on a
+fixture's contents. Nothing that executes these documents ran. All three unit workflows now list
+`sdks/fixtures/**`, in both their `push` and `pull_request` filters; a new consumer in a fourth
+workflow needs the same line.
+
 The obvious alternative — adding `{workspaceRoot}/sdks/fixtures/**/*` to the `test` target's
 `inputs` in `nx.json` — **does not work**, and was tried. On Nx 22.5.0 in this workspace a
 `{workspaceRoot}` input does not reach the hasher: verified with a tracked control file at the
@@ -95,20 +106,31 @@ nullable form has this problem: `JsonElement?` cannot tell `"value": null` apart
 `value`, because System.Text.Json maps a JSON null onto the `Nullable<T>` having no value.
 
 So a payload field that is _entirely_ `null` round-trips through .NET for the non-nullable ones and
-is lost for the nullable ones:
+is lost for the nullable ones. This table lists the **event** payload members only — it is not the
+whole set:
 
 | Field                       | .NET type      | `field: null` survives?                                                                                     |
 | --------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------- |
 | `STATE_SNAPSHOT.snapshot`   | `JsonElement`  | yes — covered by a fixture case                                                                             |
 | `RAW.event`                 | `JsonElement`  | yes — covered by a fixture case                                                                             |
-| `ACTIVITY_SNAPSHOT.content` | `JsonElement`  | yes, but TypeScript's `z.record` rejects a null `content`, so the fixture cannot assert it across all three |
+| `ACTIVITY_SNAPSHOT.content` | `JsonElement`  | yes, but no fixture can assert it: the schema declares `content` as `{"type": "object", "additionalProperties": true}`, so a bare `null` there is illegal for **every** SDK, not just rejected by the generated TypeScript validator's object predicate |
 | `CUSTOM.value`              | `JsonElement?` | **no**                                                                                                      |
 | `RUN_FINISHED.result`       | `JsonElement?` | **no**                                                                                                      |
+| `SUBAGENT_FINISHED.result`  | `JsonElement?` | **no**                                                                                                      |
 
-Nulls _nested inside_ any of these payloads always survive, in every SDK. Closing the two remaining
-gaps means changing those properties to non-nullable `JsonElement` with
-`JsonIgnoreCondition.WhenWritingDefault` — a breaking type change, so it is deliberately out of
-scope here.
+Five more "any JSON value" members collapse in exactly the same way and for exactly the same
+reason, and are left out of the table only because they are not event payloads:
+`BaseEvent.rawEvent` (`JsonElement?`), `Tool.parameters`, `ResumeEntry.payload`,
+`RunAgentInput.forwardedProps` and the media parts' `metadata` — the last a single
+`JsonElement? Metadata` on the shared base `AGUIMediaInputContent` (the four media parts declare
+`metadata` with neither a `type` nor a `$ref`, so it is one member inherited by `ImageInputContent`,
+`AudioInputContent`, `VideoInputContent` and `DocumentInputContent`) — all `JsonElement?` in the
+generated .NET models. Eight members in total, then, not three.
+
+Nulls _nested inside_ any of these payloads always survive, in every SDK. Closing any of these
+gaps — the three listed above or the four beside them — means changing the property to
+non-nullable `JsonElement` with `JsonIgnoreCondition.WhenWritingDefault`, a breaking type change,
+so it is deliberately out of scope here.
 
 `RunAgentInput.state` is **not** in this table, on purpose: there the null-collapse is the
 contract, not a limitation. `state` is optional, absent means "no state", and a bare `null` is
@@ -158,9 +180,14 @@ SDK inventing a value for a group the input left out — omitted means _undeclar
 fill it in. A `null` _value_ under an open-by-key member (`identity.metadata`, `custom`) is the
 opposite case: it is data, the protocol says it MUST be preserved, and the `open_values_may_be_null`
 case holds every SDK to carrying it through unchanged. The `full_every_group_populated` case exercises every field, including the two .NET
-gained and the one-word `subagents` key. The same three documents sit under
-`spec/draft/fixtures/AgentCapabilities/valid/`, where the spec harness validates them against the
-schema; this file is where the SDKs are held to each other.
+gained and the one-word `subagents` key. All four documents — `full_every_group_populated`,
+`minimal_nothing_declared`, `partial_as_a_real_producer_declares` and `open_values_may_be_null` —
+sit under `spec/draft/fixtures/AgentCapabilities/valid/` as `full.json`, `minimal.json`,
+`partial.json` and `open-values-null.json`, where the spec harness validates them against the
+schema; this file is where the SDKs are held to each other. The mapping is not a convention anyone
+has to remember: `spec/harness/fixtures.test.ts` asserts it in both directions, and that the two
+copies of each document parse to the same value (`expect(c.input).toEqual(spec)` on the parsed
+JSON — so formatting and key order may differ between the copies, but no value may).
 
 ### Consumers
 

@@ -482,6 +482,154 @@ describe("closure", () => {
     // leave an exemption behind.
     expect([...OPEN_BY_KEY].filter((path) => !seen.has(path))).toEqual([]);
   });
+
+  it("pins every position that accepts any JSON at all", () => {
+    // OPEN_BY_KEY above pins the KEYWORD, not the openness. It fires only
+    // where the literal `additionalProperties` appears, so a slot that accepts
+    // anything WITHOUT saying so is invisible to it: `{"type": "object"}` with
+    // no `properties`, or a slot with no `type` at all. Both accept every
+    // document a wide-open `additionalProperties: true` would.
+    //
+    // Measured against this schema, by calling the generator's IR reader
+    // (`buildModel` from ../generator/ir) on a doctored copy:
+    //
+    //   - `"sidecar": {"type": "object"}` on the closed CustomEvent, and a
+    //     whole new property-less `OpenBlob` definition of the same shape, are
+    //     both REFUSED before anything here runs: ir.ts throws
+    //     `object without additionalProperties: true` on each. So neither is
+    //     silently accepted — but the refusal comes from the generator
+    //     declining to read the schema, not from any closure check having seen
+    //     an open slot. The closure check in this file does not see them
+    //     either: `shapedDefinitions()` filters on
+    //     `effectiveProperties(name).length > 0`, and a property-less
+    //     definition has none.
+    //   - Write either as `{"type": "object", "additionalProperties": true}`
+    //     and buildModel accepts it — at which point OPEN_BY_KEY above catches
+    //     it, because that pin fires on the literal keyword.
+    //   - The shape nothing above catches is a slot with NO `type` and no
+    //     keyword at all: `{"description": "…"}` in a property position.
+    //     buildModel accepts that, and OPEN_BY_KEY has no keyword to fire on.
+    //     It admits every document a wide-open `additionalProperties: true`
+    //     would.
+    //
+    // That last one is what this check exists for.
+    //
+    // So the unconstrained positions get the same treatment as the open-by-key
+    // ones: pinned by exact location with a reason, and a stale pin fails too.
+    // Sixteen slots in this schema are deliberately "any JSON" — every one of
+    // them is a place the protocol carries a payload it does not own.
+    const UNCONSTRAINED_BY_KEY = new Map([
+      [
+        "/$defs/BaseEvent/properties/rawEvent",
+        "the producer's own event, carried verbatim; the protocol never reads it",
+      ],
+      ["/$defs/State", "agent state is any JSON value, falsy and null included"],
+      [
+        "/$defs/RawEvent/properties/event",
+        "the whole point of RAW is that the payload is not ours",
+      ],
+      [
+        "/$defs/CustomEvent/properties/value",
+        "an integration's own payload, routed by `name` and never interpreted",
+      ],
+      [
+        "/$defs/RunFinishedEvent/properties/result",
+        "whatever the agent returns; the protocol does not model return values",
+      ],
+      [
+        "/$defs/SubagentFinishedEvent/properties/result",
+        "same as the run's result, one level down",
+      ],
+      [
+        "/$defs/ResumeEntry/properties/payload",
+        "the answer to an interrupt, shaped by that interrupt's responseSchema",
+      ],
+      [
+        "/$defs/ImageInputContent/properties/metadata",
+        "producer metadata about the attachment; not protocol vocabulary",
+      ],
+      [
+        "/$defs/AudioInputContent/properties/metadata",
+        "producer metadata about the attachment; not protocol vocabulary",
+      ],
+      [
+        "/$defs/VideoInputContent/properties/metadata",
+        "producer metadata about the attachment; not protocol vocabulary",
+      ],
+      [
+        "/$defs/DocumentInputContent/properties/metadata",
+        "producer metadata about the attachment; not protocol vocabulary",
+      ],
+      [
+        "/$defs/Tool/properties/parameters",
+        "a JSON Schema document belonging to the tool, not to this contract",
+      ],
+      [
+        "/$defs/RunAgentInput/properties/forwardedProps",
+        "the caller's passthrough bag, forwarded untouched to the agent",
+      ],
+      [
+        "/$defs/AddOperation/properties/value",
+        "RFC 6902 operand: state is any JSON, so the operand is too",
+      ],
+      [
+        "/$defs/ReplaceOperation/properties/value",
+        "RFC 6902 operand: state is any JSON, so the operand is too",
+      ],
+      [
+        "/$defs/TestOperation/properties/value",
+        "RFC 6902 operand: state is any JSON, so the operand is too",
+      ],
+    ]);
+
+    // A slot is constrained when it says ANYTHING about what may sit there:
+    // it declares properties, composes, enumerates, pins a constant, refers to
+    // a definition, or pins a type that is not `object`. `description` alone
+    // says nothing a validator can act on.
+    const CONSTRAINING = [
+      "properties",
+      "additionalProperties",
+      "unevaluatedProperties",
+      "patternProperties",
+      "$ref",
+      "allOf",
+      "oneOf",
+      "anyOf",
+      "enum",
+      "const",
+    ];
+    const isUnconstrained = (node: Json): boolean => {
+      if (CONSTRAINING.some((keyword) => keyword in node)) return false;
+      const declared = node.type;
+      const types = Array.isArray(declared)
+        ? (declared as string[])
+        : declared === undefined
+          ? []
+          : [declared as string];
+      // `"null"` alongside `"object"` narrows nothing that matters here.
+      const meaningful = types.filter((name) => name !== "null");
+      return meaningful.length === 0 || meaningful.includes("object");
+    };
+
+    const found: string[] = [];
+    walkSchema(schema, (node, path) => {
+      if (isUnconstrained(node)) found.push(path);
+    });
+    // The root itself composes, so it never reaches this list; if it ever
+    // does, the walk found nothing and the whole check is vacuous.
+    expect(found, "the walk found no schema nodes at all").not.toEqual([]);
+    expect(
+      found.filter((path) => !UNCONSTRAINED_BY_KEY.has(path)),
+      "a new position accepts any JSON without being pinned. If that is " +
+        "deliberate, add it to UNCONSTRAINED_BY_KEY with the reason; if it is " +
+        "not, give it a type, a $ref or properties — an unpinned open slot is " +
+        "invisible to every closure check in this file.",
+    ).toEqual([]);
+    expect(
+      [...UNCONSTRAINED_BY_KEY.keys()].filter((path) => !found.includes(path)),
+      "a pinned unconstrained position no longer exists, or is no longer open",
+    ).toEqual([]);
+  });
 });
 
 describe("the event union", () => {

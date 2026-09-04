@@ -92,5 +92,15 @@
         "dist/server.d.ts"
       ]
     }
+  },
+  "nx": {
+    "targets": {
+      "test": {
+        "cache": false
+      },
+      "test:coverage": {
+        "cache": false
+      }
+    }
   }
 }

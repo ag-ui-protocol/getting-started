@@ -29,12 +29,24 @@
     }
   ],
   "expect": {
-    "outcome": "failed"
+    "outcome": "failed",
+    "errorContains": "expected \\\"reasoning\\\""
   },
   "expectOverrides": {
     "dotnet": {
-      "intentional": "GAP, not a design difference: the .NET model types REASONING_MESSAGE_START.role as an open string rather than the literal the schema pins, so a wrong role is carried rather than rejected and the run completes. Alignment tracked separately.",
-      "outcome": "completed"
+      "intentional": "GAP, not a design difference: the .NET model types REASONING_MESSAGE_START.role as an open string rather than the literal the schema pins, so a wrong role is carried rather than rejected and the run completes. `errorContains` is deliberately the empty string, which asserts nothing \u2014 it LIFTS the base's requirement rather than restating it, because this lane produces no rejection to match against. `eventTypes` and `eventPaths` pin what the lane does INSTEAD of rejecting: the whole reasoning bracket is delivered, and the START event reaches application code still carrying the role the producer sent \u2014 so closing the gap turns this red rather than passing silently. Alignment tracked separately.",
+      "outcome": "completed",
+      "errorContains": "",
+      "eventTypes": [
+        "RUN_STARTED",
+        "REASONING_MESSAGE_START",
+        "REASONING_MESSAGE_CONTENT",
+        "REASONING_MESSAGE_END",
+        "RUN_FINISHED"
+      ],
+      "eventPaths": {
+        "1.role": "assistant"
+      }
     }
   }
 }

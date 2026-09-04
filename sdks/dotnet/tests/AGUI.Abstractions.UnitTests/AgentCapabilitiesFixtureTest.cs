@@ -83,6 +83,33 @@ public sealed class AgentCapabilitiesFixtureTest
         }
     }
 
+    [Fact]
+    public void AssertNoNullsRejectsANullUnderANonOpenKey()
+    {
+        // The metadata/custom skip in AssertNoNulls is only meaningful if the walk it guards
+        // actually rejects a null elsewhere — and the added guard rejects a null VALUE spelled at
+        // the open key itself. No `expected` document exercises either directly (an `expected`
+        // that carried such a null would have failed NoExpectedDocumentContainsANull first), so
+        // these three inputs pin the behaviour: a null at an open key (custom, identity.metadata)
+        // throws, and a null value NESTED under an open key is legal and does not throw.
+        Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => AssertNoNulls(
+            JsonNode.Parse(JsonDocument.Parse("{\"custom\":null}").RootElement.GetRawText()),
+            "custom-null",
+            ""));
+
+        Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => AssertNoNulls(
+            JsonNode.Parse(JsonDocument.Parse("{\"identity\":{\"metadata\":null}}").RootElement.GetRawText()),
+            "metadata-null",
+            ""));
+
+        // A null VALUE under an open-by-key member is data the protocol preserves; the walk must
+        // not descend into it and must not throw.
+        AssertNoNulls(
+            JsonNode.Parse(JsonDocument.Parse("{\"custom\":{\"anything\":null}}").RootElement.GetRawText()),
+            "custom-open-null",
+            "");
+    }
+
     [Theory]
     [MemberData(nameof(CaseNames))]
     public void CaseReserializesToItsExpectedJson(string caseName)
@@ -136,6 +163,11 @@ public sealed class AgentCapabilitiesFixtureTest
                     // walk does not descend into those; a null anywhere else is an unset member spelled wrong.
                     if (property.Key is "metadata" or "custom")
                     {
+                        // Skipping the member skips its VALUE, not the member itself: the schema types
+                        // both as objects that may be absent but are never null when present.
+                        Assert.False(
+                            property.Value is null || property.Value.GetValueKind() == JsonValueKind.Null,
+                            $"{caseName}: JSON null at '{path}.{property.Key}'");
                         continue;
                     }
 

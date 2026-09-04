@@ -33,22 +33,42 @@ So a fixture failing does not always mean a client is non-conforming — it
 means a client changed. That is the point of a regression suite, and it is why
 `kill` names a change rather than a rule.
 
-- **What these clients do that the specification says they should NOT.** Three
-  fixtures deliberately pin an admitted gap — a closed string set checked as a
-  leaf, so an unrecognised member is fatal where the spec wants it stripped;
-  reasoning discipline that goes unverified. Each says so in its description
-  and names the spec Note that must change with it. These assert the opposite
-  of the rule, on purpose, so that closing the gap is a deliberate act rather
-  than a silent one.
+- **What these clients do that the specification says they should NOT.** One
+  fixture deliberately pins an admitted gap: `unknown-enum-value-role-fatal`,
+  where a closed string set is checked as a leaf, so an unrecognised member is
+  fatal on the TypeScript lane where the spec wants it stripped. Its
+  description says so and names the spec Note that must change with it. It
+  asserts the opposite of the rule, on purpose, so that closing the gap is a
+  deliberate act rather than a silent one.
+
+  It used to be four: `run-error-first-admitted`,
+  `late-run-error-after-finished-admitted` and
+  `reasoning-discipline-not-verified` were admitted gaps alongside it. Each of
+  those three now asserts the RULE on the TypeScript lane, and each was renamed
+  to say so — `run-error-first-fails-the-run`,
+  `late-run-error-after-finished-fails-the-run`, `reasoning-discipline-verified`.
+  A run that reports a failure fails, and a reasoning message is bracketed like
+  any other. What is left of those divergences is on the .NET lane, recorded as
+  `expectOverrides.dotnet` with a stated reason, which is the ordinary mechanism
+  rather than an admission against the spec.
+
+  The corpus gate's `required` list names those three renamed fixtures, so
+  flipping one back is a rename someone has to make on purpose. Two things it
+  does not do: it does not name `unknown-enum-value-role-fatal` — the gap that
+  is still open is held by its description alone, not by a `required` entry — and the fourth
+  fixture it names in that neighbourhood, `unknown-outcome-array-fatal`, was
+  never an admitted gap at all. That one pins the rule from the start: a
+  malformed value in the outcome slot is fatal rather than stripped.
 
 **If you ever point this corpus at a third-party client**, three groups need
 relaxing: the SHOULD-level `warnings` and `noWarnings`; the `era-*` fixtures'
-translation results, which the spec only permits; and the three admitted-gap
-fixtures, which assert behaviour the spec contradicts and whose `outcome` and
-`errorContains` would wrongly fail a client that gets the rule right. What
-remains after that is conformance. Nothing in the harness does this for you
-today, and nothing needs it until someone actually runs a third-party client
-through it.
+translation results, which the spec only permits; and the one admitted-gap
+fixture above, which asserts behaviour the spec contradicts and whose `outcome`
+and `errorContains` would wrongly fail a client that gets the rule right. Every
+`expectOverrides.dotnet` block needs dropping too — those describe our .NET
+client, not the protocol. What remains after that is conformance. Nothing in
+the harness does this for you today, and nothing needs it until someone
+actually runs a third-party client through it.
 
 ## Adding a fixture
 
@@ -72,7 +92,9 @@ Write one JSON file in `streams/`. The file name is the fixture name.
 }
 ```
 
-Then run your lane:
+Then add the file name to `streams/MANIFEST.txt` (the corpus is pinned by a
+committed listing, so an addition is as deliberate as a deletion) and run your
+lane:
 
 ```bash
 pnpm -C sdks/typescript/packages/client exec vitest run src/conformance
@@ -102,7 +124,7 @@ Every key is optional; state what the rule actually requires and nothing more.
 
 | Key | Asserts |
 | --- | --- |
-| `outcome` | whether the **client** accepted the stream (`"completed"`) or rejected it (`"failed"`) |
+| `outcome` | whether the run finished cleanly (`"completed"`) or ended in failure (`"failed"`) — a `"failed"` outcome is either a client rejection or a producer `RUN_ERROR` the client surfaces as a failed run |
 | `errorContains` | substring of the error a client rejection surfaces |
 | `runError` | the **run** reported its own failure: `true`, or a substring of the message |
 | `eventTypes` | the exact ordered list of event types delivered to application code |
@@ -121,6 +143,13 @@ Every key is optional; state what the rule actually requires and nothing more.
 it considers malformed and an agent honestly reporting that its run failed are
 different events, and a format that called both "failed" could not tell a
 conformance failure from a working error path.
+
+**`outcome` does not count as an assertion on its own.** Every fixture has one,
+and "the client consumed the stream" is what almost all of them say — so the
+corpus gate requires a second effective key on each lane, and requires
+`errorContains` (or `runError`) wherever a lane's resolved `outcome` is
+`"failed"`. A bare `"failed"` is satisfied by any rejection, including one for
+a reason that has nothing to do with the rule the fixture is named for.
 
 `messages`, `state` and `request` are **subset** matches: arrays must be the
 same length, objects are compared only on the keys you name. Assert what the
@@ -231,6 +260,21 @@ and no fixture can close it while the boundary exists.
 ## The corpus gate
 
 `spec/harness/conformance.test.ts` checks what is true of the corpus itself:
-that each file is well formed, that every divergence override explains itself,
-and that the behaviours this suite exists to pin still have a fixture. If you
-rename a fixture that gate names, update it in the same commit — deliberately.
+that each file is well formed, that every top-level and expectation key is one
+a runner actually reads, that every fixture asserts something beyond "the
+stream was consumed", that a fixture expecting a failure says WHICH failure,
+that every divergence override explains itself, and that the behaviours this
+suite exists to pin still have a fixture. If you rename a fixture that gate
+names, update it in the same commit — deliberately.
+
+The directory listing is pinned by `streams/MANIFEST.txt`, asserted in both
+directions. Adding or removing a fixture means regenerating it in the same
+commit; the command is in that file's header. Without it, "has fixtures" was
+satisfied by a single file, and a corpus that quietly shrank was invisible.
+
+Two escape hatches exist in that gate, both named lists with a reason per
+entry and a stale-pin check that fails once the entry stops applying:
+`OUTCOME_ONLY` for a lane whose only surviving assertion is `outcome`, and
+`FAILURE_WITHOUT_REASON` for a lane whose rejection message is not pinned
+anywhere. Both are meant to shrink, and both are empty today: every entry
+they once held was closed by giving the fixture a real observable.

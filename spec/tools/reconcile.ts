@@ -7,13 +7,16 @@
  * Where they disagree, the schema had to pick one, and the table is where those
  * picks are visible in one place instead of buried in a diff.
  *
- * It is a review artifact, not a gate: the parsing is deliberately simple and
- * reports what it could not read rather than guessing.
+ * The parsing is deliberately simple and reports what it could not read rather
+ * than guessing: the report says what the SDKs look like, it does not decide
+ * whether they are right. What IS gated is its freshness —
+ * `spec/harness/generator.test.ts` compares the committed RECONCILIATION.md
+ * against `render()`, so this file and its output cannot drift apart.
  *
  *   pnpm --filter @ag-ui/spec reconcile
  */
-import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   effectiveProperties,
@@ -23,6 +26,9 @@ import {
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const REPO = join(HERE, "..", "..");
+
+/** The committed report. Exported so a test can compare it against `render()`. */
+export const RECONCILIATION_PATH = join(REPO, "spec", "RECONCILIATION.md");
 
 type Presence = "required" | "optional" | "absent";
 
@@ -197,15 +203,20 @@ function parseDotnet(): Model {
   const raw = new Map<string, { parent?: string; fields: Shape }>();
   const root = join(REPO, "sdks/dotnet/src/AGUI.Abstractions");
 
+  // Sorted: readdirSync's order is whatever the filesystem hands back, and the
+  // walk order decides which declaration of a duplicated name wins, so an
+  // unsorted walk can render two different reports from the same sources.
   const walk = (dir: string): string[] =>
-    readdirSync(dir).flatMap((entry) => {
-      const path = join(dir, entry);
-      return statSync(path).isDirectory()
-        ? walk(path)
-        : path.endsWith(".cs")
-          ? [path]
-          : [];
-    });
+    readdirSync(dir)
+      .sort()
+      .flatMap((entry) => {
+        const path = join(dir, entry);
+        return statSync(path).isDirectory()
+          ? walk(path)
+          : path.endsWith(".cs")
+            ? [path]
+            : [];
+      });
 
   for (const path of walk(root)) {
     const source = readFileSync(path, "utf8");
@@ -312,16 +323,23 @@ function table(header: string[], rows: string[][]): string[] {
   const widths = header.map((cell_, column) =>
     Math.max(cell_.length, ...rows.map((row) => row[column].length)),
   );
-  const render = (row: string[]): string =>
+  const renderRow = (row: string[]): string =>
     `| ${row.map((value, column) => value.padEnd(widths[column])).join(" | ")} |`;
   return [
-    render(header),
+    renderRow(header),
     `| ${widths.map((width) => "-".repeat(width)).join(" | ")} |`,
-    ...rows.map(render),
+    ...rows.map(renderRow),
   ];
 }
 
-function main(): void {
+interface Report {
+  text: string;
+  compared: number;
+  disagreements: number;
+  unread: number;
+}
+
+function build(): Report {
   const ts = parseTypeScript();
   const py = parsePython();
   const net = parseDotnet();
@@ -428,8 +446,15 @@ function main(): void {
   header.push("");
   header.push(
     `${disagreements.length} field${disagreements.length === 1 ? "" : "s"} where TypeScript and`,
-    "Python disagree with each other or with the schema. Each one is a decision the schema",
+    "Python disagree with the schema about required-ness. Each one is a decision the schema",
     "had to make, not a transcription.",
+    "",
+    "Read the count for exactly what it covers. Only required-ness is compared: nullability",
+    "is reported in each column but never enters the comparison, and the .NET column is",
+    "informational — it is printed, not checked against anything. The TypeScript column is",
+    "read off the zod validator rather than the generated type, so a field the schema gives",
+    "a default reads `optional` here even where the generated TypeScript type requires it —",
+    "`tools` and `context` on RunAgentInput are the two.",
   );
   header.push("");
   header.push(
@@ -449,14 +474,53 @@ function main(): void {
   // Prettier-clean and a `pnpm format` after a `reconcile` is a no-op.
   const body = [...header, ...lines];
   while (body.at(-1) === "") body.pop();
-  writeFileSync(
-    join(REPO, "spec", "RECONCILIATION.md"),
-    body.join("\n") + "\n",
-  );
+  return {
+    text: body.join("\n") + "\n",
+    compared: definitions.length - unread.length,
+    disagreements: disagreements.length,
+    unread: unread.length,
+  };
+}
+
+/**
+ * The report this tool would write, as a string.
+ *
+ * Exported so `spec/harness/generator.test.ts` can compare it against the
+ * committed RECONCILIATION.md. That comparison is only worth anything if
+ * importing this module has no side effect — hence the entry-point guard on
+ * `main()` below. Without it the import would rewrite the file first and the
+ * test would always pass.
+ */
+export function render(): string {
+  return build().text;
+}
+
+function main(): void {
+  const report = build();
+  writeFileSync(RECONCILIATION_PATH, report.text);
   console.log(
-    `Wrote spec/RECONCILIATION.md: ${definitions.length - unread.length} definitions compared, ` +
-      `${disagreements.length} disagreements, ${unread.length} not in any SDK yet.`,
+    `Wrote spec/RECONCILIATION.md: ${report.compared} definitions compared, ` +
+      `${report.disagreements} disagreements, ${report.unread} not in any SDK yet.`,
   );
 }
 
-main();
+// Only when run as the script, never on import: see `render()` above.
+// realpath both sides before comparing. Node hands `import.meta.url` back
+// already resolved through symlinks, but `process.argv[1]` is whatever path the
+// launcher passed, so under a symlinked repo root (macOS /tmp → /private/tmp,
+// some CI caches) the two would differ and this entry point would silently
+// no-op — exiting 0 having written nothing, which then reads as a stale
+// RECONCILIATION.md. The realpath is guarded so a missing argv path can't throw.
+function realpathOrSelf(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+if (
+  process.argv[1] &&
+  realpathOrSelf(fileURLToPath(import.meta.url)) === realpathOrSelf(resolve(process.argv[1]))
+) {
+  main();
+}

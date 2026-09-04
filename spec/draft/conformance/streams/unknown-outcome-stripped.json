@@ -34,8 +34,9 @@
   },
   "expectOverrides": {
     "dotnet": {
-      "intentional": "the .NET outcome converter is a closed union, so an unrecognised discriminator is a fatal JsonException rather than stripped material: the run fails and only RUN_STARTED is ever delivered, which is why neither the surviving terminal nor the stripped path can be asserted here",
+      "intentional": "the .NET outcome converter is a closed union, so an unrecognised discriminator is a fatal JsonException rather than stripped material: the run fails and only RUN_STARTED is ever delivered, which is why neither the surviving terminal nor the stripped path can be asserted here. `errorContains` pins the converter's own message \u2014 without the trailing `Path:`/`LineNumber:` detail System.Text.Json appends \u2014 so this lane fails for THIS reason and not for any other rejection",
       "outcome": "failed",
+      "errorContains": "Unknown RunFinishedOutcome type discriminator: 'paused'",
       "warnings": [],
       "noWarnings": true,
       "eventTypes": [

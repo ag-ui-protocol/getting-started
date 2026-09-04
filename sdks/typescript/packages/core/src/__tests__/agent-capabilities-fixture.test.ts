@@ -48,8 +48,17 @@ function collectNullPaths(value: unknown, path: string, found: string[]): string
     value.forEach((item, index) => collectNullPaths(item, `${path}[${index}]`, found));
   } else if (typeof value === "object") {
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      if (OPEN_BY_KEY.has(key)) continue;
-      collectNullPaths(child, path === "" ? key : `${path}.${key}`, found);
+      const here = path === "" ? key : `${path}.${key}`;
+      if (OPEN_BY_KEY.has(key)) {
+        // Skipping the member skipped its VALUE, not the member itself: the
+        // schema types `custom` and `identity.metadata` as objects that may be
+        // absent but are never null when present, so `"custom": null` in an
+        // `expected` document is the very mistake this walk exists to catch —
+        // and it was the one shape the walk never looked at.
+        if (child === null) found.push(here);
+        continue;
+      }
+      collectNullPaths(child, here, found);
     }
   }
   return found;
@@ -69,6 +78,18 @@ describe("agent capabilities cross-language fixture", () => {
   });
 
   it("expects no null anywhere: absent is how an unset member is spelled", () => {
+    // Control, first, because the loop below is vacuous without it: no document
+    // in the shared fixture puts a null AT an open-by-key member today, so the
+    // one line that handles that shape — `if (child === null) found.push(here)`
+    // in the OPEN_BY_KEY branch — can be deleted and every assertion here stays
+    // green. These three pin the branch directly: a null AT the member is found,
+    // a null INSIDE its value is not.
+    expect(collectNullPaths({ custom: null }, "", [])).toEqual(["custom"]);
+    expect(collectNullPaths({ identity: { metadata: null } }, "", [])).toEqual([
+      "identity.metadata",
+    ]);
+    expect(collectNullPaths({ custom: { anything: null } }, "", [])).toEqual([]);
+
     for (const entry of allCases) {
       expect({ [entry.name]: collectNullPaths(entry.expected, "", []) }).toEqual({
         [entry.name]: [],
