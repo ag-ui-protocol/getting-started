@@ -1,5 +1,6 @@
 import { EventType } from "@ag-ui/client";
 import { MastraAgent } from "../mastra";
+import { continuationMessageId } from "../message-ids";
 import {
   makeLocalMastraAgent,
   makeRemoteMastraAgent,
@@ -114,8 +115,7 @@ describe("assistant message id alignment", () => {
  */
 describe("assistant text ordering vs backend tool calls", () => {
   const TURN_ID = "mastra-turn-1";
-  // Keep in sync with MastraAgent.continuationMessageId (private).
-  const CONTINUATION_ID = `${TURN_ID}-agui-text`;
+  const CONTINUATION_ID = continuationMessageId(TURN_ID);
 
   it("splits trailing text onto a distinct continuation id when Mastra reuses the turn id across the tool call", async () => {
     // The exact real-world shape: one messageId re-announced on both step-starts.
@@ -240,9 +240,8 @@ describe("assistant text ordering vs backend tool calls", () => {
  */
 describe("assistant text segments across multiple tool calls", () => {
   const TURN_ID = "mastra-turn-multi";
-  // Keep in sync with MastraAgent.continuationMessageId (private).
-  const SEGMENT_2_ID = `${TURN_ID}-agui-text`;
-  const SEGMENT_3_ID = `${TURN_ID}-agui-text-2`;
+  const SEGMENT_2_ID = continuationMessageId(TURN_ID);
+  const SEGMENT_3_ID = continuationMessageId(TURN_ID, 2);
 
   const alternatingChunks = [
     { type: "step-start", payload: { messageId: TURN_ID } },
