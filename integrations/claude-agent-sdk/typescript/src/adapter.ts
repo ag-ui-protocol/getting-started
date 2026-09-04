@@ -864,6 +864,9 @@ export class ClaudeAgentAdapter extends AbstractAgent {
               .total_cost_usd,
             usage:
               (resultMsg as { usage?: Record<string, unknown> }).usage ?? {},
+            modelUsage:
+              (resultMsg as { modelUsage?: Record<string, unknown> })
+                .modelUsage,
             structuredOutput: (resultMsg as { structured_output?: unknown })
               .structured_output,
           };
