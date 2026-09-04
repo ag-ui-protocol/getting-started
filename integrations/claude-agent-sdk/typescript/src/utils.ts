@@ -401,24 +401,62 @@ export function buildAguiAssistantMessage(
  *
  * Extracts the text content from the SDK's content block format and
  * normalises it into a simple string for the AG-UI message.
+ *
+ * @param concatenate When true, iterate all content blocks: text blocks are
+ *   joined with `\n`, and mixed content (text + non-text) falls back to
+ *   `JSON.stringify(content)` so non-text blocks are not dropped. When false
+ *   (the default), only the first block is read -- matching the original
+ *   single-block behavior.
  */
 export function buildAguiToolMessage(
   toolUseId: string,
-  content: unknown
+  content: unknown,
+  concatenate = false,
 ): Message {
   let resultStr = "";
   try {
     if (Array.isArray(content) && content.length > 0) {
-      const firstBlock = content[0] as Record<string, unknown>;
-      if (firstBlock?.type === "text") {
-        const text = (firstBlock.text as string) ?? "";
-        try {
-          resultStr = JSON.stringify(JSON.parse(text));
-        } catch {
-          resultStr = text;
+      if (concatenate) {
+        // Iterate all blocks: join text, fall back to JSON for mixed content.
+        const textParts: string[] = [];
+        let hasNonText = false;
+
+        for (const block of content) {
+          const b = block as Record<string, unknown>;
+          if (b?.type === "text") {
+            const text = (b.text as string) ?? "";
+            try {
+              textParts.push(JSON.stringify(JSON.parse(text)));
+            } catch {
+              textParts.push(text);
+            }
+          } else {
+            hasNonText = true;
+          }
+        }
+
+        if (textParts.length > 0 && !hasNonText) {
+          resultStr = textParts.join("\n");
+        } else if (textParts.length > 0 && hasNonText) {
+          // Mixed content -- serialize the entire array to avoid
+          // silently dropping non-text blocks like images.
+          resultStr = JSON.stringify(content);
+        } else if (hasNonText) {
+          resultStr = JSON.stringify(content);
         }
       } else {
-        resultStr = JSON.stringify(content);
+        // Default: read only the first block (upstream single-block behavior).
+        const firstBlock = content[0] as Record<string, unknown>;
+        if (firstBlock?.type === "text") {
+          const text = (firstBlock.text as string) ?? "";
+          try {
+            resultStr = JSON.stringify(JSON.parse(text));
+          } catch {
+            resultStr = text;
+          }
+        } else {
+          resultStr = JSON.stringify(content);
+        }
       }
     } else if (content != null) {
       resultStr = JSON.stringify(content);
