@@ -16,6 +16,9 @@ export {
 } from "./client-proxy-tool";
 export type { StrandsToolRegistry } from "./client-proxy-tool";
 
+export { syncTemplateTools, parkedBatchToolNames } from "./template-tools";
+export type { TemplateToolSelectionEntry } from "./template-tools";
+
 export { CITATIONS_METADATA_KEY } from "./citations";
 export type { AguiCitation, AguiCitationLocation } from "./citations";
 
@@ -70,6 +73,8 @@ export type {
   ToolStreamEventHandler,
   PredictStateMapping,
   SessionManagerProvider,
+  TemplateToolsProvider,
+  ThreadAgentConfigProvider,
   StateContextBuilder,
   StateFromArgs,
   StateFromResult,

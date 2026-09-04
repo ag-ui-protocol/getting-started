@@ -129,6 +129,7 @@ both routes above.
 | `src/ag_ui_strands/a2ui_tool.py`               | A2UI tool injection and the validate-and-retry recovery loop                    |
 | `src/ag_ui_strands/session_reconcile.py`       | Frontend-result reconciliation against a persisted session                      |
 | `src/ag_ui_strands/client_proxy_tool.py`       | Frontend tools registered into the Strands tool registry                        |
+| `src/ag_ui_strands/template_tools.py`          | Per-request filter over the template agent's own tools                          |
 | `src/ag_ui_strands/frontend_tool_interrupt.py` | The native checkpoint a waiting frontend tool parks in                          |
 | `examples/server/api/*.py`                     | Ready-to-run demo apps                                                          |
 
@@ -250,6 +251,98 @@ because Strands adds its own runtime entries to that dictionary. Do not source
 trusted values from client-controlled `forwarded_props`; derive them from
 authenticated request context instead. Custom routes can pass the same state
 directly with `agent.run(input_data, invocation_state={...})`.
+
+## Per-request tool filtering
+
+`StrandsAgentConfig.template_tools_provider` decides which of the template
+agent's tools one request may see. It is called once per request with that
+request's `RunAgentInput`, so the answer can vary turn by turn on a single
+thread:
+
+```python
+from ag_ui.core import RunAgentInput
+from ag_ui_strands import StrandsAgent, StrandsAgentConfig
+
+READ_ONLY = ["search_docs", "get_order"]
+
+def tools_for(input_data: RunAgentInput):
+    # Derive the role from authenticated request context in production;
+    # forwarded_props is client-controlled.
+    if (input_data.forwarded_props or {}).get("role") == "admin":
+        return None  # no filtering: every template tool stays available
+    return READ_ONLY
+
+agui_agent = StrandsAgent(
+    strands_agent,
+    name="assistant",
+    config=StrandsAgentConfig(template_tools_provider=tools_for),
+)
+```
+
+Return the tools themselves or their names. `None` declines to filter; an empty
+list is a real answer and withholds all of them. A name the template does not
+contribute is dropped with a warning, because the hook narrows the wrapped
+agent's tools and cannot add one. The provider may be async.
+
+Two boundary rules follow from that:
+
+- **The return value is checked, not merely iterated.** A string and a mapping
+  are both iterable and both mean something other than what iterating them
+  produces: a bare name would come apart into characters, and a permission map
+  would have its keys read as an allow-list while its values went unread, so a
+  name mapped to `False` would still be allowed. Both are refused with
+  `TEMPLATE_TOOLS_PROVIDER_ERROR`. Lists, tuples, sets and generators are all
+  accepted, and a generator that raises partway through iteration reports the
+  same code, because the answer is read inside the same guarded step that calls
+  the provider.
+- **The filter reaches the registry, not only the advertised tool specs.** A
+  model that calls a withheld name anyway, primed by a stale turn or by the
+  visible history, is refused by the dispatcher rather than served.
+
+The filter is applied to the tool registry the thread's live Strands `Agent`
+already owns, the same way client-declared tools are synchronised, and never by
+rebuilding that agent. The per-thread instance holds the thread's
+`SessionManager`, its native interrupt checkpoint and its history, so replacing
+it to change a tool list would discard a conversation and any approval waiting
+inside it.
+
+Three consequences follow from that:
+
+- **A parked call is never orphaned.** A tool in the batch a live interrupt
+  checkpoint would resume stays registered whatever the provider returns: the
+  human's answer is about to be routed back into that batch, and an absent tool
+  turns it into a "tool not found" the model re-fires. Filtering resumes once
+  the pause closes. This is the rule `sync_proxy_tools` already applies to a
+  proxy parked in a frontend-tool interrupt.
+- **History is never rewritten.** A filtered-out tool's earlier calls and
+  results stay in the thread's messages, so the model can still read what it
+  did with a tool it can no longer call.
+- **A failure is terminal.** If the provider raises, the run yields `RUN_ERROR`
+  with code `TEMPLATE_TOOLS_PROVIDER_ERROR` and stops, matching
+  `thread_agent_kwargs`. A filter that failed open would hand the model exactly
+  the tools the caller meant to withhold.
+
+The narrowing is also re-applied inside the run, once a tool batch has been
+dispatched. The exemption above keeps a denied tool registered so a human's
+answer can reach it, and Strands then carries on in the same run: it
+re-dispatches the batch and makes its next model call from the same registry,
+which would otherwise still be advertising what the request denied. The two
+bridges hook different SDK events for this, because the SDKs read the tool
+specs at different points relative to the events they dispatch; the effect is
+the same on both.
+
+Scope is the template's own tools. Client-declared tools on
+`RunAgentInput.tools` are re-synchronised from the request every turn already,
+so a caller that wants fewer of those sends fewer. The hook is not applied on
+the multi-agent orchestrator path, which has no template registry to filter.
+
+One deployment note. With an external per-thread agent map, a request-scoped
+wrapper is rebuilt per request while the cached thread agent keeps the registry
+it already had. If the template's tools are built per request too, the adapter
+is handed equivalent but not identical objects, so which registry entry belongs
+to the template is decided by name plus "not one of the adapter's other
+producers" rather than by object identity alone. Stable tool objects are still
+the simpler thing to hand it.
 
 ## Human-in-the-loop (native Strands interrupts)
 

@@ -241,6 +241,24 @@ async def test_thread_agent_kwargs_error_reports_a_hook_that_raised():
     assert_contract_error(_terminal_error(events), "THREAD_AGENT_KWARGS_ERROR")
 
 
+@pytest.mark.asyncio
+async def test_template_tools_provider_error_reports_a_hook_that_raised():
+    def _tools(_input):
+        raise ValueError("authz lookup failed")
+
+    events = await _drive(
+        _MockCore(),
+        _run_input(),
+        config=StrandsAgentConfig(
+            replay_history_into_strands=False, template_tools_provider=_tools
+        ),
+    )
+
+    assert_contract_error(
+        _terminal_error(events), "TEMPLATE_TOOLS_PROVIDER_ERROR"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Interrupt preflight
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ import { createHash, randomUUID } from "crypto";
 
 import {
   Agent as StrandsAgentCore,
+  AfterToolsEvent,
   BeforeToolCallEvent,
   InterruptResponseContent,
   Message as StrandsMessage,
@@ -57,10 +58,29 @@ import {
 } from "./citations";
 import { isProxyTool, syncProxyTools } from "./client-proxy-tool";
 import {
+  applyTemplateToolSelection,
+  indexTemplateTools,
+  parkedBatchToolNames,
+  recordTemplateToolSelection,
+  renarrowTemplateTools,
+  resolveTemplateToolSelection,
+} from "./template-tools";
+import type { TemplateToolSelection } from "./template-tools";
+import {
   planA2UIInjection,
   isAutoInjectedA2UITool,
+  withoutA2UIRenderGuides,
   A2UI_STREAM_KEY,
 } from "./a2ui-tool";
+import {
+  ensureTransientContextHook,
+  formatAguiContext,
+  installOrchestratorContextHooks,
+  normalizeAguiContext,
+  pullWithModelContext,
+  restoreOrchestratorContext,
+  restoreTransientModelContext,
+} from "./model-context";
 import {
   _buildToolResultContent,
   _coerceText,
@@ -1024,25 +1044,30 @@ function _terminalErrorCode(e: unknown): string {
 }
 
 /**
- * Re-yield `source`, reporting anything it throws as a `_ForeignFault`.
+ * Re-yield `source`, reporting anything it throws as a `_ForeignFault`, with
+ * `contextBlock` in scope for each pull.
  *
  * The orchestrator pulls its stream through a `for await`, which leaves no
  * boundary between what the SDK raised and what this adapter's translation of
  * an event raised. This restores one, as Python's
  * `_stream_with_model_context` does for both of its loops. The single-agent
- * loop needs no equivalent: it reports every failure out of its own `next()`
- * as the forced stop, which never reaches the classifier at all. Teardown
- * stays with the caller, which already returns the underlying stream in its
- * own `finally`.
+ * loop needs no equivalent for faults: it reports every failure out of its own
+ * `next()` as the forced stop, which never reaches the classifier at all. The
+ * other half of Python's wrapper, scoping the request's model context to one
+ * pull at a time, is shared with that loop through `pullWithModelContext`, so
+ * an orchestrator's leaf agents see the block on the same terms a single
+ * agent does. Teardown stays with the caller, which already returns the
+ * underlying stream in its own `finally`.
  */
 async function* _foreignStreamFaults<T>(
   source: AsyncIterable<T>,
+  contextBlock = "",
 ): AsyncGenerator<T, void, void> {
   const iterator = source[Symbol.asyncIterator]();
   while (true) {
     let next: IteratorResult<T, unknown>;
     try {
-      next = await iterator.next();
+      next = await pullWithModelContext(iterator, contextBlock);
     } catch (e) {
       throw new _ForeignFault(e);
     }
@@ -2376,6 +2401,29 @@ export class StrandsAgent {
           callerConfig,
         ),
       );
+      // Re-narrow the per-request tool filter once a tool batch has run. The
+      // parked-batch exemption holds a denied tool registered so a resume can
+      // reach it, and Strands then continues the same run against the same
+      // registry; without this the run would keep advertising what the request
+      // denied until the next request narrowed again.
+      //
+      // `AfterToolsEvent`, not `BeforeModelCallEvent`: this SDK reads the tool
+      // specs off the registry as the first statement of its model call and
+      // dispatches `BeforeModelCallEvent` after, so a hook there would narrow
+      // the registry a moment too late to affect the specs it was narrowing
+      // for. Python's loop dispatches before that read, and its half of this
+      // hook uses `BeforeModelCallEvent`; it has no `AfterToolsEvent` to use.
+      if (this.config.templateToolsProvider) {
+        const built = strandsAgent;
+        built.addHook(AfterToolsEvent, () => {
+          renarrowTemplateTools(
+            built,
+            this._templateFields.tools ?? [],
+            this._log,
+          );
+        });
+      }
+
       // Register interruptOnCall hooks on the per-thread agent.
       const behaviors = this.config.toolBehaviors;
       if (behaviors) {
@@ -2831,6 +2879,70 @@ export class StrandsAgent {
     }
     const strandsAgent = agentResult.agent;
 
+    // Filter the tools the template contributed, per request. Applied to the
+    // registry this thread's live agent already owns: that instance carries the
+    // thread's session manager, its interrupt checkpoint and its history, so
+    // rebuilding it to change a tool list would discard a conversation and any
+    // approval waiting inside it.
+    if (this.config.templateToolsProvider) {
+      // Calling the provider and reading its answer are guarded together.
+      // Reading is where a Map, a bare name or a generator that throws partway
+      // through is caught, and those are provider mistakes: leaving them
+      // outside this arm let them bypass the documented code and end the
+      // stream after RUN_STARTED with nothing terminal behind it.
+      let allowed: Set<string> | null;
+      try {
+        const selection: TemplateToolSelection = await maybeAwait(
+          this.config.templateToolsProvider(inputData),
+        );
+        allowed = resolveTemplateToolSelection(
+          selection,
+          indexTemplateTools(this._templateFields.tools ?? []),
+          this._log,
+        );
+      } catch (e) {
+        const msg = _errorMessage(e);
+        this._log.error(
+          `${LOG_PREFIX} templateToolsProvider failed: ${msg}`,
+          e,
+        );
+        // Deliberately terminal rather than unfiltered: a filter that fails
+        // open hands the model tools the caller meant to withhold.
+        yield _runError(
+          `Failed to resolve the template tools for this request: ${msg}`,
+          "TEMPLATE_TOOLS_PROVIDER_ERROR",
+        );
+        return;
+      }
+      // Guarded separately, and not as a provider error: past this point a
+      // failure is this adapter's, and this block runs before the main
+      // try/catch below, so it still must not escape as a stream that stops
+      // with nothing terminal behind it.
+      try {
+        applyTemplateToolSelection(
+          strandsAgent.toolRegistry,
+          this._templateFields.tools ?? [],
+          allowed,
+          {
+            exemptNames: parkedBatchToolNames(strandsAgent),
+            log: this._log,
+          },
+        );
+        // Published for the re-narrowing hook: the exemption above holds a
+        // denied tool registered so a resume can reach it, and Strands then
+        // continues the same run from this registry.
+        recordTemplateToolSelection(strandsAgent, allowed);
+      } catch (e) {
+        const msg = _errorMessage(e);
+        this._log.error(
+          `${LOG_PREFIX} applying the template tool filter failed: ${msg}`,
+          e,
+        );
+        yield _runError(msg, _terminalErrorCode(e));
+        return;
+      }
+    }
+
     // Sync proxy tools from client-defined tools.
     if (inputData.tools && inputData.tools.length > 0) {
       const proxyNames = syncProxyTools(
@@ -2858,6 +2970,13 @@ export class StrandsAgent {
     // terminal RUN_ERROR (this block runs before the main try/catch below).
     // Auto-injection is best-effort: if it throws, log and run without A2UI
     // rather than crashing the turn.
+    //
+    // What the model will be told about the application's context this run.
+    // Starts as the whole of `RunAgentInput.context` and is narrowed below
+    // when A2UI auto-injection actually happens, the way Python narrows
+    // `model_context` from `agui_context`. Tools and hooks keep reading the
+    // unnarrowed context through `buildContextExtras`.
+    let modelContext = normalizeAguiContext(inputData.context);
     try {
       const registry = strandsAgent.toolRegistry;
       // Auto-inject requires enumerating the registry to (a) remove our OWN
@@ -2891,6 +3010,14 @@ export class StrandsAgent {
         if (plan) {
           for (const name of plan.dropToolNames) registry.remove(name);
           registry.add(plan.tool);
+          // The middleware also supplies a usage guide for the render proxy.
+          // Once that proxy is replaced with `generate_a2ui`, the guide is
+          // stale and must reach neither the outer model nor the recovery
+          // subagent (which `planA2UIInjection` narrows for itself).
+          modelContext = withoutA2UIRenderGuides(
+            modelContext,
+            plan.dropToolNames,
+          );
         }
       }
     } catch (e) {
@@ -3740,6 +3867,20 @@ export class StrandsAgent {
         persistInterruptBookkeeping(strandsAgent, null, null, this._log);
       }
 
+      // The application's context, rendered once for the model. It is shown
+      // from a before-model-call hook and withdrawn from the paired after-hook
+      // (see `model-context.ts`), so it needs a hook registry to ride on. A
+      // real `Agent` always has one; an agent that does not cannot honour a
+      // non-empty block, and pretending otherwise would silently drop what
+      // the app asked the model to know. Python raises the same way at the
+      // same point, after RUN_STARTED, so the client sees a RUN_ERROR.
+      const contextBlock = formatAguiContext(modelContext);
+      if (contextBlock && !ensureTransientContextHook(strandsAgent)) {
+        throw new Error(
+          "Strands agent does not expose a hook registry for transient context",
+        );
+      }
+
       // AbortController wired into Strands's `cancelSignal` so that abandoning
       // the outer generator (HTTP client disconnect) stops the underlying
       // Bedrock streaming call rather than silently burning tokens.
@@ -3763,7 +3904,10 @@ export class StrandsAgent {
         while (true) {
           let next: IteratorResult<AgentStreamEvent, unknown>;
           try {
-            next = await agentStream.next();
+            // The one pull site, so the one place the request's context block
+            // is in scope for the SDK. Python scopes its ContextVar around
+            // each `__anext__` for the same reason.
+            next = await pullWithModelContext(agentStream, contextBlock);
           } catch (streamErr) {
             // Strands throws "Stream ended without completing a message" when
             // a frontend tool call halts the agent before the model emits a
@@ -4840,6 +4984,14 @@ export class StrandsAgent {
         } catch {
           // ignore
         }
+        // A model call abandoned mid-flight never reaches its after-hook, so
+        // the block it was shown is still in `agent.messages`. Take it out
+        // before the drain: returning the stream runs the after-invocation
+        // hooks, and a session manager snapshots `agent.messages` from there,
+        // so a restore that ran afterwards would come too late for the store.
+        // Idempotent when the hook already ran. Python restores from the same
+        // teardown `finally`.
+        restoreTransientModelContext(strandsAgent);
         try {
           await agentStream.return(undefined as never);
         } catch {
@@ -5397,6 +5549,26 @@ export class StrandsAgent {
       // anything citations introduce.
       const citations = new CitationAccumulator(this._log);
 
+      // The application's context, shown to each leaf agent's model for one
+      // call and withdrawn again, as on the single-agent path. Hooks go on the
+      // leaves because that is where the model calls are; the orchestrator
+      // itself makes none. An orchestrator with no reachable leaf (a
+      // hand-rolled one, a remote node) can only receive context in its task
+      // input, so the block is prefixed onto the prompt instead and cleared,
+      // which is Python's fallback too. Python additionally refuses that
+      // fallback during an interrupt resume; this path has no resume arm, so
+      // there is nothing here to refuse.
+      let contextBlock = formatAguiContext(
+        normalizeAguiContext(inputData.context),
+      );
+      const installedHooks = installOrchestratorContextHooks(
+        this._orchestrator,
+      );
+      if (contextBlock && installedHooks === 0) {
+        prompt = `${contextBlock}\n\n${prompt}`;
+        contextBlock = "";
+      }
+
       const orchestratorStream = this._orchestrator!.stream(prompt);
       // A throw out of this stream reaches the outer handler below and is
       // reported as STRANDS_ERROR, not under the forced-stop code the
@@ -5429,7 +5601,10 @@ export class StrandsAgent {
       // another is FAILED too. What a partially failed Graph owes a client is a
       // design question, not missing plumbing. See `ARCHITECTURE.md`.
       try {
-        for await (const rawEvent of _foreignStreamFaults(orchestratorStream)) {
+        for await (const rawEvent of _foreignStreamFaults(
+          orchestratorStream,
+          contextBlock,
+        )) {
           const event = unwrapStrandsEvent(rawEvent);
           const kind = getEventKind(event);
 
@@ -5603,6 +5778,12 @@ export class StrandsAgent {
           }
         }
       } finally {
+        // A leaf abandoned mid-model-call never reached its after-hook; take
+        // the block back off every hooked leaf before the drain, because
+        // returning the stream runs each leaf's after-invocation hooks and a
+        // session manager snapshots the leaf's `messages` from there. Python's
+        // `_restore_orchestrator_context` runs from the same teardown.
+        restoreOrchestratorContext(this._orchestrator);
         try {
           await orchestratorStream.return(undefined as never);
         } catch {

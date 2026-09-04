@@ -90,6 +90,7 @@ See [../ARCHITECTURE.md](../ARCHITECTURE.md) for diagrams and a deeper dive.
 | -------------------------- | ------------------------------------------------------------------------------- |
 | `src/agent.ts`             | Core wrapper translating Strands streams into AG-UI events                      |
 | `src/config.ts`            | Config primitives (`StrandsAgentConfig`, `ToolBehavior`, `PredictStateMapping`) |
+| `src/template-tools.ts`    | Per-request filter over the template agent's tools                              |
 | `src/server.ts`            | `createStrandsApp` + Express transport (subpath: `@ag-ui/aws-strands/server`)   |
 | `src/endpoint.ts`          | Express endpoint helpers (used by `server.ts`)                                  |
 | `src/utils.ts`             | Multimodal content conversion and the `UrlFetchPolicy` that guards it           |
@@ -434,6 +435,96 @@ resolve. Any `Transport` from `@modelcontextprotocol/sdk` works in its place;
 the streamable-HTTP one above is just the common case. See Strands' own
 [MCP tools guide](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)
 for the transports and the elicitation callback.
+
+## Per-request tool filtering
+
+`StrandsAgentConfig.templateToolsProvider` decides which of the template
+agent's tools one request may see. It is called once per request with that
+request's `RunAgentInput`, so the answer can vary turn by turn on a single
+thread:
+
+```ts
+const READ_ONLY = ["search_docs", "get_order"];
+
+const aguiAgent = new StrandsAgent({
+  agent,
+  name: "assistant",
+  config: {
+    templateToolsProvider: (input) =>
+      // Derive the role from authenticated request context in production;
+      // forwardedProps is client-controlled.
+      (input.forwardedProps as { role?: string })?.role === "admin"
+        ? null // no filtering: every template tool stays available
+        : READ_ONLY,
+  },
+});
+```
+
+Return the tools themselves or their names. `null` or `undefined` declines to
+filter; an empty array is a real answer and withholds all of them. A name the
+template does not contribute is dropped with a warning, because the hook
+narrows the wrapped agent's tools and cannot add one. The provider may be
+async.
+
+Two boundary rules follow from that:
+
+- **The return value is checked, not merely iterated.** A string and a mapping
+  are both iterable and both mean something other than what iterating them
+  produces: a bare name would come apart into characters, and a permission map
+  would have its keys read as an allow-list while its values went unread, so a
+  name mapped to `false` would still be allowed. Both are refused with
+  `TEMPLATE_TOOLS_PROVIDER_ERROR`. Arrays, sets and generators are all
+  accepted, and a generator that raises partway through iteration reports the
+  same code, because the answer is read inside the same guarded step that calls
+  the provider.
+- **The filter reaches the registry, not only the advertised tool specs.** A
+  model that calls a withheld name anyway, primed by a stale turn or by the
+  visible history, is refused by the dispatcher rather than served.
+
+The filter is applied to the tool registry the thread's live Strands `Agent`
+already owns, the same way client-declared tools are synchronised, and never by
+rebuilding that agent. The per-thread instance holds the thread's
+`SessionManager`, its native interrupt checkpoint and its history, so replacing
+it to change a tool list would discard a conversation and any approval waiting
+inside it.
+
+Three consequences follow from that:
+
+- **A parked call is never orphaned.** A tool in the batch a live interrupt
+  checkpoint would resume stays registered whatever the provider returns: the
+  human's answer is about to be routed back into that batch, and an absent tool
+  turns it into a "tool not found" the model re-fires. Filtering resumes once
+  the pause closes. This is the rule `syncProxyTools` already applies to a proxy
+  parked in a frontend-tool interrupt.
+- **History is never rewritten.** A filtered-out tool's earlier calls and
+  results stay in the thread's messages, so the model can still read what it
+  did with a tool it can no longer call.
+- **A failure is terminal.** If the provider throws, the run yields `RUN_ERROR`
+  with code `TEMPLATE_TOOLS_PROVIDER_ERROR` and stops, matching
+  `threadAgentConfig`. A filter that failed open would hand the model exactly
+  the tools the caller meant to withhold.
+
+The narrowing is also re-applied inside the run, once a tool batch has been
+dispatched. The exemption above keeps a denied tool registered so a human's
+answer can reach it, and Strands then carries on in the same run: it
+re-dispatches the batch and makes its next model call from the same registry,
+which would otherwise still be advertising what the request denied. The two
+bridges hook different SDK events for this, because the SDKs read the tool
+specs at different points relative to the events they dispatch; the effect is
+the same on both.
+
+Scope is the template's own tools. Client-declared tools on
+`RunAgentInput.tools` are re-synchronised from the request every turn already,
+so a caller that wants fewer of those sends fewer. The hook is not applied on
+the multi-agent orchestrator path, which has no template registry to filter.
+
+One deployment note. With an `agentsByThread` map, a request-scoped wrapper is
+rebuilt per request while the cached thread agent keeps the registry it already
+had. If the template's tools are built per request too, the adapter is handed
+equivalent but not identical objects, so which registry entry belongs to the
+template is decided by name plus "not one of the adapter's other producers"
+rather than by object identity alone. Stable tool objects are still the simpler
+thing to hand it.
 
 ## Human-in-the-loop interrupts
 
