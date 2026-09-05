@@ -1,0 +1,156 @@
+name: Publish Dart SDK to pub.dev
+
+on:
+  # Manual trigger only - no automatic publishing
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run in dry-run mode (validate the package without publishing)'
+        required: false
+        type: boolean
+        default: false
+
+# SECURITY: Build/test and publish are split into separate jobs. The pub.dev
+# OIDC credential (`id-token: write`) is only granted to the publish job, never
+# to the build job, so build-time code execution (analyze, test) happens in a
+# job that has no ability to publish. pub.dev's automated publishing exchanges
+# this token for a short-lived credential, so no long-lived PUB_TOKEN secret is
+# stored in the repo.
+
+permissions:
+  contents: read  # Workflow default: read-only; jobs widen this only where justified below.
+
+# Serialize publish runs so two concurrent dispatches can't race to upload the
+# same version. Never cancel an in-flight run: interrupting a publish mid-upload
+# could leave the release in an inconsistent state.
+concurrency:
+  group: publish-dart-sdk
+  cancel-in-progress: false
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read  # Read-only checkout; intentionally NOT granted id-token, so build/test code execution cannot publish.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          lfs: true
+          persist-credentials: false
+
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260  # v1.7.2
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        working-directory: sdks/community/dart
+        run: dart pub get
+
+      # Advisory (non-blocking): reports files that differ from `dart format`
+      # but does not fail the build. The repo's own CI does not enforce
+      # formatting, and the existing code predates the current formatter style,
+      # so a hard `--set-exit-if-changed` gate would block every publish.
+      - name: Check formatting (advisory)
+        working-directory: sdks/community/dart
+        run: dart format --output=none .
+
+      # Fail only on analyzer *errors*, not warnings/infos. The codebase carries
+      # pre-existing warnings/infos that the repo's CI never gated on; promoting
+      # them to fatal (`--fatal-infos`/default `--fatal-warnings`) would block
+      # every publish. Real errors still abort the build.
+      - name: Analyze
+        working-directory: sdks/community/dart
+        run: dart analyze --no-fatal-warnings
+
+      - name: Run tests
+        working-directory: sdks/community/dart
+        run: dart test --exclude-tags requires-server
+
+  publish:
+    name: Publish to pub.dev
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    environment: pub-dev
+
+    permissions:
+      contents: read  # Read-only checkout of the code to publish.
+      id-token: write  # OIDC: pub.dev exchanges this short-lived token for a publish credential, so no long-lived PUB_TOKEN secret is stored.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          lfs: true
+          persist-credentials: false
+
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260  # v1.7.2
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        working-directory: sdks/community/dart
+        run: dart pub get
+
+      # Pre-publish gate (mirrors the Kotlin job's "abort publish if tests
+      # regressed" check): pub.dev rejects re-publishing an existing version,
+      # so fail early with a clear message instead of deep inside the publish.
+      - name: Check version is publishable
+        if: inputs.dry_run == false
+        working-directory: sdks/community/dart
+        run: |
+          set -euo pipefail
+          PKG=$(grep '^name:' pubspec.yaml | head -1 | awk '{print $2}')
+          VERSION=$(grep '^version:' pubspec.yaml | head -1 | awk '{print $2}')
+          echo "Package: $PKG  Version: $VERSION"
+          # pub.dev returns 404 for a never-published version; treat that as OK.
+          PUBLISHED=$(curl -fsSL "https://pub.dev/api/packages/$PKG/versions/$VERSION" -o /dev/null -w '%{http_code}' || true)
+          if [ "$PUBLISHED" = "200" ]; then
+            echo "::error::$PKG $VERSION is already published on pub.dev. Bump the version in pubspec.yaml (and CHANGELOG.md)."
+            exit 1
+          fi
+          echo "$PKG $VERSION is not yet on pub.dev - OK to publish."
+
+      - name: Publish to pub.dev (dry-run)
+        if: inputs.dry_run == true
+        working-directory: sdks/community/dart
+        run: |
+          echo "🔍 Validating package without publishing..."
+          dart pub publish --dry-run
+
+      - name: Publish to pub.dev
+        if: inputs.dry_run == false
+        working-directory: sdks/community/dart
+        run: |
+          echo "🚀 Publishing to pub.dev..."
+          dart pub publish --force
+
+      - name: Summary
+        if: success() && inputs.dry_run == false
+        working-directory: sdks/community/dart
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | head -1 | awk '{print $2}')
+          echo "## ✅ Publishing Complete!" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "The Dart SDK has been published to pub.dev." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Published Package" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`ag_ui:${VERSION}\` → https://pub.dev/packages/ag_ui/versions/${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Next Steps" >> "$GITHUB_STEP_SUMMARY"
+          echo "1. Confirm the new version on https://pub.dev/packages/ag_ui" >> "$GITHUB_STEP_SUMMARY"
+          echo "2. pub.dev indexing and the package score update within a few minutes" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dry-run Summary
+        if: success() && inputs.dry_run == true
+        run: |
+          echo "## ✅ Dry-run Complete!" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "The dry-run completed successfully. No package was uploaded." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Run without the dry-run flag to publish to pub.dev." >> "$GITHUB_STEP_SUMMARY"
