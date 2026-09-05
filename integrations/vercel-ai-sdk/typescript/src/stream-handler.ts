@@ -161,9 +161,12 @@ export class StreamHandler {
   constructor(
     private readonly input: RunAgentInput,
     private readonly subscriber: Subscriber<BaseEvent>,
-    // Labels for the usage entry. The stream never names the model, so the
-    // agent supplies what it was configured with; optional because a caller
-    // that doesn't know (or care) still gets the counts.
+    // Labels for the usage entry. Deliberately the model the agent was
+    // CONFIGURED with, not finish-step.response.modelId: that field is per
+    // step, while totalUsage aggregates the whole run, so labelling the
+    // aggregate with any single step's responding model could misattribute
+    // it when steps use different models. Optional because a caller that
+    // doesn't know (or care) still gets the counts.
     private readonly modelIdentity: { provider?: string; model?: string } = {},
   ) {
     this.finalMessages = [...input.messages];
