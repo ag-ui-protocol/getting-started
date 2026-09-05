@@ -7,22 +7,15 @@ import {
 } from "@google/adk";
 import { describe, expect, it } from "vitest";
 
-import { AG_UI_STATE_KEYS_KEY } from "../constants";
+import { AG_UI_STATE_KEY, AG_UI_STATE_KEYS_KEY } from "../constants";
 import { ADKEventTranslator } from "../event-translator";
 import { convertMessage } from "../message-converter";
 import { MessageSnapshot } from "../message-snapshot";
 import { stateDeltaFromInput } from "../state-bridge";
+import { runInput } from "./helpers";
 
 function input(state: unknown): RunAgentInput {
-  return {
-    threadId: "thread-1",
-    runId: "run-2",
-    state,
-    messages: [{ id: "user-1", role: "user", content: "Hello" }],
-    tools: [],
-    context: [],
-    forwardedProps: {},
-  };
+  return runInput({ runId: "run-2", state });
 }
 
 describe("ADK state and identity bridges", () => {
@@ -255,7 +248,7 @@ describe("ADK state and identity bridges", () => {
         requestedToolConfirmations: {},
       },
     });
-    const translated = new ADKEventTranslator({}).translate(event);
+    const translated = new ADKEventTranslator({}, true).translate(event);
     const stateEvent = translated.find(
       (candidate) => candidate.type === EventType.STATE_DELTA,
     );
@@ -422,5 +415,35 @@ describe("ADK state and identity bridges", () => {
         outputTokens: 3,
       },
     ]);
+  });
+
+  it("rejects client writes to the bridge's reserved state keys", () => {
+    // Writing the ownership manifest directly would let a client null out
+    // arbitrary backend keys on the next snapshot.
+    expect(() =>
+      stateDeltaFromInput(input({ [AG_UI_STATE_KEYS_KEY]: ["backend"] })),
+    ).toThrowError(expect.objectContaining({ code: "RESERVED_STATE_KEY" }));
+    expect(() =>
+      stateDeltaFromInput(input({ [AG_UI_STATE_KEY]: "x" })),
+    ).toThrowError(expect.objectContaining({ code: "RESERVED_STATE_KEY" }));
+  });
+
+  it("tombstones a stored scalar state when the client switches to object state", async () => {
+    const service = new InMemorySessionService();
+    const session = await service.createSession({
+      appName: "test-app",
+      userId: "user-1",
+      sessionId: "thread-1",
+      state: { [AG_UI_STATE_KEY]: "old scalar" },
+    });
+    expect(stateDeltaFromInput(input({ counter: 1 }), session)).toMatchObject({
+      counter: 1,
+      [AG_UI_STATE_KEY]: null,
+    });
+    // and a scalar snapshot is stored under the private key, not spread
+    expect(stateDeltaFromInput(input("new scalar"), session)).toMatchObject({
+      [AG_UI_STATE_KEY]: "new scalar",
+      [AG_UI_STATE_KEYS_KEY]: [],
+    });
   });
 });

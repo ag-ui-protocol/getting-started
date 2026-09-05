@@ -7,6 +7,8 @@ const LLM_RESPONSE_TIMEOUT = 60_000;
 const ELEMENT_TIMEOUT = 10_000;
 /** Brief window to observe a just-started run before treating it as already done. */
 const RUN_START_TIMEOUT = 2_000;
+/** CopilotKit runtime `info` round-trip; a cold `next dev` route compile can take >10 s. */
+const RUNTIME_INFO_TIMEOUT = 60_000;
 
 async function waitForNoActiveCopilotRun(
   page: Page,
@@ -65,6 +67,25 @@ async function expectSubmittedUserMessage(
   await expect(submittedMessage).toContainText(message, {
     timeout: ELEMENT_TIMEOUT,
   });
+}
+
+/**
+ * Navigate to a feature page and wait for CopilotKit's runtime `info`
+ * round-trip. CopilotKit re-creates its agents when that response lands and
+ * drops any run started before it (message and stream included). Under
+ * `next dev` the route compile makes that window several hundred ms wide, so
+ * typing right after the welcome message appears loses the first message.
+ */
+export async function gotoAndAwaitRuntimeInfo(page: Page, url: string) {
+  const info = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().includes("/api/copilotkit/") &&
+      (response.request().postData() ?? "").includes('"method":"info"'),
+    { timeout: RUNTIME_INFO_TIMEOUT },
+  );
+  await page.goto(url);
+  await info;
 }
 
 /**

@@ -78,3 +78,14 @@ invisible:
 
 The TypeScript SDK reports no node type on either event, so its step names use
 the default prefix on both sides of the pair.
+
+## Google ADK-JS notes
+
+The `Google ADK (JavaScript)` example builds the same three agents as an ADK
+2.x `Workflow` (`START → researcher → analyst → writer`), each `Agent` a node
+whose final text feeds the next. The `@ag-ui/adk-js` bridge derives every
+node's `STEP_STARTED` / `STEP_FINISHED` pair and the `MultiAgentHandoff`
+events from the ADK event stream (`subagents: "steps"`); nothing in the demo
+emits them by hand. With `subagents: "attributed"` the same run is also
+reported through the AG-UI subagent protocol, which this page does not read
+yet.

@@ -8,6 +8,7 @@ packages:
   - integrations/aws-strands/typescript/examples
   - integrations/adk-middleware/js
   - integrations/adk-middleware/js/examples
+  - integrations/adk-middleware/js/starter
   - integrations/mastra/typescript/examples
 
 ignoredBuiltDependencies:

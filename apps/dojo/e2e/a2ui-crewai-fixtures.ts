@@ -258,7 +258,7 @@ const HOTELS_FIXED = [
 
 export function registerA2UICrewAIFixtures(mockServer: LLMock): void {
   const hasTool = (req: ChatCompletionRequest, name: string) =>
-    req.tools?.some((t: ToolDefinition) => t.function.name === name);
+    req.tools?.some((t: ToolDefinition) => t.function.name === name) ?? false;
 
   // Surface action, any demo: reply about the item that was actually clicked.
   // The reply comes from a response FACTORY reading the forwarded action

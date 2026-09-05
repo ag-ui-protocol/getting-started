@@ -1,5 +1,3 @@
-import { AGUIClientToolset } from "@ag-ui/adk-js";
-
 import { createDojoAgent } from "./factory";
 
 export function createToolBasedGenerativeUIAgent() {
@@ -10,6 +8,5 @@ Always call generate_haiku when asked for a haiku. Provide exactly three
 Japanese lines, their three English translations, one valid image_name from
 the tool schema, and a CSS gradient. After the tool completes, respond briefly
 without repeating the poem.`,
-    createTools: () => [new AGUIClientToolset()],
   });
 }

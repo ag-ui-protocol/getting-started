@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/core";
-import { ADKAgent } from "@ag-ui/adk-js";
+import { ADKJSAgent } from "@ag-ui/adk-js";
 import {
   Agent,
   FunctionTool,
@@ -70,7 +70,7 @@ const input: RunAgentInput = {
 async function main(): Promise<void> {
   const events = await new Promise<BaseEvent[]>((resolve, reject) => {
     const collected: BaseEvent[] = [];
-    new ADKAgent({
+    new ADKJSAgent({
       runner,
       userId: "local-smoke-user",
       usageProvider: "openai-compatible",

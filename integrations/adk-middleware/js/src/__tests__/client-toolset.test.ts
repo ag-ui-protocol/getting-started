@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { AGUIClientToolset } from "../index";
 
 describe("AGUIClientToolset", () => {
-  it("keeps arbitrary JSON Schema and scopes bindings by user and session", async () => {
+  it("keeps arbitrary JSON Schema, scopes bindings by user and session, and survives ADK closing it after a run", async () => {
     const toolset = new AGUIClientToolset();
     const schema = {
       type: "object",

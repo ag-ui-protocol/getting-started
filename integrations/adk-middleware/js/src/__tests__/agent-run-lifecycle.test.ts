@@ -1,11 +1,25 @@
 import { EventType, type BaseEvent } from "@ag-ui/core";
-import { InMemorySessionService, Runner, createEvent } from "@google/adk";
+import {
+  InMemorySessionService,
+  IntentMismatchError,
+  LlmAgent,
+  Runner,
+  StreamingMode,
+  Workflow,
+  createEvent,
+} from "@google/adk";
 import { describe, expect, it } from "vitest";
 
-import { ADKAgent } from "../index";
-import { ScriptedAgent, collect, runInput, textEvent } from "./helpers";
+import { ADKJSAgent, AGUIClientToolset } from "../index";
+import {
+  ScriptedAgent,
+  collect,
+  runInput,
+  textEvent,
+  verified,
+} from "./helpers";
 
-describe("ADKAgent run lifecycle and configuration", () => {
+describe("ADKJSAgent run lifecycle and configuration", () => {
   it("preserves ADK configuration across CopilotKit request clones", async () => {
     const runner = new Runner({
       appName: "test-app",
@@ -14,7 +28,7 @@ describe("ADKAgent run lifecycle and configuration", () => {
       ]),
       sessionService: new InMemorySessionService(),
     });
-    const original = new ADKAgent({ runner, userId: "user-1" });
+    const original = new ADKJSAgent({ runner, userId: "user-1" });
     const cloned = original.clone();
     cloned.threadId = "clone-thread";
     cloned.messages = [{ id: "clone-user", role: "user", content: "Hello" }];
@@ -27,7 +41,7 @@ describe("ADKAgent run lifecycle and configuration", () => {
       { onEvent: ({ event }) => void events.push(event) },
     );
 
-    expect(cloned).toBeInstanceOf(ADKAgent);
+    expect(cloned).toBeInstanceOf(ADKJSAgent);
     expect(events.some((event) => event.type === EventType.RUN_ERROR)).toBe(
       false,
     );
@@ -43,7 +57,7 @@ describe("ADKAgent run lifecycle and configuration", () => {
       agent: new ScriptedAgent(() => []),
       sessionService: new InMemorySessionService(),
     });
-    const conservative = await new ADKAgent({
+    const conservative = await new ADKJSAgent({
       runner,
       userId: "user-1",
     }).getCapabilities();
@@ -55,7 +69,7 @@ describe("ADKAgent run lifecycle and configuration", () => {
     expect(conservative.reasoning).toBeUndefined();
     expect(conservative.multimodal).toBeUndefined();
 
-    const declared = await new ADKAgent({
+    const declared = await new ADKJSAgent({
       runner,
       userId: "user-1",
       capabilities: {
@@ -71,15 +85,22 @@ describe("ADKAgent run lifecycle and configuration", () => {
     expect(declared.reasoning).toEqual({ supported: true, streaming: true });
     expect(declared.multimodal).toEqual({ input: { image: true } });
 
-    const factoryCapabilities = await new ADKAgent({
-      runnerFactory: () => runner,
+    // A root without a tools list (this scripted BaseAgent) cannot receive
+    // frontend tools, and sessions always persist through the session service.
+    const factoryCapabilities = await new ADKJSAgent({
+      appName: "test-app",
+      sessionService: new InMemorySessionService(),
+      agent: () => runner.agent,
       userId: "user-1",
     }).getCapabilities();
-    expect(factoryCapabilities.tools).not.toHaveProperty("clientProvided");
-    expect(factoryCapabilities.state).not.toHaveProperty("persistentState");
+    expect(factoryCapabilities.tools).toHaveProperty("clientProvided", false);
+    expect(factoryCapabilities.state).toEqual({
+      snapshots: true,
+      deltas: true,
+    });
 
-    const explicitEmptyToolsets = await new ADKAgent({
-      runnerFactory: () => runner,
+    const explicitEmptyToolsets = await new ADKJSAgent({
+      runner,
       clientToolsets: [],
       userId: "user-1",
     }).getCapabilities();
@@ -87,7 +108,7 @@ describe("ADKAgent run lifecycle and configuration", () => {
   });
 
   it("surfaces unsupported instruction history as a protocol error", async () => {
-    const bridge = new ADKAgent({
+    const bridge = new ADKJSAgent({
       runner: new Runner({
         appName: "test-app",
         agent: new ScriptedAgent(() => []),
@@ -110,7 +131,7 @@ describe("ADKAgent run lifecycle and configuration", () => {
     });
   });
 
-  it("runs an ADK Runner, exposes AG-UI state to ADK, and emits one lifecycle", async () => {
+  it("passes AG-UI state into the ADK session and emits exactly one run lifecycle", async () => {
     let observedState: Record<string, unknown> | undefined;
     const root = new ScriptedAgent((context) => {
       observedState = structuredClone(context.session.state);
@@ -123,7 +144,7 @@ describe("ADKAgent run lifecycle and configuration", () => {
       agent: root,
       sessionService: new InMemorySessionService(),
     });
-    const bridge = new ADKAgent({ runner, userId: "user-1" });
+    const bridge = new ADKJSAgent({ runner, userId: "user-1" });
 
     const events = await collect(
       bridge,
@@ -162,7 +183,7 @@ describe("ADKAgent run lifecycle and configuration", () => {
       },
     });
     usage.modelVersion = "local-test-model";
-    const bridge = new ADKAgent({
+    const bridge = new ADKJSAgent({
       runner: new Runner({
         appName: "test-app",
         sessionService: new InMemorySessionService(),
@@ -200,7 +221,7 @@ describe("ADKAgent run lifecycle and configuration", () => {
   it("clears stale ADK values when a later AG-UI snapshot removes a key", async () => {
     const observedStates: Record<string, unknown>[] = [];
     const sessionService = new InMemorySessionService();
-    const bridge = new ADKAgent({
+    const bridge = new ADKJSAgent({
       runner: new Runner({
         appName: "test-app",
         sessionService,
@@ -252,7 +273,7 @@ describe("ADKAgent run lifecycle and configuration", () => {
 
   it("rejects client writes to ADK app, user, and temporary state scopes", async () => {
     let executions = 0;
-    const bridge = new ADKAgent({
+    const bridge = new ADKJSAgent({
       runner: new Runner({
         appName: "test-app",
         sessionService: new InMemorySessionService(),
@@ -283,7 +304,7 @@ describe("ADKAgent run lifecycle and configuration", () => {
 
   it("does not duplicate full-history user messages in the ADK session", async () => {
     const sessionService = new InMemorySessionService();
-    const bridge = new ADKAgent({
+    const bridge = new ADKJSAgent({
       userId: "user-1",
       runner: new Runner({
         appName: "test-app",
@@ -322,5 +343,144 @@ describe("ADKAgent run lifecycle and configuration", () => {
       .map((part) => part.text)
       .filter(Boolean);
     expect(userTexts).toEqual(["first", "second"]);
+  });
+
+  it("closes a message still streaming after the last ADK event before RUN_FINISHED", async () => {
+    // A run whose final ADK event is a partial chunk must not leave a
+    // TEXT_MESSAGE_START open: the protocol verifier rejects RUN_FINISHED
+    // with an active message.
+    const runner = new Runner({
+      appName: "test-app",
+      agent: new ScriptedAgent(() => [
+        textEvent({ id: "open", text: "still stre", partial: true }),
+      ]),
+      sessionService: new InMemorySessionService(),
+    });
+    const events = await collect(
+      new ADKJSAgent({ runner, userId: "user-1" }),
+      runInput(),
+    );
+
+    const types = events.map((event) => event.type);
+    expect(types.indexOf(EventType.TEXT_MESSAGE_END)).toBeGreaterThan(
+      types.indexOf(EventType.TEXT_MESSAGE_CONTENT),
+    );
+    expect(types.indexOf(EventType.TEXT_MESSAGE_END)).toBeLessThan(
+      types.indexOf(EventType.RUN_FINISHED),
+    );
+    await verified(events);
+  });
+
+  it("fails the run when the userId resolver returns an empty string", async () => {
+    // An empty ADK userId would silently share one session across users.
+    const runner = new Runner({
+      appName: "test-app",
+      agent: new ScriptedAgent(() => [textEvent({ id: "x", text: "never" })]),
+      sessionService: new InMemorySessionService(),
+    });
+    const events = await collect(
+      new ADKJSAgent({ runner, userId: async () => "" }),
+      runInput(),
+    );
+    expect(events.at(-1)).toMatchObject({
+      type: EventType.RUN_ERROR,
+      message: expect.stringMatching(
+        /userId must resolve to a non-empty string/,
+      ),
+    });
+    expect(
+      events.some((event) => event.type === EventType.TEXT_MESSAGE_START),
+    ).toBe(false);
+  });
+
+  it("reports ADK's confirmation-binding refusal as a coded INTENT_MISMATCH run error", async () => {
+    const runner = new Runner({
+      appName: "test-app",
+      agent: new ScriptedAgent(() => {
+        throw new IntentMismatchError({
+          reason: "arguments_mismatch",
+          functionCallId: "delete-1",
+        });
+      }),
+      sessionService: new InMemorySessionService(),
+    });
+    const events = await collect(
+      new ADKJSAgent({ runner, userId: "user-1" }),
+      runInput(),
+    );
+    expect(events.at(-1)).toMatchObject({
+      type: EventType.RUN_ERROR,
+      code: "INTENT_MISMATCH",
+      message: expect.stringContaining("arguments_mismatch"),
+    });
+  });
+
+  it("refuses StreamingMode.BIDI with a coded error before the run starts", async () => {
+    let started = false;
+    const runner = new Runner({
+      appName: "test-app",
+      agent: new ScriptedAgent(() => {
+        started = true;
+        return [textEvent({ id: "x", text: "never" })];
+      }),
+      sessionService: new InMemorySessionService(),
+    });
+    const events = await collect(
+      new ADKJSAgent({
+        runner,
+        userId: "user-1",
+        runConfig: { streamingMode: StreamingMode.BIDI },
+      }),
+      runInput(),
+    );
+    expect(events.at(-1)).toMatchObject({
+      type: EventType.RUN_ERROR,
+      code: "STREAMING_MODE_UNSUPPORTED",
+    });
+    expect(started).toBe(false);
+  });
+
+  it("refuses frontend tools for a Workflow root with a coded error", async () => {
+    const runner = new Runner({
+      appName: "test-app",
+      agent: new Workflow({
+        name: "wf",
+        edges: [
+          ["START", new LlmAgent({ name: "node", model: "gemini-2.5-flash" })],
+        ],
+      }),
+      sessionService: new InMemorySessionService(),
+    });
+    const events = await collect(
+      new ADKJSAgent({ runner, userId: "user-1" }),
+      runInput({
+        tools: [
+          {
+            name: "client_action",
+            description: "x",
+            parameters: { type: "object" },
+          },
+        ],
+      }),
+    );
+    expect(events.at(-1)).toMatchObject({
+      type: EventType.RUN_ERROR,
+      code: "CLIENT_TOOLS_UNSUPPORTED",
+    });
+  });
+
+  it("refuses a clientToolsets entry that no agent in the tree carries", async () => {
+    const bridge = new ADKJSAgent({
+      userId: "user-1",
+      appName: "test-app",
+      sessionService: new InMemorySessionService(),
+      agent: new ScriptedAgent(() => [textEvent({ id: "t", text: "hi" })]),
+      clientToolsets: [new AGUIClientToolset()],
+    });
+    const events = await collect(bridge, runInput());
+    expect(events.at(-1)).toMatchObject({
+      type: EventType.RUN_ERROR,
+      code: "CLIENT_TOOLSET_NOT_PLACED",
+    });
   });
 });

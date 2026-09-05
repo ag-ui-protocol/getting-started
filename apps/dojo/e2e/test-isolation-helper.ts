@@ -93,7 +93,12 @@ async function dumpPageAIState(page: Page) {
  */
 async function dumpLLMockJournal() {
   try {
-    const res = await fetch("http://localhost:5555/v1/_requests?limit=20");
+    // Same port resolution as aimock-setup.ts, so the journal dump follows
+    // runs that override AIMOCK_PORT.
+    const mockPort = Number(process.env.AIMOCK_PORT) || 5555;
+    const res = await fetch(
+      `http://localhost:${mockPort}/v1/_requests?limit=20`,
+    );
     if (!res.ok) {
       console.log(
         `[LLMock Journal] Non-OK response: ${res.status} ${res.statusText}`,

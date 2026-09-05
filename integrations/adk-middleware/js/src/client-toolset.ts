@@ -73,7 +73,6 @@ export class AGUIClientToolset extends BaseToolset {
   }
 
   override async close(): Promise<void> {
-    // Runner closes toolsets after each run. Request bindings are owned and
-    // cleaned up by ADKAgent's run lifecycle instead.
+    // Intentionally empty; see the class doc.
   }
 }

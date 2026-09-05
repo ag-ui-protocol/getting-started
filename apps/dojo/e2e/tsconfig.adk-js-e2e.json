@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "playwright.config.ts",
+    "test-isolation-setup.ts",
+    "test-isolation-teardown.ts",
+    "test-isolation-helper.ts",
+    "aimock-setup.ts",
+    "adk-js-fixtures.ts",
+    "tests/adkJsTests/**/*.ts"
+  ]
+}

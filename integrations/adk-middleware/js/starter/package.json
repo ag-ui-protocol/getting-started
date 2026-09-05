@@ -1,0 +1,32 @@
+{
+  "name": "ag-ui-google-adk-js-starter",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ag-ui/adk-js": "workspace:*",
+    "@ag-ui/client": "0.0.59",
+    "@ag-ui/core": "0.0.59",
+    "@copilotkit/react-core": "1.70.1",
+    "@copilotkit/runtime": "1.70.1",
+    "@google/adk": "2.0.0",
+    "hono": "4.12.27",
+    "micromark": "4.0.2",
+    "next": "16.0.10",
+    "react": "19.2.1",
+    "react-dom": "19.2.1",
+    "rxjs": "7.8.1",
+    "shiki": "3.14.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.11",
+    "@types/react": "19.1.10",
+    "@types/react-dom": "19.1.7",
+    "typescript": "5.8.3"
+  }
+}

@@ -1,37 +1,56 @@
 import { EventType } from "@ag-ui/core";
-import { verifyEvents } from "@ag-ui/client";
 import { InMemorySessionService, Runner } from "@google/adk";
-import { from, lastValueFrom, toArray } from "rxjs";
 import { describe, expect, it } from "vitest";
 
-import { ADKAgent } from "../index";
-import { ScriptedAgent, collect, runInput, textEvent } from "./helpers";
+import { ADKJSAgent, type ADKJSAgentConfig } from "../index";
+import {
+  ScriptedAgent,
+  collect,
+  runInput,
+  textEvent,
+  verified,
+} from "./helpers";
 
-describe("ADKAgent concurrency", () => {
-  it("globally serializes runs that share one Runner", async () => {
+describe("ADKJSAgent concurrency", () => {
+  const sharedRunner = (root: () => ScriptedAgent): ADKJSAgentConfig => ({
+    userId: "user-1",
+    runner: new Runner({
+      appName: "test-app",
+      agent: root(),
+      sessionService: new InMemorySessionService(),
+    }),
+  });
+  const factoryRoot = (root: () => ScriptedAgent): ADKJSAgentConfig => ({
+    userId: "user-1",
+    appName: "test-app",
+    sessionService: new InMemorySessionService(),
+    agent: root,
+  });
+
+  it.each([
+    ["one shared runner", sharedRunner],
+    ["factory-built roots", factoryRoot],
+  ])("runs different threads concurrently on %s", async (_label, configure) => {
     let active = 0;
     let maximumActive = 0;
-    const root = new ScriptedAgent(async () => {
-      active += 1;
-      maximumActive = Math.max(maximumActive, active);
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      active -= 1;
-      return [textEvent({ id: crypto.randomUUID(), text: "done" })];
-    });
-    const bridge = new ADKAgent({
-      runner: new Runner({
-        appName: "test-app",
-        agent: root,
-        sessionService: new InMemorySessionService(),
-      }),
-      userId: "user-1",
-    });
+    const bridge = new ADKJSAgent(
+      configure(
+        () =>
+          new ScriptedAgent(async () => {
+            active += 1;
+            maximumActive = Math.max(maximumActive, active);
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            active -= 1;
+            return [textEvent({ id: crypto.randomUUID(), text: "done" })];
+          }),
+      ),
+    );
 
     await Promise.all([
       collect(bridge, runInput({ threadId: "thread-a", runId: "run-a" })),
       collect(bridge, runInput({ threadId: "thread-b", runId: "run-b" })),
     ]);
-    expect(maximumActive).toBe(1);
+    expect(maximumActive).toBe(2);
   });
 
   it("fails fast instead of queueing overlapping runs on the same user and thread", async () => {
@@ -44,21 +63,18 @@ describe("ADKAgent concurrency", () => {
     const firstMayFinish = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
-    const sessionService = new InMemorySessionService();
-    const bridge = new ADKAgent({
+    const bridge = new ADKJSAgent({
       userId: "user-1",
-      runnerFactory: () =>
-        new Runner({
-          appName: "test-app",
-          sessionService,
-          agent: new ScriptedAgent(async () => {
-            executions += 1;
-            if (executions === 1) {
-              signalStarted();
-              await firstMayFinish;
-            }
-            return [textEvent({ id: crypto.randomUUID(), text: "completed" })];
-          }),
+      appName: "test-app",
+      sessionService: new InMemorySessionService(),
+      agent: () =>
+        new ScriptedAgent(async () => {
+          executions += 1;
+          if (executions === 1) {
+            signalStarted();
+            await firstMayFinish;
+          }
+          return [textEvent({ id: crypto.randomUUID(), text: "completed" })];
         }),
     });
 
@@ -82,9 +98,7 @@ describe("ADKAgent concurrency", () => {
       type: EventType.RUN_ERROR,
       code: "THREAD_BUSY",
     });
-    await expect(
-      lastValueFrom(from(rejected).pipe(verifyEvents(false), toArray())),
-    ).resolves.toHaveLength(rejected.length);
+    await verified(rejected);
     expect(executions).toBe(1);
 
     releaseFirst();
@@ -109,32 +123,5 @@ describe("ADKAgent concurrency", () => {
       outcome: { type: "success" },
     });
     expect(executions).toBe(2);
-  });
-
-  it("lets factory-created runners execute different threads concurrently", async () => {
-    let active = 0;
-    let maximumActive = 0;
-    const sessionService = new InMemorySessionService();
-    const bridge = new ADKAgent({
-      userId: "user-1",
-      runnerFactory: () =>
-        new Runner({
-          appName: "test-app",
-          sessionService,
-          agent: new ScriptedAgent(async () => {
-            active += 1;
-            maximumActive = Math.max(maximumActive, active);
-            await new Promise((resolve) => setTimeout(resolve, 20));
-            active -= 1;
-            return [textEvent({ id: crypto.randomUUID(), text: "done" })];
-          }),
-        }),
-    });
-
-    await Promise.all([
-      collect(bridge, runInput({ threadId: "thread-a", runId: "run-a" })),
-      collect(bridge, runInput({ threadId: "thread-b", runId: "run-b" })),
-    ]);
-    expect(maximumActive).toBe(2);
   });
 });

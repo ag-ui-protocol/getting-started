@@ -28,7 +28,17 @@ export class MessageSnapshot {
   private messages: Message[];
 
   constructor(initial: readonly Message[]) {
-    this.messages = clone([...initial]);
+    // The subagent surface has no null tolerance: a client that spells an
+    // absent tag as `null` must not make the bridge's own snapshot invalid.
+    this.messages = clone([...initial]).map((message) => {
+      if ((message as { subagentRunId?: unknown }).subagentRunId !== null) {
+        return message;
+      }
+      const { subagentRunId: _absent, ...rest } = message as Message & {
+        subagentRunId?: unknown;
+      };
+      return rest as Message;
+    });
   }
 
   apply(event: AGUIEvent): void {
@@ -78,6 +88,7 @@ export class MessageSnapshot {
       role: event.role,
       content: "",
       ...(event.name ? { name: event.name } : {}),
+      ...(event.subagentRunId ? { subagentRunId: event.subagentRunId } : {}),
       ...(event.metadata ? { metadata: clone(event.metadata) } : {}),
     });
   }
@@ -103,6 +114,7 @@ export class MessageSnapshot {
         role: "assistant",
         content: "",
         ...(adkAuthor(event) ? { name: adkAuthor(event) } : {}),
+        ...(event.subagentRunId ? { subagentRunId: event.subagentRunId } : {}),
         toolCalls: [],
         ...(event.metadata ? { metadata: clone(event.metadata) } : {}),
       };
@@ -148,6 +160,7 @@ export class MessageSnapshot {
       toolCallId: event.toolCallId,
       content: event.content,
       ...(typeof event.error === "string" ? { error: event.error } : {}),
+      ...(event.subagentRunId ? { subagentRunId: event.subagentRunId } : {}),
       ...(event.metadata ? { metadata: clone(event.metadata) } : {}),
     });
   }
@@ -160,6 +173,7 @@ export class MessageSnapshot {
       id: event.messageId,
       role: "reasoning",
       content: "",
+      ...(event.subagentRunId ? { subagentRunId: event.subagentRunId } : {}),
       ...(event.metadata ? { metadata: clone(event.metadata) } : {}),
     });
   }

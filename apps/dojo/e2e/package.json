@@ -8,6 +8,7 @@
     "postinstall": "playwright install chromium",
     "test": "playwright test",
     "check:event-trace-types": "tsc -p tsconfig.event-trace.json",
+    "check:adk-js-e2e-types": "tsc -p tsconfig.adk-js-e2e.json",
     "test:event-trace-unit": "tsx --test lib/event-trace-*.test.ts",
     "event-trace:update": "tsx scripts/update-event-traces.ts",
     "test:ui": "playwright test --ui",

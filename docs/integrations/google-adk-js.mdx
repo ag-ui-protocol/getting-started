@@ -1,0 +1,136 @@
+---
+title: Google ADK JavaScript quickstart
+description: Run a native Google ADK JavaScript agent behind an AG-UI endpoint.
+---
+
+`@ag-ui/adk-js` adapts a server-side Google ADK JavaScript `Runner` to an AG-UI
+`AbstractAgent`. Use it when the agent and web runtime run in Node.js. The
+existing `@ag-ui/adk` package remains the HTTP client for the Python ADK
+middleware.
+
+## Prerequisites
+
+- Node.js 20.9 or newer
+- CopilotKit 1.70 or newer (it pins `@ag-ui/client` 0.0.59, which
+  `@ag-ui/adk-js` requires)
+- A Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey)
+
+## Create the starter
+
+```bash
+npx create-ag-ui-app --adk-js
+cd my-adk-js-app
+cp .env.example .env.local
+npm install
+npm run dev
+```
+
+Add your key to `.env.local` before starting the application:
+
+```dotenv
+GOOGLE_GENAI_API_KEY=your-api-key
+GOOGLE_GENAI_USE_VERTEXAI=0
+```
+
+Open [http://localhost:3000](http://localhost:3000). The starter registers one
+ADK agent with a CopilotKit runtime at `/api/copilotkit`.
+
+<Note>
+  `--adk-js` is intentionally separate from `--adk`. The latter continues to
+  create the established Python ADK project.
+</Note>
+
+## Add ADK JavaScript to an existing application
+
+Install the server dependencies:
+
+```bash
+npm install @ag-ui/adk-js @google/adk @copilotkit/runtime hono
+```
+
+`@ag-ui/adk-js` requires `@google/adk` 2.x.
+
+Create `app/api/copilotkit/route.ts`:
+
+```typescript
+import { ADKJSAgent } from "@ag-ui/adk-js"
+import {
+  CopilotRuntime,
+  InMemoryAgentRunner,
+  createCopilotEndpointSingleRoute,
+} from "@copilotkit/runtime/v2"
+import { Agent, InMemorySessionService } from "@google/adk"
+import { handle } from "hono/vercel"
+
+export const runtime = "nodejs"
+
+const rootAgent = new Agent({
+  name: "assistant",
+  model: "gemini-2.5-flash",
+  instruction: "Be concise and use frontend tools when appropriate.",
+})
+
+const copilotRuntime = new CopilotRuntime({
+  agents: {
+    assistant: new ADKJSAgent({
+      appName: "assistant_app",
+      sessionService: new InMemorySessionService(),
+      agent: rootAgent,
+      userId: "user-123", // resolve from server-side auth
+    }),
+  },
+  runner: new InMemoryAgentRunner(),
+})
+
+const endpoint = createCopilotEndpointSingleRoute({
+  runtime: copilotRuntime,
+  basePath: "/api/copilotkit",
+})
+
+export const POST = handle(endpoint)
+```
+
+The frontend can now select the `assistant` agent through any AG-UI client. A
+CopilotKit React application uses `runtimeUrl="/api/copilotkit"` and
+`agent="assistant"` on its `CopilotKit` provider.
+
+## Runs and concurrency
+
+Different threads run concurrently on one shared agent instance; a second run
+on the same user and thread is refused with `THREAD_BUSY`. ADK closes every
+toolset after each run, so give roots that share a closable toolset (or keep
+per-run state) per-run instances with a factory
+(`agent: () => new Workflow(...)`), or pass `runner:` to bring a fully
+configured Runner. Failures after the client disconnected go to `logger`
+(default `console`).
+
+## Supported integration behavior
+
+- Streaming assistant messages and lifecycle events
+- Backend and frontend tool calls
+- AG-UI state snapshots and RFC 6902 state deltas
+- ADK input, confirmation, and credential requests as resumable interrupts.
+  A tool that raises its own confirmation at runtime must also answer `true`
+  from `checkRequireConfirmation` (or declare `requireConfirmation` on a
+  `FunctionTool`), because ADK 2.x binds an approval to the tool it names.
+- Restored message history with stable message IDs
+- Provider/model token usage when ADK reports it
+- A bare ADK `Workflow` as the `Runner` root (its workflow nodes are reported
+  as sub-agents and their frontend tools are discovered)
+- The AG-UI subagent protocol for ADK multi-agent trees (see below)
+
+The integration is server-only. Never import `@ag-ui/adk-js` or `@google/adk`
+from a browser component. See the
+[live Dojo examples](https://dojo.ag-ui.com/adk-js/feature/agentic_chat?openCopilot=true)
+for tools, shared state, generative UI, and interrupts.
+
+## Sub-agents
+
+`subagents: "steps"` emits `STEP_STARTED` / `STEP_FINISHED` (`agent:<name>`) and
+`CUSTOM` `MultiAgentHandoff` events around ADK sub-agent work — safe for every
+client and what the Dojo multi-agent page reads. `subagents: "attributed"` adds
+the AG-UI subagent protocol (`SUBAGENT_STARTED/FINISHED/ERROR`, `subagentRunId`
+on events, messages, and interrupts, continuation of a suspended sub-agent under
+the same id on resume); the consuming client needs `@ag-ui/client` 0.0.59 or
+newer (CopilotKit 1.70+), because older clients reject those event types before
+any application code runs. The default is `off`.

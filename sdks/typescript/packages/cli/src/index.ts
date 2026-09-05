@@ -2,7 +2,9 @@
 import { Command } from "commander";
 import inquirer from "inquirer";
 import { spawn } from "child_process";
-import { buildCopilotKitCreateArgs } from "./build-args";
+import { buildCopilotKitCreateArgs, usesLocalAdkJsStarter } from "./build-args";
+import { packageMetadataUrl, resolveRegistry } from "./registry";
+import { rewriteWorkspaceDependencies } from "./workspace-deps";
 import fs from "fs";
 import path from "path";
 import { downloadTemplate } from "giget";
@@ -12,6 +14,7 @@ const program = new Command();
 // Dark purple color
 const PURPLE = "\x1b[35m";
 const RESET = "\x1b[0m";
+const ADK_JS_TEMPLATE = "gh:ag-ui-protocol/ag-ui/integrations/adk-middleware/js/starter";
 
 function displayBanner() {
   const banner = `
@@ -38,6 +41,11 @@ async function createProject() {
   console.log("  Read more about AG-UI at https://ag-ui.com\n");
 
   const options = program.opts();
+  if (usesLocalAdkJsStarter(options)) {
+    await handleAdkJsStarter();
+    return;
+  }
+
   const isFrameworkDefined = [
     "langgraphPy",
     "langgraphJs",
@@ -87,12 +95,27 @@ async function createProject() {
 async function handleCopilotKitNextJs() {
   const options = program.opts();
 
-  const projectName = await inquirer.prompt([
+  const projectName = await promptForProjectName("my-ag-ui-app");
+
+  const copilotkit = spawn("npx", buildCopilotKitCreateArgs(options, projectName), {
+    stdio: "inherit",
+    shell: true,
+  });
+
+  copilotkit.on("close", (code) => {
+    if (code !== 0) {
+      console.log("\n❌ Project creation failed.");
+    }
+  });
+}
+
+async function promptForProjectName(defaultName: string): Promise<string> {
+  const answer = await inquirer.prompt([
     {
       type: "input",
       name: "name",
       message: "What would you like to name your project?",
-      default: "my-ag-ui-app",
+      default: defaultName,
       validate: (input) => {
         if (!input.trim()) {
           return "Project name cannot be empty";
@@ -104,17 +127,31 @@ async function handleCopilotKitNextJs() {
       },
     },
   ]);
+  return answer.name;
+}
 
-  const copilotkit = spawn("npx", buildCopilotKitCreateArgs(options, projectName.name), {
-    stdio: "inherit",
-    shell: true,
-  });
+async function handleAdkJsStarter() {
+  const projectName = await promptForProjectName("my-adk-js-app");
+  console.log("\n📥 Downloading the Google ADK JavaScript starter...\n");
 
-  copilotkit.on("close", (code) => {
-    if (code !== 0) {
-      console.log("\n❌ Project creation failed.");
-    }
-  });
+  try {
+    await downloadTemplate(ADK_JS_TEMPLATE, {
+      dir: projectName,
+      install: false,
+    });
+    const versions = await getCurrentPackageVersions(["@ag-ui/adk-js"]);
+    updateWorkspaceDependencies(projectName, versions, ["@ag-ui/adk-js"]);
+    console.log(`✅ Google ADK JavaScript starter created in ${projectName}`);
+    console.log("\n🚀 Next steps:");
+    console.log(`   cd ${projectName}`);
+    console.log("   cp .env.example .env.local");
+    console.log("   # Add GOOGLE_GENAI_API_KEY to .env.local");
+    console.log("   npm install");
+    console.log("   npm run dev");
+  } catch (error) {
+    console.error("❌ Failed to download the ADK-JS starter:", error);
+    process.exitCode = 1;
+  }
 }
 
 async function handleCliClient() {
@@ -159,7 +196,15 @@ async function handleCliClient() {
 
     // Update workspace dependencies with actual versions
     console.log("\n🔄 Updating workspace dependencies...");
-    await updateWorkspaceDependencies(projectName.name, versions);
+    try {
+      updateWorkspaceDependencies(projectName.name, versions);
+    } catch (error) {
+      // Preserve the legacy generic-client flow: dependency rewrite failures
+      // are reported but do not turn a successfully downloaded project into a
+      // failed command. The ADK-JS starter passes a required package and uses
+      // the strict, fail-closed path above.
+      console.log(`❌ Error updating package.json: ${error}`);
+    }
 
     console.log(`\n📁 Project created in: ${projectName.name}`);
     console.log("\n🚀 Next steps:");
@@ -187,7 +232,8 @@ program
   .option("--llamaindex", "Use the LlamaIndex framework")
   .option("--agno", "Use the Agno framework")
   .option("--ag2", "Use the AG2 framework")
-  .option("--adk", "Use the ADK framework");
+  .option("--adk", "Use the ADK framework")
+  .option("--adk-js", "Use Google ADK with JavaScript");
 
 program.action(async () => {
   await createProject();
@@ -197,27 +243,26 @@ program.parse();
 
 // Utility functions
 
-// Helper function to get package versions from npmjs
-async function getCurrentPackageVersions(): Promise<{ [key: string]: string }> {
-  const packages = ["@ag-ui/client", "@ag-ui/core", "@ag-ui/mastra"];
+// Helper function to get package versions from the configured npm registry
+async function getCurrentPackageVersions(
+  packages = ["@ag-ui/client", "@ag-ui/core", "@ag-ui/mastra"],
+): Promise<{ [key: string]: string }> {
   const versions: { [key: string]: string } = {};
+  const registry = resolveRegistry();
 
   for (const packageName of packages) {
     try {
-      // Fetch package info from npm registry
-      const response = await fetch(`https://registry.npmjs.org/${packageName}`);
+      const response = await fetch(packageMetadataUrl(packageName, registry));
       if (response.ok) {
         const packageInfo = await response.json();
         versions[packageName] = packageInfo["dist-tags"]?.latest || "latest";
         console.log(`  ✓ ${packageName}: ${versions[packageName]}`);
       } else {
         console.log(`  ⚠️  Could not fetch version for ${packageName}`);
-        // Fallback to latest
         versions[packageName] = "latest";
       }
     } catch (error) {
       console.log(`  ⚠️  Error fetching ${packageName}: ${error}`);
-      // Fallback to latest
       versions[packageName] = "latest";
     }
   }
@@ -225,44 +270,33 @@ async function getCurrentPackageVersions(): Promise<{ [key: string]: string }> {
   return versions;
 }
 
-// Function to update workspace dependencies in downloaded project
-async function updateWorkspaceDependencies(
+// Rewrites workspace: dependencies in the downloaded project to published
+// versions. Throws on a missing/corrupt package.json, on write failure, or
+// when a required package could not be resolved off the workspace: protocol.
+function updateWorkspaceDependencies(
   projectPath: string,
   versions: { [key: string]: string },
+  requiredPackages: string[] = [],
 ) {
   const packageJsonPath = path.join(projectPath, "package.json");
-
-  try {
-    if (!fs.existsSync(packageJsonPath)) {
-      console.log("⚠️  No package.json found in downloaded project");
-      return;
-    }
-
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
-    let updated = false;
-
-    // Update workspace dependencies with actual versions
-    if (packageJson.dependencies) {
-      for (const [depName, depVersion] of Object.entries(packageJson.dependencies)) {
-        if (
-          typeof depVersion === "string" &&
-          depVersion.startsWith("workspace:") &&
-          versions[depName]
-        ) {
-          packageJson.dependencies[depName] = `^${versions[depName]}`;
-          updated = true;
-          console.log(`  📦 Updated ${depName}: workspace:* → ^${versions[depName]}`);
-        }
-      }
-    }
-
-    if (updated) {
-      fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + "\n");
-      console.log("✅ Package.json updated with actual package versions!");
-    } else {
-      console.log("📄 No workspace dependencies found to update");
-    }
-  } catch (error) {
-    console.log(`❌ Error updating package.json: ${error}`);
+  if (!fs.existsSync(packageJsonPath)) {
+    throw new Error(`No package.json found at ${packageJsonPath}.`);
   }
+
+  const { content, updated } = rewriteWorkspaceDependencies(
+    fs.readFileSync(packageJsonPath, "utf-8"),
+    versions,
+    requiredPackages,
+  );
+  const updatedEntries = Object.entries(updated);
+  if (updatedEntries.length === 0) {
+    console.log("📄 No workspace dependencies found to update");
+    return;
+  }
+
+  fs.writeFileSync(packageJsonPath, content);
+  for (const [depName, range] of updatedEntries) {
+    console.log(`  📦 Updated ${depName}: workspace:* → ${range}`);
+  }
+  console.log("✅ Package.json updated with actual package versions!");
 }

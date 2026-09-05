@@ -1,19 +1,17 @@
 import { EventType } from "@ag-ui/core";
-import { verifyEvents } from "@ag-ui/client";
 import {
   Agent,
   FunctionTool,
   InMemorySessionService,
   Runner,
 } from "@google/adk";
-import { from, lastValueFrom, toArray } from "rxjs";
 import { describe, expect, it } from "vitest";
 
-import { ADKAgent, AGUIClientToolset } from "../index";
-import { DeterministicLlm, collect, runInput } from "./helpers";
+import { ADKJSAgent, AGUIClientToolset } from "../index";
+import { DeterministicLlm, collect, runInput, verified } from "./helpers";
 
-describe("ADKAgent tool flow", () => {
-  it("executes a real ADK Agent backend-tool loop", async () => {
+describe("ADKJSAgent tool flow", () => {
+  it("streams the tool call, its result, and the final answer of a real ADK tool loop", async () => {
     let receivedArgs: unknown;
     const model = new DeterministicLlm([
       {
@@ -45,7 +43,7 @@ describe("ADKAgent tool flow", () => {
         return { result: 5 };
       },
     });
-    const bridge = new ADKAgent({
+    const bridge = new ADKJSAgent({
       runner: new Runner({
         appName: "test-app",
         sessionService: new InMemorySessionService(),
@@ -106,7 +104,7 @@ describe("ADKAgent tool flow", () => {
         },
       },
     ]);
-    const bridge = new ADKAgent({
+    const bridge = new ADKJSAgent({
       runner: new Runner({
         appName: "test-app",
         sessionService: new InMemorySessionService(),
@@ -149,9 +147,7 @@ describe("ADKAgent tool flow", () => {
       type: EventType.TOOL_CALL_START,
       toolCallName: "client_action",
     });
-    await expect(
-      lastValueFrom(from(first).pipe(verifyEvents(false), toArray())),
-    ).resolves.toHaveLength(first.length);
+    await verified(first);
     if (!start || start.type !== EventType.TOOL_CALL_START) {
       throw new Error("Expected frontend TOOL_CALL_START.");
     }
@@ -209,5 +205,62 @@ describe("ADKAgent tool flow", () => {
       type: EventType.RUN_FINISHED,
       outcome: { type: "success" },
     });
+  });
+
+  it("attaches a frontend toolset to the root agent once and binds it per run", async () => {
+    // Parity with the other integrations: an agent that declares no
+    // AGUIClientToolset still receives the frontend's tools.
+    const callClientAction = {
+      content: {
+        role: "model" as const,
+        parts: [
+          { functionCall: { name: "client_action", args: { value: 7 } } },
+        ],
+      },
+    };
+    const model = new DeterministicLlm([callClientAction, callClientAction]);
+    const agent = new Agent({ name: "plain_agent", model, tools: [] });
+    const bridge = new ADKJSAgent({
+      runner: new Runner({
+        appName: "test-app",
+        sessionService: new InMemorySessionService(),
+        agent,
+      }),
+      userId: "user-1",
+    });
+    const tools = [
+      {
+        name: "client_action",
+        description: "Runs in the browser",
+        parameters: {
+          type: "object",
+          properties: { value: { type: "number" } },
+        },
+      },
+    ];
+
+    for (const runId of ["run-1", "run-2"]) {
+      const events = await collect(
+        bridge.clone(),
+        runInput({
+          runId,
+          messages: [{ id: `user-${runId}`, role: "user", content: "Run it" }],
+          tools,
+        }),
+      );
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: EventType.TOOL_CALL_START,
+            toolCallName: "client_action",
+          }),
+        ]),
+      );
+      expect(events.at(-1)).toMatchObject({ type: EventType.RUN_FINISHED });
+    }
+    const attached = (agent as unknown as { tools: unknown[] }).tools.filter(
+      (tool) => tool instanceof AGUIClientToolset,
+    );
+    expect(attached).toHaveLength(1);
   });
 });

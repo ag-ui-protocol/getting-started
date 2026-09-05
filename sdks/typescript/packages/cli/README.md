@@ -2,7 +2,7 @@
 
 CLI tool for scaffolding **Agent-User Interaction (AG-UI) Protocol** applications.
 
-`create-ag-ui-app` provides an interactive setup wizard to quickly bootstrap AG-UI projects with your preferred client framework and agent backend. 
+`create-ag-ui-app` provides an interactive setup wizard to quickly bootstrap AG-UI projects with your preferred client framework and agent backend.
 
 Choose from CopilotKit/Next.js for web apps or CLI clients for terminal-based interactions.
 
@@ -31,15 +31,20 @@ npx create-ag-ui-app@latest
 # With framework flags
 npx create-ag-ui-app@latest --langgraph-py
 npx create-ag-ui-app@latest --mastra
+npx create-ag-ui-app@latest --adk-js
 
 # See all options
 npx create-ag-ui-app@latest --help
 ```
 
+`--adk-js` downloads the native Google ADK JavaScript starter. The existing
+`--adk` option remains the Python ADK scaffold.
+
 ## Documentation
 
 - Concepts & architecture: [`docs/concepts`](https://docs.ag-ui.com/concepts/architecture)
 - Full API reference: [`docs/events`](https://docs.ag-ui.com/concepts/events)
+- Google ADK JavaScript quickstart: [docs.ag-ui.com/integrations/google-adk-js](https://docs.ag-ui.com/integrations/google-adk-js)
 
 ## Contributing
 

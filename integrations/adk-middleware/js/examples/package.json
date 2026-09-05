@@ -20,7 +20,7 @@
     "@ag-ui/adk-js": "workspace:*",
     "@ag-ui/client": "workspace:*",
     "@ag-ui/core": "workspace:*",
-    "@google/adk": "^1.6.0",
+    "@google/adk": "^2.0.0",
     "@google/genai": "^2.9.0"
   },
   "devDependencies": {

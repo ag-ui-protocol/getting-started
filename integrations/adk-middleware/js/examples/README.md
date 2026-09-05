@@ -1,7 +1,7 @@
 # ADK-JS Dojo examples
 
 These server-side agents are loaded directly by `apps/dojo`; they do not need a
-separate HTTP process. Set `GOOGLE_API_KEY`, start the Dojo, and select
+separate HTTP process. Set `GOOGLE_GENAI_API_KEY`, start the Dojo, and select
 **Google ADK (JavaScript)**.
 
 The examples cover:

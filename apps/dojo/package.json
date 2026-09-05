@@ -48,7 +48,7 @@
     "@copilotkit/runtime": "1.70.1",
     "@copilotkit/runtime-client-gql": "1.70.1",
     "@copilotkit/shared": "1.70.1",
-    "@google/adk": "^1.6.0",
+    "@google/adk": "^2.0.0",
     "@langchain/openai": "1.0.0",
     "@mastra/client-js": "^1.28.0",
     "@mastra/core": "^1.47.0",

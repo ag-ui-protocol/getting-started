@@ -134,7 +134,7 @@ export function registerA2UIADKFixtures(mockServer: LLMock): void {
   // suffix would depend on test order, sharding and retries rather than on the
   // conversation.
   toolCallCounts.clear();
-  const hasTool = (req: ChatCompletionRequest, name: string) => req.tools?.some((t: ToolDefinition) => t.function.name === name);
+  const hasTool = (req: ChatCompletionRequest, name: string) => req.tools?.some((t: ToolDefinition) => t.function.name === name) ?? false;
   const wantsA2UI = (req: ChatCompletionRequest) =>
     isHotelCreate(userText(req.messages)) || isRecover(userText(req.messages)) || isExhaust(userText(req.messages));
 

@@ -54,6 +54,37 @@ const gitRoot = execSync("git rev-parse --show-toplevel", {
 const integrationsRoot = path.join(gitRoot, "integrations");
 const middlewaresRoot = path.join(gitRoot, "middlewares");
 
+// Port of the aimock server the e2e harness starts. Kept configurable (and in
+// sync with apps/dojo/e2e/aimock-setup.ts, which reads the same env var) so
+// parallel worktrees / runs don't collide on one aimock port.
+const AIMOCK_PORT = Number(process.env.AIMOCK_PORT) || 5555;
+
+// The ADK-JS examples run in-process with the Dojo. Route their tested
+// OpenAI-compatible model adapter to aimock by default so keyless local and CI
+// runs stay deterministic no matter which API keys (e.g. GOOGLE_GENAI_API_KEY)
+// happen to be exported in the developer's shell. Opting out is explicit:
+//   ADK_JS_USE_GEMINI=1        keep the native Gemini model string (bring your
+//                              own real GOOGLE_GENAI_API_KEY or GEMINI_API_KEY)
+//   ADK_JS_OPENAI_BASE_URL=... route the adapter to a custom OpenAI-compatible
+//                              endpoint instead of aimock
+const adkJsUseGemini = ["1", "true", "yes"].includes(
+  (process.env.ADK_JS_USE_GEMINI || "").trim().toLowerCase(),
+);
+const adkJsEnv = adkJsUseGemini
+  ? {
+      // Explicit native mode wins over inherited custom/mock settings. The
+      // official base URL also replaces the harness-wide Gemini mock default.
+      ADK_JS_OPENAI_BASE_URL: "",
+      GOOGLE_GEMINI_BASE_URL:
+        process.env.GOOGLE_GEMINI_BASE_URL ||
+        "https://generativelanguage.googleapis.com",
+    }
+  : {
+      ADK_JS_OPENAI_BASE_URL:
+        process.env.ADK_JS_OPENAI_BASE_URL ||
+        `http://localhost:${AIMOCK_PORT}/v1`,
+    };
+
 // Define all runnable services keyed by a stable id
 const ALL_SERVICES = {
   "server-starter": [
@@ -372,6 +403,7 @@ const ALL_SERVICES = {
         CLAUDE_MANAGED_AGENTS_PYTHON_URL: "http://localhost:8025",
         CLAUDE_MANAGED_AGENTS_TYPESCRIPT_URL: "http://localhost:8024",
         LANGROID_URL: "http://localhost:8021",
+        ...adkJsEnv,
         NEXT_PUBLIC_CUSTOM_DOMAIN_TITLE:
           "cpkdojo.local___CopilotKit Feature Viewer",
       },
@@ -411,6 +443,7 @@ const ALL_SERVICES = {
         CLAUDE_MANAGED_AGENTS_PYTHON_URL: "http://localhost:8025",
         CLAUDE_MANAGED_AGENTS_TYPESCRIPT_URL: "http://localhost:8024",
         LANGROID_URL: "http://localhost:8021",
+        ...adkJsEnv,
         NEXT_PUBLIC_CUSTOM_DOMAIN_TITLE:
           "cpkdojo.local___CopilotKit Feature Viewer",
       },

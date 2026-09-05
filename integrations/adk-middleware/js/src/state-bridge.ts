@@ -9,18 +9,18 @@ import {
   AG_UI_STATE_KEYS_KEY,
   isAdkSpecialStateKey,
 } from "./constants";
-import { ADKProtocolError } from "./errors";
-import { clone, isRecord, setOwn } from "./value-utils";
+import { ADKJSProtocolError } from "./errors";
+import { clone, isRecord } from "./value-utils";
 
 function validatePublicStateKey(key: string): void {
   if (AG_UI_INTERNAL_STATE_KEYS.has(key)) {
-    throw new ADKProtocolError(
+    throw new ADKJSProtocolError(
       `AG-UI state key ${key} is reserved by @ag-ui/adk-js.`,
       "RESERVED_STATE_KEY",
     );
   }
   if (isAdkSpecialStateKey(key)) {
-    throw new ADKProtocolError(
+    throw new ADKJSProtocolError(
       `AG-UI state key ${key} uses a reserved Google ADK app:, user:, or temp: scope.`,
       "RESERVED_STATE_SCOPE",
     );
@@ -60,24 +60,24 @@ export function stateDeltaFromInput(
     for (const [key, value] of Object.entries(input.state)) {
       validatePublicStateKey(key);
       nextKeys.push(key);
-      setOwn(delta, key, clone(value));
+      delta[key] = clone(value);
     }
     if (session && AG_UI_STATE_KEY in session.state) {
-      setOwn(delta, AG_UI_STATE_KEY, null);
+      delta[AG_UI_STATE_KEY] = null;
     }
   } else {
-    setOwn(delta, AG_UI_STATE_KEY, clone(input.state));
+    delta[AG_UI_STATE_KEY] = clone(input.state);
   }
 
   const nextKeySet = new Set(nextKeys);
   for (const key of previousKeys) {
     if (!nextKeySet.has(key)) {
-      setOwn(delta, key, null);
+      delta[key] = null;
     }
   }
 
-  setOwn(delta, AG_UI_STATE_KEYS_KEY, nextKeys);
-  setOwn(delta, AG_UI_CONTEXT_KEY, clone(input.context));
-  setOwn(delta, AG_UI_FORWARDED_PROPS_KEY, clone(input.forwardedProps));
+  delta[AG_UI_STATE_KEYS_KEY] = nextKeys;
+  delta[AG_UI_CONTEXT_KEY] = clone(input.context);
+  delta[AG_UI_FORWARDED_PROPS_KEY] = clone(input.forwardedProps);
   return delta;
 }

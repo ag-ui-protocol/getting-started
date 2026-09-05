@@ -1,9 +1,11 @@
-import type { Event as AdkEvent } from "@google/adk";
+import {
+  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+  type Event as AdkEvent,
+} from "@google/adk";
 
-import { REQUEST_CREDENTIAL_FUNCTION_CALL_NAME } from "./adk-compat";
 import { publicAuthConfig } from "./auth-sanitizer";
 import { AG_UI_INTERNAL_STATE_KEYS, isAdkSpecialStateKey } from "./constants";
-import { clone, isRecord, setOwn } from "./value-utils";
+import { clone, isRecord } from "./value-utils";
 
 function publicAuthConfigMap(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) {
@@ -13,7 +15,7 @@ function publicAuthConfigMap(value: unknown): Record<string, unknown> {
   for (const [key, authConfig] of Object.entries(value)) {
     const safe = publicAuthConfig(authConfig);
     if (safe) {
-      setOwn(output, key, safe);
+      output[key] = safe;
     }
   }
   return output;
@@ -57,7 +59,7 @@ export function publicAdkEvent(event: AdkEvent): AdkEvent {
       if (AG_UI_INTERNAL_STATE_KEYS.has(key) || isAdkSpecialStateKey(key)) {
         continue;
       }
-      setOwn(publicStateDelta, key, clone(value));
+      publicStateDelta[key] = clone(value);
     }
     output.actions.stateDelta = publicStateDelta;
   }

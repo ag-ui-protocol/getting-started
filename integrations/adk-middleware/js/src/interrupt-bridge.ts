@@ -6,39 +6,39 @@ import type {
   RunAgentInput,
   TokenUsage,
 } from "@ag-ui/core";
-import type { Event as AdkEvent, Session } from "@google/adk";
-import { createHash } from "node:crypto";
-
 import {
   getPendingUserInputRequests,
+  type Session,
   type UserInputRequest,
-} from "./adk-compat";
+} from "@google/adk";
+import { createHash } from "node:crypto";
+
 import { credentialResponse } from "./auth-resume";
 import { publicAuthConfig } from "./auth-sanitizer";
-import {
-  AG_UI_RESUME_COMPLETED_METADATA_KEY,
-  AG_UI_RESUME_FINGERPRINT_METADATA_KEY,
-  AG_UI_RESUME_IDS_METADATA_KEY,
-  AG_UI_RESUME_REPLAY_METADATA_KEY,
-} from "./constants";
-import { ADKProtocolError } from "./errors";
+import { AG_UI_RESUME_IDS_METADATA_KEY } from "./constants";
+import { ADKJSProtocolError } from "./errors";
 import type { AdkContent } from "./message-converter";
+import {
+  replayArtifact,
+  runMarkers,
+  type ResumeReplayArtifact,
+} from "./run-marker";
+import type { SubagentContinuation } from "./subagent-tracker";
 import { clone, errorMessage, hasOwn, isRecord } from "./value-utils";
-
-export interface ResumeReplayArtifact {
-  state: unknown;
-  /** Needed only when replaying a run that produced another interrupt. */
-  messages?: Message[];
-  interrupts: Interrupt[];
-  result?: unknown;
-  usage?: TokenUsage[];
-}
 
 export interface PreparedAdkRun {
   kind: "run";
   content: AdkContent;
   customMetadata: Record<string, unknown>;
   resumeFingerprint?: string;
+  /** Sub-agent invocations to re-announce, keyed by resumed interrupt id. */
+  continuations?: Map<string, SubagentContinuation>;
+  /**
+   * The resolved `adk_request_input` answers rendered as user text. ADK 2.x
+   * hides the request-input exchange from the model's contents, so without
+   * this a plain LlmAgent never sees the answer and asks again.
+   */
+  inputReplyText?: string;
 }
 
 interface PreparedResumeRun extends PreparedAdkRun {
@@ -50,7 +50,7 @@ interface PreparedReplay {
   artifact: ResumeReplayArtifact;
 }
 
-export type PreparedResume = PreparedResumeRun | PreparedReplay;
+type PreparedResume = PreparedResumeRun | PreparedReplay;
 
 export type PreparedRunInput = PreparedAdkRun | PreparedReplay;
 
@@ -72,7 +72,7 @@ function canonicalJson(value: unknown): string {
     }
     if (isRecord(current)) {
       if (seen.has(current)) {
-        throw new ADKProtocolError(
+        throw new ADKJSProtocolError(
           "Interrupt resume payload must be JSON serializable.",
           "INVALID_PAYLOAD",
         );
@@ -87,7 +87,7 @@ function canonicalJson(value: unknown): string {
       seen.delete(current);
       return output;
     }
-    throw new ADKProtocolError(
+    throw new ADKJSProtocolError(
       "Interrupt resume payload must be JSON serializable.",
       "INVALID_PAYLOAD",
     );
@@ -107,42 +107,31 @@ function resumeFingerprint(input: RunAgentInput): string {
   return createHash("sha256").update(canonicalJson(entries)).digest("hex");
 }
 
-function completedResume(
+/**
+ * A completed resume is replayed only while its run marker is still the
+ * newest event on the thread; once anything else ran, replaying its snapshot
+ * would rewind the client's conversation.
+ */
+function completedReplay(
   session: Session,
   fingerprint: string,
-): AdkEvent | undefined {
-  return session.events.find(
-    (event) =>
-      event.customMetadata?.[AG_UI_RESUME_COMPLETED_METADATA_KEY] === true &&
-      event.customMetadata?.[AG_UI_RESUME_FINGERPRINT_METADATA_KEY] ===
-        fingerprint,
-  );
-}
-
-function replayArtifact(event: AdkEvent): ResumeReplayArtifact {
-  const stored = event.customMetadata?.[AG_UI_RESUME_REPLAY_METADATA_KEY];
-  if (
-    isRecord(stored) &&
-    hasOwn(stored, "state") &&
-    Array.isArray(stored.interrupts) &&
-    (stored.interrupts.length === 0 || Array.isArray(stored.messages))
-  ) {
-    return {
-      state: clone(stored.state),
-      ...(Array.isArray(stored.messages)
-        ? { messages: clone(stored.messages as Message[]) }
-        : {}),
-      interrupts: clone(stored.interrupts as Interrupt[]),
-      ...(hasOwn(stored, "result") ? { result: clone(stored.result) } : {}),
-      ...(Array.isArray(stored.usage)
-        ? { usage: clone(stored.usage as TokenUsage[]) }
-        : {}),
-    };
+): ResumeReplayArtifact | undefined {
+  const last = session.events.at(-1);
+  const newest = last ? runMarkers([last])[0] : undefined;
+  if (newest?.resume?.fingerprint === fingerprint) {
+    return replayArtifact(newest.resume.replay);
   }
-  throw new ADKProtocolError(
-    "Completed ADK resume marker has no valid replay artifact.",
-    "INVALID_REPLAY_ARTIFACT",
-  );
+  if (
+    runMarkers(session.events).some(
+      (marker) => marker.resume?.fingerprint === fingerprint,
+    )
+  ) {
+    throw new ADKJSProtocolError(
+      "This resume already completed and the thread has moved on; it cannot be replayed.",
+      "STALE_RESUME",
+    );
+  }
+  return undefined;
 }
 
 function validateResumePayload(
@@ -158,7 +147,7 @@ function validateResumePayload(
       entry.payload,
     );
   } catch (error) {
-    throw new ADKProtocolError(
+    throw new ADKJSProtocolError(
       `ADK interrupt ${request.interruptId} has an invalid response schema: ${errorMessage(error)}`,
       "INVALID_RESPONSE_SCHEMA",
     );
@@ -168,7 +157,7 @@ function validateResumePayload(
       .slice(0, 3)
       .map((error) => `${error.instanceLocation || "/"}: ${error.error}`)
       .join("; ");
-    throw new ADKProtocolError(
+    throw new ADKJSProtocolError(
       `Invalid payload for ADK interrupt ${request.interruptId}${details ? `: ${details}` : "."}`,
       "INVALID_PAYLOAD",
     );
@@ -186,13 +175,13 @@ function confirmationDecision(entry: ResumeEntry): boolean {
     const confirmed = entry.payload.confirmed;
     const approved = entry.payload.approved;
     if (confirmed !== undefined && typeof confirmed !== "boolean") {
-      throw new ADKProtocolError(
+      throw new ADKJSProtocolError(
         "Confirmation payload `confirmed` must be a boolean.",
         "INVALID_PAYLOAD",
       );
     }
     if (approved !== undefined && typeof approved !== "boolean") {
-      throw new ADKProtocolError(
+      throw new ADKJSProtocolError(
         "Confirmation payload `approved` must be a boolean.",
         "INVALID_PAYLOAD",
       );
@@ -202,7 +191,7 @@ function confirmationDecision(entry: ResumeEntry): boolean {
       typeof approved === "boolean" &&
       confirmed !== approved
     ) {
-      throw new ADKProtocolError(
+      throw new ADKJSProtocolError(
         "Confirmation payload contains conflicting decisions.",
         "INVALID_PAYLOAD",
       );
@@ -214,7 +203,7 @@ function confirmationDecision(entry: ResumeEntry): boolean {
       return approved;
     }
   }
-  throw new ADKProtocolError(
+  throw new ADKJSProtocolError(
     "Resolved confirmation payload must be a boolean or contain a boolean `approved` or `confirmed` field.",
     "INVALID_PAYLOAD",
   );
@@ -225,22 +214,54 @@ function responseForResume(
   entry: ResumeEntry,
 ): Record<string, unknown> {
   if (request.kind === "confirmation") {
-    const confirmed = confirmationDecision(entry);
+    // Only the decision comes from the browser. ADK re-executes the original
+    // tool with this response's hint/payload, so both must stay the trusted
+    // values from the pending request, not client-supplied replacements.
     return {
-      confirmed,
-      ...(isRecord(entry.payload) ? { payload: entry.payload } : {}),
+      confirmed: confirmationDecision(entry),
+      ...(request.message !== undefined ? { hint: request.message } : {}),
+      ...(request.payload !== undefined ? { payload: request.payload } : {}),
     };
   }
-  if (entry.status === "cancelled") {
-    throw new ADKProtocolError(
-      `Google ADK does not define safe cancellation semantics for ${request.kind} interrupt ${request.interruptId}; resolve it explicitly instead.`,
-      "UNSUPPORTED_INTERRUPT_CANCELLATION",
-    );
-  }
   if (request.kind === "credential") {
+    if (entry.status === "cancelled") {
+      // ADK binds a credential reply to the auth flow and drops anything that
+      // is not a credential, so a "cancelled" answer would stall the tool.
+      throw new ADKJSProtocolError(
+        `Credential interrupt ${request.interruptId} cannot be cancelled; resolve it with a credential.`,
+        "UNSUPPORTED_INTERRUPT_CANCELLATION",
+      );
+    }
     return credentialResponse(request, entry.payload);
   }
+  if (entry.status === "cancelled") {
+    return { cancelled: true };
+  }
   return isRecord(entry.payload) ? entry.payload : { result: entry.payload };
+}
+
+/**
+ * Sub-agent invocations recorded as suspended when the interrupts now being
+ * resumed were raised. Read from the run markers the coordinator appends.
+ */
+export function continuationsFor(
+  session: Session,
+  input: RunAgentInput,
+): Map<string, SubagentContinuation> {
+  const resumed = new Set(
+    (input.resume ?? []).map((entry) => entry.interruptId),
+  );
+  const found = new Map<string, SubagentContinuation>();
+  for (const marker of runMarkers(session.events)) {
+    for (const [interruptId, continuation] of Object.entries(
+      marker.continuations,
+    )) {
+      if (resumed.has(interruptId)) {
+        found.set(interruptId, continuation);
+      }
+    }
+  }
+  return found;
 }
 
 export function prepareResume(
@@ -251,12 +272,9 @@ export function prepareResume(
     return undefined;
   }
   const fingerprint = resumeFingerprint(input);
-  const completed = completedResume(session, fingerprint);
-  if (completed) {
-    return {
-      kind: "replay",
-      artifact: replayArtifact(completed),
-    };
+  const replay = completedReplay(session, fingerprint);
+  if (replay) {
+    return { kind: "replay", artifact: replay };
   }
 
   const pendingRequests = getPendingUserInputRequests(session.events);
@@ -266,14 +284,14 @@ export function prepareResume(
   const resumedIds = new Set<string>();
   for (const entry of input.resume) {
     if (resumedIds.has(entry.interruptId)) {
-      throw new ADKProtocolError(
+      throw new ADKJSProtocolError(
         `Interrupt ${entry.interruptId} appears more than once in resume.`,
         "DUPLICATE_INTERRUPT_ID",
       );
     }
     resumedIds.add(entry.interruptId);
     if (!pending.has(entry.interruptId)) {
-      throw new ADKProtocolError(
+      throw new ADKJSProtocolError(
         `No pending ADK interrupt with id ${entry.interruptId}.`,
         "UNKNOWN_INTERRUPT_ID",
       );
@@ -283,20 +301,35 @@ export function prepareResume(
     .map((request) => request.interruptId)
     .filter((interruptId) => !resumedIds.has(interruptId));
   if (missing.length > 0) {
-    throw new ADKProtocolError(
+    throw new ADKJSProtocolError(
       `Partial resume: missing ADK interrupt IDs ${missing.join(", ")}.`,
       "PARTIAL_RESUME",
     );
   }
 
+  const inputReplies: string[] = [];
   const parts = input.resume.map((entry) => {
     const request = pending.get(entry.interruptId)!;
     validateResumePayload(request, entry);
+    const response = responseForResume(request, entry);
+    // Only free-form input is echoed as text; confirmations and credentials
+    // are consumed by ADK's own processors and must never reach the model.
+    if (request.kind === "input") {
+      if (entry.status === "cancelled") {
+        inputReplies.push(canonicalJson({ cancelled: true }));
+      } else if (entry.payload !== undefined) {
+        inputReplies.push(
+          typeof entry.payload === "string"
+            ? entry.payload
+            : canonicalJson(entry.payload),
+        );
+      }
+    }
     return {
       functionResponse: {
         id: entry.interruptId,
         name: request.functionCallName,
-        response: responseForResume(request, entry),
+        response,
       },
     };
   });
@@ -307,9 +340,12 @@ export function prepareResume(
       [AG_UI_RESUME_IDS_METADATA_KEY]: input.resume.map(
         (entry) => entry.interruptId,
       ),
-      [AG_UI_RESUME_FINGERPRINT_METADATA_KEY]: fingerprint,
     },
     resumeFingerprint: fingerprint,
+    continuations: continuationsFor(session, input),
+    ...(inputReplies.length > 0
+      ? { inputReplyText: inputReplies.join("\n") }
+      : {}),
   };
 }
 
@@ -324,8 +360,12 @@ function reasonFor(request: UserInputRequest): string {
   }
 }
 
-export function toInterrupt(request: UserInputRequest): Interrupt {
+export function toInterrupt(
+  request: UserInputRequest,
+  owners?: ReadonlyMap<string, SubagentContinuation>,
+): Interrupt {
   const authConfig = publicAuthConfig(request.authConfig);
+  const owner = owners?.get(request.interruptId);
   const metadata: Record<string, unknown> = {
     adkFunctionCallName: request.functionCallName,
     ...(request.author ? { author: request.author } : {}),
@@ -336,6 +376,7 @@ export function toInterrupt(request: UserInputRequest): Interrupt {
   return {
     id: request.interruptId,
     reason: reasonFor(request),
+    ...(owner ? { subagentRunId: owner.subagentRunId } : {}),
     ...(request.message ? { message: request.message } : {}),
     ...(isRecord(request.responseSchema)
       ? { responseSchema: request.responseSchema }

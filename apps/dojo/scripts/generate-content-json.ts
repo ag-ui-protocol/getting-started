@@ -417,6 +417,7 @@ const agentFilesMapper: Record<
       tool_based_generative_ui: "tool-based-generative-ui.ts",
       shared_state: "shared-state.ts",
       interrupt: "interrupt.ts",
+      multi_agent: "multi-agent.ts",
     };
     return agentKeys.reduce(
       (acc, agentId) => ({

@@ -111,4 +111,56 @@ describe("AG-UI to ADK message conversion", () => {
       expect.objectContaining({ code: "UNSUPPORTED_BINARY_REFERENCE" }),
     );
   });
+
+  it("restores a reasoning message with its thought signature into ADK history", () => {
+    const message: Message = {
+      id: "reasoning-1",
+      role: "reasoning",
+      content: "Consider the options",
+      encryptedValue: "sig-r",
+    };
+    expect(convertMessage(message, [message], "model")).toEqual({
+      author: "model",
+      content: {
+        role: "model",
+        parts: [
+          {
+            text: "Consider the options",
+            thought: true,
+            thoughtSignature: "sig-r",
+          },
+        ],
+      },
+    });
+  });
+
+  it("converts binary attachments by inline data or URL", () => {
+    const message: Message = {
+      id: "user-binary",
+      role: "user",
+      content: [
+        { type: "binary", mimeType: "image/png", data: "aW1hZ2U=" },
+        {
+          type: "binary",
+          mimeType: "application/pdf",
+          url: "gs://bucket/f.pdf",
+        },
+      ],
+    };
+    expect(convertMessage(message, [message], "model")).toEqual({
+      author: "user",
+      content: {
+        role: "user",
+        parts: [
+          { inlineData: { data: "aW1hZ2U=", mimeType: "image/png" } },
+          {
+            fileData: {
+              fileUri: "gs://bucket/f.pdf",
+              mimeType: "application/pdf",
+            },
+          },
+        ],
+      },
+    });
+  });
 });
