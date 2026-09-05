@@ -893,6 +893,104 @@ class TestConvertADKEventToAGUIMessage:
         tool_call = result.tool_calls[0]
         assert tool_call.id == "assistant_5"  # Falls back to event ID
 
+    # The two MagicMock tests above delete the attribute entirely. Real
+    # google.genai FunctionCall objects always *have* `id` and `args`; the
+    # fields are simply optional and default to None. These tests use real
+    # objects so the None-valued path stays covered.
+
+    def test_convert_real_function_call_with_none_id(self):
+        """Test that a real FunctionCall with id=None falls back to the event ID."""
+        event = ADKEvent(
+            id="event-123",
+            author="model",
+            content=types.Content(
+                role="model",
+                parts=[types.Part(
+                    function_call=types.FunctionCall(
+                        name="get_weather",
+                        args={"city": "Cairo"},
+                        # id defaults to None
+                    )
+                )],
+            ),
+        )
+
+        result = convert_adk_event_to_ag_ui_message(event)
+
+        # The event must survive conversion, not be dropped by the error handler.
+        assert isinstance(result, AssistantMessage)
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].id == "event-123"
+        assert json.loads(result.tool_calls[0].function.arguments) == {"city": "Cairo"}
+
+    def test_convert_real_function_call_with_none_args(self):
+        """Test that a real FunctionCall with args=None serializes to '{}'."""
+        event = ADKEvent(
+            id="event-456",
+            author="model",
+            content=types.Content(
+                role="model",
+                parts=[types.Part(
+                    function_call=types.FunctionCall(
+                        id="call-456",
+                        name="get_current_time",
+                        # args defaults to None
+                    )
+                )],
+            ),
+        )
+
+        result = convert_adk_event_to_ag_ui_message(event)
+
+        tool_call = result.tool_calls[0]
+        assert tool_call.id == "call-456"
+        assert tool_call.function.arguments == "{}"
+        assert json.loads(tool_call.function.arguments) == {}
+
+    def test_convert_real_function_call_with_none_id_and_args(self):
+        """Test that a real FunctionCall missing both id and args converts."""
+        event = ADKEvent(
+            id="event-789",
+            author="model",
+            content=types.Content(
+                role="model",
+                parts=[types.Part(
+                    function_call=types.FunctionCall(name="ping")
+                )],
+            ),
+        )
+
+        result = convert_adk_event_to_ag_ui_message(event)
+
+        tool_call = result.tool_calls[0]
+        assert tool_call.id == "event-789"
+        assert tool_call.function.name == "ping"
+        assert tool_call.function.arguments == "{}"
+
+    def test_convert_real_function_call_preserves_id_and_args(self):
+        """Test that a fully populated real FunctionCall is unchanged."""
+        event = ADKEvent(
+            id="event-999",
+            author="model",
+            content=types.Content(
+                role="model",
+                parts=[types.Part(
+                    function_call=types.FunctionCall(
+                        id="call-999",
+                        name="get_weather",
+                        args={"city": "Boston"},
+                    )
+                )],
+            ),
+        )
+
+        result = convert_adk_event_to_ag_ui_message(event)
+
+        tool_call = result.tool_calls[0]
+        assert tool_call.id == "call-999"
+        assert tool_call.function.name == "get_weather"
+        assert json.loads(tool_call.function.arguments) == {"city": "Boston"}
+
     def test_convert_event_without_content(self):
         """Test converting event without content."""
         mock_event = MagicMock()
