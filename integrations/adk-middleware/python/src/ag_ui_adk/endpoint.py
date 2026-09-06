@@ -17,7 +17,7 @@ from ag_ui.core import (
     ToolMessage,
 )
 from ag_ui.encoder import EventEncoder
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -429,6 +429,72 @@ def add_adk_fastapi_endpoint(
             media_type=content_type,
         )
 
+    ws_path = f"{path.rstrip('/')}/ws" if path != "/" else "/ws"
+
+    @app.websocket(ws_path)
+    async def ws_adk_endpoint(websocket: WebSocket):
+        """WebSocket transport for the ADK middleware.
+
+        Provides a persistent bidirectional channel as an alternative to the SSE
+        ``POST`` endpoint. The client sends a single ``RunAgentInput`` JSON frame
+        to start a run; the server replies with one JSON frame per AG-UI event.
+
+        HITL (Human-in-the-Loop) flows benefit most from this transport: instead
+        of opening a second HTTP connection to resume after a ``RUN_FINISHED``
+        pause, the client simply sends the follow-up ``RunAgentInput`` (with the
+        ``ToolMessage`` result) over the same socket — no reconnection needed.
+
+        Wire format (both directions): UTF-8 JSON, one AG-UI event per frame.
+        """
+        await websocket.accept()
+        try:
+            raw = await websocket.receive_json()
+            input_data = RunAgentInput(**raw)
+            input_data = await _merge_extractor_state(
+                input_data,
+                websocket,  # type: ignore[arg-type]  # headers-compatible mapping
+                extract_state_fn,
+            )
+            agent = await _resolve_agent(
+                default_agent,
+                websocket,  # type: ignore[arg-type]
+                input_data,
+                agent_resolver,
+            )
+            async for event in agent.run(input_data):
+                try:
+                    encoded = event.model_dump_json(by_alias=True, exclude_none=True)
+                    logger.debug(f"WS Response: {encoded}")
+                    await websocket.send_text(encoded)
+                except Exception as encoding_error:
+                    logger.error(
+                        f"❌ WS event encoding error: {encoding_error}", exc_info=True
+                    )
+                    error_event = _build_run_error(
+                        message=f"Event encoding failed: {str(encoding_error)}",
+                        code="ENCODING_ERROR",
+                    )
+                    await websocket.send_text(
+                        error_event.model_dump_json(by_alias=True, exclude_none=True)
+                    )
+                    return
+        except WebSocketDisconnect:
+            logger.debug("WebSocket client disconnected")
+        except Exception as agent_error:
+            logger.error(f"❌ WS ADKAgent error: {agent_error}", exc_info=True)
+            try:
+                error_event = _build_run_error(
+                    message=f"Agent execution failed: {str(agent_error)}",
+                    code="AGENT_ERROR",
+                )
+                await websocket.send_text(
+                    error_event.model_dump_json(by_alias=True, exclude_none=True)
+                )
+            except Exception:
+                pass
+            finally:
+                await websocket.close()
+
     capabilities_path = f"{path.rstrip('/')}/capabilities" if path != "/" else "/capabilities"
 
     @app.get(capabilities_path)
@@ -457,8 +523,13 @@ def add_adk_fastapi_endpoint(
             agent = await _resolve_agent(
                 default_agent, request, synthetic_input, agent_resolver
             )
-            caps = agent.get_capabilities()
-            if caps is None:
+            caps = agent.get_capabilities() or {}
+            # Advertise WebSocket transport — the /ws endpoint is always mounted
+            # by add_adk_fastapi_endpoint alongside the SSE endpoint.
+            caps.setdefault("transport", {})
+            caps["transport"]["websocket"] = True
+            caps["transport"].setdefault("streaming", True)
+            if not caps:
                 logger.debug("Capabilities endpoint called but no capabilities configured on agent")
                 return JSONResponse(content={})
             return JSONResponse(content=caps)

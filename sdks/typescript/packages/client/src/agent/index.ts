@@ -1,6 +1,8 @@
 export { AbstractAgent } from "./agent";
 export type { RunAgentResult } from "./agent";
 export { HttpAgent } from "./http";
+export { WebSocketAgent } from "./ws";
+export type { WebSocketAgentConfig } from "./ws";
 export type {
   AgentConfig,
   HttpAgentConfig,
