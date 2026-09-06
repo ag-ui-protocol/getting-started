@@ -112,6 +112,7 @@ export abstract class AbstractAgent {
     this.state = structuredClone_(initialState ?? {});
     this._debug = resolveAgentDebugConfig(debug);
     this._debugLogger = createDebugLogger(this._debug);
+    this.bindPublicMethods();
 
     if (compareVersions(this.maxVersion, "0.0.39") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_39());
@@ -134,6 +135,15 @@ export abstract class AbstractAgent {
     if (compareVersions(this.maxVersion, "0.0.57") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_57());
     }
+  }
+
+  private bindPublicMethods() {
+    this.subscribe = this.subscribe.bind(this);
+    this.use = this.use.bind(this);
+    this.addMessage = this.addMessage.bind(this);
+    this.addMessages = this.addMessages.bind(this);
+    this.setMessages = this.setMessages.bind(this);
+    this.setState = this.setState.bind(this);
   }
 
   public subscribe(subscriber: AgentSubscriber) {
@@ -592,6 +602,7 @@ export abstract class AbstractAgent {
     cloned.subscribers = [...this.subscribers];
     cloned.middlewares = [...this.middlewares];
     cloned.pendingInterrupts = structuredClone_(this.pendingInterrupts);
+    cloned.bindPublicMethods();
 
     return cloned;
   }

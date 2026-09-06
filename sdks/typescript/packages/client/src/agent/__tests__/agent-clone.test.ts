@@ -41,6 +41,45 @@ describe("AbstractAgent cloning", () => {
     expect(cloned.state).toEqual(agent.state);
     expect(cloned.state).not.toBe(agent.state);
   });
+
+  it("keeps public methods bound on new and cloned agents", () => {
+    const agent = new CloneableTestAgent();
+
+    for (const target of [agent, agent.clone()]) {
+      const { subscribe, use, addMessage, addMessages, setMessages, setState } = target;
+      const subscription = subscribe({});
+
+      expect(use((input: RunAgentInput, next: AbstractAgent) => next.run(input))).toBe(target);
+      addMessage({ id: "msg-2", role: "user", content: "Second" });
+      addMessages([{ id: "msg-3", role: "user", content: "Third" }]);
+      setMessages([{ id: "msg-4", role: "user", content: "Fourth" }]);
+      setState({ stage: "updated" });
+
+      expect(target.messages).toHaveLength(1);
+      expect(target.messages[0].id).toBe("msg-4");
+      expect(target.state).toEqual({ stage: "updated" });
+      subscription.unsubscribe();
+    }
+  });
+
+  it("binds subclass overrides", () => {
+    class OverridingAgent extends CloneableTestAgent {
+      calls = 0;
+
+      override addMessage(message: Message) {
+        this.calls++;
+        super.addMessage(message);
+      }
+    }
+
+    const agent = new OverridingAgent();
+    const { addMessage } = agent;
+
+    addMessage({ id: "msg-2", role: "user", content: "Second" });
+
+    expect(agent.calls).toBe(1);
+    expect(agent.messages).toHaveLength(2);
+  });
 });
 
 describe("HttpAgent cloning", () => {
