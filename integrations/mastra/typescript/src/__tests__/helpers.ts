@@ -24,6 +24,16 @@ export class FakeMemory {
     this.threads.set(thread.id, thread);
   }
 
+  /** Records every createThread call (the first-turn thread-scope sync). */
+  createThreadCalls: Array<{ threadId?: string; resourceId: string }> = [];
+
+  async createThread(args: { threadId?: string; resourceId: string }) {
+    this.createThreadCalls.push(args);
+    const thread = { id: args.threadId, resourceId: args.resourceId };
+    this.threads.set(thread.id!, thread);
+    return thread;
+  }
+
   async getWorkingMemory(_opts: any): Promise<string | undefined> {
     return this.workingMemoryValue;
   }
