@@ -15,8 +15,12 @@ import java.util.List;
  * {@code type} discriminator and {@link com.agui.community.core.message.Message}
  * keyed on its {@code role} discriminator.
  *
- * <p>Implementations should be thread-safe and must wrap any underlying failure
- * in a {@link SerializationException}.
+ * <p>This repository provides no concrete JSON {@code Serializer}
+ * implementation; applications or integration modules provide one. Those
+ * implementations should be thread-safe, must configure parser constraints
+ * appropriate to the chosen JSON library (including nesting depth, token count,
+ * and string size limits), and must wrap serialization or deserialization
+ * library failures in a {@link SerializationException}.
  */
 public interface Serializer {
 

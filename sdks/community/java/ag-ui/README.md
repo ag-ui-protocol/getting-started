@@ -14,11 +14,11 @@ dependencies**.
 
 ## Modules
 
-| Module | Description |
-|--------|-------------|
-| [`core`](core) | Core types and protocol primitives — messages, events, agent abstraction, and a pluggable `Serializer`. No external runtime dependencies. |
+| Module             | Description                                                                                                                                                                         |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`core`](core)     | Core types and protocol primitives — messages, events, agent abstraction, and a pluggable `Serializer`. No external runtime dependencies.                                           |
 | [`client`](client) | Client implementation. `HttpAgent` runs against a remote AG-UI endpoint over HTTP, decoding the Server-Sent Events response into a stream of events. Built on the JDK `HttpClient`. |
-| [`server`](server) | Server-side support for exposing an `Agent` over the AG-UI protocol. |
+| [`server`](server) | Server-side support for exposing an `Agent` over the AG-UI protocol.                                                                                                                |
 
 ## Requirements
 
@@ -44,6 +44,8 @@ mvn test
 `HttpAgent` POSTs a `RunAgentInput` to an AG-UI endpoint and exposes the
 Server-Sent Events response as a `Flow.Publisher<Event>`. You supply a
 `Serializer` (the library is agnostic to the concrete JSON implementation).
+By default, the client bounds each SSE wire line to 1 MiB and each decoded event
+`data` payload to 8 MiB. Pass an `SseLimits` overload to customize those caps.
 
 ```java
 import com.agui.community.client.HttpAgent;
@@ -74,6 +76,17 @@ Each subscription triggers a fresh run: the request is sent on subscribe, events
 are emitted in order, and the publisher completes when the stream ends (or
 signals `onError` on failure).
 
+The SSE limits count UTF-8 bytes, not Java characters. Line limits exclude the
+wire line terminator but still apply to comments and fields the AG-UI parser
+ignores. Event payload limits include the newlines inserted between multiple
+`data:` fields. Limits apply per line and per event; there is no lifetime byte
+budget for a long-running stream.
+
+`Serializer` is an interface, not a bundled JSON binding. This repository does
+not provide a concrete JSON `Serializer` implementation. Applications should
+configure parser constraints appropriate to their JSON library, such as nesting,
+token, and string limits, and wrap library failures in `SerializationException`.
+
 ### Implementing an agent
 
 `Agent` is a functional interface — implement `run` to emit your own event
@@ -84,6 +97,11 @@ Agent agent = input -> {
     // produce a Flow.Publisher<Event> describing the run
 };
 ```
+
+The included JDK HTTP server adapter rejects request bodies larger than 8 MiB by
+default. Use a `JdkAgentHttpHandler` constructor that accepts
+`maxRequestBodyBytes` to provide a positive custom cap. Oversized requests
+receive `413 Payload Too Large` before the body is parsed or the agent is run.
 
 ## Using as a dependency
 
