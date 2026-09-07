@@ -2810,12 +2810,29 @@ export class MastraAgent extends AbstractAgent {
         // No/invalid existing working memory — start from the client state.
       }
 
-      await memory.updateWorkingMemory({
-        resourceId,
-        threadId: input.threadId,
-        workingMemory: JSON.stringify({ ...existing, ...rest }),
-        memoryConfig,
-      });
+      const write = () =>
+        memory.updateWorkingMemory({
+          resourceId,
+          threadId: input.threadId,
+          workingMemory: JSON.stringify({ ...existing, ...rest }),
+          memoryConfig,
+        });
+
+      try {
+        await write();
+      } catch (error) {
+        // Thread-scoped working memory lives in thread.metadata, so Mastra
+        // refuses the update until the thread exists — and on the first turn
+        // it does not yet (the stream creates it). Create it and retry once;
+        // anything else is a real failure and still fails the run.
+        if (await memory.getThreadById(
+          { threadId: input.threadId, resourceId } as { threadId: string },
+        )) {
+          throw error;
+        }
+        await memory.createThread({ threadId: input.threadId, resourceId });
+        await write();
+      }
       return;
     }
 
@@ -2851,10 +2868,9 @@ export class MastraAgent extends AbstractAgent {
       await write();
     } catch {
       // The remote working-memory HTTP route requires the thread to exist. On
-      // the first turn it may not yet (unlike local Memory, which upserts). So
-      // create the thread and retry once. Best-effort: if it still fails, skip
-      // rather than fail the run — the stream creates the thread, and later
-      // turns will sync.
+      // the first turn it may not yet. So create the thread and retry once.
+      // Best-effort: if it still fails, skip rather than fail the run — the
+      // stream creates the thread, and later turns will sync.
       try {
         await client.createMemoryThread({
           agentId,
