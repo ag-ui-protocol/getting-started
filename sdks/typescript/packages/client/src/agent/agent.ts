@@ -11,6 +11,7 @@ import {
 import {
   AgentConfig,
   AgentDebugConfig,
+  AgentLogger,
   RunAgentParameters,
   ResolvedAgentDebugConfig,
   resolveAgentDebugConfig,
@@ -59,6 +60,7 @@ export abstract class AbstractAgent {
   public state: State;
   private _debug: ResolvedAgentDebugConfig;
   private _debugLogger: DebugLogger | undefined;
+  private logger: AgentLogger | undefined;
   public subscribers: AgentSubscriber[] = [];
   public isRunning: boolean = false;
   /** Interrupts emitted by the most recent run that have not yet been resolved.
@@ -104,6 +106,7 @@ export abstract class AbstractAgent {
     initialMessages,
     initialState,
     debug,
+    logger,
   }: AgentConfig = {}) {
     this.agentId = agentId;
     this.description = description ?? "";
@@ -112,6 +115,7 @@ export abstract class AbstractAgent {
     this.state = structuredClone_(initialState ?? {});
     this._debug = resolveAgentDebugConfig(debug);
     this._debugLogger = createDebugLogger(this._debug);
+    this.logger = logger;
 
     if (compareVersions(this.maxVersion, "0.0.39") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_39());
@@ -529,7 +533,11 @@ export abstract class AbstractAgent {
             error.message === "component unmounted" ||
             errStr === "component unmounted";
           if (!isAbort) {
-            console.error("Agent execution failed:", error);
+            if (this.logger) {
+              this.logger.error("Agent execution failed:", error);
+            } else {
+              console.error("Agent execution failed:", error);
+            }
             throw error;
           }
         }
@@ -588,6 +596,7 @@ export abstract class AbstractAgent {
     cloned.state = structuredClone_(this.state);
     cloned._debug = this._debug;
     cloned._debugLogger = this._debugLogger;
+    cloned.logger = this.logger;
     cloned.isRunning = this.isRunning;
     cloned.subscribers = [...this.subscribers];
     cloned.middlewares = [...this.middlewares];

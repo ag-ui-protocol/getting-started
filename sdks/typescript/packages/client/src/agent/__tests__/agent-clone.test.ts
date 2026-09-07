@@ -45,9 +45,11 @@ describe("AbstractAgent cloning", () => {
 
 describe("HttpAgent cloning", () => {
   it("produces a new HttpAgent with cloned configuration and abort controller", () => {
+    const logger = { error: () => undefined };
     const httpAgent = new HttpAgent({
       url: "https://example.com/agent",
       headers: { Authorization: "Bearer token" },
+      logger,
       threadId: "thread-http",
       initialMessages: [
         {
@@ -73,6 +75,7 @@ describe("HttpAgent cloning", () => {
     expect(cloned.messages).not.toBe(httpAgent.messages);
     expect(cloned.state).toEqual(httpAgent.state);
     expect(cloned.state).not.toBe(httpAgent.state);
+    expect((cloned as unknown as { logger: typeof logger }).logger).toBe(logger);
     expect(cloned.abortController).not.toBe(httpAgent.abortController);
     expect(cloned.abortController).toBeInstanceOf(AbortController);
     expect(cloned.abortController.signal.aborted).toBe(true);
