@@ -2711,11 +2711,38 @@ export class MastraAgent extends AbstractAgent {
       const keep = new Set([...fresh, ...pairedCalls]);
       return messages.filter((m) => keep.has(m));
     } catch (error) {
+      // recall() throws for a thread that does not exist yet. That is every
+      // first turn, not a failure: nothing is stored, so the full list is the
+      // right thing to send. Only warn when the thread exists (or the lookup
+      // itself fails).
+      if (await this.threadIsMissing(threadId, resourceId)) return messages;
       console.warn(
         `[MastraAgent] Failed to compute new-message diff for thread ${threadId}; sending full history:`,
         error,
       );
       return messages;
+    }
+  }
+
+  private async threadIsMissing(
+    threadId: string,
+    resourceId: string,
+  ): Promise<boolean> {
+    if (!this.isLocalMastraAgent(this.agent)) return false;
+    try {
+      const memory = await this.agent.getMemory({
+        requestContext: this.requestContext,
+      });
+      if (!memory) return false;
+      // Concrete Memory implementations check thread ownership and want the
+      // resourceId alongside the threadId; the abstract signature omits it.
+      const thread = await memory.getThreadById({
+        threadId,
+        resourceId,
+      } as { threadId: string });
+      return thread == null;
+    } catch {
+      return false;
     }
   }
 

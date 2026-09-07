@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import {
   FakeMemory,
   FakeLocalAgent,
@@ -58,6 +59,49 @@ describe("only-new-messages diff feed", () => {
 
     const ids = (agent.agent as unknown as FakeLocalAgent).lastStreamMessages!.map((m: any) => m.id);
     expect(ids).toEqual(["u1"]);
+  });
+
+  it("sends the full list without warning when the thread does not exist yet", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const memory = new FakeMemory();
+    memory.recall = async () => {
+      throw new Error("No thread found with id thread-1");
+    };
+    const agent = makeLocalMastraAgent({ memory, streamChunks: SIMPLE_STREAM_CHUNKS });
+
+    await collectEvents(
+      agent,
+      makeInput({ messages: [{ id: "u1", role: "user", content: "hi" }] as any }),
+    );
+
+    const ids = (agent.agent as unknown as FakeLocalAgent).lastStreamMessages!.map((m: any) => m.id);
+    expect(ids).toEqual(["u1"]);
+    expect(
+      warn.mock.calls.some((c) => String(c[0]).includes("Failed to compute new-message diff")),
+    ).toBe(false);
+    warn.mockRestore();
+  });
+
+  it("still warns when recall fails for an existing thread", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const memory = new FakeMemory();
+    memory.threads.set("thread-1", { id: "thread-1", resourceId: "resource-1" });
+    memory.recall = async () => {
+      throw new Error("storage unavailable");
+    };
+    const agent = makeLocalMastraAgent({ memory, streamChunks: SIMPLE_STREAM_CHUNKS });
+
+    await collectEvents(
+      agent,
+      makeInput({ messages: [{ id: "u1", role: "user", content: "hi" }] as any }),
+    );
+
+    const ids = (agent.agent as unknown as FakeLocalAgent).lastStreamMessages!.map((m: any) => m.id);
+    expect(ids).toEqual(["u1"]);
+    expect(
+      warn.mock.calls.some((c) => String(c[0]).includes("Failed to compute new-message diff")),
+    ).toBe(true);
+    warn.mockRestore();
   });
 
   it("falls back to the full list if every message is already stored", async () => {
