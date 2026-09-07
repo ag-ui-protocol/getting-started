@@ -1,7 +1,8 @@
 """Translates between IBM watsonx orchestrate SSE and AG-UI events."""
 
-from typing import AsyncGenerator, List
+from typing import Any, AsyncGenerator, List, Protocol
 import asyncio
+import inspect
 import logging
 import time
 import uuid
@@ -37,6 +38,47 @@ logger = logging.getLogger(__name__)
 _IAM_TOKEN_URL = "https://iam.cloud.ibm.com/identity/token"
 
 
+class ThreadIdStore(Protocol):
+    """Persistence for the mapping of AG-UI thread_id to the watsonx-managed
+    thread_id. ``get``/``set`` may be sync or async."""
+
+    def get(self, thread_id: str) -> Any: ...
+
+    def set(self, thread_id: str, watsonx_thread_id: str) -> Any: ...
+
+
+class InMemoryThreadIdStore:
+    """Default store; sufficient when the agent instance lives as long as the
+    conversation. Provide a custom store (e.g. database-backed) when agent
+    instances are created per-request on a server."""
+
+    def __init__(self) -> None:
+        self._threads: dict[str, str] = {}
+
+    def get(self, thread_id: str) -> str | None:
+        return self._threads.get(thread_id)
+
+    def set(self, thread_id: str, watsonx_thread_id: str) -> None:
+        self._threads[thread_id] = watsonx_thread_id
+
+
+async def _maybe_await(value):
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+def _messages_since_last_user(messages: list) -> list:
+    """When continuing a watsonx-managed thread, only the messages from the
+    last user message onward are new to the server (earlier context lives in
+    the thread). Keeps trailing assistant/tool messages so tool results still
+    reach watsonx."""
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].role == "user":
+            return messages[i:]
+    return messages
+
+
 class WatsonxAgent:
     def __init__(
         self,
@@ -47,6 +89,7 @@ class WatsonxAgent:
         api_key: str | None = None,
         bearer_token: str | None = None,
         name: str = "watsonx",
+        thread_id_store: ThreadIdStore | None = None,
     ):
         if not api_key and not bearer_token:
             raise ValueError(
@@ -60,6 +103,7 @@ class WatsonxAgent:
         self._token_expires_at = time.time() + 55 * 60 if bearer_token else 0
         self.name = name
         self._token_lock = asyncio.Lock()
+        self._thread_id_store: ThreadIdStore = thread_id_store or InMemoryThreadIdStore()
 
     def clone(self):
         """Create a new WatsonxAgent with the same config but fresh state.
@@ -73,6 +117,8 @@ class WatsonxAgent:
             api_key=self.api_key,
             bearer_token=self._cached_token,
             name=self.name,
+            # Share the store so the clone continues existing watsonx threads.
+            thread_id_store=self._thread_id_store,
         )
         cloned._token_expires_at = self._token_expires_at
         return cloned
@@ -131,8 +177,21 @@ class WatsonxAgent:
                     role="tool",
                 )
 
+        # watsonx orchestrate manages conversation state server-side, keyed by
+        # a thread_id it issues in the SSE stream. It ignores client-invented
+        # IDs (creating a fresh thread instead) and only acts on the last user
+        # message in the payload. So: reuse the watsonx thread_id captured
+        # from a previous run of this AG-UI thread, and when continuing, send
+        # only the messages since the last user message.
+        watsonx_thread_id = await _maybe_await(self._thread_id_store.get(thread_id))
+        request_messages = (
+            _messages_since_last_user(input_data.messages)
+            if watsonx_thread_id
+            else input_data.messages
+        )
+
         messages = []
-        for msg in input_data.messages:
+        for msg in request_messages:
             content = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
             entry: dict = {"role": msg.role, "content": content}
             if hasattr(msg, "tool_call_id") and msg.tool_call_id:
@@ -181,16 +240,22 @@ class WatsonxAgent:
             # STEP_STARTED wraps the watsonx API call
             yield StepStartedEvent(type=EventType.STEP_STARTED, step_name=step_name)
 
+            # On the first turn the header is omitted so watsonx creates the
+            # thread; its thread_id is captured from the stream and reused on
+            # later turns.
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            if watsonx_thread_id:
+                headers["X-IBM-THREAD-ID"] = watsonx_thread_id
+
             async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30, read=120, write=30, pool=30)) as client:
                 async with client.stream(
                     "POST",
                     f"{self.base_url}/v1/orchestrate/{self.agent_id}/chat/completions",
                     json=body,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                        "X-IBM-THREAD-ID": thread_id,
-                    },
+                    headers=headers,
                 ) as response:
                     response.raise_for_status()
 
@@ -212,6 +277,20 @@ class WatsonxAgent:
                             event=chunk,
                             source="watsonx",
                         )
+
+                        # Persist the watsonx-managed thread_id so the next
+                        # turn continues the same server-side thread. Chunks
+                        # may carry it even when they have no choices.
+                        wx_thread_id = chunk.get("thread_id")
+                        if (
+                            isinstance(wx_thread_id, str)
+                            and wx_thread_id
+                            and wx_thread_id != watsonx_thread_id
+                        ):
+                            watsonx_thread_id = wx_thread_id
+                            await _maybe_await(
+                                self._thread_id_store.set(thread_id, wx_thread_id)
+                            )
 
                         choices = chunk.get("choices") or []
                         if not choices:

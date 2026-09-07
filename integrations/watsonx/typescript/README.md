@@ -102,6 +102,6 @@ This adapter translates between that format and the AG-UI event protocol:
 
 - `choices[0].delta.content` → `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_END`
 - `choices[0].delta.tool_calls` → `TOOL_CALL_START` / `TOOL_CALL_ARGS` / `TOOL_CALL_END`
-- `X-IBM-THREAD-ID` header is mapped from AG-UI's `threadId` for conversation continuity
+- watsonx orchestrate manages conversation history server-side, keyed by a `thread_id` it issues in the SSE stream. The adapter captures that ID, maps it to AG-UI's `threadId`, and sends it back as the `X-IBM-THREAD-ID` header on subsequent turns (the header is omitted on the first turn so watsonx creates the thread). The mapping lives in an in-memory store by default; pass `threadIdStore` (an object with `get`/`set`, sync or async) to persist it externally when agent instances are created per-request on a server.
 
 Authentication is handled via IBM Cloud IAM. Pass an `apiKey` and the adapter exchanges it for a bearer token automatically, refreshing before expiry.

@@ -298,7 +298,7 @@ describe("Message mapping", () => {
     expect(body.tools).toBeUndefined();
   });
 
-  it("sends correct headers including X-IBM-THREAD-ID and Authorization", async () => {
+  it("sends Authorization and omits X-IBM-THREAD-ID on the first turn", async () => {
     let capturedHeaders: Record<string, string> | null = null;
 
     globalThis.fetch = vi.fn().mockImplementation((url: string, opts?: any) => {
@@ -328,7 +328,10 @@ describe("Message mapping", () => {
     await collectEvents(makeAgent(), input);
 
     expect(capturedHeaders).toBeDefined();
-    expect(capturedHeaders!["X-IBM-THREAD-ID"]).toBe("my-thread-42");
+    // watsonx ignores client-invented thread IDs; the header is omitted so
+    // watsonx creates the thread, and the returned thread_id is reused later
+    // (see thread-persistence.test.ts).
+    expect(capturedHeaders!["X-IBM-THREAD-ID"]).toBeUndefined();
     expect(capturedHeaders!["Authorization"]).toBe("Bearer tok");
     expect(capturedHeaders!["Content-Type"]).toBe("application/json");
   });

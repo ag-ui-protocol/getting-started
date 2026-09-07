@@ -6,8 +6,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ag_ui.core import EventType, RunAgentInput, UserMessage, ToolMessage as AGUIToolMessage
-from ag_ui_watsonx.agent import WatsonxAgent, _IAM_TOKEN_URL
+from ag_ui.core import (
+    AssistantMessage,
+    EventType,
+    FunctionCall,
+    RunAgentInput,
+    ToolCall,
+    ToolMessage as AGUIToolMessage,
+    UserMessage,
+)
+from ag_ui_watsonx.agent import InMemoryThreadIdStore, WatsonxAgent, _IAM_TOKEN_URL
 
 
 # ---------------------------------------------------------------------------
@@ -454,7 +462,10 @@ class TestErrorHandling:
 
 class TestRequestConstruction:
     @pytest.mark.asyncio
-    async def test_sends_thread_id_header(self):
+    async def test_omits_thread_id_header_on_first_turn(self):
+        """watsonx ignores client-invented thread IDs; the header is omitted
+        so watsonx creates the thread, and the returned thread_id is reused
+        later (see TestThreadPersistence)."""
         agent = _make_agent()
         response = _mock_stream_response(_sse_lines(_text_chunk("Hi")))
         client_ctx = _mock_httpx_client(response)
@@ -464,7 +475,7 @@ class TestRequestConstruction:
 
         mock_client = client_ctx._value
         call_kwargs = mock_client.stream.call_args[1]
-        assert call_kwargs["headers"]["X-IBM-THREAD-ID"] == "my-thread"
+        assert "X-IBM-THREAD-ID" not in call_kwargs["headers"]
         assert "Bearer " in call_kwargs["headers"]["Authorization"]
 
     @pytest.mark.asyncio
@@ -704,3 +715,161 @@ class TestToolCallResult:
 
         types = [e.type for e in events]
         assert EventType.TOOL_CALL_RESULT not in types
+
+
+# ---------------------------------------------------------------------------
+# watsonx thread persistence
+# ---------------------------------------------------------------------------
+
+def _text_chunk_with_thread(content: str, watsonx_thread_id: str) -> dict:
+    chunk = _text_chunk(content)
+    chunk["thread_id"] = watsonx_thread_id
+    return chunk
+
+
+class TestThreadPersistence:
+    async def _run(self, agent, input_data, chunks):
+        """Run the agent against a fresh mocked stream, returning call kwargs."""
+        response = _mock_stream_response(_sse_lines(*chunks))
+        client_ctx = _mock_httpx_client(response)
+        with patch("ag_ui_watsonx.agent.httpx.AsyncClient", return_value=client_ctx):
+            await _collect_events(agent, input_data)
+        return client_ctx._value.stream.call_args[1]
+
+    @pytest.mark.asyncio
+    async def test_reuses_watsonx_thread_id_on_next_run(self):
+        agent = _make_agent()
+
+        first = await self._run(
+            agent, _make_input(run_id="r-1"), [_text_chunk_with_thread("Hi", "wx-abc")]
+        )
+        second = await self._run(
+            agent, _make_input(run_id="r-2"), [_text_chunk_with_thread("More", "wx-abc")]
+        )
+
+        assert "X-IBM-THREAD-ID" not in first["headers"]
+        assert second["headers"]["X-IBM-THREAD-ID"] == "wx-abc"
+
+    @pytest.mark.asyncio
+    async def test_tracks_watsonx_thread_ids_per_agui_thread(self):
+        agent = _make_agent()
+
+        await self._run(
+            agent,
+            _make_input(thread_id="t-1"),
+            [_text_chunk_with_thread("Hi", "wx-1")],
+        )
+        second = await self._run(
+            agent, _make_input(thread_id="t-2"), [_text_chunk("Hi")]
+        )
+
+        # Second AG-UI thread is new to watsonx, so no header yet.
+        assert "X-IBM-THREAD-ID" not in second["headers"]
+
+    @pytest.mark.asyncio
+    async def test_captures_thread_id_from_chunk_without_choices(self):
+        agent = _make_agent()
+
+        await self._run(
+            agent,
+            _make_input(run_id="r-1"),
+            [{"thread_id": "wx-only"}, _text_chunk("Hi")],
+        )
+        second = await self._run(agent, _make_input(run_id="r-2"), [_text_chunk("Hi")])
+
+        assert second["headers"]["X-IBM-THREAD-ID"] == "wx-only"
+
+    @pytest.mark.asyncio
+    async def test_sends_only_messages_since_last_user_when_continuing(self):
+        agent = _make_agent()
+
+        first = await self._run(
+            agent, _make_input(run_id="r-1"), [_text_chunk_with_thread("Hi", "wx-1")]
+        )
+
+        history = [
+            UserMessage(id="m-1", role="user", content="Hello"),
+            AssistantMessage(id="a-1", role="assistant", content="Hi"),
+            UserMessage(id="m-2", role="user", content="Follow-up"),
+        ]
+        second = await self._run(
+            agent,
+            _make_input(run_id="r-2", messages=history),
+            [_text_chunk("More")],
+        )
+
+        assert len(first["json"]["messages"]) == 1
+        assert len(second["json"]["messages"]) == 1
+        assert second["json"]["messages"][0]["content"] == "Follow-up"
+
+    @pytest.mark.asyncio
+    async def test_keeps_trailing_tool_messages_when_continuing(self):
+        agent = _make_agent()
+
+        await self._run(
+            agent, _make_input(run_id="r-1"), [_text_chunk_with_thread("Hi", "wx-1")]
+        )
+
+        history = [
+            UserMessage(id="m-1", role="user", content="Weather?"),
+            AssistantMessage(
+                id="a-1",
+                role="assistant",
+                tool_calls=[
+                    ToolCall(
+                        id="tc-1",
+                        type="function",
+                        function=FunctionCall(name="get_weather", arguments="{}"),
+                    )
+                ],
+            ),
+            AGUIToolMessage(id="t-1", role="tool", content="Sunny", tool_call_id="tc-1"),
+        ]
+        second = await self._run(
+            agent,
+            _make_input(run_id="r-2", messages=history),
+            [_text_chunk("It's sunny")],
+        )
+
+        roles = [m["role"] for m in second["json"]["messages"]]
+        assert roles == ["user", "assistant", "tool"]
+
+    @pytest.mark.asyncio
+    async def test_custom_thread_id_store(self):
+        store = InMemoryThreadIdStore()
+        store.set("t-1", "wx-stored")
+        agent = _make_agent(thread_id_store=store)
+
+        first = await self._run(
+            agent, _make_input(), [_text_chunk_with_thread("Hi", "wx-new")]
+        )
+
+        assert first["headers"]["X-IBM-THREAD-ID"] == "wx-stored"
+        assert store.get("t-1") == "wx-new"
+
+    @pytest.mark.asyncio
+    async def test_async_thread_id_store(self):
+        class AsyncStore:
+            def __init__(self):
+                self.data = {"t-1": "wx-async"}
+
+            async def get(self, thread_id):
+                return self.data.get(thread_id)
+
+            async def set(self, thread_id, watsonx_thread_id):
+                self.data[thread_id] = watsonx_thread_id
+
+        store = AsyncStore()
+        agent = _make_agent(thread_id_store=store)
+
+        first = await self._run(
+            agent, _make_input(), [_text_chunk_with_thread("Hi", "wx-updated")]
+        )
+
+        assert first["headers"]["X-IBM-THREAD-ID"] == "wx-async"
+        assert store.data["t-1"] == "wx-updated"
+
+    def test_clone_shares_thread_id_store(self):
+        agent = _make_agent()
+        cloned = agent.clone()
+        assert cloned._thread_id_store is agent._thread_id_store

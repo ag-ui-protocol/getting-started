@@ -33,6 +33,19 @@ export interface WatsonxAgentConfig {
   agentId: string;
   apiKey?: string;
   bearerToken?: string;
+  /**
+   * Optional persistence for the mapping of AG-UI threadId to the
+   * watsonx-managed thread_id. Defaults to an in-memory Map, which is
+   * sufficient when the agent instance lives as long as the conversation.
+   * Provide a custom store (e.g. backed by a database) when agent
+   * instances are created per-request on a server.
+   */
+  threadIdStore?: WatsonxThreadIdStore;
+}
+
+export interface WatsonxThreadIdStore {
+  get(threadId: string): string | undefined | Promise<string | undefined>;
+  set(threadId: string, watsonxThreadId: string): unknown | Promise<unknown>;
 }
 
 export class WatsonxAgent extends AbstractAgent {
@@ -45,6 +58,7 @@ export class WatsonxAgent extends AbstractAgent {
   private tokenRefreshPromise?: Promise<string>;
   private activeAbortController?: AbortController;
   private stepInProgress = false;
+  private threadIdStore: WatsonxThreadIdStore;
 
   constructor(config: WatsonxAgentConfig) {
     super({ agentId: config.agentId });
@@ -55,6 +69,7 @@ export class WatsonxAgent extends AbstractAgent {
     this.instanceId = config.instanceId;
     this.watsonxAgentId = config.agentId;
     this.apiKey = config.apiKey;
+    this.threadIdStore = config.threadIdStore ?? new Map<string, string>();
     this.cachedToken = config.bearerToken;
     if (config.bearerToken) {
       this.tokenExpiresAt = Date.now() + 55 * 60 * 1000;
@@ -174,7 +189,16 @@ export class WatsonxAgent extends AbstractAgent {
       }
     }
 
-    const watsonxMessages = this.mapMessages(messages);
+    // watsonx orchestrate manages conversation state server-side, keyed by a
+    // thread_id it issues in the SSE stream. It ignores client-invented IDs
+    // (creating a fresh thread instead) and only acts on the last user
+    // message in the payload. So: reuse the watsonx thread_id captured from
+    // a previous run of this AG-UI thread, and when continuing, send only
+    // the messages since the last user message.
+    const watsonxThreadId = await this.threadIdStore.get(threadId);
+    const watsonxMessages = this.mapMessages(
+      watsonxThreadId ? messagesSinceLastUser(messages) : messages,
+    );
 
     const token = await this.getToken();
 
@@ -208,15 +232,21 @@ export class WatsonxAgent extends AbstractAgent {
     subscriber.next(stepStarted);
     this.stepInProgress = true;
 
+    // On the first turn the header is omitted so watsonx creates the thread;
+    // its thread_id is captured from the stream and reused on later turns.
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    };
+    if (watsonxThreadId) {
+      headers["X-IBM-THREAD-ID"] = watsonxThreadId;
+    }
+
     const response = await fetch(
       `${this.baseUrl}/v1/orchestrate/${this.watsonxAgentId}/chat/completions`,
       {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "X-IBM-THREAD-ID": threadId,
-        },
+        headers,
         body: JSON.stringify(requestBody),
         signal: combinedSignal,
       },
@@ -233,11 +263,39 @@ export class WatsonxAgent extends AbstractAgent {
     let msgId: string | null = null;
     let msgStarted = false;
     let accumulatedContent = "";
+    let capturedThreadId: string | null = null;
     const activeToolCalls = new Map<
       number,
       { id: string; name: string; ended: boolean }
     >();
     let buffer = "";
+
+    const state = {
+      get msgId() {
+        return msgId;
+      },
+      set msgId(v: string | null) {
+        msgId = v;
+      },
+      get msgStarted() {
+        return msgStarted;
+      },
+      set msgStarted(v: boolean) {
+        msgStarted = v;
+      },
+      get accumulatedContent() {
+        return accumulatedContent;
+      },
+      set accumulatedContent(v: string) {
+        accumulatedContent = v;
+      },
+      get watsonxThreadId() {
+        return capturedThreadId;
+      },
+      set watsonxThreadId(v: string | null) {
+        capturedThreadId = v;
+      },
+    };
 
     try {
       while (true) {
@@ -252,26 +310,7 @@ export class WatsonxAgent extends AbstractAgent {
         buffer = lines.pop() ?? "";
 
         for (const line of lines) {
-          this.processSSELine(line, subscriber, activeToolCalls, {
-            get msgId() {
-              return msgId;
-            },
-            set msgId(v: string | null) {
-              msgId = v;
-            },
-            get msgStarted() {
-              return msgStarted;
-            },
-            set msgStarted(v: boolean) {
-              msgStarted = v;
-            },
-            get accumulatedContent() {
-              return accumulatedContent;
-            },
-            set accumulatedContent(v: string) {
-              accumulatedContent = v;
-            },
-          });
+          this.processSSELine(line, subscriber, activeToolCalls, state);
         }
       }
 
@@ -283,26 +322,7 @@ export class WatsonxAgent extends AbstractAgent {
           : trimmed.slice(5).trim();
         if (data && data !== "[DONE]") {
           try {
-            this.processSSELine(trimmed, subscriber, activeToolCalls, {
-              get msgId() {
-                return msgId;
-              },
-              set msgId(v: string | null) {
-                msgId = v;
-              },
-              get msgStarted() {
-                return msgStarted;
-              },
-              set msgStarted(v: boolean) {
-                msgStarted = v;
-              },
-              get accumulatedContent() {
-                return accumulatedContent;
-              },
-              set accumulatedContent(v: string) {
-                accumulatedContent = v;
-              },
-            });
+            this.processSSELine(trimmed, subscriber, activeToolCalls, state);
           } catch (e) {
             if (!(e instanceof SyntaxError)) throw e;
           }
@@ -310,6 +330,11 @@ export class WatsonxAgent extends AbstractAgent {
       }
     } finally {
       reader.releaseLock();
+      // Persist the watsonx-issued thread_id even if the stream errored
+      // mid-way, so the next turn continues the same server-side thread.
+      if (capturedThreadId && capturedThreadId !== watsonxThreadId) {
+        await this.threadIdStore.set(threadId, capturedThreadId);
+      }
     }
 
     for (const [, tc] of activeToolCalls) {
@@ -390,7 +415,12 @@ export class WatsonxAgent extends AbstractAgent {
     line: string,
     subscriber: import("rxjs").Subscriber<BaseEvent>,
     activeToolCalls: Map<number, { id: string; name: string; ended: boolean }>,
-    state: { msgId: string | null; msgStarted: boolean; accumulatedContent: string },
+    state: {
+      msgId: string | null;
+      msgStarted: boolean;
+      accumulatedContent: string;
+      watsonxThreadId: string | null;
+    },
   ): void {
     // Handle both "data: " and "data:" (without trailing space)
     if (!line.startsWith("data:")) return;
@@ -414,6 +444,12 @@ export class WatsonxAgent extends AbstractAgent {
       source: "watsonx",
     };
     subscriber.next(rawEvent);
+
+    // Chunks carry the watsonx-managed thread_id (also on chunks that have
+    // no choices, so this must run before the early return below).
+    if (typeof chunk.thread_id === "string" && chunk.thread_id) {
+      state.watsonxThreadId = chunk.thread_id;
+    }
 
     const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
     const choice = choices?.[0];
@@ -523,6 +559,23 @@ export class WatsonxAgent extends AbstractAgent {
     cloned.cachedToken = this.cachedToken;
     cloned.tokenExpiresAt = this.tokenExpiresAt;
     cloned.stepInProgress = false;
+    // Share the store so the clone continues existing watsonx threads.
+    cloned.threadIdStore = this.threadIdStore;
     return cloned;
   }
+}
+
+/**
+ * When continuing a watsonx-managed thread, only the messages from the last
+ * user message onward are new to the server (earlier context lives in the
+ * thread). This keeps trailing assistant/tool messages so tool results still
+ * reach watsonx.
+ */
+function messagesSinceLastUser(messages: Message[]): Message[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") {
+      return messages.slice(i);
+    }
+  }
+  return messages;
 }
