@@ -71,6 +71,32 @@ server.createContext("/agent", new JdkAgentHttpHandler(registry, serializer));
 The single-agent constructor above is shorthand for a one-entry registry: it is
 served on the base path (the alias) and on `/agent/default`.
 
+### Request body size limit
+
+Both existing two-argument `JdkAgentHttpHandler` constructors use
+`DEFAULT_MAX_REQUEST_BODY_BYTES`: **8 MiB (8,388,608 bytes)**. Bodies are measured
+in bytes before UTF-8 decoding, not in characters. A body exactly at the limit
+is accepted; a larger body receives **413 Request Entity Too Large** without
+calling the serializer or agent.
+
+Override the limit with the third constructor argument for either a single
+agent or an `AgentRegistry`:
+
+```java
+int maxRequestBodyBytes = 16 * 1024 * 1024; // 16 MiB
+new JdkAgentHttpHandler(agent, serializer, maxRequestBodyBytes);
+new JdkAgentHttpHandler(registry, serializer, maxRequestBodyBytes);
+```
+
+The limit must be between `1` and `Integer.MAX_VALUE - 1`, inclusive; other
+values throw `IllegalArgumentException`. The handler rejects an oversized
+`Content-Length` before reading the body and otherwise reads at most the limit
+plus one byte, including for chunked requests without `Content-Length`.
+
+**Compatibility:** constructor signatures remain available, but previously
+accepted requests larger than 8 MiB now receive 413 by default. Applications
+that need larger requests must explicitly configure a suitable limit.
+
 ### Bringing your own transport
 
 To integrate with another stack (servlet, WebFlux, …), use the transport-neutral
