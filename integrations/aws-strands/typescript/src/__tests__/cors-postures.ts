@@ -29,10 +29,14 @@ export const PROBE_REQUEST_HEADERS = "x-custom, content-type";
  *
  * `allowCredentials` is asserted for every posture, including the ones that
  * withhold the header. The factory derives `credentials` from the resolved
- * origin (`allowsCredentials` in `server.ts`), so the value is a function of
- * the posture alone and there is nothing left to opt out of: a policy naming at
- * least one specific origin emits `"true"`, and `"*"`, `[]` and the arrays that
- * collapse to `"*"` emit nothing at all.
+ * origin and from the calling one (`policyAllowsCredentials` and
+ * `requestAllowsCredentials` in `server.ts`), and every probe in this fixture
+ * calls from an origin naming a site, so the value is a function of the posture
+ * alone here and there is nothing left to opt out of: a policy naming at least
+ * one specific origin emits `"true"`, and `"*"`, `[]` and the arrays that
+ * collapse to `"*"` emit nothing at all. The callers that name no site are
+ * measured in `cors.test.ts` rather than here, since they are a property of the
+ * request instead of the posture.
  */
 export interface MeasuredResponse {
   status: number;

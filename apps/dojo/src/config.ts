@@ -76,6 +76,13 @@ export const featureConfig: FeatureConfig[] = [
     tags: ["Chat", "Tools", "Streaming", "Reasoning"],
   }),
   createFeatureConfig({
+    id: "agentic_chat_citations",
+    name: "Agentic Chat Citations",
+    description:
+      "Chat with a Copilot whose answers carry the sources they came from",
+    tags: ["Chat", "Streaming", "Citations"],
+  }),
+  createFeatureConfig({
     id: "agentic_chat_multimodal",
     name: "Agentic Chat Multimodal",
     description: "Chat with a Copilot using images and other media",

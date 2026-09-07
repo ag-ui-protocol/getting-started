@@ -4,6 +4,7 @@ import base64
 import hashlib
 import http.client
 import ipaddress
+import json
 import logging
 import re
 import socket
@@ -35,6 +36,21 @@ InvocationStateProvider: TypeAlias = Callable[
 ]
 
 logger = logging.getLogger(__name__)
+
+
+def dumps_wire(value: Any, **kwargs: Any) -> str:
+    """Serialize compact JSON with JavaScript-style separators and Unicode.
+
+    Both adapters re-serialize tool arguments and tool results before putting
+    them on the wire. Python's default encoder pads separators and escapes
+    non-ASCII; those two representations are normalized here.
+
+    Number formatting remains Python-native and can differ from
+    ``JSON.stringify``, including ``1.0`` vs ``1``, ``-0.0`` vs ``0``, and
+    fixed-versus-exponent notation.
+    """
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False, **kwargs)
+
 
 # Allowed formats per media type for Strands ContentBlock
 _IMAGE_FORMATS: Set[str] = {"png", "jpeg", "gif", "webp"}

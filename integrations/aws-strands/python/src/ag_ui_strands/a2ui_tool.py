@@ -52,6 +52,8 @@ from ag_ui_a2ui_toolkit import (
     wrap_error_envelope,
 )
 
+from .utils import dumps_wire
+
 # Re-export the toolkit constants/types for callers that import them from this
 # package — keeps the public surface aligned with the LangGraph adapter so
 # consumers can type their params bag without depending on the toolkit directly.
@@ -188,7 +190,7 @@ def _tool_result_text(content: Any) -> str:
         if isinstance(block.get("text"), str):
             parts.append(block["text"])
         elif "json" in block:
-            parts.append(json.dumps(block["json"]))
+            parts.append(dumps_wire(block["json"]))
     return "".join(parts)
 
 

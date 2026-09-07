@@ -239,13 +239,47 @@ describe("StrandsAgent native interrupt bridge (Strands SDK 1.1.0+)", () => {
     expect(forwarded).toBeInstanceOf(InterruptResponseContent);
     expect(forwarded.interruptResponse.interruptId).toBe(id);
     expect(forwarded.interruptResponse.response).toEqual({
-      status: "cancelled",
+      approved: false,
     });
     expect(calls, "cancelled resume executed the tool").toEqual([]);
     expect(
       pendingFor(agent),
       "cancelled resume left the interrupt pending",
     ).toBeUndefined();
+  });
+
+  it("closes a cancelled tool card with exactly one result", async () => {
+    // The denial reaches the approval hook, which sets `cancel`, and the SDK
+    // then produces the error tool result the afterToolCallEvent branch turns
+    // into TOOL_CALL_RESULT. A second, synthetic result for the same call
+    // would leave the client reconciling two answers to one tool card.
+    const { agent } = approvalAgent();
+    const first = await collect(agent, userTurn());
+    const id = soleInterruptId(first);
+
+    const second = await collect(
+      agent,
+      minimalRunInput({
+        runId: "run-2",
+        resume: [{ interruptId: id, status: "cancelled" }] as never,
+      }),
+    );
+    expectNoRunError(second, "cancelled resume");
+
+    const results = second.filter(
+      (e) => e.type === EventType.TOOL_CALL_RESULT,
+    ) as (BaseEvent & { toolCallId: string; content: string })[];
+    expect(results.map((r) => r.toolCallId)).toEqual(["tu-1"]);
+    expect(results[0].content).toContain("denied approval");
+    // Inside the run envelope: after RUN_STARTED and before the finish, so a
+    // client that closes the card on RUN_FINISHED still sees the result.
+    const types = second.map((e) => e.type);
+    const resultIndex = second.indexOf(results[0]);
+    const finishedIndex = types.indexOf(EventType.RUN_FINISHED);
+    expect(types[0]).toBe(EventType.RUN_STARTED);
+    expect(types).toContain(EventType.RUN_FINISHED);
+    expect(resultIndex).toBeGreaterThan(0);
+    expect(resultIndex).toBeLessThan(finishedIndex);
   });
 
   it("logs a debug trace when a paused result carries no interrupts", async () => {
@@ -269,7 +303,7 @@ describe("StrandsAgent native interrupt bridge (Strands SDK 1.1.0+)", () => {
     // Control flow is unchanged: still a plain success finish, no extra event.
     const finished = events.at(-1) as BaseEvent & { outcome?: { type: string } };
     expect(finished.type).toBe(EventType.RUN_FINISHED);
-    expect(finished.outcome).toBeUndefined();
+    expect(finished.outcome).toEqual({ type: "success" });
     expect(events.map((e) => e.type)).not.toContain(EventType.RUN_ERROR);
 
     const traced = debug.mock.calls.map(([message]) => String(message));
@@ -331,7 +365,8 @@ describe("Resume responses recorded on the native interrupt", () => {
   // interruptFromAgent that re-throws InterruptError). Handing it an
   // undefined response re-raises the same interrupt on every resume, and a
   // generic interrupt publishes no responseSchema, so nothing upstream
-  // rejects an empty payload first.
+  // rejects an empty payload first. The envelope a generic answer is wrapped
+  // in is always present, so no answer can be read as absent.
   it("records a defined response when a resolved entry carries no payload", async () => {
     const response = await forwardedResumeResponse({
       interruptId: "int-absent",
@@ -339,7 +374,7 @@ describe("Resume responses recorded on the native interrupt", () => {
     });
 
     expect(response.response).not.toBeUndefined();
-    expect(response.response).toStrictEqual({});
+    expect(response.response).toStrictEqual({ response: null });
   });
 
   it("records a defined response when a resolved payload is explicitly undefined", async () => {
@@ -350,11 +385,11 @@ describe("Resume responses recorded on the native interrupt", () => {
     });
 
     expect(response.response).not.toBeUndefined();
-    expect(response.response).toStrictEqual({});
+    expect(response.response).toStrictEqual({ response: null });
   });
 
-  // The substitution above must not become a blanket rewrite: a payload that
-  // is present is what the tool destructures, falsy values included.
+  // The envelope must not rewrite the answer inside it: whatever the client
+  // sent is what the tool reads off `.response`, falsy values included.
   it.each([
     ["an object", { approved: true }],
     ["false", false],
@@ -364,20 +399,19 @@ describe("Resume responses recorded on the native interrupt", () => {
     ["an empty array", []],
     ["an empty object", {}],
     ["a string", "approved"],
-  ])("forwards a present payload unchanged: %s", async (_label, payload) => {
+  ])("carries a present payload unchanged: %s", async (_label, payload) => {
     const response = await forwardedResumeResponse({
       interruptId: "int-present",
       status: "resolved",
       payload,
     });
 
-    expect(response.response).toStrictEqual(payload);
+    expect(response.response).toStrictEqual({ response: payload });
   });
 
-  // The replay short-circuit answers from a fingerprint, so the fingerprint has
-  // to separate whatever this converter separates. Reading an absent payload
-  // and an explicit null as one resume answers the second with a success the
-  // SDK never produced.
+  // An absent payload and an explicit null submit the same answer, so only the
+  // fingerprint keeps the two resumes apart. Collapsing them would answer the
+  // second with a success the SDK never produced.
   it("does not read an explicit null payload as a replay of an absent one", async () => {
     const forwarded: InterruptResponse[] = [];
     const stubAgent = scriptedAgent([], {
@@ -430,8 +464,8 @@ describe("Resume responses recorded on the native interrupt", () => {
     );
 
     expect(forwarded.map((response) => response.response)).toStrictEqual([
-      {},
-      null,
+      { response: null },
+      { response: null },
     ]);
     expect(second.some((e) => e.type === EventType.RUN_ERROR)).toBe(false);
     expect(

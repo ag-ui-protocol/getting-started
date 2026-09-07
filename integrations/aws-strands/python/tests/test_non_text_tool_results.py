@@ -12,6 +12,7 @@ from strands.tools.registry import ToolRegistry
 
 from ag_ui_strands.agent import StrandsAgent
 from ag_ui_strands.config import StrandsAgentConfig
+from tests.json_wire_fixture import PARITY_JSON, PARITY_VALUE
 
 
 def _build_agent(thread_id: str, result_content: list[dict]) -> StrandsAgent:
@@ -165,3 +166,10 @@ async def test_text_results_keep_the_existing_last_text_block_semantics():
         ]
     )
     assert json.loads(content) == "second"
+
+
+async def test_a_json_result_reaches_the_wire_compact_and_unicode_preserving():
+    """A JSON result block is re-serialized through ``dumps_wire``, so the
+    padded separators and ASCII escapes of the Python defaults are gone."""
+    content = await _tool_result_content([{"json": PARITY_VALUE}])
+    assert content == PARITY_JSON

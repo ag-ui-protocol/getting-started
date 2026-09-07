@@ -1,8 +1,21 @@
 diff --git a/dist/responses.js b/dist/responses.js
-index 0a9817d6c0a328769077e2baa61760c6cc9a2bca..140342048f16b23ae649bf10eba24017aa5b8ca7 100644
+index 0a9817d6c0a328769077e2baa61760c6cc9a2bca..f4fd8fa66e4b8bb6fbdf6f331b7afbfcc0d315bd 100644
 --- a/dist/responses.js
 +++ b/dist/responses.js
-@@ -174,5 +174,20 @@ function buildTextStreamEvents(content, model, chunkSize, reasoning, webSearches
+@@ -161,9 +161,9 @@ function responseId() {
+ function itemId() {
+ 	return generateId("msg");
+ }
+-function buildTextStreamEvents(content, model, chunkSize, reasoning, webSearches, overrides) {
++function buildTextStreamEvents(content, model, chunkSize, reasoning, webSearches, overrides, citations) {
+ 	const { respId, created, events, prefixOutputItems, nextOutputIndex } = buildResponsePreamble(model, chunkSize, reasoning, webSearches, overrides);
+-	const { events: msgEvents, msgItem } = buildMessageOutputEvents(content, chunkSize, nextOutputIndex);
++	const { events: msgEvents, msgItem } = buildMessageOutputEvents(content, chunkSize, nextOutputIndex, citations);
+ 	events.push(...msgEvents);
+ 	events.push({
+ 		type: "response.completed",
+@@ -173,6 +173,21 @@ function buildTextStreamEvents(content, model, chunkSize, reasoning, webSearches
+ 			created_at: created,
  			model: overrides?.model ?? model,
  			status: responsesStatus(overrides?.finishReason, "completed"),
 +			error: null,
@@ -23,7 +36,8 @@ index 0a9817d6c0a328769077e2baa61760c6cc9a2bca..140342048f16b23ae649bf10eba24017
  			output: [...prefixOutputItems, msgItem],
  			usage: responsesUsage(overrides)
  		}
-@@ -239,5 +254,20 @@ function buildToolCallStreamEvents(toolCalls, model, chunkSize, reasoning, webSe
+@@ -238,6 +253,21 @@ function buildToolCallStreamEvents(toolCalls, model, chunkSize, reasoning, webSe
+ 			created_at: created,
  			model: overrides?.model ?? model,
  			status: responsesStatus(overrides?.finishReason, "completed"),
 +			error: null,
@@ -44,7 +58,121 @@ index 0a9817d6c0a328769077e2baa61760c6cc9a2bca..140342048f16b23ae649bf10eba24017
  			output: [...prefixOutputItems, ...fcOutputItems],
  			usage: responsesUsage(overrides)
  		}
-@@ -635,5 +665,20 @@ function buildContentWithToolCallsStreamEvents(content, toolCalls, model, chunkS
+@@ -392,7 +422,23 @@ function buildResponsePreamble(model, chunkSize, reasoning, webSearches, overrid
+ 		nextOutputIndex
+ 	};
+ }
+-function buildMessageOutputEvents(content, chunkSize, outputIndex) {
++function responsesAnnotations(citations, content) {
++	if (!citations || citations.length === 0) return [];
++	return citations.map((citation) => {
++		const start = typeof citation.startIndex === "number" ? citation.startIndex : 0;
++		const end = typeof citation.endIndex === "number" ? citation.endIndex : content.length;
++		return {
++			type: "url_citation",
++			start_index: start,
++			end_index: end,
++			url: citation.url ?? "",
++			title: citation.title ?? "",
++			...citation.citedText !== undefined ? { cited_text: citation.citedText } : {}
++		};
++	});
++}
++function buildMessageOutputEvents(content, chunkSize, outputIndex, citations) {
++	const annotations = responsesAnnotations(citations, content);
+ 	const msgId = itemId();
+ 	const events = [];
+ 	events.push({
+@@ -417,13 +463,33 @@ function buildMessageOutputEvents(content, chunkSize, outputIndex) {
+ 			annotations: []
+ 		}
+ 	});
+-	for (let i = 0; i < content.length; i += chunkSize) events.push({
+-		type: "response.output_text.delta",
+-		item_id: msgId,
+-		output_index: outputIndex,
+-		content_index: 0,
+-		delta: content.slice(i, i + chunkSize)
+-	});
++	let emitted = 0;
++	const emitAnnotationsThrough = (streamed) => {
++		while (emitted < annotations.length && annotations[emitted].end_index <= streamed) {
++			events.push({
++				type: "response.output_text.annotation.added",
++				item_id: msgId,
++				output_index: outputIndex,
++				content_index: 0,
++				annotation_index: emitted,
++				annotation: annotations[emitted]
++			});
++			emitted++;
++		}
++	};
++	for (let i = 0; i < content.length; i += chunkSize) {
++		events.push({
++			type: "response.output_text.delta",
++			item_id: msgId,
++			output_index: outputIndex,
++			content_index: 0,
++			delta: content.slice(i, i + chunkSize)
++		});
++		emitAnnotationsThrough(Math.min(i + chunkSize, content.length));
++	}
++	// An end_index past the text (or a fixture with no text at all) still has to
++	// reach the client rather than being silently dropped.
++	emitAnnotationsThrough(Infinity);
+ 	events.push({
+ 		type: "response.output_text.done",
+ 		item_id: msgId,
+@@ -439,7 +505,7 @@ function buildMessageOutputEvents(content, chunkSize, outputIndex) {
+ 		part: {
+ 			type: "output_text",
+ 			text: content,
+-			annotations: []
++			annotations
+ 		}
+ 	});
+ 	const msgItem = {
+@@ -450,7 +516,7 @@ function buildMessageOutputEvents(content, chunkSize, outputIndex) {
+ 		content: [{
+ 			type: "output_text",
+ 			text: content,
+-			annotations: []
++			annotations
+ 		}]
+ 	};
+ 	events.push({
+@@ -518,7 +584,7 @@ function buildFunctionCallOutputEvents(toolCall, chunkSize, outputIndex) {
+ 		fcItem
+ 	};
+ }
+-function buildOutputPrefix(content, reasoning, webSearches) {
++function buildOutputPrefix(content, reasoning, webSearches, citations) {
+ 	const output = [];
+ 	if (reasoning) output.push({
+ 		type: "reasoning",
+@@ -545,7 +611,7 @@ function buildOutputPrefix(content, reasoning, webSearches) {
+ 		content: [{
+ 			type: "output_text",
+ 			text: content,
+-			annotations: []
++			annotations: responsesAnnotations(citations, content)
+ 		}]
+ 	});
+ 	return output;
+@@ -561,8 +627,8 @@ function buildResponseEnvelope(model, output, overrides) {
+ 		usage: responsesUsage(overrides)
+ 	};
+ }
+-function buildTextResponse(content, model, reasoning, webSearches, overrides) {
+-	return buildResponseEnvelope(model, buildOutputPrefix(content, reasoning, webSearches), overrides);
++function buildTextResponse(content, model, reasoning, webSearches, overrides, citations) {
++	return buildResponseEnvelope(model, buildOutputPrefix(content, reasoning, webSearches, citations), overrides);
+ }
+ function buildToolCallResponse(toolCalls, model, reasoning, webSearches, overrides) {
+ 	const output = [];
+@@ -634,6 +700,21 @@ function buildContentWithToolCallsStreamEvents(content, toolCalls, model, chunkS
+ 			created_at: created,
  			model: overrides?.model ?? model,
  			status: responsesStatus(overrides?.finishReason, "completed"),
 +			error: null,
@@ -65,3 +193,89 @@ index 0a9817d6c0a328769077e2baa61760c6cc9a2bca..140342048f16b23ae649bf10eba24017
  			output: [...prefixOutputItems, ...orderedOutputItems],
  			usage: responsesUsage(overrides)
  		}
+@@ -891,11 +972,11 @@ async function handleResponses(req, res, raw, fixtures, journal, defaults, setCo
+ 			}
+ 		});
+ 		if (responsesReq.stream !== true) {
+-			const body = buildTextResponse(response.content, completionReq.model, effReasoning, response.webSearches, overrides);
++			const body = buildTextResponse(response.content, completionReq.model, effReasoning, response.webSearches, overrides, response.citations);
+ 			res.writeHead(200, { "Content-Type": "application/json" });
+ 			res.end(JSON.stringify(body));
+ 		} else {
+-			const events = buildTextStreamEvents(response.content, completionReq.model, chunkSize, effReasoning, response.webSearches, overrides);
++			const events = buildTextStreamEvents(response.content, completionReq.model, chunkSize, effReasoning, response.webSearches, overrides, response.citations);
+ 			const interruption = createInterruptionSignal(fixture);
+ 			if (!await writeResponsesSSEStream(res, events, {
+ 				latency,
+diff --git a/dist/types.d.cts b/dist/types.d.cts
+index b4752f9dd46236e465a9963c3b8df164a35c62a8..8f995371260202321d235839daccab6c7f4daf30 100644
+--- a/dist/types.d.cts
++++ b/dist/types.d.cts
+@@ -179,6 +179,31 @@ interface TextResponse extends ResponseOverrides {
+    */
+   redactedThinking?: string[];
+   webSearches?: string[];
++  citations?: ResponseCitation[];
++}
++/**
++ * One `url_citation` annotation for a {@link TextResponse}, replayed on the
++ * OpenAI Responses API exactly as a hosted web search produces it: a
++ * `response.output_text.annotation.added` event once the cited span has
++ * streamed, plus the annotation on the completed content part.
++ *
++ * Only the Responses API carries these; other providers ignore the field.
++ */
++interface ResponseCitation {
++  /** Source URL. Required, and the only field a client is guaranteed to get. */
++  url: string;
++  title?: string;
++  /** The quoted span, when the fixture wants one on the wire. */
++  citedText?: string;
++  /** Offset of the cited span in `content`. Defaults to 0. */
++  startIndex?: number;
++  /**
++   * End offset of the cited span in `content`. Defaults to the end of the
++   * text. Doubles as the emission point: the annotation is streamed after the
++   * delta that carries this offset, which is where the real API emits it, so a
++   * fixture can reproduce citations arriving mid-answer.
++   */
++  endIndex?: number;
+ }
+ interface ToolCall {
+   name: string;
+diff --git a/dist/types.d.ts b/dist/types.d.ts
+index fe92cce6d399bbc3d86712505aa658b398dd87b4..e9e1e63e25c505b4a8b1ae5c27dd6ac7f38832a0 100644
+--- a/dist/types.d.ts
++++ b/dist/types.d.ts
+@@ -179,6 +179,31 @@ interface TextResponse extends ResponseOverrides {
+    */
+   redactedThinking?: string[];
+   webSearches?: string[];
++  citations?: ResponseCitation[];
++}
++/**
++ * One `url_citation` annotation for a {@link TextResponse}, replayed on the
++ * OpenAI Responses API exactly as a hosted web search produces it: a
++ * `response.output_text.annotation.added` event once the cited span has
++ * streamed, plus the annotation on the completed content part.
++ *
++ * Only the Responses API carries these; other providers ignore the field.
++ */
++interface ResponseCitation {
++  /** Source URL. Required, and the only field a client is guaranteed to get. */
++  url: string;
++  title?: string;
++  /** The quoted span, when the fixture wants one on the wire. */
++  citedText?: string;
++  /** Offset of the cited span in `content`. Defaults to 0. */
++  startIndex?: number;
++  /**
++   * End offset of the cited span in `content`. Defaults to the end of the
++   * text. Doubles as the emission point: the annotation is streamed after the
++   * delta that carries this offset, which is where the real API emits it, so a
++   * fixture can reproduce citations arriving mid-answer.
++   */
++  endIndex?: number;
+ }
+ interface ToolCall {
+   name: string;

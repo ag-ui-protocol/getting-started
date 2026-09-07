@@ -69,7 +69,10 @@ import {
   buildLgCommandResumeFromAgui,
   reconcileLegacyResumeInterrupts,
 } from "./interrupts";
-import { RunsStreamPayload } from "@langchain/langgraph-sdk/dist/types";
+import type {
+  Durability,
+  RunsStreamPayload,
+} from "@langchain/langgraph-sdk/dist/types";
 import {
   aguiMessagesToLangChain,
   DEFAULT_SCHEMA_KEYS,
@@ -193,6 +196,8 @@ export interface LangGraphAgentConfig extends AgentConfig {
 }
 
 const ROOT_SUBGRAPH_NAME = "root";
+const ASYNC_BOUNDARY_CHECKPOINT_ATTEMPTS = 3;
+const ASYNC_BOUNDARY_CHECKPOINT_RETRY_DELAY_MS = 25;
 
 export class LangGraphAgent extends AbstractAgent {
   client: LangGraphClient;
@@ -890,6 +895,8 @@ export class LangGraphAgent extends AbstractAgent {
 
     this.activeRun!.prevNodeName = null;
     let latestStateValues = {} as ThreadState<State>["values"];
+    let latestRootStateValues = {} as ThreadState<State>["values"];
+    let hasOrderedRootStateValues = false;
     let updatedState = state;
 
     try {
@@ -981,6 +988,8 @@ export class LangGraphAgent extends AbstractAgent {
             ...latestStateValues,
             ...chunk.data,
           };
+          latestRootStateValues = chunk.data;
+          hasOrderedRootStateValues = true;
           continue;
         } else if (
           subgraphsStreamEnabled &&
@@ -1017,7 +1026,22 @@ export class LangGraphAgent extends AbstractAgent {
 
         if (currentSubgraph !== this.currentSubgraph) {
           this.currentSubgraph = currentSubgraph;
-          await this.getStateAndMessagesSnapshots(threadId);
+          const boundaryCheckpointStep =
+            currentSubgraph === ROOT_SUBGRAPH_NAME &&
+            typeof metadata.langgraph_step === "number"
+              ? metadata.langgraph_step - 1
+              : undefined;
+          latestStateValues = await this.getStateAndMessagesSnapshots(
+            threadId,
+            latestRootStateValues,
+            hasOrderedRootStateValues,
+            boundaryCheckpointStep,
+            input.forwardedProps?.durability ?? "async",
+          );
+          // A root values snapshot describes the boundary that follows it. Do
+          // not reuse it after crossing that boundary: a subgraph may commit
+          // newer state before the next root values event arrives.
+          hasOrderedRootStateValues = false;
         }
 
         // Set server-assigned run id as soon as available
@@ -1209,9 +1233,47 @@ export class LangGraphAgent extends AbstractAgent {
     }
   }
 
-  private async getStateAndMessagesSnapshots(threadId: string): Promise<void> {
-    const state: ThreadState<State> =
-      await this.client.threads.getState(threadId);
+  private async getStateAndMessagesSnapshots(
+    threadId: string,
+    orderedStateValues?: ThreadState<State>["values"],
+    hasOrderedStateValues = false,
+    boundaryCheckpointStep?: number,
+    durability: Durability = "async",
+  ): Promise<ThreadState<State>["values"]> {
+    let state: ThreadState<State>;
+    if (hasOrderedStateValues) {
+      state = { values: orderedStateValues ?? {} } as ThreadState<State>;
+    } else if (boundaryCheckpointStep !== undefined) {
+      if (durability === "exit") {
+        throw new Error(
+          `Cannot snapshot LangGraph boundary step ${boundaryCheckpointStep} with durability "exit": the checkpoint is not persisted until the run exits`,
+        );
+      }
+
+      const attempts =
+        durability === "async" ? ASYNC_BOUNDARY_CHECKPOINT_ATTEMPTS : 1;
+      let boundaryState: ThreadState<State> | undefined;
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        [boundaryState] = await this.client.threads.getHistory(threadId, {
+          limit: 1,
+          metadata: { step: boundaryCheckpointStep },
+        });
+        if (boundaryState) break;
+        if (attempt < attempts - 1) {
+          await new Promise<void>((resolve) =>
+            setTimeout(resolve, ASYNC_BOUNDARY_CHECKPOINT_RETRY_DELAY_MS),
+          );
+        }
+      }
+      if (!boundaryState) {
+        throw new Error(
+          `No LangGraph checkpoint found for boundary step ${boundaryCheckpointStep}`,
+        );
+      }
+      state = boundaryState;
+    } else {
+      state = await this.client.threads.getState(threadId);
+    }
     this.dispatchEvent({
       type: EventType.STATE_SNAPSHOT,
       snapshot: this.getStateSnapshot(state),
@@ -1222,6 +1284,7 @@ export class LangGraphAgent extends AbstractAgent {
       type: EventType.MESSAGES_SNAPSHOT,
       messages: langchainMessagesToAgui(checkpointMessages),
     });
+    return state.values;
   }
 
   /**

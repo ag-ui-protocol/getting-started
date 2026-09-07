@@ -16,15 +16,16 @@ const MOCK_HEADER = "x-cors-mock";
 // `cors` is an optional peer dependency, so an app that opts out of
 // cross-origin access must not even construct the middleware. Mocking it makes
 // two things observable that the wire cannot distinguish: `corsFactory` counts
-// middleware construction and records the exact options object handed to
-// `cors`, and the middleware it returns stamps a header so a request through
+// middleware construction and records the delegate handed to `cors`, which
+// {@link resolveCorsOptions} then calls to get the exact options object `cors`
+// would act on, and the middleware it returns stamps a header so a request through
 // the returned app shows whether it was actually mounted. Whether the module is
 // imported at all is a third question, and it lives in its own file
 // (`cors-peer-not-loaded.test.ts`) because the answer is only observable while
 // nothing in the module registry has opted in yet.
 const { corsFactory } = vi.hoisted(() => ({
   corsFactory: vi.fn(
-    (_options: Record<string, unknown>) =>
+    (_delegate: unknown) =>
       (
         _req: unknown,
         res: { setHeader: (name: string, value: string) => void },
@@ -59,6 +60,32 @@ async function headersFromRequest(
   } finally {
     await closeServer(server);
   }
+}
+
+/**
+ * The options `cors` is handed for a request from `requestOrigin`.
+ *
+ * `cors` is constructed with a delegate rather than a fixed options object,
+ * because `credentials` depends on the calling origin and not only on the
+ * configured policy. So the assertions below go through the delegate the same
+ * way `cors` itself would, once per caller they care about.
+ */
+function resolveCorsOptions(requestOrigin?: string): Record<string, unknown> {
+  const delegate = corsFactory.mock.calls[0]![0] as (
+    req: { headers: Record<string, string | undefined> },
+    done: (err: null, options: Record<string, unknown>) => void,
+  ) => void;
+  let resolved: Record<string, unknown> | undefined;
+  delegate({ headers: { origin: requestOrigin } }, (_err, options) => {
+    resolved = options;
+  });
+  if (!resolved) {
+    throw new Error(
+      "The cors delegate did not call back synchronously; the assertions " +
+        "below read its options straight after the call.",
+    );
+  }
+  return resolved;
 }
 
 /**
@@ -101,11 +128,14 @@ const NOT_INSTALLED: [string, CreateStrandsAppOptions][] = [
  * Neither key is a copy of what the caller passed. `origin` is the output of
  * `normalizeCorsOrigin`, so an array holding `"*"` arrives here as the bare
  * string `"*"` however many other entries it had, and `credentials` is derived
- * from that resolved origin by `allowsCredentials`: `true` only for a policy
- * naming at least one specific origin, which rules out `"*"`, `[]` and every
- * array that collapsed to `"*"`. This is the one file that pins both, so the
- * rows below are the boundary between the option a caller wrote and the option
- * `cors` acts on.
+ * rather than passed: `true` only for a policy naming at least one specific
+ * origin, which rules out `"*"`, `[]` and every array that collapsed to `"*"`.
+ * This is the one file that pins both, so the rows below are the boundary
+ * between the option a caller wrote and the option `cors` acts on.
+ *
+ * The rows state the options for a caller whose own origin names a site, which
+ * is the policy half of the `credentials` decision on its own. The request
+ * half has its own test below, since it is the same value for every row.
  *
  * Written out rather than derived from the posture table: deriving the expected
  * object would compute it the same way the source does, and a test that
@@ -160,7 +190,9 @@ const INSTALLED: [string, CreateStrandsAppOptions, Record<string, unknown>][] =
       { origin: "*", credentials: false },
     ],
     [
-      // Reflection names a specific origin per request, so credentials stay on.
+      // Reflection carries whatever the caller sent, so the policy half leaves
+      // credentials on and the request half is the only thing that can refuse
+      // a caller naming no site.
       "origin reflection",
       { corsOrigin: true },
       { origin: true, credentials: true },
@@ -216,7 +248,7 @@ describe("createStrandsApp CORS middleware installation", () => {
     async (_label, options, expectedOptions) => {
       const app = await createStrandsApp(new FixedAgent(), options);
       expect(corsFactory).toHaveBeenCalledTimes(1);
-      const passed = corsFactory.mock.calls[0]![0];
+      const passed = resolveCorsOptions(ALLOWED_ORIGIN);
       // Key set first: an explicit `undefined` for a key `cors` merges over
       // its own default is the failure mode this guards, and a value
       // comparison cannot see it.
@@ -230,6 +262,51 @@ describe("createStrandsApp CORS middleware installation", () => {
       expect(headers.get(MOCK_HEADER)).toBe("1");
     },
   );
+
+  it.each([
+    [
+      "origin reflection",
+      { corsOrigin: true } as CreateStrandsAppOptions,
+      true,
+    ],
+    [
+      "an allowlist naming that origin",
+      { corsOrigin: ["null", ALLOWED_ORIGIN] } as CreateStrandsAppOptions,
+      ["null", ALLOWED_ORIGIN],
+    ],
+    [
+      "a fixed origin string",
+      { corsOrigin: ALLOWED_ORIGIN } as CreateStrandsAppOptions,
+      ALLOWED_ORIGIN,
+    ],
+  ])(
+    "refuses credentials to a caller whose origin names no site under %s",
+    async (_label, options, expectedOrigin) => {
+      await createStrandsApp(new FixedAgent(), options);
+      // One delegate, two callers. The origin policy is identical for both, so
+      // this is the whole of the per-request decision: the policy is not
+      // narrowed for anyone, and only the caller that names no site loses its
+      // credentials.
+      expect(resolveCorsOptions(ALLOWED_ORIGIN)).toEqual({
+        origin: expectedOrigin,
+        credentials: true,
+      });
+      expect(resolveCorsOptions("null")).toEqual({
+        origin: expectedOrigin,
+        credentials: false,
+      });
+    },
+  );
+
+  it("leaves credentials alone for a request carrying no Origin at all", async () => {
+    await createStrandsApp(new FixedAgent(), { corsOrigin: ALLOWED_ORIGIN });
+    // Not a cross-origin request, so there is nothing to refuse: the absent
+    // header must not read as the null origin.
+    expect(resolveCorsOptions()).toEqual({
+      origin: ALLOWED_ORIGIN,
+      credentials: true,
+    });
+  });
 
   it("covers every posture the fixture measures as installing middleware", () => {
     // The gate on the hand-written list above. `installsMiddleware` is the one

@@ -64,6 +64,7 @@ const DOJO_PATHS = [
   "a2ui-fixed-schema",
   "a2ui-recovery",
   "agentic-chat",
+  "agentic-chat-citations",
   "agentic-chat-multimodal",
   "agentic-chat-reasoning",
   "agentic-generative-ui",

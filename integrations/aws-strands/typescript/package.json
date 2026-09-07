@@ -32,9 +32,9 @@
   },
   "peerDependencies": {
     "@ag-ui/a2ui-toolkit": ">=0.0.3",
-    "@ag-ui/client": ">=0.0.37",
-    "@ag-ui/core": ">=0.0.37",
-    "@ag-ui/encoder": ">=0.0.37",
+    "@ag-ui/client": ">=0.0.59",
+    "@ag-ui/core": ">=0.0.59",
+    "@ag-ui/encoder": ">=0.0.59",
     "@modelcontextprotocol/sdk": ">=1.0.0",
     "@strands-agents/sdk": ">=1.1.0",
     "cors": "^2.8.5",

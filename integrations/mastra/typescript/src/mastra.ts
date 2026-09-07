@@ -996,12 +996,13 @@ export class MastraAgent extends AbstractAgent {
               }
 
               let stopped = false;
-              const { handleChunk, flush } = this.createChunkProcessor({
-                ...callbacks,
-                onError: (error) => {
-                  subscriber.error(error);
-                },
-              });
+              const { handleChunk, flush, getUsage } =
+                this.createChunkProcessor({
+                  ...callbacks,
+                  onError: (error) => {
+                    subscriber.error(error);
+                  },
+                });
 
               await response.processDataStream({
                 onChunk: async (chunk: any) => {
@@ -1019,7 +1020,7 @@ export class MastraAgent extends AbstractAgent {
                 flush();
                 await finishResume(
                   await this.resolveTraceId(response),
-                  await this.resolveUsage(response),
+                  await this.resolveUsage(response, getUsage()),
                 );
               }
             }
@@ -1278,9 +1279,12 @@ export class MastraAgent extends AbstractAgent {
    * (no usage, remote agent, rejected promise) yields an empty array so the run
    * still finishes without usage.
    */
-  private async resolveUsage(response: any): Promise<TokenUsage[]> {
+  private async resolveUsage(
+    response: any,
+    streamedUsage?: unknown,
+  ): Promise<TokenUsage[]> {
     try {
-      const raw = await response?.usage;
+      const raw = streamedUsage ?? (await response?.usage);
       const identity = this.getModelIdentity();
       const entry = tokenUsageFromAiSdkUsage(raw, identity);
       return entry ? [entry] : [];
@@ -1623,15 +1627,22 @@ export class MastraAgent extends AbstractAgent {
    * path (processDataStream callback) — single source of truth for chunk
    * handling and buffering logic.
    *
-   * @returns An object with two methods:
+   * @returns An object with three methods:
    *   - `handleChunk`: processes a single chunk; returns `true` if processing should stop (error or malformed chunk).
    *   - `flush`: emits any buffered tool-call (call at end of stream).
+   *   - `getUsage`: returns usage reported by the terminal `finish` chunk.
    */
   private createChunkProcessor(
     callbacks: MastraAgentStreamOptions,
     clientToolNames: Set<string> = new Set(),
     initialState: Record<string, any> = {},
   ) {
+    // Remote processDataStream responses report token usage on the terminal
+    // `finish` chunk rather than on the response object. Keep only that
+    // boundary's value: `step-finish` can repeat usage for each model step and
+    // would double-count the run if included.
+    let usage: unknown;
+
     // Running client-side working-memory state, mapped to AG-UI shared state.
     // Seeded from the run's input.state (the base the client already holds), so
     // the first STATE_DELTA patches from what the UI shows, not from empty.
@@ -2418,6 +2429,7 @@ export class MastraAgent extends AbstractAgent {
         case "finish": {
           flush();
           releaseBufferedText(chunk.payload, true);
+          usage = chunk.payload?.output?.usage ?? chunk.payload?.usage;
           callbacks.onFinishMessagePart?.();
           break;
         }
@@ -2587,7 +2599,7 @@ export class MastraAgent extends AbstractAgent {
       return false;
     };
 
-    return { handleChunk, flush };
+    return { handleChunk, flush, getUsage: () => usage };
   }
 
   /**
@@ -3129,7 +3141,7 @@ export class MastraAgent extends AbstractAgent {
         // Remote agents use processDataStream (callback-based) — share
         // chunk handling logic via createChunkProcessor.
         if (response && typeof response.processDataStream === "function") {
-          const { handleChunk, flush } = this.createChunkProcessor(
+          const { handleChunk, flush, getUsage } = this.createChunkProcessor(
             {
               onMessageId,
               onTextPart,
@@ -3169,7 +3181,7 @@ export class MastraAgent extends AbstractAgent {
           if (!stopped) {
             flush();
             const traceId = await this.resolveTraceId(response);
-            const usage = await this.resolveUsage(response);
+            const usage = await this.resolveUsage(response, getUsage());
             await onRunFinished?.(traceId, usage);
           }
         } else {

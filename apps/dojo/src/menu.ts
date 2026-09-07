@@ -333,6 +333,7 @@ export const menuIntegrations = [
     features: [
       "agentic_chat",
       "agentic_chat_reasoning",
+      "agentic_chat_citations",
       "agentic_chat_multimodal",
       "v1_agentic_chat",
       "backend_tool_rendering",
@@ -355,6 +356,7 @@ export const menuIntegrations = [
     features: [
       "agentic_chat",
       "agentic_chat_reasoning",
+      "agentic_chat_citations",
       "agentic_chat_multimodal",
       "v1_agentic_chat",
       "backend_tool_rendering",

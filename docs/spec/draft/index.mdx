@@ -1,0 +1,150 @@
+---
+title: "Specification"
+description: "The behavioural specification for the AG-UI protocol — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+AG-UI is an open protocol that standardizes how agents talk to user-facing
+applications: one request in, one ordered stream of typed events out, carrying
+everything the user sees of the agent — text, tool calls, reasoning, shared
+state, progress.
+
+This specification defines the authoritative protocol requirements, based on
+the JSON Schema in [`schema.json`](/spec/draft/schema.json), rendered readably
+as the [Schema Reference](/spec/draft/schema).
+
+For implementation guides, concepts and examples, see the
+[documentation](/introduction).
+
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD",
+"SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this
+document are to be interpreted as described in
+[BCP 14](https://datatracker.ietf.org/doc/html/bcp14)
+[[RFC2119](https://datatracker.ietf.org/doc/html/rfc2119)]
+[[RFC8174](https://datatracker.ietf.org/doc/html/rfc8174)] when, and only
+when, they appear in all capitals, as shown here.
+
+## What this document is
+
+A JSON Schema says what an event looks like. It cannot say what order events
+may arrive in, what an implementation does with something it does not
+recognise, or when a warning has to be emitted. Those rules are the protocol,
+and this document states them.
+
+The division of authority is deliberate and absolute:
+
+- **The [schema](/spec/draft/schema) is authoritative for structure.**
+  Which fields exist, which are required, what type each carries, which values
+  a discriminator may take. Where this document mentions a field, it does so
+  to give a rule meaning — never to restate the field's shape. If the two
+  disagree about structure, the schema wins and this document has a bug.
+- **This document is authoritative for behaviour.** Ordering, lifecycle,
+  attribution, error handling, compatibility. The schema cannot express any of
+  it. If an implementation disagrees with a rule here, the implementation has
+  a bug.
+
+## Roles
+
+Every rule names who it binds. Two roles carry obligations:
+
+- A **producer** is whatever emits the event stream — an agent, a proxy, a
+  bridge, a test double.
+- A **consumer** is whatever reads it — a client SDK, a UI, a recorder,
+  another proxy.
+
+A participant that does both is bound by both sets of rules, in each direction
+separately.
+
+## Conformance
+
+An implementation conforms when it satisfies every MUST and MUST NOT that
+applies to the roles it plays. SHOULD-level rules describe what a good
+implementation does; departing from one is a decision that needs a reason, not
+a violation.
+
+Conformance is judged per stream. A producer that emits one malformed run does
+not conform, whatever it does on other runs.
+
+## Overview
+
+The protocol decomposes into a base every implementation speaks and features a
+producer emits when it has something to say with them:
+
+- **[The event model](/spec/draft/basic)** — the envelope, the general fields,
+  the identifiers.
+- **[Run input](/spec/draft/basic/run-input)** — the one message that travels
+  from application to agent.
+- **[Metadata](/spec/draft/basic/metadata)** — the open channel on everything,
+  and how it merges.
+- **[Event patterns](/spec/draft/basic/patterns)** — streaming,
+  snapshot–delta, interrupt–resume.
+- **[Transports](/spec/draft/basic/transports)** — HTTP + SSE, HTTP +
+  Protobuf, and the contract custom bindings must meet.
+- **[Processing model](/spec/draft/basic/processing)** — middleware before
+  enforcement; unrecognised material survives, malformed known values are
+  fatal.
+- **[Versioning and compatibility](/spec/draft/basic/versioning)** — talking
+  to older and newer peers, and what losing content obliges.
+- **[Event streams](/spec/draft/events)** — the eight event families.
+
+## Security and Trust & Safety
+
+AG-UI turns model output into things applications do: tool calls become
+actions, state events become writes, streamed content becomes what the user
+reads. With that come obligations the protocol cannot enforce at the wire
+level but that implementors must address.
+
+### Key principles
+
+1. **User consent and control.** The application decides what runs. It SHOULD
+   obtain explicit user consent before executing side-effectful
+   [tool calls](/spec/draft/events/tool-calls), and MUST NOT represent an
+   action as user-approved when it was not.
+2. **Model output is untrusted input.** Tool arguments, tool results,
+   [state](/spec/draft/events/state) content and
+   [passthrough](/spec/draft/events/passthrough) payloads cross a trust
+   boundary. Applications MUST validate what they act on and MUST NOT render
+   streamed content as executable markup.
+3. **Data flows both ways.** State and messages round-trip through the
+   consumer and back on every run. Producers SHOULD NOT put secrets in them;
+   consumers SHOULD treat reasoning and encrypted artefacts with the same
+   confidentiality as the conversation.
+
+### Implementation guidelines
+
+The protocol itself cannot enforce these principles. Implementors SHOULD build
+consent flows for consequential actions, validate schema and semantics at
+every trust boundary, isolate rendering from execution, and log enough to
+audit what an agent did on a user's behalf.
+
+## Scope
+
+This document specifies the protocol: the event stream, the run input, and the
+obligations of the parties exchanging them. It does not specify what any
+particular integration does with an event after receiving it, how an agent
+framework should be structured, or how a UI should render anything.
+
+AG-UI is maintained with three first-party SDKs — TypeScript, Python and
+.NET — and every rule here applies to all of them equally. Other language
+bindings are community-maintained; they are bound by this document when they
+claim conformance, but nothing here is derived from them.
+
+## Learn More
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/spec/draft/architecture">
+    The components, the run, and the design principles.
+  </Card>
+  <Card title="Base Protocol" icon="code" href="/spec/draft/basic">
+    The event model, run input, patterns, transports, processing, versioning.
+  </Card>
+  <Card title="Event Streams" icon="list" href="/spec/draft/events">
+    The eight event families and their rules.
+  </Card>
+  <Card title="Key Changes" icon="clock-rotate-left" href="/spec/draft/changelog">
+    What the 1.0 draft changes against the 0.x line.
+  </Card>
+</CardGroup>

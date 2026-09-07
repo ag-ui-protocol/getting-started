@@ -53,7 +53,17 @@ export interface StartedApp {
 }
 
 /**
- * Bind an app to an ephemeral port.
+ * Bind an app to an ephemeral port on the IPv4 loopback.
+ *
+ * The address is pinned because every probe below dials `127.0.0.1`, and an
+ * unspecified host binds the IPv6 wildcard instead. That pair is not the same
+ * port: an unrelated process already holding the IPv4 wildcard on the number
+ * the kernel hands out keeps receiving the loopback traffic, so the probe is
+ * answered by that process while this server never sees a connection. It
+ * reaches the suite as whatever that stranger happens to reply -- a foreign
+ * status and body, an HTTP parse error, or a bare close -- on whichever test
+ * drew the colliding number. Binding the loopback explicitly takes precedence
+ * over a wildcard holder, so the probe reaches this app or nothing at all.
  *
  * Two failure modes, and each needs its own handler. A bind failure
  * (EADDRINUSE, a permission denial) arrives before the promise settles, so it
@@ -68,7 +78,7 @@ export function listen(
   app: import("express").Express,
 ): Promise<import("http").Server> {
   return new Promise((resolve, reject) => {
-    const server = app.listen(0, () => {
+    const server = app.listen(0, "127.0.0.1", () => {
       server.removeListener("error", reject);
       // Thrown synchronously out of `emit`, which surfaces it as an uncaught
       // exception and fails the run. Loud beats lost for a server fault the

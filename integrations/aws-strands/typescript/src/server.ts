@@ -72,12 +72,15 @@ export interface CreateStrandsAppOptions {
    * - `true`: reflects the request's `Origin` header back per-request, a more
    *   permissive posture than `"*"`.
    *
-   * Credentials follow from the resolved value rather than being fixed: every
-   * concrete origin enables them, including a reflected one, and a literal
-   * `"*"`, an empty string and an empty array do not. Two consequences worth
-   * reading before picking a value:
+   * Credentials are derived rather than fixed, from the resolved value and
+   * from the calling origin. A policy carries them only if it names a site to
+   * begin with, which rules out a literal `"*"`, an empty string, an empty
+   * array and a lone `"null"`; a request carries them only if its own `Origin`
+   * names a site, which rules out `null` whichever policy admitted it. There
+   * is no way to override either half. Three consequences worth reading before
+   * picking a value:
    * - `true` is the value to be careful with, not `"*"`. A reflected origin
-   *   does carry credentials, so `true` lets a page on any origin make a
+   *   does carry credentials, so `true` lets a page on any site make a
    *   credentialed call to the agent route and read the stream back. On a route
    *   with no {@link CreateStrandsAppOptions.auth} guard that is every site the
    *   browser visits. Prefer an exact-match array.
@@ -85,6 +88,13 @@ export interface CreateStrandsAppOptions {
    *   CORS protocol tells browsers to reject a literal wildcard combined with
    *   them anyway, so it only ever serves requests that send none. Name the
    *   origins explicitly when the browser has to send them.
+   * - `"null"` is the Origin a browser sends from a sandboxed iframe, a
+   *   `file://` page and some redirect chains, and it belongs to no site, so
+   *   nothing distinguishes one such caller from another. Listing it still
+   *   admits those callers, and the rest of an allowlist holding it is
+   *   unaffected, but they are never credentialed: not through a list naming
+   *   `"null"`, not through a reflection under `true`, and not through a fixed
+   *   origin string echoed at them.
    */
   corsOrigin?: string | string[] | boolean;
   /**
@@ -390,33 +400,77 @@ function normalizeCorsOrigin(
 }
 
 /**
- * Whether credentialed cross-origin requests may be allowed for `origin`.
+ * The Origin a browser sends when the calling page belongs to no site: from a
+ * sandboxed iframe, a `file://` page and some redirect chains.
  *
- * Only a concrete origin qualifies, whether given as a single string or a
- * list. `Access-Control-Allow-Origin: *`
- * together with `Access-Control-Allow-Credentials: true` is a pairing browsers
- * reject outright, and `origin: true` reflects whatever Origin the caller sent,
- * which would extend credentials to every site. The Python adapter applies the
- * same rule for the wildcard, and additionally withholds credentials for the
- * literal `"null"` origin, which names no site. This does not yet, so the two
- * differ on that one value.
+ * Credentials granted against it are granted to whatever can present it, which
+ * is the same objection as for `"*"`, except that browsers reject the wildcard
+ * pairing outright and honour this one. So it is refused on both sides of the
+ * decision below: a policy that names nothing else cannot carry credentials,
+ * and no individual request from this origin carries them either.
+ *
+ * Compared exactly, because that is the only spelling a browser can send:
+ * `cors` matches allowlist entries with `===` and a browser compares the
+ * allow-origin header against its own origin serialization byte for byte, so
+ * any other casing or a trailing slash matches nothing and grants nothing.
+ */
+const NULL_ORIGIN = "null";
+
+/**
+ * Whether the origin policy names a site credentials could belong to.
+ *
+ * Half of the decision, and the request-independent half: a policy naming
+ * nothing but `"*"`, `"null"` or nothing at all can never carry credentials,
+ * whoever calls. The other half is {@link requestAllowsCredentials}, which is
+ * what keeps a policy that does name a site from extending its credentials to
+ * a caller that is not one. Splitting them is what lets `["null", "https://
+ * a.tld"]` stay a working allowlist: `cors` is given a `credentials` value per
+ * request rather than one for the whole policy, so the named site keeps its
+ * credentials and only the null caller is refused.
+ *
+ * The Python adapter refuses the same two values, via
+ * `allow_credentials=bool(origins) and not {"*", "null"}.intersection(...)`,
+ * but has only this half: Starlette takes one `allow_credentials` for the
+ * whole policy, so a list holding `"null"` there loses credentials for every
+ * origin beside it.
  *
  * Call this on the output of {@link normalizeCorsOrigin}, so the wildcard
  * spellings have already collapsed to `"*"`.
  */
-function allowsCredentials(origin: string | string[] | boolean): boolean {
+function policyAllowsCredentials(origin: string | string[] | boolean): boolean {
   // `false` turns the middleware off; `""` leaves no origin to grant
-  // credentials against. A literal `"*"` is the one value browsers refuse to
-  // pair with credentials at all.
-  if (typeof origin === "string") return origin !== "*" && origin !== "";
-  // A surviving array is a concrete allow-list; normalization has already
-  // collapsed the wildcard spelling. Kept as a guard rather than a bare
-  // `true` so calling this on an unnormalized value stays safe.
-  if (Array.isArray(origin)) return origin.length > 0 && !origin.includes("*");
-  // `true` reflects the caller's Origin, so the header carries a concrete
-  // origin and credentials are valid. Permissive, but it is what the caller
-  // asked for, and withholding them would break deployments that rely on it.
+  // credentials against.
+  if (typeof origin === "string")
+    return origin !== "" && origin !== "*" && origin !== NULL_ORIGIN;
+  // A surviving array is an allow-list compared per caller; normalization has
+  // already collapsed the wildcard spelling, and the wildcard check is kept as
+  // a guard so calling this on an unnormalized value stays safe. One entry
+  // naming a site is enough here, because the per-request half decides whether
+  // this caller is that entry.
+  if (Array.isArray(origin))
+    return (
+      origin.length > 0 &&
+      !origin.includes("*") &&
+      origin.some((entry) => entry !== NULL_ORIGIN)
+    );
+  // `true` reflects the caller's Origin, so the header carries whatever the
+  // caller sent and credentials go with it. Permissive, but it is what the
+  // caller asked for, and withholding them would break deployments that rely
+  // on it. The per-request half is what stops the reflection from crediting an
+  // origin that names no site.
   return origin === true;
+}
+
+/**
+ * Whether this particular caller's Origin can be credentialed.
+ *
+ * The request half of the decision. Every policy shape can end up answering a
+ * request from {@link NULL_ORIGIN}: `true` reflects it, an allowlist can name
+ * it, and a fixed origin string is echoed to it. A request with no `Origin` at
+ * all is not a cross-origin request and is unaffected.
+ */
+function requestAllowsCredentials(requestOrigin: string | undefined): boolean {
+  return requestOrigin !== NULL_ORIGIN;
 }
 
 /** Create an Express app with a single Strands agent endpoint and optional ping endpoint. */
@@ -481,20 +535,30 @@ export async function createStrandsApp(
       warnEmptyNarrowing("allowHeaders", "Access-Control-Allow-Headers");
     }
     const cors = await loadCors();
-    // Normalize before deciding credentials: `allowsCredentials` expects the
-    // wildcard spellings to have collapsed already.
+    // Normalize before deciding credentials: `policyAllowsCredentials` expects
+    // the wildcard spellings to have collapsed already.
     const resolvedCorsOrigin = normalizeCorsOrigin(corsPolicy);
+    const policyCredentials = policyAllowsCredentials(resolvedCorsOrigin);
+    const corsOptions = {
+      origin: resolvedCorsOrigin,
+      // Spread rather than pass `undefined`: `cors` merges the options object
+      // over its defaults with `Object.assign`, so an explicit `undefined`
+      // would clobber the default instead of falling back to it, and
+      // `methods: undefined` then throws inside `cors` itself.
+      ...(allowMethods ? { methods: allowMethods } : {}),
+      ...(allowHeaders ? { allowedHeaders: allowHeaders } : {}),
+    };
+    // Options per request rather than one fixed object, because `credentials`
+    // depends on who is calling and not only on the configured policy. The
+    // origin policy itself is unchanged either way.
     app.use(
-      cors({
-        origin: resolvedCorsOrigin,
-        credentials: allowsCredentials(resolvedCorsOrigin),
-        // Spread rather than pass `undefined`: `cors` merges the options object
-        // over its defaults with `Object.assign`, so an explicit `undefined`
-        // would clobber the default instead of falling back to it, and
-        // `methods: undefined` then throws inside `cors` itself.
-        ...(allowMethods ? { methods: allowMethods } : {}),
-        ...(allowHeaders ? { allowedHeaders: allowHeaders } : {}),
-      }),
+      cors((req, done) =>
+        done(null, {
+          ...corsOptions,
+          credentials:
+            policyCredentials && requestAllowsCredentials(req.headers.origin),
+        }),
+      ),
     );
   }
   // Keep auth, parsing, and dispatch in one route. Besides putting auth ahead

@@ -137,27 +137,42 @@ def _is_proxy(tool: Any) -> bool:
     return getattr(tool, _PROXY_MARKER, False) is True
 
 
+def registered_proxy_names(tool_registry: ToolRegistry) -> Set[str]:
+    """Return the names the registry currently holds a proxy under."""
+    return {
+        name
+        for name, tool in tool_registry.registry.items()
+        if _is_proxy(tool)
+    }
+
+
 def sync_proxy_tools(
     tool_registry: ToolRegistry,
     ag_ui_tools: list[AgUiTool],
     tracked_names: Set[str],
     *,
     tool_behaviors: Mapping[str, "ToolBehavior"] | None = None,
+    exempt_names: Set[str] | None = None,
 ) -> Set[str]:
     """Synchronise proxy tools in *tool_registry* with *ag_ui_tools*.
 
     * New tools present in *ag_ui_tools* but absent from the registry are
       registered (unless a native, non-proxy tool with the same name exists).
     * Stale proxy tools that are in *tracked_names* but absent from the
-      incoming list are removed.
+      incoming list are removed, unless they are in *exempt_names*.
 
     Args:
         tool_registry: The Strands ``ToolRegistry`` attached to the agent.
         ag_ui_tools: Tool definitions from the current ``RunAgentInput.tools``.
         tracked_names: Set of proxy tool names registered in previous calls.
+        exempt_names: Proxy names that must stay registered even when the
+            incoming list omits them. A tool parked in a live frontend-tool
+            interrupt is about to be resumed by Strands, so removing it turns
+            the client's answer into a "tool not found" failure.
 
     Returns:
-        Updated set of proxy tool names currently registered.
+        Updated set of proxy tool names currently registered, including any
+        exempt proxy retained across this call.
     """
     desired_names: Set[str] = set()
     for t in ag_ui_tools:
@@ -166,13 +181,25 @@ def sync_proxy_tools(
             desired_names.add(n)
 
     # --- Remove stale proxy tools ---
+    retained_names: Set[str] = set()
     stale = tracked_names - desired_names
     for name in stale:
         existing = tool_registry.registry.get(name)
-        if existing is not None and _is_proxy(existing):
-            del tool_registry.registry[name]
-            tool_registry.dynamic_tools.pop(name, None)
-            logger.debug("Removed stale proxy tool: %s", name)
+        if exempt_names is not None and name in exempt_names:
+            # Report an exempt name as retained only when the registry really
+            # still holds our proxy. Claiming one that is absent (or that a
+            # native tool now owns) would leave the caller tracking a proxy it
+            # does not have, and the caller checks the registry for exactly
+            # that case.
+            if existing is not None and _is_proxy(existing):
+                retained_names.add(name)
+                logger.debug("Retained proxy tool parked in an interrupt: %s", name)
+            continue
+        if existing is None or not _is_proxy(existing):
+            continue
+        del tool_registry.registry[name]
+        tool_registry.dynamic_tools.pop(name, None)
+        logger.debug("Removed stale proxy tool: %s", name)
 
     # --- Add / update proxy tools ---
     current_proxy_names: Set[str] = set()
@@ -196,4 +223,4 @@ def sync_proxy_tools(
         current_proxy_names.add(n)
         logger.debug("Registered proxy tool: %s", n)
 
-    return current_proxy_names
+    return current_proxy_names | retained_names

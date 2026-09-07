@@ -1,0 +1,82 @@
+---
+title: "HTTP + Server-Sent Events"
+description: "The default binding: a POST carrying the run input, a text/event-stream carrying the run — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+The default binding. The application POSTs the run input to the agent's
+endpoint; the response is a
+[Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html)
+stream carrying the run.
+
+## Request
+
+- The client sends `POST` to the agent endpoint. The body is the
+  [`RunAgentInput`](/spec/draft/basic/run-input) as a single JSON object,
+  UTF-8 encoded, with `Content-Type: application/json`.
+- The client sends `Accept: text/event-stream` (adding the
+  [protobuf media type](/spec/draft/basic/transports/http-protobuf) when it
+  can consume that binding too).
+
+## Response
+
+- A run that starts answers `200` with `Content-Type: text/event-stream`.
+- Each SSE event's `data` payload is exactly one protocol event as a JSON
+  object — never more than one, never a fragment. Multi-line `data:` fields
+  join as SSE specifies.
+- A producer MUST frame the stream with LF (`\n`) line endings. The SSE
+  grammar also admits CR and CRLF, but this binding pins the one form every
+  consumer is known to parse; a consumer MAY additionally accept the full
+  grammar.
+- A consumer MUST ignore SSE fields other than `data` (`event:`, `id:`,
+  `retry:`) and MUST tolerate SSE comment lines (`: keep-alive`), which
+  producers MAY send at any cadence.
+- The producer closes the response body after the last run's terminal event.
+  One POST carries one request; a response MAY nevertheless carry
+  [several runs](/spec/draft/events/lifecycle#several-runs-on-one-stream) when
+  the producer is replaying a thread's history ahead of the requested run — no
+  further input travels for those, per the
+  [binding contract](/spec/draft/basic/transports#the-binding-contract).
+
+## Errors
+
+- Input rejected before the run starts — malformed JSON, failed validation,
+  refused auth — is an HTTP error status with no event stream. The run never
+  started.
+- A failure after the stream opens travels in-stream, as `RUN_ERROR`. The HTTP
+  status is already sent and cannot change; a consumer MUST NOT infer success
+  from `200` alone.
+- A connection that drops without a terminal event is a
+  [truncated run](/spec/draft/basic/transports#truncation).
+
+## No resumption
+
+The binding has no stream resumption: SSE's `Last-Event-ID` mechanism is not
+used, and a broken stream cannot be re-entered. Re-running is a new run with a
+new `runId`, whose input carries whatever the consumer retained.
+
+## Example
+
+```
+POST /agent HTTP/1.1
+Content-Type: application/json
+Accept: text/event-stream
+
+{"threadId":"thr-1","runId":"run-1","messages":[…]}
+
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+
+data: {"type":"RUN_STARTED","threadId":"thr-1","runId":"run-1"}
+
+data: {"type":"TEXT_MESSAGE_START","messageId":"msg-1","role":"assistant"}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"msg-1","delta":"Hello."}
+
+data: {"type":"TEXT_MESSAGE_END","messageId":"msg-1"}
+
+data: {"type":"RUN_FINISHED","threadId":"thr-1","runId":"run-1"}
+```

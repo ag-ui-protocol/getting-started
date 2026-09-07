@@ -494,6 +494,29 @@ describe("orchestrator abnormal stop reasons", () => {
     expect(hintAt).toBeLessThan(errorAt);
     expect(runError(events)?.code).toBe("STRANDS_ERROR");
   });
+
+  it("reports a failure whose message cannot be read as a fault from outside", async () => {
+    // Wrapping a failure from this stream has to derive its text, and reading
+    // `message` off a thrown value runs whatever a getter or a `Proxy` trap
+    // defines. A raise there escapes the wrapper as a plain TypeError and the
+    // outer handler reads THAT as this adapter's defect, which is the exact
+    // misattribution the wrapper exists to remove, so wrapping has to be
+    // total.
+    const failure = new TypeError("cannot read 'x'");
+    Object.defineProperty(failure, "message", {
+      get() {
+        throw new TypeError("message accessor exploded");
+      },
+    });
+    const agent = orchestratorThrowingAfter([], failure);
+
+    const { events } = await collectQuietly(agent);
+
+    expect(runError(events)?.code).toBe("STRANDS_ERROR");
+    // A text that cannot be read falls back to the name, which is what
+    // Python's `_exception_text` falls back to.
+    expect(runError(events)?.message).toBe("TypeError");
+  });
 });
 
 describe("orchestrator inherited object keys are not stop reasons", () => {

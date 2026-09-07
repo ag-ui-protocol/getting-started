@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import re
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -416,10 +417,17 @@ class TestMimeToFormat:
 
 
 class MockStrandsAgentForMultimodal:
-    """Mock Strands agent that records the prompt passed to stream_async."""
+    """Mock Strands agent that records how, and whether, it was invoked.
+
+    ``last_prompt`` alone cannot answer whether the agent ran: the adapter
+    passes ``None`` as the prompt whenever it has already reconciled the turn
+    into ``messages``, which is the usual case. ``stream_calls`` is what a test
+    about a run that must not reach the agent asserts on.
+    """
 
     def __init__(self):
         self.last_prompt = None
+        self.stream_calls = 0
         self.model = MagicMock()
         self.system_prompt = "test"
         self.tool_registry = MagicMock()
@@ -433,20 +441,31 @@ class MockStrandsAgentForMultimodal:
         self.session_manager = None
 
     async def stream_async(self, prompt):
+        self.stream_calls += 1
         self.last_prompt = prompt
         yield {"data": "response"}
         yield {"complete": True}
 
 
 def _make_input(messages):
-    """Create a minimal mock RunAgentInput."""
-    input_data = MagicMock()
-    input_data.thread_id = "test-thread"
-    input_data.run_id = "test-run"
-    input_data.state = {}
-    input_data.tools = []
-    input_data.messages = messages
-    return input_data
+    """Stand-in for ``RunAgentInput`` stating every field it carries.
+
+    A ``MagicMock`` answers ``resume``, ``context`` and ``forwarded_props``
+    with truthy mocks nobody stated, which leaves a plain first turn one
+    defensive check away from being read as a resume. ``SimpleNamespace``
+    states the empty first-turn values, and makes a field the adapter starts
+    reading fail out loud rather than be answered with a mock.
+    """
+    return SimpleNamespace(
+        thread_id="test-thread",
+        run_id="test-run",
+        state={},
+        tools=[],
+        messages=messages,
+        context=[],
+        forwarded_props={},
+        resume=None,
+    )
 
 
 class TestAgentMultimodalIntegration:
@@ -569,6 +588,82 @@ class TestAgentMultimodalIntegration:
         assert isinstance(last_user["content"], list)
         assert any("text" in block for block in last_user["content"])
         assert any("image" in block for block in last_user["content"])
+
+    @pytest.mark.asyncio
+    async def test_unconvertible_media_with_no_text_fails_the_run(self):
+        """A prompt stripped of everything the user sent is not worth sending."""
+        from ag_ui.core import EventType
+        from ag_ui_strands.agent import StrandsAgent
+
+        agent = StrandsAgent(
+            MockStrandsAgentForMultimodal(), name="test", description="test"
+        )
+        mock_strands = MockStrandsAgentForMultimodal()
+        mock_strands.session_manager = object()
+        agent._agents_by_thread["test-thread"] = mock_strands
+
+        message = UserMessage(
+            id="unconvertible-1",
+            content=[
+                ImageInputContent(
+                    source=InputContentDataSource(
+                        value=base64.b64encode(b"fake-tiff").decode(),
+                        mime_type="image/tiff",
+                    )
+                )
+            ],
+        )
+
+        events = [event async for event in agent.run(_make_input([message]))]
+
+        assert mock_strands.stream_calls == 0, "the agent was invoked anyway"
+        assert events[-1].type == EventType.RUN_ERROR
+        assert events[-1].code == "MEDIA_RESOLUTION_FAILED"
+
+    @pytest.mark.asyncio
+    async def test_unconvertible_media_falls_back_to_the_text_the_user_sent(self):
+        """Every block is dropped by the converter, but the typed text survives.
+
+        The text arrives as a raw ``{"type": "text", ...}`` mapping rather than
+        a validated ``TextInputContent``, which is the shape that reaches this
+        path when history is replayed without model validation. The converter
+        yields nothing for a mapping, so the whole prompt is empty and the
+        fallback has to recover the text instead of failing the run.
+        """
+        from ag_ui.core import EventType
+        from ag_ui_strands.agent import StrandsAgent
+
+        agent = StrandsAgent(
+            MockStrandsAgentForMultimodal(), name="test", description="test"
+        )
+        mock_strands = MockStrandsAgentForMultimodal()
+        mock_strands.session_manager = object()
+        agent._agents_by_thread["test-thread"] = mock_strands
+
+        message = UserMessage.model_construct(
+            id="unconvertible-2",
+            role="user",
+            content=[
+                {"type": "text", "text": "what is in this picture?"},
+                ImageInputContent(
+                    source=InputContentDataSource(
+                        value=base64.b64encode(b"fake-tiff").decode(),
+                        mime_type="image/tiff",
+                    )
+                ),
+            ],
+        )
+
+        # Without this the run never enters the fallback at all: a converter
+        # that returns the text itself leaves nothing for the fallback to do.
+        assert convert_agui_content_to_strands(message.content) == []
+        assert flatten_content_to_text(message.content) == "what is in this picture?"
+
+        events = [event async for event in agent.run(_make_input([message]))]
+
+        assert all(event.type != EventType.RUN_ERROR for event in events)
+        assert mock_strands.stream_calls == 1, "the surviving text never reached the agent"
+        assert mock_strands.last_prompt == "what is in this picture?"
 
     @pytest.mark.asyncio
     async def test_text_only_list_flattened_to_string(self):

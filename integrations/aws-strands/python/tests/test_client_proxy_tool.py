@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 from ag_ui.core import Tool as AgUiTool
@@ -171,6 +170,57 @@ class TestSyncProxyTools:
         assert result == set()
         assert "tool_x" not in registry.registry
 
+    def test_exempt_proxy_survives_removal_and_stays_tracked(self):
+        registry = self._fresh_registry()
+        registry.register_tool(create_proxy_tool(_make_ag_ui_tool("waiting")))
+        registry.register_tool(create_proxy_tool(_make_ag_ui_tool("idle")))
+
+        result = sync_proxy_tools(
+            registry, [], {"waiting", "idle"}, exempt_names={"waiting"}
+        )
+
+        assert result == {"waiting"}
+        assert "waiting" in registry.registry
+        assert "idle" not in registry.registry
+
+    def test_exempt_proxy_survives_a_partial_tool_list(self):
+        registry = self._fresh_registry()
+        registry.register_tool(create_proxy_tool(_make_ag_ui_tool("waiting")))
+
+        result = sync_proxy_tools(
+            registry,
+            [_make_ag_ui_tool("other")],
+            {"waiting"},
+            exempt_names={"waiting"},
+        )
+
+        assert result == {"waiting", "other"}
+        assert "waiting" in registry.registry
+
+    def test_exempting_a_native_tool_does_not_track_it_as_a_proxy(self):
+        registry = self._fresh_registry()
+        registry.register_tool(_make_native_tool("my_native"))
+
+        result = sync_proxy_tools(
+            registry, [], {"my_native"}, exempt_names={"my_native"}
+        )
+
+        assert result == set()
+        assert _is_proxy(registry.registry["my_native"]) is False
+
+    def test_exempting_an_absent_proxy_does_not_claim_it_is_retained(self):
+        # The caller tracks what comes back and separately checks the registry
+        # for a parked tool. Reporting a name the registry does not hold makes
+        # the two disagree and hides exactly the case that check is for.
+        registry = self._fresh_registry()
+
+        result = sync_proxy_tools(
+            registry, [], {"vanished"}, exempt_names={"vanished"}
+        )
+
+        assert result == set()
+        assert "vanished" not in registry.registry
+
     def test_idempotent_re_registration(self):
         """Re-syncing the same tools should work (hot reload)."""
         registry = self._fresh_registry()
@@ -208,4 +258,5 @@ class TestSyncProxyTools:
         )
 
         assert unconfigured_result["content"] == [{"text": "Forwarded to client"}]
+        assert waiting_events, "the waiting proxy emitted no events at all"
         assert "tool_interrupt_event" in waiting_events[0]

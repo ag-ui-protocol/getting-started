@@ -1,6 +1,8 @@
 """FastAPI endpoint utilities for IBM watsonx orchestrate integration."""
 
-from fastapi import FastAPI, Request
+from typing import Any
+
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import StreamingResponse
 
 from ag_ui.core.types import RunAgentInput
@@ -10,13 +12,25 @@ from .agent import WatsonxAgent
 
 
 def add_watsonx_fastapi_endpoint(
-    app: FastAPI,
+    app: FastAPI | APIRouter,
     agent: WatsonxAgent,
     path: str = "/",
+    **kwargs: Any,
 ) -> None:
-    """Adds an endpoint to the FastAPI app."""
+    """Adds an endpoint to the FastAPI app.
 
-    @app.post(path)
+    Args:
+        app: FastAPI application or APIRouter to register the routes on.
+        agent: watsonx orchestrate agent to serve.
+        path: Path of the agent route.
+        **kwargs: Forwarded to ``app.post`` for the agent route (``name``,
+            ``tags``, ``operation_id``, ``dependencies``, ``include_in_schema``,
+            ...). They do not apply to the other routes this helper registers,
+            because values such as ``operation_id`` and ``name`` must stay
+            unique per operation.
+    """
+
+    @app.post(path, **kwargs)
     async def watsonx_endpoint(input_data: RunAgentInput, request: Request):
         # Get the accept header from the request
         accept_header = request.headers.get("accept")

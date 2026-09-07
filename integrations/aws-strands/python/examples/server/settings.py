@@ -34,6 +34,7 @@ DEMO_PATHS = (
     "/a2ui-recovery",
     "/agentic-chat",
     "/agentic-chat-reasoning",
+    "/agentic-chat-citations",
     "/agentic-chat-multimodal",
     "/backend-tool-rendering",
     "/agentic-generative-ui",

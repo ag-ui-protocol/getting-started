@@ -13,13 +13,20 @@ from types import SimpleNamespace
 import pytest
 import strands.event_loop.event_loop as strands_event_loop
 from ag_ui.core import EventType, RunAgentInput, UserMessage
+import ag_ui_strands.agent as agent_module
 from ag_ui_strands.agent import StrandsAgent
 from strands import Agent
 from strands.models import Model
 from strands.types.exceptions import ModelThrottledException
 
+from tests.error_code_table import FORCE_STOP_FALLBACK
+
 _THREAD_ID = "terminal-event-thread"
 _THROTTLE_REASON = "Too many requests"
+
+# Stands for a ``force_stop`` event that carries no reason key at all, as
+# distinct from one carrying the key with nothing in it.
+_ABSENT = object()
 
 
 class _UnusedModel(Model):
@@ -57,11 +64,11 @@ class _StreamProbe:
     finalized = False
 
 
-def _run_input() -> RunAgentInput:
+def _run_input(state: object = None) -> RunAgentInput:
     return RunAgentInput(
         thread_id=_THREAD_ID,
         run_id="terminal-event-run",
-        state={},
+        state={} if state is None else state,
         messages=[UserMessage(id="user-1", role="user", content="Hello")],
         tools=[],
         context=[],
@@ -98,8 +105,8 @@ def _scripted_adapter(
     return _adapter(core), probe
 
 
-async def _collect(adapter: StrandsAgent) -> list:
-    return [event async for event in adapter.run(_run_input())]
+async def _collect(adapter: StrandsAgent, state: object = None) -> list:
+    return [event async for event in adapter.run(_run_input(state))]
 
 
 @pytest.mark.asyncio
@@ -121,6 +128,7 @@ async def test_real_force_stop_emits_run_error_and_logs_reason(
     assert EventType.TEXT_MESSAGE_CONTENT not in event_types
 
     error = events[-1]
+    assert error.code == "STRANDS_FORCE_STOP"
     assert _THROTTLE_REASON in error.message
     assert any(
         record.levelno >= logging.ERROR and _THROTTLE_REASON in record.getMessage()
@@ -141,8 +149,40 @@ async def test_force_stop_is_an_error_even_if_stream_ends_without_raising():
 
     assert probe.finalized
     assert events[-1].type == EventType.RUN_ERROR
+    assert events[-1].code == "STRANDS_FORCE_STOP"
     assert events[-1].message == reason
     assert all(event.type != EventType.RUN_FINISHED for event in events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "force_stop_reason",
+    [
+        pytest.param(_ABSENT, id="absent"),
+        pytest.param(None, id="explicit-none"),
+        pytest.param("", id="empty"),
+        pytest.param("   ", id="blank"),
+    ],
+)
+async def test_a_reasonless_force_stop_reports_the_shared_fallback(
+    force_stop_reason: object,
+):
+    """A failure carrying no reason still owes the client the shared text.
+
+    An absent reason key and one set to ``None`` are different events, and
+    rendering the second would put the word "None" on the wire.
+    """
+
+    event: dict = {"force_stop": True}
+    if force_stop_reason is not _ABSENT:
+        event["force_stop_reason"] = force_stop_reason
+    adapter, _ = _scripted_adapter([event])
+
+    events = await _collect(adapter)
+
+    assert events[-1].type == EventType.RUN_ERROR
+    assert events[-1].code == "STRANDS_FORCE_STOP"
+    assert events[-1].message == FORCE_STOP_FALLBACK
 
 
 @pytest.mark.asyncio
@@ -164,9 +204,141 @@ async def test_force_stop_preserves_a_followup_stream_exception_in_error_logs(
     assert any(
         record.levelno >= logging.ERROR
         and record.exc_info is not None
-        and record.exc_info[1] is cleanup_error
+        and cleanup_error in (record.exc_info[1], record.exc_info[1].__cause__)
         for record in caplog.records
     )
+
+
+@pytest.mark.asyncio
+async def test_stream_failure_reports_a_provider_error():
+    adapter, _ = _scripted_adapter([], stream_error=RuntimeError("provider is down"))
+
+    events = await _collect(adapter)
+
+    assert events[-1].type == EventType.RUN_ERROR
+    assert events[-1].code == "STRANDS_ERROR"
+    assert events[-1].message == "provider is down"
+
+
+@pytest.mark.asyncio
+async def test_a_tool_raising_a_type_error_is_not_reported_as_an_adapter_defect():
+    """An integrator's tool raises the same types a code defect here does.
+
+    Everything Strands runs for this adapter (the provider, the SDK, the
+    integrator's tools) raises past the one boundary both run loops pull the
+    stream through, so a ``TypeError`` arriving from there is not evidence of
+    a defect in this adapter.
+    """
+
+    adapter, _ = _scripted_adapter(
+        [], stream_error=TypeError("unsupported operand type(s) in my_tool")
+    )
+
+    events = await _collect(adapter)
+
+    assert events[-1].type == EventType.RUN_ERROR
+    assert events[-1].code == "STRANDS_ERROR"
+    assert events[-1].message == "unsupported operand type(s) in my_tool"
+
+
+class _UnreadableFailure(Exception):
+    """A failure whose text cannot be read.
+
+    ``__str__`` is arbitrary code and an integrator's exception type owns it.
+    Reading it is the one thing wrapping a foreign fault has to do, so a raise
+    there hands the classifier the very ``TypeError`` the wrapper exists to
+    keep away from ``ADAPTER_BUG``.
+    """
+
+    def __str__(self) -> str:
+        raise TypeError("__str__ exploded")
+
+
+@pytest.mark.asyncio
+async def test_a_failure_whose_text_cannot_be_read_is_still_not_an_adapter_defect():
+    adapter, _ = _scripted_adapter([], stream_error=_UnreadableFailure())
+
+    events = await _collect(adapter)
+
+    assert events[-1].type == EventType.RUN_ERROR
+    assert events[-1].code == "STRANDS_ERROR"
+    assert events[-1].message == "_UnreadableFailure"
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_defect_is_not_reported_as_a_provider_error(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The regression guard: a defect in this adapter's own code still says so."""
+
+    def broken_snapshot(*_args, **_kwargs):
+        raise TypeError("not subscriptable")
+
+    monkeypatch.setattr(agent_module, "_build_snapshot_messages", broken_snapshot)
+    adapter, _ = _scripted_adapter([])
+
+    events = await _collect(adapter)
+
+    assert events[-1].type == EventType.RUN_ERROR
+    assert events[-1].code == "ADAPTER_BUG"
+    assert events[-1].message == "not subscriptable"
+
+
+@pytest.mark.asyncio
+async def test_an_unserializable_tool_result_is_not_reported_as_an_adapter_defect():
+    """The tool chose what to return, so its JSON contract is the tool's."""
+
+    adapter, _ = _scripted_adapter(
+        [
+            {
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "toolResult": {
+                                "toolUseId": "tool-1",
+                                "content": [{"json": {"handle": object()}}],
+                            }
+                        }
+                    ],
+                }
+            }
+        ]
+    )
+
+    events = await _collect(adapter)
+
+    assert events[-1].type == EventType.RUN_ERROR
+    assert events[-1].code == "STRANDS_ERROR"
+    assert "not JSON serializable" in events[-1].message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state",
+    [
+        pytest.param("not an object", id="scalar"),
+        pytest.param(["not", "an", "object"], id="list"),
+    ],
+)
+async def test_a_state_that_is_not_a_mapping_emits_no_initial_snapshot(state: object):
+    """AG-UI types ``state`` as any value, so a scalar is a run, not a failure.
+
+    Reading one as a mapping raised ``AttributeError`` and reported a client's
+    payload as this adapter's defect. Forwarding it verbatim instead would put
+    a scalar on a wire that has only ever carried an object here, so the
+    no-snapshot reading stands and the run simply proceeds.
+    """
+
+    events = await _collect(_scripted_adapter([])[0], state=state)
+
+    types = [event.type for event in events]
+    assert EventType.RUN_ERROR not in types
+    assert types[-1] == EventType.RUN_FINISHED
+    snapshots = [e.snapshot for e in events if e.type == EventType.STATE_SNAPSHOT]
+    # Only the terminal snapshot, which tracks the key/value merges tools
+    # publish and so starts empty for a state that carries none of them.
+    assert snapshots == [{}]
 
 
 @pytest.mark.asyncio

@@ -23,6 +23,7 @@ import { createA2UIFixedSchemaAgent } from "./api/a2ui-fixed-schema";
 import { createA2UIRecoveryAgent } from "./api/a2ui-recovery";
 import { createAgenticChatAgent } from "./api/agentic-chat";
 import { createAgenticChatMultimodalAgent } from "./api/agentic-chat-multimodal";
+import { createAgenticChatCitationsAgent } from "./api/agentic-chat-citations";
 import { createAgenticChatReasoningAgent } from "./api/agentic-chat-reasoning";
 import { createAgenticGenerativeUIAgent } from "./api/agentic-generative-ui";
 import { createBackendToolRenderingAgent } from "./api/backend-tool-rendering";
@@ -42,6 +43,7 @@ import { createToolBasedGenerativeUIAgent } from "./api/tool-based-generative-ui
  */
 export const DEMOS: Record<string, () => Promise<StrandsAgent>> = {
   "agentic-chat": createAgenticChatAgent,
+  "agentic-chat-citations": createAgenticChatCitationsAgent,
   "agentic-chat-reasoning": createAgenticChatReasoningAgent,
   "agentic-chat-multimodal": createAgenticChatMultimodalAgent,
   "backend-tool-rendering": createBackendToolRenderingAgent,

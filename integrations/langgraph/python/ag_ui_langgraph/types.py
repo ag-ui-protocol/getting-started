@@ -2,6 +2,8 @@ from typing import TypedDict, Optional, List, Any, Dict, Set, Union, Literal
 from typing_extensions import NotRequired
 from enum import Enum
 
+from ag_ui.core import TokenUsage
+
 class LangGraphEventTypes(str, Enum):
     OnChainStart = "on_chain_start"
     OnChainStream = "on_chain_stream"
@@ -235,6 +237,21 @@ RunMetadata = TypedDict("RunMetadata", {
     # only tool_call_id, no parent_message_id/subagent_run_id) back to the owning
     # assistant entry in subagent_messages. Maps tool_call_id -> message id.
     "subagent_tool_call_owner": NotRequired[Dict[str, str]],
+    # Provider-reported token usage, ONE ENTRY PER MODEL CALL, in the order the
+    # calls reported it. Appended from each OnChatModelStream chunk that carries
+    # `usage_metadata`, and folded into one entry per (provider, model) by
+    # LangGraphAgent._collect_run_usage at the terminal event. Kept per-call
+    # rather than pre-summed so a run invoking several models keeps them
+    # separate — aggregation is the SDK's job (aggregate_token_usage), shared
+    # with the TypeScript producer so both languages emit the same shape.
+    "usage": NotRequired[List[TokenUsage]],
+    # LangGraph run ids of the model calls that already contributed a usage
+    # entry. Usage arrives on TWO channels and a call can use either or both:
+    # the final OnChatModelStream chunk, and the aggregated OnChatModelEnd
+    # output. A streaming provider reports it on both, under the SAME run id —
+    # so without this set, every streamed call would be counted twice. The
+    # model-end fallback consults it; the streaming path only populates it.
+    "usage_run_ids": NotRequired[Set[Optional[str]]],
 })
 
 # run_id -> lane -> in-flight message/tool-call record. The inner "lane" key is

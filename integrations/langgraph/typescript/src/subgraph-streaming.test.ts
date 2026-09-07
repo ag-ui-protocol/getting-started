@@ -12,11 +12,18 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Subject } from "rxjs";
+import type { MockedFunction } from "vitest";
 import { EventType } from "@ag-ui/core";
+import type { MessagesSnapshotEvent, StateSnapshotEvent } from "@ag-ui/core";
 import { LangGraphAgent } from "./agent";
 import type { LangGraphAgentConfig } from "./agent";
-import type { Message as LangGraphMessage } from "@langchain/langgraph-sdk";
+// @langchain/langgraph-sdk is a graph persistence client, not an LLM provider;
+// aimock does not apply to these checkpoint-history tests.
+import type {
+  Message as LangGraphMessage,
+  ThreadState as LangGraphThreadState,
+} from "@langchain/langgraph-sdk";
+import type { Durability } from "@langchain/langgraph-sdk/dist/types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -33,7 +40,7 @@ function makeConfig(): LangGraphAgentConfig {
     deploymentUrl: "http://localhost:2024",
     graphId: "test-graph",
     client: {
-      threads: { getState: vi.fn() },
+      threads: { getState: vi.fn(), getHistory: vi.fn() },
       runs: { cancel: vi.fn() },
       assistants: {
         search: vi.fn().mockResolvedValue([]),
@@ -54,12 +61,91 @@ function makeAgent(config = makeConfig()) {
   return { agent, dispatched };
 }
 
+type SnapshotHarness = {
+  activeRun: unknown;
+  getStateSnapshot: ReturnType<typeof vi.fn>;
+  getStateAndMessagesSnapshots: (
+    threadId: string,
+    orderedStateValues?: LangGraphThreadState<unknown>["values"],
+    hasOrderedStateValues?: boolean,
+    boundaryCheckpointStep?: number,
+    durability?: Durability,
+  ) => Promise<LangGraphThreadState<unknown>["values"]>;
+};
+
+type LangGraphClient = NonNullable<LangGraphAgentConfig["client"]>;
+type GetState = LangGraphClient["threads"]["getState"];
+type GetStateMock = MockedFunction<GetState>;
+type GetHistory = LangGraphClient["threads"]["getHistory"];
+type GetHistoryMock = MockedFunction<GetHistory>;
+type MockThreadState = Pick<LangGraphThreadState<unknown>, "values"> &
+  Partial<Omit<LangGraphThreadState<unknown>, "values">>;
+
+function snapshotHarness(agent: LangGraphAgent): SnapshotHarness {
+  return agent as unknown as SnapshotHarness;
+}
+
+function makeMockThreadState(
+  state: MockThreadState,
+): LangGraphThreadState<unknown> {
+  return {
+    next: [],
+    checkpoint: {
+      thread_id: "thread-1",
+      checkpoint_ns: "",
+      checkpoint_id: null,
+      checkpoint_map: null,
+    },
+    metadata: {},
+    created_at: null,
+    parent_checkpoint: null,
+    tasks: [],
+    ...state,
+  };
+}
+
+function setMockGetState(
+  config: LangGraphAgentConfig,
+  state: MockThreadState,
+): GetStateMock {
+  const threadState = makeMockThreadState(state);
+  const getState = vi.mocked(config.client!.threads.getState);
+  getState.mockResolvedValue(threadState);
+  return getState;
+}
+
+function setMockGetHistory(
+  config: LangGraphAgentConfig,
+  states: MockThreadState[],
+): GetHistoryMock {
+  const getHistory = vi.mocked(config.client!.threads.getHistory);
+  getHistory.mockResolvedValue(states.map(makeMockThreadState));
+  return getHistory;
+}
+
+function setupSnapshotHarness(state: MockThreadState) {
+  const config = makeConfig();
+  const getState = setMockGetState(config, state);
+  const { agent, dispatched } = makeAgent(config);
+  const agentHarness = snapshotHarness(agent);
+  agentHarness.activeRun = { id: "run-1" };
+  return { agentHarness, config, dispatched, getState };
+}
+
 function eventTypes(dispatched: any[]): string[] {
   return dispatched.map((e) => e?.type).filter(Boolean);
 }
 
-function msg(id: string, role: "human" | "ai", content: string): LangGraphMessage {
-  return { id, type: role === "human" ? "human" : "ai", content } as LangGraphMessage;
+function msg(
+  id: string,
+  role: "human" | "ai",
+  content: string,
+): LangGraphMessage {
+  return {
+    id,
+    type: role === "human" ? "human" : "ai",
+    content,
+  } as LangGraphMessage;
 }
 
 // ---------------------------------------------------------------------------
@@ -68,10 +154,14 @@ function msg(id: string, role: "human" | "ai", content: string): LangGraphMessag
 
 describe("nsRoot extraction", () => {
   it("empty ns → empty string", () => expect(nsRoot("")).toBe(""));
-  it("root supervisor → supervisor", () => expect(nsRoot("supervisor:cf4865ae")).toBe("supervisor"));
-  it("subgraph boundary → subgraph name", () => expect(nsRoot("flights_agent:17b1922c")).toBe("flights_agent"));
+  it("root supervisor → supervisor", () =>
+    expect(nsRoot("supervisor:cf4865ae")).toBe("supervisor"));
+  it("subgraph boundary → subgraph name", () =>
+    expect(nsRoot("flights_agent:17b1922c")).toBe("flights_agent"));
   it("inside subgraph (|) → first segment", () =>
-    expect(nsRoot("flights_agent:17b1922c|flights_agent_chat_node:0a492c87")).toBe("flights_agent"));
+    expect(
+      nsRoot("flights_agent:17b1922c|flights_agent_chat_node:0a492c87"),
+    ).toBe("flights_agent"));
   it("deeply nested → outermost", () =>
     expect(nsRoot("outer:aaa|inner:bbb|deepest:ccc")).toBe("outer"));
 });
@@ -160,12 +250,230 @@ describe("getStateAndMessagesSnapshots", () => {
 
     await (agent as any).getStateAndMessagesSnapshots("thread-1");
 
-    const snap = dispatched.find((e) => e?.type === EventType.MESSAGES_SNAPSHOT);
+    const snap = dispatched.find(
+      (e) => e?.type === EventType.MESSAGES_SNAPSHOT,
+    );
     expect(snap).toBeDefined();
     const ids = snap.messages.map((m: any) => m.id);
     expect(ids).toContain("h1");
     expect(ids.indexOf("f1")).toBeLessThan(ids.indexOf("h1"));
   });
+
+  it("uses ordered values for boundary snapshots when getState is ahead", async () => {
+    const user = msg("u1", "human", "AMS to SF");
+    const hotels = msg("h1", "ai", "Booked Hotel Zoe");
+    const futureExperience = msg(
+      "e1",
+      "ai",
+      "Booked experience after boundary",
+    );
+    const orderedValues = {
+      messages: [user, hotels],
+      itinerary: {
+        hotel: "Hotel Zoe",
+        refundable: true,
+      },
+    };
+    const { agentHarness, dispatched, getState } = setupSnapshotHarness({
+      values: {
+        messages: [user, hotels, futureExperience],
+        itinerary: {
+          hotel: "Hotel Zoe",
+          experience: "Ferry Building tasting",
+        },
+        futureOnly: true,
+      },
+    });
+
+    await agentHarness.getStateAndMessagesSnapshots(
+      "thread-1",
+      orderedValues,
+      true,
+    );
+
+    expect(getState).not.toHaveBeenCalled();
+    const messagesSnap = dispatched.find(
+      (event): event is MessagesSnapshotEvent =>
+        event?.type === EventType.MESSAGES_SNAPSHOT,
+    );
+    expect(messagesSnap).toBeDefined();
+    const ids = messagesSnap?.messages.map((message) => message.id);
+    expect(ids).toEqual(["u1", "h1"]);
+    expect(ids).not.toContain("e1");
+
+    const stateSnap = dispatched.find(
+      (event): event is StateSnapshotEvent =>
+        event?.type === EventType.STATE_SNAPSHOT,
+    );
+    expect(stateSnap).toBeDefined();
+    expect(stateSnap?.snapshot).toEqual(orderedValues);
+    expect(stateSnap?.snapshot).not.toHaveProperty("futureOnly");
+    expect(stateSnap?.snapshot.itinerary).not.toHaveProperty("experience");
+  });
+
+  it("uses available empty ordered state instead of falling back to getState", async () => {
+    const checkpointOnly = msg("c1", "ai", "Checkpoint-only response");
+    const { agentHarness, dispatched, getState } = setupSnapshotHarness({
+      values: {
+        messages: [checkpointOnly],
+        futureOnly: true,
+      },
+    });
+
+    await agentHarness.getStateAndMessagesSnapshots("thread-1", {}, true);
+
+    expect(getState).not.toHaveBeenCalled();
+    const stateSnap = dispatched.find(
+      (event): event is StateSnapshotEvent =>
+        event?.type === EventType.STATE_SNAPSHOT,
+    );
+    expect(stateSnap?.snapshot).toEqual({});
+    const messagesSnap = dispatched.find(
+      (event): event is MessagesSnapshotEvent =>
+        event?.type === EventType.MESSAGES_SNAPSHOT,
+    );
+    expect(messagesSnap?.messages).toEqual([]);
+  });
+
+  it("falls back to getState for STATE_SNAPSHOT and MESSAGES_SNAPSHOT when no ordered values exist", async () => {
+    const user = msg("u1", "human", "AMS to SF");
+    const checkpointOnly = msg("c1", "ai", "Checkpoint-only response");
+    const { agentHarness, dispatched, getState } = setupSnapshotHarness({
+      values: {
+        messages: [user, checkpointOnly],
+        itinerary: {
+          hotels: ["Checkpoint Hotel"],
+        },
+      },
+    });
+
+    await agentHarness.getStateAndMessagesSnapshots("thread-1");
+
+    expect(getState).toHaveBeenCalledWith("thread-1");
+    const stateSnap = dispatched.find(
+      (event): event is StateSnapshotEvent =>
+        event?.type === EventType.STATE_SNAPSHOT,
+    );
+    expect(stateSnap).toBeDefined();
+    expect(stateSnap?.snapshot).toEqual({
+      messages: [user, checkpointOnly],
+      itinerary: {
+        hotels: ["Checkpoint Hotel"],
+      },
+    });
+    const messagesSnap = dispatched.find(
+      (event): event is MessagesSnapshotEvent =>
+        event?.type === EventType.MESSAGES_SNAPSHOT,
+    );
+    expect(messagesSnap).toBeDefined();
+    const ids = messagesSnap?.messages.map((message) => message.id);
+    expect(ids).toEqual(["u1", "c1"]);
+  });
+});
+
+describe("boundary checkpoint durability", () => {
+  it("retries an empty default-async history lookup", async () => {
+    const user = msg("u1", "human", "AMS to SF");
+    const committedSubgraphAssistant = msg(
+      "s1",
+      "ai",
+      "Subgraph committed a hotel",
+    );
+    const { agentHarness, config, dispatched, getState } = setupSnapshotHarness(
+      {
+        values: {
+          messages: [
+            user,
+            committedSubgraphAssistant,
+            msg("future", "ai", "Future root response"),
+          ],
+          futureOnly: true,
+        },
+      },
+    );
+    const boundaryState = makeMockThreadState({
+      values: {
+        messages: [user, committedSubgraphAssistant],
+        itinerary: { hotel: "Hotel Zoe" },
+      },
+      metadata: { step: 6 },
+    });
+    const getHistory = vi.mocked(config.client!.threads.getHistory);
+    getHistory.mockResolvedValueOnce([]).mockResolvedValueOnce([boundaryState]);
+
+    await agentHarness.getStateAndMessagesSnapshots(
+      "thread-1",
+      undefined,
+      false,
+      6,
+    );
+
+    expect(getHistory).toHaveBeenCalledTimes(2);
+    expect(getState).not.toHaveBeenCalled();
+    const stateSnapshot = dispatched.find(
+      (event): event is StateSnapshotEvent =>
+        event?.type === EventType.STATE_SNAPSHOT,
+    );
+    expect(stateSnapshot?.snapshot).toEqual(boundaryState.values);
+    expect(stateSnapshot?.snapshot).not.toHaveProperty("futureOnly");
+  });
+
+  it("fails explicitly for exit durability without reading thread head", async () => {
+    const { agentHarness, config, dispatched, getState } = setupSnapshotHarness(
+      {
+        values: {
+          messages: [msg("future", "ai", "Future root response")],
+          futureOnly: true,
+        },
+      },
+    );
+    const getHistory = setMockGetHistory(config, []);
+
+    await expect(
+      agentHarness.getStateAndMessagesSnapshots(
+        "thread-1",
+        undefined,
+        false,
+        6,
+        "exit",
+      ),
+    ).rejects.toThrow('durability "exit"');
+
+    expect(getHistory).not.toHaveBeenCalled();
+    expect(getState).not.toHaveBeenCalled();
+    expect(dispatched).toEqual([]);
+  });
+
+  it.each([
+    ["async", 3],
+    ["sync", 1],
+  ] as const)(
+    "bounds %s durability checkpoint lookup to %i attempt(s)",
+    async (durability, expectedAttempts) => {
+      const { agentHarness, config, dispatched, getState } =
+        setupSnapshotHarness({
+          values: {
+            messages: [msg("future", "ai", "Future root response")],
+            futureOnly: true,
+          },
+        });
+      const getHistory = setMockGetHistory(config, []);
+
+      await expect(
+        agentHarness.getStateAndMessagesSnapshots(
+          "thread-1",
+          undefined,
+          false,
+          6,
+          durability,
+        ),
+      ).rejects.toThrow("No LangGraph checkpoint found for boundary step 6");
+
+      expect(getHistory).toHaveBeenCalledTimes(expectedAttempts);
+      expect(getState).not.toHaveBeenCalled();
+      expect(dispatched).toEqual([]);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -185,9 +493,9 @@ describe("subgraph change trigger", () => {
       next: [],
       metadata: { writes: {} },
     });
-    (config.client as any).assistants.search = vi.fn().mockResolvedValue([
-      { assistant_id: "asst-1", graph_id: "test-graph" },
-    ]);
+    (config.client as any).assistants.search = vi
+      .fn()
+      .mockResolvedValue([{ assistant_id: "asst-1", graph_id: "test-graph" }]);
     (config.client as any).assistants.getGraph = vi.fn().mockResolvedValue({
       nodes: [{ id: "supervisor" }, { id: "hotels_agent" }],
       edges: [],
@@ -195,7 +503,10 @@ describe("subgraph change trigger", () => {
 
     const { agent, dispatched } = makeAgent(config);
     agent.threadId = "thread-1";
-    (agent as any).assistant = { assistant_id: "asst-1", graph_id: "test-graph" };
+    (agent as any).assistant = {
+      assistant_id: "asst-1",
+      graph_id: "test-graph",
+    };
     (agent as any).activeRun = {
       id: "run-1",
       nodeName: null,
@@ -209,17 +520,18 @@ describe("subgraph change trigger", () => {
     return { agent, dispatched, config };
   }
 
-  async function driveAgent(agent: LangGraphAgent, chunks: any[]) {
-    let resolve: () => void;
-    const done = new Promise<void>((r) => (resolve = r));
-
-    const events$ = new Subject<any>();
-    const results: any[] = [];
-
+  async function driveAgent(
+    agent: LangGraphAgent,
+    chunks: any[],
+    expectedError?: Error,
+  ) {
     // Patch prepareStream to return our synthetic chunk stream
     (agent as any).prepareStream = vi.fn().mockResolvedValue({
       streamResponse: (async function* () {
-        for (const c of chunks) yield c;
+        for (const c of chunks) {
+          if (c instanceof Error) throw c;
+          yield c;
+        }
       })(),
       state: { values: { messages: [] } } as any,
     });
@@ -239,8 +551,8 @@ describe("subgraph change trigger", () => {
       await new Promise<void>((res, rej) => {
         obs.subscribe({ next: () => {}, error: rej, complete: res });
       });
-    } catch (_) {
-      // Expected — we don't have a real server
+    } catch (error) {
+      if (error !== expectedError) throw error;
     }
   }
 
@@ -256,7 +568,8 @@ describe("subgraph change trigger", () => {
           event: "on_chain_start",
           metadata: {
             langgraph_node: "hotels_agent",
-            langgraph_checkpoint_ns: "hotels_agent:abc|hotels_agent_chat_node:xyz",
+            langgraph_checkpoint_ns:
+              "hotels_agent:abc|hotels_agent_chat_node:xyz",
           },
         },
       },
@@ -276,7 +589,7 @@ describe("subgraph change trigger", () => {
     await driveAgent(agent, chunks);
 
     const snapCount = eventTypes(dispatched).filter(
-      (t) => t === EventType.MESSAGES_SNAPSHOT
+      (t) => t === EventType.MESSAGES_SNAPSHOT,
     ).length;
     expect(snapCount).toBeGreaterThanOrEqual(1);
   });
@@ -291,7 +604,8 @@ describe("subgraph change trigger", () => {
           event: "on_chain_start",
           metadata: {
             langgraph_node: "hotels_agent",
-            langgraph_checkpoint_ns: "hotels_agent:abc|hotels_agent_chat_node:xyz",
+            langgraph_checkpoint_ns:
+              "hotels_agent:abc|hotels_agent_chat_node:xyz",
           },
         },
       },
@@ -310,7 +624,9 @@ describe("subgraph change trigger", () => {
 
     await driveAgent(agent, chunks);
 
-    const snapshots = dispatched.filter((e) => e?.type === EventType.MESSAGES_SNAPSHOT);
+    const snapshots = dispatched.filter(
+      (e) => e?.type === EventType.MESSAGES_SNAPSHOT,
+    );
     expect(snapshots.length).toBeGreaterThanOrEqual(1);
 
     const first = snapshots[0];
@@ -319,6 +635,217 @@ describe("subgraph change trigger", () => {
     if (ids.includes("f1")) {
       expect(ids.indexOf("f1")).toBeLessThan(ids.indexOf("h1"));
     }
+  });
+
+  it("uses only root values for subgraph boundary snapshots", async () => {
+    const { agent, dispatched, config } = makeStreamingAgent();
+    const getState = vi.mocked(config.client!.threads.getState);
+    (agent as any).getStateSnapshot = vi
+      .fn()
+      .mockImplementation(
+        (state: LangGraphThreadState<unknown>) => state.values,
+      );
+
+    const user = msg("u1", "human", "AMS to SF");
+    const rootAssistant = msg("r1", "ai", "Root has current route");
+    const futureSubgraphAssistant = msg(
+      "s1",
+      "ai",
+      "Subgraph has a future-only route",
+    );
+
+    const stopAfterBoundary = new Error("stop after boundary snapshot");
+    const chunks = [
+      {
+        event: "values",
+        data: {
+          messages: [user, rootAssistant],
+          itinerary: {
+            route: "root route",
+          },
+        },
+      },
+      {
+        event: "values|hotels_agent:abc",
+        data: {
+          messages: [futureSubgraphAssistant],
+          itinerary: {
+            route: "subgraph route",
+            hotel: "Hotel Zoe",
+          },
+          futureOnly: true,
+        },
+      },
+      {
+        event: "events",
+        data: {
+          event: "on_chain_start",
+          metadata: {
+            langgraph_node: "hotels_agent",
+            langgraph_checkpoint_ns:
+              "hotels_agent:abc|hotels_agent_chat_node:xyz",
+          },
+        },
+      },
+      stopAfterBoundary,
+    ];
+
+    await driveAgent(agent, chunks, stopAfterBoundary);
+
+    expect(getState).not.toHaveBeenCalled();
+
+    const stateSnapshots = dispatched.filter(
+      (event): event is StateSnapshotEvent =>
+        event?.type === EventType.STATE_SNAPSHOT,
+    );
+    expect(stateSnapshots.map((event) => event.snapshot)).toContainEqual({
+      messages: [user, rootAssistant],
+      itinerary: {
+        route: "root route",
+      },
+    });
+    for (const stateSnapshot of stateSnapshots) {
+      expect(stateSnapshot.snapshot).not.toHaveProperty("futureOnly");
+      expect(stateSnapshot.snapshot.itinerary).not.toHaveProperty("hotel");
+    }
+
+    const messagesSnap = dispatched.find(
+      (event): event is MessagesSnapshotEvent =>
+        event?.type === EventType.MESSAGES_SNAPSHOT,
+    );
+    expect(messagesSnap).toBeDefined();
+    expect(messagesSnap?.messages.map((message) => message.id)).toEqual([
+      "u1",
+      "r1",
+    ]);
+    expect(messagesSnap?.messages.map((message) => message.id)).not.toContain(
+      "s1",
+    );
+  });
+
+  it("uses the boundary checkpoint after ordered root values are consumed", async () => {
+    const { agent, dispatched, config } = makeStreamingAgent();
+    const user = msg("u1", "human", "AMS to SF");
+    const rootAssistant = msg("r1", "ai", "Root has current route");
+    const committedSubgraphAssistant = msg(
+      "s1",
+      "ai",
+      "Subgraph committed a hotel",
+    );
+    const futureAssistant = msg("future", "ai", "Future root response");
+    const getState = setMockGetState(config, {
+      values: {
+        messages: [
+          user,
+          rootAssistant,
+          committedSubgraphAssistant,
+          futureAssistant,
+        ],
+        itinerary: {
+          route: "root route",
+          hotel: "Hotel Zoe",
+        },
+        futureOnly: true,
+      },
+      metadata: { writes: {} },
+    });
+    const getHistory = setMockGetHistory(config, [
+      {
+        values: {
+          messages: [user, rootAssistant, committedSubgraphAssistant],
+          itinerary: {
+            route: "root route",
+            hotel: "Hotel Zoe",
+          },
+        },
+        metadata: { step: 6, writes: {} },
+      },
+    ]);
+    (agent as any).getStateSnapshot = vi
+      .fn()
+      .mockImplementation(
+        (state: LangGraphThreadState<unknown>) => state.values,
+      );
+
+    const stopAfterExitBoundary = new Error(
+      "stop after exit boundary snapshot",
+    );
+    const chunks = [
+      {
+        event: "values",
+        data: {
+          messages: [user, rootAssistant],
+          itinerary: { route: "root route" },
+        },
+      },
+      {
+        event: "events",
+        data: {
+          event: "on_chain_start",
+          metadata: {
+            langgraph_node: "hotels_agent",
+            langgraph_checkpoint_ns:
+              "hotels_agent:abc|hotels_agent_chat_node:xyz",
+          },
+        },
+      },
+      {
+        event: "values|hotels_agent:abc",
+        data: {
+          messages: [committedSubgraphAssistant],
+          itinerary: { hotel: "Hotel Zoe" },
+        },
+      },
+      {
+        event: "events",
+        data: {
+          event: "on_chain_end",
+          metadata: {
+            langgraph_node: "supervisor",
+            langgraph_checkpoint_ns: "supervisor:def",
+            langgraph_step: 7,
+          },
+          data: { output: {} },
+        },
+      },
+      stopAfterExitBoundary,
+    ];
+
+    await driveAgent(agent, chunks, stopAfterExitBoundary);
+
+    expect(getHistory).toHaveBeenCalledWith("thread-1", {
+      limit: 1,
+      metadata: { step: 6 },
+    });
+    expect(getState).not.toHaveBeenCalled();
+    const stateSnapshots = dispatched.filter(
+      (event): event is StateSnapshotEvent =>
+        event?.type === EventType.STATE_SNAPSHOT,
+    );
+    expect(stateSnapshots.map((event) => event.snapshot)).toContainEqual({
+      messages: [user, rootAssistant, committedSubgraphAssistant],
+      itinerary: {
+        route: "root route",
+        hotel: "Hotel Zoe",
+      },
+    });
+    for (const stateSnapshot of stateSnapshots) {
+      expect(stateSnapshot.snapshot).not.toHaveProperty("futureOnly");
+    }
+
+    const messagesSnapshots = dispatched.filter(
+      (event): event is MessagesSnapshotEvent =>
+        event?.type === EventType.MESSAGES_SNAPSHOT,
+    );
+    expect(messagesSnapshots).toHaveLength(2);
+    expect(messagesSnapshots[1].messages.map((message) => message.id)).toEqual([
+      "u1",
+      "r1",
+      "s1",
+    ]);
+    expect(
+      messagesSnapshots[1].messages.map((message) => message.id),
+    ).not.toContain("future");
   });
 });
 
@@ -338,7 +865,7 @@ describe("getState error propagation", () => {
     (agent as any).getStateSnapshot = vi.fn().mockReturnValue({});
 
     await expect(
-      (agent as any).getStateAndMessagesSnapshots("thread-1")
+      (agent as any).getStateAndMessagesSnapshots("thread-1"),
     ).rejects.toThrow("checkpoint unavailable");
   });
 });

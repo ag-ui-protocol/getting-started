@@ -10,13 +10,36 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
 dependencies = [
-    "ag-ui-protocol>=0.1.21",
+    "ag-ui-protocol>=0.1.22",
     "ag-ui-a2ui-toolkit>=0.0.4",
     "langchain>=1.2.0",
     "langchain-core>=0.3.0",
     "langgraph>=0.6.0,<2",
     "pydantic>=2.0.0",
 ]
+
+# TEMPORARY, MUST BE REMOVED BEFORE THE NEXT ag-ui-langgraph RELEASE.
+#
+# Terminal-event token usage needs `ag_ui.core.token_usage`
+# (token_usage_from_langchain_metadata / aggregate_token_usage), which lives in
+# this repo's sdks/python but is not in any published ag-ui-protocol wheel
+# (latest on PyPI is 0.1.21). Without this override the package does not import
+# at all — `from ag_ui.core import aggregate_token_usage` raises ImportError —
+# so every test here fails on a clean checkout.
+#
+# `[tool.uv.sources]` is a development-only override: uv applies it for local
+# `uv sync` and CI, and it is NOT written into the built wheel's metadata, so
+# installed users still resolve `ag-ui-protocol>=0.1.22` from PyPI. That is
+# exactly why it is unsafe to leave here — a release cut while this points at a
+# local path ships a wheel whose declared floor cannot be satisfied.
+#
+# The sequence, same as PNI-274: release ag-ui-protocol 0.1.22 with the token
+# usage helpers, delete this block, relock, then release ag-ui-langgraph. Until
+# 0.1.22 is on PyPI the `langgraph-python-declared-floor` lane cannot pass —
+# that lane installs the declared floor from PyPI, and this floor does not
+# exist there yet. See OSS-886.
+[tool.uv.sources]
+ag-ui-protocol = { path = "../../../sdks/python" }
 
 [project.optional-dependencies]
 fastapi = ["fastapi>=0.115.12"]

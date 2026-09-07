@@ -166,7 +166,7 @@ describe("interruptOnCall client-tool guard", () => {
     expect(finished).toEqual(
       expect.objectContaining({ type: EventType.RUN_FINISHED }),
     );
-    expect(finished).not.toHaveProperty("outcome");
+    expect(finished).toHaveProperty("outcome", { type: "success" });
     expect(agent).toHaveProperty("_pendingInterruptsByThread", new Map());
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(TOOL_NAME));
@@ -192,7 +192,7 @@ describe("interruptOnCall client-tool guard", () => {
     model.beginRun();
 
     const firstEvents = await collect(agent, input("run-1", [CLIENT_TOOL]));
-    expect(firstEvents.at(-1)).not.toHaveProperty("outcome");
+    expect(firstEvents.at(-1)).toHaveProperty("outcome", { type: "success" });
 
     const liveAgent = agentsByThread.get(THREAD_ID);
     if (!liveAgent) {

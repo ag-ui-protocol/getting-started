@@ -16,13 +16,13 @@ import { describe, it, expect } from "vitest";
 import type { Agent } from "@strands-agents/sdk";
 import type { Message, RunAgentInput } from "@ag-ui/core";
 
-import { StrandsAgent } from "../agent";
 import type { StrandsAgentConfig } from "../config";
 import {
   collect,
   expectCompletedRun,
   minimalRunInput,
   scriptedAgent,
+  strandsAgentOverStub,
 } from "./helpers";
 
 /** A stub that records the prompt the adapter hands to `stream()`. */
@@ -36,15 +36,6 @@ function promptRecorder() {
     } as unknown as Agent["stream"],
   });
   return { stub, calls };
-}
-
-function makeAgent(stub: Agent, config: StrandsAgentConfig): StrandsAgent {
-  const sa = new StrandsAgent({ agent: stub, name: "t", config });
-  const byThread = (sa as unknown as { _agentsByThread: Map<string, unknown> })
-    ._agentsByThread;
-  byThread.set("thread-1", stub);
-  byThread.set("default", stub);
-  return sa;
 }
 
 /** The frontend tool every case here resolves. */
@@ -100,7 +91,7 @@ async function promptFor(
   config: StrandsAgentConfig = { replayHistoryIntoStrands: false },
 ): Promise<string> {
   const { stub, calls } = promptRecorder();
-  const agent = makeAgent(stub, config);
+  const agent = strandsAgentOverStub(stub, { config });
   const events = await collect(agent, input);
   expectCompletedRun(events, "continuation run");
   expect(calls, "adapter never invoked stream()").toHaveLength(1);
@@ -181,7 +172,7 @@ describe("continuation prompt after a frontend tool resolves", () => {
     // The second live configuration: a wired session manager disables replay,
     // so the prompt is again what carries the result.
     const { stub, calls } = promptRecorder();
-    const agent = makeAgent(stub, {});
+    const agent = strandsAgentOverStub(stub);
     // Set after construction: the constructor warns about a template-level
     // session manager, while the replay gate reads the per-thread agent.
     (stub as unknown as { sessionManager: unknown }).sessionManager = {};

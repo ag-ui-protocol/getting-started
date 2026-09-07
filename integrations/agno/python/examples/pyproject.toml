@@ -9,14 +9,15 @@ license = "MIT"
 readme = "README.md"
 requires-python = ">=3.12,<4.0"
 dependencies = [
-    "agno[agui,google]>=2.6.19",
+    "agno[agui,google,os]>=3.0.4,<4",
     "httpx>=0.27.0",
     "openai>=1.99.1",
     "yfinance>=0.2.63",
     "fastapi>=0.116.1",
     "uvicorn>=0.35.0",
-    "ag-ui-protocol>=0.1.19",
-    "dotenv (>=0.9.9,<0.10.0)",
+    "ag-ui-protocol>=0.1.22,<0.2",
+    "python-dotenv>=1.0,<2",
+    "packaging>=24,<27",
 ]
 authors = [
     {name = "AG-UI Team"}
