@@ -1,0 +1,5 @@
+{"type":"RUN_STARTED","threadId":"thread-client","runId":"run-client"}
+{"type":"TEXT_MESSAGE_START","messageId":"message-client","role":"assistant"}
+{"type":"TEXT_MESSAGE_CONTENT","messageId":"message-client","delta":"Hello from ADK"}
+{"type":"TEXT_MESSAGE_END","messageId":"message-client"}
+{"type":"RUN_FINISHED","threadId":"thread-client","runId":"run-client","result":{"status":"ok"}}

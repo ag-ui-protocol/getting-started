@@ -1,0 +1,3 @@
+{"type":"RUN_STARTED","threadId":"thread-hitl-approval","runId":"run-hitl-request"}
+{"type":"TOOL_CALL_CHUNK","toolCallId":"approval-call","toolCallName":"request_approval","parentMessageId":"message-hitl-request","delta":"{\"action\":\"publish\"}"}
+{"type":"RUN_FINISHED","threadId":"thread-hitl-approval","runId":"run-hitl-request","result":{"status":"pending-confirmation"}}

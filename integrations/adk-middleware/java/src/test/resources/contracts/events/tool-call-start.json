@@ -1,0 +1,6 @@
+{
+  "type": "TOOL_CALL_START",
+  "toolCallId": "backend-call-contract",
+  "toolCallName": "lookup_score",
+  "parentMessageId": "message-contract"
+}

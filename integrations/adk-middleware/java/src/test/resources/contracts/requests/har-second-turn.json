@@ -1,0 +1,65 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": {
+      "name": "ag-ui-adk-bridge-fixture",
+      "version": "0.12.0"
+    },
+    "pages": [],
+    "entries": [
+      {
+        "startedDateTime": "2026-08-07T10:00:00.000Z",
+        "time": 12,
+        "request": {
+          "method": "POST",
+          "url": "https://api.example.test/v1/runs",
+          "httpVersion": "HTTP/1.1",
+          "cookies": [],
+          "headers": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-correlation-id",
+              "value": "anon-correlation-0001"
+            }
+          ],
+          "queryString": [],
+          "postData": {
+            "mimeType": "application/json",
+            "text": "{\"threadId\":\"thread-ordinary-turns\",\"runId\":\"run-ordinary-two\",\"messages\":[{\"role\":\"user\",\"content\":\"second turn\"}]}"
+          },
+          "headersSize": -1,
+          "bodySize": -1
+        },
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "httpVersion": "HTTP/1.1",
+          "cookies": [],
+          "headers": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ],
+          "content": {
+            "size": -1,
+            "mimeType": "application/x-ndjson",
+            "text": "{\"type\":\"RUN_STARTED\",\"threadId\":\"thread-ordinary-turns\",\"runId\":\"run-ordinary-two\"}\n{\"type\":\"TEXT_MESSAGE_CHUNK\",\"messageId\":\"assistant-ordinary-two\",\"role\":\"assistant\",\"delta\":\"Second answer\"}\n{\"type\":\"RUN_FINISHED\",\"threadId\":\"thread-ordinary-turns\",\"runId\":\"run-ordinary-two\",\"result\":{\"turn\":2}}"
+          },
+          "redirectURL": "",
+          "headersSize": -1,
+          "bodySize": -1
+        },
+        "cache": {},
+        "timings": {
+          "send": 2,
+          "wait": 8,
+          "receive": 2
+        }
+      }
+    ]
+  }
+}

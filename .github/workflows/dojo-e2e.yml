@@ -136,6 +136,10 @@ jobs:
             test_path: tests/adkMiddlewareTests
             services: ["dojo", "adk-middleware"]
             wait_on: http://localhost:9999,tcp:localhost:8010
+          - suite: adk-middleware-java
+            test_path: tests/adkMiddlewareJavaTests
+            services: ["dojo", "adk-middleware-java"]
+            wait_on: http://localhost:9999,tcp:localhost:8027
           - suite: agno
             test_path: tests/agnoTests
             services: ["dojo", "agno"]
@@ -324,8 +328,21 @@ jobs:
             9.0.x
             10.0.x
 
+      - name: Set up JDK 21
+        if: ${{ contains(join(matrix.services, ','), 'adk-middleware-java') }}
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961  # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Test Java ADK middleware
+        if: ${{ contains(join(matrix.services, ','), 'adk-middleware-java') }}
+        working-directory: integrations/adk-middleware/java
+        run: mvn -B test
 
       - name: Prepare dojo for e2e
         working-directory: apps/dojo

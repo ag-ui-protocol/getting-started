@@ -1,0 +1,3 @@
+{"type":"RUN_STARTED","threadId":"thread-replay","runId":"run-replay"}
+{"type":"TOOL_CALL_CHUNK","toolCallId":"unknown-call","toolCallName":"show_sports_list","parentMessageId":"message-replay","delta":"{\"league\":\"championship\"}"}
+{"type":"RUN_FINISHED","threadId":"thread-replay","runId":"run-replay","result":{"status":"pending-tools"}}

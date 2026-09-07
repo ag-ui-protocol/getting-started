@@ -1,0 +1,6 @@
+{
+  "type": "REASONING_ENCRYPTED_VALUE",
+  "subtype": "message",
+  "entityId": "reasoning-message-contract",
+  "encryptedValue": "ciphertext-contract"
+}

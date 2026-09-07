@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test src/test/node/**/*.test.mjs"
+  },
+  "devDependencies": {
+    "@ag-ui/client": "0.0.52",
+    "@ag-ui/core": "0.0.52"
+  }
+}

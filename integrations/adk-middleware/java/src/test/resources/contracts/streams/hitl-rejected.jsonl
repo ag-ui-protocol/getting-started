@@ -1,0 +1,5 @@
+{"type":"RUN_STARTED","threadId":"thread-hitl-rejection","runId":"run-hitl-rejected"}
+{"type":"TEXT_MESSAGE_START","messageId":"message-hitl-rejected","role":"assistant"}
+{"type":"TEXT_MESSAGE_CONTENT","messageId":"message-hitl-rejected","delta":"Approval rejected"}
+{"type":"TEXT_MESSAGE_END","messageId":"message-hitl-rejected"}
+{"type":"RUN_FINISHED","threadId":"thread-hitl-rejection","runId":"run-hitl-rejected","result":{"status":"rejected"}}

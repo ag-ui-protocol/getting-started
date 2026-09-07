@@ -119,6 +119,12 @@ const ALL_TARGETS = {
     name: "ADK Middleware",
     cwd: path.join(integrationsRoot, "adk-middleware/python/examples"),
   },
+  "adk-middleware-java": {
+    command:
+      "mvn -q -DskipTests install && mvn -q -DskipTests -f examples/pom.xml package",
+    name: "ADK Middleware (Java)",
+    cwd: path.join(integrationsRoot, "adk-middleware/java"),
+  },
   "a2a-middleware": {
     command: "uv sync",
     name: "A2A Middleware",

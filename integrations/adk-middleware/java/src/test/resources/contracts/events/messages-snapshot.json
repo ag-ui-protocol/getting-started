@@ -1,0 +1,7 @@
+{
+  "type": "MESSAGES_SNAPSHOT",
+  "messages": [
+    { "id": "user-contract", "role": "user", "content": "Question" },
+    { "id": "assistant-contract", "role": "assistant", "content": "Answer" }
+  ]
+}
