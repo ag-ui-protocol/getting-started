@@ -2575,6 +2575,20 @@ export class MastraAgent extends AbstractAgent {
           ]);
           break;
         }
+        case "tripwire": {
+          // A processor blocked the run. With `retry: true` Mastra retries
+          // internally and produces a new response on this same stream, so
+          // there is nothing to surface. Otherwise the stream ends here: emit
+          // the reason as assistant text so the run does not finish as an
+          // empty success. (Mastra's own channel adapter posts a non-retry
+          // tripwire as a user-visible message the same way.)
+          if (chunk.payload.retry) break;
+          flush();
+          callbacks.onTextPart?.(
+            chunk.payload.reason || "The response was blocked by a processor.",
+          );
+          break;
+        }
         case "abort": {
           // @mastra/core emits a first-class `abort` chunk (payload `{}`) when
           // a run is cancelled via abortSignal, and closes the stream straight
