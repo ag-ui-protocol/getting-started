@@ -303,6 +303,9 @@ func (e *RunErrorEvent) ToJSON() ([]byte, error) {
 type StepStartedEvent struct {
 	*BaseEvent
 	StepName string `json:"stepName"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewStepStartedEvent creates a new step started event
@@ -361,6 +364,9 @@ func (e *StepStartedEvent) ToJSON() ([]byte, error) {
 type StepFinishedEvent struct {
 	*BaseEvent
 	StepName string `json:"stepName"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewStepFinishedEvent creates a new step finished event

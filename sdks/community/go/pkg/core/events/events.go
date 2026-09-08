@@ -69,6 +69,14 @@ const (
 	// EventTypeReasoningEncryptedValue attaches an encrypted reasoning value.
 	EventTypeReasoningEncryptedValue     EventType = "REASONING_ENCRYPTED_VALUE"
 
+	// Subagent events attribute a segment of the stream to a nested agent.
+	// EventTypeSubagentStarted indicates a subagent has started within the run.
+	EventTypeSubagentStarted EventType = "SUBAGENT_STARTED"
+	// EventTypeSubagentFinished indicates a subagent has finished.
+	EventTypeSubagentFinished EventType = "SUBAGENT_FINISHED"
+	// EventTypeSubagentError indicates a subagent has errored, independent of the run.
+	EventTypeSubagentError EventType = "SUBAGENT_ERROR"
+
 	// EventTypeUnknown represents an unrecognized event type
 	EventTypeUnknown EventType = "UNKNOWN"
 )
@@ -108,6 +116,9 @@ var validEventTypes = map[EventType]bool{
 	EventTypeReasoningMessageChunk:      true,
 	EventTypeReasoningEnd:               true,
 	EventTypeReasoningEncryptedValue:    true,
+	EventTypeSubagentStarted:            true,
+	EventTypeSubagentFinished:           true,
+	EventTypeSubagentError:              true,
 }
 
 // Event defines the common interface for all AG-UI events
@@ -247,6 +258,7 @@ func ValidateSequence(events []Event) error {
 	activeReasoningMessages := make(map[string]bool)
 	activeToolCalls := make(map[string]bool)
 	activeSteps := make(map[string]bool)
+	activeSubagents := make(map[string]bool)
 	finishedRuns := make(map[string]bool)
 
 	for i, event := range events {
@@ -398,6 +410,29 @@ func ValidateSequence(events []Event) error {
 		case EventTypeReasoningEnd:
 			// Reasoning events are always valid in sequence context.
 
+		case EventTypeSubagentStarted:
+			if subagentEvent, ok := event.(*SubagentStartedEvent); ok {
+				if activeSubagents[subagentEvent.SubagentRunID] {
+					return fmt.Errorf("subagent %s already started", subagentEvent.SubagentRunID)
+				}
+				activeSubagents[subagentEvent.SubagentRunID] = true
+			}
+
+		case EventTypeSubagentFinished:
+			if subagentEvent, ok := event.(*SubagentFinishedEvent); ok {
+				if !activeSubagents[subagentEvent.SubagentRunID] {
+					return fmt.Errorf("cannot finish subagent %s that was not started", subagentEvent.SubagentRunID)
+				}
+				delete(activeSubagents, subagentEvent.SubagentRunID)
+			}
+
+		case EventTypeSubagentError:
+			// A subagent can error without having been announced, so this ends
+			// the invocation without requiring a prior SUBAGENT_STARTED.
+			if subagentEvent, ok := event.(*SubagentErrorEvent); ok {
+				delete(activeSubagents, subagentEvent.SubagentRunID)
+			}
+
 		case EventTypeStateSnapshot:
 			// State snapshot events are always valid in sequence context
 			// They represent complete state at any point in time
@@ -508,6 +543,12 @@ func EventFromJSON(data []byte) (Event, error) {
 		event = &ReasoningEndEvent{}
 	case EventTypeReasoningEncryptedValue:
 		event = &ReasoningEncryptedValueEvent{}
+	case EventTypeSubagentStarted:
+		event = &SubagentStartedEvent{}
+	case EventTypeSubagentFinished:
+		event = &SubagentFinishedEvent{}
+	case EventTypeSubagentError:
+		event = &SubagentErrorEvent{}
 	default:
 		return nil, fmt.Errorf("unknown event type: %s", base.Type)
 	}

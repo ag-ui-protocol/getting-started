@@ -11,6 +11,9 @@ type TextMessageStartEvent struct {
 	MessageID string  `json:"messageId"`
 	Role      *string `json:"role,omitempty"`
 	Name      string  `json:"name,omitempty"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewTextMessageStartEvent creates a new text message start event
@@ -76,6 +79,9 @@ type TextMessageContentEvent struct {
 	*BaseEvent
 	MessageID string `json:"messageId"`
 	Delta     string `json:"delta"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewTextMessageContentEvent creates a new text message content event
@@ -140,6 +146,9 @@ func (e *TextMessageContentEvent) ToJSON() ([]byte, error) {
 type TextMessageEndEvent struct {
 	*BaseEvent
 	MessageID string `json:"messageId"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewTextMessageEndEvent creates a new text message end event
@@ -201,6 +210,9 @@ type TextMessageChunkEvent struct {
 	Role      *string `json:"role,omitempty"`
 	Delta     *string `json:"delta,omitempty"`
 	Name      *string `json:"name,omitempty"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewTextMessageChunkEvent creates a new text message chunk event

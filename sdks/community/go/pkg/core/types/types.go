@@ -197,6 +197,9 @@ type Message struct {
 	ActivityType string `json:"activityType,omitempty"`
 	// Metadata is optional extra information attached to the message.
 	Metadata Metadata `json:"metadata,omitempty"`
+	// SubagentRunID attributes this message to a subagent invocation.
+	// Empty when the message comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler and supports snake_case compatibility.
@@ -239,6 +242,9 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	if err := unmarshalField(raw, &m.Metadata, "metadata"); err != nil {
 		return err
 	}
+	if err := unmarshalField(raw, &m.SubagentRunID, "subagentRunId", "subagent_run_id"); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -279,6 +285,13 @@ type Interrupt struct {
 	ExpiresAt string `json:"expiresAt,omitempty"`
 	// Metadata is optional arbitrary metadata associated with the interrupt.
 	Metadata Metadata `json:"metadata,omitempty"`
+	// SubagentRunID is the subagent whose work raised this interrupt, when it
+	// was raised inside one. Empty for a root-raised interrupt.
+	//
+	// Attribution lives on each interrupt rather than on RUN_FINISHED because
+	// one run can carry interrupts from several subagents. It lets a client
+	// render the approval request inside that subagent's group.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler and supports snake_case compatibility.
@@ -307,6 +320,9 @@ func (i *Interrupt) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if err := unmarshalField(raw, &i.Metadata, "metadata"); err != nil {
+		return err
+	}
+	if err := unmarshalField(raw, &i.SubagentRunID, "subagentRunId", "subagent_run_id"); err != nil {
 		return err
 	}
 

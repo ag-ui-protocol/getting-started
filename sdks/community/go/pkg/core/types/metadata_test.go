@@ -187,3 +187,38 @@ func TestMergeMetadataEmptyInputs(t *testing.T) {
 	assert.Equal(t, Metadata{"attempt": 1}, MergeMetadata(nil, existing))
 	assert.Nil(t, MergeMetadata(nil, nil))
 }
+
+// TestMessageUnmarshalSubagentRunID verifies subagent attribution decodes in both
+// the camelCase and snake_case spellings.
+func TestMessageUnmarshalSubagentRunID(t *testing.T) {
+	for name, payload := range map[string]string{
+		"camelCase":  `{"id": "msg-1", "role": "assistant", "subagentRunId": "sub-1"}`,
+		"snake_case": `{"id": "msg-1", "role": "assistant", "subagent_run_id": "sub-1"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var message Message
+			require.NoError(t, json.Unmarshal([]byte(payload), &message))
+			assert.Equal(t, "sub-1", message.SubagentRunID)
+		})
+	}
+}
+
+// TestInterruptUnmarshalSubagentRunID verifies the interrupt names the subagent that
+// raised it, and stays unattributed when the root agent raised it.
+func TestInterruptUnmarshalSubagentRunID(t *testing.T) {
+	var interrupt Interrupt
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id": "int-1",
+		"reason": "tool_call",
+		"subagent_run_id": "sub-1"
+	}`), &interrupt))
+	assert.Equal(t, "sub-1", interrupt.SubagentRunID)
+
+	var rootRaised Interrupt
+	require.NoError(t, json.Unmarshal([]byte(`{"id": "int-2", "reason": "tool_call"}`), &rootRaised))
+	assert.Empty(t, rootRaised.SubagentRunID)
+
+	encoded, err := json.Marshal(rootRaised)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "subagentRunId")
+}
