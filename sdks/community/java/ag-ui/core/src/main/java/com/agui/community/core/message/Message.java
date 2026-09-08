@@ -11,7 +11,8 @@ package com.agui.community.core.message;
  * @see <a href="https://docs.ag-ui.com/concepts/messages">AG-UI Messages</a>
  */
 public sealed interface Message
-        permits DeveloperMessage, SystemMessage, AssistantMessage, UserMessage, ToolMessage {
+        permits DeveloperMessage, SystemMessage, AssistantMessage, UserMessage, ToolMessage,
+                ReasoningMessage {
 
     /**
      * @return the unique identifier of this message (required)
