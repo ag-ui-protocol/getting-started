@@ -97,8 +97,8 @@ export function normalizeAguiContext(context: unknown): AguiContextEntry[] {
  * feeds the `generate_a2ui` path and would only bloat the prompt here.
  *
  * `JSON.stringify` and `json.dumps` agree on strings, integers, booleans and
- * `null`, which is what a lax caller can realistically send in a field the
- * wire types as a string. They disagree on the shapes the wire never carries:
+ * `null` for the value, which is what a lax caller can realistically send in a
+ * field the wire types as a string. They disagree on the shapes the wire never carries:
  * objects and arrays (`json.dumps` puts a space after `,` and `:`), integral
  * floats (`1.0` against `1`) and non-ASCII text (`json.dumps` escapes it).
  * Those are left to differ rather than papered over with a Python emulation.
@@ -144,14 +144,18 @@ const modelContextBlock = new AsyncLocalStorage<string>();
  * duration of one `next()` and left again before the event is handed back to
  * the run loop, so the block is visible to the SDK while it serves the pull
  * and to nothing that runs between pulls. Both run loops pull through here.
- * An empty block skips the store entirely so a run with no context costs
- * nothing and, more to the point, cannot see a block another run set.
+ * The store is entered either way. A run with no context enters it with an
+ * empty block, which the hook reads as "nothing to show", and which is also
+ * what stops a run nested inside another run's continuation from reading the
+ * outer run's block as its own.
  */
 export function pullWithModelContext<T, R>(
   iterator: AsyncIterator<T, R>,
   contextBlock: string,
 ): Promise<IteratorResult<T, R>> {
-  if (!contextBlock) return iterator.next();
+  // Entered even for an empty block. Returning `iterator.next()` bare would
+  // leave whatever store is already in scope, so a run nested inside another
+  // run's continuation would read the outer run's context as its own.
   return modelContextBlock.run(contextBlock, () => iterator.next());
 }
 
@@ -162,9 +166,9 @@ export function pullWithModelContext<T, R>(
 /**
  * What the before-hook did to `agent.messages`, so the after-hook and the
  * teardown can undo exactly that. `insert` added a whole user message at
- * `index`; `prepend` added one text block to the front of an existing user
- * turn's `content`. Both hold the inserted object so the restore removes by
- * identity rather than by position, in case the SDK moved things meanwhile.
+ * `index`; `prepend` added one text block to the front of the question turn's
+ * `content`. Both hold the inserted object so the restore removes by identity
+ * rather than by position, in case the SDK moved things meanwhile.
  */
 type ContextMutation =
   | {
@@ -184,34 +188,266 @@ const mutations = new WeakMap<object, ContextMutation>();
 type MessagesOwner = { messages?: unknown };
 
 /**
- * Whether a content block is a tool result. Seeded history reaches the agent
- * as ContentBlock instances, which carry a `type` discriminant; the
- * plain-object form carries the `toolResult` key itself. Both shapes occur,
- * and the run loop's own tail check reads them the same way.
+ * Whether a content block names a tool call or its answer.
+ *
+ * Seeded history reaches the agent as ContentBlock instances, which carry a
+ * `type` discriminant; the plain-object form carries the key itself. Both
+ * shapes occur, and the run loop's own tail check reads them the same way.
+ *
+ * Key presence, not a defined value: a block naming a call with nothing useful
+ * in it is still that kind of block, which is what Python's
+ * `_carries_tool_result` decides too. Placement and the outline both read
+ * through these, so they cannot disagree about a block's kind.
  */
 function isToolResultBlock(block: unknown): boolean {
   if (block === null || typeof block !== "object") return false;
-  const record = block as { toolResult?: unknown; type?: unknown };
-  return record.toolResult !== undefined || record.type === "toolResultBlock";
+  const record = block as { type?: unknown };
+  return "toolResult" in record || record.type === "toolResultBlock";
+}
+
+/** The `toolResult` payload, normalized across the two block shapes. */
+function toolResultPayload(block: unknown): unknown {
+  const record = block as {
+    type?: unknown;
+    toolUseId?: unknown;
+    toolResult?: unknown;
+  };
+  return record.type === "toolResultBlock"
+    ? { toolUseId: record.toolUseId }
+    : record.toolResult;
+}
+
+/** Whether a content block opens a tool call. Counterpart of the above. */
+function isToolUseBlock(block: unknown): boolean {
+  if (block === null || typeof block !== "object") return false;
+  const record = block as { type?: unknown };
+  return "toolUse" in record || record.type === "toolUseBlock";
+}
+
+/** The `toolUse` payload, normalized across the two block shapes. */
+function toolUsePayload(block: unknown): unknown {
+  const record = block as {
+    type?: unknown;
+    toolUseId?: unknown;
+    toolUse?: unknown;
+  };
+  return record.type === "toolUseBlock"
+    ? { toolUseId: record.toolUseId }
+    : record.toolUse;
 }
 
 /**
- * Place the run's block in front of the model, mirroring Python's
- * `_TransientModelContextHook._before_model_call` case for case:
+ * The call id a `toolUse` or `toolResult` block names.
  *
- * - No user message at all: append the block as a new user turn.
- * - The latest user turn carries a tool result: prepend the block into that
- *   same turn. A separate user message between an assistant `toolUse` and its
- *   `toolResult` is a shape providers reject, so the block rides inside.
- * - Otherwise: insert the block as its own user message immediately BEFORE
- *   the latest user turn. The actual latest turn stays byte-identical for
- *   model routers and fixtures that key off it, while live UI context lands
- *   next to the question it belongs to rather than at the head of stale
- *   history.
+ * A block with no id renders as `<none>` rather than as the string
+ * `"undefined"`, so two unrelated malformed blocks cannot read as a matched
+ * call and answer. The payload itself is never stringified: it holds the tool
+ * input or result, and this line is documented as carrying neither.
  */
+function blockCallId(named: unknown): string {
+  const id =
+    named !== null && typeof named === "object"
+      ? (named as { toolUseId?: unknown }).toolUseId
+      : undefined;
+  return typeof id === "string" || typeof id === "number"
+    ? String(id)
+    : "<none>";
+}
+
+/** A block's kind, from the instance discriminant or the wrapped-data key. */
+function blockKindOf(block: unknown): string {
+  const record = block as { type?: unknown } | null;
+  if (typeof record?.type === "string")
+    return record.type.replace(/Block$/, "");
+  if (record !== null && typeof record === "object") {
+    const [key] = Object.keys(record);
+    if (key) return key;
+  }
+  return "?";
+}
+
+/**
+ * One-line sanitized outline of the history a model call was handed.
+ *
+ * Text, tool inputs and tool results are dropped, so the line is safe to log:
+ * it carries only what decides whether a provider accepts the request, which
+ * is the roles, the block kinds and the tool ids that have to sit adjacent.
+ *
+ * The sequence is the OpenAI-compatible expansion, where a turn's non-tool
+ * content becomes its own message ahead of the tool results it appends. That
+ * is deliberately the only view here: a 400 over tool-call adjacency is about
+ * this sequence, and reading it says directly whether each assistant call is
+ * followed by its own answers. Whether a request would also satisfy the
+ * block-level formatters' role alternation is a different question over a
+ * different sequence, and the suites answer it against the real provider
+ * bodies rather than against a second rendering nobody can index reliably.
+ *
+ * The Python counterpart is `describe_model_bound_history`. The two agree on
+ * roles, tool ids and structure; block-kind names follow each SDK's own block
+ * vocabulary, so a reasoning block reads as `reasoning` here and
+ * `reasoningContent` there.
+ */
+export function describeModelBoundHistory(messages: unknown): string {
+  if (!Array.isArray(messages)) return "unrecorded";
+  const labels: string[] = [];
+  for (const message of messages) {
+    const record = message as { role?: unknown; content?: unknown } | null;
+    if (record === null || typeof record !== "object") {
+      labels.push("?");
+      continue;
+    }
+    const role = typeof record.role === "string" ? record.role : "?";
+    const blocks = Array.isArray(record.content) ? record.content : [];
+    const toolCallIds: string[] = [];
+    const resultIds: string[] = [];
+    const blockKinds: string[] = [];
+    for (const block of blocks) {
+      // The same reads `isToolUseBlock` and `isToolResultBlock` apply, so
+      // placement and this line cannot disagree about a block's kind.
+      if (isToolUseBlock(block)) {
+        toolCallIds.push(blockCallId(toolUsePayload(block)));
+      } else if (isToolResultBlock(block)) {
+        resultIds.push(blockCallId(toolResultPayload(block)));
+      } else {
+        blockKinds.push(blockKindOf(block));
+      }
+    }
+    if (
+      blockKinds.length > 0 ||
+      (toolCallIds.length === 0 && resultIds.length === 0)
+    ) {
+      let label = `${role}[${blockKinds.join("+")}]`;
+      if (toolCallIds.length > 0) {
+        label = `${label}(tool_calls=${toolCallIds.join(",")})`;
+      }
+      labels.push(label);
+    } else if (toolCallIds.length > 0) {
+      labels.push(`${role}(tool_calls=${toolCallIds.join(",")})`);
+    }
+    for (const callId of resultIds) labels.push(`tool(${callId})`);
+  }
+  return labels.join(" -> ");
+}
+
+/**
+ * The outline of the last context-carrying model call each agent was handed.
+ * Injecting context is the one thing this adapter does to the history a
+ * provider validates, so a rejection is worth reporting against the shape that
+ * was actually sent rather than against the durable history the restore leaves
+ * behind. Cleared on a run that carries no context, because per-thread agents
+ * are reused and a stale entry would name a different run's call.
+ */
+const historyOutlines = new WeakMap<object, string>();
+
+/**
+ * The outline recorded for `agent`'s last context-carrying model call, or
+ * `"unrecorded"` when the current run carried none.
+ */
+export function modelBoundHistoryOutline(agent: unknown): string {
+  if (agent === null || typeof agent !== "object") return "unrecorded";
+  return historyOutlines.get(agent) ?? "unrecorded";
+}
+
+/**
+ * Whether a native message answers a tool call. Strands puts tool results in a
+ * `user` message, so role alone does not say whether a turn is a real question
+ * or the answer half of a tool exchange, and only the latter constrains where
+ * context may go. The Python counterpart is `_carries_tool_result`.
+ */
+function carriesToolResult(message: unknown): boolean {
+  const content = (message as { content?: unknown } | null)?.content;
+  return Array.isArray(content) && content.some(isToolResultBlock);
+}
+
+/**
+ * Index of the latest user turn a text block can join, or `-1`.
+ *
+ * That turn is the question the run is still answering. It has to carry no
+ * tool result, or the block would land between an assistant tool call and the
+ * result answering it, and its content has to be an array, or there is nothing
+ * to prepend to. The Python counterpart is `_context_host_index`.
+ */
+function contextHostIndex(messages: unknown[]): number {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index] as { role?: unknown; content?: unknown };
+    if (message?.role !== "user") continue;
+    if (carriesToolResult(message)) continue;
+    if (Array.isArray(message.content)) return index;
+  }
+  return -1;
+}
+
+/** Record what the model was just handed, for a later failure report. */
 function injectModelContext(event: BeforeModelCallEvent): void {
+  const agent = event.agent as unknown as MessagesOwner;
+  let placed: boolean;
+  try {
+    placed = placeModelContext(event);
+  } catch (error) {
+    // A throw leaves no outline either. Reporting an earlier run's model call
+    // as this one's is the outcome this record exists to avoid.
+    if (agent !== null && typeof agent === "object") {
+      historyOutlines.delete(agent as object);
+    }
+    throw error;
+  }
+  if (!placed) {
+    // A run with no context leaves no outline behind. Per-thread agents are
+    // reused, so a stale one would report a previous run's history as the
+    // history this call was handed, which is worse than saying nothing.
+    if (agent !== null && typeof agent === "object") {
+      historyOutlines.delete(agent as object);
+    }
+    return;
+  }
+  historyOutlines.delete(agent as object);
+  try {
+    historyOutlines.set(
+      agent as object,
+      describeModelBoundHistory(agent.messages),
+    );
+  } catch {
+    // The block is already spliced in and the mutation already recorded, so a
+    // throw here would abort the run, leave the block in the durable history
+    // and make the next call fail the not-restored guard. Observability is not
+    // allowed to cost any of that. The delete above runs first, so a failure
+    // leaves no outline rather than an earlier run's, and the forced-stop
+    // report then says `unrecorded` instead of naming the wrong call. Nothing
+    // is logged because this hook has no access to the run's injected logger
+    // and the default one drops debug, so a line here would go nowhere.
+  }
+}
+
+/**
+ * Show the run's block to the model. `false` when the run has none.
+ *
+ * One placement, every history: the block joins the latest user turn that
+ * carries no tool result, which is the question the run is still answering.
+ * That is the only position no provider objects to, and the reason is that the
+ * two families object to different things and no separate message satisfies
+ * both.
+ *
+ * A turn carrying a tool result cannot take the block, because every
+ * OpenAI-compatible formatter emits a turn's non-tool content as its own
+ * message ahead of the tool results it appends, whatever order the blocks sit
+ * in, so the block would wedge a user message between the assistant tool call
+ * and its answers and the request is rejected. A separate user message cannot
+ * take it either, because the block-level formatters (Anthropic, Bedrock,
+ * Gemini) map messages one to one and never merge same-role neighbours, so a
+ * context turn next to any user turn is two user messages in a row and fails
+ * role alternation.
+ *
+ * Joining the question satisfies both at once, and in the strongest available
+ * sense: the provider-bound message sequence comes out exactly as it would
+ * with no context at all. When no question turn exists the block has to become
+ * a message of its own, appended when the history ends on an assistant turn
+ * (or is empty) and placed at the head otherwise, which is the cold
+ * continuation replaying only a tool exchange. Mirrors Python's
+ * `_place_context` case for case.
+ */
+function placeModelContext(event: BeforeModelCallEvent): boolean {
   const contextBlock = modelContextBlock.getStore();
-  if (!contextBlock) return;
+  if (!contextBlock) return false;
   const agent = event.agent as unknown as MessagesOwner;
   if (mutations.has(agent)) {
     // A second before-hook with the first still in place means an after-hook
@@ -221,49 +457,46 @@ function injectModelContext(event: BeforeModelCallEvent): void {
     throw new Error("Transient AG-UI model context was not restored");
   }
   const messages = agent.messages;
-  if (!Array.isArray(messages)) return;
-
-  let latestUserIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index--) {
-    if ((messages[index] as { role?: unknown } | undefined)?.role === "user") {
-      latestUserIndex = index;
-      break;
-    }
+  if (!Array.isArray(messages)) {
+    // Returning `false` here would read to the caller as "this run carried no
+    // context" and drop the application's context with no error, which is the
+    // one outcome the caller explicitly refuses.
+    throw new Error(
+      "Strands agent exposes no message list for transient context",
+    );
   }
+
+  const hostIndex = contextHostIndex(messages);
+  if (hostIndex >= 0) {
+    const content = (messages[hostIndex] as { content: unknown[] }).content;
+    const inserted = new TextBlock(contextBlock);
+    content.unshift(inserted);
+    mutations.set(agent, { kind: "prepend", content, inserted });
+    return true;
+  }
+
+  // No question to join. The head keeps a replayed tool exchange intact; the
+  // tail is right when the history ends on an assistant turn, where a new user
+  // turn both alternates and sits closest to the generation it informs. A
+  // history whose only user turn answers a tool call has no valid placement at
+  // all, because it is already missing the assistant turn that opened that
+  // call: the head keeps tool adjacency and leaves the alternation the history
+  // arrived with, which the outline reports rather than hides.
+  const tail = messages[messages.length - 1] as { role?: unknown } | undefined;
+  const index = tail?.role === "user" ? 0 : messages.length;
   const contextMessage = new StrandsMessage({
     role: "user",
     content: [new TextBlock(contextBlock)],
   });
-
-  if (latestUserIndex < 0) {
-    messages.push(contextMessage);
-    mutations.set(agent, {
-      kind: "insert",
-      messages,
-      index: messages.length - 1,
-      inserted: contextMessage,
-    });
-    return;
-  }
-
-  const latestUser = messages[latestUserIndex] as { content?: unknown };
-  const content = latestUser.content;
-  if (Array.isArray(content) && content.some(isToolResultBlock)) {
-    const inserted = new TextBlock(contextBlock);
-    content.unshift(inserted);
-    mutations.set(agent, { kind: "prepend", content, inserted });
-    return;
-  }
-
-  messages.splice(latestUserIndex, 0, contextMessage);
+  messages.splice(index, 0, contextMessage);
   mutations.set(agent, {
     kind: "insert",
     messages,
-    index: latestUserIndex,
+    index,
     inserted: contextMessage,
   });
+  return true;
 }
-
 /** Remove `target` from `list` by identity, trying `hint` first. */
 function removeByIdentity(
   list: unknown[],
@@ -288,9 +521,25 @@ export function restoreTransientModelContext(agent: unknown): void {
   if (agent === null || typeof agent !== "object") return;
   const mutation = mutations.get(agent);
   if (!mutation) return;
-  mutations.delete(agent);
+  // Cleared only once the removals are done. Disarming the loud not-restored
+  // guard first would leave a throw in the removal path with the block still
+  // spliced in and nothing left to report it.
   if (mutation.kind === "prepend") {
     removeByIdentity(mutation.content, mutation.inserted, 0);
+    // The recorded array is searched first, then every live turn, in case the
+    // SDK swapped a turn's content array in between. Without the second pass
+    // the block survives in a copy the record does not know about, which is
+    // the leak this module exists to prevent.
+    const live = (agent as MessagesOwner).messages;
+    if (Array.isArray(live)) {
+      for (const message of live) {
+        const content = (message as { content?: unknown } | null)?.content;
+        if (Array.isArray(content) && content !== mutation.content) {
+          removeByIdentity(content, mutation.inserted, 0);
+        }
+      }
+    }
+    mutations.delete(agent);
     return;
   }
   removeByIdentity(mutation.messages, mutation.inserted, mutation.index);
@@ -298,6 +547,7 @@ export function restoreTransientModelContext(agent: unknown): void {
   if (Array.isArray(live) && live !== mutation.messages) {
     removeByIdentity(live, mutation.inserted, mutation.index);
   }
+  mutations.delete(agent);
 }
 
 type AddHook = (
@@ -318,12 +568,28 @@ export function ensureTransientContextHook(agent: unknown): boolean {
   if (hookedAgents.has(agent)) return true;
   const addHook = (agent as { addHook?: unknown }).addHook;
   if (typeof addHook !== "function") return false;
-  (addHook as AddHook).call(agent, BeforeModelCallEvent, injectModelContext);
-  (addHook as AddHook).call(
+  // Both or neither. An injector installed without its restorer would splice
+  // the block in on every model call and never take it back out, which is the
+  // leak into durable history this module exists to prevent. The agent is not
+  // in `hookedAgents` yet, so undoing means calling the cleanup the SDK hands
+  // back for the first hook rather than removing a set entry that is not there.
+  const undoInjector = (addHook as AddHook).call(
     agent,
-    AfterModelCallEvent,
-    (event: AfterModelCallEvent) => restoreTransientModelContext(event.agent),
+    BeforeModelCallEvent,
+    injectModelContext,
   );
+  try {
+    (addHook as AddHook).call(
+      agent,
+      AfterModelCallEvent,
+      (event: AfterModelCallEvent) => restoreTransientModelContext(event.agent),
+    );
+  } catch (error) {
+    if (typeof undoInjector === "function") {
+      (undoInjector as () => void)();
+    }
+    throw error;
+  }
   hookedAgents.add(agent);
   return true;
 }

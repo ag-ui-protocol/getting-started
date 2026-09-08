@@ -579,10 +579,10 @@ async def test_auto_inject_hides_stale_render_tool_context_from_both_models():
                         "Context provided by the application:\n"
                         "- account: premium"
                     )
-                }
+                },
+                {"text": "hi"},
             ],
         },
-        {"role": "user", "content": [{"text": "hi"}]},
     ]]
     assert instance.messages == [
         {"role": "user", "content": [{"text": "hi"}]}

@@ -12,6 +12,8 @@ import {
   type AgentStreamEvent,
   type ModelStreamEvent,
 } from "@strands-agents/sdk";
+import { AnthropicModel } from "@strands-agents/sdk/models/anthropic";
+import { OpenAIModel } from "@strands-agents/sdk/models/openai";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { z } from "zod";
@@ -524,9 +526,15 @@ export function realStrandsAgent(
     throwOnCall?: number;
     /** Forwarded to every per-thread agent, so a hook can edit its state. */
     plugins?: unknown[];
+    /**
+     * A pre-built model to drive instead of a plain `ScriptedModel`, for the
+     * tests whose model has to inspect what it was handed. `turns` and
+     * `throwOnCall` are then the model's own business.
+     */
+    model?: ScriptedModel;
   } = {},
 ): { agent: StrandsAgent; model: ScriptedModel; template: StrandsAgentCore } {
-  const model = new ScriptedModel(turns, options.throwOnCall);
+  const model = options.model ?? new ScriptedModel(turns, options.throwOnCall);
   const template = new StrandsAgentCore({
     model,
     tools: (options.tools ?? []) as never,
@@ -1154,4 +1162,213 @@ export function expectStoreMatchesMemory(
       ? snapshotPicture(persistedSnapshot(store))
       : store;
   expect(memoryPicture(agent, threadId), label).toEqual(expected);
+}
+
+// ---------------------------------------------------------------------------
+// Provider-bound serialization
+// ---------------------------------------------------------------------------
+//
+// A native Strands history can look correct and still serialize into a request
+// the provider rejects, so a test that only inspects native messages proves
+// less than it appears to. These helpers run a history through the real
+// provider clients and hand back the request body that would have gone on the
+// wire. Nothing reaches a provider: the injected `fetch` records the body and
+// throws, which is also why no API key or LLM mock is involved.
+
+/**
+ * A `fetch` that records the outgoing JSON body and never answers.
+ *
+ * `reached` is what proves the stub actually intercepted. The thrown error is
+ * not: every provider SDK rewraps a transport throw into its own connection
+ * error, so its message says nothing about whether the request was captured.
+ */
+function capturingFetch(
+  sink: (body: unknown) => void,
+  reached: { value: boolean },
+): typeof globalThis.fetch {
+  return async (_input, init) => {
+    reached.value = true;
+    sink(JSON.parse(String(init?.body)));
+    throw new Error("capturing fetch never answers");
+  };
+}
+
+async function captureRequestBody(
+  model: {
+    stream: (
+      messages: StrandsMessage[],
+      options?: never,
+    ) => AsyncIterable<unknown>;
+  },
+  history: readonly StrandsMessage[],
+  captured: () => unknown,
+  reached: { value: boolean },
+): Promise<unknown> {
+  await expect(
+    (async () => {
+      for await (const _event of model.stream([...history])) {
+        // Unreachable: the capturing fetch throws before any event arrives.
+      }
+    })(),
+  ).rejects.toThrow();
+  // Both checks matter. Without them a bad model config, an SDK validation
+  // error or a stub the client bypassed would reject too, and every assertion
+  // built on the body would pass over nothing at all.
+  expect(reached.value, "the provider client never called the stub fetch").toBe(
+    true,
+  );
+  const body = captured();
+  expect(body, "the provider client sent no request body").toBeDefined();
+  return body;
+}
+
+/** One message in an OpenAI Chat Completions request body. */
+interface OpenAIChatRequestMessage {
+  role: string;
+  tool_call_id?: string;
+  tool_calls?: Array<{ id: string }>;
+}
+
+/** The Chat Completions body the real OpenAI client would have sent. */
+export async function openAIChatRequestMessages(
+  history: readonly StrandsMessage[],
+): Promise<OpenAIChatRequestMessage[]> {
+  let body: { messages?: OpenAIChatRequestMessage[] } | undefined;
+  const reached = { value: false };
+  const model = new OpenAIModel({
+    api: "chat",
+    modelId: "gpt-4o",
+    apiKey: "test-key",
+    clientConfig: {
+      maxRetries: 0,
+      fetch: capturingFetch((captured) => {
+        body = captured as { messages?: OpenAIChatRequestMessage[] };
+      }, reached),
+    },
+  });
+  await captureRequestBody(model, history, () => body, reached);
+  return requireMessages(body?.messages, "openai chat");
+}
+
+/**
+ * The messages a captured body has to carry. Returning `[]` for an absent key
+ * would let every assertion built on it pass over nothing at all.
+ */
+function requireMessages<T>(messages: T[] | undefined, label: string): T[] {
+  expect(messages, `the ${label} request carried no messages`).toBeDefined();
+  expect(
+    messages!.length,
+    `the ${label} request carried no messages`,
+  ).toBeGreaterThan(0);
+  return messages!;
+}
+
+/** The Messages-API body the real Anthropic client would have sent. */
+export async function anthropicRequestMessages(
+  history: readonly StrandsMessage[],
+): Promise<Array<{ role: string }>> {
+  let body: { messages?: Array<{ role: string }> } | undefined;
+  const reached = { value: false };
+  const model = new AnthropicModel({
+    modelId: "claude-sonnet-4-5",
+    maxTokens: 64,
+    apiKey: "test-key",
+    clientConfig: {
+      maxRetries: 0,
+      fetch: capturingFetch((captured) => {
+        body = captured as { messages?: Array<{ role: string }> };
+      }, reached),
+    },
+  });
+  await captureRequestBody(model, history, () => body, reached);
+  return requireMessages(body?.messages, "anthropic");
+}
+
+/**
+ * The Responses-API `input` items the real OpenAI client would have sent, each
+ * as `kind(id)`. This is the SDK's DEFAULT OpenAI mode, and it splits tool
+ * calls and results out of the message the same way Chat Completions does, so
+ * it needs its own check rather than inheriting the Chat one.
+ */
+export async function openAIResponsesRequestItems(
+  history: readonly StrandsMessage[],
+): Promise<string[]> {
+  let body: { input?: Array<Record<string, unknown>> } | undefined;
+  const reached = { value: false };
+  const model = new OpenAIModel({
+    modelId: "gpt-4o",
+    apiKey: "test-key",
+    clientConfig: {
+      maxRetries: 0,
+      fetch: capturingFetch((captured) => {
+        body = captured as { input?: Array<Record<string, unknown>> };
+      }, reached),
+    },
+  });
+  await captureRequestBody(model, history, () => body, reached);
+  return requireMessages(body?.input, "openai responses").map((item) => {
+    const kind = typeof item.type === "string" ? item.type : "message";
+    const id = item.call_id ?? item.role ?? "";
+    return `${kind}(${String(id)})`;
+  });
+}
+
+/** Provider-bound roles, naming the tool ids each message opens or answers. */
+export function openAIRoleSequence(
+  messages: readonly OpenAIChatRequestMessage[],
+): string[] {
+  return messages.map((message) => {
+    if (message.tool_calls && message.tool_calls.length > 0) {
+      return `${message.role}(tool_calls=${message.tool_calls
+        .map((call) => call.id)
+        .join(",")})`;
+    }
+    if (message.role === "tool") return `tool(${message.tool_call_id})`;
+    return message.role;
+  });
+}
+
+/**
+ * Every assistant `tool_calls` message is followed by its own tool results.
+ *
+ * This is the adjacency OpenAI states in the 400 the bridge used to turn into
+ * a terminal RUN_ERROR: "An assistant message with 'tool_calls' must be
+ * followed by tool messages responding to each 'tool_call_id'".
+ */
+export async function expectToolCallsAnsweredImmediately(
+  history: readonly StrandsMessage[],
+): Promise<void> {
+  const messages = await openAIChatRequestMessages(history);
+  const sequence = openAIRoleSequence(messages);
+  messages.forEach((message, index) => {
+    const calls = message.tool_calls;
+    if (!calls || calls.length === 0) return;
+    const answers = sequence.slice(index + 1, index + 1 + calls.length);
+    // Sorted: the provider requires the answers to be the messages right after
+    // the call, not to arrive in the order the calls were made.
+    expect(
+      [...answers].sort(),
+      `tool_calls at ${index} are not answered immediately: ${sequence.join(" -> ")}`,
+    ).toEqual(calls.map((call) => `tool(${call.id})`).sort());
+  });
+}
+
+/**
+ * No two provider-bound messages in a row share a role.
+ *
+ * The Anthropic Messages API and Bedrock Converse both refuse a repeated role,
+ * and a context turn placed beside the tool results is exactly that. Anthropic
+ * stands in for the block-level family here: its formatter maps messages one to
+ * one, as Bedrock's and Gemini's do.
+ */
+export async function expectRolesAlternate(
+  history: readonly StrandsMessage[],
+): Promise<void> {
+  const roles = (await anthropicRequestMessages(history)).map(
+    (message) => message.role,
+  );
+  const repeated = roles.filter(
+    (role, index) => index > 0 && role === roles[index - 1],
+  );
+  expect(repeated, `roles do not alternate: ${roles.join(" -> ")}`).toEqual([]);
 }

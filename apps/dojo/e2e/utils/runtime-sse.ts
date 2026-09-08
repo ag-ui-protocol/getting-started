@@ -1,8 +1,34 @@
-import type { Page, Response } from "@playwright/test";
+import { expect, type Page, type Response } from "@playwright/test";
 
 /** Escape a value taken off the wire before interpolating it into a RegExp. */
 export function escapeForRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Assert a captured run reached `RUN_FINISHED` and never emitted `RUN_ERROR`.
+ *
+ * Rendering is not success. A tool call and its result are on the wire before
+ * the model continuation happens, so a surface can paint from a run that then
+ * dies at the provider: that is how a context-ordering defect shipped past a
+ * suite whose fixed-schema tests only asserted that cards appeared. Terminal
+ * events are the only thing that separates the two.
+ */
+export function expectRunFinished(sse: string, label: string): void {
+  const types = [...sse.matchAll(/"type":"([A-Z_]+)"/g)].map(
+    (match) => match[1]!,
+  );
+  expect(types, `${label}: the run produced no protocol events`).not.toEqual(
+    [],
+  );
+  expect(
+    types.filter((type) => type === "RUN_ERROR"),
+    `${label}: run errored. Events: ${types.join(" -> ")}`,
+  ).toEqual([]);
+  expect(
+    types.at(-1),
+    `${label}: run did not end on RUN_FINISHED. Events: ${types.join(" -> ")}`,
+  ).toBe("RUN_FINISHED");
 }
 
 /**

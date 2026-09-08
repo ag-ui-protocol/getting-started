@@ -3094,6 +3094,107 @@ def _without_a2ui_render_guides(context: list, tool_names: List[str]) -> list:
     ]
 
 
+def _block_call_id(named: Any) -> str:
+    """The call id a ``toolUse`` or ``toolResult`` block names.
+
+    A block with no id renders as ``<none>`` rather than as ``"None"``, so two
+    unrelated malformed blocks cannot read as a matched call and answer. The
+    payload itself is never stringified: it holds the tool input or result, and
+    this line is documented as carrying neither.
+    """
+    call_id = named.get("toolUseId") if isinstance(named, dict) else None
+    return str(call_id) if isinstance(call_id, (str, int)) else "<none>"
+
+
+def describe_model_bound_history(messages: Sequence[Any]) -> str:
+    """One-line sanitized outline of the history a model call was handed.
+
+    Text, tool inputs and tool results are dropped, so the line is safe to log:
+    it carries only what decides whether a provider accepts the request, which
+    is the roles, the block kinds and the tool ids that have to sit adjacent.
+
+    The sequence is the OpenAI-compatible expansion, where a turn's non-tool
+    content becomes its own message ahead of the tool results it appends. That
+    is deliberately the only view here: a 400 over tool-call adjacency is about
+    this sequence, and reading it says directly whether each assistant call is
+    followed by its own answers. Whether a request would also satisfy the
+    block-level formatters' role alternation is a different question over a
+    different sequence, and the suites answer it against the real provider
+    bodies rather than against a second rendering nobody can index reliably.
+    """
+    labels: List[str] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            labels.append("?")
+            continue
+        role = str(message.get("role", "?"))
+        content = message.get("content")
+        blocks = content if isinstance(content, list) else []
+        tool_use_ids: List[str] = []
+        result_ids: List[str] = []
+        other_kinds: List[str] = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                other_kinds.append("?")
+            # Key presence, the same test ``_carries_tool_result`` applies, so
+            # the two cannot disagree about what kind of block this is.
+            elif "toolUse" in block:
+                tool_use_ids.append(_block_call_id(block["toolUse"]))
+            elif "toolResult" in block:
+                result_ids.append(_block_call_id(block["toolResult"]))
+            else:
+                other_kinds.append(next(iter(block), "?"))
+        if other_kinds or not (tool_use_ids or result_ids):
+            label = f"{role}[{'+'.join(other_kinds)}]" if other_kinds else f"{role}[]"
+            if tool_use_ids:
+                label = f"{label}(tool_calls={','.join(tool_use_ids)})"
+            labels.append(label)
+        elif tool_use_ids:
+            labels.append(f"{role}(tool_calls={','.join(tool_use_ids)})")
+        labels.extend(f"tool({result_id})" for result_id in result_ids)
+    return " -> ".join(labels)
+
+
+def _carries_tool_result(message: Any) -> bool:
+    """Whether a native message answers a tool call.
+
+    Strands puts tool results in a ``user`` message, so role alone does not
+    say whether a turn is a real question or the answer half of a tool
+    exchange, and only the latter constrains where context may go.
+    """
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(block, dict) and "toolResult" in block for block in content)
+
+
+def _context_host_index(messages: List[Any]) -> Optional[int]:
+    """Index of the latest user turn a text block can join, or ``None``.
+
+    That turn is the question the run is still answering. It has to carry no
+    tool result, or the block would land between an assistant tool call and the
+    result answering it, and its content has to be a list, or there is nothing
+    to prepend to.
+    """
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        if _carries_tool_result(message):
+            continue
+        if isinstance(message.get("content"), list):
+            return index
+    return None
+
+
+# Where the hook files the outline of the history it just handed the model.
+# Injecting context is the one thing this adapter does to the history a provider
+# validates, so a rejection is worth reporting against the shape that was
+# actually sent rather than against the durable history the restore leaves
+# behind. Read back by the forced-stop report.
+_MODEL_BOUND_HISTORY_OUTLINE = "_agui_model_bound_history_outline"
+
+
 class _TransientModelContextHook:
     """Expose request context to the model without persisting it as history."""
 
@@ -3102,55 +3203,106 @@ class _TransientModelContextHook:
         registry.add_callback(AfterModelCallEvent, self._after_model_call)
 
     def _before_model_call(self, event: Any) -> None:
+        try:
+            placed = self._place_context(event)
+        except Exception:
+            # A raise leaves no outline either. Reporting an earlier run's model
+            # call as this one's is what this record exists to avoid.
+            event.agent.__dict__.pop(_MODEL_BOUND_HISTORY_OUTLINE, None)
+            raise
+        if not placed:
+            # A run with no context leaves no outline behind. Per-thread agents
+            # are reused, so a stale one would report a previous run's history
+            # as the history this call was handed, which is worse than saying
+            # nothing.
+            event.agent.__dict__.pop(_MODEL_BOUND_HISTORY_OUTLINE, None)
+            return
+        try:
+            setattr(
+                event.agent,
+                _MODEL_BOUND_HISTORY_OUTLINE,
+                describe_model_bound_history(event.agent.messages),
+            )
+        except Exception:  # noqa: BLE001
+            # The block is already spliced in and the mutation marker already
+            # set, so a raise here would abort the run, leave the block in the
+            # durable history and make the next call fail the not-restored
+            # guard. Observability is not allowed to cost any of that.
+            logger.debug("Could not record the model-bound history outline", exc_info=True)
+
+    def _place_context(self, event: Any) -> bool:
+        """Show the run's block to the model. False when the run has none.
+
+        One placement, every history: the block joins the latest user turn that
+        carries no tool result, which is the question the run is still
+        answering. That is the only position no provider objects to, and the
+        reason is that both families object to something different and no
+        separate message satisfies both.
+
+        A turn carrying a tool result cannot take the block, because every
+        OpenAI-compatible formatter emits a turn's non-tool content as its own
+        message ahead of the tool results it appends, whatever order the blocks
+        sit in, so the block would wedge a user message between the assistant
+        tool call and its answers and the request is rejected. A separate user
+        message cannot take it either, because the block-level formatters
+        (Anthropic, Bedrock, Gemini) map messages one to one and never merge
+        same-role neighbours, so a context turn next to any user turn is two
+        user messages in a row and fails role alternation.
+
+        Joining the question satisfies both at once, and does so in the
+        strongest available sense: the provider-bound message sequence comes
+        out exactly as it would with no context at all. When no question turn
+        exists the block has to become a message of its own, appended when the
+        history ends on an assistant turn (or is empty) and placed at the head
+        otherwise, which is the cold continuation replaying only a tool
+        exchange.
+
+        This gives up keeping the latest user turn byte-identical, which an
+        earlier placement preserved for model routers and fixtures that key off
+        it. A request the provider rejects is not worth trading for that.
+        """
         context_block = _MODEL_CONTEXT_BLOCK.get()
         if not context_block:
-            return
+            return False
         if event.agent.__dict__.get(_MODEL_CONTEXT_MUTATION_MARKER) is not None:
             raise RuntimeError("Transient AG-UI model context was not restored")
 
         messages = event.agent.messages
-        latest_user_index = next(
-            (
-                index
-                for index in range(len(messages) - 1, -1, -1)
-                if messages[index].get("role") == "user"
-            ),
-            None,
+        host_index = _context_host_index(messages)
+        if host_index is not None:
+            host = messages[host_index]
+            content = host["content"]
+            host["content"] = [{"text": context_block}, *content]
+            setattr(
+                event.agent,
+                _MODEL_CONTEXT_MUTATION_MARKER,
+                ("replace", host, content),
+            )
+            return True
+
+        # No question to join. The head keeps a replayed tool exchange intact;
+        # the tail is right when the history ends on an assistant turn, where a
+        # new user turn both alternates and sits closest to the generation it
+        # is meant to inform. One case has no good answer: a history whose only
+        # user turn answers a tool call is already missing the assistant turn
+        # that opened that call, and prepending here does add a repeated role
+        # the history did not have. Tool adjacency is kept, the repeat is
+        # reported by the outline rather than hidden, and the alternative is
+        # dropping the context the caller asked to be shown.
+        tail = messages[-1] if messages else None
+        index = (
+            0
+            if isinstance(tail, dict) and tail.get("role") == "user"
+            else len(messages)
         )
-        context_message = {
-            "role": "user",
-            "content": [{"text": context_block}],
-        }
-
-        if latest_user_index is None:
-            messages.append(context_message)
-            setattr(
-                event.agent,
-                _MODEL_CONTEXT_MUTATION_MARKER,
-                ("insert", messages, len(messages) - 1, context_message),
-            )
-            return
-
-        latest_user = messages[latest_user_index]
-        content = latest_user.get("content")
-        if isinstance(content, list) and any("toolResult" in block for block in content):
-            latest_user["content"] = [{"text": context_block}, *content]
-            setattr(
-                event.agent,
-                _MODEL_CONTEXT_MUTATION_MARKER,
-                ("replace", latest_user, content),
-            )
-            return
-
-        # Keep the actual latest user turn byte-identical for model routers and
-        # fixtures that key off it, while placing live UI context immediately
-        # before that turn rather than at the start of stale history.
-        messages.insert(latest_user_index, context_message)
+        context_message = {"role": "user", "content": [{"text": context_block}]}
+        messages.insert(index, context_message)
         setattr(
             event.agent,
             _MODEL_CONTEXT_MUTATION_MARKER,
-            ("insert", messages, latest_user_index, context_message),
+            ("insert", messages, index, context_message),
         )
+        return True
 
     def _after_model_call(self, event: Any) -> None:
         _restore_transient_model_context(event.agent)
@@ -3167,10 +3319,19 @@ def _restore_transient_model_context(agent: Any) -> None:
         message["content"] = original_content
     else:
         _, messages, index, inserted = mutation
+        # By identity throughout. ``list.remove`` compares equal, and two
+        # message dicts with the same content are equal, so it can delete a
+        # real turn and leave the injected one in the durable history. A turn
+        # that is already gone needs no undo, and the marker still has to clear
+        # or the next model call fails the not-restored guard over a mutation
+        # that no longer exists.
         if index < len(messages) and messages[index] is inserted:
             messages.pop(index)
         else:
-            messages.remove(inserted)
+            for position, message in enumerate(messages):
+                if message is inserted:
+                    messages.pop(position)
+                    break
     delattr(agent, _MODEL_CONTEXT_MUTATION_MARKER)
 
 
@@ -5441,6 +5602,11 @@ class StrandsAgent:
             # has to. Filled in by whichever branch below settles it.
             uncarried_result_ids: list[str] = []
             context_block = _format_agui_context(model_context)
+            # Per-thread agents are reused, so an outline left by an earlier run
+            # has to go before this one starts. Clearing only when a model call
+            # records one would leave a run that force-stops before its first
+            # model call reporting the previous run's history as its own.
+            strands_agent.__dict__.pop(_MODEL_BOUND_HISTORY_OUTLINE, None)
             if context_block and not _ensure_transient_context_hook(strands_agent):
                 raise RuntimeError(
                     "Strands agent does not expose a hook registry for transient context"
@@ -5761,9 +5927,13 @@ class StrandsAgent:
                             raw_reason or "The Strands agent stopped unexpectedly."
                         )
                         logger.error(
-                            "Agent stream force-stopped (thread_id=%s, reason=%s)",
+                            "Agent stream force-stopped (thread_id=%s, reason=%s, "
+                            "model_bound_history=%s)",
                             input_data.thread_id,
                             force_stop_error,
+                            getattr(
+                                strands_agent, _MODEL_BOUND_HISTORY_OUTLINE, "unrecorded"
+                            ),
                         )
                         continue
 

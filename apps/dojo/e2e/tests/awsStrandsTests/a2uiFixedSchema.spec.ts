@@ -1,5 +1,8 @@
 import { test, expect } from "../../test-isolation-helper";
 import { A2UIPage } from "../../featurePages/A2UIPage";
+import { captureRuntimeSSE, expectRunFinished } from "../../utils/runtime-sse";
+
+const INTEGRATION_ID = "aws-strands";
 
 // OSS-158 — AWS Strands (Python) A2UI fixed schema. The agent exposes two plain
 // backend tools (search_flights / search_hotels); the LLM supplies the row data
@@ -16,12 +19,18 @@ test("[AWS Strands] A2UI Fixed Schema renders flight search surface", async ({
 
   const a2ui = new A2UIPage(page);
   await a2ui.openChat();
+  const sse = captureRuntimeSSE(
+    page,
+    INTEGRATION_ID,
+    "flights from SFO to JFK",
+  );
   await a2ui.sendMessage("Find flights from SFO to JFK for next Tuesday.");
 
   await a2ui.assertUserMessageVisible("Find flights from SFO to JFK");
   await a2ui.assertSurfaceWithIdVisible("flight-search-results");
   // Flight data is bound via the fixed schema template — assert key data fields.
   await a2ui.assertSurfaceContainsAll(["UA 123", "DL 456", "$289", "$315"]);
+  expectRunFinished(await sse, "flight search run");
 });
 
 test("[AWS Strands] A2UI Fixed Schema renders hotel search with StarRating", async ({
@@ -53,13 +62,30 @@ test("[AWS Strands] A2UI Fixed Schema renders multiple surfaces in sequence", as
   const a2ui = new A2UIPage(page);
   await a2ui.openChat();
 
+  // Terminal events are captured per run, because a painted surface does not
+  // establish that its run completed: this very case once passed while two
+  // runs emitted RUN_ERROR.
+  const flightsSse = captureRuntimeSSE(
+    page,
+    INTEGRATION_ID,
+    "flights from SFO to JFK",
+  );
+
   // First surface: flights
   await a2ui.sendMessage("Find flights from SFO to JFK.");
   await a2ui.assertSurfaceWithIdVisible("flight-search-results");
+  expectRunFinished(await flightsSse, "flight surface run");
+
+  const hotelsSse = captureRuntimeSSE(
+    page,
+    INTEGRATION_ID,
+    "hotels in downtown Manhattan",
+  );
 
   // Second surface: hotels
   await a2ui.sendMessage("Find hotels in downtown Manhattan.");
   await a2ui.assertSurfaceWithIdVisible("hotel-search-results");
+  expectRunFinished(await hotelsSse, "hotel surface run");
 
   // Both surfaces should be present
   const count = await a2ui.getSurfaceCount();

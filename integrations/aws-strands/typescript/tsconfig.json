@@ -21,5 +21,8 @@
     "stripInternal": true
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist"]
+  // The tests are typechecked by `tsconfig.test.json`, which needs a different
+  // module resolution to follow the SDK's provider subpath exports. Widening it
+  // here would loosen the check over the published sources too.
+  "exclude": ["node_modules", "dist", "src/__tests__"]
 }

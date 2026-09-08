@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The suites serialize history through the SDK's real provider clients,
+    // which are published on subpath exports. "node" resolution cannot read an
+    // exports map, so only this config is widened, and the published sources
+    // keep the stricter parent setting.
+    "moduleResolution": "bundler",
+    "noEmit": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}
