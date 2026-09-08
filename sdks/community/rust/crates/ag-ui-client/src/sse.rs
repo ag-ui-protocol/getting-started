@@ -5,6 +5,14 @@ use futures::{Stream, StreamExt};
 use reqwest::Response;
 use std::pin::Pin;
 
+/// Maximum number of bytes held in the read buffer while waiting for a frame
+/// delimiter.
+///
+/// Mirrors the Dart SDK's `kSseDefaultMaxDataCodeUnits` (8 MiB) so the community
+/// SDKs bound an unterminated stream at the same point. Exceeding it clears the
+/// buffer and surfaces an [`AgUiClientError::SseParse`].
+pub const SSE_MAX_BUFFER_BYTES: usize = 8 * 1024 * 1024;
+
 /// Represents a parsed Server-Sent Event
 #[derive(Debug)]
 pub struct SseEvent {
@@ -41,7 +49,8 @@ pub struct SseEvent {
 /// - `id`: Optional field providing an event identifier
 /// - `data`: The event payload, often JSON data
 ///
-/// Events are separated by double newlines (`\n\n`).
+/// Events are separated by a blank line, i.e. two consecutive line terminators
+/// (`\r\n`, `\n`, or `\r` in any combination).
 #[async_trait]
 pub trait SseResponseExt {
     /// Converts a reqwest::Response into a Stream of SSE events
@@ -66,40 +75,86 @@ impl SseResponseExt for Response {
 /// A processor that converts a byte stream into an SSE event stream
 struct SseEventProcessor;
 
+/// What the processor carries between chunks.
+///
+/// `terminated` lives here rather than in the closure so the outer stream can answer a poll
+/// without touching the body: once it is set the source is dropped and `None` is returned, which
+/// is what releases the response.
+struct SseProcessorState<S> {
+    stream: Pin<Box<S>>,
+    buffer: String,
+    terminated: bool,
+}
+
 impl SseEventProcessor {
     /// Creates a new SSE event processor
     #[allow(clippy::new_ret_no_self)]
-    fn new(
-        stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + 'static,
-    ) -> impl Stream<Item = Result<SseEvent, AgUiClientError>> {
-        let mut buffer = String::new();
+    fn new<S>(stream: S) -> impl Stream<Item = Result<SseEvent, AgUiClientError>>
+    where
+        S: Stream<Item = Result<Bytes, reqwest::Error>> + 'static,
+    {
+        let state = SseProcessorState {
+            stream: Box::pin(stream),
+            buffer: String::new(),
+            terminated: false,
+        };
 
-        // Process the stream
-        stream
-            .map(move |chunk_result| {
-                // Map reqwest errors
-                let chunk = match chunk_result {
-                    Ok(chunk) => chunk,
-                    Err(err) => return vec![Err(AgUiClientError::HttpTransport(err))],
-                };
+        futures::stream::unfold(state, |mut state| async move {
+            // Ending the stream has to be decided before the body is polled. Deciding it after
+            // would leave a caller that keeps consuming waiting on a server that has no reason to
+            // send anything else. Dropping `state` here drops the source with it.
+            if state.terminated {
+                return None;
+            }
 
-                // Convert bytes to string and append to buffer
-                match String::from_utf8(chunk.to_vec()) {
-                    Ok(text) => {
-                        buffer.push_str(&text);
-
-                        // Process complete events from the buffer
-                        let (events, new_buffer) = process_raw_sse_events(&buffer);
-                        buffer = new_buffer;
-
-                        events
-                    }
-                    Err(e) => vec![Err(AgUiClientError::SseParse {
-                        message: format!("Invalid UTF-8: {e}"),
-                    })],
+            // Map reqwest errors
+            let chunk = match state.stream.next().await? {
+                Ok(chunk) => chunk,
+                Err(err) => {
+                    return Some((vec![Err(AgUiClientError::HttpTransport(err))], state));
                 }
-            })
-            .flat_map(futures::stream::iter)
+            };
+
+            // Convert bytes to string and append to buffer
+            let text = match String::from_utf8(chunk.to_vec()) {
+                Ok(text) => text,
+                Err(e) => {
+                    let message = format!("Invalid UTF-8: {e}");
+                    return Some((vec![Err(AgUiClientError::SseParse { message })], state));
+                }
+            };
+            state.buffer.push_str(&text);
+
+            // Process complete events from the buffer, refusing any frame over the cap before it
+            // is parsed.
+            let (mut events, new_buffer, overflowed) =
+                process_raw_sse_events_capped(&state.buffer, SSE_MAX_BUFFER_BYTES);
+
+            if overflowed {
+                /*
+                 * End the stream rather than carry on from an arbitrary offset.
+                 *
+                 * The parser was inside the frame that broke the cap, and the bytes after the
+                 * point it gave up are the tail of that frame, not a new one. Clearing the buffer
+                 * and continuing reads that tail as a frame of its own, so a sender could place
+                 * anything it liked after the cap and have it dispatched as an event. There is no
+                 * offset that is known to be a frame boundary, so there is nothing safe to resume
+                 * from.
+                 */
+                state.terminated = true;
+                state.buffer = String::new();
+                events.push(Err(AgUiClientError::SseParse {
+                    message: format!(
+                        "SSE frame exceeded {SSE_MAX_BUFFER_BYTES} bytes; ending the stream"
+                    ),
+                }));
+            } else {
+                state.buffer = new_buffer;
+            }
+
+            Some((events, state))
+        })
+        .flat_map(futures::stream::iter)
     }
 }
 
@@ -108,40 +163,80 @@ impl SseEventProcessor {
 /// Returns a tuple of (events, new_buffer) where:
 /// - events: A vector of parsed events or errors
 /// - new_buffer: The remaining buffer that might contain incomplete events
+/// Only the tests parse without a limit; the stream always applies one.
+#[cfg(test)]
 fn process_raw_sse_events(buffer: &str) -> (Vec<Result<SseEvent, AgUiClientError>>, String) {
-    let mut results = Vec::new();
-    let chunks: Vec<&str> = buffer.split("\n\n").collect();
+    let (events, rest, _) = process_raw_sse_events_capped(buffer, usize::MAX);
+    (events, rest)
+}
 
-    // If there's only one chunk and it doesn't end with a double newline,
-    // it might be incomplete - keep it in the buffer
-    if chunks.len() == 1 && !buffer.ends_with("\n\n") {
-        return (Vec::new(), buffer.to_string());
+/// As [`process_raw_sse_events`], with a per-frame size limit.
+///
+/// The limit is applied to each frame *before* it is parsed, and to the incomplete remainder
+/// afterwards. Checking only the remainder is not the same thing: by then a frame larger than the
+/// limit has already been parsed and handed to the caller, so the cap can be stepped over by
+/// terminating the oversized frame instead of leaving it open.
+///
+/// The third element of the return is whether the limit was hit. On that path the remainder is
+/// dropped, because the parser is somewhere inside a frame it refused and no later offset is known
+/// to be a frame boundary.
+fn process_raw_sse_events_capped(
+    buffer: &str,
+    max_frame_bytes: usize,
+) -> (Vec<Result<SseEvent, AgUiClientError>>, String, bool) {
+    let mut results = Vec::new();
+    let mut rest = buffer;
+
+    while let Some((frame_end, delimiter_len)) = find_frame_end(rest) {
+        if frame_end > max_frame_bytes {
+            return (results, String::new(), true);
+        }
+        let frame = &rest[..frame_end];
+        if !frame.is_empty() {
+            results.push(parse_sse_event(frame));
+        }
+        rest = &rest[frame_end + delimiter_len..];
     }
 
-    let complete_chunks = if buffer.ends_with("\n\n") {
-        // All chunks are complete
-        &chunks[..]
-    } else {
-        // Last chunk might be incomplete
-        &chunks[..chunks.len() - 1]
-    };
+    // Whatever follows the last delimiter is an incomplete frame; keep buffering it, unless it has
+    // already outgrown what any single frame is allowed to be.
+    if rest.len() > max_frame_bytes {
+        return (results, String::new(), true);
+    }
 
-    // Process all complete events
-    for chunk in complete_chunks {
-        if !chunk.is_empty() {
-            results.push(parse_sse_event(chunk));
+    (results, rest.to_string(), false)
+}
+
+/// Length of the line terminator at `index`, if one starts there.
+///
+/// The SSE spec allows CRLF, LF, or a bare CR to end a line.
+fn line_terminator_len(bytes: &[u8], index: usize) -> Option<usize> {
+    match bytes.get(index)? {
+        b'\r' if bytes.get(index + 1) == Some(&b'\n') => Some(2),
+        b'\r' | b'\n' => Some(1),
+        _ => None,
+    }
+}
+
+/// Locate the first frame boundary, i.e. two consecutive line terminators.
+///
+/// Returns `(offset of the first terminator, combined length of both terminators)`,
+/// or `None` when the buffer holds no complete frame yet.
+fn find_frame_end(buffer: &str) -> Option<(usize, usize)> {
+    let bytes = buffer.as_bytes();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        match line_terminator_len(bytes, index) {
+            Some(first) => match line_terminator_len(bytes, index + first) {
+                Some(second) => return Some((index, first + second)),
+                None => index += first,
+            },
+            None => index += 1,
         }
     }
 
-    // If the buffer doesn't end with a double newline and we have chunks,
-    // the last chunk is incomplete - keep it in the buffer
-    let new_buffer = if !buffer.ends_with("\n\n") && !chunks.is_empty() {
-        chunks.last().unwrap().to_string()
-    } else {
-        String::new()
-    };
-
-    (results, new_buffer)
+    None
 }
 
 /// Parse a single SSE event text into an SseEvent
@@ -150,7 +245,9 @@ fn parse_sse_event(event_text: &str) -> Result<SseEvent, AgUiClientError> {
     let mut id = None;
     let mut data_lines = Vec::new();
 
-    for line in event_text.lines() {
+    // Split on any spec-legal line terminator; CRLF yields an empty segment that the
+    // emptiness check below skips.
+    for line in event_text.split(['\r', '\n']) {
         if line.is_empty() {
             continue;
         }
@@ -215,6 +312,151 @@ mod tests {
         assert_eq!(
             new_buffer,
             "data: {\"event_type\":\"test2\",\"data\":\"hello2\"}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_raw_sse_events_crlf() {
+        // A spec-legal CRLF-delimited stream must dispatch just like an LF one.
+        let buffer = "event: ping\r\ndata: {\"message\":\"hello\"}\r\n\r\n\
+                      event: update\r\nid: 7\r\ndata: {\"status\":\"ok\"}\r\n\r\n";
+        let (events, new_buffer) = process_raw_sse_events(buffer);
+        assert_eq!(events.len(), 2);
+        assert_eq!(new_buffer, "");
+
+        let ping = events[0].as_ref().unwrap();
+        assert_eq!(ping.event, Some("ping".to_string()));
+        assert_eq!(ping.data, "{\"message\":\"hello\"}");
+
+        let update = events[1].as_ref().unwrap();
+        assert_eq!(update.event, Some("update".to_string()));
+        assert_eq!(update.id, Some("7".to_string()));
+        assert_eq!(update.data, "{\"status\":\"ok\"}");
+    }
+
+    #[tokio::test]
+    async fn test_process_raw_sse_events_crlf_partial_frame_is_retained() {
+        let buffer = "data: first\r\n\r\ndata: seco";
+        let (events, new_buffer) = process_raw_sse_events(buffer);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].as_ref().unwrap().data, "first");
+        assert_eq!(new_buffer, "data: seco");
+    }
+
+    #[tokio::test]
+    async fn test_process_raw_sse_events_bare_cr() {
+        // A bare CR is also a spec-legal line terminator.
+        let buffer = "event: ping\rdata: one\r\rdata: two\r\r";
+        let (events, new_buffer) = process_raw_sse_events(buffer);
+        assert_eq!(events.len(), 2);
+        assert_eq!(new_buffer, "");
+        assert_eq!(events[0].as_ref().unwrap().event, Some("ping".to_string()));
+        assert_eq!(events[0].as_ref().unwrap().data, "one");
+        assert_eq!(events[1].as_ref().unwrap().data, "two");
+    }
+
+    #[tokio::test]
+    async fn test_buffer_is_capped_when_no_frame_ever_completes() {
+        // A stream that never emits a frame delimiter must not grow without bound.
+        let chunk_len = 1024 * 1024;
+        let chunk_count = SSE_MAX_BUFFER_BYTES / chunk_len + 2;
+        let chunks: Vec<Result<Bytes, reqwest::Error>> = (0..chunk_count)
+            .map(|_| Ok(Bytes::from(vec![b'x'; chunk_len])))
+            .collect();
+
+        let results: Vec<_> = SseEventProcessor::new(futures::stream::iter(chunks))
+            .collect::<Vec<_>>()
+            .await;
+
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Err(AgUiClientError::SseParse { .. }))),
+            "expected an SseParse error once the buffer exceeded the cap"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_frame_larger_than_the_cap_is_refused_not_emitted() {
+        // The cap has to be decided before a frame is parsed. Checked afterwards, against only
+        // what is left over, a frame that is itself over the cap has already been emitted.
+        let oversized = "x".repeat(SSE_MAX_BUFFER_BYTES + 1);
+        let chunks: Vec<Result<Bytes, reqwest::Error>> =
+            vec![Ok(Bytes::from(format!("data: {oversized}\n\n")))];
+
+        let results: Vec<_> = SseEventProcessor::new(futures::stream::iter(chunks))
+            .collect::<Vec<_>>()
+            .await;
+
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Err(AgUiClientError::SseParse { .. }))),
+            "expected an SseParse error for a frame over the cap"
+        );
+        assert!(
+            !results.iter().any(|r| r.is_ok()),
+            "an over-cap frame must not be emitted as an event"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stream_ends_after_an_overflow_rather_than_resynchronizing() {
+        // Clearing the buffer on overflow forgets that the parser was inside a rejected frame, so
+        // the tail of that frame reads as a new one. Both the forged tail and the frame after it
+        // were emitted. Overflow now ends the stream.
+        let oversized = "y".repeat(SSE_MAX_BUFFER_BYTES + 1);
+        let chunks: Vec<Result<Bytes, reqwest::Error>> = vec![
+            Ok(Bytes::from(oversized)),
+            Ok(Bytes::from(
+                "data: forged tail\n\ndata: legitimate\n\n".to_string(),
+            )),
+        ];
+
+        let results: Vec<_> = SseEventProcessor::new(futures::stream::iter(chunks))
+            .collect::<Vec<_>>()
+            .await;
+
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, Err(AgUiClientError::SseParse { .. }))),
+            "expected an SseParse error once the cap was exceeded"
+        );
+        let emitted: Vec<&str> = results
+            .iter()
+            .filter_map(|r| r.as_ref().ok())
+            .map(|e| e.data.as_str())
+            .collect();
+        assert!(
+            emitted.is_empty(),
+            "nothing may be emitted after an overflow, got {emitted:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_overflow_ends_the_stream_without_another_upstream_chunk() {
+        // A finite source cannot show this: it supplies EOF of its own accord. Here the body goes
+        // quiet after the oversized chunk, exactly as a server holding the connection open would,
+        // so the stream has to reach `None` on its own rather than wait to be told.
+        let oversized = "z".repeat(SSE_MAX_BUFFER_BYTES + 1);
+        let upstream =
+            futures::stream::once(
+                async move { Ok::<Bytes, reqwest::Error>(Bytes::from(oversized)) },
+            )
+            .chain(futures::stream::pending());
+        let mut events = Box::pin(SseEventProcessor::new(upstream));
+
+        assert!(matches!(
+            events.next().await,
+            Some(Err(AgUiClientError::SseParse { .. }))
+        ));
+
+        let end = tokio::time::timeout(std::time::Duration::from_millis(100), events.next()).await;
+
+        assert!(
+            matches!(end, Ok(None)),
+            "the stream must end without another chunk from the body"
         );
     }
 
