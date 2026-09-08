@@ -97,6 +97,16 @@ async function getFeatureFrontendFiles(featureId: string) {
   return retrievedFiles;
 }
 
+function getGoSourceFiles(directory: string): string[] {
+  return fs
+    .readdirSync(directory)
+    .filter(
+      (fileName) => fileName.endsWith(".go") && !fileName.endsWith("_test.go"),
+    )
+    .sort()
+    .map((fileName) => path.join(directory, fileName));
+}
+
 const integrationsFolderPath = "../../../integrations";
 const middlewaresFolderPath = "../../../middlewares";
 const sdksFolderPath = "../../../sdks";
@@ -335,6 +345,21 @@ const agentFilesMapper: Record<
             `/agno/python/examples/server/api/${agentId}.py`,
           ),
         ],
+      }),
+      {},
+    );
+  },
+  "trpc-agent-go": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: getGoSourceFiles(
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/trpc-agent-go/go/examples/${agentId.replace(/^v1_/, "")}`,
+          ),
+        ),
       }),
       {},
     );

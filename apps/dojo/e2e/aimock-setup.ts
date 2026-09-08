@@ -291,6 +291,37 @@ export async function setupLLMock(): Promise<void> {
       typeof sysContent(msgs) === "string" ? (sysContent(msgs) as string) : "";
     return sys.toLowerCase().includes(substr.toLowerCase());
   };
+
+  // tRPC-Agent-Go predictive state calls the frontend write_document tool
+  // directly. Other integrations use a backend write_document_local tool, so
+  // keep this fixture scoped to requests that expose only the frontend tool.
+  mockServer.addFixture({
+    match: {
+      predicate: (req) => {
+        const lastMessage = req.messages[req.messages.length - 1];
+        const toolNames = req.tools?.map((tool) => tool.function.name) ?? [];
+        return (
+          lastMessage?.role === "user" &&
+          toolNames.includes("write_document") &&
+          !toolNames.includes("write_document_local") &&
+          sysIncludes(req.messages, "MUST use the write_document tool") &&
+          textOf(lastMessage.content).includes("dragon called Atlantis")
+        );
+      },
+    },
+    response: {
+      toolCalls: [
+        {
+          name: "write_document",
+          arguments: JSON.stringify({
+            document:
+              "Once upon a time, in a land far away, there lived a magnificent dragon named Atlantis. Atlantis was known throughout the realm for its shimmering scales that reflected the light of a thousand stars. The dragon Atlantis would soar above the mountains, breathing fire that lit up the night sky. Villagers would gather to watch Atlantis perform its aerial dances, marveling at the grace of this ancient creature.",
+          }),
+        },
+      ],
+    },
+  });
+
   const supervisorRoute = (nextAgent: string, answer: string) => ({
     response: {
       toolCalls: [

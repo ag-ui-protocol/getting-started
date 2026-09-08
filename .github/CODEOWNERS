@@ -10,5 +10,6 @@ sdks/community/dart @mattsp1290
 docs/sdk/dart @mattsp1290
 
 integrations/agent-spec @sonleoracle
+integrations/trpc-agent-go @Flash-LHR
 
 .github/config-allowlist.txt @AlemTuzlak @atai

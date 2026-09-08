@@ -405,6 +405,23 @@ export const agentsIntegrations = {
       },
     ),
 
+  "trpc-agent-go": async () =>
+    mapAgents(
+      (path) =>
+        new HttpAgent({ url: `${envVars.trpcAgentGoUrl}/${path}/agui` }),
+      {
+        agentic_chat: "agentic_chat",
+        agentic_chat_reasoning: "agentic_chat_reasoning",
+        agentic_chat_multimodal: "agentic_chat_multimodal",
+        agentic_generative_ui: "agentic_generative_ui",
+        backend_tool_rendering: "backend_tool_rendering",
+        human_in_the_loop: "human_in_the_loop",
+        predictive_state_updates: "predictive_state_updates",
+        shared_state: "shared_state",
+        tool_based_generative_ui: "tool_based_generative_ui",
+      },
+    ),
+
   "spring-ai": async () =>
     mapAgents(
       (path) =>
