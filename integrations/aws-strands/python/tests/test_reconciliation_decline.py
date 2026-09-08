@@ -44,7 +44,7 @@ from ag_ui_strands.config import StrandsAgentConfig
 from ag_ui_strands.session_reconcile import AG_UI_FRONTEND_CALL_IDS_STATE_KEY
 from tests.hook_helpers import invoke_after_model_call, invoke_before_model_call
 from tests.interrupt_state_stub import InterruptStateStub
-from tests.provider_binding import PROVIDER_FORMATTERS, assert_binds_cleanly
+from tests.provider_binding import SPLITTING_FORMATTERS, assert_binds_cleanly
 
 RECONCILE_LOGGER = "ag_ui_strands.agent"
 
@@ -507,19 +507,24 @@ class TestReconciliationDisabled:
 
 
 class TestTheCarriedAnswerBindsCleanly:
-    """A prompt that cannot travel as a turn of its own still has to reach a
-    provider in a shape it accepts.
+    """The answer the prompt carries must not break the tool call it answers.
 
     When the cached history already ends on the turn that answers the tool call,
-    handing Strands a prompt appends a second user turn, which the one-to-one
-    formatters reject, and folding it into that turn puts text ahead of the tool
-    message, which the splitting formatters reject. The answer therefore merges
-    into the question, and this is where that is checked against the real
-    formatters rather than against a description of them.
+    the tempting repair is to fold the prompt into that turn so the conversation
+    stays one user turn. That is the shape OpenAI refuses: the splitting
+    formatters emit the text as a message of its own ahead of the tool message,
+    leaving the call unanswered. So the prompt travels as its own turn, and this
+    checks the result against the real formatters rather than a description of
+    them.
+
+    Only the splitting family is asserted here. Its own turn means two
+    consecutive user messages, which the one-to-one family refuses, and that is
+    a pre-existing limitation of every path through this adapter rather than
+    something this scenario introduces.
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("provider", PROVIDER_FORMATTERS, ids=str)
+    @pytest.mark.parametrize("provider", SPLITTING_FORMATTERS, ids=str)
     async def test_the_history_the_model_reads_binds_cleanly(self, provider):
         core = _no_session_core(_cached_history_awaiting_an_answer())
 
@@ -533,8 +538,6 @@ class TestTheCarriedAnswerBindsCleanly:
             )
 
         assert _errors(events) == []
-        # The durable history is the conversation, two consecutive user turns
-        # and all; what the provider is sent is the reshaped view.
         assert [message["role"] for message in core.messages] == [
             "user",
             "assistant",
@@ -544,7 +547,7 @@ class TestTheCarriedAnswerBindsCleanly:
         assert_binds_cleanly(provider, core.model_messages[0])
 
     @pytest.mark.asyncio
-    async def test_the_answer_is_said_once_in_the_question(self):
+    async def test_the_answer_is_said_once_and_never_inside_the_tool_turn(self):
         core = _no_session_core(_cached_history_awaiting_an_answer())
 
         with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
@@ -556,14 +559,14 @@ class TestTheCarriedAnswerBindsCleanly:
                 ),
             )
 
-        assert describe_model_bound_history(core.model_messages[0]) == (
-            "roles=[user, assistant, user] tool-call adjacency=ok "
-            "role alternation=ok"
-        )
         seen = core.model_messages[0]
+        assert describe_model_bound_history(seen) == (
+            "roles=[user, assistant, user, user] tool-call adjacency=ok "
+            "role alternation=broken at [3]"
+        )
         said = repr(seen).count("get_weather returned: sunny, 22C")
         assert said == 1, f"the answer was said {said} times: {seen}"
-        # And the reshape is undone: the store keeps the turn the client sent.
+        # Its own turn, so the store keeps it as the client sent it.
         assert core.messages[-1] == {
             "role": "user",
             "content": [{"text": "get_weather returned: sunny, 22C"}],

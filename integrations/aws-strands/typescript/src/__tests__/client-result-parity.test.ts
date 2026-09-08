@@ -161,14 +161,9 @@ const ANSWER_TABLE: ClientAnswer[] = [
   },
 ];
 
-/** What the client typed on the first turn, and the question every later turn
- * continues. The prompt path merges its wording into this text, so a test
- * reading that wording back has to know where it starts. */
-const FIRST_QUESTION = "make it red";
-
 function firstRun(): RunAgentInput {
   return minimalRunInput({
-    messages: [{ id: "u1", role: "user", content: FIRST_QUESTION } as never],
+    messages: [{ id: "u1", role: "user", content: "make it red" } as never],
     tools: CLIENT_TOOLS,
   });
 }
@@ -344,29 +339,15 @@ async function prompted(answer: ClientAnswer): Promise<string[]> {
     model.seenMessages.length,
     "model turns taken across the first run and the continuation",
   ).toBe(MODEL_TURNS);
-  // The prompt rides in the question, the latest user turn that carries no
-  // tool result: the turn that does carry one cannot also carry text, because
-  // a splitting formatter emits that text as its own message ahead of the tool
-  // message and breaks the tool call's adjacency. It merges into that turn's
-  // own text block rather than sitting beside it, so what this run added is
-  // what follows the client's first question there.
-  const question = model.seenMessages[CONTINUATION_TURN]!.filter((message) => {
-    if ((message as { role?: string }).role !== "user") return false;
-    const content = (message as { content?: unknown[] }).content ?? [];
-    return !content.some(
-      (block) =>
-        (block as { toolResult?: unknown }).toolResult !== undefined ||
-        (block as { type?: string }).type === "toolResultBlock",
-    );
-  }).at(-1);
-  const texts = ((question as { content?: unknown[] })?.content ?? [])
+  // The LAST user turn only: earlier ones are the thread's own history, which
+  // this path replays unchanged, and the run's own prompt is what is under test.
+  const users = model.seenMessages[CONTINUATION_TURN]!.filter(
+    (message) => (message as { role?: string }).role === "user",
+  );
+  const last = users.at(-1);
+  return ((last as { content?: unknown[] })?.content ?? [])
     .map((block) => (block as { text?: unknown }).text)
     .filter((text): text is string => typeof text === "string");
-  return texts.flatMap((text) =>
-    text.startsWith(`${FIRST_QUESTION}\n\n`)
-      ? [text.slice(FIRST_QUESTION.length + 2)]
-      : [],
-  );
 }
 
 /** One model turn: the seeded run is the only request this path makes. */

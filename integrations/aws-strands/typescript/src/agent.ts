@@ -3798,15 +3798,15 @@ export class StrandsAgent {
         }
       }
 
-      // Nothing reshapes the history here. A continuation whose payload
-      // carries both a tool result and the user's next question ends the
-      // conversation on `user(toolResult)` then the prompt Strands appends,
-      // which is two consecutive user messages and a shape the one-to-one
-      // formatters reject. That is repaired for the length of each model call
-      // by the hook in `model-context.ts` and put back afterwards, rather than
-      // here: the client's turn has to reach the session store as its own
-      // message, and a turn this loop folded away before `stream()` is a turn
-      // the store never records.
+      // Nothing reshapes the history here. The prompt goes to `stream()` and
+      // Strands appends it as its own user turn, which is what the session
+      // store records and what the client sent. When the history it lands on
+      // already ends on the turn that answers the tool call, that is two
+      // consecutive user messages, which is what every other path through this
+      // adapter has always produced and is left alone here. What is NOT left
+      // alone is text inside the turn that answers the tool call: that binds as
+      // assistant(tool_calls) -> user(text) -> tool(result) and OpenAI refuses
+      // it outright. See `model-context.ts`.
 
       // Native ids already in this thread's history, captured after any history
       // replacement above and before the stream appends this run's own calls.
@@ -3837,11 +3837,7 @@ export class StrandsAgent {
       // the app asked the model to know. Python raises the same way at the
       // same point, after RUN_STARTED, so the client sees a RUN_ERROR.
       const contextBlock = formatAguiContext(modelContext);
-      // Installed whether or not there is context: the same hook folds a
-      // trailing user turn the provider would refuse. Only a non-empty block
-      // makes a missing registry fatal, because only that drops something the
-      // app asked the model to know.
-      if (!ensureTransientContextHook(strandsAgent) && contextBlock) {
+      if (contextBlock && !ensureTransientContextHook(strandsAgent)) {
         throw new Error(
           "Strands agent does not expose a hook registry for transient context",
         );

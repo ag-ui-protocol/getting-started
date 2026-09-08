@@ -45,7 +45,6 @@ import {
   expectCompletedRun,
   expectDurableRecovery,
   expectNoRunError,
-  expectRolesAlternate,
   expectStoreMatchesMemory,
   expectToolCallsAnsweredImmediately,
   historyTexts,
@@ -268,13 +267,15 @@ function timesSaid(texts: readonly string[], line: string): number {
 /**
  * Assert the model was told `line` somewhere in the turn's text.
  *
- * Not an exact match on one block: a prompt that cannot travel as a turn of its
- * own merges into the question's own text block, so what the model reads is the
- * question and the line joined. What matters is that the line was said, once.
+ * Not an exact match on one block: what carries the line can be a turn of its
+ * own or, where a provider would refuse that, text merged into another turn.
+ * What matters is that the line was said, once.
  */
 function expectSaid(texts: readonly string[], line: string): void {
-  expect(timesSaid(texts, line), `model was not told ${JSON.stringify(line)}`)
-    .toBe(1);
+  expect(
+    timesSaid(texts, line),
+    `model was not told ${JSON.stringify(line)}`,
+  ).toBe(1);
 }
 
 /**
@@ -1506,7 +1507,7 @@ describe("frontend tool result with a session manager, same process", () => {
     expect(persistedToolResults(dir).map((r) => r.content)).toEqual([
       [{ text: "color applied" }],
     ]);
-    expectSaid(modelSawTexts(model, 1), "now make it blue");
+    expect(modelSawTexts(model, 1)).toContain("now make it blue");
   });
 });
 
@@ -1957,8 +1958,7 @@ describe("frontend tool result recovery across a restart", () => {
     ]);
     // Detection stays permissive, so the gate still sees a stub and the real
     // result reaches the model through the fallback prompt instead.
-    expectSaid(
-      modelSawTexts(second.model, 0),
+    expect(modelSawTexts(second.model, 0)).toContain(
       `${TOOL} returned: color applied`,
     );
   });
@@ -2088,11 +2088,11 @@ describe("a continuation whose reconcile declines only some results", () => {
                 `toolResult:#${DECLINED_ID}`,
               ],
             },
-            // Its own message, and durable. The model reads it folded into the
-            // question, because a user turn following the one that answers the
-            // tool call is a shape the one-to-one formatters reject, but that
-            // reshape lives for one model call: what the store keeps is the
-            // conversation as it happened.
+            // Its own turn, and durable. Text inside the turn above would bind
+            // as assistant(tool_calls) -> user(text) -> tool(result), which
+            // OpenAI refuses; a turn after it is two consecutive user messages,
+            // which is what every path through this adapter produces and what
+            // the store has to keep to stay faithful to what the client sent.
             { role: "user", blocks: [`text:${DECLINED_LINE}`] },
             { role: "assistant", blocks: ["text:The color is now red."] },
           ],
@@ -2272,7 +2272,7 @@ describe("a client answer whose placeholder can never be repaired", () => {
     // Exactly one: the persisted turn-2 prompt the model already holds. A
     // second is this turn restating it.
     expect(timesSaid(modelSawTexts(third.model, 0), LINE)).toBe(1);
-    expectSaid(modelSawTexts(third.model, 0), "now make it blue");
+    expect(modelSawTexts(third.model, 0)).toContain("now make it blue");
 
     const fourth = bootProcess(dir, ANSWERS);
     const fourthEvents = await collect(
@@ -2396,7 +2396,7 @@ describe("a client answer whose placeholder can never be repaired", () => {
     const seen = modelSawTexts(third.model, 0);
     expect(timesSaid(seen, LINE)).toBe(1);
     expect(timesSaid(seen, OTHER_LINE)).toBe(1);
-    expectSaid(seen, "now make it blue");
+    expect(seen).toContain("now make it blue");
   });
 });
 
@@ -2468,12 +2468,11 @@ describe("a reconcile whose snapshot write the store refuses", () => {
 
     expect(model.calls).toBe(1);
     // The legacy path in full: the stub still stands in the history the model
-    // reads, and the client's answer arrives as the prompt beside it. The
-    // prompt rides in the question rather than in the stub's own turn, which
-    // is the one placement no provider formatter rejects.
+    // reads, and the client's answer arrives as the prompt beside it.
     expect(modelSawTexts(model, 0)).toEqual([
-      `make it red\n\n${TOOL} returned: color applied`,
+      "make it red",
       PROXY_RESULT_PLACEHOLDER,
+      `${TOOL} returned: color applied`,
     ]);
   });
 
@@ -2489,8 +2488,8 @@ describe("a reconcile whose snapshot write the store refuses", () => {
             { role: "user", blocks: ["text:make it red"] },
             { role: "assistant", blocks: [`toolUse:${TOOL}#${NATIVE_ID}`] },
             { role: "user", blocks: [`toolResult:#${NATIVE_ID}`] },
-            // Its own message, and durable; see the partial-decline case above
-            // for why the model still reads it folded into the question.
+            // Its own turn; see the partial-decline case above for why it is
+            // not inside the one that answers the call.
             { role: "user", blocks: [`text:${TOOL} returned: color applied`] },
             { role: "assistant", blocks: ["text:The color is now red."] },
           ],
@@ -2623,8 +2622,7 @@ describe("a continuation carrying one admitted and one unadmitted result", () =>
     const texts = modelSawTexts(model, 0);
     // Both answers arrive together, in the one place that can carry the
     // unadmitted one.
-    expectSaid(
-      texts,
+    expect(texts).toContain(
       `${TOOL} returned: color applied\n${TOOL} returned: second applied`,
     );
     // And neither is also stated as a corrected toolResult beside it.
@@ -3195,17 +3193,17 @@ describe("a proxy left over from an earlier turn", () => {
 });
 
 /**
- * A continuation whose payload holds a tool result and the user's next
- * question has to reach the model in a shape a provider accepts AND leave the
- * store holding what the client actually sent.
+ * A continuation whose payload holds a tool result and the user's next question
+ * has to leave the store holding what the client actually sent.
  *
- * Those pull in opposite directions. No provider will take two consecutive
- * user turns, so the model is shown the question and the trailing turn folded
- * together; the store has to keep them apart, or a client that reloads the
- * thread finds its own question fused into an older message. The fold
- * therefore lives for one model call. This reads the store back after a
- * restart to prove it, and is the TypeScript half of the Python suite's
- * `TestATurnCarryingBothAnAnswerAndAQuestion`.
+ * The temptation is to reshape the conversation on the way in, so the trailing
+ * turn stops being a second consecutive user message. Anything that edits the
+ * history before the run is silently lossy: Python's session manager writes a
+ * message when it is added and never rewrites an older one, so an edit to the
+ * question is an edit the store never sees, and the client's own question is
+ * gone on reload. Nothing here reshapes; the tool call still has to be answered
+ * with nothing in between, which is the rule that has teeth. The TypeScript
+ * half of the Python suite's `TestATurnCarryingBothAnAnswerAndAQuestion`.
  */
 describe("a turn carrying both an answer and a question", () => {
   it("keeps both as their own messages across a restart", async () => {
@@ -3233,11 +3231,8 @@ describe("a turn carrying both an answer and a question", () => {
     );
     expectNoRunError(events, "the answer-and-question turn");
 
-    // The model read them folded, which is the only shape every formatter
-    // takes.
     expectSaid(modelSawTexts(second.model, 0), "now make it blue");
     expectToolCallsAnsweredImmediately(second.model.seenMessages[0]!);
-    expectRolesAlternate(second.model.seenMessages[0]!);
 
     // The store is read back on its own terms. The client's question is
     // there, and it is still its own message.

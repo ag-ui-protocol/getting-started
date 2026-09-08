@@ -181,8 +181,7 @@ export type PlacedUserText =
       index: number;
       original: unknown;
       inserted: TextBlock;
-    }
-  | { kind: "remove"; messages: unknown[]; index: number; removed: unknown };
+    };
 
 /** Agents that already carry the hook pair, so a re-run installs nothing. */
 const hookedAgents = new WeakSet<object>();
@@ -391,74 +390,24 @@ export function placeUserText(
 }
 
 /**
- * Fold a trailing user turn that answers nothing into the question.
- *
- * A continuation whose payload carries both a tool result and the user's next
- * question leaves the history ending `user(toolResult)` then `user(text)`.
- * That is the conversation as it happened, and it is what the session store
- * has to keep, but it is not a shape a provider will take: the one-to-one
- * formatters read two consecutive user messages and reject it. So the trailing
- * turn is folded into the question for the length of the model call and put
- * back afterwards, which leaves the durable record faithful and the request
- * valid.
- *
- * The whole turn moves, not just its text, so an image the client attached to
- * that turn still reaches the model. Nothing is folded when the history holds
- * no question to fold into: an orphan tool result is already a shape a
- * provider rejects and moving turns around it would not repair that.
- */
-function foldTrailingUserTurn(messages: unknown): PlacedUserText[] {
-  if (!Array.isArray(messages) || messages.length < 2) return [];
-  const lastIndex = messages.length - 1;
-  const last = messages[lastIndex] as { role?: unknown; content?: unknown };
-  if (last?.role !== "user" || carriesToolResult(last)) return [];
-  const previous = messages[lastIndex - 1];
-  if (!carriesToolResult(previous)) return [];
-
-  const questionIndex = latestQuestionIndexIn(messages.slice(0, lastIndex));
-  if (questionIndex < 0) return [];
-
-  const applied: PlacedUserText[] = [];
-  const question = messages[questionIndex];
-  const content = (question as { content?: unknown }).content as unknown[];
-  for (const block of (last.content ?? []) as unknown[]) {
-    if (isTextBlock(block)) {
-      applied.push(mergeTextInto(question, block.text, "append"));
-      continue;
-    }
-    content.push(block);
-    applied.push({ kind: "splice", content, inserted: block as TextBlock });
-  }
-  messages.splice(lastIndex, 1);
-  applied.push({ kind: "remove", messages, index: lastIndex, removed: last });
-  return applied;
-}
-
-/**
- * Reshape the history for one model call, mirroring Python's
- * `_TransientModelContextHook._before_model_call` case for case.
- *
- * Two texts can need placing: the client's own trailing turn, folded by
- * `foldTrailingUserTurn`, and the application's context block. Both go through
- * `placeUserText`, so both reach the model under the same provider rules, and
- * both are undone afterwards so the durable conversation is the conversation.
+ * Place the run's context block in front of the model, mirroring Python's
+ * `_TransientModelContextHook._before_model_call` case for case. The placement
+ * is `placeUserText`, so the block lands where no provider formatter refuses
+ * it, and it is undone afterwards so the durable conversation is untouched.
  */
 function injectModelContext(event: BeforeModelCallEvent): void {
+  const contextBlock = modelContextBlock.getStore();
+  if (!contextBlock) return;
   const agent = event.agent as unknown as MessagesOwner;
   if (mutations.has(agent)) {
     // A second before-hook with the first still in place means an after-hook
-    // or a teardown was skipped. Persisting that would leak the reshape into
-    // the durable conversation, which is the one thing this module exists to
+    // or a teardown was skipped. Persisting that would leak the block into the
+    // durable conversation, which is the one thing this module exists to
     // prevent, so it fails loudly instead. Same message as Python.
     throw new Error("Transient AG-UI model context was not restored");
   }
-  const applied = foldTrailingUserTurn(agent.messages);
-  const contextBlock = modelContextBlock.getStore();
-  if (contextBlock) {
-    const placed = placeUserText(agent.messages, contextBlock, "prepend");
-    if (placed) applied.push(placed);
-  }
-  if (applied.length > 0) mutations.set(agent, applied);
+  const placed = placeUserText(agent.messages, contextBlock, "prepend");
+  if (placed) mutations.set(agent, [placed]);
 }
 
 /** Remove `target` from `list` by identity, trying `hint` first. */
@@ -492,10 +441,6 @@ export function restoreTransientModelContext(agent: unknown): void {
 }
 
 function undoOne(agent: unknown, mutation: PlacedUserText): void {
-  if (mutation.kind === "remove") {
-    mutation.messages.splice(mutation.index, 0, mutation.removed);
-    return;
-  }
   if (mutation.kind === "replace") {
     const at =
       mutation.content[mutation.index] === mutation.inserted

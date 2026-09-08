@@ -689,23 +689,6 @@ export function expectToolCallsAnsweredImmediately(
 }
 
 /**
- * Assert a model-bound history never puts two turns of the same role in a row,
- * the rule the one-to-one provider formatters (anthropic, bedrock, gemini)
- * enforce. Those map each native message to one provider message, so two
- * consecutive user turns reach the provider as two consecutive user messages,
- * which each of them rejects.
- */
-export function expectRolesAlternate(
-  history: readonly unknown[],
-  label = "model-bound history",
-): void {
-  const described = describeModelBoundHistory(history);
-  expect(described, `${label}: ${described}`).toContain(
-    "role alternation=ok",
-  );
-}
-
-/**
  * Assert the run ran to completion: no error, and not suspended. An interrupt
  * also emits RUN_FINISHED, so the outcome check is what separates a completed
  * run from one parked waiting on a resume.

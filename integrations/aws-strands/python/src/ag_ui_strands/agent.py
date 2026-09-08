@@ -3267,53 +3267,6 @@ def _place_user_text(
     return ("insert", messages, index, added)
 
 
-def _fold_trailing_user_turn(messages: Any) -> List[Tuple[Any, ...]]:
-    """Fold a trailing user turn that answers nothing into the question.
-
-    A continuation whose payload carries both a tool result and the user's next
-    question leaves the history ending ``user(toolResult)`` then ``user(text)``.
-    That is the conversation as it happened, and it is what the session store
-    has to keep, but it is not a shape a provider will take: the one-to-one
-    formatters read two consecutive user messages and reject it. So the trailing
-    turn is folded into the question for the length of the model call and put
-    back afterwards, which leaves the durable record faithful and the request
-    valid.
-
-    The whole turn moves, not just its text, so an image the client attached to
-    it still reaches the model. Nothing is folded when the history holds no
-    question to fold into: an orphan tool result is already a shape a provider
-    rejects, and moving turns around it would not repair that."""
-    if not isinstance(messages, list) or len(messages) < 2:
-        return []
-    last = messages[-1]
-    if not isinstance(last, dict) or last.get("role") != "user":
-        return []
-    if _carries_tool_result(last):
-        return []
-    if not _carries_tool_result(messages[-2]):
-        return []
-
-    question_index = _latest_question_index(messages[:-1])
-    if question_index < 0:
-        return []
-
-    applied: List[Tuple[Any, ...]] = []
-    question = messages[question_index]
-    content = question.get("content")
-    if not isinstance(content, list):
-        content = []
-        question["content"] = content
-    for block in last.get("content") or []:
-        if isinstance(block, dict) and isinstance(block.get("text"), str):
-            applied.append(_merge_text_into(question, block["text"], "append"))
-            continue
-        content.append(block)
-        applied.append(("splice", content, block))
-    removed = messages.pop()
-    applied.append(("remove", messages, len(messages), removed))
-    return applied
-
-
 class _TransientModelContextHook:
     """Expose request context to the model without persisting it as history."""
 
@@ -3322,24 +3275,18 @@ class _TransientModelContextHook:
         registry.add_callback(AfterModelCallEvent, self._after_model_call)
 
     def _before_model_call(self, event: Any) -> None:
+        context_block = _MODEL_CONTEXT_BLOCK.get()
+        if not context_block:
+            return
         if event.agent.__dict__.get(_MODEL_CONTEXT_MUTATION_MARKER) is not None:
             raise RuntimeError("Transient AG-UI model context was not restored")
 
-        # Two texts can need placing: the client's own trailing turn, folded by
-        # ``_fold_trailing_user_turn``, and the application's context block.
-        # Both go through ``_place_user_text``, so both reach the model under
-        # the same provider rules, and both are undone afterwards so the
-        # durable conversation stays the conversation.
-        applied = _fold_trailing_user_turn(event.agent.messages)
-        context_block = _MODEL_CONTEXT_BLOCK.get()
-        if context_block:
-            mutation = _place_user_text(
-                event.agent.messages, context_block, "prepend"
-            )
-            if mutation is not None:
-                applied.append(mutation)
-        if applied:
-            setattr(event.agent, _MODEL_CONTEXT_MUTATION_MARKER, applied)
+        # The placement is ``_place_user_text``, so the block lands where no
+        # provider formatter refuses it, and it is undone afterwards so the
+        # durable conversation is untouched.
+        mutation = _place_user_text(event.agent.messages, context_block, "prepend")
+        if mutation is not None:
+            setattr(event.agent, _MODEL_CONTEXT_MUTATION_MARKER, [mutation])
 
     def _after_model_call(self, event: Any) -> None:
         _restore_transient_model_context(event.agent)
@@ -3359,10 +3306,7 @@ def _restore_transient_model_context(agent: Any) -> None:
 
 def _undo_one(mutation: Tuple[Any, ...]) -> None:
     kind = mutation[0]
-    if kind == "remove":
-        _, messages, index, removed = mutation
-        messages.insert(index, removed)
-    elif kind == "replace":
+    if kind == "replace":
         _, content, index, original, inserted = mutation
         if index < len(content) and content[index] is inserted:
             content[index] = original
@@ -5652,11 +5596,7 @@ class StrandsAgent:
             # has to. Filled in by whichever branch below settles it.
             uncarried_result_ids: list[str] = []
             context_block = _format_agui_context(model_context)
-            # Installed whether or not there is context: the same hook folds a
-            # trailing user turn the provider would refuse. Only a non-empty
-            # block makes a missing registry fatal, because only that drops
-            # something the app asked the model to know.
-            if not _ensure_transient_context_hook(strands_agent) and context_block:
+            if context_block and not _ensure_transient_context_hook(strands_agent):
                 raise RuntimeError(
                     "Strands agent does not expose a hook registry for transient context"
                 )
@@ -5914,16 +5854,16 @@ class StrandsAgent:
                         AG_UI_FRONTEND_CALL_IDS_STATE_KEY, remaining
                     )
 
-            # Nothing reshapes the history here. A continuation whose payload
-            # carries both a tool result and the user's next question ends the
-            # conversation on ``user(toolResult)`` then the prompt Strands
-            # appends, which is two consecutive user messages and a shape the
-            # one-to-one formatters reject. That is repaired for the length of
-            # each model call by ``_TransientModelContextHook`` and put back
-            # afterwards, rather than here: this session manager persists a
-            # message when it is added and never rewrites an older one, so a
-            # turn folded away before ``stream_async`` is a turn the store
-            # never records at all.
+            # Nothing reshapes the history here. The prompt goes to
+            # ``stream_async`` and Strands appends it as its own user turn,
+            # which is what the session store records and what the client sent.
+            # When the history it lands on already ends on the turn that
+            # answers the tool call, that is two consecutive user messages,
+            # which is what every other path through this adapter has always
+            # produced and is left alone here. What is NOT left alone is text
+            # inside the turn that answers the tool call: that binds as
+            # assistant(tool_calls) -> user(text) -> tool(result) and OpenAI
+            # refuses it outright. See ``_place_user_text``.
 
             prior_tool_call_ids = _native_assistant_tool_call_ids(
                 getattr(strands_agent, "messages", None) or []

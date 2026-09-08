@@ -136,6 +136,12 @@ PROVIDER_FORMATTERS = [
 ]
 
 
+#: The subset whose rule is tool-call adjacency. Used where a scenario legitimately
+#: produces two consecutive user turns, which this adapter has always produced on
+#: its ordinary paths and does not claim to repair.
+SPLITTING_FORMATTERS = [p for p in PROVIDER_FORMATTERS if p.family is SPLITTING]
+
+
 def bound_roles(provider: ProviderFormatter, messages: Any) -> List[str]:
     """The provider-message roles ``messages`` binds to, skipping when the
     provider's own SDK is not installed. Only the import is forgiven: a

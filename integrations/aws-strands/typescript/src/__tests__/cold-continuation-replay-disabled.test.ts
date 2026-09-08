@@ -7,26 +7,23 @@
  * routed to a fresh process, or arriving after a restart, looks like this.
  *
  * With replay disabled the seed is the whole history, and its last message is
- * the user-role `toolResult`. That leaves the synthetic continuation prompt
- * with nowhere obvious to go, and the two obvious answers are each wrong for
- * one family of providers:
+ * the user-role `toolResult`. The synthetic continuation prompt used to be
+ * folded into that turn so the conversation stayed one user turn, and that is
+ * the shape this file now exists to keep out. The splitting formatters
+ * (openai, litellm, mistral, writer, llamaapi, llamacpp) emit a turn's
+ * non-tool content as a user message of its own AHEAD of the tool message its
+ * tool results become, so a turn carrying both binds as
+ * `assistant(tool_calls) -> user(text) -> tool(result)`. OpenAI answers that
+ * with HTTP 400 "An assistant message with 'tool_calls' must be followed by
+ * tool messages responding to each 'tool_call_id'", which the bridge reports
+ * as a terminal `STRANDS_FORCE_STOP`.
  *
- * - Handing the prompt to `stream()` has Strands append a SECOND user message.
- *   The one-to-one formatters (anthropic, bedrock, gemini) map that to two
- *   consecutive user messages, which those providers reject.
- * - Folding the prompt into the `toolResult` turn has the splitting formatters
- *   (openai, litellm, mistral, writer, llamaapi, llamacpp) emit it as a user
- *   message of its own AHEAD of the tool message, so the bound sequence is
- *   `assistant(tool_calls) -> user(text) -> tool(result)` and OpenAI answers
- *   with HTTP 400, which the bridge reports as a terminal `STRANDS_FORCE_STOP`
- *   run error.
- *
- * So the prompt rides in the question, the latest user turn that carries no
- * tool result. The message count does not change, nothing lands in a turn that
- * answers a tool call, and both rules hold. These tests check the placement,
- * check it against the real OpenAI Chat Completions formatter the Strands SDK
- * ships, and check that a model that enforces the provider rules the way the
- * provider does still lets the run finish.
+ * The prompt therefore travels as its own turn, which is also what reaches the
+ * session store. That leaves two consecutive user messages, which the
+ * one-to-one formatters (anthropic, bedrock, gemini) do refuse: a real
+ * limitation, pre-existing on every other path through this adapter, and not
+ * one this file claims to fix. Repairing it by folding the client's own turn
+ * into an older one is what these tests exist to prevent.
  */
 
 import { describe, it, expect } from "vitest";
@@ -42,7 +39,6 @@ import {
   collect,
   errorCodes,
   expectCompletedRun,
-  expectRolesAlternate,
   expectToolCallsAnsweredImmediately,
   minimalRunInput,
   modelTurn,
@@ -149,14 +145,19 @@ function openAIAdjacency(
 }
 
 /**
- * A model that refuses the shapes the providers refuse.
+ * A model that refuses the shape OpenAI refuses.
  *
  * `ScriptedModel` replays turns whatever it is handed, so on its own it cannot
  * tell a run that would have worked from one OpenAI would have answered with a
- * 400. This double applies both provider rules before replaying, which is what
- * makes the terminal-event assertions below mean anything: the bridge turns a
- * throw from the model into a `STRANDS_FORCE_STOP` run error, exactly as it
- * turns the provider's own rejection into one.
+ * 400. This double runs the real Chat Completions formatter and rejects a
+ * broken tool call the way the provider does, which is what makes the terminal
+ * event below mean anything: the bridge turns a throw from the model into a
+ * `STRANDS_FORCE_STOP` run error, exactly as it turns the provider's own
+ * rejection into one.
+ *
+ * It deliberately does not enforce role alternation. Two consecutive user
+ * turns are a shape this adapter has always produced on its ordinary paths,
+ * so a double that refused them would be asserting a fix nothing here makes.
  */
 class ProviderRuleModel extends ScriptedModel {
   override async *stream(
@@ -170,15 +171,6 @@ class ProviderRuleModel extends ScriptedModel {
         "An assistant message with 'tool_calls' must be followed by tool " +
           `messages responding to each 'tool_call_id' (${adjacency})`,
       );
-    }
-    const roles = messages.map((message) => message.role);
-    for (let index = 1; index < roles.length; index++) {
-      if (roles[index] === roles[index - 1]) {
-        throw new Error(
-          `A conversation must alternate between user and assistant roles ` +
-            `(broken at [${index}])`,
-        );
-      }
     }
     yield* super.stream(messages, options);
   }
@@ -196,26 +188,28 @@ describe("cold frontend-tool continuation with replay disabled", () => {
     }
 
     expectCompletedRun(events);
-    // `seenMessages` and not the live array: the reshape is undone once the
-    // model call returns, so anything that aliased the agent's own messages
-    // would report the restored history rather than what the model was given.
     expect(model.seenMessages).toHaveLength(1);
 
     const history = model.seenMessages[0]!;
-    const roles = history.map((m) => m.role);
-    expect(roles).toEqual(["user", "assistant", "user"]);
-
-    // The prompt is in the question, and the turn that answers the tool call
-    // carries the tool result and nothing else.
-    expect(textsOf(history[0]!)).toEqual([
-      "call the tool\n\ndoIt executed successfully with no return value.",
+    expect(history.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "user",
     ]);
-    const tail = history[history.length - 1]!;
-    expect(carriesToolResult(tail)).toBe(true);
-    expect(textsOf(tail)).toEqual([]);
+
+    // The turn that answers the tool call carries the tool result and nothing
+    // else; the prompt is the turn after it, which is also the turn the store
+    // records.
+    const answering = history[2]!;
+    expect(carriesToolResult(answering)).toBe(true);
+    expect(textsOf(answering)).toEqual([]);
+    expect(textsOf(history[3]!)).toEqual([
+      "doIt executed successfully with no return value.",
+    ]);
+    expect(textsOf(history[0]!)).toEqual(["call the tool"]);
 
     expectToolCallsAnsweredImmediately(history);
-    expectRolesAlternate(history);
   });
 
   it("binds to a request the real OpenAI formatter accepts", async () => {
@@ -234,6 +228,7 @@ describe("cold frontend-tool continuation with replay disabled", () => {
       "user",
       "assistant",
       "tool",
+      "user",
     ]);
     expect(openAIAdjacency(bound)).toBe("ok");
   });
