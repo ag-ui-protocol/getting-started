@@ -726,6 +726,10 @@ describe("verifyEvents subagent lifecycle", () => {
       { type: EventType.TOOL_CALL_START, toolCallId: "c", toolCallName: "t", subagentRunId: "s1" } as BaseEvent,
       { type: EventType.TOOL_CALL_END, toolCallId: "c", subagentRunId: "s1" } as BaseEvent,
       { type: EventType.REASONING_ENCRYPTED_VALUE, subtype: "tool-call", entityId: "c", value: "v", subagentRunId: "s1" } as BaseEvent,
+      // #2300: the run has to reach a terminal event, and RUN_FINISHED is refused while a
+      // subagent is still active, so this fixture now closes what it opened.
+      { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s1" } as SubagentFinishedEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
     ];
     const events = await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
     expect(events).toHaveLength(inputEvents.length);
@@ -767,6 +771,10 @@ describe("verifyEvents subagent lifecycle", () => {
       { type: EventType.STEP_STARTED, stepName: "tools", subagentRunId: "" } as BaseEvent,
       { type: EventType.STEP_FINISHED, stepName: "tools", subagentRunId: "" } as BaseEvent,
       { type: EventType.STEP_FINISHED, stepName: "tools" } as BaseEvent,
+      // #2300: the run has to reach a terminal event, and RUN_FINISHED is refused while a
+      // subagent is still active, so this fixture now closes what it opened.
+      { type: EventType.SUBAGENT_FINISHED, subagentRunId: "" } as SubagentFinishedEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
     ];
     const events = await firstValueFrom(verifyEvents(false)(from(valid)).pipe(toArray()));
     expect(events).toHaveLength(valid.length);
@@ -783,6 +791,11 @@ describe("verifyEvents subagent lifecycle", () => {
       { type: EventType.ACTIVITY_SNAPSHOT, messageId: "a1", activityType: "x", content: {}, subagentRunId: "s1" } as BaseEvent,
       { type: EventType.ACTIVITY_SNAPSHOT, messageId: "a1", activityType: "x", content: {}, subagentRunId: "s2" } as BaseEvent,
       { type: EventType.ACTIVITY_DELTA, messageId: "a1", content: {}, subagentRunId: "s2" } as BaseEvent,
+      // #2300: the run has to reach a terminal event, and RUN_FINISHED is refused while a
+      // subagent is still active, so this fixture now closes what it opened.
+      { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s1" } as SubagentFinishedEvent,
+      { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s2" } as SubagentFinishedEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
     ];
     const events = await firstValueFrom(verifyEvents(false)(from(inputEvents)).pipe(toArray()));
     expect(events).toHaveLength(inputEvents.length);
@@ -837,6 +850,11 @@ describe("verifyEvents subagent lifecycle", () => {
       { type: EventType.REASONING_MESSAGE_START, messageId: "r1", role: "reasoning", subagentRunId: "s1" } as BaseEvent,
       { type: EventType.REASONING_MESSAGE_END, messageId: "r1", subagentRunId: "s1" } as BaseEvent,
       { type: EventType.REASONING_ENCRYPTED_VALUE, subtype: "message", entityId: "r1", value: "v", subagentRunId: "s1" } as BaseEvent,
+      // #2300: the run has to reach a terminal event, and RUN_FINISHED is refused while a
+      // subagent is still active, so this fixture now closes what it opened.
+      { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s1" } as SubagentFinishedEvent,
+      { type: EventType.SUBAGENT_FINISHED, subagentRunId: "s2" } as SubagentFinishedEvent,
+      { type: EventType.RUN_FINISHED, threadId: "t", runId: "r" } as RunFinishedEvent,
     ]);
   });
 

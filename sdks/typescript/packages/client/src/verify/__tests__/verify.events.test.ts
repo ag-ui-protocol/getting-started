@@ -645,6 +645,8 @@ describe("verifyEvents events", () => {
       },
     } as StateSnapshotEvent);
 
+    source$.next(finishedEvent);
+
     // Complete the source
     source$.complete();
 
@@ -652,7 +654,7 @@ describe("verifyEvents events", () => {
     const result = await promise;
 
     // Verify both events were processed
-    expect(result.length).toBe(2);
+    expect(result.length).toBe(3);
     expect(result[1].type).toBe(EventType.STATE_SNAPSHOT);
   });
 });

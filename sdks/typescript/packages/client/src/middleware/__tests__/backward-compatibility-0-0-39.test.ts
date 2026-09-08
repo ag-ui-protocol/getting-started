@@ -15,11 +15,18 @@ class LegacyAgent extends AbstractAgent {
 
   override run(input: RunAgentInput): Observable<BaseEvent> {
     this.receivedInput = input;
-    return of({
-      type: EventType.RUN_STARTED,
-      threadId: input.threadId,
-      runId: input.runId,
-    } as BaseEvent);
+    return of(
+      {
+        type: EventType.RUN_STARTED,
+        threadId: input.threadId,
+        runId: input.runId,
+      } as BaseEvent,
+      {
+        type: EventType.RUN_FINISHED,
+        threadId: input.threadId,
+        runId: input.runId,
+      } as BaseEvent,
+    );
   }
 
   protected override prepareRunAgentInput(
