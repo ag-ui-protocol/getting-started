@@ -16,7 +16,16 @@
     "types": ["vitest/globals"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      // The SDK publishes its providers on subpath exports, which the "node"
+      // moduleResolution above cannot follow. The tests serialize history
+      // through the real provider clients, so map the two they use.
+      "@strands-agents/sdk/models/openai": [
+        "./node_modules/@strands-agents/sdk/dist/src/models/openai/index.d.ts"
+      ],
+      "@strands-agents/sdk/models/anthropic": [
+        "./node_modules/@strands-agents/sdk/dist/src/models/anthropic.d.ts"
+      ]
     },
     "stripInternal": true
   },

@@ -2,29 +2,47 @@
 
 Mirrors the langgraph integration where tools read context off agent state.
 Tools running on Strands read it via ``strands_agent.state.get("agui_context")``.
+
+The model-facing half of the contract is checked twice over, because a native
+Strands history can look correct and still serialize into a request the
+provider rejects. So the cases below assert the native history AND run that
+same history through the real installed provider formatters, where the tool
+call/result adjacency an OpenAI-compatible request needs, and the role
+alternation a block-level request needs, are actually decided.
 """
 
 from __future__ import annotations
 
 import base64
 import copy
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from strands import Agent
+from strands import tool as strands_tool
 from strands.agent.state import AgentState
 from strands.hooks.registry import HookRegistry
+from strands.models.bedrock import BedrockModel
 from strands.models.model import Model
+# Imported for its request formatter only. Nothing here opens a connection, so
+# no LLM mock is involved; the live provider runs are the e2e suite's job.
+from strands.models.openai import OpenAIModel
 from strands.session.file_session_manager import FileSessionManager
 from strands.tools.registry import ToolRegistry
 
 from ag_ui.core import (
     AssistantMessage,
     Context,
+    EventType,
+    FunctionCall,
     ImageInputContent,
     InputContentDataSource,
     RunAgentInput,
     TextInputContent,
+    Tool,
+    ToolCall,
+    ToolMessage,
     UserMessage,
 )
 from ag_ui_a2ui_toolkit import A2UI_SCHEMA_CONTEXT_DESCRIPTION
@@ -38,16 +56,62 @@ except ImportError:
         class JSONSerializableDict(dict):  # type: ignore[no-redef]
             def set(self, key, value): self[key] = value  # noqa: E704
 
-from ag_ui_strands.agent import StrandsAgent
+from ag_ui_strands.agent import (
+    _MODEL_CONTEXT_BLOCK,
+    _MODEL_CONTEXT_MUTATION_MARKER,
+    StrandsAgent,
+    _TransientModelContextHook,
+)
 from ag_ui_strands.config import StrandsAgentConfig
 from tests.hook_helpers import invoke_after_model_call, invoke_before_model_call
 
 
-class _CapturingModel(Model):
-    """Real Strands model boundary that records the exact transient messages."""
+def _text_turn(text="ok"):
+    """Stream events for one assistant turn that answers in plain text."""
+    return [
+        {"messageStart": {"role": "assistant"}},
+        {"contentBlockStart": {"start": {}}},
+        {"contentBlockDelta": {"delta": {"text": text}}},
+        {"contentBlockStop": {}},
+        {"messageStop": {"stopReason": "end_turn"}},
+    ]
 
-    def __init__(self):
+
+def _tool_use_turn(*calls):
+    """Stream events for one assistant turn that calls the given tools."""
+    events = [{"messageStart": {"role": "assistant"}}]
+    for tool_use_id, name in calls:
+        events += [
+            {
+                "contentBlockStart": {
+                    "start": {"toolUse": {"toolUseId": tool_use_id, "name": name}}
+                }
+            },
+            {"contentBlockDelta": {"delta": {"toolUse": {"input": "{}"}}}},
+            {"contentBlockStop": {}},
+        ]
+    events.append({"messageStop": {"stopReason": "tool_use"}})
+    return events
+
+
+_USAGE_EVENT = {
+    "metadata": {
+        "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
+        "metrics": {"latencyMs": 1},
+    }
+}
+
+
+class _CapturingModel(Model):
+    """Real Strands model boundary that records the exact transient messages.
+
+    ``turns`` scripts one stream-event list per model call so a case can drive a
+    backend tool round trip; the default is a single plain-text answer.
+    """
+
+    def __init__(self, turns=None):
         self.calls = []
+        self._turns = list(turns) if turns is not None else None
 
     def get_config(self):
         return {}
@@ -60,17 +124,14 @@ class _CapturingModel(Model):
 
     async def stream(self, messages, tool_specs=None, system_prompt=None, **kwargs):
         self.calls.append(copy.deepcopy(messages))
-        yield {"messageStart": {"role": "assistant"}}
-        yield {"contentBlockStart": {"start": {}}}
-        yield {"contentBlockDelta": {"delta": {"text": "ok"}}}
-        yield {"contentBlockStop": {}}
-        yield {"messageStop": {"stopReason": "end_turn"}}
-        yield {
-            "metadata": {
-                "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
-                "metrics": {"latencyMs": 1},
-            }
-        }
+        if self._turns is None:
+            events = _text_turn()
+        else:
+            index = min(len(self.calls) - 1, len(self._turns) - 1)
+            events = self._turns[index]
+        for event in events:
+            yield event
+        yield _USAGE_EVENT
 
 
 def _mock_model():
@@ -398,3 +459,360 @@ async def test_session_context_is_visible_for_one_model_call_but_never_persisted
         session.session_id, instance.agent_id
     )
     assert "secret-value" not in repr(persisted_after_second)
+
+
+# ---------------------------------------------------------------------------
+# Provider-bound ordering during a tool continuation
+# ---------------------------------------------------------------------------
+#
+# Strands carries a tool result in a message whose role is ``user``, so the
+# turn the context block would naturally join during a continuation is the one
+# answering a tool call. Both provider families refuse that for different
+# reasons, and neither refusal is visible in the native history:
+#
+# * The OpenAI-compatible formatters emit a message's non-tool content as its
+#   own ``user`` message and append the ``tool`` messages after it, whatever
+#   order the blocks sit in. A text block anywhere in the tool-result turn
+#   therefore lands between the assistant ``tool_calls`` and the results.
+# * The block-level formatters (Anthropic, Bedrock, Gemini) map messages one
+#   to one, so a separate context turn beside the results is two ``user``
+#   messages in a row and fails role alternation.
+#
+# The block joins the question turn instead, which leaves the provider-bound
+# message sequence exactly as it would be with no context at all.
+
+_TOOL_CONTINUATION = [
+    {"role": "user", "content": [{"text": "weather and time in SF?"}]},
+    {
+        "role": "assistant",
+        "content": [
+            {"toolUse": {"toolUseId": "t1", "name": "get_weather", "input": {}}},
+            {"toolUse": {"toolUseId": "t2", "name": "get_time", "input": {}}},
+        ],
+    },
+    {
+        "role": "user",
+        "content": [
+            {
+                "toolResult": {
+                    "toolUseId": "t1",
+                    "status": "success",
+                    "content": [{"text": "sunny"}],
+                }
+            },
+            {
+                "toolResult": {
+                    "toolUseId": "t2",
+                    "status": "success",
+                    "content": [{"text": "10am"}],
+                }
+            },
+        ],
+    },
+]
+
+
+def _inject_context(messages, block):
+    """Run the real before-hook over *messages*, returning the hooked agent.
+
+    The block reaches the hook through the same ``ContextVar`` the run loop
+    sets, so this exercises the shipped code path rather than a restatement of
+    it.
+    """
+    agent = SimpleNamespace(messages=messages, __dict__={"messages": messages})
+    hook = _TransientModelContextHook()
+    registry = HookRegistry()
+    hook.register_hooks(registry)
+    token = _MODEL_CONTEXT_BLOCK.set(block)
+    try:
+        invoke_before_model_call(registry, agent)
+    finally:
+        _MODEL_CONTEXT_BLOCK.reset(token)
+    return agent, registry
+
+
+def _openai_request_messages(messages):
+    """Serialize native history with the real OpenAI Chat Completions formatter."""
+    return OpenAIModel.format_request_messages(messages, None)
+
+
+def _openai_role_sequence(messages):
+    """Provider-bound roles, with the ids each ``tool_calls`` message opened."""
+    sequence = []
+    for message in _openai_request_messages(messages):
+        role = message["role"]
+        if message.get("tool_calls"):
+            ids = ",".join(call["id"] for call in message["tool_calls"])
+            sequence.append(f"{role}(tool_calls={ids})")
+        elif role == "tool":
+            sequence.append(f"tool({message['tool_call_id']})")
+        else:
+            sequence.append(role)
+    return sequence
+
+
+def _assert_tool_calls_answered_immediately(messages):
+    """Every assistant ``tool_calls`` message is followed by its own results.
+
+    This is the adjacency OpenAI states in the 400 the bridge used to turn into
+    a terminal RUN_ERROR: "An assistant message with 'tool_calls' must be
+    followed by tool messages responding to each 'tool_call_id'".
+    """
+    formatted = _openai_request_messages(messages)
+    for index, message in enumerate(formatted):
+        tool_calls = message.get("tool_calls")
+        if not tool_calls:
+            continue
+        expected_ids = [call["id"] for call in tool_calls]
+        answers = formatted[index + 1 : index + 1 + len(expected_ids)]
+        assert [answer["role"] for answer in answers] == ["tool"] * len(
+            expected_ids
+        ), f"tool_calls at {index} not answered immediately: {_openai_role_sequence(messages)}"
+        assert [answer["tool_call_id"] for answer in answers] == expected_ids
+
+
+def _bedrock_role_sequence(messages):
+    """Provider-bound roles from the real Bedrock Converse formatter."""
+    model = BedrockModel(
+        model_id="anthropic.claude-3-5-sonnet-20240620-v1:0", region_name="us-east-1"
+    )
+    request = model._format_request(messages, [], None, None)
+    return [message["role"] for message in request["messages"]]
+
+
+def _assert_roles_alternate(messages):
+    """No two provider-bound messages in a row share a role.
+
+    Converse and the Anthropic Messages API both refuse a repeated role, and a
+    context turn placed beside the tool results is exactly that.
+    """
+    roles = _bedrock_role_sequence(messages)
+    repeated = [
+        (index, role)
+        for index, role in enumerate(roles[1:], start=1)
+        if role == roles[index - 1]
+    ]
+    assert repeated == [], f"role repeats at {repeated}: {roles}"
+
+
+class TestToolContinuationProviderOrdering:
+    """The block must not disturb the request a tool continuation serializes to."""
+
+    def test_every_tool_call_is_still_answered_immediately(self):
+        messages = copy.deepcopy(_TOOL_CONTINUATION)
+        _inject_context(messages, "Context provided by the application:\n- locale: en-US")
+
+        _assert_tool_calls_answered_immediately(messages)
+        assert _openai_role_sequence(messages) == [
+            "user",
+            "assistant(tool_calls=t1,t2)",
+            "tool(t1)",
+            "tool(t2)",
+        ]
+
+    def test_roles_still_alternate_for_the_block_level_formatters(self):
+        messages = copy.deepcopy(_TOOL_CONTINUATION)
+        _inject_context(messages, "Context provided by the application:\n- locale: en-US")
+
+        _assert_roles_alternate(messages)
+
+    def test_context_does_not_change_the_provider_bound_sequence(self):
+        """A/B control: the same continuation with no context and with one entry.
+
+        The sequence is what the provider validates, so a fix that keeps it
+        identical cannot reintroduce the rejection for any entry count.
+        """
+        without = copy.deepcopy(_TOOL_CONTINUATION)
+        with_context = copy.deepcopy(_TOOL_CONTINUATION)
+        _inject_context(
+            with_context, "Context provided by the application:\n- locale: en-US"
+        )
+
+        assert _openai_role_sequence(with_context) == _openai_role_sequence(without)
+        assert _bedrock_role_sequence(with_context) == _bedrock_role_sequence(without)
+
+    def test_block_joins_the_question_and_leaves_the_results_untouched(self):
+        messages = copy.deepcopy(_TOOL_CONTINUATION)
+        block = "Context provided by the application:\n- locale: en-US"
+
+        _inject_context(messages, block)
+
+        assert messages[0]["content"] == [
+            {"text": block},
+            {"text": "weather and time in SF?"},
+        ]
+        assert messages[1:] == _TOOL_CONTINUATION[1:]
+
+    def test_a_replay_with_no_question_gets_the_block_as_its_own_opening_turn(self):
+        """A cold continuation replays only the exchange, so nothing can absorb it."""
+        messages = copy.deepcopy(_TOOL_CONTINUATION[1:])
+        block = "Context provided by the application:\n- locale: en-US"
+
+        _inject_context(messages, block)
+
+        assert messages[0] == {"role": "user", "content": [{"text": block}]}
+        assert messages[1:] == _TOOL_CONTINUATION[1:]
+        _assert_tool_calls_answered_immediately(messages)
+        _assert_roles_alternate(messages)
+
+    def test_the_block_is_withdrawn_after_the_model_call(self):
+        messages = copy.deepcopy(_TOOL_CONTINUATION)
+        agent, registry = _inject_context(
+            messages, "Context provided by the application:\n- locale: en-US"
+        )
+
+        invoke_after_model_call(registry, agent)
+
+        assert messages == _TOOL_CONTINUATION
+        assert _MODEL_CONTEXT_MUTATION_MARKER not in agent.__dict__
+
+    def test_a_skipped_restore_is_refused_rather_than_left_to_leak(self):
+        messages = copy.deepcopy(_TOOL_CONTINUATION)
+        block = "Context provided by the application:\n- locale: en-US"
+        agent, registry = _inject_context(messages, block)
+
+        token = _MODEL_CONTEXT_BLOCK.set(block)
+        try:
+            with pytest.raises(RuntimeError, match="was not restored"):
+                invoke_before_model_call(registry, agent)
+        finally:
+            _MODEL_CONTEXT_BLOCK.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_frontend_tool_continuation_serializes_to_a_request_openai_accepts():
+    """The proxy path: the client answered the call and the run continues.
+
+    The wire history carries the assistant call and the client's result, which
+    the bridge replays as a native tool exchange, so the turn the block would
+    otherwise join is the one answering the call.
+    """
+    model = _CapturingModel()
+    template = Agent(model=model, callback_handler=None)
+    agent = StrandsAgent(template, name="test")
+    run_input = RunAgentInput(
+        thread_id="t-frontend",
+        run_id="r1",
+        state={},
+        messages=[
+            UserMessage(id="u1", content="what is the weather?"),
+            AssistantMessage(
+                id="a1",
+                tool_calls=[
+                    ToolCall(
+                        id="tc1",
+                        type="function",
+                        function=FunctionCall(name="get_weather", arguments="{}"),
+                    )
+                ],
+            ),
+            ToolMessage(id="m1", content="sunny", tool_call_id="tc1"),
+        ],
+        tools=[Tool(name="get_weather", description="d", parameters={})],
+        context=[Context(description="locale", value="en-US")],
+        forwarded_props={},
+    )
+
+    async for _ in agent.run(run_input):
+        pass
+
+    seen = model.calls[0]
+    assert any("toolResult" in block for block in seen[-1]["content"])
+    _assert_tool_calls_answered_immediately(seen)
+    _assert_roles_alternate(seen)
+    assert "en-US" in repr(seen)
+
+
+@pytest.mark.asyncio
+async def test_backend_tool_continuation_serializes_to_a_request_openai_accepts():
+    """The native path: a Strands tool ran in-process and the loop came back."""
+
+    @strands_tool(name="get_weather", description="d")
+    def get_weather() -> str:
+        return "sunny"
+
+    model = _CapturingModel(
+        turns=[_tool_use_turn(("t1", "get_weather")), _text_turn("done")]
+    )
+    template = Agent(model=model, tools=[get_weather], callback_handler=None)
+    agent = StrandsAgent(template, name="test")
+
+    async for _ in agent.run(
+        _run_input([Context(description="locale", value="en-US")], thread_id="t-backend")
+    ):
+        pass
+
+    assert len(model.calls) == 2, f"expected a continuation call, got {len(model.calls)}"
+    continuation = model.calls[1]
+    assert any("toolResult" in block for block in continuation[-1]["content"])
+    _assert_tool_calls_answered_immediately(continuation)
+    _assert_roles_alternate(continuation)
+    assert "en-US" in repr(continuation)
+
+
+class _ProviderRuleModel(_CapturingModel):
+    """A model boundary that enforces the rule the provider enforces.
+
+    The real formatter decides the request, and OpenAI rejects one whose
+    assistant ``tool_calls`` message is not answered immediately. Raising the
+    provider's own message here reproduces the reported failure end to end
+    offline: the bridge wraps a provider raise into a terminal RUN_ERROR under
+    ``STRANDS_FORCE_STOP``, which is what the run died of. It is not a
+    substitute for a live provider run, only for the rule the provider applies.
+    """
+
+    PROVIDER_400 = (
+        "An assistant message with 'tool_calls' must be followed by tool "
+        "messages responding to each 'tool_call_id'"
+    )
+
+    async def stream(self, messages, tool_specs=None, system_prompt=None, **kwargs):
+        formatted = _openai_request_messages(messages)
+        for index, message in enumerate(formatted):
+            tool_calls = message.get("tool_calls")
+            if not tool_calls:
+                continue
+            answers = formatted[index + 1 : index + 1 + len(tool_calls)]
+            if [answer["role"] for answer in answers] != ["tool"] * len(tool_calls):
+                raise RuntimeError(self.PROVIDER_400)
+        async for event in super().stream(
+            messages, tool_specs=tool_specs, system_prompt=system_prompt, **kwargs
+        ):
+            yield event
+
+
+@pytest.mark.asyncio
+async def test_a_tool_continuation_with_context_finishes_instead_of_erroring():
+    """The run-level symptom: the tool succeeded, then the run died.
+
+    The tool call and its result are already on the wire when the provider
+    rejects the continuation, so the UI shows a healthy tool card while the run
+    terminates. Only the terminal event tells the two apart, which is why this
+    asserts on it rather than on what was rendered.
+    """
+
+    @strands_tool(name="get_weather", description="d")
+    def get_weather() -> str:
+        return "sunny"
+
+    model = _ProviderRuleModel(
+        turns=[_tool_use_turn(("t1", "get_weather")), _text_turn("it is sunny")]
+    )
+    template = Agent(model=model, tools=[get_weather], callback_handler=None)
+    agent = StrandsAgent(template, name="test")
+
+    events = [
+        event
+        async for event in agent.run(
+            _run_input(
+                [Context(description="locale", value="en-US")], thread_id="t-terminal"
+            )
+        )
+    ]
+
+    types = [event.type for event in events]
+    codes = [getattr(event, "code", None) for event in events]
+    assert "STRANDS_FORCE_STOP" not in codes, f"run force-stopped: {types}"
+    assert EventType.RUN_ERROR not in types, f"run errored: {types}"
+    assert types[-1] == EventType.RUN_FINISHED, f"terminal event was {types[-1]}"
+    assert len(model.calls) == 2, "the continuation call never happened"

@@ -76,6 +76,7 @@ import {
   ensureTransientContextHook,
   formatAguiContext,
   installOrchestratorContextHooks,
+  modelBoundHistoryOutline,
   normalizeAguiContext,
   pullWithModelContext,
   restoreOrchestratorContext,
@@ -390,6 +391,11 @@ class ForcedStop {
     /** Which stream failed, for the log line. */
     private readonly _label: string,
     private readonly _threadId: string,
+    /**
+     * Structural outline of the history the failing model call was handed.
+     * Read lazily, so the line is built only for a run that actually failed.
+     */
+    private readonly _historyOutline: () => string = () => "unrecorded",
   ) {}
 
   /** True once a failure has been recorded, i.e. this reporter owns the run's report. */
@@ -445,7 +451,8 @@ class ForcedStop {
       // operator the stack, the name and the `cause`.
       this._log.error(
         `${LOG_PREFIX} ${this._label} force-stopped ` +
-          `(threadId=${this._threadId}, reason=${this._message})`,
+          `(threadId=${this._threadId}, reason=${this._message}, ` +
+          `modelBoundHistory=${this._historyOutline()})`,
         failure,
       );
     } catch {
@@ -3898,7 +3905,12 @@ export class StrandsAgent {
       // below still run, as they do in Python after its `force_stop` event.
       // The failures `record` rethrows instead are the ones Python also leaves
       // to its outer handler, and they skip that closeout on both bridges.
-      const forcedStop = new ForcedStop(this._log, "Agent stream", threadId);
+      const forcedStop = new ForcedStop(
+        this._log,
+        "Agent stream",
+        threadId,
+        () => modelBoundHistoryOutline(strandsAgent),
+      );
 
       try {
         while (true) {

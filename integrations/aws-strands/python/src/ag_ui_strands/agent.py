@@ -3094,6 +3094,105 @@ def _without_a2ui_render_guides(context: list, tool_names: List[str]) -> list:
     ]
 
 
+def describe_model_bound_history(messages: Sequence[Any]) -> str:
+    """One-line structural outline of the history a model call was handed.
+
+    Text, tool inputs and tool results are dropped, so the line is safe to log:
+    it carries only what decides whether a provider accepts the request, which
+    is the roles, the block kinds and the tool ids that have to sit adjacent.
+    The sequence is the one an OpenAI-compatible formatter builds, where a
+    turn's non-tool content becomes its own message ahead of the tool results
+    it appends, because that ordering is what a 400 over tool-call adjacency is
+    complaining about. Ends with the adjacency verdict so a failure report says
+    whether the request was well formed without anyone having to re-derive it.
+    """
+    provider_bound: List[str] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            provider_bound.append("?")
+            continue
+        role = message.get("role", "?")
+        content = message.get("content")
+        blocks = content if isinstance(content, list) else []
+        tool_use_ids = [
+            block["toolUse"].get("toolUseId")
+            for block in blocks
+            if isinstance(block, dict) and isinstance(block.get("toolUse"), dict)
+        ]
+        result_ids = [
+            block["toolResult"].get("toolUseId")
+            for block in blocks
+            if isinstance(block, dict) and isinstance(block.get("toolResult"), dict)
+        ]
+        others = [
+            next(iter(block), "?")
+            for block in blocks
+            if isinstance(block, dict)
+            and "toolUse" not in block
+            and "toolResult" not in block
+        ]
+        if others or not (tool_use_ids or result_ids):
+            label = f"{role}[{'+'.join(others)}]" if others else f"{role}[]"
+            if tool_use_ids:
+                label += f"(tool_calls={','.join(map(str, tool_use_ids))})"
+            provider_bound.append(label)
+        elif tool_use_ids:
+            provider_bound.append(
+                f"{role}(tool_calls={','.join(map(str, tool_use_ids))})"
+            )
+        provider_bound.extend(f"tool({result_id})" for result_id in result_ids)
+
+    broken = []
+    for index, entry in enumerate(provider_bound):
+        if "tool_calls=" not in entry:
+            continue
+        opened = entry.split("tool_calls=")[1].rstrip(")").split(",")
+        answers = provider_bound[index + 1 : index + 1 + len(opened)]
+        if answers != [f"tool({call_id})" for call_id in opened]:
+            broken.append(index)
+    verdict = "ok" if not broken else f"broken at {broken}"
+    return f"{' -> '.join(provider_bound)} | tool-call adjacency={verdict}"
+
+
+def _carries_tool_result(message: Any) -> bool:
+    """Whether a native message answers a tool call.
+
+    Strands puts tool results in a ``user`` message, so role alone does not
+    say whether a turn is a real question or the answer half of a tool
+    exchange, and only the latter constrains where context may go.
+    """
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(block, dict) and "toolResult" in block for block in content)
+
+
+def _context_host_index(messages: List[Any]) -> Optional[int]:
+    """Index of the latest user turn that carries no tool result, or ``None``.
+
+    That turn is the question the run is still answering, and it is the only
+    place a text block can join without landing between an assistant tool call
+    and the result that answers it.
+    """
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        if _carries_tool_result(message):
+            continue
+        if isinstance(message.get("content"), list):
+            return index
+    return None
+
+
+# Where the hook files the outline of the history it just handed the model.
+# Injecting context is the one thing this adapter does to the history a provider
+# validates, so a rejection is worth reporting against the shape that was
+# actually sent rather than against the durable history the restore leaves
+# behind. Read back by the forced-stop report.
+_MODEL_BOUND_HISTORY_OUTLINE = "_agui_model_bound_history_outline"
+
+
 class _TransientModelContextHook:
     """Expose request context to the model without persisting it as history."""
 
@@ -3102,9 +3201,18 @@ class _TransientModelContextHook:
         registry.add_callback(AfterModelCallEvent, self._after_model_call)
 
     def _before_model_call(self, event: Any) -> None:
+        if self._place_context(event):
+            setattr(
+                event.agent,
+                _MODEL_BOUND_HISTORY_OUTLINE,
+                describe_model_bound_history(event.agent.messages),
+            )
+
+    def _place_context(self, event: Any) -> bool:
+        """Show the run's block to the model. False when the run has none."""
         context_block = _MODEL_CONTEXT_BLOCK.get()
         if not context_block:
-            return
+            return False
         if event.agent.__dict__.get(_MODEL_CONTEXT_MUTATION_MARKER) is not None:
             raise RuntimeError("Transient AG-UI model context was not restored")
 
@@ -3129,18 +3237,40 @@ class _TransientModelContextHook:
                 _MODEL_CONTEXT_MUTATION_MARKER,
                 ("insert", messages, len(messages) - 1, context_message),
             )
-            return
+            return True
 
-        latest_user = messages[latest_user_index]
-        content = latest_user.get("content")
-        if isinstance(content, list) and any("toolResult" in block for block in content):
-            latest_user["content"] = [{"text": context_block}, *content]
+        if _carries_tool_result(messages[latest_user_index]):
+            # Tool continuation. The block must not ride inside the turn that
+            # carries the results and must not become a message of its own next
+            # to it: every provider formatter emits a message's non-tool content
+            # ahead of the tool results it appends, whatever the block order, so
+            # riding inside wedges a user message between the assistant tool
+            # call and its answers; and a separate turn beside the results is
+            # two user messages in a row, which the block-level formatters
+            # refuse for role alternation. Joining the question instead leaves
+            # the provider-bound message sequence exactly as it would be with no
+            # context at all.
+            host_index = _context_host_index(messages)
+            if host_index is None:
+                # A cold continuation replays only the tool exchange, so there
+                # is no question to join. At the head the block opens the
+                # conversation and still sits outside the exchange.
+                messages.insert(0, context_message)
+                setattr(
+                    event.agent,
+                    _MODEL_CONTEXT_MUTATION_MARKER,
+                    ("insert", messages, 0, context_message),
+                )
+                return True
+            host = messages[host_index]
+            content = host["content"]
+            host["content"] = [{"text": context_block}, *content]
             setattr(
                 event.agent,
                 _MODEL_CONTEXT_MUTATION_MARKER,
-                ("replace", latest_user, content),
+                ("replace", host, content),
             )
-            return
+            return True
 
         # Keep the actual latest user turn byte-identical for model routers and
         # fixtures that key off it, while placing live UI context immediately
@@ -3151,6 +3281,7 @@ class _TransientModelContextHook:
             _MODEL_CONTEXT_MUTATION_MARKER,
             ("insert", messages, latest_user_index, context_message),
         )
+        return True
 
     def _after_model_call(self, event: Any) -> None:
         _restore_transient_model_context(event.agent)
@@ -5761,9 +5892,13 @@ class StrandsAgent:
                             raw_reason or "The Strands agent stopped unexpectedly."
                         )
                         logger.error(
-                            "Agent stream force-stopped (thread_id=%s, reason=%s)",
+                            "Agent stream force-stopped (thread_id=%s, reason=%s, "
+                            "model_bound_history=%s)",
                             input_data.thread_id,
                             force_stop_error,
+                            getattr(
+                                strands_agent, _MODEL_BOUND_HISTORY_OUTLINE, "unrecorded"
+                            ),
                         )
                         continue
 

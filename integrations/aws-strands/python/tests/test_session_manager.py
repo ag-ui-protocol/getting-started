@@ -899,9 +899,18 @@ class TestSessionFrontendToolReconciliation:
         )
 
         assert instance.stream_prompts == [None]
-        assert instance.model_messages[-1][-1]["content"][0] == {
-            "text": "Context provided by the application:\n- account: premium"
+        # The reconciled history is only the tool exchange, so the block cannot
+        # join a question turn and opens the conversation instead. It must not
+        # join the tool-result turn: a provider then sees a user message wedged
+        # between the assistant tool call and the result answering it.
+        model_saw = instance.model_messages[-1]
+        assert model_saw[0] == {
+            "role": "user",
+            "content": [
+                {"text": "Context provided by the application:\n- account: premium"}
+            ],
         }
+        assert model_saw[-1]["content"][0].get("toolResult") is not None
         assert instance.messages[-1]["content"][0].get("toolResult") is not None
         persisted = sm.session_repository.list_messages(sm.session_id, "default")
         assert "Context provided by the application" not in repr(persisted)

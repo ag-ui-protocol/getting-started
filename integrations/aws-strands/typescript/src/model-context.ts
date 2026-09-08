@@ -162,9 +162,9 @@ export function pullWithModelContext<T, R>(
 /**
  * What the before-hook did to `agent.messages`, so the after-hook and the
  * teardown can undo exactly that. `insert` added a whole user message at
- * `index`; `prepend` added one text block to the front of an existing user
- * turn's `content`. Both hold the inserted object so the restore removes by
- * identity rather than by position, in case the SDK moved things meanwhile.
+ * `index`; `prepend` added one text block to the front of the question turn's
+ * `content`. Both hold the inserted object so the restore removes by identity
+ * rather than by position, in case the SDK moved things meanwhile.
  */
 type ContextMutation =
   | {
@@ -196,13 +196,169 @@ function isToolResultBlock(block: unknown): boolean {
 }
 
 /**
+ * One-line structural outline of the history a model call was handed.
+ *
+ * Text, tool inputs and tool results are dropped, so the line is safe to log:
+ * it carries only what decides whether a provider accepts the request, which
+ * is the roles, the block kinds and the tool ids that have to sit adjacent.
+ * The sequence is the one an OpenAI-compatible formatter builds, where a
+ * turn's non-tool content becomes its own message ahead of the tool results it
+ * appends, because that ordering is what a 400 over tool-call adjacency is
+ * complaining about. Ends with the adjacency verdict so a failure report says
+ * whether the request was well formed without anyone having to re-derive it.
+ * The Python counterpart is `describe_model_bound_history`.
+ */
+export function describeModelBoundHistory(messages: unknown): string {
+  if (!Array.isArray(messages)) return "unrecorded";
+  const providerBound: string[] = [];
+  for (const message of messages) {
+    const record = message as { role?: unknown; content?: unknown } | null;
+    const role = typeof record?.role === "string" ? record.role : "?";
+    const blocks = Array.isArray(record?.content) ? record.content : [];
+    const toolUseIds: string[] = [];
+    const resultIds: string[] = [];
+    const others: string[] = [];
+    for (const block of blocks) {
+      const use = toolUseIdOf(block);
+      if (use !== undefined) {
+        toolUseIds.push(use);
+        continue;
+      }
+      const result = toolResultIdOf(block);
+      if (result !== undefined) {
+        resultIds.push(result);
+        continue;
+      }
+      others.push(blockKindOf(block));
+    }
+    if (others.length > 0 || (toolUseIds.length === 0 && resultIds.length === 0)) {
+      providerBound.push(
+        `${role}[${others.join("+")}]` +
+          (toolUseIds.length > 0 ? `(tool_calls=${toolUseIds.join(",")})` : ""),
+      );
+    } else if (toolUseIds.length > 0) {
+      providerBound.push(`${role}(tool_calls=${toolUseIds.join(",")})`);
+    }
+    for (const resultId of resultIds) providerBound.push(`tool(${resultId})`);
+  }
+
+  const broken: number[] = [];
+  providerBound.forEach((entry, index) => {
+    const marker = entry.indexOf("tool_calls=");
+    if (marker < 0) return;
+    const opened = entry
+      .slice(marker + "tool_calls=".length)
+      .replace(/\)$/, "")
+      .split(",");
+    const answers = providerBound.slice(index + 1, index + 1 + opened.length);
+    const expected = opened.map((callId) => `tool(${callId})`);
+    if (answers.join("|") !== expected.join("|")) broken.push(index);
+  });
+  const verdict = broken.length === 0 ? "ok" : `broken at [${broken.join(",")}]`;
+  return `${providerBound.join(" -> ")} | tool-call adjacency=${verdict}`;
+}
+
+/** The tool-use id a block opens, for both the instance and plain-object forms. */
+function toolUseIdOf(block: unknown): string | undefined {
+  const record = block as
+    | { type?: unknown; toolUseId?: unknown; toolUse?: { toolUseId?: unknown } }
+    | null;
+  if (record?.type === "toolUseBlock" && typeof record.toolUseId === "string") {
+    return record.toolUseId;
+  }
+  const nested = record?.toolUse?.toolUseId;
+  return typeof nested === "string" ? nested : undefined;
+}
+
+/** The tool-use id a block answers, for both block forms. */
+function toolResultIdOf(block: unknown): string | undefined {
+  const record = block as
+    | {
+        type?: unknown;
+        toolUseId?: unknown;
+        toolResult?: { toolUseId?: unknown };
+      }
+    | null;
+  if (record?.type === "toolResultBlock" && typeof record.toolUseId === "string") {
+    return record.toolUseId;
+  }
+  const nested = record?.toolResult?.toolUseId;
+  return typeof nested === "string" ? nested : undefined;
+}
+
+/** A block's kind, from the instance discriminant or the wrapped-data key. */
+function blockKindOf(block: unknown): string {
+  const record = block as { type?: unknown } | null;
+  if (typeof record?.type === "string") return record.type.replace(/Block$/, "");
+  if (record !== null && typeof record === "object") {
+    const [key] = Object.keys(record);
+    if (key) return key;
+  }
+  return "?";
+}
+
+/**
+ * The outline of the last context-carrying model call each agent was handed.
+ * Injecting context is the one thing this adapter does to the history a
+ * provider validates, so a rejection is worth reporting against the shape that
+ * was actually sent rather than against the durable history the restore leaves
+ * behind.
+ */
+const historyOutlines = new WeakMap<object, string>();
+
+/**
+ * The outline recorded for `agent`'s last context-carrying model call, or
+ * `"unrecorded"` when the run carried no context.
+ */
+export function modelBoundHistoryOutline(agent: unknown): string {
+  if (agent === null || typeof agent !== "object") return "unrecorded";
+  return historyOutlines.get(agent) ?? "unrecorded";
+}
+
+/**
+ * Whether a native message answers a tool call. Strands puts tool results in a
+ * `user` message, so role alone does not say whether a turn is a real question
+ * or the answer half of a tool exchange, and only the latter constrains where
+ * context may go. The Python counterpart is `_carries_tool_result`.
+ */
+function carriesToolResult(message: unknown): boolean {
+  const content = (message as { content?: unknown } | null)?.content;
+  return Array.isArray(content) && content.some(isToolResultBlock);
+}
+
+/**
+ * Index of the latest user turn that carries no tool result, or `-1`.
+ *
+ * That turn is the question the run is still answering, and it is the only
+ * place a text block can join without landing between an assistant tool call
+ * and the result that answers it. The Python counterpart is
+ * `_context_host_index`.
+ */
+function contextHostIndex(messages: unknown[]): number {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index] as { role?: unknown; content?: unknown };
+    if (message?.role !== "user") continue;
+    if (carriesToolResult(message)) continue;
+    if (Array.isArray(message.content)) return index;
+  }
+  return -1;
+}
+
+/**
  * Place the run's block in front of the model, mirroring Python's
  * `_TransientModelContextHook._before_model_call` case for case:
  *
  * - No user message at all: append the block as a new user turn.
- * - The latest user turn carries a tool result: prepend the block into that
- *   same turn. A separate user message between an assistant `toolUse` and its
- *   `toolResult` is a shape providers reject, so the block rides inside.
+ * - The latest user turn carries a tool result: join the question turn, or
+ *   open the conversation when the replay holds no question. Neither the turn
+ *   carrying the results nor a turn beside it can take the block: every
+ *   provider formatter emits a message's non-tool content ahead of the tool
+ *   results it appends, whatever the block order, so riding inside wedges a
+ *   user message between the assistant tool call and its answers; and a
+ *   separate turn beside the results is two user messages in a row, which the
+ *   block-level formatters refuse for role alternation. Joining the question
+ *   leaves the provider-bound message sequence exactly as it would be with no
+ *   context at all.
  * - Otherwise: insert the block as its own user message immediately BEFORE
  *   the latest user turn. The actual latest turn stays byte-identical for
  *   model routers and fixtures that key off it, while live UI context lands
@@ -210,8 +366,15 @@ function isToolResultBlock(block: unknown): boolean {
  *   history.
  */
 function injectModelContext(event: BeforeModelCallEvent): void {
+  if (!placeModelContext(event)) return;
+  const agent = event.agent as unknown as MessagesOwner;
+  historyOutlines.set(agent, describeModelBoundHistory(agent.messages));
+}
+
+/** Show the run's block to the model. `false` when the run has none. */
+function placeModelContext(event: BeforeModelCallEvent): boolean {
   const contextBlock = modelContextBlock.getStore();
-  if (!contextBlock) return;
+  if (!contextBlock) return false;
   const agent = event.agent as unknown as MessagesOwner;
   if (mutations.has(agent)) {
     // A second before-hook with the first still in place means an after-hook
@@ -221,7 +384,7 @@ function injectModelContext(event: BeforeModelCallEvent): void {
     throw new Error("Transient AG-UI model context was not restored");
   }
   const messages = agent.messages;
-  if (!Array.isArray(messages)) return;
+  if (!Array.isArray(messages)) return false;
 
   let latestUserIndex = -1;
   for (let index = messages.length - 1; index >= 0; index--) {
@@ -243,16 +406,26 @@ function injectModelContext(event: BeforeModelCallEvent): void {
       index: messages.length - 1,
       inserted: contextMessage,
     });
-    return;
+    return true;
   }
 
-  const latestUser = messages[latestUserIndex] as { content?: unknown };
-  const content = latestUser.content;
-  if (Array.isArray(content) && content.some(isToolResultBlock)) {
+  if (carriesToolResult(messages[latestUserIndex])) {
+    const hostIndex = contextHostIndex(messages);
+    if (hostIndex < 0) {
+      messages.splice(0, 0, contextMessage);
+      mutations.set(agent, {
+        kind: "insert",
+        messages,
+        index: 0,
+        inserted: contextMessage,
+      });
+      return true;
+    }
+    const content = (messages[hostIndex] as { content: unknown[] }).content;
     const inserted = new TextBlock(contextBlock);
     content.unshift(inserted);
     mutations.set(agent, { kind: "prepend", content, inserted });
-    return;
+    return true;
   }
 
   messages.splice(latestUserIndex, 0, contextMessage);
@@ -262,6 +435,7 @@ function injectModelContext(event: BeforeModelCallEvent): void {
     index: latestUserIndex,
     inserted: contextMessage,
   });
+  return true;
 }
 
 /** Remove `target` from `list` by identity, trying `hint` first. */

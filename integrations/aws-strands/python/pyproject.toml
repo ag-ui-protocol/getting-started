@@ -39,4 +39,8 @@ dev = [
     # a real socket to close.
     "httpx>=0.28.1",
     "uvicorn>=0.38.0",
+    # The context-ordering regressions serialize native history through the
+    # real provider formatters, and OpenAIModel imports the openai package at
+    # module level. The bridge itself never depends on a provider extra.
+    "strands-agents[openai]>=1.15.0",
 ]
