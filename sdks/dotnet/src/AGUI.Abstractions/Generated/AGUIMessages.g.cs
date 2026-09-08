@@ -34,7 +34,11 @@ public abstract class AGUIMessage
     /// see AGUIMetadata.ReservedKey.
     /// </summary>
     [JsonPropertyName("metadata")]
-    public JsonElement? Metadata { get; set; }
+    public JsonElement? Metadata
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 
     /// <summary>
     /// The subagent run this message is attributed to, when a subagent produced
@@ -292,7 +296,11 @@ public abstract class AGUIMediaInputContent : AGUIInputContent
     public AGUIInputContentSource Source { get; set; } = null!;
 
     [JsonPropertyName("metadata")]
-    public JsonElement? Metadata { get; set; }
+    public JsonElement? Metadata
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 }
 
 /// <summary>

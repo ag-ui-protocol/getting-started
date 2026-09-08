@@ -101,6 +101,7 @@ const USED_KEYWORDS = new Set([
   "maximum",
   "minItems",
   "minimum",
+  "not",
   "oneOf",
   "pattern",
   "properties",
@@ -469,7 +470,9 @@ describe("closure", () => {
       }
       // `not` can reject properties just as effectively, and boolean-false
       // property schemas close an object against a field it claims to have.
-      if ("not" in node) offenders.push(`${path}: not`);
+      if ("not" in node && JSON.stringify(node.not) !== '{"type":"null"}') {
+        offenders.push(`${path}: not`);
+      }
       for (const [name, child] of Object.entries(
         (node.properties ?? {}) as Record<string, unknown>,
       )) {
@@ -523,7 +526,10 @@ describe("closure", () => {
         "/$defs/BaseEvent/properties/rawEvent",
         "the producer's own event, carried verbatim; the protocol never reads it",
       ],
-      ["/$defs/State", "agent state is any JSON value, falsy and null included"],
+      [
+        "/$defs/State",
+        "agent state is any JSON value, falsy and null included",
+      ],
       [
         "/$defs/RawEvent/properties/event",
         "the whole point of RAW is that the payload is not ours",
@@ -606,9 +612,7 @@ describe("closure", () => {
         : declared === undefined
           ? []
           : [declared as string];
-      // `"null"` alongside `"object"` narrows nothing that matters here.
-      const meaningful = types.filter((name) => name !== "null");
-      return meaningful.length === 0 || meaningful.includes("object");
+      return types.length === 0 || types.includes("object");
     };
 
     const found: string[] = [];

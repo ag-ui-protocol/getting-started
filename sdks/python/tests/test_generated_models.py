@@ -26,9 +26,9 @@ FIXTURES = (
 GENERATED_EVENT = TypeAdapter(generated.Event)
 GENERATED_MESSAGE = TypeAdapter(generated.Message)
 
-# What the wire (encoder) form of a dump looks like: the EventEncoder
-# serializes with by_alias and exclude_none, exactly as it always has.
-WIRE_DUMP = {"by_alias": True, "exclude_none": True}
+# EventEncoder uses aliases and lets GeneratedBaseModel omit absent optional
+# fields. exclude_none would also drop required null-valued payloads.
+WIRE_DUMP = {"by_alias": True}
 
 
 def collect(kind):
@@ -59,7 +59,7 @@ def adapter_for(anchor):
 # tolerance rather than an oversight. Four classes:
 #   unknown-keys — closure belongs to the spec; unknown fields survive here.
 #   null-means-absent — idiomatic Python passes None for optionals; the
-#     encoder's exclude_none keeps it off the wire.
+#     base model's serializer keeps it off the wire.
 #   const-fills-in — a field with exactly one legal value defaults to it,
 #     so nothing is invented by accepting its omission.
 #   lax-coercion — pydantic's default coercion, kept deliberately (see
@@ -83,6 +83,7 @@ TOLERATED_INVALID = {
     "SubagentStartedEvent/invalid/description-null.json": "null-means-absent",
     "TextMessageContentEvent/invalid/metadata-null.json": "null-means-absent",
     "TextMessageContentEvent/invalid/subagent-run-id-null.json": "null-means-absent",
+    "TextMessageEndEvent/invalid/raw-event-null.json": "null-means-absent",
     "TextMessageEndEvent/invalid/unknown-property.json": "unknown-keys",
     "ToolCallChunkEvent/invalid/parent-message-id-null.json": "null-means-absent",
     "ToolCallStartEvent/invalid/parent-message-id-null.json": "null-means-absent",
@@ -137,17 +138,22 @@ class GeneratedModelsAgainstFixtures(unittest.TestCase):
                 parsed = adapter_for(anchor).validate_python(probed)
                 self.assertEqual(parsed.model_dump()["xPassthroughProbe"], 1)
 
-    def test_wire_dump_never_emits_null_for_an_absent_field(self):
-        # The encoder form (by_alias, exclude_none) is the wire: a field that
-        # has no value is left out, never spelled null. An explicit null that
-        # IS data on a required field is the encoder's job to restore — see
-        # TestWireNullParity in test_encoder.py.
+    def test_wire_dump_omits_absent_fields_and_preserves_required_nulls(self):
+        # Use the encoder's actual serialization options. Required payload
+        # nulls must remain present; optional None values must be omitted.
         for name, anchor, document in collect("valid"):
             with self.subTest(name):
                 parsed = adapter_for(anchor).validate_python(document)
                 dumped = json.loads(parsed.model_dump_json(**WIRE_DUMP))
-                for key, value in dumped.items():
-                    self.assertIsNotNone(value, f"{key} reached the wire as null")
+                for field_name, field in type(parsed).model_fields.items():
+                    if getattr(parsed, field_name) is not None:
+                        continue
+                    key = field.serialization_alias or field.alias or field_name
+                    if field.is_required():
+                        self.assertIn(key, dumped, f"required {key} was omitted")
+                        self.assertIsNone(dumped[key])
+                    else:
+                        self.assertNotIn(key, dumped, f"absent {key} reached the wire")
 
 
 class PublicErgonomics(unittest.TestCase):

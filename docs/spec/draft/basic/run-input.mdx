@@ -90,9 +90,10 @@ them against this value until its own first snapshot replaces it.
 
 ## `forwardedProps`
 
-OPTIONAL. An application-specific channel passed through to the agent
-untouched. Any JSON value. The protocol attaches no meaning to it, and
-intermediaries MUST NOT alter it.
+OPTIONAL. An application-specific channel passed through to the agent untouched.
+Any JSON value except a whole `null`, which means the field is omitted. Null
+values inside the payload are preserved. The protocol attaches no meaning to the
+payload, and intermediaries MUST NOT alter it.
 
 ## `resume`
 

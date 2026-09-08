@@ -51,7 +51,9 @@ const renderType = (type: TypeExpr): string => {
     case "boolean":
       return "`boolean`";
     case "any":
-      return "any JSON value";
+      return type.excludeNull
+        ? "any JSON value except `null`"
+        : "any JSON value";
     case "openMap":
       return "`object`, open by key";
     case "literal":
@@ -59,12 +61,13 @@ const renderType = (type: TypeExpr): string => {
         ? `\`"${type.value}"\``
         : `\`"${type.value}"\` (${link(type.enumRef)})`;
     case "ref":
-      return link(type.name);
+      return link(type.name) + (type.excludeNull ? " except `null`" : "");
     case "stringEnum":
       return type.values.map((value) => `\`"${value}"\``).join(" | ");
     case "array": {
       const items = renderType(type.items);
-      const bound = type.minItems === undefined ? "" : ` (min ${type.minItems})`;
+      const bound =
+        type.minItems === undefined ? "" : ` (min ${type.minItems})`;
       return `array of ${items}${bound}`;
     }
     case "union":
@@ -234,7 +237,8 @@ const sectionize = (model: ProtocolModel): Section[] => {
     },
     {
       title: "Messages",
-      intro: "The message union and the message types conversation history holds.",
+      intro:
+        "The message union and the message types conversation history holds.",
       definitions: pick(messages),
     },
     {
@@ -273,7 +277,10 @@ export function emitSchemaReference(model: ProtocolModel): string {
     );
 
   const mixins = model.mixinShapes.map((shape) =>
-    renderDefinition({ ...shape, composedMixins: [] }, { omitClosedness: true }),
+    renderDefinition(
+      { ...shape, composedMixins: [] },
+      { omitClosedness: true },
+    ),
   );
 
   return [

@@ -1,4 +1,4 @@
-import { BaseEvent, EventType, RunAgentInput } from "@ag-ui/core";
+import { BaseEvent, EventType, RunAgentInput, omitOptionalNulls } from "@ag-ui/core";
 import { EventSchema, RunAgentInputSchema } from "@ag-ui/core/schemas";
 import { z } from "zod/v4";
 import { Observable, of, EMPTY } from "rxjs";
@@ -106,7 +106,10 @@ export const enforceEvents =
  * known field is fatal before a byte leaves the process.
  */
 export function enforceOutgoingInput(input: RunAgentInput): RunAgentInput {
-  const { value, stripped } = stripUnknown(input, RunAgentInputSchema as unknown as z.ZodType);
+  const { value, stripped } = stripUnknown(
+    omitOptionalNulls(input, "RunAgentInput"),
+    RunAgentInputSchema as unknown as z.ZodType,
+  );
   for (const path of stripped) {
     warnDeviation(`Removed unrecognised material at '${path}' from the outgoing input.`);
   }

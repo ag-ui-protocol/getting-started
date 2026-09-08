@@ -2,7 +2,7 @@
 // Source: https://ag-ui.com/spec/draft/schema.json
 // Regenerate: pnpm --filter @ag-ui/spec generate
 
-import { BaseEvent, AGUIEvent, EventType } from "@ag-ui/core";
+import { BaseEvent, AGUIEvent, EventType, omitOptionalNulls } from "@ag-ui/core";
 import { EventSchemas } from "@ag-ui/core/schemas";
 import * as protoEvents from "./generated/events";
 import * as protoPatch from "./generated/patch";
@@ -463,6 +463,7 @@ const fromWireRunAgentInput = (value: unknown): LooseRecord | undefined => {
  * Encodes an event to the protobuf wire format.
  */
 export function encode(event: BaseEvent): Uint8Array {
+  event = omitOptionalNulls(event, "Event");
   // Events the handwritten SDK knows are validated, with a warning and a
   // best-effort fallback for malformed ones — existing clients encoding
   // invalid events keep working, loudly. Events the SDK does not know yet

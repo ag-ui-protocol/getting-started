@@ -83,10 +83,9 @@ public static class AGUIJsonUtilities
                 continue;
             }
 
-            var alreadyDeclared = property.ShouldSerialize;
-            property.ShouldSerialize = alreadyDeclared is null
-                ? static (_, value) => value is not null
-                : (parent, value) => value is not null && alreadyDeclared(parent, value);
+            // An explicit rule can preserve required JSON null (CustomEvent.Value)
+            // or omit a default value. The global default must not replace it.
+            property.ShouldSerialize ??= static (_, value) => value is not null;
         }
     }
 }

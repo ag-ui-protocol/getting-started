@@ -221,6 +221,8 @@ TextMessageContentEvent/valid/metadata-empty.json
 TextMessageContentEvent/valid/metadata-reserved-key.json
 TextMessageContentEvent/valid/metadata-value-null.json
 TextMessageContentEvent/valid/minimal.json
+TextMessageEndEvent/invalid/raw-event-null.expect.json
+TextMessageEndEvent/invalid/raw-event-null.json
 TextMessageEndEvent/invalid/timestamp-above-safe-integer.expect.json
 TextMessageEndEvent/invalid/timestamp-above-safe-integer.json
 TextMessageEndEvent/invalid/timestamp-below-safe-integer.expect.json
@@ -232,7 +234,6 @@ TextMessageEndEvent/invalid/unknown-property.json
 TextMessageEndEvent/valid/metadata-prototype-named-key.json
 TextMessageEndEvent/valid/minimal.json
 TextMessageEndEvent/valid/raw-event-array.json
-TextMessageEndEvent/valid/raw-event-null.json
 TextMessageEndEvent/valid/raw-event-number.json
 TextMessageEndEvent/valid/raw-event-object.json
 TextMessageEndEvent/valid/raw-event-string.json

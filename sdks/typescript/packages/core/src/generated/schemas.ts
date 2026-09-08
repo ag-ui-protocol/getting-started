@@ -44,7 +44,10 @@ export const TextMessageRoleSchema = z.enum(["developer", "system", "assistant",
 export const TextMessageStartEventSchema = z.looseObject({
   type: z.literal(EventType.TEXT_MESSAGE_START),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   messageId: z.string(),
@@ -58,7 +61,10 @@ export const TextMessageStartEventSchema = z.looseObject({
 export const TextMessageContentEventSchema = z.looseObject({
   type: z.literal(EventType.TEXT_MESSAGE_CONTENT),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   messageId: z.string(),
@@ -71,7 +77,10 @@ export const TextMessageContentEventSchema = z.looseObject({
 export const TextMessageEndEventSchema = z.looseObject({
   type: z.literal(EventType.TEXT_MESSAGE_END),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   messageId: z.string(),
@@ -87,7 +96,10 @@ export const TextMessageEndEventSchema = z.looseObject({
 export const TextMessageChunkEventSchema = z.looseObject({
   type: z.literal(EventType.TEXT_MESSAGE_CHUNK),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   messageId: z.string().optional(),
@@ -103,7 +115,10 @@ export const TextMessageChunkEventSchema = z.looseObject({
 export const ToolCallStartEventSchema = z.looseObject({
   type: z.literal(EventType.TOOL_CALL_START),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   toolCallId: z.string(),
@@ -117,7 +132,10 @@ export const ToolCallStartEventSchema = z.looseObject({
 export const ToolCallArgsEventSchema = z.looseObject({
   type: z.literal(EventType.TOOL_CALL_ARGS),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   toolCallId: z.string(),
@@ -130,7 +148,10 @@ export const ToolCallArgsEventSchema = z.looseObject({
 export const ToolCallEndEventSchema = z.looseObject({
   type: z.literal(EventType.TOOL_CALL_END),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   toolCallId: z.string(),
@@ -143,7 +164,10 @@ export const ToolCallEndEventSchema = z.looseObject({
 export const ToolCallChunkEventSchema = z.looseObject({
   type: z.literal(EventType.TOOL_CALL_CHUNK),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   toolCallId: z.string().optional(),
@@ -159,7 +183,10 @@ export const ToolCallChunkEventSchema = z.looseObject({
 export const ToolCallResultEventSchema = z.looseObject({
   type: z.literal(EventType.TOOL_CALL_RESULT),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   messageId: z.string(),
@@ -181,7 +208,10 @@ export const StateSchema = z.any();
 export const StateSnapshotEventSchema = z.looseObject({
   type: z.literal(EventType.STATE_SNAPSHOT),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   snapshot: StateSchema.refine((value) => value !== undefined),
@@ -296,7 +326,10 @@ export const JsonPatchSchema = z.array(JsonPatchOperationSchema);
 export const StateDeltaEventSchema = z.looseObject({
   type: z.literal(EventType.STATE_DELTA),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   delta: JsonPatchSchema,
@@ -404,7 +437,10 @@ export const InputContentSourceSchema = z.discriminatedUnion("type", [
 export const ImageInputContentSchema = z.looseObject({
   type: z.literal("image"),
   source: InputContentSourceSchema,
-  metadata: z.any().optional(),
+  metadata: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
 });
 
 /**
@@ -413,7 +449,10 @@ export const ImageInputContentSchema = z.looseObject({
 export const AudioInputContentSchema = z.looseObject({
   type: z.literal("audio"),
   source: InputContentSourceSchema,
-  metadata: z.any().optional(),
+  metadata: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
 });
 
 /**
@@ -422,7 +461,10 @@ export const AudioInputContentSchema = z.looseObject({
 export const VideoInputContentSchema = z.looseObject({
   type: z.literal("video"),
   source: InputContentSourceSchema,
-  metadata: z.any().optional(),
+  metadata: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
 });
 
 /**
@@ -431,7 +473,10 @@ export const VideoInputContentSchema = z.looseObject({
 export const DocumentInputContentSchema = z.looseObject({
   type: z.literal("document"),
   source: InputContentSourceSchema,
-  metadata: z.any().optional(),
+  metadata: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
 });
 
 /**
@@ -528,7 +573,10 @@ export const MessageSchema = z.discriminatedUnion("role", [
 export const MessagesSnapshotEventSchema = z.looseObject({
   type: z.literal(EventType.MESSAGES_SNAPSHOT),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   messages: z.array(MessageSchema),
 });
@@ -540,7 +588,10 @@ export const MessagesSnapshotEventSchema = z.looseObject({
 export const ActivitySnapshotEventSchema = z.looseObject({
   type: z.literal(EventType.ACTIVITY_SNAPSHOT),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   messageId: z.string(),
@@ -557,7 +608,10 @@ export const ActivitySnapshotEventSchema = z.looseObject({
 export const ActivityDeltaEventSchema = z.looseObject({
   type: z.literal(EventType.ACTIVITY_DELTA),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   messageId: z.string(),
@@ -572,7 +626,10 @@ export const ActivityDeltaEventSchema = z.looseObject({
 export const RawEventSchema = z.looseObject({
   type: z.literal(EventType.RAW),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   event: z.any().refine((value) => value !== undefined),
@@ -586,7 +643,10 @@ export const RawEventSchema = z.looseObject({
 export const CustomEventSchema = z.looseObject({
   type: z.literal(EventType.CUSTOM),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   name: z.string(),
@@ -599,7 +659,10 @@ export const CustomEventSchema = z.looseObject({
 export const ToolSchema = z.looseObject({
   name: z.string(),
   description: z.string(),
-  parameters: z.any().optional(),
+  parameters: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
 });
 
@@ -618,7 +681,10 @@ export const ContextSchema = z.looseObject({
 export const ResumeEntrySchema = z.looseObject({
   interruptId: z.string(),
   status: z.enum(["resolved", "cancelled"]),
-  payload: z.any().optional(),
+  payload: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
 });
 
@@ -634,13 +700,17 @@ export const RunAgentInputSchema = z.looseObject({
   runId: z.string(),
   protocolVersion: z.string().optional(),
   parentRunId: z.string().optional(),
-  state: StateSchema.nullable()
+  state: StateSchema.refine((value) => value !== null)
+    .nullable()
     .transform((value) => value ?? undefined)
     .optional(),
   messages: z.array(MessageSchema),
   tools: z.array(ToolSchema).default(() => []),
   context: z.array(ContextSchema).default(() => []),
-  forwardedProps: z.any().optional(),
+  forwardedProps: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   resume: z.array(ResumeEntrySchema).optional(),
 });
 
@@ -650,7 +720,10 @@ export const RunAgentInputSchema = z.looseObject({
 export const RunStartedEventSchema = z.looseObject({
   type: z.literal(EventType.RUN_STARTED),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   threadId: z.string(),
   runId: z.string(),
@@ -727,11 +800,17 @@ export const TokenUsageSchema = z.looseObject({
 export const RunFinishedEventSchema = z.looseObject({
   type: z.literal(EventType.RUN_FINISHED),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   threadId: z.string(),
   runId: z.string(),
-  result: z.any().optional(),
+  result: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   outcome: RunFinishedOutcomeSchema.optional(),
   usage: z.array(TokenUsageSchema).optional(),
 });
@@ -743,7 +822,10 @@ export const RunFinishedEventSchema = z.looseObject({
 export const RunErrorEventSchema = z.looseObject({
   type: z.literal(EventType.RUN_ERROR),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   message: z.string(),
   code: z.string().optional(),
@@ -757,7 +839,10 @@ export const RunErrorEventSchema = z.looseObject({
 export const StepStartedEventSchema = z.looseObject({
   type: z.literal(EventType.STEP_STARTED),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   stepName: z.string(),
@@ -769,7 +854,10 @@ export const StepStartedEventSchema = z.looseObject({
 export const StepFinishedEventSchema = z.looseObject({
   type: z.literal(EventType.STEP_FINISHED),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   stepName: z.string(),
@@ -781,7 +869,10 @@ export const StepFinishedEventSchema = z.looseObject({
 export const ReasoningStartEventSchema = z.looseObject({
   type: z.literal(EventType.REASONING_START),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   messageId: z.string(),
@@ -793,7 +884,10 @@ export const ReasoningStartEventSchema = z.looseObject({
 export const ReasoningMessageStartEventSchema = z.looseObject({
   type: z.literal(EventType.REASONING_MESSAGE_START),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   messageId: z.string(),
@@ -806,7 +900,10 @@ export const ReasoningMessageStartEventSchema = z.looseObject({
 export const ReasoningMessageContentEventSchema = z.looseObject({
   type: z.literal(EventType.REASONING_MESSAGE_CONTENT),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   messageId: z.string(),
@@ -819,7 +916,10 @@ export const ReasoningMessageContentEventSchema = z.looseObject({
 export const ReasoningMessageEndEventSchema = z.looseObject({
   type: z.literal(EventType.REASONING_MESSAGE_END),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   messageId: z.string(),
@@ -832,7 +932,10 @@ export const ReasoningMessageEndEventSchema = z.looseObject({
 export const ReasoningMessageChunkEventSchema = z.looseObject({
   type: z.literal(EventType.REASONING_MESSAGE_CHUNK),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   messageId: z.string().optional(),
@@ -845,7 +948,10 @@ export const ReasoningMessageChunkEventSchema = z.looseObject({
 export const ReasoningEndEventSchema = z.looseObject({
   type: z.literal(EventType.REASONING_END),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   messageId: z.string(),
@@ -863,7 +969,10 @@ export const ReasoningEncryptedValueSubtypeSchema = z.enum(["tool-call", "messag
 export const ReasoningEncryptedValueEventSchema = z.looseObject({
   type: z.literal(EventType.REASONING_ENCRYPTED_VALUE),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema.optional(),
   subtype: ReasoningEncryptedValueSubtypeSchema,
@@ -882,7 +991,10 @@ export const ReasoningEncryptedValueEventSchema = z.looseObject({
 export const SubagentStartedEventSchema = z.looseObject({
   type: z.literal(EventType.SUBAGENT_STARTED),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema,
   name: z.string(),
@@ -925,10 +1037,16 @@ export const SubagentFinishedOutcomeSchema = z.discriminatedUnion("type", [
 export const SubagentFinishedEventSchema = z.looseObject({
   type: z.literal(EventType.SUBAGENT_FINISHED),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema,
-  result: z.any().optional(),
+  result: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   outcome: SubagentFinishedOutcomeSchema.optional(),
 });
 
@@ -940,7 +1058,10 @@ export const SubagentFinishedEventSchema = z.looseObject({
 export const SubagentErrorEventSchema = z.looseObject({
   type: z.literal(EventType.SUBAGENT_ERROR),
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
   subagentRunId: SubagentRunIdSchema,
   message: z.string(),
@@ -1193,7 +1314,10 @@ export const AttributableSchema = z.looseObject({
 export const BaseEventSchema = z.looseObject({
   type: EventTypeSchema,
   timestamp: z.int().min(-9007199254740991).max(9007199254740991).optional(),
-  rawEvent: z.any().optional(),
+  rawEvent: z
+    .any()
+    .refine((value) => value !== null)
+    .optional(),
   metadata: MetadataSchema.optional(),
 });
 

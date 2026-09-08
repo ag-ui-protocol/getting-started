@@ -71,6 +71,33 @@ const STRING_DEFAULT: Record<string, string> = {
 };
 
 /**
+ * Ordinary JsonSerializer.Serialize has no context-wide omission setting.
+ * Retain the existing input/tool defaults, and cover fields newly made
+ * optional or introduced by the generated models. BaseEvent's three optional
+ * fields are shared by the new chunk events, so their omission lives there.
+ */
+const DEFAULT_OMISSION_FIELDS = new Set([
+  "RunAgentInput.parentRunId",
+  "RunAgentInput.state",
+  "RunAgentInput.tools",
+  "RunAgentInput.context",
+  "RunAgentInput.forwardedProps",
+  "RunAgentInput.resume",
+  "Tool.parameters",
+  "RunAgentInput.protocolVersion",
+  "RunStartedEvent.protocolVersion",
+  "TextMessageStartEvent.role",
+  "BaseEvent.timestamp",
+  "BaseEvent.rawEvent",
+  "BaseEvent.metadata",
+]);
+
+const DEFAULT_OMISSION_TYPES = new Set([
+  "TextMessageChunkEvent",
+  "ToolCallChunkEvent",
+]);
+
+/**
  * Fields whose representation is a hand-written shim; emitted verbatim.
  * AGUIUserContent owns the string|parts wire union, and its JSON is written
  * by AGUIMessageJsonConverter rather than by an attribute.
@@ -454,6 +481,17 @@ interface EmitContext {
   memberOf: Map<string, string>;
 }
 
+/** A whole optional JSON null is absent; nulls inside a value are untouched. */
+function optionalJsonProperty(name: string): string[] {
+  return [
+    `    public JsonElement? ${name}`,
+    "    {",
+    "        get;",
+    "        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;",
+    "    }",
+  ];
+}
+
 function csProperty(
   context: EmitContext,
   definition: ObjectDefinition,
@@ -467,6 +505,13 @@ function csProperty(
   const lines = doc(field.description, "    ");
   const attr = (name: string) => lines.push(`    ${name}`);
   attr(`[JsonPropertyName("${field.name}")]`);
+  if (
+    !field.required &&
+    (DEFAULT_OMISSION_FIELDS.has(key) ||
+      DEFAULT_OMISSION_TYPES.has(definition.name))
+  ) {
+    attr("[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]");
+  }
 
   // Patches ride as raw JSON in this SDK; the protobuf mappers own the
   // structured form. Aliases are followed but not seen through: resolving the
@@ -476,7 +521,7 @@ function csProperty(
     if (field.required) {
       lines.push(`    public JsonElement ${propName} { get; set; }`);
     } else {
-      lines.push(`    public JsonElement? ${propName} { get; set; }`);
+      lines.push(...optionalJsonProperty(propName));
     }
     return lines;
   }
@@ -558,14 +603,14 @@ function csProperty(
         prop("JsonElement?");
         return lines;
       }
-      prop("JsonElement?");
+      lines.push(...optionalJsonProperty(propName));
       return lines;
     case "openMap":
       if (field.required) {
         prop("JsonElement");
         return lines;
       }
-      prop("JsonElement?");
+      lines.push(...optionalJsonProperty(propName));
       return lines;
     case "array": {
       const items = resolveAlias(context.defs, resolved.items);
@@ -768,8 +813,14 @@ export function emitDotnetModels(
   assertTableKeys("TYPE_NAME", Object.keys(TYPE_NAME), model);
   assertTableKeys("PROP_NAME", Object.keys(PROP_NAME), model);
   assertTableKeys("STRING_DEFAULT", Object.keys(STRING_DEFAULT), model);
+  assertTableKeys("DEFAULT_OMISSION_FIELDS", DEFAULT_OMISSION_FIELDS, model);
+  assertTableKeys("DEFAULT_OMISSION_TYPES", DEFAULT_OMISSION_TYPES, model);
   assertTableKeys("BESPOKE_PROPERTY", Object.keys(BESPOKE_PROPERTY), model);
-  assertTableKeys("NULLABLE_REQUIRED_STRINGS", NULLABLE_REQUIRED_STRINGS, model);
+  assertTableKeys(
+    "NULLABLE_REQUIRED_STRINGS",
+    NULLABLE_REQUIRED_STRINGS,
+    model,
+  );
   assertTableKeys("NULLABLE_REQUIRED_ANY", NULLABLE_REQUIRED_ANY, model);
   const defs = new Map(model.definitions.map((d) => [d.name, d]));
   const memberOf = new Map<string, string>();
@@ -947,7 +998,7 @@ export function emitDotnetModels(
           "    ",
         ),
         '    [JsonPropertyName("metadata")]',
-        "    public JsonElement? Metadata { get; set; }",
+        ...optionalJsonProperty("Metadata"),
       ].join("\n"),
       [
         ...doc(
@@ -996,7 +1047,7 @@ export function emitDotnetModels(
       ].join("\n"),
       [
         '    [JsonPropertyName("metadata")]',
-        "    public JsonElement? Metadata { get; set; }",
+        ...optionalJsonProperty("Metadata"),
       ].join("\n"),
     ].join("\n\n"),
     "}",

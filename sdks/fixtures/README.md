@@ -99,44 +99,21 @@ The obvious alternative — adding `{workspaceRoot}/sdks/fixtures/**/*` to the `
 repository root, which changed the file without changing the task hash. Don't spend time on it
 again; turn caching off for the consuming project instead.
 
-### Known boundary
+### Whole-field null and nested null
 
-.NET models an opaque JSON payload either as `JsonElement` or as `JsonElement?`, and only the
-nullable form has this problem: `JsonElement?` cannot tell `"value": null` apart from an absent
-`value`, because System.Text.Json maps a JSON null onto the `Nullable<T>` having no value.
+A whole optional field set to `null` means absence, including optional arbitrary-JSON payloads.
+Producers omit the field; the schema requires omission instead of an explicit `null`. This rule
+applies to `rawEvent`, run and subagent `result`, tool `parameters`, resume `payload`, run input
+`state` and `forwardedProps`, and media-part `metadata`. It is the same rule in every SDK.
 
-So a payload field that is _entirely_ `null` round-trips through .NET for the non-nullable ones and
-is lost for the nullable ones. This table lists the **event** payload members only — it is not the
-whole set:
+Required arbitrary-JSON fields retain a whole `null` value: `STATE_SNAPSHOT.snapshot`, `RAW.event`,
+`CUSTOM.value`, and the `value` of a JSON Patch add, replace or test operation. The nullable .NET
+type of `CUSTOM.value` does not change that requirement; its serializer explicitly preserves null.
+`ACTIVITY_SNAPSHOT.content` is a required object, so a whole `null` is invalid in every SDK.
 
-| Field                       | .NET type      | `field: null` survives?                                                                                     |
-| --------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------- |
-| `STATE_SNAPSHOT.snapshot`   | `JsonElement`  | yes — covered by a fixture case                                                                             |
-| `RAW.event`                 | `JsonElement`  | yes — covered by a fixture case                                                                             |
-| `ACTIVITY_SNAPSHOT.content` | `JsonElement`  | yes, but no fixture can assert it: the schema declares `content` as `{"type": "object", "additionalProperties": true}`, so a bare `null` there is illegal for **every** SDK, not just rejected by the generated TypeScript validator's object predicate |
-| `CUSTOM.value`              | `JsonElement?` | **no**                                                                                                      |
-| `RUN_FINISHED.result`       | `JsonElement?` | **no**                                                                                                      |
-| `SUBAGENT_FINISHED.result`  | `JsonElement?` | **no**                                                                                                      |
-
-Five more "any JSON value" members collapse in exactly the same way and for exactly the same
-reason, and are left out of the table only because they are not event payloads:
-`BaseEvent.rawEvent` (`JsonElement?`), `Tool.parameters`, `ResumeEntry.payload`,
-`RunAgentInput.forwardedProps` and the media parts' `metadata` — the last a single
-`JsonElement? Metadata` on the shared base `AGUIMediaInputContent` (the four media parts declare
-`metadata` with neither a `type` nor a `$ref`, so it is one member inherited by `ImageInputContent`,
-`AudioInputContent`, `VideoInputContent` and `DocumentInputContent`) — all `JsonElement?` in the
-generated .NET models. Eight members in total, then, not three.
-
-Nulls _nested inside_ any of these payloads always survive, in every SDK. Closing any of these
-gaps — the three listed above or the four beside them — means changing the property to
-non-nullable `JsonElement` with `JsonIgnoreCondition.WhenWritingDefault`, a breaking type change,
-so it is deliberately out of scope here.
-
-`RunAgentInput.state` is **not** in this table, on purpose: there the null-collapse is the
-contract, not a limitation. `state` is optional, absent means "no state", and a bare `null` is
-read as absent — a survey of every integration found none that distinguishes the two, so all three
-SDKs converge on omission (see the `run_started_input_with_bare_null_state_converges_on_omission`
-case). Nulls _inside_ a state object are values and survive.
+Nulls nested inside any permitted object or array remain data and survive unchanged. For example,
+an optional `result: null` is omitted, while `result: {"selectedId": null}` is retained. The same
+distinction applies to nulls under metadata keys and inside state objects or arrays.
 
 ## `agent-capabilities.json`
 

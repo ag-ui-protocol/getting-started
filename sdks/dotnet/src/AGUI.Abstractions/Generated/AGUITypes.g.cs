@@ -69,7 +69,11 @@ public sealed class AGUIToolCall
     /// and merging them would make the result depend on their order.
     /// </summary>
     [JsonPropertyName("metadata")]
-    public JsonElement? Metadata { get; set; }
+    public JsonElement? Metadata
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 }
 
 /// <summary>
@@ -97,14 +101,23 @@ public sealed class AGUITool
     /// thing to an agent.
     /// </summary>
     [JsonPropertyName("parameters")]
-    public JsonElement? Parameters { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement? Parameters
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 
     /// <summary>
     /// Extra information about the tool, for consumers that attach their own
     /// rendering or routing information to it.
     /// </summary>
     [JsonPropertyName("metadata")]
-    public JsonElement? Metadata { get; set; }
+    public JsonElement? Metadata
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 }
 
 /// <summary>
@@ -177,7 +190,11 @@ public sealed class AGUIInterrupt
     /// "any answer". Recorded as a known divergence rather than settled.
     /// </summary>
     [JsonPropertyName("responseSchema")]
-    public JsonElement? ResponseSchema { get; set; }
+    public JsonElement? ResponseSchema
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 
     /// <summary>
     /// When the interrupt stops being answerable. Deliberately unconstrained
@@ -194,7 +211,11 @@ public sealed class AGUIInterrupt
     /// Extra information attached to this interrupt.
     /// </summary>
     [JsonPropertyName("metadata")]
-    public JsonElement? Metadata { get; set; }
+    public JsonElement? Metadata
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 }
 
 /// <summary>
@@ -218,14 +239,22 @@ public sealed class AGUIResume
     /// The answer the agent asked for and will act on. Any JSON value.
     /// </summary>
     [JsonPropertyName("payload")]
-    public JsonElement? Payload { get; set; }
+    public JsonElement? Payload
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 
     /// <summary>
     /// Envelope information about the response, such as signatures or routing
     /// keys, as opposed to payload, which is the answer itself.
     /// </summary>
     [JsonPropertyName("metadata")]
-    public JsonElement? Metadata { get; set; }
+    public JsonElement? Metadata
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 }
 
 /// <summary>
@@ -311,19 +340,26 @@ public sealed class RunAgentInput
     /// self-describing.
     /// </summary>
     [JsonPropertyName("protocolVersion")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? ProtocolVersion { get; set; }
 
     /// <summary>
     /// The run that spawned this one.
     /// </summary>
     [JsonPropertyName("parentRunId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? ParentRunId { get; set; }
 
     /// <summary>
     /// The state the run starts from.
     /// </summary>
     [JsonPropertyName("state")]
-    public JsonElement? State { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement? State
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 
     /// <summary>
     /// The conversation so far, in order.
@@ -335,12 +371,14 @@ public sealed class RunAgentInput
     /// The tools the agent may call. Absent means none.
     /// </summary>
     [JsonPropertyName("tools")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public IList<AGUITool>? Tools { get; set; }
 
     /// <summary>
     /// Ambient information for the run. Absent means none.
     /// </summary>
     [JsonPropertyName("context")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public IList<AGUIContext>? Context { get; set; }
 
     /// <summary>
@@ -348,13 +386,19 @@ public sealed class RunAgentInput
     /// JSON value.
     /// </summary>
     [JsonPropertyName("forwardedProps")]
-    public JsonElement? ForwardedProperties { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement? ForwardedProperties
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 
     /// <summary>
     /// Answers to the interrupts that ended a previous run, when this run
     /// continues from one.
     /// </summary>
     [JsonPropertyName("resume")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public IList<AGUIResume>? Resume { get; set; }
 }
 
@@ -428,7 +472,11 @@ public sealed class IdentityCapabilities
     /// Arbitrary key-value pairs for integration-specific identity info.
     /// </summary>
     [JsonPropertyName("metadata")]
-    public JsonElement? Metadata { get; set; }
+    public JsonElement? Metadata
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 }
 
 /// <summary>
@@ -873,7 +921,11 @@ public sealed class AgentCapabilities
     /// the categories above cannot anticipate what an integration declares.
     /// </summary>
     [JsonPropertyName("custom")]
-    public JsonElement? Custom { get; set; }
+    public JsonElement? Custom
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 }
 
 /// <summary>

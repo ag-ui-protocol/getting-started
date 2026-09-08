@@ -158,19 +158,19 @@ describe("Agent Result", () => {
       expect(result.result).toBe(expectedResult);
     });
 
-    it("should handle null result", async () => {
+    it("rejects a whole optional null result from an in-memory producer", async () => {
       agent.setEventsToEmit([
         {
           type: EventType.RUN_FINISHED,
           threadId: "test-thread",
           runId: "test-run",
           result: null,
-        } as RunFinishedEvent,
+        },
       ]);
 
-      const result = await agent.runAgent();
-
-      expect(result.result).toBeNull();
+      await expect(agent.runAgent()).rejects.toMatchObject({
+        issues: [expect.objectContaining({ path: ["result"] })],
+      });
     });
   });
 

@@ -8,6 +8,7 @@
 // and stay on this entry.
 export * from "./generated/types";
 export { PROTOCOL_VERSION } from "./generated/version";
+export { omitOptionalNulls } from "./generated/serialization";
 
 // The names this package has always exported, pointed at the generated source.
 // BaseEvent is named explicitly: the compat shape (with the historic open

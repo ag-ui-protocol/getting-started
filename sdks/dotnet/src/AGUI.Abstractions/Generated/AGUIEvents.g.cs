@@ -43,6 +43,7 @@ public sealed class TextMessageStartEvent : BaseEvent
     /// as documentation rather than as behaviour.
     /// </summary>
     [JsonPropertyName("role")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? Role { get; set; }
 
     /// <summary>
@@ -134,6 +135,7 @@ public sealed class TextMessageChunkEvent : BaseEvent
     /// produced it directly.
     /// </summary>
     [JsonPropertyName("subagentRunId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? SubagentRunId { get; set; }
 
     /// <summary>
@@ -141,24 +143,28 @@ public sealed class TextMessageChunkEvent : BaseEvent
     /// open.
     /// </summary>
     [JsonPropertyName("messageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? MessageId { get; set; }
 
     /// <summary>
     /// Who the message is from, on the chunk that opens it.
     /// </summary>
     [JsonPropertyName("role")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? Role { get; set; }
 
     /// <summary>
     /// The fragment to append. May be the empty string.
     /// </summary>
     [JsonPropertyName("delta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? Delta { get; set; }
 
     /// <summary>
     /// An optional display name for the author.
     /// </summary>
     [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? Name { get; set; }
 }
 
@@ -283,30 +289,35 @@ public sealed class ToolCallChunkEvent : BaseEvent
     /// produced it directly.
     /// </summary>
     [JsonPropertyName("subagentRunId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? SubagentRunId { get; set; }
 
     /// <summary>
     /// The call this chunk belongs to. Absent continues the call already open.
     /// </summary>
     [JsonPropertyName("toolCallId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? ToolCallId { get; set; }
 
     /// <summary>
     /// Which tool is being called, on the chunk that opens it.
     /// </summary>
     [JsonPropertyName("toolCallName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? ToolCallName { get; set; }
 
     /// <summary>
     /// The assistant message that holds this call.
     /// </summary>
     [JsonPropertyName("parentMessageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? ParentMessageId { get; set; }
 
     /// <summary>
     /// A fragment of the arguments. May be the empty string.
     /// </summary>
     [JsonPropertyName("delta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? Delta { get; set; }
 }
 
@@ -628,6 +639,7 @@ public sealed class RunStartedEvent : BaseEvent
     /// the protocol carried a version.
     /// </summary>
     [JsonPropertyName("protocolVersion")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? ProtocolVersion { get; set; }
 
     /// <summary>
@@ -674,7 +686,11 @@ public sealed class RunFinishedEvent : BaseEvent
     /// The run's return value, if it has one. Any JSON value.
     /// </summary>
     [JsonPropertyName("result")]
-    public JsonElement? Result { get; set; }
+    public JsonElement? Result
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 
     /// <summary>
     /// Why the run ended. Absent means success, so every producer written
@@ -1080,7 +1096,11 @@ public sealed class SubagentFinishedEvent : BaseEvent
     /// RUN_FINISHED.result.
     /// </summary>
     [JsonPropertyName("result")]
-    public JsonElement? Result { get; set; }
+    public JsonElement? Result
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 
     /// <summary>
     /// Why the segment ended. Absent means success. A suspended subagent is

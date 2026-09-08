@@ -879,6 +879,33 @@
           ]
         }
       }
+    },
+    {
+      "name": "run_finished_with_explicit_optional_nulls",
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
+      "note": "Whole optional null fields are omitted; a null value inside metadata remains application data.",
+      "input": {
+        "type": "RUN_FINISHED",
+        "threadId": "thread_1",
+        "runId": "run_1",
+        "rawEvent": null,
+        "result": null,
+        "metadata": {
+          "retained": null
+        }
+      },
+      "expected": {
+        "type": "RUN_FINISHED",
+        "threadId": "thread_1",
+        "runId": "run_1",
+        "metadata": {
+          "retained": null
+        }
+      }
     }
   ]
 }

@@ -31,6 +31,7 @@ public abstract class BaseEvent
     /// Nothing in the protocol computes with this value.
     /// </summary>
     [JsonPropertyName("timestamp")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public long? Timestamp { get; set; }
 
     /// <summary>
@@ -39,12 +40,22 @@ public abstract class BaseEvent
     /// model. Any JSON value.
     /// </summary>
     [JsonPropertyName("rawEvent")]
-    public JsonElement? RawEvent { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement? RawEvent
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 
     /// <summary>
     /// Extra information attached to this event.
     /// </summary>
     [JsonPropertyName("metadata")]
-    public JsonElement? Metadata { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement? Metadata
+    {
+        get;
+        set => field = value is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : value;
+    }
 }
 

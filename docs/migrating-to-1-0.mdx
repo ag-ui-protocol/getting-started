@@ -41,8 +41,17 @@ with the exceptions on this page.
 
 ## TypeScript
 
-The TypeScript SDK takes the most change of the three, because it is where
-the protocol's behaviour was previously defined.
+The TypeScript SDK takes the most change of the three, because it is where the
+protocol's behaviour was previously defined.
+
+### Omit whole optional null fields
+
+Optional protocol fields must be absent instead of `null`, including `rawEvent`,
+`RUN_FINISHED.result`, and `forwardedProps`. `EventEncoder` and outgoing HTTP
+inputs omit these fields before transmission. In-memory agents must omit them
+when producing events; incoming event validation rejects a whole optional null.
+Required JSON payloads such as `CUSTOM.value`, and null values inside state,
+metadata, or other application data, remain valid and are preserved.
 
 ### zod is an optional peer dependency of `@ag-ui/core`
 
@@ -189,6 +198,33 @@ differ:
 Validation stays as tolerant as it was: unknown keys are kept, pydantic's
 default coercion applies. The strict contract is the specification's
 [fixture corpus](/spec/draft/schema-files), not the SDK models.
+
+### Read JSON Patch entries as objects
+
+Entries in `StateDeltaEvent.delta` and `ActivityDeltaEvent.patch` are typed
+operation models, even when you construct the event with dictionaries. Replace
+dictionary reads such as `patch["path"]` and `patch.get("op")` with `patch.path`
+and `patch.op`. The JSON sent over the wire is unchanged.
+
+If a patch library or other existing code needs dictionaries, convert each
+operation with `model_dump(by_alias=True)`. Keeping aliases enabled preserves
+wire keys such as `from` on move and copy operations.
+
+```python
+from ag_ui.core import StateDeltaEvent
+
+event = StateDeltaEvent(delta=[{"op": "replace", "path": "/count", "value": 1}])
+operation = event.delta[0]
+assert operation.path == "/count"  # Previously: event.delta[0]["path"]
+assert operation.op == "replace"  # Previously: event.delta[0].get("op")
+
+patches = [operation.model_dump(by_alias=True) for operation in event.delta]
+assert patches == [{"op": "replace", "path": "/count", "value": 1}]
+```
+
+An adapter that supports both older SDK dictionaries and 1.0 models can keep a
+dictionary entry as-is and call `model_dump(by_alias=True)` only when the entry
+is a model.
 
 ### Retired
 

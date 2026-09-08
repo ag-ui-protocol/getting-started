@@ -96,6 +96,7 @@
           "description": "When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value."
         },
         "rawEvent": {
+          "not": { "type": "null" },
           "description": "The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value."
         },
         "metadata": {
@@ -565,6 +566,7 @@
         },
         "runId": { "type": "string", "description": "The run being closed." },
         "result": {
+          "not": { "type": "null" },
           "description": "The run's return value, if it has one. Any JSON value."
         },
         "outcome": {
@@ -839,6 +841,7 @@
           "description": "The invocation being closed."
         },
         "result": {
+          "not": { "type": "null" },
           "description": "The subagent's return value, if it has one. Any JSON value, mirroring RUN_FINISHED.result."
         },
         "outcome": {
@@ -993,6 +996,7 @@
           "enum": ["resolved", "cancelled"]
         },
         "payload": {
+          "not": { "type": "null" },
           "description": "The answer the agent asked for and will act on. Any JSON value."
         },
         "metadata": {
@@ -1325,6 +1329,7 @@
           "description": "Where the image comes from."
         },
         "metadata": {
+          "not": { "type": "null" },
           "description": "Extra information about this part. Unconstrained rather than an object: inherited from the SDKs, which declare it unknown rather than a record; listed under known divergences in the README rather than resolved here."
         }
       },
@@ -1342,6 +1347,7 @@
           "description": "Where the audio comes from."
         },
         "metadata": {
+          "not": { "type": "null" },
           "description": "Extra information about this part. Unconstrained, as on the other media parts."
         }
       },
@@ -1359,6 +1365,7 @@
           "description": "Where the video comes from."
         },
         "metadata": {
+          "not": { "type": "null" },
           "description": "Extra information about this part. Unconstrained, as on the other media parts."
         }
       },
@@ -1376,6 +1383,7 @@
           "description": "Where the document comes from."
         },
         "metadata": {
+          "not": { "type": "null" },
           "description": "Extra information about this part. Unconstrained, as on the other media parts."
         }
       },
@@ -1455,6 +1463,7 @@
           "description": "What the tool does, for the agent to decide when to use it."
         },
         "parameters": {
+          "not": { "type": "null" },
           "description": "A JSON Schema describing the tool's arguments. Carried opaquely: the protocol does not constrain or validate it. Optional, because all three SDKs already treat it that way and a tool that takes no arguments has nothing to declare; an absent schema and an empty one mean the same thing to an agent."
         },
         "metadata": {
@@ -1484,6 +1493,7 @@
           "description": "The run that spawned this one."
         },
         "state": {
+          "not": { "type": "null" },
           "$ref": "#/$defs/State",
           "description": "The state the run starts from."
         },
@@ -1503,6 +1513,7 @@
           "items": { "$ref": "#/$defs/Context" }
         },
         "forwardedProps": {
+          "not": { "type": "null" },
           "description": "Application-specific values passed through to the agent untouched. Any JSON value."
         },
         "resume": {

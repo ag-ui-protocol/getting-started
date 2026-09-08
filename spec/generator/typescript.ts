@@ -11,6 +11,7 @@
  * If a field's meaning ever appears in this file, it has escaped the schema.
  */
 
+import { emitSerialization } from "./serialization";
 import type {
   Definition,
   Field,
@@ -122,7 +123,9 @@ function emitObjectType(definition: ObjectDefinition): string {
       // on — the schema says "Absent means none", and absent is exactly what
       // this type can no longer express — so the divergence is stated here
       // rather than left for a reader to trip over.
-      const materialise = ABSENT_MEANS_EMPTY.has(`${definition.name}.${field.name}`);
+      const materialise = ABSENT_MEANS_EMPTY.has(
+        `${definition.name}.${field.name}`,
+      );
       if (materialise) materialised = true;
       const description = materialise
         ? `${base} Optional on the wire; the TypeScript SDK materialises an absent one as an empty list, so this type requires it.`
@@ -178,16 +181,14 @@ export function emitTypes(model: ProtocolModel): string {
 
 /** Renders a TypeExpr as a zod v4 expression. */
 /**
- * Optional fields whose contract reads an explicit null as absent, rather than
- * as the null value itself. Only RunAgentInput.state: absent means "no state"
- * and a bare null says the same thing, which every consumer already collapses
- * and .NET's representation cannot tell apart. Nulls INSIDE the value are data
- * and survive.
+ * Existing parser compatibility tolerances for whole optional null fields.
+ * Producers must omit every whole optional null. This table preserves the
+ * narrower parser tolerance for RunAgentInput.state, where consumers already
+ * read a bare null as no state. Nulls INSIDE the value remain data and survive.
  *
- * Distinct from the legacy event-level null tolerances, which are producer bugs
- * shimmed at the compatibility boundary and listed in DEPRECATIONS.md. This one
- * is the contract, and it applies where no boundary exists: a server parsing a
- * request body.
+ * Legacy event-level tolerances live at the compatibility boundary and are
+ * listed in DEPRECATIONS.md. State's existing tolerance stays in the parser
+ * because a server parsing a request body has no middleware boundary before it.
  */
 const NULL_MEANS_ABSENT = new Set(["RunAgentInput.state"]);
 
@@ -243,7 +244,9 @@ function zodType(type: TypeExpr): string {
         ? `z.literal(${TS_ENUM}.${type.value})`
         : `z.literal(${JSON.stringify(type.value)})`;
     case "any":
-      return "z.any()";
+      return type.excludeNull
+        ? "z.any().refine((value) => value !== null)"
+        : "z.any()";
     case "openMap":
       // Not z.record: its key schema rejects prototype-named keys such as
       // "constructor", which are valid JSON the spec accepts. z.custom checks
@@ -256,7 +259,7 @@ function zodType(type: TypeExpr): string {
     case "stringEnum":
       return `z.enum([${type.values.map((value) => JSON.stringify(value)).join(", ")}])`;
     case "ref":
-      return `${type.name}Schema`;
+      return `${type.name}Schema${type.excludeNull ? ".refine((value) => value !== null)" : ""}`;
     case "array": {
       let expr = `z.array(${zodType(type.items)})`;
       if (type.minItems !== undefined) expr += `.min(${type.minItems})`;
@@ -412,5 +415,6 @@ export function emitTypeScript(model: ProtocolModel): GeneratedFile[] {
     { name: "types.ts", content: emitTypes(model) },
     { name: "schemas.ts", content: emitSchemas(model) },
     { name: "version.ts", content: emitVersion(model) },
+    { name: "serialization.ts", content: emitSerialization(model) },
   ];
 }

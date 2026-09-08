@@ -24,6 +24,7 @@ import { emitModels } from "../generator/python";
 import { emitSchemaReference } from "../generator/schema-reference";
 import { assertTableKeys } from "../generator/tables";
 import { emitTypeScript } from "../generator/typescript";
+import { emitSerialization } from "../generator/serialization";
 
 type Json = Record<string, any>;
 
@@ -56,6 +57,49 @@ const realModel = buildModel(realSchema());
 const realWire = buildWireModel(realModel, FREEZE);
 
 describe("the reader's vocabulary", () => {
+  it("does not walk an opaque arm of a structured inline union", () => {
+    const raw = realSchema();
+    raw.$defs.RunAgentInput.properties.forwardedProps = {
+      description: "An ambiguous array union.",
+      oneOf: [
+        { type: "array", items: { $ref: "#/$defs/ResumeEntry" } },
+        { type: "array", items: {} },
+      ],
+    };
+    expect(() => emitSerialization(buildModel(raw))).toThrow(
+      /requires a discriminator/,
+    );
+  });
+
+  it("models optional JSON null exclusion without admitting other negations", () => {
+    const model = buildModel(
+      fieldDoc({ description: "JSON except null.", not: { type: "null" } }),
+    );
+    const thing = model.definitions.find((d) => d.name === "Thing");
+    expect(thing?.kind === "object" && thing.fields[0].type).toEqual({
+      kind: "any",
+      excludeNull: true,
+    });
+    expect(() => buildModel(fieldDoc({ not: { type: "string" } }))).toThrow(
+      /only not/,
+    );
+    expect(() =>
+      buildModel(fieldDoc({ not: { type: "null", description: "ignored" } })),
+    ).toThrow(/only not/);
+    expect(() =>
+      buildModel(
+        doc({
+          Thing: {
+            type: "object",
+            description: "A thing.",
+            properties: {},
+            not: { type: "null" },
+          },
+        }),
+      ),
+    ).toThrow(/null exclusion is only modelled/);
+  });
+
   it("reads the real schema", () => {
     expect(realModel.definitions.length).toBeGreaterThan(80);
   });
@@ -351,7 +395,9 @@ describe("the .NET emitters", () => {
       description: "Labels on the step.",
     };
     const wire = buildWireModel(buildModel(schema), FREEZE);
-    expect(() => emitDotnet(wire)).toThrow(/encode: unhandled kind stringArray/);
+    expect(() => emitDotnet(wire)).toThrow(
+      /encode: unhandled kind stringArray/,
+    );
   });
 
   it("writes the real models and mappers", () => {

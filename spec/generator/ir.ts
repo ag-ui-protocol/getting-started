@@ -97,9 +97,9 @@ export type TypeExpr =
       /** Set when the literal narrows a reference to an enum definition. */
       enumRef?: string;
     }
-  | { kind: "any" }
+  | { kind: "any"; excludeNull?: true }
   | { kind: "openMap" }
-  | { kind: "ref"; name: string }
+  | { kind: "ref"; name: string; excludeNull?: true }
   | { kind: "stringEnum"; values: string[] }
   | {
       kind: "array";
@@ -130,6 +130,7 @@ const KNOWN_KEYWORDS = new Set([
   "maximum",
   "minItems",
   "minimum",
+  "not",
   "oneOf",
   "pattern",
   "properties",
@@ -217,6 +218,27 @@ function readType(
   path: string,
 ): TypeExpr {
   assertKnownKeywords(node, path);
+
+  if ("not" in node) {
+    const excluded = node.not;
+    if (
+      typeof excluded !== "object" ||
+      excluded === null ||
+      Object.keys(excluded).length !== 1 ||
+      (excluded as Json).type !== "null"
+    ) {
+      throw new SchemaReadError(path, 'only not: { type: "null" } is modelled');
+    }
+    const { not: _not, ...base } = node;
+    const type = readType(base, defs, path);
+    if (type.kind !== "any" && type.kind !== "ref") {
+      throw new SchemaReadError(
+        path,
+        "null exclusion is only modelled on JSON values or references",
+      );
+    }
+    return { ...type, excludeNull: true };
+  }
 
   const ref = node.$ref;
   if (typeof ref === "string") {
@@ -571,6 +593,19 @@ function assertVocabulary(root: Json): void {
       return;
     const object = node as Json;
     assertKnownKeywords(object, path, path === "#" ? ROOT_KEYWORDS : undefined);
+    if (
+      "not" in object &&
+      (path === "#" ||
+        object.properties !== undefined ||
+        object.allOf !== undefined ||
+        object.oneOf !== undefined ||
+        object.enum !== undefined)
+    ) {
+      throw new SchemaReadError(
+        path,
+        "null exclusion is only modelled on JSON values or references",
+      );
+    }
     for (const [key, value] of Object.entries(object)) {
       if (key === "properties" || key === "$defs") {
         for (const [name, child] of Object.entries(value as Json)) {
@@ -582,6 +617,7 @@ function assertVocabulary(root: Json): void {
         );
       } else if (
         key === "items" ||
+        key === "not" ||
         key === "additionalProperties" ||
         key === "unevaluatedProperties"
       ) {

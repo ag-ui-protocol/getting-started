@@ -98,9 +98,7 @@ export function emitProtoTranslation(wire: WireModel): string {
   const baseEventLiteral = baseFieldNames
     .map((name) => {
       const written = BASE_FIELD_ENCODING[`BaseEvent.${name}`];
-      return written
-        ? `        ${name}: ${written},`
-        : `        ${name},`;
+      return written ? `        ${name}: ${written},` : `        ${name},`;
     })
     .join("\n");
 
@@ -243,9 +241,7 @@ export function emitProtoTranslation(wire: WireModel): string {
       (field) => field.name === messageUnion.discriminator,
     );
     if (role?.type.kind !== "literal") throw new Error("message discriminator");
-    const content = member.fields.find(
-      (field) => field.name === contentField,
-    );
+    const content = member.fields.find((field) => field.name === contentField);
     const mode =
       content === undefined
         ? "none"
@@ -310,7 +306,10 @@ export function emitProtoTranslation(wire: WireModel): string {
       // what keeps the mapper and the .proto agreeing about what a union does
       // on the wire; treating every union as flattened would emit a mapper for
       // a shape the .proto never wrote.
-      if (resolved?.kind === "union" && UNION_STRATEGY[resolved.name] === "flatten") {
+      if (
+        resolved?.kind === "union" &&
+        UNION_STRATEGY[resolved.name] === "flatten"
+      ) {
         flattenSpecs.push({
           eventType: type,
           jsonField: field.name,
@@ -366,7 +365,10 @@ export function emitProtoTranslation(wire: WireModel): string {
         // is the whole reason the encode/decode pair below exists. Keying on
         // the definition's name instead would let this emitter and the .proto
         // disagree about which union is tagged.
-        if (itemsDef !== undefined && UNION_STRATEGY[itemsDef.name] === "tagged") {
+        if (
+          itemsDef !== undefined &&
+          UNION_STRATEGY[itemsDef.name] === "tagged"
+        ) {
           patchFields.push({ eventType: type, jsonField: field.name });
         }
         if (!field.required) {
@@ -599,8 +601,12 @@ ${rebuild}
     // enforcement to strip with the rest.
     if (wireOutcome !== undefined && !${JSON.stringify(knownValues)}.includes(wireOutcome)) {
       record.${spec.jsonField} = {
-        type: wireOutcome${payloadNames.map((name) => `,
-        ...(asArray(payload.${name}).length > 0 ? { ${name}: payload.${name} } : {})`).join("")}
+        type: wireOutcome${payloadNames
+          .map(
+            (name) => `,
+        ...(asArray(payload.${name}).length > 0 ? { ${name}: payload.${name} } : {})`,
+          )
+          .join("")}
       };
     }
   }`);
@@ -736,7 +742,7 @@ ${rebuild}
 // Source: ${model.schemaId}
 // Regenerate: pnpm --filter @ag-ui/spec generate
 
-import { BaseEvent, AGUIEvent, EventType } from "@ag-ui/core";
+import { BaseEvent, AGUIEvent, EventType, omitOptionalNulls } from "@ag-ui/core";
 import { EventSchemas } from "@ag-ui/core/schemas";
 import * as protoEvents from "./generated/events";
 import * as protoPatch from "./generated/patch";
@@ -1101,6 +1107,7 @@ ${inputDefs.map(inputConverter).join("\n")}
  * Encodes an event to the protobuf wire format.
  */
 export function encode(event: BaseEvent): Uint8Array {
+  event = omitOptionalNulls(event, "Event");
   // Events the handwritten SDK knows are validated, with a warning and a
   // best-effort fallback for malformed ones — existing clients encoding
   // invalid events keep working, loudly. Events the SDK does not know yet

@@ -1,0 +1,5 @@
+{
+  "keyword": "not",
+  "instanceLocation": "/rawEvent",
+  "keywordLocation": "#/properties/rawEvent/not"
+}
