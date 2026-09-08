@@ -524,6 +524,7 @@ describe("subgraph change trigger", () => {
     agent: LangGraphAgent,
     chunks: any[],
     expectedError?: Error,
+    initialStateValues: Record<string, unknown> = { messages: [] },
   ) {
     // Patch prepareStream to return our synthetic chunk stream
     (agent as any).prepareStream = vi.fn().mockResolvedValue({
@@ -533,7 +534,7 @@ describe("subgraph change trigger", () => {
           yield c;
         }
       })(),
-      state: { values: { messages: [] } } as any,
+      state: { values: initialStateValues } as any,
     });
 
     // We call the internal streaming handler directly via run()
@@ -622,7 +623,13 @@ describe("subgraph change trigger", () => {
       },
     ];
 
-    await driveAgent(agent, chunks);
+    await driveAgent(agent, chunks, undefined, {
+      messages: [
+        msg("u1", "human", "AMS to SF"),
+        msg("f1", "ai", "Booked KLM"),
+        msg("h1", "ai", "Booked Hotel Zoe"),
+      ],
+    });
 
     const snapshots = dispatched.filter(
       (e) => e?.type === EventType.MESSAGES_SNAPSHOT,

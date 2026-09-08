@@ -895,8 +895,10 @@ export class LangGraphAgent extends AbstractAgent {
 
     this.activeRun!.prevNodeName = null;
     let latestStateValues = {} as ThreadState<State>["values"];
-    let latestRootStateValues = {} as ThreadState<State>["values"];
-    let hasOrderedRootStateValues = false;
+    // prepareStream's state is the ordered root boundary before any streamed
+    // chunk, including a first subgraph event that arrives before values mode.
+    let latestRootStateValues = state.values;
+    let hasOrderedRootStateValues = true;
     let updatedState = state;
 
     try {
@@ -1003,6 +1005,12 @@ export class LangGraphAgent extends AbstractAgent {
         }
 
         const chunkData = chunk.data;
+        // Once events-mode streaming is active, messages-tuple is a legacy
+        // fallback only. Skip it before the shared state-snapshot logic so an
+        // ignored late tuple cannot become a snapshot timing pulse.
+        if (isMessagesTupleEvent && this.eventsStreamActive) {
+          continue;
+        }
         // messages-tuple chunks arrive as [AIMessageChunk, metadata] arrays;
         // events-mode chunks are objects with metadata/event properties. Read
         // metadata from the right slot so langgraph_node is extracted in both
@@ -1082,13 +1090,17 @@ export class LangGraphAgent extends AbstractAgent {
         // LangGraph JS doesn't emit `values` chunks with the latest state between
         // tool execution and run end, so without this update, intermediate
         // STATE_SNAPSHOTs go stale after a tool Command updates state.
+        // A root on_chain_end also advances the ordered root cache: when values
+        // mode is omitted, the next subgraph boundary snapshots straight from
+        // that cache, so it must carry the same merged output.
         if (
           eventType === LangGraphEventTypes.OnChainEnd &&
           chunkData.data?.output != null
         ) {
           const output: any = chunkData.data.output;
+          let outputUpdate: Record<string, any> | undefined;
           if (typeof output === "object" && !Array.isArray(output)) {
-            latestStateValues = { ...latestStateValues, ...output };
+            outputUpdate = output;
           } else if (Array.isArray(output)) {
             for (const item of output) {
               if (
@@ -1098,11 +1110,17 @@ export class LangGraphAgent extends AbstractAgent {
                 (item as any).update &&
                 typeof (item as any).update === "object"
               ) {
-                latestStateValues = {
-                  ...latestStateValues,
-                  ...(item as any).update,
-                };
+                outputUpdate = { ...outputUpdate, ...(item as any).update };
               }
+            }
+          }
+          if (outputUpdate) {
+            latestStateValues = { ...latestStateValues, ...outputUpdate };
+            if (currentSubgraph === ROOT_SUBGRAPH_NAME) {
+              latestRootStateValues = {
+                ...latestRootStateValues,
+                ...outputUpdate,
+              };
             }
           }
         }
