@@ -8,10 +8,9 @@ rather than twelve months from when they shipped, and they will be re-dated
 from the 1.0 release if it slips. After the expiry date the shim may be
 removed in the next release, and the deprecated shape stops working entirely.
 
-The 1.0 contract (spec/draft/schema.json) does not describe any of these
-shapes, and since the SDKs moved onto the generated models none of the three
-— TypeScript, Python, .NET — declares them. They exist only as conversions
-in the TypeScript client middleware layer: the
+The canonical 1.0 contract (spec/draft/schema.json) excludes these shapes.
+Compatibility conversions live in the TypeScript client boundary and
+middleware layer: the
 always-on inbound boundary (`CompatibilityBoundary`) upgrades what arrives,
 and four version-gated middlewares are inserted when the peer ceiling is at or
 below their version. They do not all work in the same direction.
@@ -28,17 +27,40 @@ non-lossy binary upgrade for a modern peer is silent).
 `SUPPRESS_TRANSFORMATION_WARNINGS=true` silences the warnings, not the
 conversions.
 
-| Deprecated shape | Replacement | Shim | Expires |
-| --- | --- | --- | --- |
-| `THINKING_START` event | `REASONING_START` | inbound boundary (and `BackwardCompatibility_0_0_45` for gated flows) | 2027-08-24 |
-| `THINKING_END` event | `REASONING_END` | inbound boundary (and `BackwardCompatibility_0_0_45`) | 2027-08-24 |
-| `THINKING_TEXT_MESSAGE_START` event | `REASONING_MESSAGE_START` | inbound boundary (and `BackwardCompatibility_0_0_45`) | 2027-08-24 |
-| `THINKING_TEXT_MESSAGE_CONTENT` event | `REASONING_MESSAGE_CONTENT` | inbound boundary (and `BackwardCompatibility_0_0_45`) | 2027-08-24 |
-| `THINKING_TEXT_MESSAGE_END` event | `REASONING_MESSAGE_END` | inbound boundary (and `BackwardCompatibility_0_0_45`) | 2027-08-24 |
-| `{ type: "binary" }` input content part | the media parts (`image`, `audio`, `video`, `document`) with a `source` | inbound boundary; outbound `BackwardCompatibility_0_0_47` | 2027-08-24 |
-| `parentMessageId: null` on `TOOL_CALL_START` | omit the field | inbound boundary | 2027-08-24 |
-| `parentMessageId: null` on `TOOL_CALL_CHUNK` | omit the field | inbound boundary | 2027-08-24 |
-| `outcome: null` on `RUN_FINISHED` | omit the field | inbound boundary | 2027-08-24 |
+| Deprecated shape                              | Replacement                                                             | Shim                                                                  | Expires    |
+| --------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------- |
+| `THINKING_START` event                        | `REASONING_START`                                                       | inbound boundary (and `BackwardCompatibility_0_0_45` for gated flows) | 2027-08-24 |
+| `THINKING_END` event                          | `REASONING_END`                                                         | inbound boundary (and `BackwardCompatibility_0_0_45`)                 | 2027-08-24 |
+| `THINKING_TEXT_MESSAGE_START` event           | `REASONING_MESSAGE_START`                                               | inbound boundary (and `BackwardCompatibility_0_0_45`)                 | 2027-08-24 |
+| `THINKING_TEXT_MESSAGE_CONTENT` event         | `REASONING_MESSAGE_CONTENT`                                             | inbound boundary (and `BackwardCompatibility_0_0_45`)                 | 2027-08-24 |
+| `THINKING_TEXT_MESSAGE_END` event             | `REASONING_MESSAGE_END`                                                 | inbound boundary (and `BackwardCompatibility_0_0_45`)                 | 2027-08-24 |
+| `{ type: "binary" }` input content part       | the media parts (`image`, `audio`, `video`, `document`) with a `source` | inbound boundary; outbound `BackwardCompatibility_0_0_47`             | 2027-08-24 |
+| `parentMessageId: null` on `TOOL_CALL_START`  | omit the field                                                          | inbound boundary                                                      | 2027-08-24 |
+| `parentMessageId: null` on `TOOL_CALL_CHUNK`  | omit the field                                                          | inbound boundary                                                      | 2027-08-24 |
+| `outcome: null` on `RUN_FINISHED`             | omit the field                                                          | inbound boundary                                                      | 2027-08-24 |
+| `rawEvent: null` on an event                  | omit the field                                                          | inbound boundary                                                      | 2027-09-08 |
+| `result: null` on `RUN_FINISHED`              | omit the field                                                          | inbound boundary                                                      | 2027-09-08 |
+| `result: null` on `SUBAGENT_FINISHED`         | omit the field                                                          | inbound boundary                                                      | 2027-09-08 |
+| `payload: null` on a resume entry             | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
+| `metadata: null` on an `image` content part   | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
+| `metadata: null` on an `audio` content part   | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
+| `metadata: null` on a `video` content part    | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
+| `metadata: null` on a `document` content part | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
+| `parameters: null` on a tool                  | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
+| `forwardedProps: null` on `RunAgentInput`     | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
+
+The optional-null conversions preserve compatibility with shapes the previous
+SDK accepted. They run before validation on incoming events, including nested
+messages and `RUN_STARTED.input`, across in-memory runs, reconnects, SSE and
+protobuf. Request handlers can apply `normalizeLegacyRunAgentInput` from
+`@ag-ui/client` before parsing an incoming request. Canonical schemas still
+reject these whole optional nulls, and producer serializers omit them. The
+existing `RunAgentInput.state: null` parser tolerance continues to yield
+`undefined`.
+
+This is a selective compatibility list: event or message `metadata: null` and
+`parentRunId: null` already failed validation and remain invalid. Required JSON
+payloads such as `CUSTOM.value: null` remain valid.
 
 A `null` **value under a metadata key** is not on this list and never will
 be: metadata is open by key and a null value there is data. Only a `null` in

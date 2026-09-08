@@ -33,18 +33,13 @@ export {
  * now lives in the generated source (MetadataSchema in
  * src/generated/schemas.ts); this comment survives as the recorded reasoning.
  *
- * This is deliberately NOT the treatment `parentMessageId` and `outcome`
- * receive. Those USED to tolerate `null`, because released producers emitted it
- * before the producer-side omission fix and rejecting it would have broken
- * agents already in the wild. The generated schema no longer does
- * (`parentMessageId: z.string().optional()`, `outcome:
- * RunFinishedOutcomeSchema.optional()` in src/generated/schemas.ts) — which is
- * exactly WHY they, and only they, moved into the compatibility boundary with
- * PNI-207: the tolerance had to go somewhere, and a validator that mirrors the
- * schema is not it. Metadata has no such history: it postdates that fix,
- * and no released Python or .NET package has ever emitted `"metadata": null`.
- * Adding a tolerance here would grandfather in a fourth exception with nobody
- * to protect; enforcing from day one means there is never anything to retire.
+ * Historically tolerated whole optional nulls are translated to absence in
+ * the client's compatibility boundary before validation. That includes the
+ * legacy `parentMessageId` and `outcome` cases and optional JSON fields such as
+ * `rawEvent`, `result`, and media content-part `metadata`; see the repo-root
+ * DEPRECATIONS.md for the exact list. Event and message metadata already
+ * rejected a whole `null`, so their restriction remains. Compatibility for
+ * media content-part metadata does not broaden this shared metadata schema.
  *
  * A `null` *value under a key* is meaningful data and is preserved. Only a
  * `null` in place of the whole object is a contract violation.

@@ -19,14 +19,14 @@ what each one means for code you already have.
 **A 0.x agent keeps working against a 1.0 client.** The TypeScript client
 carries an always-on compatibility boundary that translates the retired shapes
 it meets on an incoming stream — the five `THINKING_*` events become their
-`REASONING_*` equivalents, a legacy `binary` content part becomes the media
-part its media type names, and a `null` standing in for an absent
-`parentMessageId` or `outcome` becomes absent. Every inbound translation warns.
-These shims are recorded, with their replacements and their expiry, in
-[`DEPRECATIONS.md`](https://github.com/ag-ui-protocol/ag-ui/blob/main/DEPRECATIONS.md);
-they expire, provisionally, on **2027-08-24** — twelve months from when the
-shims were written, re-dated at the 1.0 release if it slips — after which the
-retired shapes stop working entirely.
+`REASONING_*` equivalents, a legacy `binary` content part becomes the media part
+its media type names, and historically accepted whole optional `null` fields
+become absent before validation. Every inbound translation warns. These shims
+are recorded, with their replacements and their expiry, in
+[`DEPRECATIONS.md`](https://github.com/ag-ui-protocol/ag-ui/blob/main/DEPRECATIONS.md).
+Their expiry dates are provisional — twelve months from when each shim was
+written, re-dated at the 1.0 release if it slips — after which the retired
+shapes stop working entirely.
 
 **A 1.0 agent keeps working against a 0.x client.** Everything 1.0 adds —
 `RUN_FINISHED.outcome`, the subagent events, `protocolVersion`, activity
@@ -48,10 +48,27 @@ protocol's behaviour was previously defined.
 
 Optional protocol fields must be absent instead of `null`, including `rawEvent`,
 `RUN_FINISHED.result`, and `forwardedProps`. `EventEncoder` and outgoing HTTP
-inputs omit these fields before transmission. In-memory agents must omit them
-when producing events; incoming event validation rejects a whole optional null.
-Required JSON payloads such as `CUSTOM.value`, and null values inside state,
-metadata, or other application data, remain valid and are preserved.
+inputs omit these fields before transmission. Emit the canonical shape from
+in-memory agents too.
+
+Older producers remain compatible where the previous SDK accepted a whole
+optional `null`. Before validation, the client translates it to an absent field
+and warns for `rawEvent`, `RUN_FINISHED.result`, `SUBAGENT_FINISHED.result`,
+resume-entry `payload`, media-part `metadata` (`image`, `audio`, `video`,
+`document`), tool `parameters`, and `RunAgentInput.forwardedProps`. This applies
+to in-memory runs, reconnects, SSE, and protobuf, including messages and input
+echoes embedded in events. Subscribers receive the normalized event: for
+example, an old `RUN_FINISHED.result: null` becomes an absent result.
+
+Direct schema validation remains strict; request handlers accepting older
+`RunAgentInput` values can call `normalizeLegacyRunAgentInput` from
+`@ag-ui/client` before `RunAgentInputSchema.parse`. The existing
+`RunAgentInput.state: null` parser tolerance still yields `undefined`.
+
+This compatibility is limited to historically accepted fields. Event or message
+`metadata: null` and `parentRunId: null` remain invalid. Required JSON payloads
+such as `CUSTOM.value`, and null values inside state, metadata, or other
+application data, remain valid and are preserved.
 
 ### zod is an optional peer dependency of `@ag-ui/core`
 

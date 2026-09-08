@@ -17,6 +17,75 @@ const THINKING_TEXT_MESSAGE_START = "THINKING_TEXT_MESSAGE_START";
 const THINKING_TEXT_MESSAGE_CONTENT = "THINKING_TEXT_MESSAGE_CONTENT";
 const THINKING_TEXT_MESSAGE_END = "THINKING_TEXT_MESSAGE_END";
 
+function warnCompatibility(what: string, replacement: string) {
+  if (
+    typeof process !== "undefined" &&
+    typeof process.env !== "undefined" &&
+    process.env.SUPPRESS_TRANSFORMATION_WARNINGS
+  )
+    return;
+  console.warn(
+    `[ag-ui][compat] Converting deprecated ${what} to ${replacement}. The old shape leaves the protocol after its shim window — see the repo-root DEPRECATIONS.md. Set SUPPRESS_TRANSFORMATION_WARNINGS=true to silence.`,
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function omitLegacyNull(value: unknown, field: string, context: string): unknown {
+  if (!isRecord(value) || value[field] !== null) return value;
+  warnCompatibility(`${context}.${field}: null`, "an absent field");
+  const { [field]: _null, ...rest } = value;
+  return rest;
+}
+
+function mapProtocolArray(
+  value: unknown,
+  field: string,
+  normalize: (entry: unknown) => unknown,
+): unknown {
+  if (!isRecord(value) || !Array.isArray(value[field])) return value;
+  const original = value[field];
+  const entries = original.map(normalize);
+  return entries.some((entry, index) => entry !== original[index])
+    ? { ...value, [field]: entries }
+    : value;
+}
+
+function normalizeLegacyMessageNulls(message: unknown): unknown {
+  return mapProtocolArray(message, "content", (part) => {
+    if (!isRecord(part)) return part;
+    switch (part.type) {
+      case "image":
+      case "audio":
+      case "video":
+      case "document":
+        return omitLegacyNull(part, "metadata", `${part.type} input content`);
+      default:
+        return part;
+    }
+  });
+}
+
+/**
+ * Normalize only whole optional nulls accepted by pre-1.0 request parsers.
+ * Shared with RUN_STARTED.input and server request handlers, which can call
+ * this before RunAgentInputSchema.parse without an agent/middleware pipeline.
+ * This does not validate input or walk opaque application data. Invalid
+ * values, including nulls forbidden on main, remain for the validator to reject.
+ */
+export function normalizeLegacyRunAgentInput(input: unknown): unknown {
+  let normalized = omitLegacyNull(input, "forwardedProps", "RunAgentInput");
+  normalized = mapProtocolArray(normalized, "tools", (tool) =>
+    omitLegacyNull(tool, "parameters", "Tool"),
+  );
+  normalized = mapProtocolArray(normalized, "resume", (entry) =>
+    omitLegacyNull(entry, "payload", "ResumeEntry"),
+  );
+  return mapProtocolArray(normalized, "messages", normalizeLegacyMessageNulls);
+}
+
 /**
  * The always-on inbound half of the pre-1.0 compatibility boundary.
  *
@@ -44,21 +113,16 @@ const THINKING_TEXT_MESSAGE_END = "THINKING_TEXT_MESSAGE_END";
  *   RUN_STARTED input) -> the modern media parts.
  * - The three legacy nulls -> absent: parentMessageId on TOOL_CALL_START and
  *   TOOL_CALL_CHUNK, and RUN_FINISHED.outcome.
+ * - Optional JSON payload nulls accepted before 1.0 -> absent: rawEvent,
+ *   run/subagent result, media-part metadata, and the request fields handled
+ *   by normalizeLegacyRunAgentInput. Required and nested data nulls survive.
  */
 export class CompatibilityBoundary extends Middleware {
   private currentReasoningId: string | null = null;
   private currentMessageId: string | null = null;
 
   private warn(what: string, replacement: string) {
-    if (
-      typeof process !== "undefined" &&
-      typeof process.env !== "undefined" &&
-      process.env.SUPPRESS_TRANSFORMATION_WARNINGS
-    )
-      return;
-    console.warn(
-      `[ag-ui][compat] Converting deprecated ${what} to ${replacement}. The old shape leaves the protocol after its shim window — see the repo-root DEPRECATIONS.md. Set SUPPRESS_TRANSFORMATION_WARNINGS=true to silence.`,
-    );
+    warnCompatibility(what, replacement);
   }
 
   /**
@@ -93,7 +157,9 @@ export class CompatibilityBoundary extends Middleware {
       process.env.SUPPRESS_TRANSFORMATION_WARNINGS
     )
       return;
-    console.warn(`[ag-ui][compat] ${sentence} Set SUPPRESS_TRANSFORMATION_WARNINGS=true to silence.`);
+    console.warn(
+      `[ag-ui][compat] ${sentence} Set SUPPRESS_TRANSFORMATION_WARNINGS=true to silence.`,
+    );
   }
 
   override run(input: RunAgentInput, next: AbstractAgent): Observable<BaseEvent> {
@@ -108,6 +174,21 @@ export class CompatibilityBoundary extends Middleware {
   }
 
   private transformEvent(event: BaseEvent): BaseEvent {
+    // Apply shared fields before event-specific translations so combined old
+    // shapes (e.g. result:null plus outcome:null) are normalized in one pass.
+    if (event.rawEvent === null) {
+      this.warn(`${event.type}.rawEvent: null`, "an absent field");
+      const { rawEvent: _null, ...rest } = event;
+      event = rest;
+    }
+    if (
+      (event.type === EventType.RUN_FINISHED || event.type === EventType.SUBAGENT_FINISHED) &&
+      event.result === null
+    ) {
+      this.warn(`${event.type}.result: null`, "an absent field");
+      const { result: _null, ...rest } = event;
+      event = rest;
+    }
     switch (event.type as string) {
       case THINKING_START: {
         this.currentReasoningId = randomUUID();
@@ -149,7 +230,10 @@ export class CompatibilityBoundary extends Middleware {
         return {
           ...rest,
           type: EventType.REASONING_MESSAGE_CONTENT,
-          messageId: this.mintedContinuationId(THINKING_TEXT_MESSAGE_CONTENT, this.currentMessageId),
+          messageId: this.mintedContinuationId(
+            THINKING_TEXT_MESSAGE_CONTENT,
+            this.currentMessageId,
+          ),
           delta,
         };
       }
@@ -210,8 +294,11 @@ export class CompatibilityBoundary extends Middleware {
       }
 
       case EventType.RUN_STARTED: {
-        const record = event as BaseEvent & { input?: { messages?: Message[] } };
-        if (!record.input || !Array.isArray(record.input.messages)) return event;
+        const normalizedInput = normalizeLegacyRunAgentInput(event.input);
+        const normalized =
+          normalizedInput === event.input ? event : { ...event, input: normalizedInput };
+        const record = normalized as BaseEvent & { input?: { messages?: Message[] } };
+        if (!record.input || !Array.isArray(record.input.messages)) return normalized;
         return {
           ...record,
           input: {
@@ -227,6 +314,9 @@ export class CompatibilityBoundary extends Middleware {
   }
 
   private upgradeInboundMessage(message: Message): Message {
+    // This helper changes only media-part metadata and preserves the rest of
+    // the message shape; validation still happens after the boundary.
+    message = normalizeLegacyMessageNulls(message) as Message;
     const content = (message as { content?: unknown }).content;
     if (!Array.isArray(content)) return message;
     const hasLegacyBinary = content.some(

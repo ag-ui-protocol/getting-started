@@ -14,6 +14,7 @@ import {
   TextMessageContentEvent,
   TextMessageEndEvent,
 } from "@ag-ui/core";
+import { EventSchema } from "@ag-ui/core/schemas";
 import { Observable, of, Subject } from "rxjs";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -158,8 +159,13 @@ describe("Agent Result", () => {
       expect(result.result).toBe(expectedResult);
     });
 
-    it("rejects a whole optional null result from an in-memory producer", async () => {
+    it("normalizes a legacy null result from an in-memory producer to absence", async () => {
       agent.setEventsToEmit([
+        {
+          type: EventType.RUN_STARTED,
+          threadId: "test-thread",
+          runId: "test-run",
+        },
         {
           type: EventType.RUN_FINISHED,
           threadId: "test-thread",
@@ -168,9 +174,22 @@ describe("Agent Result", () => {
         },
       ]);
 
-      await expect(agent.runAgent()).rejects.toMatchObject({
-        issues: [expect.objectContaining({ path: ["result"] })],
+      const seen: BaseEvent[] = [];
+      const result = await agent.runAgent(
+        { runId: "test-run" },
+        {
+          onEvent: ({ event }) => {
+            seen.push(event);
+          },
+        },
+      );
+      expect(result.result).toBeUndefined();
+      expect(seen.at(-1)).toEqual({
+        type: EventType.RUN_FINISHED,
+        threadId: "test-thread",
+        runId: "test-run",
       });
+      expect(EventSchema.safeParse(seen.at(-1)).success).toBe(true);
     });
   });
 
