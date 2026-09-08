@@ -393,9 +393,11 @@ class ForcedStop {
     private readonly _threadId: string,
     /**
      * Structural outline of the history the failing model call was handed.
-     * Read lazily, so the line is built only for a run that actually failed.
+     * A closure rather than a string because the reporter is built before the
+     * stream runs; the outline it reads is recorded per model call by the
+     * context hook, and reads `"unrecorded"` for a run that carried none.
      */
-    private readonly _historyOutline: () => string = () => "unrecorded",
+    private readonly _historyOutline: () => string,
   ) {}
 
   /** True once a failure has been recorded, i.e. this reporter owns the run's report. */

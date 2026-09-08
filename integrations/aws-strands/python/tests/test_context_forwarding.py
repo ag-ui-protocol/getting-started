@@ -15,21 +15,25 @@ from __future__ import annotations
 
 import base64
 import copy
+import logging
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+import strands.event_loop.event_loop as strands_event_loop
 from strands import Agent
 from strands import tool as strands_tool
 from strands.agent.state import AgentState
 from strands.hooks.registry import HookRegistry
-from strands.models.bedrock import BedrockModel
+from strands.models.anthropic import AnthropicModel
 from strands.models.model import Model
 # Imported for its request formatter only. Nothing here opens a connection, so
 # no LLM mock is involved; the live provider runs are the e2e suite's job.
 from strands.models.openai import OpenAIModel
 from strands.session.file_session_manager import FileSessionManager
 from strands.tools.registry import ToolRegistry
+from strands.types.exceptions import ModelThrottledException
 
 from ag_ui.core import (
     AssistantMessage,
@@ -47,20 +51,13 @@ from ag_ui.core import (
 )
 from ag_ui_a2ui_toolkit import A2UI_SCHEMA_CONTEXT_DESCRIPTION
 
-try:
-    from strands.types.json_dict import JSONSerializableDict  # strands <2.0
-except ImportError:
-    try:
-        from strands.types import JSONSerializableDict  # strands >=2.0 (reorganized)
-    except ImportError:
-        class JSONSerializableDict(dict):  # type: ignore[no-redef]
-            def set(self, key, value): self[key] = value  # noqa: E704
-
 from ag_ui_strands.agent import (
+    _MODEL_BOUND_HISTORY_OUTLINE,
     _MODEL_CONTEXT_BLOCK,
     _MODEL_CONTEXT_MUTATION_MARKER,
     StrandsAgent,
     _TransientModelContextHook,
+    describe_model_bound_history,
 )
 from ag_ui_strands.config import StrandsAgentConfig
 from tests.hook_helpers import invoke_after_model_call, invoke_before_model_call
@@ -127,7 +124,13 @@ class _CapturingModel(Model):
         if self._turns is None:
             events = _text_turn()
         else:
-            index = min(len(self.calls) - 1, len(self._turns) - 1)
+            index = len(self.calls) - 1
+            # Replaying the last turn would let a runaway loop spin on a
+            # tool_use turn forever instead of reporting the extra call.
+            assert index < len(self._turns), (
+                f"the agent asked for model call {index + 1} but only "
+                f"{len(self._turns)} turns were scripted"
+            )
             events = self._turns[index]
         for event in events:
             yield event
@@ -221,7 +224,7 @@ async def test_empty_context_writes_empty_list():
 
 
 @pytest.mark.asyncio
-async def test_context_is_transient_before_latest_message_when_history_is_replayed():
+async def test_context_joins_the_question_turn_when_history_is_replayed():
     template = Agent(model=_mock_model())
     ag = StrandsAgent(template, name="test")
     lookalike_description = "A2UI Component Schema for customer preferences"
@@ -244,10 +247,10 @@ async def test_context_is_transient_before_latest_message_when_history_is_replay
                         f"- {lookalike_description}: keep me\n"
                         "- user_id: u-42"
                     )
-                }
+                },
+                {"text": "hello"},
             ],
         },
-        {"role": "user", "content": [{"text": "hello"}]},
     ]]
     assert instance.messages == [
         {"role": "user", "content": [{"text": "hello"}]}
@@ -276,10 +279,10 @@ async def test_context_is_transient_when_history_replay_is_disabled():
         {
             "role": "user",
             "content": [
-                {"text": "Context provided by the application:\n- account: premium"}
+                {"text": "Context provided by the application:\n- account: premium"},
+                {"text": "hello"},
             ],
         },
-        {"role": "user", "content": [{"text": "hello"}]},
     ]]
 
 
@@ -326,12 +329,7 @@ async def test_context_is_transient_for_a_multimodal_direct_prompt():
         {
             "role": "user",
             "content": [
-                {"text": "Context provided by the application:\n- locale: nl-NL"}
-            ],
-        },
-        {
-            "role": "user",
-            "content": [
+                {"text": "Context provided by the application:\n- locale: nl-NL"},
                 {"text": "hello"},
                 {
                     "image": {
@@ -374,7 +372,7 @@ async def test_a2ui_schema_only_context_does_not_change_the_model_prompt():
 
 
 @pytest.mark.asyncio
-async def test_current_context_follows_stale_history_but_keeps_latest_user_unchanged():
+async def test_current_context_joins_the_current_question_not_stale_history():
     template = Agent(model=_mock_model())
     agent = StrandsAgent(template, name="test")
     run_input = RunAgentInput(
@@ -394,6 +392,8 @@ async def test_current_context_follows_stale_history_but_keeps_latest_user_uncha
     with patch("ag_ui_strands.agent.StrandsAgentCore", _CapturingCore):
         instance = await _drive(agent, run_input, complete=True)
 
+    # The block lands on the question being asked now, leaving the stale turns
+    # that mention an older invoice exactly as they were.
     assert instance.model_messages == [[
         {"role": "user", "content": [{"text": "selected invoice 456"}]},
         {"role": "assistant", "content": [{"text": "noted"}]},
@@ -405,10 +405,10 @@ async def test_current_context_follows_stale_history_but_keeps_latest_user_uncha
                         "Context provided by the application:\n"
                         "- selected invoice: 123"
                     )
-                }
+                },
+                {"text": "which invoice is selected?"},
             ],
         },
-        {"role": "user", "content": [{"text": "which invoice is selected?"}]},
     ]]
 
 
@@ -519,7 +519,7 @@ def _inject_context(messages, block):
     sets, so this exercises the shipped code path rather than a restatement of
     it.
     """
-    agent = SimpleNamespace(messages=messages, __dict__={"messages": messages})
+    agent = SimpleNamespace(messages=messages)
     hook = _TransientModelContextHook()
     registry = HookRegistry()
     hook.register_hooks(registry)
@@ -571,22 +571,29 @@ def _assert_tool_calls_answered_immediately(messages):
         assert [answer["tool_call_id"] for answer in answers] == expected_ids
 
 
-def _bedrock_role_sequence(messages):
-    """Provider-bound roles from the real Bedrock Converse formatter."""
-    model = BedrockModel(
-        model_id="anthropic.claude-3-5-sonnet-20240620-v1:0", region_name="us-east-1"
+def _block_level_role_sequence(messages):
+    """Provider-bound roles from the real Anthropic Messages formatter.
+
+    Anthropic stands in for the block-level family: its formatter maps native
+    messages to provider messages one to one and never merges same-role
+    neighbours, exactly as Bedrock's and Gemini's do. Its ``format_request`` is
+    public, so this does not couple the suite to a private SDK signature.
+    """
+    model = AnthropicModel(
+        model_id="claude-sonnet-4-5", max_tokens=64, client_args={"api_key": "test-key"}
     )
-    request = model._format_request(messages, [], None, None)
+    request = model.format_request(messages, [], None)
     return [message["role"] for message in request["messages"]]
 
 
 def _assert_roles_alternate(messages):
     """No two provider-bound messages in a row share a role.
 
-    Converse and the Anthropic Messages API both refuse a repeated role, and a
-    context turn placed beside the tool results is exactly that.
+    The Anthropic Messages API and Bedrock Converse both refuse a repeated
+    role, so a context turn placed next to any user turn is a rejected request
+    on that whole family.
     """
-    roles = _bedrock_role_sequence(messages)
+    roles = _block_level_role_sequence(messages)
     repeated = [
         (index, role)
         for index, role in enumerate(roles[1:], start=1)
@@ -629,7 +636,9 @@ class TestToolContinuationProviderOrdering:
         )
 
         assert _openai_role_sequence(with_context) == _openai_role_sequence(without)
-        assert _bedrock_role_sequence(with_context) == _bedrock_role_sequence(without)
+        assert _block_level_role_sequence(with_context) == _block_level_role_sequence(
+            without
+        )
 
     def test_block_joins_the_question_and_leaves_the_results_untouched(self):
         messages = copy.deepcopy(_TOOL_CONTINUATION)
@@ -816,3 +825,251 @@ async def test_a_tool_continuation_with_context_finishes_instead_of_erroring():
     assert EventType.RUN_ERROR not in types, f"run errored: {types}"
     assert types[-1] == EventType.RUN_FINISHED, f"terminal event was {types[-1]}"
     assert len(model.calls) == 2, "the continuation call never happened"
+
+
+class TestModelBoundHistoryOutline:
+    """The failure-path diagnostic has to describe the request the provider saw."""
+
+    QUESTION = {"role": "user", "content": [{"text": "q"}]}
+
+    @staticmethod
+    def _tool_use(call_id):
+        return {"toolUse": {"toolUseId": call_id, "name": "a", "input": {}}}
+
+    @staticmethod
+    def _tool_result(call_id):
+        return {"toolResult": {"toolUseId": call_id, "content": [{"text": "r"}]}}
+
+    def test_a_healthy_continuation_reports_both_verdicts_ok(self):
+        outline = describe_model_bound_history(
+            [
+                {"role": "user", "content": [{"text": "ctx"}, {"text": "q"}]},
+                {
+                    "role": "assistant",
+                    "content": [self._tool_use("t1"), self._tool_use("t2")],
+                },
+                {
+                    "role": "user",
+                    "content": [self._tool_result("t1"), self._tool_result("t2")],
+                },
+            ]
+        )
+
+        assert outline == (
+            "user[text+text] -> assistant(tool_calls=t1,t2) -> tool(t1) -> tool(t2)"
+            " | tool-call adjacency=ok | role alternation=ok"
+        )
+
+    def test_a_wedged_message_is_reported_as_a_broken_adjacency(self):
+        outline = describe_model_bound_history(
+            [
+                self.QUESTION,
+                {"role": "assistant", "content": [self._tool_use("t1")]},
+                {"role": "user", "content": [{"text": "ctx"}, self._tool_result("t1")]},
+            ]
+        )
+
+        assert "tool-call adjacency=broken at [1]" in outline
+
+    def test_results_answering_out_of_order_are_still_adjacent(self):
+        """Order among the answers is not something a provider requires."""
+        outline = describe_model_bound_history(
+            [
+                self.QUESTION,
+                {
+                    "role": "assistant",
+                    "content": [self._tool_use("t1"), self._tool_use("t2")],
+                },
+                {
+                    "role": "user",
+                    "content": [self._tool_result("t2"), self._tool_result("t1")],
+                },
+            ]
+        )
+
+        assert "tool-call adjacency=ok" in outline
+
+    def test_a_repeated_role_is_reported_even_when_adjacency_holds(self):
+        outline = describe_model_bound_history(
+            [{"role": "user", "content": [{"text": "ctx"}]}, self.QUESTION]
+        )
+
+        assert "tool-call adjacency=ok" in outline
+        assert "role alternation=repeats at [1]" in outline
+
+    def test_a_tool_id_carrying_punctuation_is_not_misread(self):
+        """The verdicts read the message objects, not the rendered line."""
+        weird = "a,b)c"
+        outline = describe_model_bound_history(
+            [
+                self.QUESTION,
+                {"role": "assistant", "content": [self._tool_use(weird)]},
+                {"role": "user", "content": [self._tool_result(weird)]},
+            ]
+        )
+
+        assert "tool-call adjacency=ok" in outline
+
+    def test_it_agrees_with_the_real_formatter_about_the_sequence(self):
+        """A diagnostic that describes a request the provider never saw is worse
+        than none, so the rendered half is pinned against the formatter."""
+        messages = copy.deepcopy(_TOOL_CONTINUATION)
+        _inject_context(messages, "Context provided by the application:\n- l: en")
+
+        rendered = describe_model_bound_history(messages).split(" | ")[0]
+        stripped = re.sub(r"\[[^\]]*\]", "", rendered)
+
+        assert stripped == " -> ".join(_openai_role_sequence(messages))
+
+    def test_the_outline_carries_no_message_text(self):
+        messages = copy.deepcopy(_TOOL_CONTINUATION)
+        _inject_context(messages, "Context provided by the application:\n- token: s3cret")
+
+        outline = describe_model_bound_history(messages)
+
+        assert "s3cret" not in outline
+        assert "weather and time in SF?" not in outline
+        assert "sunny" not in outline
+
+
+class TestContextPlacementWithNoQuestionTurn:
+    """The block still has to go somewhere when no question turn exists."""
+
+    def test_a_replayed_tool_exchange_gets_the_block_as_its_opening_turn(self):
+        messages = copy.deepcopy(_TOOL_CONTINUATION[1:])
+        block = "Context provided by the application:\n- locale: en-US"
+
+        _inject_context(messages, block)
+
+        assert messages[0] == {"role": "user", "content": [{"text": block}]}
+        assert messages[1:] == _TOOL_CONTINUATION[1:]
+        _assert_tool_calls_answered_immediately(messages)
+        _assert_roles_alternate(messages)
+
+    def test_a_history_ending_on_an_assistant_turn_gets_a_new_trailing_turn(self):
+        """A trailing user turn both alternates and sits closest to generation."""
+        messages = [{"role": "assistant", "content": [{"text": "anything else?"}]}]
+        block = "Context provided by the application:\n- locale: en-US"
+
+        _inject_context(messages, block)
+
+        assert messages == [
+            {"role": "assistant", "content": [{"text": "anything else?"}]},
+            {"role": "user", "content": [{"text": block}]},
+        ]
+        _assert_roles_alternate(messages)
+
+    def test_an_empty_history_gets_the_block_as_its_only_turn(self):
+        messages = []
+        block = "Context provided by the application:\n- locale: en-US"
+
+        _inject_context(messages, block)
+
+        assert messages == [{"role": "user", "content": [{"text": block}]}]
+
+
+@pytest.mark.asyncio
+async def test_a_forced_stop_reports_the_history_the_failing_call_was_handed(
+    monkeypatch, caplog
+):
+    """The whole point of the outline: a provider rejection names the shape.
+
+    Driven through Strands' real forced-stop path, so the report this asserts on
+    is the one an operator actually gets.
+    """
+    monkeypatch.setattr(strands_event_loop, "MAX_ATTEMPTS", 1)
+
+    class _ThrottledModel(_CapturingModel):
+        async def stream(self, messages, tool_specs=None, system_prompt=None, **kwargs):
+            self.calls.append(copy.deepcopy(messages))
+            raise ModelThrottledException("too many requests")
+            yield  # pragma: no cover - unreachable, keeps this a generator
+
+    template = Agent(model=_ThrottledModel(), tools=[], callback_handler=None)
+    agent = StrandsAgent(template, name="test")
+
+    with caplog.at_level(logging.ERROR, logger="ag_ui_strands.agent"):
+        events = [
+            event
+            async for event in agent.run(
+                _run_input(
+                    [Context(description="locale", value="en-US")],
+                    thread_id="t-forced",
+                )
+            )
+        ]
+
+    assert [getattr(e, "code", None) for e in events][-1] == "STRANDS_FORCE_STOP"
+    forced = [r for r in caplog.records if "force-stopped" in r.getMessage()]
+    assert forced, f"no forced-stop line: {[r.getMessage() for r in caplog.records]}"
+    line = forced[0].getMessage()
+    assert "model_bound_history=" in line
+    assert "tool-call adjacency=" in line
+    assert "role alternation=" in line
+    assert "en-US" not in line, "the outline must not carry context text"
+
+
+@pytest.mark.asyncio
+async def test_a_later_context_free_run_does_not_report_the_earlier_outline():
+    """Per-thread agents are reused, so a stale outline would name another run."""
+    model = _CapturingModel()
+    template = Agent(model=model, callback_handler=None)
+    agent = StrandsAgent(template, name="test")
+
+    async for _ in agent.run(
+        _run_input([Context(description="locale", value="en-US")], thread_id="t-stale")
+    ):
+        pass
+    instance = agent._agents_by_thread["t-stale"]
+    assert getattr(instance, _MODEL_BOUND_HISTORY_OUTLINE, None) is not None
+
+    async for _ in agent.run(
+        _run_input([], thread_id="t-stale", content="second question")
+    ):
+        pass
+
+    assert getattr(instance, _MODEL_BOUND_HISTORY_OUTLINE, None) is None
+
+
+class TestOrdinaryTurnProviderOrdering:
+    """The plain path has to survive the same two checks as a continuation.
+
+    It is the default path and it used to place the block as its own user
+    message next to the question, which reads fine as native history and is two
+    consecutive user messages once a block-level formatter maps it one to one.
+    """
+
+    ORDINARY = [
+        {"role": "user", "content": [{"text": "selected invoice 456"}]},
+        {"role": "assistant", "content": [{"text": "noted"}]},
+        {"role": "user", "content": [{"text": "which invoice is selected?"}]},
+    ]
+
+    def test_roles_still_alternate(self):
+        messages = copy.deepcopy(self.ORDINARY)
+        _inject_context(messages, "Context provided by the application:\n- l: en")
+
+        _assert_roles_alternate(messages)
+
+    def test_context_does_not_change_the_provider_bound_sequence(self):
+        without = copy.deepcopy(self.ORDINARY)
+        with_context = copy.deepcopy(self.ORDINARY)
+        _inject_context(
+            with_context, "Context provided by the application:\n- l: en"
+        )
+
+        assert _openai_role_sequence(with_context) == _openai_role_sequence(without)
+        assert _block_level_role_sequence(with_context) == _block_level_role_sequence(
+            without
+        )
+
+    def test_a_single_question_turn_does_not_gain_a_second_user_message(self):
+        messages = [{"role": "user", "content": [{"text": "hello"}]}]
+        block = "Context provided by the application:\n- l: en"
+
+        _inject_context(messages, block)
+
+        assert messages == [
+            {"role": "user", "content": [{"text": block}, {"text": "hello"}]}
+        ]
+        _assert_roles_alternate(messages)

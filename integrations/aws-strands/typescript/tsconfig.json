@@ -6,7 +6,10 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "moduleResolution": "node",
+    // The SDK publishes its providers on subpath exports, which "node"
+    // resolution cannot follow. `examples/tsconfig.json` already overrides it
+    // for the same reason.
+    "moduleResolution": "bundler",
     "skipLibCheck": true,
     "strict": true,
     "jsx": "react-jsx",
@@ -16,16 +19,7 @@
     "types": ["vitest/globals"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
-      // The SDK publishes its providers on subpath exports, which the "node"
-      // moduleResolution above cannot follow. The tests serialize history
-      // through the real provider clients, so map the two they use.
-      "@strands-agents/sdk/models/openai": [
-        "./node_modules/@strands-agents/sdk/dist/src/models/openai/index.d.ts"
-      ],
-      "@strands-agents/sdk/models/anthropic": [
-        "./node_modules/@strands-agents/sdk/dist/src/models/anthropic.d.ts"
-      ]
+      "@/*": ["./src/*"]
     },
     "stripInternal": true
   },

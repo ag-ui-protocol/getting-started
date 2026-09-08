@@ -3094,64 +3094,129 @@ def _without_a2ui_render_guides(context: list, tool_names: List[str]) -> list:
     ]
 
 
+def _outline_entries(messages: Sequence[Any]) -> Tuple[List[Any], List[str]]:
+    """Split a native history into the two views a provider validates.
+
+    The first view is the OpenAI-compatible expansion: a turn's non-tool
+    content becomes its own message and each tool result becomes a ``tool``
+    message after it, which is where tool-call adjacency is decided. The second
+    is the roles a block-level formatter sees, one per native message, which is
+    where role alternation is decided. Both are built from the message objects
+    rather than from rendered text so a tool id containing a comma or a bracket
+    cannot be misread later.
+    """
+    expanded: List[Any] = []
+    native_roles: List[str] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            expanded.append(("message", "?", [], []))
+            native_roles.append("?")
+            continue
+        role = str(message.get("role", "?"))
+        content = message.get("content")
+        blocks = content if isinstance(content, list) else []
+        tool_use_ids: List[str] = []
+        result_ids: List[str] = []
+        other_kinds: List[str] = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                other_kinds.append("?")
+                continue
+            if isinstance(block.get("toolUse"), dict):
+                tool_use_ids.append(str(block["toolUse"].get("toolUseId")))
+            elif isinstance(block.get("toolResult"), dict):
+                result_ids.append(str(block["toolResult"].get("toolUseId")))
+            else:
+                other_kinds.append(next(iter(block), "?"))
+        if blocks:
+            native_roles.append(role)
+        if other_kinds or not (tool_use_ids or result_ids):
+            expanded.append(("message", role, other_kinds, tool_use_ids))
+        elif tool_use_ids:
+            expanded.append(("message", role, [], tool_use_ids))
+        expanded.extend(("tool", result_id) for result_id in result_ids)
+    return expanded, native_roles
+
+
+def _render_outline_entry(entry: Any) -> str:
+    if entry[0] == "tool":
+        return f"tool({entry[1]})"
+    _, role, other_kinds, tool_use_ids = entry
+    label = f"{role}[{'+'.join(other_kinds)}]" if other_kinds else role
+    if tool_use_ids:
+        label = f"{label}(tool_calls={','.join(tool_use_ids)})"
+    elif not other_kinds:
+        label = f"{role}[]"
+    return label
+
+
+def _tool_call_adjacency_breaks(expanded: List[Any]) -> List[int]:
+    """Indices whose tool calls are not answered by the messages right after.
+
+    Order among the answers does not matter to the provider, only that the
+    messages immediately following are the tool results for exactly those ids,
+    so this compares them as a set.
+    """
+    breaks = []
+    for index, entry in enumerate(expanded):
+        if entry[0] != "message" or not entry[3]:
+            continue
+        opened = entry[3]
+        answers = expanded[index + 1 : index + 1 + len(opened)]
+        if len(answers) != len(opened) or any(a[0] != "tool" for a in answers):
+            breaks.append(index)
+            continue
+        if sorted(a[1] for a in answers) != sorted(opened):
+            breaks.append(index)
+    return breaks
+
+
+def _role_alternation_breaks(native_roles: List[str]) -> List[int]:
+    """Indices where a native message repeats the role of the one before it."""
+    return [
+        index
+        for index in range(1, len(native_roles))
+        if native_roles[index] == native_roles[index - 1]
+    ]
+
+
+def _format_break_list(breaks: List[int]) -> str:
+    return f"[{','.join(str(index) for index in breaks)}]"
+
+
 def describe_model_bound_history(messages: Sequence[Any]) -> str:
     """One-line structural outline of the history a model call was handed.
 
     Text, tool inputs and tool results are dropped, so the line is safe to log:
     it carries only what decides whether a provider accepts the request, which
     is the roles, the block kinds and the tool ids that have to sit adjacent.
-    The sequence is the one an OpenAI-compatible formatter builds, where a
-    turn's non-tool content becomes its own message ahead of the tool results
-    it appends, because that ordering is what a 400 over tool-call adjacency is
-    complaining about. Ends with the adjacency verdict so a failure report says
-    whether the request was well formed without anyone having to re-derive it.
-    """
-    provider_bound: List[str] = []
-    for message in messages:
-        if not isinstance(message, dict):
-            provider_bound.append("?")
-            continue
-        role = message.get("role", "?")
-        content = message.get("content")
-        blocks = content if isinstance(content, list) else []
-        tool_use_ids = [
-            block["toolUse"].get("toolUseId")
-            for block in blocks
-            if isinstance(block, dict) and isinstance(block.get("toolUse"), dict)
-        ]
-        result_ids = [
-            block["toolResult"].get("toolUseId")
-            for block in blocks
-            if isinstance(block, dict) and isinstance(block.get("toolResult"), dict)
-        ]
-        others = [
-            next(iter(block), "?")
-            for block in blocks
-            if isinstance(block, dict)
-            and "toolUse" not in block
-            and "toolResult" not in block
-        ]
-        if others or not (tool_use_ids or result_ids):
-            label = f"{role}[{'+'.join(others)}]" if others else f"{role}[]"
-            if tool_use_ids:
-                label += f"(tool_calls={','.join(map(str, tool_use_ids))})"
-            provider_bound.append(label)
-        elif tool_use_ids:
-            provider_bound.append(
-                f"{role}(tool_calls={','.join(map(str, tool_use_ids))})"
-            )
-        provider_bound.extend(f"tool({result_id})" for result_id in result_ids)
+    The rendered sequence is the OpenAI-compatible expansion, where a turn's
+    non-tool content becomes its own message ahead of the tool results it
+    appends, because that ordering is what a 400 over tool-call adjacency is
+    complaining about.
 
-    broken = []
-    for index, entry in enumerate(provider_bound):
-        if "tool_calls=" not in entry:
-            continue
-        opened = entry.split("tool_calls=")[1].rstrip(")").split(",")
-        answers = provider_bound[index + 1 : index + 1 + len(opened)]
-        if answers != [f"tool({call_id})" for call_id in opened]:
-            broken.append(index)
-    verdict = "ok" if not broken else f"broken at {broken}"
-    return f"{' -> '.join(provider_bound)} | tool-call adjacency={verdict}"
+    Two verdicts follow it, one per provider family and neither implying the
+    other: tool-call adjacency, which the OpenAI-compatible formatters enforce,
+    and role alternation, which the block-level formatters (Anthropic, Bedrock,
+    Gemini) enforce over the native messages one to one. A request can satisfy
+    either and fail the other, so a report that named only one would send the
+    reader the wrong way. Neither verdict is a claim that the request is well
+    formed in every other respect; an orphan tool result, for instance, is
+    outside what these two check. The TypeScript counterpart is
+    ``describeModelBoundHistory`` and emits the same string for the same
+    history.
+    """
+    expanded, native_roles = _outline_entries(messages)
+    rendered = " -> ".join(_render_outline_entry(entry) for entry in expanded)
+    adjacency = _tool_call_adjacency_breaks(expanded)
+    alternation = _role_alternation_breaks(native_roles)
+    return (
+        f"{rendered}"
+        f" | tool-call adjacency="
+        f"{'ok' if not adjacency else f'broken at {_format_break_list(adjacency)}'}"
+        f" | role alternation="
+        f"{'ok' if not alternation else f'repeats at {_format_break_list(alternation)}'}"
+    )
 
 
 def _carries_tool_result(message: Any) -> bool:
@@ -3168,11 +3233,12 @@ def _carries_tool_result(message: Any) -> bool:
 
 
 def _context_host_index(messages: List[Any]) -> Optional[int]:
-    """Index of the latest user turn that carries no tool result, or ``None``.
+    """Index of the latest user turn a text block can join, or ``None``.
 
-    That turn is the question the run is still answering, and it is the only
-    place a text block can join without landing between an assistant tool call
-    and the result that answers it.
+    That turn is the question the run is still answering. It has to carry no
+    tool result, or the block would land between an assistant tool call and the
+    result answering it, and its content has to be a list, or there is nothing
+    to prepend to.
     """
     for index in range(len(messages) - 1, -1, -1):
         message = messages[index]
@@ -3201,15 +3267,53 @@ class _TransientModelContextHook:
         registry.add_callback(AfterModelCallEvent, self._after_model_call)
 
     def _before_model_call(self, event: Any) -> None:
-        if self._place_context(event):
+        if not self._place_context(event):
+            # A run with no context leaves no outline behind. Per-thread agents
+            # are reused, so a stale one would report a previous run's history
+            # as the history this call was handed, which is worse than saying
+            # nothing.
+            event.agent.__dict__.pop(_MODEL_BOUND_HISTORY_OUTLINE, None)
+            return
+        try:
             setattr(
                 event.agent,
                 _MODEL_BOUND_HISTORY_OUTLINE,
                 describe_model_bound_history(event.agent.messages),
             )
+        except Exception:  # noqa: BLE001
+            # The block is already spliced in and the mutation marker already
+            # set, so a raise here would abort the run, leave the block in the
+            # durable history and make the next call fail the not-restored
+            # guard. Observability is not allowed to cost any of that.
+            logger.debug("Could not record the model-bound history outline", exc_info=True)
 
     def _place_context(self, event: Any) -> bool:
-        """Show the run's block to the model. False when the run has none."""
+        """Show the run's block to the model. False when the run has none.
+
+        One placement, every history: the block joins the latest user turn that
+        carries no tool result, which is the question the run is still
+        answering. That is the only position no provider objects to, and the
+        reason is that both families object to something different and no
+        separate message satisfies both.
+
+        A turn carrying a tool result cannot take the block, because every
+        OpenAI-compatible formatter emits a turn's non-tool content as its own
+        message ahead of the tool results it appends, whatever order the blocks
+        sit in, so the block would wedge a user message between the assistant
+        tool call and its answers and the request is rejected. A separate user
+        message cannot take it either, because the block-level formatters
+        (Anthropic, Bedrock, Gemini) map messages one to one and never merge
+        same-role neighbours, so a context turn next to any user turn is two
+        user messages in a row and fails role alternation.
+
+        Joining the question satisfies both at once, and does so in the
+        strongest available sense: the provider-bound message sequence comes
+        out exactly as it would with no context at all. When no question turn
+        exists the block has to become a message of its own, appended when the
+        history ends on an assistant turn (or is empty) and placed at the head
+        otherwise, which is the cold continuation replaying only a tool
+        exchange.
+        """
         context_block = _MODEL_CONTEXT_BLOCK.get()
         if not context_block:
             return False
@@ -3217,51 +3321,8 @@ class _TransientModelContextHook:
             raise RuntimeError("Transient AG-UI model context was not restored")
 
         messages = event.agent.messages
-        latest_user_index = next(
-            (
-                index
-                for index in range(len(messages) - 1, -1, -1)
-                if messages[index].get("role") == "user"
-            ),
-            None,
-        )
-        context_message = {
-            "role": "user",
-            "content": [{"text": context_block}],
-        }
-
-        if latest_user_index is None:
-            messages.append(context_message)
-            setattr(
-                event.agent,
-                _MODEL_CONTEXT_MUTATION_MARKER,
-                ("insert", messages, len(messages) - 1, context_message),
-            )
-            return True
-
-        if _carries_tool_result(messages[latest_user_index]):
-            # Tool continuation. The block must not ride inside the turn that
-            # carries the results and must not become a message of its own next
-            # to it: every provider formatter emits a message's non-tool content
-            # ahead of the tool results it appends, whatever the block order, so
-            # riding inside wedges a user message between the assistant tool
-            # call and its answers; and a separate turn beside the results is
-            # two user messages in a row, which the block-level formatters
-            # refuse for role alternation. Joining the question instead leaves
-            # the provider-bound message sequence exactly as it would be with no
-            # context at all.
-            host_index = _context_host_index(messages)
-            if host_index is None:
-                # A cold continuation replays only the tool exchange, so there
-                # is no question to join. At the head the block opens the
-                # conversation and still sits outside the exchange.
-                messages.insert(0, context_message)
-                setattr(
-                    event.agent,
-                    _MODEL_CONTEXT_MUTATION_MARKER,
-                    ("insert", messages, 0, context_message),
-                )
-                return True
+        host_index = _context_host_index(messages)
+        if host_index is not None:
             host = messages[host_index]
             content = host["content"]
             host["content"] = [{"text": context_block}, *content]
@@ -3272,14 +3333,26 @@ class _TransientModelContextHook:
             )
             return True
 
-        # Keep the actual latest user turn byte-identical for model routers and
-        # fixtures that key off it, while placing live UI context immediately
-        # before that turn rather than at the start of stale history.
-        messages.insert(latest_user_index, context_message)
+        # No question to join. The head keeps a replayed tool exchange intact;
+        # the tail is right when the history ends on an assistant turn, where a
+        # new user turn both alternates and sits closest to the generation it
+        # is meant to inform. A history whose only user turn answers a tool
+        # call has no valid placement at all, because it is already missing the
+        # assistant turn that opened that call: the head keeps tool adjacency
+        # and leaves the alternation the history arrived with, which the
+        # outline reports rather than hides.
+        tail = messages[-1] if messages else None
+        index = (
+            0
+            if isinstance(tail, dict) and tail.get("role") == "user"
+            else len(messages)
+        )
+        context_message = {"role": "user", "content": [{"text": context_block}]}
+        messages.insert(index, context_message)
         setattr(
             event.agent,
             _MODEL_CONTEXT_MUTATION_MARKER,
-            ("insert", messages, latest_user_index, context_message),
+            ("insert", messages, index, context_message),
         )
         return True
 
@@ -3298,10 +3371,16 @@ def _restore_transient_model_context(agent: Any) -> None:
         message["content"] = original_content
     else:
         _, messages, index, inserted = mutation
-        if index < len(messages) and messages[index] is inserted:
-            messages.pop(index)
-        else:
-            messages.remove(inserted)
+        try:
+            if index < len(messages) and messages[index] is inserted:
+                messages.pop(index)
+            else:
+                messages.remove(inserted)
+        except ValueError:
+            # Already gone. Nothing to undo, and the marker below still has to
+            # clear or the next model call fails the not-restored guard over a
+            # mutation that no longer exists.
+            pass
     delattr(agent, _MODEL_CONTEXT_MUTATION_MARKER)
 
 

@@ -49,6 +49,7 @@ import {
   MODEL_CONTEXT_HEADER,
   describeModelBoundHistory,
   formatAguiContext,
+  modelBoundHistoryOutline,
   normalizeAguiContext,
 } from "../model-context";
 import {
@@ -56,6 +57,7 @@ import {
   collect,
   errorCodes,
   expectCompletedRun,
+  anthropicRequestMessages,
   expectRolesAlternate,
   expectToolCallsAnsweredImmediately,
   historyShape,
@@ -135,9 +137,12 @@ function toolContinuationAgent(options: { parallel?: boolean } = {}) {
         { toolUseId: "t2", name: "audit", input: {} },
       ]
     : [{ toolUseId: "t1", name: "lookup", input: {} }];
-  return realStrandsAgent([modelTurn.toolUse(...calls), modelTurn.text("done")], {
-    tools: options.parallel ? [lookup, audit] : [lookup],
-  });
+  return realStrandsAgent(
+    [modelTurn.toolUse(...calls), modelTurn.text("done")],
+    {
+      tools: options.parallel ? [lookup, audit] : [lookup],
+    },
+  );
 }
 
 /** Run `context` through a tool continuation, returning the recorded turns. */
@@ -215,7 +220,7 @@ describe("model context block rendering", () => {
 });
 
 describe("context forwarding to the model", () => {
-  it("shows the context to the model immediately before the latest user turn and excludes the A2UI schema entry", async () => {
+  it("joins the context onto the latest user turn and excludes the A2UI schema entry", async () => {
     const { agent, model } = realStrandsAgent([modelTurn.text("ok")]);
     const lookalike = "A2UI Component Schema for customer preferences";
 
@@ -233,9 +238,10 @@ describe("context forwarding to the model", () => {
       blockOf(`- ${lookalike}: keep me`, "- user_id: u-42"),
       "hello",
     ]);
+    // One turn, not two: a second user message in a row is what the
+    // block-level formatters refuse. See the provider-bound cases below.
     expect(modelSawShape(model, 0)).toEqual([
-      { role: "user", blocks: ["textBlock"] },
-      { role: "user", blocks: ["textBlock"] },
+      { role: "user", blocks: ["textBlock", "textBlock"] },
     ]);
     // The block was for the model only: the durable history holds the turn
     // and the answer, and no snapshot the client received carries it.
@@ -296,8 +302,7 @@ describe("context forwarding to the model", () => {
 
     expectCompletedRun(events);
     expect(modelSawShape(model, 0)).toEqual([
-      { role: "user", blocks: ["textBlock"] },
-      { role: "user", blocks: ["textBlock", "imageBlock"] },
+      { role: "user", blocks: ["textBlock", "textBlock", "imageBlock"] },
     ]);
     expect(modelSawTexts(model, 0)).toEqual([
       blockOf("- locale: nl-NL"),
@@ -328,7 +333,7 @@ describe("context forwarding to the model", () => {
     ]);
   });
 
-  it("follows stale history but keeps the latest user turn byte-identical", async () => {
+  it("joins the current question rather than the head of stale history", async () => {
     const { agent, model } = realStrandsAgent([modelTurn.text("ok")]);
 
     const events = await collect(
@@ -349,16 +354,21 @@ describe("context forwarding to the model", () => {
       blockOf("- selected invoice: 123"),
       "which invoice is selected?",
     ]);
-    // The turn the model routed on is the turn the client sent, unchanged.
-    // Read from the model-call-time copy: the live array has since grown by
-    // the answer. Only the role and the content are compared, because that is
-    // all a provider is sent; the SDK is free to add bookkeeping fields to a
-    // serialized message and does across releases.
+    // The block rides on the question being asked now, so the stale turns
+    // mentioning an older invoice are handed over untouched. Read from the
+    // model-call-time copy: the live array has since grown by the answer. Only
+    // the role and the content are compared, because that is all a provider is
+    // sent; the SDK is free to add bookkeeping fields to a serialized message
+    // and does across releases.
     const seen = model.seenMessages[0]!;
     const latest = seen[seen.length - 1]!;
     expect(latest.role).toBe("user");
     expect(latest.toJSON().content).toEqual([
+      { text: blockOf("- selected invoice: 123") },
       { text: "which invoice is selected?" },
+    ]);
+    expect(seen[0]!.toJSON().content).toEqual([
+      { text: "selected invoice 456" },
     ]);
     expect(historyTexts(threadAgent(agent)!.messages)).toEqual([
       "selected invoice 456",
@@ -377,14 +387,13 @@ describe("context forwarding to the model", () => {
     );
 
     expectCompletedRun(events);
-    // First call: the usual separate turn before the question.
+    // First call: joined onto the question, one turn.
     expect(modelSawShape(model, 0)).toEqual([
-      { role: "user", blocks: ["textBlock"] },
-      { role: "user", blocks: ["textBlock"] },
+      { role: "user", blocks: ["textBlock", "textBlock"] },
     ]);
-    // Second call: the latest user turn is the tool result. The block joins the
-    // question instead, because neither that turn nor a turn beside it can take
-    // it without breaking the request. See the provider-bound cases below.
+    // Second call: the latest user turn is now the tool result. The block still
+    // joins the question, because neither that turn nor a turn beside it can
+    // take it without breaking the request. See the provider-bound cases below.
     expect(modelSawShape(model, 1)).toEqual([
       { role: "user", blocks: ["textBlock", "textBlock"] },
       { role: "assistant", blocks: ["toolUseBlock"] },
@@ -715,7 +724,6 @@ describe("A2UI render-guide exclusion", () => {
   });
 });
 
-
 describe("provider-bound ordering during a tool continuation", () => {
   // Strands carries a tool result in a message whose role is `user`, so the
   // turn the block would naturally join during a continuation is the one
@@ -760,9 +768,9 @@ describe("provider-bound ordering during a tool continuation", () => {
       { parallel: true },
     );
 
-    expect(openAIRoleSequence(await openAIChatRequestMessages(withContext))).toEqual(
-      openAIRoleSequence(await openAIChatRequestMessages(without)),
-    );
+    expect(
+      openAIRoleSequence(await openAIChatRequestMessages(withContext)),
+    ).toEqual(openAIRoleSequence(await openAIChatRequestMessages(without)));
   });
 
   it("does not change the Responses-API item sequence either", async () => {
@@ -797,7 +805,6 @@ describe("provider-bound ordering during a tool continuation", () => {
     );
   });
 });
-
 
 describe("a tool continuation carrying context finishes the run", () => {
   /**
@@ -859,6 +866,197 @@ describe("a tool continuation carrying context finishes the run", () => {
 
     expect(errorCodes(events)).toEqual([]);
     expectCompletedRun(events);
-    expect(model.seenMessages.length, "the continuation call never happened").toBe(2);
+    expect(
+      model.seenMessages.length,
+      "the continuation call never happened",
+    ).toBe(2);
+  });
+});
+
+describe("provider-bound ordering for an ordinary turn", () => {
+  // The plain path is the default one and has to survive the same two checks
+  // as a continuation. It used to place the block as its own user message next
+  // to the question, which reads fine as native history and is two
+  // consecutive user messages once a block-level formatter maps it one to one.
+
+  const stale: AguiMessage[] = [
+    { id: "u1", role: "user", content: "selected invoice 456" },
+    { id: "a1", role: "assistant", content: "noted" },
+    { id: "u2", role: "user", content: "which invoice is selected?" },
+  ] as AguiMessage[];
+
+  async function ordinaryTurn(context: ContextEntry[]) {
+    const { agent, model } = realStrandsAgent([modelTurn.text("ok")]);
+    const events = await collect(
+      agent,
+      contextRun(context, { messages: stale }),
+    );
+    expectCompletedRun(events);
+    return model.seenMessages[0]!;
+  }
+
+  it("still alternates roles for the block-level formatters", async () => {
+    await expectRolesAlternate(
+      await ordinaryTurn([{ description: "selected invoice", value: "123" }]),
+    );
+  });
+
+  it("does not change the provider-bound sequence at all", async () => {
+    const without = await ordinaryTurn([]);
+    const withContext = await ordinaryTurn([
+      { description: "selected invoice", value: "123" },
+    ]);
+
+    expect(
+      openAIRoleSequence(await openAIChatRequestMessages(withContext)),
+    ).toEqual(openAIRoleSequence(await openAIChatRequestMessages(without)));
+    expect(
+      (await anthropicRequestMessages(withContext)).map((m) => m.role),
+    ).toEqual((await anthropicRequestMessages(without)).map((m) => m.role));
+  });
+});
+
+describe("context placement with no question turn", () => {
+  it("gives a replayed tool exchange the block as its opening turn", async () => {
+    const { agent, model } = toolContinuationAgent();
+    const events = await collect(
+      agent,
+      contextRun([{ description: "locale", value: "en-US" }], {
+        // No user question on the wire, only the exchange, which is the cold
+        // continuation the opt-out replays.
+        messages: [
+          {
+            id: "a1",
+            role: "assistant",
+            toolCalls: [
+              {
+                id: "t1",
+                type: "function",
+                function: { name: "lookup", arguments: "{}" },
+              },
+            ],
+          },
+          { id: "m1", role: "tool", content: "42", toolCallId: "t1" },
+        ] as AguiMessage[],
+      }),
+    );
+
+    expectCompletedRun(events);
+    const seen = model.seenMessages[0]!;
+    expect(historyShape(seen)[0]).toEqual({
+      role: "user",
+      blocks: ["textBlock"],
+    });
+    await expectToolCallsAnsweredImmediately(seen);
+    await expectRolesAlternate(seen);
+  });
+});
+
+describe("the model-bound history outline", () => {
+  const question = StrandsMessage.fromMessageData({
+    role: "user",
+    content: [{ text: "q" }],
+  });
+  const toolUse = (id: string) => ({
+    toolUse: { toolUseId: id, name: "a", input: {} },
+  });
+  const toolResult = (id: string) => ({
+    toolResult: { toolUseId: id, content: [{ text: "r" }] },
+  });
+  const turn = (role: "user" | "assistant", content: unknown[]) =>
+    StrandsMessage.fromMessageData({ role, content: content as never });
+
+  it("reports both verdicts, in the string the Python bridge emits", () => {
+    // Pinned as a literal in both suites, so a drift on either side is a
+    // failing test rather than a silent parity break.
+    expect(
+      describeModelBoundHistory([
+        turn("user", [{ text: "ctx" }, { text: "q" }]),
+        turn("assistant", [toolUse("t1"), toolUse("t2")]),
+        turn("user", [toolResult("t1"), toolResult("t2")]),
+      ]),
+    ).toBe(
+      "user[text+text] -> assistant(tool_calls=t1,t2) -> tool(t1) -> tool(t2)" +
+        " | tool-call adjacency=ok | role alternation=ok",
+    );
+  });
+
+  it("reports a wedged message as a broken adjacency", () => {
+    expect(
+      describeModelBoundHistory([
+        question,
+        turn("assistant", [toolUse("t1")]),
+        turn("user", [{ text: "ctx" }, toolResult("t1")]),
+      ]),
+    ).toContain("tool-call adjacency=broken at [1]");
+  });
+
+  it("treats results answering out of order as adjacent", () => {
+    expect(
+      describeModelBoundHistory([
+        question,
+        turn("assistant", [toolUse("t1"), toolUse("t2")]),
+        turn("user", [toolResult("t2"), toolResult("t1")]),
+      ]),
+    ).toContain("tool-call adjacency=ok");
+  });
+
+  it("reports a repeated role even when adjacency holds", () => {
+    const outline = describeModelBoundHistory([
+      turn("user", [{ text: "ctx" }]),
+      question,
+    ]);
+
+    expect(outline).toContain("tool-call adjacency=ok");
+    expect(outline).toContain("role alternation=repeats at [1]");
+  });
+
+  it("does not misread a tool id carrying punctuation", () => {
+    expect(
+      describeModelBoundHistory([
+        question,
+        turn("assistant", [toolUse("a,b)c")]),
+        turn("user", [toolResult("a,b)c")]),
+      ]),
+    ).toContain("tool-call adjacency=ok");
+  });
+
+  it("agrees with the real formatter about the sequence", async () => {
+    const turns = await continuationTurns(
+      [{ description: "selected invoice", value: "123" }],
+      { parallel: true },
+    );
+    const sequence = openAIRoleSequence(await openAIChatRequestMessages(turns));
+
+    const rendered = describeModelBoundHistory(turns).split(" | ")[0]!;
+
+    expect(rendered.replace(/\[[^\]]*\]/g, "")).toBe(sequence.join(" -> "));
+  });
+
+  it("carries no message text", async () => {
+    const turns = await continuationTurns([
+      { description: "token", value: "s3cret" },
+    ]);
+
+    const outline = describeModelBoundHistory(turns);
+
+    expect(outline).not.toContain("s3cret");
+    expect(outline).not.toContain("hello");
+  });
+
+  it("is dropped by a later run that carries no context", async () => {
+    // Per-thread agents are reused, so a stale outline would name another run.
+    const { agent } = realStrandsAgent([
+      modelTurn.text("one"),
+      modelTurn.text("two"),
+    ]);
+
+    await collect(agent, contextRun([{ description: "locale", value: "en" }]));
+    const instance = threadAgent(agent)!;
+    expect(modelBoundHistoryOutline(instance)).not.toBe("unrecorded");
+
+    await collect(agent, contextRun([], { content: "second question" }));
+
+    expect(modelBoundHistoryOutline(instance)).toBe("unrecorded");
   });
 });

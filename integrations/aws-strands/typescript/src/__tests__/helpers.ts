@@ -1164,7 +1164,6 @@ export function expectStoreMatchesMemory(
   expect(memoryPicture(agent, threadId), label).toEqual(expected);
 }
 
-
 // ---------------------------------------------------------------------------
 // Provider-bound serialization
 // ---------------------------------------------------------------------------
@@ -1176,21 +1175,34 @@ export function expectStoreMatchesMemory(
 // wire. Nothing reaches a provider: the injected `fetch` records the body and
 // throws, which is also why no API key or LLM mock is involved.
 
-/** Thrown by the capturing `fetch` once it has the request body. */
-const REQUEST_CAPTURED = "provider request captured";
-
-/** A `fetch` that records the outgoing JSON body and never answers. */
-function capturingFetch(sink: (body: unknown) => void): typeof globalThis.fetch {
+/**
+ * A `fetch` that records the outgoing JSON body and never answers.
+ *
+ * `reached` is what proves the stub actually intercepted. The thrown error is
+ * not: every provider SDK rewraps a transport throw into its own connection
+ * error, so its message says nothing about whether the request was captured.
+ */
+function capturingFetch(
+  sink: (body: unknown) => void,
+  reached: { value: boolean },
+): typeof globalThis.fetch {
   return async (_input, init) => {
+    reached.value = true;
     sink(JSON.parse(String(init?.body)));
-    throw new Error(REQUEST_CAPTURED);
+    throw new Error("capturing fetch never answers");
   };
 }
 
 async function captureRequestBody(
-  model: { stream: (messages: StrandsMessage[], options?: never) => AsyncIterable<unknown> },
+  model: {
+    stream: (
+      messages: StrandsMessage[],
+      options?: never,
+    ) => AsyncIterable<unknown>;
+  },
   history: readonly StrandsMessage[],
   captured: () => unknown,
+  reached: { value: boolean },
 ): Promise<unknown> {
   await expect(
     (async () => {
@@ -1199,6 +1211,12 @@ async function captureRequestBody(
       }
     })(),
   ).rejects.toThrow();
+  // Both checks matter. Without them a bad model config, an SDK validation
+  // error or a stub the client bypassed would reject too, and every assertion
+  // built on the body would pass over nothing at all.
+  expect(reached.value, "the provider client never called the stub fetch").toBe(
+    true,
+  );
   const body = captured();
   expect(body, "the provider client sent no request body").toBeDefined();
   return body;
@@ -1216,6 +1234,7 @@ export async function openAIChatRequestMessages(
   history: readonly StrandsMessage[],
 ): Promise<OpenAIChatRequestMessage[]> {
   let body: { messages?: OpenAIChatRequestMessage[] } | undefined;
+  const reached = { value: false };
   const model = new OpenAIModel({
     api: "chat",
     modelId: "gpt-4o",
@@ -1224,11 +1243,24 @@ export async function openAIChatRequestMessages(
       maxRetries: 0,
       fetch: capturingFetch((captured) => {
         body = captured as { messages?: OpenAIChatRequestMessage[] };
-      }),
+      }, reached),
     },
   });
-  await captureRequestBody(model, history, () => body);
-  return body?.messages ?? [];
+  await captureRequestBody(model, history, () => body, reached);
+  return requireMessages(body?.messages, "openai chat");
+}
+
+/**
+ * The messages a captured body has to carry. Returning `[]` for an absent key
+ * would let every assertion built on it pass over nothing at all.
+ */
+function requireMessages<T>(messages: T[] | undefined, label: string): T[] {
+  expect(messages, `the ${label} request carried no messages`).toBeDefined();
+  expect(
+    messages!.length,
+    `the ${label} request carried no messages`,
+  ).toBeGreaterThan(0);
+  return messages!;
 }
 
 /** The Messages-API body the real Anthropic client would have sent. */
@@ -1236,6 +1268,7 @@ export async function anthropicRequestMessages(
   history: readonly StrandsMessage[],
 ): Promise<Array<{ role: string }>> {
   let body: { messages?: Array<{ role: string }> } | undefined;
+  const reached = { value: false };
   const model = new AnthropicModel({
     modelId: "claude-sonnet-4-5",
     maxTokens: 64,
@@ -1244,11 +1277,11 @@ export async function anthropicRequestMessages(
       maxRetries: 0,
       fetch: capturingFetch((captured) => {
         body = captured as { messages?: Array<{ role: string }> };
-      }),
+      }, reached),
     },
   });
-  await captureRequestBody(model, history, () => body);
-  return body?.messages ?? [];
+  await captureRequestBody(model, history, () => body, reached);
+  return requireMessages(body?.messages, "anthropic");
 }
 
 /**
@@ -1261,6 +1294,7 @@ export async function openAIResponsesRequestItems(
   history: readonly StrandsMessage[],
 ): Promise<string[]> {
   let body: { input?: Array<Record<string, unknown>> } | undefined;
+  const reached = { value: false };
   const model = new OpenAIModel({
     modelId: "gpt-4o",
     apiKey: "test-key",
@@ -1268,11 +1302,11 @@ export async function openAIResponsesRequestItems(
       maxRetries: 0,
       fetch: capturingFetch((captured) => {
         body = captured as { input?: Array<Record<string, unknown>> };
-      }),
+      }, reached),
     },
   });
-  await captureRequestBody(model, history, () => body);
-  return (body?.input ?? []).map((item) => {
+  await captureRequestBody(model, history, () => body, reached);
+  return requireMessages(body?.input, "openai responses").map((item) => {
     const kind = typeof item.type === "string" ? item.type : "message";
     const id = item.call_id ?? item.role ?? "";
     return `${kind}(${String(id)})`;
@@ -1331,6 +1365,8 @@ export async function expectRolesAlternate(
   const roles = (await anthropicRequestMessages(history)).map(
     (message) => message.role,
   );
-  const repeated = roles.filter((role, index) => index > 0 && role === roles[index - 1]);
+  const repeated = roles.filter(
+    (role, index) => index > 0 && role === roles[index - 1],
+  );
   expect(repeated, `roles do not alternate: ${roles.join(" -> ")}`).toEqual([]);
 }
