@@ -390,10 +390,11 @@ function propertyName(key: string) {
 }
 
 type StructuralValue = readonly unknown[] | { readonly [key: string]: unknown };
+type ShareableValue = StructuralValue | string;
 
-type SharedStructure = {
+type SharedValue = {
   key: string;
-  value: StructuralValue;
+  value: ShareableValue;
   count: number;
   size: number;
   descendantKeys: ReadonlySet<string>;
@@ -405,38 +406,44 @@ function isStructuralValue(value: unknown): value is StructuralValue {
   return typeof value === "object" && value !== null;
 }
 
-function structuralKey(value: StructuralValue) {
+function isShareableValue(value: unknown): value is ShareableValue {
+  return typeof value === "string" || isStructuralValue(value);
+}
+
+function sharedValueKey(value: ShareableValue) {
   return JSON.stringify(value);
 }
 
-function collectDescendantKeys(value: StructuralValue) {
+function collectDescendantKeys(value: ShareableValue) {
   const keys = new Set<string>();
 
   const visit = (child: unknown) => {
+    if (!isShareableValue(child)) return;
+    keys.add(sharedValueKey(child));
     if (!isStructuralValue(child)) return;
-    keys.add(structuralKey(child));
     for (const nested of Array.isArray(child) ? child : Object.values(child)) {
       visit(nested);
     }
   };
 
+  if (!isStructuralValue(value)) return keys;
   for (const child of Array.isArray(value) ? value : Object.values(value)) {
     visit(child);
   }
   return keys;
 }
 
-function findSharedStructures(journeys: {
+function findSharedValues(journeys: {
   readonly [journeyKey: string]: readonly TraceEvent[];
 }) {
   const structures = new Map<
     string,
-    { value: StructuralValue; count: number }
+    { value: ShareableValue; count: number }
   >();
 
   const visit = (value: unknown) => {
-    if (!isStructuralValue(value)) return;
-    const key = structuralKey(value);
+    if (!isShareableValue(value)) return;
+    const key = sharedValueKey(value);
     const existing = structures.get(key);
     if (existing) {
       existing.count += 1;
@@ -444,14 +451,16 @@ function findSharedStructures(journeys: {
       structures.set(key, { value, count: 1 });
     }
 
-    for (const child of Array.isArray(value) ? value : Object.values(value)) {
-      visit(child);
+    if (isStructuralValue(value)) {
+      for (const child of Array.isArray(value) ? value : Object.values(value)) {
+        visit(child);
+      }
     }
   };
 
   for (const events of Object.values(journeys)) visit(events);
 
-  const candidates: SharedStructure[] = [...structures.entries()]
+  const candidates: SharedValue[] = [...structures.entries()]
     .filter(
       ([key, structure]) =>
         structure.count > 1 &&
@@ -472,14 +481,22 @@ function findSharedStructures(journeys: {
         left.key.localeCompare(right.key),
     );
 
-  const selected: SharedStructure[] = [];
+  const selected: SharedValue[] = [];
   for (const candidate of candidates) {
+    if (typeof candidate.value === "string") {
+      selected.push(candidate);
+      continue;
+    }
     if (selected.some((parent) => parent.descendantKeys.has(candidate.key))) {
       continue;
     }
     selected.push(candidate);
   }
-  return selected;
+  return selected.sort(
+    (left, right) =>
+      Number(typeof left.value !== "string") -
+      Number(typeof right.value !== "string"),
+  );
 }
 
 function indent(level: number) {
@@ -492,8 +509,8 @@ function renderTraceValue(
   sharedNames: ReadonlyMap<string, string>,
   inlineKey?: string,
 ): string {
-  if (isStructuralValue(value)) {
-    const key = structuralKey(value);
+  if (isShareableValue(value)) {
+    const key = sharedValueKey(value);
     const sharedName = sharedNames.get(key);
     if (sharedName && key !== inlineKey) return sharedName;
   }
@@ -528,7 +545,7 @@ export async function renderEventTraceModule(options: RenderEventTraceOptions) {
   const reason = options.reason.replaceAll(/\s+/g, " ").trim();
   if (!reason) throw new Error("Event trace updates require a reason");
 
-  const sharedStructures = findSharedStructures(options.journeys);
+  const sharedStructures = findSharedValues(options.journeys);
   const sharedNames = new Map(
     sharedStructures.map((structure, index) => [
       structure.key,

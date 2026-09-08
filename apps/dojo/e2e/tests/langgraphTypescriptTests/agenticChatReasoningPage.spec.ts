@@ -1,10 +1,11 @@
-import { test, expect } from "../../test-isolation-helper";
+import { test, expect } from "../../event-trace-test";
 import {
   sendChatMessage,
   awaitLLMResponseDone,
   openChat,
 } from "../../utils/copilot-actions";
 import { CopilotSelectors } from "../../utils/copilot-selectors";
+import { agenticChatReasoningPageEventTrace } from "./agenticChatReasoningPage.event-trace";
 
 test.describe("[Integration] LangGraph TypeScript - Agentic Chat Reasoning", () => {
   test("should display model selection dropdown", async ({ page }) => {
@@ -16,7 +17,10 @@ test.describe("[Integration] LangGraph TypeScript - Agentic Chat Reasoning", () 
     await expect(dropdown).toBeVisible({ timeout: 10000 });
   });
 
-  test("should show reasoning indicator and then the response", async ({ page }) => {
+  test("should show reasoning indicator and then the response", async ({
+    page,
+    eventTrace,
+  }) => {
     await page.goto("/langgraph-typescript/feature/agentic_chat_reasoning");
     await openChat(page);
 
@@ -32,6 +36,9 @@ test.describe("[Integration] LangGraph TypeScript - Agentic Chat Reasoning", () 
     await expect(lastAssistant).toContainText(
       /Toyota|Honda|Mazda|recommendations/i,
       { timeout: 10000 },
+    );
+    await eventTrace.expectJourney(
+      agenticChatReasoningPageEventTrace.showReasoningIndicatorAndThenTheResponse,
     );
   });
 });

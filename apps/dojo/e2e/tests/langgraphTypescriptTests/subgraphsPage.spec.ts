@@ -1,9 +1,11 @@
-import { test, expect } from "../../test-isolation-helper";
+import { test, expect } from "../../event-trace-test";
 import { SubgraphsPage } from "../../pages/langGraphPages/SubgraphsPage";
+import { subgraphsPageEventTrace } from "./subgraphsPage.event-trace";
 
 test.describe("Subgraphs Travel Agent Feature", () => {
   test("[LangGraph] should complete full travel planning flow with feature validation", async ({
     page,
+    eventTrace,
   }) => {
     const subgraphsPage = new SubgraphsPage(page);
 
@@ -81,10 +83,14 @@ test.describe("Subgraphs Travel Agent Feature", () => {
       });
 
     await subgraphsPage.verifyStaticExperienceData();
+    await eventTrace.expectJourney(
+      subgraphsPageEventTrace.completeFullTravelPlanningFlowWithFeatureValidation,
+    );
   });
 
   test("[LangGraph] should handle different selections and demonstrate supervisor routing patterns", async ({
     page,
+    eventTrace,
   }) => {
     const subgraphsPage = new SubgraphsPage(page);
 
@@ -173,5 +179,8 @@ test.describe("Subgraphs Travel Agent Feature", () => {
     await expect(subgraphsPage.selectedFlight).toContainText("United"); // Flight selection persisted
     await expect(subgraphsPage.selectedHotel).toContainText("Ritz-Carlton"); // Hotel selection persisted
     await subgraphsPage.verifyStaticExperienceData(); // Experiences provided based on selections
+    await eventTrace.expectJourney(
+      subgraphsPageEventTrace.handleDifferentSelectionsAndDemonstrateSupervisorRoutingPatterns,
+    );
   });
 });

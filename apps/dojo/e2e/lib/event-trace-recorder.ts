@@ -26,14 +26,21 @@ function toError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error));
 }
 
+function hasComparableEvents(stream: CapturedStream) {
+  return stream.events?.some((event) => event.type !== "RAW") ?? false;
+}
+
 export class EventTraceRecorder {
   private readonly settleMs: number;
   private readonly settleTimeoutMs: number;
   private readonly streams: CapturedStream[] = [];
   private readonly active = new Set<Promise<void>>();
+  private readonly overlaps: Array<{
+    first: CapturedStream;
+    second: CapturedStream;
+  }> = [];
   private assertionCount = 0;
   private assertedStreamCount?: number;
-  private overlap?: { firstUrl: string; secondUrl: string };
 
   constructor(options: { settleMs?: number; settleTimeoutMs?: number } = {}) {
     this.settleMs = options.settleMs ?? 100;
@@ -41,20 +48,15 @@ export class EventTraceRecorder {
   }
 
   observeStream(stream: ObservedStream) {
-    if (this.active.size > 0 && !this.overlap) {
-      const firstActive = this.streams.find(
-        (candidate) => candidate.body === undefined && !candidate.error,
-      );
-      this.overlap = {
-        firstUrl: firstActive?.url ?? "unknown stream",
-        secondUrl: stream.url,
-      };
-    }
-
     const captured: CapturedStream = {
       sequence: this.streams.length,
       url: stream.url,
     };
+    for (const active of this.streams.filter(
+      (candidate) => candidate.body === undefined && !candidate.error,
+    )) {
+      this.overlaps.push({ first: active, second: captured });
+    }
     this.streams.push(captured);
 
     const completion = stream.body
@@ -118,9 +120,13 @@ export class EventTraceRecorder {
   }
 
   private readJourney() {
-    if (this.overlap) {
+    const overlap = this.overlaps.find(
+      ({ first, second }) =>
+        hasComparableEvents(first) && hasComparableEvents(second),
+    );
+    if (overlap) {
       throw new Error(
-        `Overlapping AG-UI streams are not supported: ${this.overlap.firstUrl} and ${this.overlap.secondUrl}`,
+        `Overlapping AG-UI streams are not supported: ${overlap.first.url} and ${overlap.second.url}`,
       );
     }
 

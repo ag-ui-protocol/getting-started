@@ -1,9 +1,11 @@
-import { test, expect } from "../../test-isolation-helper";
+import { test, expect } from "../../event-trace-test";
 import { PredictiveStateUpdatesPage } from "../../pages/langGraphFastAPIPages/PredictiveStateUpdatesPage";
+import { predictiveStateUpdatePageEventTrace } from "./predictiveStateUpdatePage.event-trace";
 
 test.describe("Predictive Status Updates Feature", () => {
   test("[LangGraph FastAPI] should interact with agent and approve asked changes", async ({
     page,
+    eventTrace,
   }) => {
     const predictiveStateUpdates = new PredictiveStateUpdatesPage(page);
 
@@ -30,10 +32,14 @@ test.describe("Predictive Status Updates Feature", () => {
     const dragonNameNew =
       await predictiveStateUpdates.verifyAgentResponse("Lola");
     expect(dragonNameNew).not.toBe(dragonName);
+    await eventTrace.expectJourney(
+      predictiveStateUpdatePageEventTrace.interactWithAgentAndApproveAskedChanges,
+    );
   });
 
   test("[LangGraph FastAPI] should interact with agent and reject asked changes", async ({
     page,
+    eventTrace,
   }) => {
     const predictiveStateUpdates = new PredictiveStateUpdatesPage(page);
 
@@ -61,5 +67,8 @@ test.describe("Predictive Status Updates Feature", () => {
       await predictiveStateUpdates.verifyAgentResponse("Atlantis");
     expect(dragonNameAfterRejection).toBe(dragonName);
     expect(dragonNameAfterRejection).not.toBe("Lola");
+    await eventTrace.expectJourney(
+      predictiveStateUpdatePageEventTrace.interactWithAgentAndRejectAskedChanges,
+    );
   });
 });

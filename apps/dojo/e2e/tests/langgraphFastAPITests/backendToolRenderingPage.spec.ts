@@ -1,8 +1,10 @@
-import { test, expect } from "../../test-isolation-helper";
+import { test, expect } from "../../event-trace-test";
 import { awaitLLMResponseDone } from "../../utils/copilot-actions";
+import { backendToolRenderingPageEventTrace } from "./backendToolRenderingPage.event-trace";
 
 test("[LanggraphFastAPI] Backend Tool Rendering displays weather cards", async ({
   page,
+  eventTrace,
 }) => {
   await page.goto("/langgraph-fastapi/feature/backend_tool_rendering");
 
@@ -23,7 +25,7 @@ test("[LanggraphFastAPI] Backend Tool Rendering displays weather cards", async (
   // Try test ID first, fallback to text
   try {
     await expect(weatherCard).toBeVisible();
-  } catch (e) {
+  } catch {
     // Fallback to checking for "Current Weather" text
     await expect(currentWeatherText.first()).toBeVisible();
   }
@@ -55,4 +57,7 @@ test("[LanggraphFastAPI] Backend Tool Rendering displays weather cards", async (
     .getByText(/Weather|Humidity|Wind|Temperature/i)
     .count();
   expect(weatherElements).toBeGreaterThan(0);
+  await eventTrace.expectJourney(
+    backendToolRenderingPageEventTrace.backendToolRenderingDisplaysWeatherCards,
+  );
 });

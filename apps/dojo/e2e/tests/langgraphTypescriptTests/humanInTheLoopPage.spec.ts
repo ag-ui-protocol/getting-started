@@ -1,9 +1,11 @@
-import { test, expect } from "../../test-isolation-helper";
+import { test, expect } from "../../event-trace-test";
 import { HumanInLoopPage } from "../../pages/langGraphPages/HumanInLoopPage";
+import { humanInTheLoopPageEventTrace } from "./humanInTheLoopPage.event-trace";
 
 test.describe("Human in the Loop Feature", () => {
   test("[LangGraph] should interact with the chat and perform steps", async ({
     page,
+    eventTrace,
   }) => {
     const humanInLoop = new HumanInLoopPage(page);
 
@@ -25,10 +27,14 @@ test.describe("Human in the Loop Feature", () => {
     await humanInLoop.sendMessage(
       `Does the planner include ${itemText}? ⚠️ Reply with only words 'Yes' or 'No' (no explanation, no punctuation).`,
     );
+    await eventTrace.expectJourney(
+      humanInTheLoopPageEventTrace.interactWithTheChatAndPerformSteps,
+    );
   });
 
   test("should interact with the chat using predefined prompts and perform steps", async ({
     page,
+    eventTrace,
   }) => {
     const humanInLoop = new HumanInLoopPage(page);
     await page.goto("/langgraph-typescript/feature/human_in_the_loop");
@@ -49,6 +55,9 @@ test.describe("Human in the Loop Feature", () => {
 
     await humanInLoop.sendMessage(
       `Does the planner include ${uncheckedItem}? ⚠️ Reply with only words 'Yes' or 'No' (no explanation, no punctuation).`,
+    );
+    await eventTrace.expectJourney(
+      humanInTheLoopPageEventTrace.interactWithTheChatUsingPredefinedPromptsAndPerformSteps,
     );
   });
 });

@@ -9,7 +9,8 @@ const CleanReporter = require("../clean-reporter.cjs") as new () => {
     playwrightTest: { parent: { title: string }; title: string },
     result: {
       status: string;
-      error: { message: string };
+      error: { message: string; stack?: string };
+      errors?: Array<{ message?: string; stack?: string } | string>;
       stdout: string[];
     },
   ): void;
@@ -55,4 +56,41 @@ test("the clean reporter prints the complete semantic event trace mismatch", () 
   assert.match(rendered, /expected: "Mango"/);
   assert.match(rendered, /actual: "Apple"/);
   assert.doesNotMatch(rendered, /Likely cause: AI service down/);
+});
+
+test("the clean reporter uses Playwright's serialized stack for the complete mismatch", () => {
+  const reporter = new CleanReporter();
+  const output: string[] = [];
+  const originalLog = console.log;
+  console.log = (...values: unknown[]) => {
+    output.push(values.map(String).join(" "));
+  };
+
+  try {
+    reporter.onTestEnd(
+      { parent: { title: "LangGraph Tests" }, title: "retains memory" },
+      {
+        status: "failed",
+        error: {
+          message:
+            "EventTraceAssertionError: Event trace mismatch: trace.ts#journey",
+          stack: [
+            "EventTraceAssertionError: Event trace mismatch: trace.ts#journey",
+            "  events: expected=2, actual=1",
+            "  event 1: expected RUN_FINISHED, actual <end>",
+            "  Full traces are attached to the Playwright test result.",
+            "    at assertEventTraceMatches (event-trace-update.ts:256:11)",
+          ].join("\n"),
+        },
+        stdout: [],
+      },
+    );
+  } finally {
+    console.log = originalLog;
+  }
+
+  const rendered = output.join("\n");
+  assert.match(rendered, /events: expected=2, actual=1/);
+  assert.match(rendered, /event 1: expected RUN_FINISHED, actual <end>/);
+  assert.doesNotMatch(rendered, /at assertEventTraceMatches/);
 });

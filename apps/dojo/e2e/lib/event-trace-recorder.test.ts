@@ -164,6 +164,23 @@ test("rejects overlapping AG-UI streams", async () => {
   );
 });
 
+test("ignores empty responses that overlap an AG-UI stream", async () => {
+  const recorder = new EventTraceRecorder({ settleMs: 0 });
+  const empty = Promise.withResolvers<string>();
+
+  recorder.observeStream({
+    url: "http://dojo.test/api/copilotkit/probe",
+    body: empty.promise,
+  });
+  recorder.observeStream({
+    url: "http://dojo.test/api/copilotkit/run",
+    body: Promise.resolve(sse({ type: "RUN_FINISHED" })),
+  });
+  empty.resolve("");
+
+  await recorder.expectJourney([{ type: "RUN_FINISHED" }], () => {});
+});
+
 test("exposes raw and normalized journey artifacts", async () => {
   const recorder = new EventTraceRecorder({ settleMs: 0 });
   const body = sse({

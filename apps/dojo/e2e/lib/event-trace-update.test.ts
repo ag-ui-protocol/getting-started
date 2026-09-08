@@ -213,6 +213,49 @@ test("renders repeated structures compactly without changing the imported trace"
   }
 });
 
+test("renders repeated long strings compactly when their parent structures differ", async () => {
+  const repeatedContent =
+    "A deliberately repeated schema description whose parent snapshots remain distinct. ".repeat(
+      4,
+    );
+  const journeys = {
+    repeatedStrings: [
+      {
+        type: "STATE_SNAPSHOT",
+        snapshot: { sequence: 1, content: repeatedContent },
+      },
+      {
+        type: "STATE_SNAPSHOT",
+        snapshot: { sequence: 1, content: repeatedContent },
+      },
+      {
+        type: "STATE_SNAPSHOT",
+        snapshot: { sequence: 2, content: repeatedContent },
+      },
+    ],
+  };
+  const options = {
+    exportName: "eventTrace",
+    importPath: new URL("./event-trace-golden.ts", import.meta.url).href,
+    reason: "Prove repeated strings remain reviewable and exact.",
+    journeys,
+  };
+
+  const rendered = await renderEventTraceModule(options);
+  assert.match(rendered, /const shared\d+ =\n?\s*"A deliberately repeated/);
+
+  const directory = await mkdtemp(join(tmpdir(), "event-trace-string-test-"));
+  const modulePath = join(directory, "event-trace.ts");
+  try {
+    await writeFile(modulePath, rendered, "utf8");
+    const generated = await importGeneratedModule(modulePath);
+    assert.ok(typeof generated === "object" && generated !== null);
+    assert.deepEqual(Reflect.get(generated, "eventTrace"), journeys);
+  } finally {
+    await rm(directory, { recursive: true });
+  }
+});
+
 test("summarizes the first semantic event difference for review", () => {
   assert.deepEqual(
     summarizeEventTraceDiff(

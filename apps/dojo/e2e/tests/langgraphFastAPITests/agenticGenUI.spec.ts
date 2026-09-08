@@ -1,10 +1,12 @@
 import { awaitLLMResponseDone } from "../../utils/copilot-actions";
-import { test, expect } from "../../test-isolation-helper";
+import { test, expect } from "../../event-trace-test";
 import { AgenticGenUIPage } from "../../pages/langGraphFastAPIPages/AgenticUIGenPage";
+import { agenticGenUIEventTrace } from "./agenticGenUI.event-trace";
 
 test.describe("Agent Generative UI Feature", () => {
   test("[LangGraph FastAPI] should interact with the chat to get a planner on prompt", async ({
     page,
+    eventTrace,
   }) => {
     const genUIAgent = new AgenticGenUIPage(page);
 
@@ -20,10 +22,14 @@ test.describe("Agent Generative UI Feature", () => {
 
     await genUIAgent.plan();
     await awaitLLMResponseDone(page);
+    await eventTrace.expectJourney(
+      agenticGenUIEventTrace.interactWithTheChatToGetAPlannerOnPrompt,
+    );
   });
 
   test("[LangGraph FastAPI] should interact with the chat using predefined prompts and perform steps", async ({
     page,
+    eventTrace,
   }) => {
     const genUIAgent = new AgenticGenUIPage(page);
 
@@ -38,5 +44,8 @@ test.describe("Agent Generative UI Feature", () => {
     await expect(genUIAgent.agentPlannerContainer).toBeVisible();
     await genUIAgent.plan();
     await awaitLLMResponseDone(page);
+    await eventTrace.expectJourney(
+      agenticGenUIEventTrace.interactWithTheChatUsingPredefinedPromptsAndPerformSteps,
+    );
   });
 });
