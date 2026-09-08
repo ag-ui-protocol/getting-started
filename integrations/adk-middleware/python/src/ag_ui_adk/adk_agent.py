@@ -41,6 +41,22 @@ from google.adk.agents import BaseAgent, LlmAgent, RunConfig as ADKRunConfig
 # pre-appended to the session as its own event, and new_message becomes a
 # minimal placeholder that short-circuits _resolve_invocation_id.
 _ADK_OVERRIDES_INVOCATION_ID = hasattr(Runner, "_resolve_invocation_id")
+
+# Feature detect ADK's guard for plugins a Runner does not own.
+#
+# PluginManager.set_skip_closing_plugins() was added in google-adk 2.2.0 and is
+# absent on 1.x. Without it a per-request Runner closes the caller's App-owned
+# plugins on every request; with it that half of Runner.close() is skipped,
+# leaving toolset cleanup and the session flush intact. ADK itself uses it for
+# the nested Runner in tools/agent_tool.py.
+try:  # pragma: no cover - import shape varies across ADK versions
+    from google.adk.plugins.plugin_manager import PluginManager as _PluginManager
+
+    _ADK_SKIPS_CLOSING_PLUGINS = hasattr(
+        _PluginManager, "set_skip_closing_plugins"
+    )
+except Exception:  # pragma: no cover - defensive
+    _ADK_SKIPS_CLOSING_PLUGINS = False
 from google.adk.agents.run_config import StreamingMode
 from google.adk.agents.llm_agent import InstructionProvider, ToolUnion
 from google.adk.sessions import BaseSessionService, InMemorySessionService
@@ -1093,6 +1109,31 @@ class ADKAgent:
         return 'plugin_close_timeout' in sig.parameters
 
     @staticmethod
+    def _mark_plugins_externally_owned(runner: Runner) -> None:
+        """Stop a per-request Runner from closing plugins the caller owns.
+
+        ``Runner.close()`` closes every registered plugin. Plugins reached
+        through a caller-supplied ``App`` are the caller's own instances and
+        hold process-lifetime state -- clients, pools, background batch
+        writers -- so closing one per request forces a full re-initialization
+        on the next one.
+
+        ``set_skip_closing_plugins`` is ADK's guard for exactly this; ADK
+        (>= 2.2) uses it itself for the nested runner in
+        ``google/adk/tools/agent_tool.py``. It was added in google-adk 2.2.0
+        and is absent on 1.x, where this is a no-op and the previous
+        per-request close behaviour stands.
+        """
+        if not _ADK_SKIPS_CLOSING_PLUGINS:
+            return
+        plugin_manager = getattr(runner, 'plugin_manager', None)
+        # The module flag says the ADK we imported has the API; this says the
+        # object in hand does. Both, so an unexpected manager degrades to the
+        # old behaviour instead of raising inside a request.
+        if hasattr(plugin_manager, 'set_skip_closing_plugins'):
+            plugin_manager.set_skip_closing_plugins(True)
+
+    @staticmethod
     def _adk_supports_streaming_fc_args() -> bool:
         """Check if google-adk supports reliable streaming function call arguments.
 
@@ -1141,7 +1182,11 @@ class ADKAgent:
         if self._app is not None:
             # Create per-request App copy with modified agent (preserves all App configs)
             request_app = self._app.model_copy(update={'root_agent': adk_agent})
-            return Runner(app=request_app, **service_kwargs)
+            runner = Runner(app=request_app, **service_kwargs)
+            # model_copy is shallow: request_app.plugins holds the caller's own
+            # objects, and this runner is closed at the end of the request.
+            self._mark_plugins_externally_owned(runner)
+            return runner
         else:
             # Old style: component-based (no plugins support - use from_app() for that)
             return Runner(
