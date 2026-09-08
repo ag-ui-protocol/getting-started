@@ -1,11 +1,13 @@
 """Agentic Chat Multimodal — Accepts images, audio, video, and documents."""
 
-from agno.agent.agent import Agent
+from agno.agent import Agent
+from agno.db.in_memory import InMemoryDb
 from agno.models.google import Gemini
 from agno.os import AgentOS
 from agno.os.interfaces.agui import AGUI
 
 agent = Agent(
+    db=InMemoryDb(),
     model=Gemini(id="gemini-2.5-flash"),
     description="You are a helpful assistant that can analyze images, audio, video, and documents.",
     instructions=[

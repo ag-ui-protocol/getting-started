@@ -595,6 +595,226 @@ class TestRunErrorPath:
         # No per-run result entry for the errored thread survives.
         assert not any(k[0] == "leaky" for k in adapter._per_run_result)
 
+    @pytest.mark.asyncio
+    async def test_input_error_preserves_live_session_worker(self, make_input, monkeypatch):
+        class _ReusableWorker:
+            def __init__(self, *args, **kwargs):
+                self.query_count = 0
+                self.stopped = False
+
+            async def start(self):
+                pass
+
+            def is_alive(self):
+                return True
+
+            def query(self, prompt, session_id="default"):
+                self.query_count += 1
+
+                async def _gen():
+                    return
+                    yield  # pragma: no cover
+
+                return _gen()
+
+            async def stop(self):
+                self.stopped = True
+
+        adapter = ClaudeAgentAdapter(name="t")
+        monkeypatch.setattr("ag_ui_claude_sdk.adapter.SessionWorker", _ReusableWorker)
+
+        first = make_input(
+            thread_id="live-session",
+            run_id="run-1",
+            messages=[{"id": "1", "role": "user", "content": "hello"}],
+        )
+        first_events = [event async for event in adapter.run(first)]
+        worker = adapter._workers["live-session"]["worker"]
+        assert EventType.RUN_FINISHED in _types(first_events)
+
+        invalid = make_input(
+            thread_id="live-session",
+            run_id="run-2",
+            messages=[
+                {
+                    "id": "2",
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "listen"},
+                        {
+                            "type": "audio",
+                            "source": {
+                                "type": "data",
+                                "value": "Ynl0ZXM=",
+                                "mime_type": "audio/mp4",
+                            },
+                        },
+                    ],
+                }
+            ],
+        )
+        invalid_events = [event async for event in adapter.run(invalid)]
+
+        assert _types(invalid_events) == [EventType.RUN_ERROR]
+        assert "type audio is not supported" in invalid_events[0].message
+        assert adapter._workers["live-session"]["worker"] is worker
+        assert worker.stopped is False
+        assert worker.query_count == 1
+
+        third = make_input(
+            thread_id="live-session",
+            run_id="run-3",
+            messages=[{"id": "3", "role": "user", "content": "still there?"}],
+        )
+        third_events = [event async for event in adapter.run(third)]
+        assert EventType.RUN_FINISHED in _types(third_events)
+        assert adapter._workers["live-session"]["worker"] is worker
+        assert worker.query_count == 2
+
+
+class TestMultimodalQueryBoundary:
+    @pytest.mark.asyncio
+    async def test_worker_receives_structured_image_and_pdf_prompt(
+        self, make_input, monkeypatch
+    ):
+        captured = {}
+
+        class _CapturingWorker:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def start(self):
+                pass
+
+            def is_alive(self):
+                return True
+
+            def query(self, prompt, session_id="default"):
+                captured["prompt"] = prompt
+                captured["session_id"] = session_id
+
+                async def _gen():
+                    return
+                    yield  # pragma: no cover
+
+                return _gen()
+
+            async def stop(self):
+                pass
+
+        adapter = ClaudeAgentAdapter(name="t")
+        monkeypatch.setattr("ag_ui_claude_sdk.adapter.SessionWorker", _CapturingWorker)
+        inp = make_input(
+            thread_id="thread-media",
+            messages=[
+                {
+                    "id": "1",
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "look"},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "data",
+                                "value": "aW1hZ2U=",
+                                "mime_type": "image/png",
+                            },
+                        },
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "data",
+                                "value": "cGRm",
+                                "mime_type": "application/pdf",
+                            },
+                        },
+                    ],
+                }
+            ],
+        )
+
+        _ = [event async for event in adapter.run(inp)]
+        sdk_messages = [message async for message in captured["prompt"]]
+
+        assert captured["session_id"] == "thread-media"
+        assert sdk_messages == [
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "look"},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": "aW1hZ2U=",
+                            },
+                        },
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": "cGRm",
+                            },
+                        },
+                    ],
+                },
+                "parent_tool_use_id": None,
+                "session_id": "thread-media",
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_worker_does_not_receive_empty_text_blocks(
+        self, make_input, monkeypatch
+    ):
+        captured = {}
+
+        class _CapturingWorker:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def start(self):
+                pass
+
+            def is_alive(self):
+                return True
+
+            def query(self, prompt, session_id="default"):
+                captured["prompt"] = prompt
+
+                async def _gen():
+                    return
+                    yield  # pragma: no cover
+
+                return _gen()
+
+            async def stop(self):
+                pass
+
+        adapter = ClaudeAgentAdapter(name="t")
+        monkeypatch.setattr("ag_ui_claude_sdk.adapter.SessionWorker", _CapturingWorker)
+        inp = make_input(
+            messages=[
+                {
+                    "id": "1",
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": ""},
+                        {"type": "text", "text": "   "},
+                    ],
+                }
+            ]
+        )
+
+        events = [event async for event in adapter.run(inp)]
+
+        assert captured["prompt"] == ""
+        assert EventType.RUN_FINISHED in _types(events)
+
 
 class _FakeAliveWorker:
     """A SessionWorker stand-in that stays alive and is never queried."""

@@ -19,6 +19,8 @@ describe("public export surface", () => {
       "createProxyTool",
       "syncProxyTools",
       "isProxyTool",
+      "syncTemplateTools",
+      "parkedBatchToolNames",
       "DEFAULT_URL_FETCH_POLICY",
       "UrlFetchPolicyError",
     ];

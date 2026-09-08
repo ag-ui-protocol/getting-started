@@ -1,18 +1,18 @@
-"""Example: Agno Agent with Finance tools
+"""Example: Agno Agent with a weather tool
 
-This example shows how to create an Agno Agent with tools (YFinanceTools) and expose it in an AG-UI compatible way.
+This example shows how to create an Agno Agent with a backend weather tool and
+expose it in an AG-UI compatible way.
 """
 
 import json
 import os
 
 import httpx
-from agno.agent.agent import Agent
+from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 from agno.os import AgentOS
 from agno.os.interfaces.agui import AGUI
 from agno.tools import tool
-from agno.tools.yfinance import YFinanceTools
 
 
 def get_weather_condition(code: int) -> str:

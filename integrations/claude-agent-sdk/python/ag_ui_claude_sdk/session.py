@@ -8,6 +8,7 @@ on multi-turn conversations.
 import asyncio
 import logging
 from contextlib import suppress
+from collections.abc import AsyncIterable
 from typing import Any, AsyncIterator, Optional
 
 logger = logging.getLogger(__name__)
@@ -162,7 +163,11 @@ class SessionWorker:
         except Exception as exc:
             logger.debug(f"[SessionWorker] Graceful disconnect error (ignored): {exc}")
 
-    async def query(self, prompt: str, session_id: str = "default") -> AsyncIterator[Any]:
+    async def query(
+        self,
+        prompt: str | AsyncIterable[dict[str, Any]],
+        session_id: str = "default",
+    ) -> AsyncIterator[Any]:
         """Send prompt to the worker and yield SDK Message objects."""
         output_queue: asyncio.Queue = asyncio.Queue()
         # Register the output queue in the in-flight set BEFORE enqueuing the

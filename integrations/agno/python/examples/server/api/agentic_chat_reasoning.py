@@ -3,12 +3,14 @@
 Uses o4-mini to expose its thinking process.
 """
 
-from agno.agent.agent import Agent
+from agno.agent import Agent
+from agno.db.in_memory import InMemoryDb
 from agno.models.openai import OpenAIResponses
 from agno.os import AgentOS
 from agno.os.interfaces.agui import AGUI
 
 agent = Agent(
+    db=InMemoryDb(),
     model=OpenAIResponses(id="o4-mini"),
     reasoning_model=OpenAIResponses(
         id="o4-mini",

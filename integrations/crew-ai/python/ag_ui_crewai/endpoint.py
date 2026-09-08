@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from typing import Any
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import StreamingResponse
 
 from ._env import _parse_env_float
@@ -3349,7 +3349,7 @@ async def _run_flow_resume_stream(
 
 
 def add_crewai_flow_fastapi_endpoint(
-    app: FastAPI,
+    app: FastAPI | APIRouter,
     flow: Flow,
     path: str = "/",
     *,
@@ -3358,6 +3358,7 @@ def add_crewai_flow_fastapi_endpoint(
     emit_raw_events: bool | None = None,
     emission_shape: str | None = None,
     conversational: bool = False,
+    **kwargs: Any,
 ):
     """Adds a CrewAI endpoint to the FastAPI app.
 
@@ -3394,6 +3395,9 @@ def add_crewai_flow_fastapi_endpoint(
     back, so the run re-kicks off and re-pauses in a loop. Pass
     ``emit_interrupt_outcome=True`` (or ``enable_legacy_on_interrupt_event=False``)
     for those clients.
+
+    ``**kwargs`` are forwarded to ``app.post`` (``name``, ``tags``,
+    ``operation_id``, ``dependencies``, ``include_in_schema``, ...).
     """
     global GLOBAL_EVENT_LISTENER # pylint: disable=global-statement
     hitl_options = HITLOptions(
@@ -3424,7 +3428,7 @@ def add_crewai_flow_fastapi_endpoint(
     resolved_emit_raw_events = resolve_emit_raw_events(emit_raw_events)
     resolved_emission_shape = resolve_emission_shape(emission_shape)
 
-    @app.post(path)
+    @app.post(path, **kwargs)
     async def agentic_chat_endpoint(input_data: RunAgentInput, request: Request):
         """Agentic chat endpoint"""
 
@@ -3507,12 +3511,13 @@ def add_crewai_flow_fastapi_endpoint(
 
 
 def add_crewai_crew_fastapi_endpoint(
-    app: FastAPI,
+    app: FastAPI | APIRouter,
     crew: CrewBaseInstance,
     path: str = "/",
     *,
     emit_raw_events: bool | None = None,
     emission_shape: str | None = None,
+    **kwargs: Any,
 ):
     """Adds a CrewAI crew endpoint to the FastAPI app.
 
@@ -3526,6 +3531,9 @@ def add_crewai_crew_fastapi_endpoint(
     ChatWithCrewFlow construction is deferred to first request because the
     constructor calls crew_chat_generate_crew_chat_inputs which makes an LLM
     call. At import time the LLM mock server may not be running yet.
+
+    ``**kwargs`` are forwarded to ``app.post`` (``name``, ``tags``,
+    ``operation_id``, ``dependencies``, ``include_in_schema``, ...).
     """
     global GLOBAL_EVENT_LISTENER # pylint: disable=global-statement
     # Skip the legacy bus listener on the StreamFrame path (see the rationale
@@ -3553,7 +3561,7 @@ def add_crewai_crew_fastapi_endpoint(
                 _cached_flow = ChatWithCrewFlow(crew=crew)
             return _cached_flow
 
-    @app.post(path)
+    @app.post(path, **kwargs)
     async def crew_endpoint(input_data: RunAgentInput, request: Request):
         """Crew chat endpoint with deferred initialization."""
         accept_header = request.headers.get("accept")

@@ -50,6 +50,12 @@ export const menuIntegrations = [
       "shared_state",
       "tool_based_generative_ui",
       "subgraphs",
+      // NOTE: no "deepagents_subagents" here. That demo needs the SUBAGENT_*
+      // lifecycle events, which only the Python integration (ag_ui_langgraph)
+      // emits. This Platform integration goes through the TypeScript
+      // @ag-ui/langgraph client, which has no subagent support, so the demo
+      // would silently degrade to a plain chat. It is exposed under
+      // langgraph-fastapi only.
       "a2ui_dynamic_schema",
       "a2ui_fixed_schema",
       "a2ui_advanced",
@@ -71,6 +77,7 @@ export const menuIntegrations = [
       "shared_state",
       "tool_based_generative_ui",
       "subgraphs",
+      "deepagents_subagents",
       "a2ui_fixed_schema",
       "a2ui_dynamic_schema",
       "a2ui_advanced",

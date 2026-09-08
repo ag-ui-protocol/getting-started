@@ -316,6 +316,7 @@ def add_adk_fastapi_endpoint(
     extract_headers: Optional[List[str]] = None,
     extract_state_from_request: Optional[Callable[[Request, RunAgentInput], Coroutine[dict[str,Any], Any, Any]]] = None,
     agent_resolver: Optional[AgentResolver] = None,
+    **kwargs: Any,
 ):
     """Add ADK middleware endpoint to FastAPI app.
 
@@ -331,6 +332,11 @@ def add_adk_fastapi_endpoint(
         agent_resolver: Optional async function that can select an ``ADKAgent``
             for the request after state extraction. Returning ``None`` uses
             the default agent.
+        **kwargs: Forwarded to ``app.post`` for the agent route (``name``,
+            ``tags``, ``operation_id``, ``dependencies``, ``include_in_schema``,
+            ...). They do not apply to the other routes this helper registers,
+            because values such as ``operation_id`` and ``name`` must stay
+            unique per operation.
 
     Note:
         This function also adds an experimental POST /agents/state endpoint for
@@ -385,7 +391,7 @@ def add_adk_fastapi_endpoint(
 
     default_agent = agent
 
-    @app.post(path)
+    @app.post(path, **kwargs)
     async def adk_endpoint(input_data: RunAgentInput, request: Request):
         """ADK middleware endpoint.
 
@@ -653,6 +659,7 @@ def create_adk_app(
     extract_headers: Optional[List[str]] = None,
     extract_state_from_request: Optional[Callable[[Request, RunAgentInput], Coroutine[dict[str,Any], Any, Any]]] = None,
     agent_resolver: Optional[AgentResolver] = None,
+    **kwargs: Any,
 ) -> FastAPI:
     """Create a FastAPI app with ADK middleware endpoint.
 
@@ -667,6 +674,11 @@ def create_adk_app(
         agent_resolver: Optional async function that can select an ``ADKAgent``
             for the request after state extraction. Returning ``None`` uses
             the default agent.
+        **kwargs: Forwarded to ``app.post`` for the agent route (``name``,
+            ``tags``, ``operation_id``, ``dependencies``, ``include_in_schema``,
+            ...). They do not apply to the other routes this helper registers,
+            because values such as ``operation_id`` and ``name`` must stay
+            unique per operation.
 
     Returns:
         FastAPI application instance
@@ -679,5 +691,6 @@ def create_adk_app(
         extract_headers=extract_headers,
         extract_state_from_request=extract_state_from_request,
         agent_resolver=agent_resolver,
+        **kwargs,
     )
     return app

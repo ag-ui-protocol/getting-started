@@ -145,6 +145,21 @@ describe("terminal error paths", () => {
       expectContractError(terminalError(events), "THREAD_AGENT_CONFIG_ERROR");
     });
 
+    it("reports a templateToolsProvider hook that threw as TEMPLATE_TOOLS_PROVIDER_ERROR", async () => {
+      const agent = uncachedAgent({
+        templateToolsProvider: () => {
+          throw new Error("authz lookup failed");
+        },
+      });
+
+      const events = await collect(agent, minimalRunInput());
+
+      expectContractError(
+        terminalError(events),
+        "TEMPLATE_TOOLS_PROVIDER_ERROR",
+      );
+    });
+
     it("reports a seed this bridge cannot build as SEED_BUILD_ERROR", async () => {
       // The seed is built from the client's own messages, which nothing
       // validates. A message whose content cannot even be read is the

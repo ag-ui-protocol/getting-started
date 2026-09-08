@@ -153,49 +153,20 @@ export class ClaudeAgentAdapter extends AbstractAgent {
         sessionEntry.active = true;
       }
 
-      const { userMessage } = processMessages(runInput);
-      const options = this.buildOptions(runInput);
-
-      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-      const abortController = this.config.queryTimeoutMs
-        ? new AbortController()
-        : undefined;
-      if (abortController) {
-        timeoutHandle = setTimeout(
-          () => abortController.abort(),
-          this.config.queryTimeoutMs!,
-        );
-      }
-
-      const queryStream = query({
-        prompt: userMessage,
-        options: {
-          ...options,
-          model: options.model, // SDK picks default if omitted
-          ...(abortController ? { abortController } : {}),
-        },
+      this.translateStream(runInput, subscriber).catch((error) => {
+        subscriber.error(error);
       });
-
-      this.activeQueries.set(threadId, queryStream);
-
-      this.translateStream(runInput, queryStream, subscriber)
-        .catch((error) => {
-          subscriber.error(error);
-        })
-        .finally(() => {
-          if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
-          this.activeQueries.delete(threadId);
-        });
     });
   }
 
   private async translateStream(
     input: RunAgentInput,
-    messageStream: AsyncIterable<unknown>,
     subscriber: Subscriber<ProcessedEvent>,
   ): Promise<void> {
+    const queryKey = input.threadId ?? "default";
     const threadId = input.threadId ?? randomUUID();
     const runId = input.runId ?? randomUUID();
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
     const runCtx = {
       currentState: hasState(input.state) ? input.state : null,
@@ -214,6 +185,28 @@ export class ClaudeAgentAdapter extends AbstractAgent {
         threadId,
         runId,
       });
+
+      const { userMessage } = processMessages(input);
+      const options = this.buildOptions(input);
+      const abortController = this.config.queryTimeoutMs
+        ? new AbortController()
+        : undefined;
+      if (abortController) {
+        timeoutHandle = setTimeout(
+          () => abortController.abort(),
+          this.config.queryTimeoutMs!,
+        );
+      }
+
+      const messageStream = query({
+        prompt: userMessage,
+        options: {
+          ...options,
+          model: options.model, // SDK picks default if omitted
+          ...(abortController ? { abortController } : {}),
+        },
+      });
+      this.activeQueries.set(queryKey, messageStream);
 
       const frontendToolNames = new Set(
         input.tools?.length ? extractToolNames(input.tools) : [],
@@ -261,6 +254,18 @@ export class ClaudeAgentAdapter extends AbstractAgent {
         message: errorMessage,
       });
       subscriber.complete();
+    } finally {
+      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+      this.activeQueries.delete(queryKey);
+
+      // Conversion can fail before streamMessages gets a chance to mark a
+      // resumed session idle, so cover every terminal path here as well.
+      const idleEntry = this.sessions.get(queryKey);
+      if (idleEntry) {
+        idleEntry.active = false;
+        idleEntry.lastUsed = Date.now();
+        this.evictSessions();
+      }
     }
   }
 

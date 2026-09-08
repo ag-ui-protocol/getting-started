@@ -171,6 +171,12 @@
       "messages": ["{}"]
     },
     {
+      "code": "TEMPLATE_TOOLS_PROVIDER_ERROR",
+      "sides": ["python", "typescript"],
+      "messages": ["Failed to resolve the template tools for this request: {}"],
+      "note": "Reported when the per-request template-tools hook throws. Unlike the per-thread agent hook beside it, the option carries one name on both sides (template_tools_provider / templateToolsProvider) and returns the same thing, a selection of the template's tools, so there is one code and one sentence. Terminal rather than degrading to an unfiltered run: the hook exists to withhold tools from a caller, and failing open would hand the model exactly what the caller meant to keep back."
+    },
+    {
       "code": "THREAD_AGENT_CONFIG_ERROR",
       "sides": ["typescript"],
       "messages": ["Failed to build per-thread agent config: {}"],

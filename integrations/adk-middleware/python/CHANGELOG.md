@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `add_adk_fastapi_endpoint()` and `create_adk_app()` accept extra keyword
+  arguments and forward them to `app.post` for the agent route (`name`,
+  `tags`, `operation_id`, `summary`, `dependencies`, `include_in_schema`,
+  ...), so an application can give the route the same metadata, OpenAPI
+  identity and dependencies as the rest of its API. The derived
+  `<path>/capabilities` and `/agents/state` routes keep their own identity,
+  because FastAPI requires a unique `operation_id` and `name` per operation.
+
 ## [0.7.0] - 2026-06-22
 
 ### Added

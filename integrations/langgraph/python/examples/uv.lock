@@ -20,7 +20,7 @@ wheels = [
 
 [[package]]
 name = "ag-ui-langgraph"
-version = "0.0.43"
+version = "0.0.44"
 source = { directory = "../" }
 dependencies = [
     { name = "ag-ui-a2ui-toolkit" },
@@ -39,7 +39,7 @@ fastapi = [
 [package.metadata]
 requires-dist = [
     { name = "ag-ui-a2ui-toolkit", specifier = ">=0.0.4" },
-    { name = "ag-ui-protocol", directory = "../../../../sdks/python" },
+    { name = "ag-ui-protocol", specifier = ">=0.1.21" },
     { name = "fastapi", marker = "extra == 'fastapi'", specifier = ">=0.115.12" },
     { name = "langchain", specifier = ">=1.2.0" },
     { name = "langchain-core", specifier = ">=0.3.0" },
@@ -58,7 +58,7 @@ dev = [
 
 [[package]]
 name = "ag-ui-protocol"
-version = "0.1.20"
+version = "0.1.21"
 source = { directory = "../../../../sdks/python" }
 dependencies = [
     { name = "pydantic" },

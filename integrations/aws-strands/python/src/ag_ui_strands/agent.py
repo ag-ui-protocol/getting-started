@@ -1438,6 +1438,14 @@ from .client_proxy_tool import (
     sync_proxy_tools,
     waits_for_frontend_call,
 )
+from .template_tools import (
+    TemplateToolsNarrowingHook,
+    apply_template_tool_selection,
+    index_template_tools,
+    parked_batch_tool_names,
+    record_template_tool_selection,
+    resolve_template_tool_selection,
+)
 from .frontend_tool_interrupt import (
     frontend_tool_response_schema,
     index_frontend_tool_interrupts,
@@ -3383,6 +3391,14 @@ class StrandsAgent:
         if interrupt_tools:
             self._hooks = [StrandsInterruptHook(interrupt_tools), *self._hooks]
 
+        # Re-narrow the per-request tool filter before each model call. The
+        # parked-batch exemption holds a denied tool registered so a resume can
+        # reach it, and Strands then continues the same run against the same
+        # registry; without this the run would keep advertising what the
+        # request denied until the next request narrowed again.
+        if self.config.template_tools_provider is not None:
+            self._hooks = [*self._hooks, TemplateToolsNarrowingHook(self._tools)]
+
         # Detect the common footgun: session_manager set on the template Agent
         # (stored as `_session_manager` by Strands) with no per-thread provider.
         # Forwarding it would make every AG-UI thread share one session_id.
@@ -4485,6 +4501,65 @@ class StrandsAgent:
             strands_agent.state.set("agui_context", agui_context)
         except Exception as e:
             logger.warning(f"Failed to set agui_context on strands_agent.state: {e}")
+
+        # Filter the tools the template contributed, per request. Applied to
+        # the registry this thread's live agent already owns: that instance
+        # carries the thread's session manager, its interrupt checkpoint and
+        # its history, so rebuilding it to change a tool list would discard a
+        # conversation and any approval waiting inside it.
+        if self.config.template_tools_provider is not None:
+            # Calling the provider and reading its answer are guarded
+            # together. Reading is where a mapping, a bare name or a generator
+            # that raises partway through is caught, and those are provider
+            # mistakes: leaving them outside this arm would let them bypass the
+            # documented code and, on the TypeScript side, end the stream with
+            # nothing terminal behind it.
+            try:
+                template_tool_allowed = resolve_template_tool_selection(
+                    await maybe_await(
+                        self.config.template_tools_provider(input_data)
+                    ),
+                    index_template_tools(self._tools),
+                )
+            except Exception as e:  # noqa: BLE001 - surfaced as RUN_ERROR
+                logger.error(
+                    "template_tools_provider failed: %s", e, exc_info=True
+                )
+                # Deliberately terminal rather than unfiltered: a filter that
+                # fails open hands the model tools the caller meant to withhold.
+                ev_started, ev_error = _error_events(
+                    input_data,
+                    "Failed to resolve the template tools for this request: "
+                    f"{e}",
+                    "TEMPLATE_TOOLS_PROVIDER_ERROR",
+                )
+                yield ev_started
+                yield ev_error
+                return
+            # Guarded separately, and not as a provider error: past this point
+            # a failure is this adapter's, and it still must not escape as a
+            # stream that stops with nothing terminal behind it.
+            try:
+                apply_template_tool_selection(
+                    strands_agent.tool_registry,
+                    self._tools,
+                    template_tool_allowed,
+                    exempt_names=parked_batch_tool_names(strands_agent),
+                )
+            except Exception as e:  # noqa: BLE001 - surfaced as RUN_ERROR
+                logger.error(
+                    "Applying the template tool filter failed: %s", e, exc_info=True
+                )
+                ev_started, ev_error = _error_events(
+                    input_data, str(e), _terminal_error_code(e)
+                )
+                yield ev_started
+                yield ev_error
+                return
+            # Published for the re-narrowing hook: the exemption above holds a
+            # denied tool registered so a resume can reach it, and Strands then
+            # continues the same run from this registry.
+            record_template_tool_selection(strands_agent, template_tool_allowed)
 
         # Sync proxy tools from client-defined tools. A proxy parked in a live
         # frontend-tool interrupt is exempt from removal: Strands is about to

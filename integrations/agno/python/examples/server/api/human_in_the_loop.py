@@ -1,54 +1,18 @@
 """Example: Agno Agent with Human-in-the-Loop
 
-This example shows how to create an Agno Agent with a generate_task_steps tool
+This example shows how an Agno Agent uses the generate_task_steps client tool
 for human-in-the-loop interactions, exposed in an AG-UI compatible way.
 """
 
-from typing import List, Literal
-
-from agno.agent.agent import Agent
+from agno.agent import Agent
 from agno.db.in_memory import InMemoryDb
 from agno.models.openai import OpenAIChat
 from agno.os import AgentOS
 from agno.os.interfaces.agui import AGUI
-from agno.tools import tool
-from pydantic import BaseModel, Field
-
-
-class Step(BaseModel):
-    """A single step in a task plan."""
-
-    description: str = Field(..., description="A brief description of the step")
-    status: Literal["enabled", "disabled", "executing"] = Field(
-        default="enabled",
-        description="The status of the step",
-    )
-
-
-@tool(external_execution=True)
-def generate_task_steps(
-    steps: List[Step],
-) -> str:  # pylint: disable=unused-argument
-    """Generate a list of steps for the user to review and approve.
-
-    This tool creates a task plan that will be displayed to the user for review.
-    The user can enable/disable steps before confirming execution.
-
-    Args:
-        steps: A list of 10 step objects, each containing a description and status.
-               Each step should be brief (a few words) and in imperative form
-               (e.g., "Dig hole", "Open door", "Mix ingredients").
-
-    Returns:
-        A confirmation message.
-    """
-    return f"Generated {len(steps)} steps for user review"
-
 
 agent = Agent(
     db=InMemoryDb(),
     model=OpenAIChat(id="gpt-4o"),
-    tools=[generate_task_steps],
     description="You are a helpful task planning assistant that helps break down complex tasks into manageable steps.",
     instructions="""
     You are a task planning assistant specialized in creating clear, actionable step-by-step plans.

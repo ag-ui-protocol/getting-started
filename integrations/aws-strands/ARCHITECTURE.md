@@ -93,6 +93,8 @@ This document explains how the AWS Strands integration inside `integrations/aws-
 - **State priming**
   - If `RunAgentInput.state` is provided, it immediately publishes a `StateSnapshotEvent`, filtering out any `messages` field so the frontend remains the source of truth for the timeline.
   - Optionally rewrites the outgoing user prompt via `StrandsAgentConfig.state_context_builder`.
+- **Model context (`RunAgentInput.context`)**
+  - The application's context entries are rendered as one text block (`Context provided by the application:` followed by one `- description: value` line per entry, the A2UI component-schema entry excluded through the shared toolkit split) and shown to the model for exactly one call: a `BeforeModelCallEvent` hook splices the block into `agent.messages` immediately before the latest user turn (into that turn's content when it carries a tool result, appended when there is no user turn at all) and the paired `AfterModelCallEvent` hook splices it back out, with the stream teardown as a second restore for cancellation. The block never reaches `agent.messages` after the call, a `MessagesSnapshotEvent`, or the session store. The block is request-scoped (a `ContextVar` in Python, `AsyncLocalStorage` in TypeScript, both set around each pull of the Strands stream) so concurrent runs cannot see each other's context. A non-empty block on an agent with no hook registry ends the run with a `RunErrorEvent`. On the orchestrator path the hook goes on every reachable leaf agent; an orchestrator with no reachable leaf gets the block prefixed onto its prompt instead. Python additionally refuses that prompt fallback during an interrupt resume; the TypeScript orchestrator path has no resume arm, so that refusal has no counterpart there. Both bridges also drop the middleware's usage guide for a render tool that A2UI auto-injection replaced, from the model block and from the recovery subagent's context alike. Tools and hooks keep reading the unnarrowed context through `agui_context` state (Python) and `buildContextExtras` (TypeScript).
 - **History reconciliation**
   - When the cached per-thread `StrandsAgentCore` has no `session_manager`, the adapter rebuilds Strands' internal `messages` list from `RunAgentInput.messages` before each `stream_async` call. Tool calls are rendered as `toolUse` ContentBlocks on assistant turns and tool results as `toolResult` blocks on user turns, matching Strands' native shape.
   - For legacy placeholder frontend tools, this fixes the "frontend tool loops forever" symptom: without reconciliation, Strands re-fires the same tool every turn because the result the frontend produced never reaches the LLM context. Explicit native waits resume from Strands' checkpoint instead.
@@ -170,6 +172,7 @@ This document explains how the AWS Strands integration inside `integrations/aws-
 | `tool_behaviors: Dict[str, ToolBehavior]` | Per-tool overrides keyed by the Strands tool name.                                                                                                                                     |
 | `state_context_builder`                   | Callable that enriches the outgoing prompt with the current shared state (useful for reiterating plan steps, recipes, etc.).                                                           |
 | `session_manager_provider`                | Factory invoked once per thread to produce a per-thread `SessionManager`.                                                                                                              |
+| `template_tools_provider`                 | Per-request choice of which of the template agent's tools this request may see, applied to the live per-thread registry. TypeScript's equivalent field is `templateToolsProvider`.     |
 | `thread_agent_kwargs`                     | Callable returning extra constructor kwargs for one thread's `StrandsAgentCore`. TypeScript's `threadAgentConfig` returns a partial `AgentConfig` instead.                             |
 | `emit_messages_snapshot`                  | Global opt-out of the four-point `MESSAGES_SNAPSHOT` emission. Default `True`.                                                                                                         |
 | `replay_history_into_strands`             | Global opt-out of the per-run Strands history reconciliation. Default `True`.                                                                                                          |
@@ -245,8 +248,10 @@ typescript/src/
 ├── config.ts             ← StrandsAgentConfig, ToolBehavior, helpers
 ├── endpoint.ts           ← Express route registration + capabilities endpoint
 ├── logger.ts             ← injectable Logger interface + internal default
+├── model-context.ts      ← RunAgentInput.context shown to the model for one call only
 ├── server.ts             ← createStrandsApp factory + CORS/auth wiring
 ├── session-reconcile.ts  ← port of session_reconcile.py, snapshot-shaped
+├── template-tools.ts     ← per-request filter over the template agent's tools
 ├── types.ts              ← internal SeenToolCall bookkeeping
 ├── utils.ts              ← content conversion + UrlFetchPolicy
 └── index.ts              ← public exports
