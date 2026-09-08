@@ -25,28 +25,45 @@ pub enum Event<StateT> {
     TextMessageEnd(TextMessageEndEvent),
     TextMessageChunk(TextMessageChunkEvent),
     ThinkingTextMessageStart(ThinkingTextMessageStartEvent),
+    ThinkingTextMessageContent(ThinkingTextMessageContentEvent),
+    ThinkingTextMessageEnd(ThinkingTextMessageEndEvent),
     ToolCallStart(ToolCallStartEvent),
     ToolCallArgs(ToolCallArgsEvent),
     ToolCallEnd(ToolCallEndEvent),
+    ToolCallChunk(ToolCallChunkEvent),
     ToolCallResult(ToolCallResultEvent),
     StateSnapshot(StateSnapshotEvent<StateT>),
     StateDelta(StateDeltaEvent),
     MessagesSnapshot(MessagesSnapshotEvent),
+    ActivitySnapshot(ActivitySnapshotEvent),
+    ActivityDelta(ActivityDeltaEvent),
     Raw(RawEvent),
     Custom(CustomEvent),
+    ReasoningStart(ReasoningStartEvent),
+    ReasoningMessageStart(ReasoningMessageStartEvent),
+    ReasoningMessageContent(ReasoningMessageContentEvent),
+    ReasoningMessageEnd(ReasoningMessageEndEvent),
+    ReasoningMessageChunk(ReasoningMessageChunkEvent),
+    ReasoningEnd(ReasoningEndEvent),
+    ReasoningEncryptedValue(ReasoningEncryptedValueEvent),
 }
 ```
 
 ## Frequently used events
 
-- RunStartedEvent – signals the beginning of a run
-- RunFinishedEvent – contains an optional result payload
+- RunStartedEvent – signals the beginning of a run and can include parentRunId/input
+- RunFinishedEvent – contains an optional result payload or interrupt-aware outcome
 - RunErrorEvent – reports an error with message/context
 - TextMessageStart/Content/End – streaming assistant message text
+- TextMessageChunk – convenience chunk form matching the proto schema
 - ToolCall* – tool call lifecycle and argument streaming
 - StateSnapshotEvent<StateT> – full state replacement
 - StateDeltaEvent – JSON-Patch style deltas (Vec<Value>)
 - MessagesSnapshotEvent – full replacement of the message history
+- ActivitySnapshotEvent/ActivityDeltaEvent – structured in-progress activity updates
+- Reasoning* – reasoning block/message events and encrypted reasoning values
+
+`Thinking*` events are still accepted for compatibility, but the protocol docs now mark them as deprecated in favor of the `Reasoning*` events.
 
 ## Handling in subscribers
 

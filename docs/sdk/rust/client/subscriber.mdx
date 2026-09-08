@@ -44,7 +44,7 @@ impl AgentSubscriber for Logger {
         _buffer: &str,
         _params: ag_ui_client::subscriber::AgentSubscriberParams<'async_trait, serde_json::Value, serde_json::Value>,
     ) -> Result<ag_ui_client::agent::AgentStateMutation, ag_ui_client::agent::AgentError> {
-        println!("chunk: {}", event.content);
+        println!("chunk: {}", event.delta);
         Ok(Default::default())
     }
 }
@@ -101,6 +101,9 @@ You can implement specific typed callbacks or the catch‑all on_event. Key call
 - on_tool_call_start_event / on_tool_call_args_event / on_tool_call_end_event / on_tool_call_result_event
 - on_state_snapshot_event / on_state_delta_event
 - on_messages_snapshot_event
+- on_activity_snapshot_event / on_activity_delta_event
+- on_reasoning_start_event / on_reasoning_message_start_event / on_reasoning_message_content_event / on_reasoning_message_end_event
+- on_reasoning_message_chunk_event / on_reasoning_end_event / on_reasoning_encrypted_value_event
 - on_raw_event / on_custom_event
 
 All callbacks have sensible defaults that return Ok(Default::default()). Only implement what you need.

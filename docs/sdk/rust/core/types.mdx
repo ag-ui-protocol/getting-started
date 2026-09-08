@@ -28,18 +28,19 @@ let tcid = ToolCallId::random();
 
 ## Messages
 
-Message is an enum covering different roles. Helpers exist to create messages.
+Message is an enum covering protocol roles: developer, system, assistant, user, tool, activity, and reasoning. Helpers exist to create common message types.
 
 ```rust
-use ag_ui_client::core::types::{Message, MessageId};
+use ag_ui_client::core::types::Message;
 
 let user = Message::new_user("Hello");
 let system = Message::new_system("You are a helpful assistant");
 let dev = Message::new_developer("internal instruction");
-let tool = Message::new_tool("result", ag_ui_client::core::types::ToolCallId::random());
+let tool = Message::new_tool("result");
 ```
 
 Each variant also has a builder form; see crate docs for full fields (name, error, tool call reference, etc.).
+Activity messages carry structured JSON content for in-progress UI state. Reasoning messages carry reasoning content and optional encryptedValue.
 
 ## Tools and context
 
@@ -60,6 +61,8 @@ let tool = Tool::new(
 let ctx = Context::new("trace_id".into(), "abc-123".into());
 ```
 
+Tools can also carry optional metadata, and tool calls can carry encryptedValue for reasoning continuity workflows.
+
 ## RunAgentInput
 
 The payload sent to an agent, typically over HTTP by HttpAgent. Constructed internally by Agent::run_agent but also available directly.
@@ -79,7 +82,7 @@ let input = RunAgentInput::new(
 );
 ```
 
-Type parameters allow strongly-typed state and forwarded_props when desired.
+Type parameters allow strongly-typed state and forwarded_props when desired. Use `with_parent_run_id` to record run lineage and `with_resume` to resume interrupts with `ResumeEntry` values.
 
 ## Traits: AgentState and FwdProps
 

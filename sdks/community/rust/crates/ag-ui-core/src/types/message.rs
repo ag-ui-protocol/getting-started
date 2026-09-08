@@ -1,3 +1,4 @@
+use crate::JsonValue;
 use crate::types::ids::{MessageId, ToolCallId};
 use crate::types::tool::ToolCall;
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,8 @@ pub enum Role {
     Assistant,
     User,
     Tool,
+    Activity,
+    Reasoning,
 }
 
 // Utility methods for serde defaults
@@ -38,6 +41,9 @@ impl Role {
     pub(crate) fn tool() -> Self {
         Self::Tool
     }
+    pub(crate) fn reasoning() -> Self {
+        Self::Reasoning
+    }
 }
 
 /// A basic message, where the only content should be an optional string.
@@ -49,6 +55,8 @@ pub struct BaseMessage {
     pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(rename = "encryptedValue", skip_serializing_if = "Option::is_none")]
+    pub encrypted_value: Option<String>,
 }
 
 /// A developer message.
@@ -118,6 +126,8 @@ pub struct AssistantMessage {
     pub name: Option<String>,
     #[serde(rename = "toolCalls", skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
+    #[serde(rename = "encryptedValue", skip_serializing_if = "Option::is_none")]
+    pub encrypted_value: Option<String>,
 }
 
 impl AssistantMessage {
@@ -128,6 +138,7 @@ impl AssistantMessage {
             content: None,
             name: None,
             tool_calls: None,
+            encrypted_value: None,
         }
     }
 
@@ -145,6 +156,11 @@ impl AssistantMessage {
         self.tool_calls = Some(tool_calls);
         self
     }
+
+    pub fn with_encrypted_value(mut self, encrypted_value: String) -> Self {
+        self.encrypted_value = Some(encrypted_value);
+        self
+    }
 }
 
 /// A user message.
@@ -156,6 +172,8 @@ pub struct UserMessage {
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(rename = "encryptedValue", skip_serializing_if = "Option::is_none")]
+    pub encrypted_value: Option<String>,
 }
 
 impl UserMessage {
@@ -165,11 +183,17 @@ impl UserMessage {
             role: Role::User,
             content,
             name: None,
+            encrypted_value: None,
         }
     }
 
     pub fn with_name(mut self, name: String) -> Self {
         self.name = Some(name);
+        self
+    }
+
+    pub fn with_encrypted_value(mut self, encrypted_value: String) -> Self {
+        self.encrypted_value = Some(encrypted_value);
         self
     }
 }
@@ -185,6 +209,8 @@ pub struct ToolMessage {
     pub tool_call_id: ToolCallId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(rename = "encryptedValue", skip_serializing_if = "Option::is_none")]
+    pub encrypted_value: Option<String>,
 }
 
 impl ToolMessage {
@@ -199,11 +225,17 @@ impl ToolMessage {
             role: Role::Tool,
             tool_call_id: tool_call_id.into(),
             error: None,
+            encrypted_value: None,
         }
     }
 
     pub fn with_error(mut self, error: String) -> Self {
         self.error = Some(error);
+        self
+    }
+
+    pub fn with_encrypted_value(mut self, encrypted_value: String) -> Self {
+        self.encrypted_value = Some(encrypted_value);
         self
     }
 }
@@ -217,12 +249,16 @@ pub enum Message {
         content: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        #[serde(rename = "encryptedValue", skip_serializing_if = "Option::is_none")]
+        encrypted_value: Option<String>,
     },
     System {
         id: MessageId,
         content: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        #[serde(rename = "encryptedValue", skip_serializing_if = "Option::is_none")]
+        encrypted_value: Option<String>,
     },
     Assistant {
         id: MessageId,
@@ -232,12 +268,16 @@ pub enum Message {
         name: Option<String>,
         #[serde(rename = "toolCalls", skip_serializing_if = "Option::is_none")]
         tool_calls: Option<Vec<ToolCall>>,
+        #[serde(rename = "encryptedValue", skip_serializing_if = "Option::is_none")]
+        encrypted_value: Option<String>,
     },
     User {
         id: MessageId,
         content: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        #[serde(rename = "encryptedValue", skip_serializing_if = "Option::is_none")]
+        encrypted_value: Option<String>,
     },
     Tool {
         id: MessageId,
@@ -246,6 +286,20 @@ pub enum Message {
         tool_call_id: ToolCallId,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        #[serde(rename = "encryptedValue", skip_serializing_if = "Option::is_none")]
+        encrypted_value: Option<String>,
+    },
+    Activity {
+        id: MessageId,
+        #[serde(rename = "activityType")]
+        activity_type: String,
+        content: JsonValue,
+    },
+    Reasoning {
+        id: MessageId,
+        content: String,
+        #[serde(rename = "encryptedValue", skip_serializing_if = "Option::is_none")]
+        encrypted_value: Option<String>,
     },
 }
 
@@ -256,28 +310,43 @@ impl Message {
                 id: id.into(),
                 content: content.as_ref().to_string(),
                 name: None,
+                encrypted_value: None,
             },
             Role::System => Self::System {
                 id: id.into(),
                 content: content.as_ref().to_string(),
                 name: None,
+                encrypted_value: None,
             },
             Role::Assistant => Self::Assistant {
                 id: id.into(),
                 content: Some(content.as_ref().to_string()),
                 name: None,
                 tool_calls: None,
+                encrypted_value: None,
             },
             Role::User => Self::User {
                 id: id.into(),
                 content: content.as_ref().to_string(),
                 name: None,
+                encrypted_value: None,
             },
             Role::Tool => Self::Tool {
                 id: id.into(),
                 content: content.as_ref().to_string(),
                 tool_call_id: ToolCallId::random(),
                 error: None,
+                encrypted_value: None,
+            },
+            Role::Activity => Self::Activity {
+                id: id.into(),
+                activity_type: "activity".to_string(),
+                content: JsonValue::String(content.as_ref().to_string()),
+            },
+            Role::Reasoning => Self::Reasoning {
+                id: id.into(),
+                content: content.as_ref().to_string(),
+                encrypted_value: None,
             },
         }
     }
@@ -314,6 +383,8 @@ impl Message {
             Message::Assistant { id, .. } => id,
             Message::User { id, .. } => id,
             Message::Tool { id, .. } => id,
+            Message::Activity { id, .. } => id,
+            Message::Reasoning { id, .. } => id,
         }
     }
 
@@ -324,6 +395,8 @@ impl Message {
             Message::Assistant { id, .. } => id,
             Message::User { id, .. } => id,
             Message::Tool { id, .. } => id,
+            Message::Activity { id, .. } => id,
+            Message::Reasoning { id, .. } => id,
         }
     }
 
@@ -334,6 +407,8 @@ impl Message {
             Message::Assistant { .. } => Role::Assistant,
             Message::User { .. } => Role::User,
             Message::Tool { .. } => Role::Tool,
+            Message::Activity { .. } => Role::Activity,
+            Message::Reasoning { .. } => Role::Reasoning,
         }
     }
     pub fn content(&self) -> Option<&str> {
@@ -343,6 +418,8 @@ impl Message {
             Message::User { content, .. } => Some(content),
             Message::Tool { content, .. } => Some(content),
             Message::Assistant { content, .. } => content.as_deref(),
+            Message::Activity { .. } => None,
+            Message::Reasoning { content, .. } => Some(content),
         }
     }
 
@@ -358,6 +435,8 @@ impl Message {
                 }
                 content.as_mut()
             }
+            Message::Activity { .. } => None,
+            Message::Reasoning { content, .. } => Some(content),
         }
     }
 
@@ -377,6 +456,30 @@ impl Message {
                 tool_calls.as_mut()
             }
             _ => None,
+        }
+    }
+
+    pub fn encrypted_value_mut(&mut self) -> Option<&mut Option<String>> {
+        match self {
+            Message::Developer {
+                encrypted_value, ..
+            }
+            | Message::System {
+                encrypted_value, ..
+            }
+            | Message::Assistant {
+                encrypted_value, ..
+            }
+            | Message::User {
+                encrypted_value, ..
+            }
+            | Message::Tool {
+                encrypted_value, ..
+            }
+            | Message::Reasoning {
+                encrypted_value, ..
+            } => Some(encrypted_value),
+            Message::Activity { .. } => None,
         }
     }
 }

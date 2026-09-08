@@ -1,6 +1,6 @@
 use crate::JsonValue;
 use crate::state::AgentState;
-use crate::types::{Message, Role};
+use crate::types::{Interrupt, Message, Role, RunAgentInput};
 use crate::types::{MessageId, RunId, ThreadId, ToolCallId};
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +42,10 @@ pub enum EventType {
     StateDelta,
     /// Event containing a snapshot of the messages
     MessagesSnapshot,
+    /// Event containing a snapshot of structured activity
+    ActivitySnapshot,
+    /// Event containing a delta for structured activity
+    ActivityDelta,
     /// Event containing a raw event
     Raw,
     /// Event containing a custom event
@@ -56,6 +60,20 @@ pub enum EventType {
     StepStarted,
     /// Event indicating that a step has finished
     StepFinished,
+    /// Event indicating the start of a reasoning block
+    ReasoningStart,
+    /// Event indicating the start of a reasoning message
+    ReasoningMessageStart,
+    /// Event containing a reasoning message delta
+    ReasoningMessageContent,
+    /// Event indicating the end of a reasoning message
+    ReasoningMessageEnd,
+    /// Event containing a chunk of reasoning message content
+    ReasoningMessageChunk,
+    /// Event indicating the end of a reasoning block
+    ReasoningEnd,
+    /// Event carrying an encrypted reasoning value
+    ReasoningEncryptedValue,
 }
 
 /// Base event for all events in the Agent User Interaction Protocol.
@@ -68,6 +86,22 @@ pub struct BaseEvent {
     pub raw_event: Option<JsonValue>,
 }
 
+/// The interrupt-aware outcome of a completed run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum RunFinishedOutcome {
+    Success,
+    Interrupt { interrupts: Vec<Interrupt> },
+}
+
+/// Entity subtype for encrypted reasoning values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReasoningEncryptedValueSubtype {
+    Message,
+    ToolCall,
+}
+
 /// Event indicating the start of a text message.
 /// This event is sent when the agent begins generating a text message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -76,7 +110,10 @@ pub struct TextMessageStartEvent {
     pub base: BaseEvent,
     #[serde(rename = "messageId")]
     pub message_id: MessageId,
+    #[serde(default = "Role::assistant")]
     pub role: Role, // "assistant"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Event containing a piece of text message content.
@@ -109,9 +146,12 @@ pub struct TextMessageChunkEvent {
     pub base: BaseEvent,
     #[serde(rename = "messageId", skip_serializing_if = "Option::is_none")]
     pub message_id: Option<MessageId>,
-    pub role: Role,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<Role>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delta: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Event indicating the start of a thinking text message.
@@ -252,6 +292,36 @@ pub struct MessagesSnapshotEvent {
     pub messages: Vec<Message>,
 }
 
+/// Event containing a full structured activity snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActivitySnapshotEvent {
+    #[serde(flatten)]
+    pub base: BaseEvent,
+    #[serde(rename = "messageId")]
+    pub message_id: MessageId,
+    #[serde(rename = "activityType")]
+    pub activity_type: String,
+    pub content: JsonValue,
+    #[serde(default = "default_activity_replace")]
+    pub replace: bool,
+}
+
+fn default_activity_replace() -> bool {
+    true
+}
+
+/// Event containing JSON Patch operations for an activity message.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActivityDeltaEvent {
+    #[serde(flatten)]
+    pub base: BaseEvent,
+    #[serde(rename = "messageId")]
+    pub message_id: MessageId,
+    #[serde(rename = "activityType")]
+    pub activity_type: String,
+    pub patch: Vec<JsonValue>,
+}
+
 /// Event containing a raw event.
 /// This event type allows wrapping arbitrary events from external sources.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -270,7 +340,8 @@ pub struct CustomEvent {
     #[serde(flatten)]
     pub base: BaseEvent,
     pub name: String,
-    pub value: JsonValue,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<JsonValue>,
 }
 
 /// Event indicating that a run has started.
@@ -283,6 +354,10 @@ pub struct RunStartedEvent {
     pub thread_id: ThreadId,
     #[serde(rename = "runId")]
     pub run_id: RunId,
+    #[serde(rename = "parentRunId", skip_serializing_if = "Option::is_none")]
+    pub parent_run_id: Option<RunId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<RunAgentInput>,
 }
 
 /// Event indicating that a run has finished.
@@ -297,6 +372,8 @@ pub struct RunFinishedEvent {
     pub run_id: RunId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<JsonValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<RunFinishedOutcome>,
 }
 
 /// Event indicating that a run has encountered an error.
@@ -328,6 +405,77 @@ pub struct StepFinishedEvent {
     pub base: BaseEvent,
     #[serde(rename = "stepName")]
     pub step_name: String,
+}
+
+/// Event indicating the start of a reasoning block.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReasoningStartEvent {
+    #[serde(flatten)]
+    pub base: BaseEvent,
+    #[serde(rename = "messageId")]
+    pub message_id: MessageId,
+}
+
+/// Event indicating the start of a reasoning message.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReasoningMessageStartEvent {
+    #[serde(flatten)]
+    pub base: BaseEvent,
+    #[serde(rename = "messageId")]
+    pub message_id: MessageId,
+    #[serde(default = "Role::reasoning")]
+    pub role: Role,
+}
+
+/// Event containing a piece of reasoning message content.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReasoningMessageContentEvent {
+    #[serde(flatten)]
+    pub base: BaseEvent,
+    #[serde(rename = "messageId")]
+    pub message_id: MessageId,
+    pub delta: String,
+}
+
+/// Event indicating the end of a reasoning message.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReasoningMessageEndEvent {
+    #[serde(flatten)]
+    pub base: BaseEvent,
+    #[serde(rename = "messageId")]
+    pub message_id: MessageId,
+}
+
+/// Event containing a chunk of reasoning message content.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReasoningMessageChunkEvent {
+    #[serde(flatten)]
+    pub base: BaseEvent,
+    #[serde(rename = "messageId", skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<MessageId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta: Option<String>,
+}
+
+/// Event indicating the end of a reasoning block.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReasoningEndEvent {
+    #[serde(flatten)]
+    pub base: BaseEvent,
+    #[serde(rename = "messageId")]
+    pub message_id: MessageId,
+}
+
+/// Event carrying encrypted reasoning data for a message or tool call.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReasoningEncryptedValueEvent {
+    #[serde(flatten)]
+    pub base: BaseEvent,
+    pub subtype: ReasoningEncryptedValueSubtype,
+    #[serde(rename = "entityId")]
+    pub entity_id: String,
+    #[serde(rename = "encryptedValue")]
+    pub encrypted_value: String,
 }
 
 /// Union of all possible events in the Agent User Interaction Protocol.
@@ -406,6 +554,12 @@ pub enum Event<StateT: AgentState = JsonValue> {
     /// Contains a vector of all current messages.
     MessagesSnapshot(MessagesSnapshotEvent),
 
+    /// Provides a complete structured activity snapshot.
+    ActivitySnapshot(ActivitySnapshotEvent),
+
+    /// Provides incremental structured activity changes.
+    ActivityDelta(ActivityDeltaEvent),
+
     /// Wraps a raw event from an external source.
     /// Contains the original event as a JSON value and an optional source identifier.
     Raw(RawEvent),
@@ -433,9 +587,30 @@ pub enum Event<StateT: AgentState = JsonValue> {
     /// Signals the completion of a step within an agent run.
     /// Contains the name of the completed step.
     StepFinished(StepFinishedEvent),
+
+    /// Signals the start of a reasoning block.
+    ReasoningStart(ReasoningStartEvent),
+
+    /// Signals the start of a reasoning message.
+    ReasoningMessageStart(ReasoningMessageStartEvent),
+
+    /// Represents content being added to an in-progress reasoning message.
+    ReasoningMessageContent(ReasoningMessageContentEvent),
+
+    /// Signals the completion of a reasoning message.
+    ReasoningMessageEnd(ReasoningMessageEndEvent),
+
+    /// Represents a complete or partial reasoning message chunk in a single event.
+    ReasoningMessageChunk(ReasoningMessageChunkEvent),
+
+    /// Signals the end of a reasoning block.
+    ReasoningEnd(ReasoningEndEvent),
+
+    /// Carries encrypted reasoning data for a message or tool call.
+    ReasoningEncryptedValue(ReasoningEncryptedValueEvent),
 }
 
-impl Event {
+impl<StateT: AgentState> Event<StateT> {
     /// Get the event type
     pub fn event_type(&self) -> EventType {
         match self {
@@ -456,6 +631,8 @@ impl Event {
             Event::StateSnapshot(_) => EventType::StateSnapshot,
             Event::StateDelta(_) => EventType::StateDelta,
             Event::MessagesSnapshot(_) => EventType::MessagesSnapshot,
+            Event::ActivitySnapshot(_) => EventType::ActivitySnapshot,
+            Event::ActivityDelta(_) => EventType::ActivityDelta,
             Event::Raw(_) => EventType::Raw,
             Event::Custom(_) => EventType::Custom,
             Event::RunStarted(_) => EventType::RunStarted,
@@ -463,6 +640,13 @@ impl Event {
             Event::RunError(_) => EventType::RunError,
             Event::StepStarted(_) => EventType::StepStarted,
             Event::StepFinished(_) => EventType::StepFinished,
+            Event::ReasoningStart(_) => EventType::ReasoningStart,
+            Event::ReasoningMessageStart(_) => EventType::ReasoningMessageStart,
+            Event::ReasoningMessageContent(_) => EventType::ReasoningMessageContent,
+            Event::ReasoningMessageEnd(_) => EventType::ReasoningMessageEnd,
+            Event::ReasoningMessageChunk(_) => EventType::ReasoningMessageChunk,
+            Event::ReasoningEnd(_) => EventType::ReasoningEnd,
+            Event::ReasoningEncryptedValue(_) => EventType::ReasoningEncryptedValue,
         }
     }
 
@@ -486,6 +670,8 @@ impl Event {
             Event::StateSnapshot(e) => e.base.timestamp,
             Event::StateDelta(e) => e.base.timestamp,
             Event::MessagesSnapshot(e) => e.base.timestamp,
+            Event::ActivitySnapshot(e) => e.base.timestamp,
+            Event::ActivityDelta(e) => e.base.timestamp,
             Event::Raw(e) => e.base.timestamp,
             Event::Custom(e) => e.base.timestamp,
             Event::RunStarted(e) => e.base.timestamp,
@@ -493,6 +679,13 @@ impl Event {
             Event::RunError(e) => e.base.timestamp,
             Event::StepStarted(e) => e.base.timestamp,
             Event::StepFinished(e) => e.base.timestamp,
+            Event::ReasoningStart(e) => e.base.timestamp,
+            Event::ReasoningMessageStart(e) => e.base.timestamp,
+            Event::ReasoningMessageContent(e) => e.base.timestamp,
+            Event::ReasoningMessageEnd(e) => e.base.timestamp,
+            Event::ReasoningMessageChunk(e) => e.base.timestamp,
+            Event::ReasoningEnd(e) => e.base.timestamp,
+            Event::ReasoningEncryptedValue(e) => e.base.timestamp,
         }
     }
 }
@@ -527,6 +720,7 @@ impl TextMessageStartEvent {
             },
             message_id: message_id.into(),
             role: Role::Assistant,
+            name: None,
         }
     }
 
@@ -537,6 +731,11 @@ impl TextMessageStartEvent {
 
     pub fn with_raw_event(mut self, raw_event: JsonValue) -> Self {
         self.base.raw_event = Some(raw_event);
+        self
+    }
+
+    pub fn with_name(mut self, name: String) -> Self {
+        self.name = Some(name);
         self
     }
 }

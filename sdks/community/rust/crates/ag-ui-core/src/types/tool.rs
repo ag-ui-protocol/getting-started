@@ -9,6 +9,8 @@ pub struct ToolCall {
     #[serde(rename = "type")]
     pub call_type: String,
     pub function: FunctionCall,
+    #[serde(rename = "encryptedValue", skip_serializing_if = "Option::is_none")]
+    pub encrypted_value: Option<String>,
 }
 
 impl ToolCall {
@@ -17,7 +19,13 @@ impl ToolCall {
             id: id.into(),
             call_type: "function".to_string(),
             function,
+            encrypted_value: None,
         }
+    }
+
+    pub fn with_encrypted_value(mut self, encrypted_value: impl Into<String>) -> Self {
+        self.encrypted_value = Some(encrypted_value.into());
+        self
     }
 }
 
@@ -30,6 +38,9 @@ pub struct Tool {
     pub description: String,
     /// The tool parameters
     pub parameters: serde_json::Value,
+    /// Arbitrary tool metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 impl Tool {
@@ -38,6 +49,12 @@ impl Tool {
             name,
             description,
             parameters,
+            metadata: None,
         }
+    }
+
+    pub fn with_metadata(mut self, metadata: JsonValue) -> Self {
+        self.metadata = Some(metadata);
+        self
     }
 }

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use crate::core::JsonValue;
 use crate::core::types::{
-    AgentId, Context, Message, MessageId, RunAgentInput, RunId, ThreadId, Tool,
+    AgentId, Context, Message, MessageId, ResumeEntry, RunAgentInput, RunId, ThreadId, Tool,
 };
 use crate::core::{AgentState, FwdProps};
 use crate::event_handler::EventHandler;
@@ -41,11 +41,13 @@ where
 #[derive(Debug, Clone, Default)]
 pub struct RunAgentParams<StateT: AgentState = JsonValue, FwdPropsT: FwdProps = JsonValue> {
     pub run_id: Option<RunId>,
+    pub parent_run_id: Option<RunId>,
     pub tools: Vec<Tool>,
     pub context: Vec<Context>,
     pub forwarded_props: FwdPropsT,
     pub messages: Vec<Message>,
     pub state: StateT,
+    pub resume: Option<Vec<ResumeEntry>>,
 }
 
 impl<StateT, FwdPropsT> RunAgentParams<StateT, FwdPropsT>
@@ -60,16 +62,26 @@ where
     pub fn new_typed() -> Self {
         Self {
             run_id: None,
+            parent_run_id: None,
             tools: Vec::new(),
             context: Vec::new(),
             forwarded_props: FwdPropsT::default(),
             messages: Vec::new(),
             state: StateT::default(),
+            resume: None,
         }
     }
 
     pub fn with_run_id(mut self, run_id: RunId) -> Self {
         self.run_id = Some(run_id);
+        self
+    }
+    pub fn with_parent_run_id(mut self, parent_run_id: RunId) -> Self {
+        self.parent_run_id = Some(parent_run_id);
+        self
+    }
+    pub fn with_resume(mut self, resume: Vec<ResumeEntry>) -> Self {
+        self.resume = Some(resume);
         self
     }
     pub fn add_tool(mut self, tool: Tool) -> Self {
@@ -97,6 +109,7 @@ where
             id: MessageId::random(),
             content: content.into(),
             name: None,
+            encrypted_value: None,
         });
         self
     }
@@ -192,11 +205,13 @@ where
         let input = RunAgentInput {
             thread_id: ThreadId::random(),
             run_id: params.run_id.clone().unwrap_or_else(RunId::random),
+            parent_run_id: params.parent_run_id.clone(),
             state: params.state.clone(),
             messages: params.messages.clone(),
             tools: params.tools.clone(),
             context: params.context.clone(),
             forwarded_props: params.forwarded_props.clone(),
+            resume: params.resume.clone(),
         };
         let current_message_ids: HashSet<&MessageId> =
             params.messages.iter().map(|m| m.id()).collect();

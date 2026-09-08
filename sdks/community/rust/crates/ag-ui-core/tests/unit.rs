@@ -1,20 +1,36 @@
 #[cfg(test)]
 mod tests {
     use ag_ui_core::error::AgUiError;
+    use ag_ui_core::event::{
+        ActivityDeltaEvent, ActivitySnapshotEvent, BaseEvent, Event, EventType,
+        ReasoningEncryptedValueEvent, ReasoningEncryptedValueSubtype, ReasoningMessageContentEvent,
+        RunFinishedEvent, RunFinishedOutcome, TextMessageStartEvent,
+    };
     use ag_ui_core::types::{
-        AssistantMessage, Context, DeveloperMessage, FunctionCall, Message, MessageId, Role,
-        RunAgentInput, RunId, SystemMessage, ThreadId, Tool, ToolCall, ToolCallId, ToolMessage,
-        UserMessage,
+        AssistantMessage, Context, DeveloperMessage, FunctionCall, Interrupt, Message, MessageId,
+        ResumeEntry, ResumeStatus, Role, RunAgentInput, RunId, SystemMessage, ThreadId, Tool,
+        ToolCall, ToolCallId, ToolMessage, UserMessage,
     };
     use serde::{Deserialize, Serialize};
     use serde_json::json;
     use uuid::Uuid;
+
+    fn base_event() -> BaseEvent {
+        BaseEvent {
+            timestamp: None,
+            raw_event: None,
+        }
+    }
 
     #[test]
     fn test_role_serialization() {
         let role = Role::Developer;
         let json = serde_json::to_string(&role).unwrap();
         assert_eq!(json, r#""developer""#);
+
+        let role = Role::Reasoning;
+        let json = serde_json::to_string(&role).unwrap();
+        assert_eq!(json, r#""reasoning""#);
     }
 
     #[test]
@@ -48,6 +64,7 @@ mod tests {
             id: MessageId::random(),
             content: "Hello".to_string(),
             name: None,
+            encrypted_value: None,
         };
 
         let json = serde_json::to_string(&user_msg).unwrap();
@@ -65,6 +82,9 @@ mod tests {
 
         let tool_call = ToolCall::new(ToolCallId::random(), function_call);
         assert_eq!(tool_call.call_type, "function");
+
+        let tool_call = tool_call.with_encrypted_value("enc".to_string());
+        assert_eq!(tool_call.encrypted_value, Some("enc".to_string()));
     }
 
     #[test]
@@ -86,8 +106,10 @@ mod tests {
             "test_tool".to_string(),
             "tool desc".to_string(),
             json!({"type": "object"}),
-        );
+        )
+        .with_metadata(json!({"renderer": "a2ui"}));
         assert_eq!(tool.name, "test_tool");
+        assert_eq!(tool.metadata, Some(json!({"renderer": "a2ui"})));
     }
 
     #[test]
@@ -172,6 +194,7 @@ mod tests {
                 content,
                 name,
                 tool_calls,
+                ..
             } => {
                 assert_eq!(id.to_string(), "00000000-0000-0000-0000-000000000000");
                 assert_eq!(
@@ -215,10 +238,49 @@ mod tests {
         assert_eq!(messages.len(), 3);
 
         match &messages[0] {
-            Message::User { id, content, name } => {
+            Message::User {
+                id, content, name, ..
+            } => {
                 assert_eq!(id.to_string(), "00000000-0000-0000-0000-000000000000");
                 assert_eq!(content, "Hello!");
                 assert_eq!(*name, Some("Alice".to_string()));
+            }
+            _ => panic!("Wrong message type"),
+        }
+    }
+
+    #[test]
+    fn test_activity_and_reasoning_messages() {
+        let activity_id = MessageId::random();
+        let reasoning_id = MessageId::random();
+        let json_value = json!([
+            {
+                "role": "activity",
+                "id": activity_id,
+                "activityType": "progress",
+                "content": {"pct": 10}
+            },
+            {
+                "role": "reasoning",
+                "id": reasoning_id,
+                "content": "step 1",
+                "encryptedValue": "enc"
+            }
+        ]);
+
+        let messages: Vec<Message> = serde_json::from_value(json_value).unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role(), Role::Activity);
+        assert_eq!(messages[1].role(), Role::Reasoning);
+
+        match &messages[0] {
+            Message::Activity {
+                activity_type,
+                content,
+                ..
+            } => {
+                assert_eq!(activity_type, "progress");
+                assert_eq!(content["pct"], 10);
             }
             _ => panic!("Wrong message type"),
         }
@@ -316,5 +378,133 @@ mod tests {
         let wrong_input: serde_json::Result<RunAgentInput<OtherState>> =
             serde_json::from_str(json_str);
         assert!(wrong_input.is_err())
+    }
+
+    #[test]
+    fn test_run_agent_input_parent_and_resume_serialization() {
+        let parent_run_id = RunId::random();
+        let resume = ResumeEntry {
+            interrupt_id: "int1".to_string(),
+            status: ResumeStatus::Resolved,
+            payload: Some(json!({"answer": 42})),
+        };
+
+        let input = RunAgentInput::new(
+            ThreadId::random(),
+            RunId::random(),
+            json!({}),
+            vec![],
+            vec![],
+            vec![],
+            json!({}),
+        )
+        .with_parent_run_id(parent_run_id.clone())
+        .with_resume(vec![resume]);
+
+        let payload = serde_json::to_value(&input).unwrap();
+        assert_eq!(payload["parentRunId"], parent_run_id.to_string());
+        assert_eq!(payload["resume"][0]["interruptId"], "int1");
+        assert_eq!(payload["resume"][0]["status"], "resolved");
+
+        let round_trip: RunAgentInput = serde_json::from_value(payload).unwrap();
+        assert_eq!(round_trip.parent_run_id, Some(parent_run_id));
+        assert_eq!(round_trip.resume.unwrap()[0].status, ResumeStatus::Resolved);
+    }
+
+    #[test]
+    fn test_new_event_shapes_serialization() {
+        let message_id = MessageId::random();
+        let text_event: Event = Event::TextMessageStart(TextMessageStartEvent {
+            base: base_event(),
+            message_id: message_id.clone(),
+            role: Role::Assistant,
+            name: Some("research-agent".to_string()),
+        });
+        let payload = serde_json::to_value(&text_event).unwrap();
+        assert_eq!(payload["type"], "TEXT_MESSAGE_START");
+        assert_eq!(payload["messageId"], message_id.to_string());
+        assert_eq!(payload["name"], "research-agent");
+
+        let activity_event: Event = Event::ActivitySnapshot(ActivitySnapshotEvent {
+            base: base_event(),
+            message_id: message_id.clone(),
+            activity_type: "progress".to_string(),
+            content: json!({"pct": 20}),
+            replace: true,
+        });
+        let payload = serde_json::to_value(&activity_event).unwrap();
+        assert_eq!(payload["type"], "ACTIVITY_SNAPSHOT");
+        assert_eq!(payload["activityType"], "progress");
+        assert_eq!(payload["content"]["pct"], 20);
+
+        let reasoning_event: Event = Event::ReasoningMessageContent(ReasoningMessageContentEvent {
+            base: base_event(),
+            message_id: message_id.clone(),
+            delta: "thinking".to_string(),
+        });
+        let payload = serde_json::to_value(&reasoning_event).unwrap();
+        assert_eq!(payload["type"], "REASONING_MESSAGE_CONTENT");
+        assert_eq!(payload["delta"], "thinking");
+    }
+
+    #[test]
+    fn test_run_finished_outcome_serialization() {
+        let interrupt = Interrupt::new("int1", "input_required");
+        let event: Event = Event::RunFinished(RunFinishedEvent {
+            base: base_event(),
+            thread_id: ThreadId::random(),
+            run_id: RunId::random(),
+            result: None,
+            outcome: Some(RunFinishedOutcome::Interrupt {
+                interrupts: vec![interrupt],
+            }),
+        });
+
+        let payload = serde_json::to_value(&event).unwrap();
+        assert_eq!(payload["type"], "RUN_FINISHED");
+        assert_eq!(payload["outcome"]["type"], "interrupt");
+        assert_eq!(payload["outcome"]["interrupts"][0]["id"], "int1");
+
+        let round_trip: Event = serde_json::from_value(payload).unwrap();
+        assert_eq!(round_trip.event_type(), EventType::RunFinished);
+    }
+
+    #[test]
+    fn test_activity_delta_and_reasoning_encrypted_events_deserialize() {
+        let message_id = MessageId::random();
+        let delta_payload = json!({
+            "type": "ACTIVITY_DELTA",
+            "messageId": message_id,
+            "activityType": "progress",
+            "patch": [{"op": "replace", "path": "/pct", "value": 50}]
+        });
+        let event: Event = serde_json::from_value(delta_payload).unwrap();
+        match event {
+            Event::ActivityDelta(ActivityDeltaEvent { patch, .. }) => {
+                assert_eq!(patch[0]["op"], "replace");
+            }
+            _ => panic!("Wrong event type"),
+        }
+
+        let encrypted_payload = json!({
+            "type": "REASONING_ENCRYPTED_VALUE",
+            "subtype": "tool-call",
+            "entityId": "call_123",
+            "encryptedValue": "enc"
+        });
+        let event: Event = serde_json::from_value(encrypted_payload).unwrap();
+        match event {
+            Event::ReasoningEncryptedValue(ReasoningEncryptedValueEvent {
+                subtype,
+                entity_id,
+                encrypted_value,
+                ..
+            }) => {
+                assert_eq!(subtype, ReasoningEncryptedValueSubtype::ToolCall);
+                assert_eq!(entity_id, "call_123");
+                assert_eq!(encrypted_value, "enc");
+            }
+            _ => panic!("Wrong event type"),
+        }
     }
 }

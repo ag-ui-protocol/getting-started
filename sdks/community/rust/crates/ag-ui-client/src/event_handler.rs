@@ -98,14 +98,42 @@ where
         match event {
             Event::TextMessageStart(e) => {
                 // Default behavior
-                let new_message = Message::Assistant {
-                    id: e.message_id.clone(),
-                    content: Some(String::new()),
-                    name: None,
-                    tool_calls: None,
-                };
-                self.messages.push(new_message);
-                current_mutation.messages = Some(self.messages.clone());
+                if !self.messages.iter().any(|m| m.id() == &e.message_id) {
+                    let new_message = match e.role {
+                        Role::Developer => Message::Developer {
+                            id: e.message_id.clone(),
+                            content: String::new(),
+                            name: e.name.clone(),
+                            encrypted_value: None,
+                        },
+                        Role::System => Message::System {
+                            id: e.message_id.clone(),
+                            content: String::new(),
+                            name: e.name.clone(),
+                            encrypted_value: None,
+                        },
+                        Role::User => Message::User {
+                            id: e.message_id.clone(),
+                            content: String::new(),
+                            name: e.name.clone(),
+                            encrypted_value: None,
+                        },
+                        Role::Reasoning => Message::Reasoning {
+                            id: e.message_id.clone(),
+                            content: String::new(),
+                            encrypted_value: None,
+                        },
+                        Role::Assistant | Role::Tool | Role::Activity => Message::Assistant {
+                            id: e.message_id.clone(),
+                            content: Some(String::new()),
+                            name: e.name.clone(),
+                            tool_calls: None,
+                            encrypted_value: None,
+                        },
+                    };
+                    self.messages.push(new_message);
+                    current_mutation.messages = Some(self.messages.clone());
+                }
 
                 for subscriber in &self.subscribers {
                     let params = self.to_subscriber_params();
@@ -115,7 +143,11 @@ where
             }
             Event::TextMessageContent(e) => {
                 // Default behavior
-                if let Some(last_message) = self.messages.last_mut() {
+                if let Some(last_message) = self
+                    .messages
+                    .iter_mut()
+                    .find(|message| message.id() == &e.message_id)
+                {
                     let content = last_message.content_mut();
                     if let Some(s) = content {
                         s.push_str(&e.delta)
@@ -126,7 +158,8 @@ where
                 // Get the current text message buffer
                 let text_message_buffer = self
                     .messages
-                    .last()
+                    .iter()
+                    .find(|message| message.id() == &e.message_id)
                     .and_then(|m| m.content())
                     .unwrap_or_default()
                     .to_string(); // Clone to avoid borrowing issues
@@ -143,7 +176,8 @@ where
                 // Get the current text message buffer
                 let text_message_buffer = self
                     .messages
-                    .last()
+                    .iter()
+                    .find(|message| message.id() == &e.message_id)
                     .and_then(|m| m.content())
                     .unwrap_or_default()
                     .to_string(); // Clone to avoid borrowing issues
@@ -199,25 +233,37 @@ where
                         name: e.tool_call_name.clone(),
                         arguments: String::new(),
                     },
+                    encrypted_value: None,
                 };
 
-                if let Some(last_message) = self.messages.last_mut() {
-                    if Some(last_message.id()) == e.parent_message_id.clone().as_ref() {
-                        let _ = last_message.tool_calls_mut().get_or_insert(&mut Vec::new());
+                let parent_message_index = e.parent_message_id.as_ref().and_then(|parent_id| {
+                    self.messages
+                        .iter()
+                        .position(|message| message.id() == parent_id)
+                });
 
-                        let _ = last_message
-                            .tool_calls_mut()
-                            .map(|tc| tc.push(new_tool_call));
+                let target_assistant_index = parent_message_index.and_then(|index| {
+                    matches!(self.messages.get(index), Some(Message::Assistant { .. }))
+                        .then_some(index)
+                });
+
+                if let Some(index) = target_assistant_index {
+                    if let Some(tool_calls) = self.messages[index].tool_calls_mut() {
+                        tool_calls.push(new_tool_call);
                     }
                 } else {
                     let new_message = Message::Assistant {
-                        id: e
-                            .parent_message_id
-                            .clone()
-                            .unwrap_or_else(MessageId::random),
+                        id: if parent_message_index.is_some() {
+                            MessageId::random()
+                        } else {
+                            e.parent_message_id
+                                .clone()
+                                .unwrap_or_else(MessageId::random)
+                        },
                         content: None,
                         name: None,
-                        tool_calls: None,
+                        tool_calls: Some(vec![new_tool_call]),
+                        encrypted_value: None,
                     };
                     self.messages.push(new_message);
                 }
@@ -231,39 +277,48 @@ where
             }
             Event::ToolCallArgs(e) => {
                 // Default behavior
-                if let Some(last_message) = self.messages.last_mut()
-                    && let Some(tool_calls) = last_message.tool_calls_mut()
-                    && let Some(last_tool_call) = tool_calls.last_mut()
+                if let Some(tool_call) = self
+                    .messages
+                    .iter_mut()
+                    .filter_map(|message| match message {
+                        Message::Assistant {
+                            tool_calls: Some(tool_calls),
+                            ..
+                        } => Some(tool_calls),
+                        _ => None,
+                    })
+                    .find_map(|tool_calls| {
+                        tool_calls
+                            .iter_mut()
+                            .find(|tool_call| tool_call.id == e.tool_call_id)
+                    })
                 {
-                    last_tool_call.function.arguments.push_str(&e.delta);
+                    tool_call.function.arguments.push_str(&e.delta);
                     current_mutation.messages = Some(self.messages.clone());
                 }
 
                 // Get the current tool call buffer and name
-                let (tool_call_buffer, tool_call_name, partial_args) = if let Some(last_message) =
-                    self.messages.last()
-                {
-                    if let Some(tool_calls) = last_message.tool_calls() {
-                        if let Some(last_tool_call) = tool_calls.last() {
-                            // Try to parse the arguments as JSON to get partial args
-                            let partial_args = serde_json::from_str::<HashMap<String, JsonValue>>(
-                                &last_tool_call.function.arguments,
-                            )
-                            .unwrap_or_default();
-                            (
-                                last_tool_call.function.arguments.clone(),
-                                last_tool_call.function.name.clone(),
-                                partial_args,
-                            )
-                        } else {
-                            (String::new(), String::new(), HashMap::new())
-                        }
-                    } else {
-                        (String::new(), String::new(), HashMap::new())
-                    }
-                } else {
-                    (String::new(), String::new(), HashMap::new())
-                };
+                let (tool_call_buffer, tool_call_name, partial_args) = self
+                    .messages
+                    .iter()
+                    .filter_map(|message| message.tool_calls())
+                    .find_map(|tool_calls| {
+                        tool_calls
+                            .iter()
+                            .find(|tool_call| tool_call.id == e.tool_call_id)
+                    })
+                    .map(|tool_call| {
+                        let partial_args = serde_json::from_str::<HashMap<String, JsonValue>>(
+                            &tool_call.function.arguments,
+                        )
+                        .unwrap_or_default();
+                        (
+                            tool_call.function.arguments.clone(),
+                            tool_call.function.name.clone(),
+                            partial_args,
+                        )
+                    })
+                    .unwrap_or_else(|| (String::new(), String::new(), HashMap::new()));
 
                 for subscriber in &self.subscribers {
                     let params = self.to_subscriber_params();
@@ -281,25 +336,23 @@ where
             }
             Event::ToolCallEnd(e) => {
                 // Get the current tool call buffer and name
-                let (tool_call_name, tool_call_args) =
-                    if let Some(last_message) = self.messages.last() {
-                        if let Some(tool_calls) = last_message.tool_calls() {
-                            if let Some(last_tool_call) = tool_calls.last() {
-                                // Try to parse the arguments as JSON
-                                let args = serde_json::from_str::<HashMap<String, JsonValue>>(
-                                    &last_tool_call.function.arguments,
-                                )
-                                .unwrap_or_default();
-                                (last_tool_call.function.name.clone(), args)
-                            } else {
-                                (String::new(), HashMap::new())
-                            }
-                        } else {
-                            (String::new(), HashMap::new())
-                        }
-                    } else {
-                        (String::new(), HashMap::new())
-                    };
+                let (tool_call_name, tool_call_args) = self
+                    .messages
+                    .iter()
+                    .filter_map(|message| message.tool_calls())
+                    .find_map(|tool_calls| {
+                        tool_calls
+                            .iter()
+                            .find(|tool_call| tool_call.id == e.tool_call_id)
+                    })
+                    .map(|tool_call| {
+                        let args = serde_json::from_str::<HashMap<String, JsonValue>>(
+                            &tool_call.function.arguments,
+                        )
+                        .unwrap_or_default();
+                        (tool_call.function.name.clone(), args)
+                    })
+                    .unwrap_or_else(|| (String::new(), HashMap::new()));
 
                 for subscriber in &self.subscribers {
                     let params = self.to_subscriber_params();
@@ -372,9 +425,93 @@ where
                 }
             }
             Event::MessagesSnapshot(e) => {
+                // Default behavior
+                let snapshot_has_activity = e
+                    .messages
+                    .iter()
+                    .any(|message| matches!(message, Message::Activity { .. }));
+                let snapshot_has_reasoning = e
+                    .messages
+                    .iter()
+                    .any(|message| matches!(message, Message::Reasoning { .. }));
+
+                self.messages.retain(|message| {
+                    let in_snapshot = e
+                        .messages
+                        .iter()
+                        .any(|snapshot_message| snapshot_message.id() == message.id());
+                    let preserved_client_only = matches!(message, Message::Activity { .. })
+                        && !snapshot_has_activity
+                        || matches!(message, Message::Reasoning { .. }) && !snapshot_has_reasoning;
+                    in_snapshot || preserved_client_only
+                });
+
+                for snapshot_message in &e.messages {
+                    if let Some(existing_message) = self
+                        .messages
+                        .iter_mut()
+                        .find(|message| message.id() == snapshot_message.id())
+                    {
+                        *existing_message = snapshot_message.clone();
+                    } else {
+                        self.messages.push(snapshot_message.clone());
+                    }
+                }
+
+                current_mutation.messages = Some(self.messages.clone());
+
                 for subscriber in &self.subscribers {
                     let params = self.to_subscriber_params();
                     let mutation = subscriber.on_messages_snapshot_event(e, params).await?;
+                    mutations.push(mutation);
+                }
+            }
+            Event::ActivitySnapshot(e) => {
+                // Default behavior
+                let new_message = Message::Activity {
+                    id: e.message_id.clone(),
+                    activity_type: e.activity_type.clone(),
+                    content: e.content.clone(),
+                };
+                if let Some(index) = self.messages.iter().position(|m| m.id() == &e.message_id) {
+                    let existing_is_activity =
+                        matches!(self.messages.get(index), Some(Message::Activity { .. }));
+                    if existing_is_activity || e.replace {
+                        self.messages[index] = new_message;
+                        current_mutation.messages = Some(self.messages.clone());
+                    }
+                } else {
+                    self.messages.push(new_message);
+                    current_mutation.messages = Some(self.messages.clone());
+                }
+
+                for subscriber in &self.subscribers {
+                    let params = self.to_subscriber_params();
+                    let mutation = subscriber.on_activity_snapshot_event(e, params).await?;
+                    mutations.push(mutation);
+                }
+            }
+            Event::ActivityDelta(e) => {
+                // Default behavior
+                if let Some(Message::Activity {
+                    activity_type,
+                    content,
+                    ..
+                }) = self.messages.iter_mut().find(|m| m.id() == &e.message_id)
+                {
+                    let patches: Vec<PatchOperation> =
+                        serde_json::from_value(serde_json::to_value(e.patch.clone())?)?;
+
+                    json_patch::patch(content, &patches).map_err(|err| AgentError::Execution {
+                        message: format!("Failed to apply activity patch: {err}"),
+                    })?;
+                    *activity_type = e.activity_type.clone();
+                    current_mutation.messages = Some(self.messages.clone());
+                }
+
+                for subscriber in &self.subscribers {
+                    let params = self.to_subscriber_params();
+                    let mutation = subscriber.on_activity_delta_event(e, params).await?;
                     mutations.push(mutation);
                 }
             }
@@ -393,6 +530,15 @@ where
                 }
             }
             Event::RunStarted(e) => {
+                if let Some(input) = &e.input {
+                    for message in &input.messages {
+                        if !self.messages.iter().any(|m| m.id() == message.id()) {
+                            self.messages.push(message.clone());
+                        }
+                    }
+                    current_mutation.messages = Some(self.messages.clone());
+                }
+
                 for subscriber in &self.subscribers {
                     let params = self.to_subscriber_params();
                     let mutation = subscriber.on_run_started_event(e, params).await?;
@@ -427,6 +573,132 @@ where
                 for subscriber in &self.subscribers {
                     let params = self.to_subscriber_params();
                     let mutation = subscriber.on_step_finished_event(e, params).await?;
+                    mutations.push(mutation);
+                }
+            }
+            Event::ReasoningStart(e) => {
+                for subscriber in &self.subscribers {
+                    let params = self.to_subscriber_params();
+                    let mutation = subscriber.on_reasoning_start_event(e, params).await?;
+                    mutations.push(mutation);
+                }
+            }
+            Event::ReasoningMessageStart(e) => {
+                if !self.messages.iter().any(|m| m.id() == &e.message_id) {
+                    self.messages.push(Message::Reasoning {
+                        id: e.message_id.clone(),
+                        content: String::new(),
+                        encrypted_value: None,
+                    });
+                    current_mutation.messages = Some(self.messages.clone());
+                }
+
+                for subscriber in &self.subscribers {
+                    let params = self.to_subscriber_params();
+                    let mutation = subscriber
+                        .on_reasoning_message_start_event(e, params)
+                        .await?;
+                    mutations.push(mutation);
+                }
+            }
+            Event::ReasoningMessageContent(e) => {
+                if let Some(message) = self.messages.iter_mut().find(|m| m.id() == &e.message_id)
+                    && let Some(content) = message.content_mut()
+                {
+                    content.push_str(&e.delta);
+                    current_mutation.messages = Some(self.messages.clone());
+                }
+
+                let reasoning_message_buffer = self
+                    .messages
+                    .iter()
+                    .find(|m| m.id() == &e.message_id)
+                    .and_then(|m| m.content())
+                    .unwrap_or_default()
+                    .to_string();
+
+                for subscriber in &self.subscribers {
+                    let params = self.to_subscriber_params();
+                    let mutation = subscriber
+                        .on_reasoning_message_content_event(e, &reasoning_message_buffer, params)
+                        .await?;
+                    mutations.push(mutation);
+                }
+            }
+            Event::ReasoningMessageEnd(e) => {
+                let reasoning_message_buffer = self
+                    .messages
+                    .iter()
+                    .find(|m| m.id() == &e.message_id)
+                    .and_then(|m| m.content())
+                    .unwrap_or_default()
+                    .to_string();
+
+                for subscriber in &self.subscribers {
+                    let params = self.to_subscriber_params();
+                    let mutation = subscriber
+                        .on_reasoning_message_end_event(e, &reasoning_message_buffer, params)
+                        .await?;
+                    mutations.push(mutation);
+                }
+            }
+            Event::ReasoningMessageChunk(e) => {
+                for subscriber in &self.subscribers {
+                    let params = self.to_subscriber_params();
+                    let mutation = subscriber
+                        .on_reasoning_message_chunk_event(e, params)
+                        .await?;
+                    mutations.push(mutation);
+                }
+            }
+            Event::ReasoningEnd(e) => {
+                for subscriber in &self.subscribers {
+                    let params = self.to_subscriber_params();
+                    let mutation = subscriber.on_reasoning_end_event(e, params).await?;
+                    mutations.push(mutation);
+                }
+            }
+            Event::ReasoningEncryptedValue(e) => {
+                let mut entity_updated = false;
+                match e.subtype {
+                    crate::core::event::ReasoningEncryptedValueSubtype::ToolCall => {
+                        for message in &mut self.messages {
+                            if let Message::Assistant {
+                                tool_calls: Some(tool_calls),
+                                ..
+                            } = message
+                                && let Some(tool_call) = tool_calls
+                                    .iter_mut()
+                                    .find(|tc| tc.id.to_string() == e.entity_id)
+                            {
+                                tool_call.encrypted_value = Some(e.encrypted_value.clone());
+                                entity_updated = true;
+                                break;
+                            }
+                        }
+                    }
+                    crate::core::event::ReasoningEncryptedValueSubtype::Message => {
+                        if let Some(encrypted_value) = self
+                            .messages
+                            .iter_mut()
+                            .find(|message| message.id().to_string() == e.entity_id)
+                            .and_then(|message| message.encrypted_value_mut())
+                        {
+                            *encrypted_value = Some(e.encrypted_value.clone());
+                            entity_updated = true;
+                        }
+                    }
+                }
+
+                if entity_updated {
+                    current_mutation.messages = Some(self.messages.clone());
+                }
+
+                for subscriber in &self.subscribers {
+                    let params = self.to_subscriber_params();
+                    let mutation = subscriber
+                        .on_reasoning_encrypted_value_event(e, params)
+                        .await?;
                     mutations.push(mutation);
                 }
             }
@@ -538,5 +810,136 @@ where
                 .await?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::event::{
+        BaseEvent, TextMessageContentEvent, TextMessageStartEvent, ToolCallArgsEvent,
+        ToolCallStartEvent,
+    };
+    use crate::core::types::{RunId, ThreadId, ToolCallId};
+    use crate::subscriber::Subscribers;
+    use serde_json::json;
+
+    fn base_event() -> BaseEvent {
+        BaseEvent {
+            timestamp: None,
+            raw_event: None,
+        }
+    }
+
+    fn input() -> RunAgentInput {
+        RunAgentInput::new(
+            ThreadId::random(),
+            RunId::random(),
+            json!({}),
+            vec![],
+            vec![],
+            vec![],
+            json!({}),
+        )
+    }
+
+    #[tokio::test]
+    async fn text_events_use_role_name_and_message_id() {
+        let input = input();
+        let message_id = MessageId::random();
+        let mut handler = EventHandler::new(
+            vec![Message::Assistant {
+                id: MessageId::random(),
+                content: Some("existing".to_string()),
+                name: None,
+                tool_calls: None,
+                encrypted_value: None,
+            }],
+            json!({}),
+            &input,
+            Subscribers::new(vec![]),
+        );
+
+        handler
+            .handle_event(&Event::TextMessageStart(TextMessageStartEvent {
+                base: base_event(),
+                message_id: message_id.clone(),
+                role: Role::User,
+                name: Some("Alice".to_string()),
+            }))
+            .await
+            .unwrap();
+
+        handler.messages.push(Message::Assistant {
+            id: MessageId::random(),
+            content: Some("tail".to_string()),
+            name: None,
+            tool_calls: None,
+            encrypted_value: None,
+        });
+
+        handler
+            .handle_event(&Event::TextMessageContent(TextMessageContentEvent {
+                base: base_event(),
+                message_id: message_id.clone(),
+                delta: "hello".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let target = handler
+            .messages
+            .iter()
+            .find(|message| message.id() == &message_id)
+            .unwrap();
+        match target {
+            Message::User { content, name, .. } => {
+                assert_eq!(content, "hello");
+                assert_eq!(name.as_deref(), Some("Alice"));
+            }
+            _ => panic!("expected user message"),
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_call_start_without_parent_keeps_tool_call() {
+        let input = input();
+        let tool_call_id = ToolCallId::random();
+        let mut handler = EventHandler::new(
+            vec![Message::new_user("hello")],
+            json!({}),
+            &input,
+            Subscribers::new(vec![]),
+        );
+
+        handler
+            .handle_event(&Event::ToolCallStart(ToolCallStartEvent {
+                base: base_event(),
+                tool_call_id: tool_call_id.clone(),
+                tool_call_name: "search".to_string(),
+                parent_message_id: None,
+            }))
+            .await
+            .unwrap();
+
+        handler
+            .handle_event(&Event::ToolCallArgs(ToolCallArgsEvent {
+                base: base_event(),
+                tool_call_id: tool_call_id.clone(),
+                delta: "{\"q\":\"ag-ui\"}".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let tool_call = handler
+            .messages
+            .iter()
+            .filter_map(|message| message.tool_calls())
+            .flatten()
+            .find(|tool_call| tool_call.id == tool_call_id)
+            .unwrap();
+
+        assert_eq!(tool_call.function.name, "search");
+        assert_eq!(tool_call.function.arguments, "{\"q\":\"ag-ui\"}");
     }
 }
