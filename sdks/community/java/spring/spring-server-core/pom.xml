@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.ag-ui.community</groupId>
+        <artifactId>ag-ui-spring</artifactId>
+        <version>0.1.0</version>
+    </parent>
+
+    <artifactId>ag-ui-spring-server-core</artifactId>
+    <!--
+      Independent version: tracks the Spring Boot line the server modules target
+      (3.4.x), since they share its Jackson version. Released alongside them.
+    -->
+    <version>4.1.0</version>
+
+    <name>ag-ui-spring-server-core</name>
+    <description>Shared serialization and routing support for the AG-UI Spring server modules</description>
+
+    <properties>
+        <spring-boot.version>4.1.0</spring-boot.version>
+    </properties>
+
+    <!-- Imports the Spring Boot BOM only to pin the Jackson version; this module
+         has no Spring dependency. -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.ag-ui.community</groupId>
+            <artifactId>java-server</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+    </dependencies>
+</project>

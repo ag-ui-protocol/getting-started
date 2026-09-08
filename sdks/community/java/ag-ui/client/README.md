@@ -45,10 +45,12 @@ are emitted in order, and the publisher completes when the stream ends.
 
 ### Customizing the transport
 
-The default constructor uses `HttpClient.newHttpClient()`, the common
-`ForkJoinPool`, and a 5-minute request timeout. Use the full constructor to
-control the `HttpClient`, the `Executor` on which the response stream is
-consumed, and the per-request timeout:
+The default constructor uses `HttpClient.newHttpClient()`, a cached thread pool
+(`Executors.newCachedThreadPool()`), and a 5-minute request timeout. Consuming
+the SSE response is a long-lived blocking operation, so a cached pool is used to
+avoid starving a shared bounded pool. Use the full constructor to control the
+`HttpClient`, the `Executor` on which the response stream is consumed, and the
+per-request timeout:
 
 ```java
 Agent agent = new HttpAgent(

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.ag-ui.community</groupId>
+        <artifactId>ag-ui-spring</artifactId>
+        <version>0.1.0</version>
+    </parent>
+
+    <artifactId>ag-ui-spring-webmvc-server</artifactId>
+    <!--
+      Independent version: tracks the Spring Boot line this module targets
+      (3.4.x). Released separately from ag-ui-spring-ai.
+    -->
+    <version>4.1.0</version>
+
+    <name>ag-ui-spring-webmvc-server</name>
+    <description>Spring WebMVC (Servlet) server integration for the AG-UI protocol</description>
+
+    <properties>
+        <spring-boot.version>4.1.0</spring-boot.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Shared serializer, mix-ins and AgentNotFoundException; brings ag-ui server transitively. -->
+        <dependency>
+            <groupId>com.ag-ui.community</groupId>
+            <artifactId>ag-ui-spring-server-core</artifactId>
+        </dependency>
+
+        <!-- WebMVC (Servlet) brings spring-web, spring-webmvc and Jackson. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- Auto-configuration support; optional for consumers that wire beans themselves. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+
+        <!-- MockMvc for the controller test. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

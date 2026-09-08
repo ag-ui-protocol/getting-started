@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.ag-ui.community</groupId>
+        <artifactId>ag-ui-spring</artifactId>
+        <version>0.1.0</version>
+    </parent>
+
+    <artifactId>ag-ui-spring-ai-webmvc-boot-starter</artifactId>
+    <!-- Tracks the Spring AI line, like the spring-ai module it bundles. -->
+    <version>2.0.0</version>
+
+    <name>ag-ui-spring-ai-webmvc-boot-starter</name>
+    <description>Spring Boot starter that exposes a Spring AI ChatModel as an AG-UI agent over a Servlet (WebMVC) server</description>
+
+    <properties>
+        <!-- Spring Boot autoconfigure used by this starter's auto-configuration. -->
+        <spring-boot.version>4.1.0</spring-boot.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <!--
+      Combines the Spring AI agent adapter with the Servlet (WebMVC) AG-UI server
+      endpoint and adds auto-configuration that registers a SpringAiAgent from any
+      ChatModel bean. Add this starter and a ChatModel to get a working AG-UI
+      endpoint with no code. The WebFlux equivalent is
+      ag-ui-spring-ai-spring-boot-starter.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>com.ag-ui.community</groupId>
+            <artifactId>ag-ui-spring-ai</artifactId>
+        </dependency>
+        <!--
+          The Servlet (WebMVC) AG-UI server: provides the auto-configured /agent SSE
+          endpoint (SseEmitter-backed) and, via spring-boot-starter-web, the embedded
+          servlet web server.
+        -->
+        <dependency>
+            <groupId>com.ag-ui.community</groupId>
+            <artifactId>ag-ui-spring-webmvc-server</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

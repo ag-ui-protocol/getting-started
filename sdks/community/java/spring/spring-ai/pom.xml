@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.ag-ui.community</groupId>
+        <artifactId>ag-ui-spring</artifactId>
+        <version>0.1.0</version>
+    </parent>
+
+    <artifactId>ag-ui-spring-ai</artifactId>
+    <!--
+      Independent version: tracks the Spring AI line this module targets (1.1.x).
+      Released separately from ag-ui-spring-server.
+    -->
+    <version>2.0.0</version>
+
+    <name>ag-ui-spring-ai</name>
+    <description>Spring AI integration for the AG-UI protocol</description>
+
+    <properties>
+        <spring-ai.version>2.0.0</spring-ai.version>
+        <!-- Reactor train matching the Spring AI / Spring 6.2 line. -->
+        <reactor-bom.version>2024.0.12</reactor-bom.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Spring AI's BOM does not manage Reactor, so manage it here. -->
+            <dependency>
+                <groupId>io.projectreactor</groupId>
+                <artifactId>reactor-bom</artifactId>
+                <version>${reactor-bom.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.ag-ui.community</groupId>
+            <artifactId>java-core</artifactId>
+        </dependency>
+
+        <!-- Spring AI chat client/model API. -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-client-chat</artifactId>
+        </dependency>
+
+        <!-- Reactor core is used directly to adapt Flux <-> Flow.Publisher. -->
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-core</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

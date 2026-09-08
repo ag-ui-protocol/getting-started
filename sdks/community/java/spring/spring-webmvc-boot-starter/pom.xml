@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.ag-ui.community</groupId>
+        <artifactId>ag-ui-spring</artifactId>
+        <version>0.1.0</version>
+    </parent>
+
+    <artifactId>ag-ui-spring-webmvc-boot-starter</artifactId>
+    <!-- Tracks the Spring Boot line, like the spring-webmvc-server module it bundles. -->
+    <version>4.1.0</version>
+
+    <name>ag-ui-spring-webmvc-boot-starter</name>
+    <description>Spring Boot starter that exposes an AG-UI Agent over a Servlet (WebMVC) SSE endpoint</description>
+
+    <!--
+      A dependency-only starter: add it and define a single Agent bean to get a
+      working /agent endpoint. The WebMVC server, Jackson serializer and Spring
+      Boot auto-configuration come transitively from ag-ui-spring-webmvc-server.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>com.ag-ui.community</groupId>
+            <artifactId>ag-ui-spring-webmvc-server</artifactId>
+        </dependency>
+    </dependencies>
+</project>

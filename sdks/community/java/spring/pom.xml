@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.ag-ui.community</groupId>
+    <artifactId>ag-ui-spring</artifactId>
+    <version>0.1.0</version>
+    <packaging>pom</packaging>
+
+    <name>ag-ui-spring</name>
+    <description>Spring integrations for the AG-UI protocol (Spring AI and Spring server)</description>
+    <url>https://github.com/ag-ui-protocol/ag-ui</url>
+
+    <licenses>
+        <license>
+            <name>The Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>pascalwilbrink</id>
+            <name>Pascal Wilbrink</name>
+            <email>pascal.wilbrink@gmail.com</email>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/ag-ui-protocol/ag-ui.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/ag-ui-protocol/ag-ui.git</developerConnection>
+        <url>https://github.com/ag-ui-protocol/ag-ui</url>
+    </scm>
+
+    <modules>
+        <module>spring-server-core</module>
+        <module>spring-webflux-server</module>
+        <module>spring-webmvc-server</module>
+        <module>spring-webflux-boot-starter</module>
+        <module>spring-webmvc-boot-starter</module>
+        <module>spring-ai</module>
+        <module>spring-ai-spring-boot-starter</module>
+        <module>spring-ai-webmvc-boot-starter</module>
+    </modules>
+
+    <properties>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- ag-ui is published to Maven Central, so resolve the release directly. -->
+        <ag-ui.version>0.1.0</ag-ui.version>
+        <junit.version>5.10.2</junit.version>
+        <jacoco.version>0.8.13</jacoco.version>
+        <!--
+          Internal module versions are managed here rather than via
+          ${project.version} because the modules are versioned independently
+          (see the Versioning section of the README). Bump alongside each
+          module's own <version>.
+        -->
+        <ag-ui-spring-server-core.version>4.1.0</ag-ui-spring-server-core.version>
+        <ag-ui-spring-webflux-server.version>4.1.0</ag-ui-spring-webflux-server.version>
+        <ag-ui-spring-webmvc-server.version>4.1.0</ag-ui-spring-webmvc-server.version>
+        <ag-ui-spring-ai.version>2.0.0</ag-ui-spring-ai.version>
+    </properties>
+
+    <!--
+      Only stable, shared management lives here. Each module imports its own
+      framework BOM (Spring Boot for spring-server, Spring AI for spring-ai) and
+      carries its own, independent version, so the two modules can be released on
+      separate cadences tracking their respective frameworks.
+    -->
+    <dependencyManagement>
+        <dependencies>
+            <!-- ag-ui-4j modules. -->
+            <dependency>
+                <groupId>com.ag-ui.community</groupId>
+                <artifactId>java-core</artifactId>
+                <version>${ag-ui.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ag-ui.community</groupId>
+                <artifactId>java-client</artifactId>
+                <version>${ag-ui.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ag-ui.community</groupId>
+                <artifactId>java-server</artifactId>
+                <version>${ag-ui.version}</version>
+            </dependency>
+
+            <!-- Internal modules (independently versioned). -->
+            <dependency>
+                <groupId>com.ag-ui.community</groupId>
+                <artifactId>ag-ui-spring-server-core</artifactId>
+                <version>${ag-ui-spring-server-core.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ag-ui.community</groupId>
+                <artifactId>ag-ui-spring-webflux-server</artifactId>
+                <version>${ag-ui-spring-webflux-server.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ag-ui.community</groupId>
+                <artifactId>ag-ui-spring-webmvc-server</artifactId>
+                <version>${ag-ui-spring-webmvc-server.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ag-ui.community</groupId>
+                <artifactId>ag-ui-spring-ai</artifactId>
+                <version>${ag-ui-spring-ai.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${junit.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.2.5</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+
+        <plugins>
+            <!-- Produces the per-module coverage report at
+                 target/site/jacoco/jacoco.xml. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- Activated when publishing to Maven Central (see .github/workflows/release.yml). -->
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <!-- Inline the parent and resolve property/managed versions into each
+                         module's published POM, so modules can be released independently
+                         without the aggregator parent being on Maven Central. -->
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>flatten-maven-plugin</artifactId>
+                        <version>1.7.0</version>
+                        <configuration>
+                            <flattenMode>oss</flattenMode>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>flatten</id>
+                                <phase>process-resources</phase>
+                                <goals>
+                                    <goal>flatten</goal>
+                                </goals>
+                            </execution>
+                            <execution>
+                                <id>flatten-clean</id>
+                                <phase>clean</phase>
+                                <goals>
+                                    <goal>clean</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Attach a sources jar (required by Maven Central). -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.3.1</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Attach a javadoc jar (required by Maven Central). -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>3.11.2</version>
+                        <configuration>
+                            <doclint>none</doclint>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Sign all artifacts with GPG (required by Maven Central).
+                         The passphrase is read from the MAVEN_GPG_PASSPHRASE env var. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.7</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Publish to Maven Central via the Central Publishing Portal.
+                         Credentials come from the "central" server in settings.xml. -->
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.7.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>true</autoPublish>
+                            <waitUntil>published</waitUntil>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>
