@@ -1354,7 +1354,7 @@ export class LangGraphAgent extends AbstractAgent {
             predictStateTool.tool === toolCallData?.name,
         );
 
-        const isToolCallStartEvent = !hasCurrentStream && toolCallData?.name;
+        let isToolCallStartEvent = !hasCurrentStream && toolCallData?.name;
         const isToolCallArgsEvent =
           hasCurrentStream && currentStream?.toolCallId && toolCallData?.args;
         const isToolCallEndEvent =
@@ -1443,7 +1443,14 @@ export class LangGraphAgent extends AbstractAgent {
           if (resolved) {
             this.messagesInProcess[this.activeRun!.id] = null;
           }
-          break;
+          // The chunk that ends streamed text can also open a tool call: Anthropic
+          // streams the `tool_use` block of a message right after its text block.
+          // Fall through to the tool-call start below instead of dropping the call
+          // and every argument chunk that follows it (the Python adapter already
+          // handles this transition).
+          if (!toolCallData?.name) break;
+          isToolCallStartEvent = true;
+          this.activeRun!.hasFunctionStreaming = true;
         }
 
         if (isToolCallStartEvent && shouldEmitToolCalls) {
