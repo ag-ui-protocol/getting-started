@@ -1406,9 +1406,6 @@ importers:
 
   middlewares/mcp-middleware:
     dependencies:
-      '@ag-ui/client':
-        specifier: workspace:*
-        version: link:../../sdks/typescript/packages/client
       '@modelcontextprotocol/sdk':
         specifier: ^1.0.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
@@ -1416,6 +1413,9 @@ importers:
         specifier: 7.8.1
         version: 7.8.1
     devDependencies:
+      '@ag-ui/client':
+        specifier: workspace:*
+        version: link:../../sdks/typescript/packages/client
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
         version: 0.17.4
