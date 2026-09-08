@@ -35,6 +35,12 @@ import java.util.concurrent.CompletionException;
  * Request} before streaming begins; non-{@code POST} requests receive
  * {@code 405 Method Not Allowed}.
  *
+ * <p><b>Body limit.</b> The two-argument constructors default to
+ * {@value #DEFAULT_MAX_REQUEST_BODY_BYTES} bytes (8 MiB). Use a three-argument
+ * constructor to override this limit. Bodies are counted before UTF-8 decoding;
+ * oversized requests receive HTTP 413 without invoking the serializer or agent.
+ * Previously accepted large requests may therefore be rejected by default.
+ *
  * <pre>{@code
  * AgentRegistry registry = AgentRegistry.of(Map.of("weather", weatherAgent, "support", supportAgent));
  * HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
@@ -45,11 +51,15 @@ import java.util.concurrent.CompletionException;
  */
 public final class JdkAgentHttpHandler implements HttpHandler {
 
+    /** Default maximum request body size: 8 MiB, measured before UTF-8 decoding. */
+    public static final int DEFAULT_MAX_REQUEST_BODY_BYTES = 8 * 1024 * 1024;
+
     /** Id under which the single-agent convenience constructor registers its agent. */
     static final String DEFAULT_AGENT_ID = "default";
 
     private final AgentRegistry registry;
     private final Serializer serializer;
+    private final int maxRequestBodyBytes;
 
     /**
      * Creates a handler that serves a single agent. It answers on the base path
@@ -60,8 +70,21 @@ public final class JdkAgentHttpHandler implements HttpHandler {
      *                   (required)
      */
     public JdkAgentHttpHandler(Agent agent, Serializer serializer) {
+        this(agent, serializer, DEFAULT_MAX_REQUEST_BODY_BYTES);
+    }
+
+    /**
+     * Creates a single-agent handler with a request body limit in bytes.
+     *
+     * @param agent the agent to run (required)
+     * @param serializer the serializer (required)
+     * @param maxRequestBodyBytes maximum body size before UTF-8 decoding
+     * @throws IllegalArgumentException if the limit is not between 1 and
+     *         {@code Integer.MAX_VALUE - 1}, inclusive
+     */
+    public JdkAgentHttpHandler(Agent agent, Serializer serializer, int maxRequestBodyBytes) {
         this(AgentRegistry.of(Map.of(DEFAULT_AGENT_ID, Objects.requireNonNull(agent, "agent must not be null"))),
-                serializer);
+                serializer, maxRequestBodyBytes);
     }
 
     /**
@@ -73,8 +96,27 @@ public final class JdkAgentHttpHandler implements HttpHandler {
      *                   (required)
      */
     public JdkAgentHttpHandler(AgentRegistry registry, Serializer serializer) {
+        this(registry, serializer, DEFAULT_MAX_REQUEST_BODY_BYTES);
+    }
+
+    /**
+     * Creates a routing handler with a request body limit in bytes. Oversized
+     * requests receive HTTP 413 without invoking the serializer or agent.
+     *
+     * @param registry the agents addressable by this handler (required)
+     * @param serializer the serializer (required)
+     * @param maxRequestBodyBytes maximum body size before UTF-8 decoding
+     * @throws IllegalArgumentException if the limit is not between 1 and
+     *         {@code Integer.MAX_VALUE - 1}, inclusive
+     */
+    public JdkAgentHttpHandler(AgentRegistry registry, Serializer serializer, int maxRequestBodyBytes) {
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
         this.serializer = Objects.requireNonNull(serializer, "serializer must not be null");
+        // Reserve one byte for detecting an oversized body without integer overflow.
+        if (maxRequestBodyBytes <= 0 || maxRequestBodyBytes == Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("maxRequestBodyBytes must be between 1 and Integer.MAX_VALUE - 1");
+        }
+        this.maxRequestBodyBytes = maxRequestBodyBytes;
     }
 
     @Override
@@ -92,7 +134,23 @@ public final class JdkAgentHttpHandler implements HttpHandler {
             }
             AgentRunHandler handler = new AgentRunHandler(agent, serializer);
 
-            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            String contentLength = exchange.getRequestHeaders().getFirst("Content-Length");
+            if (contentLength != null) {
+                try {
+                    if (Long.parseLong(contentLength) > maxRequestBodyBytes) {
+                        respondPlain(exchange, 413, "Request body too large");
+                        return;
+                    }
+                } catch (NumberFormatException ignored) {
+                    // The bounded read also protects requests with an invalid length.
+                }
+            }
+            byte[] bytes = exchange.getRequestBody().readNBytes(maxRequestBodyBytes + 1);
+            if (bytes.length > maxRequestBodyBytes) {
+                respondPlain(exchange, 413, "Request body too large");
+                return;
+            }
+            String body = new String(bytes, StandardCharsets.UTF_8);
 
             RunAgentInput input;
             try {
