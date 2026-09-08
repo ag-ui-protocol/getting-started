@@ -75,71 +75,86 @@ impl SseResponseExt for Response {
 /// A processor that converts a byte stream into an SSE event stream
 struct SseEventProcessor;
 
+/// What the processor carries between chunks.
+///
+/// `terminated` lives here rather than in the closure so the outer stream can answer a poll
+/// without touching the body: once it is set the source is dropped and `None` is returned, which
+/// is what releases the response.
+struct SseProcessorState<S> {
+    stream: Pin<Box<S>>,
+    buffer: String,
+    terminated: bool,
+}
+
 impl SseEventProcessor {
     /// Creates a new SSE event processor
     #[allow(clippy::new_ret_no_self)]
-    fn new(
-        stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + 'static,
-    ) -> impl Stream<Item = Result<SseEvent, AgUiClientError>> {
-        let mut buffer = String::new();
-        // Set when a frame breaks the cap. Every later chunk is discarded, because the parser gave
-        // up partway through a frame and no offset after that is a known boundary.
-        let mut terminated = false;
+    fn new<S>(stream: S) -> impl Stream<Item = Result<SseEvent, AgUiClientError>>
+    where
+        S: Stream<Item = Result<Bytes, reqwest::Error>> + 'static,
+    {
+        let state = SseProcessorState {
+            stream: Box::pin(stream),
+            buffer: String::new(),
+            terminated: false,
+        };
 
-        // Process the stream
-        stream
-            .map(move |chunk_result| {
-                // Nothing after an overflow can be trusted to start on a frame boundary.
-                if terminated {
-                    return Vec::new();
+        futures::stream::unfold(state, |mut state| async move {
+            // Ending the stream has to be decided before the body is polled. Deciding it after
+            // would leave a caller that keeps consuming waiting on a server that has no reason to
+            // send anything else. Dropping `state` here drops the source with it.
+            if state.terminated {
+                return None;
+            }
+
+            // Map reqwest errors
+            let chunk = match state.stream.next().await? {
+                Ok(chunk) => chunk,
+                Err(err) => {
+                    return Some((vec![Err(AgUiClientError::HttpTransport(err))], state));
                 }
+            };
 
-                // Map reqwest errors
-                let chunk = match chunk_result {
-                    Ok(chunk) => chunk,
-                    Err(err) => return vec![Err(AgUiClientError::HttpTransport(err))],
-                };
-
-                // Convert bytes to string and append to buffer
-                match String::from_utf8(chunk.to_vec()) {
-                    Ok(text) => {
-                        buffer.push_str(&text);
-
-                        // Process complete events from the buffer, refusing any frame over the
-                        // cap before it is parsed.
-                        let (mut events, new_buffer, overflowed) =
-                            process_raw_sse_events_capped(&buffer, SSE_MAX_BUFFER_BYTES);
-
-                        if overflowed {
-                            /*
-                             * End the stream rather than carry on from an arbitrary offset.
-                             *
-                             * The parser was inside the frame that broke the cap, and the bytes
-                             * after the point it gave up are the tail of that frame, not a new
-                             * one. Clearing the buffer and continuing reads that tail as a frame
-                             * of its own, so a sender could place anything it liked after the cap
-                             * and have it dispatched as an event. There is no offset that is known
-                             * to be a frame boundary, so there is nothing safe to resume from.
-                             */
-                            terminated = true;
-                            buffer = String::new();
-                            events.push(Err(AgUiClientError::SseParse {
-                                message: format!(
-                                    "SSE frame exceeded {SSE_MAX_BUFFER_BYTES} bytes; ending the stream"
-                                ),
-                            }));
-                        } else {
-                            buffer = new_buffer;
-                        }
-
-                        events
-                    }
-                    Err(e) => vec![Err(AgUiClientError::SseParse {
-                        message: format!("Invalid UTF-8: {e}"),
-                    })],
+            // Convert bytes to string and append to buffer
+            let text = match String::from_utf8(chunk.to_vec()) {
+                Ok(text) => text,
+                Err(e) => {
+                    let message = format!("Invalid UTF-8: {e}");
+                    return Some((vec![Err(AgUiClientError::SseParse { message })], state));
                 }
-            })
-            .flat_map(futures::stream::iter)
+            };
+            state.buffer.push_str(&text);
+
+            // Process complete events from the buffer, refusing any frame over the cap before it
+            // is parsed.
+            let (mut events, new_buffer, overflowed) =
+                process_raw_sse_events_capped(&state.buffer, SSE_MAX_BUFFER_BYTES);
+
+            if overflowed {
+                /*
+                 * End the stream rather than carry on from an arbitrary offset.
+                 *
+                 * The parser was inside the frame that broke the cap, and the bytes after the
+                 * point it gave up are the tail of that frame, not a new one. Clearing the buffer
+                 * and continuing reads that tail as a frame of its own, so a sender could place
+                 * anything it liked after the cap and have it dispatched as an event. There is no
+                 * offset that is known to be a frame boundary, so there is nothing safe to resume
+                 * from.
+                 */
+                state.terminated = true;
+                state.buffer = String::new();
+                events.push(Err(AgUiClientError::SseParse {
+                    message: format!(
+                        "SSE frame exceeded {SSE_MAX_BUFFER_BYTES} bytes; ending the stream"
+                    ),
+                }));
+            } else {
+                state.buffer = new_buffer;
+            }
+
+            Some((events, state))
+        })
+        .flat_map(futures::stream::iter)
     }
 }
 
@@ -416,6 +431,32 @@ mod tests {
         assert!(
             emitted.is_empty(),
             "nothing may be emitted after an overflow, got {emitted:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_overflow_ends_the_stream_without_another_upstream_chunk() {
+        // A finite source cannot show this: it supplies EOF of its own accord. Here the body goes
+        // quiet after the oversized chunk, exactly as a server holding the connection open would,
+        // so the stream has to reach `None` on its own rather than wait to be told.
+        let oversized = "z".repeat(SSE_MAX_BUFFER_BYTES + 1);
+        let upstream =
+            futures::stream::once(
+                async move { Ok::<Bytes, reqwest::Error>(Bytes::from(oversized)) },
+            )
+            .chain(futures::stream::pending());
+        let mut events = Box::pin(SseEventProcessor::new(upstream));
+
+        assert!(matches!(
+            events.next().await,
+            Some(Err(AgUiClientError::SseParse { .. }))
+        ));
+
+        let end = tokio::time::timeout(std::time::Duration::from_millis(100), events.next()).await;
+
+        assert!(
+            matches!(end, Ok(None)),
+            "the stream must end without another chunk from the body"
         );
     }
 
