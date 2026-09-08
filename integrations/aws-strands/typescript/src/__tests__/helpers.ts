@@ -23,6 +23,9 @@ import {
   type RunAgentInput,
 } from "@ag-ui/core";
 
+import type OpenAI from "openai";
+import { OpenAIModel } from "@strands-agents/sdk/models/openai";
+
 import { StrandsAgent } from "../agent";
 import type { StrandsAgentConfig } from "../config";
 import { describeModelBoundHistory } from "../model-context";
@@ -663,6 +666,57 @@ export function expectNoRunError(events: BaseEvent[], label = "run"): void {
   expect(codes, `${label} emitted RUN_ERROR ${JSON.stringify(codes)}`).toEqual(
     [],
   );
+}
+
+/**
+ * The request the real OpenAI Chat Completions adapter builds for `history`.
+ *
+ * The Strands SDK's OpenAI provider is the formatter under test, not a
+ * reimplementation of it: the only thing replaced is the transport, so what
+ * comes back is what the bridge would have put on the wire. The fake client is
+ * duck-typed to the one call `_streamChat` makes, hence the cast.
+ */
+export async function openAIBoundMessages(
+  history: readonly StrandsMessage[],
+): Promise<Array<Record<string, unknown>>> {
+  const captured: Array<{ messages: Array<Record<string, unknown>> }> = [];
+  const client = {
+    chat: {
+      completions: {
+        create: async (request: {
+          messages: Array<Record<string, unknown>>;
+        }) => {
+          captured.push(request);
+          return (async function* () {})();
+        },
+      },
+    },
+  } as unknown as OpenAI;
+
+  const model = new OpenAIModel({ api: "chat", modelId: "gpt-4o", client });
+  for await (const _event of model.stream([...history])) {
+    // Drained so the adapter reaches its request build; the fake yields none.
+  }
+  return captured[0]!.messages;
+}
+
+/** Every assistant message with `tool_calls` is followed by its tool messages. */
+export function openAIAdjacency(
+  bound: Array<Record<string, unknown>>,
+): "ok" | `broken at [${number}]` {
+  for (let index = 0; index < bound.length; index++) {
+    const message = bound[index]!;
+    const toolCalls = message.tool_calls as unknown[] | undefined;
+    if (message.role !== "assistant" || !toolCalls?.length) continue;
+    const answers = bound.slice(index + 1, index + 1 + toolCalls.length);
+    if (
+      answers.length !== toolCalls.length ||
+      answers.some((answer) => answer.role !== "tool")
+    ) {
+      return `broken at [${index}]`;
+    }
+  }
+  return "ok";
 }
 
 /**

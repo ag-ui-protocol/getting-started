@@ -54,6 +54,8 @@ import {
   modelSawShape,
   modelSawTexts,
   modelTurn,
+  openAIAdjacency,
+  openAIBoundMessages,
   persistedSnapshot,
   persistedToolResults,
   realStrandsAgent,
@@ -3206,44 +3208,144 @@ describe("a proxy left over from an earlier turn", () => {
  * half of the Python suite's `TestATurnCarryingBothAnAnswerAndAQuestion`.
  */
 describe("a turn carrying both an answer and a question", () => {
+  /** The payload that carries a tool result and the user's next turn. */
+  function answerAndQuestion(
+    runId: string,
+    questions: string[],
+  ): RunAgentInput {
+    return minimalRunInput({
+      runId,
+      messages: [
+        { id: "u1", role: "user", content: "make it red" } as never,
+        {
+          id: "t1",
+          role: "tool",
+          toolCallId: NATIVE_ID,
+          content: "color applied",
+        } as never,
+        ...questions.map(
+          (text, index) =>
+            ({ id: `u${index + 2}`, role: "user", content: text }) as never,
+        ),
+      ],
+      tools: CLIENT_TOOLS,
+    });
+  }
+
+  /** The persisted conversation as `role: joined text`, in order. */
+  function storedTurns(dir: string): string[] {
+    return persistedSnapshot(dir).data.messages.map((message) => {
+      const record = message as { role?: string; content?: unknown[] };
+      const text = (record.content ?? [])
+        .flatMap((block) => {
+          const value = (block as { text?: unknown }).text;
+          return typeof value === "string" ? [value] : [];
+        })
+        .join("");
+      return `${record.role}: ${text}`;
+    });
+  }
+
   it("keeps both as their own messages across a restart", async () => {
     const dir = storageDir();
     const first = bootProcess(dir, CALLS_FRONTEND_TOOL);
     expectNoRunError(await collect(first.agent, firstRun()), "first run");
 
     const second = bootProcess(dir, ANSWERS);
-    const events = await collect(
-      second.agent,
-      minimalRunInput({
-        runId: "run-2",
-        messages: [
-          { id: "u1", role: "user", content: "make it red" } as never,
-          {
-            id: "t1",
-            role: "tool",
-            toolCallId: NATIVE_ID,
-            content: "color applied",
-          } as never,
-          { id: "u2", role: "user", content: "now make it blue" } as never,
-        ],
-        tools: CLIENT_TOOLS,
-      }),
+    expectNoRunError(
+      await collect(
+        second.agent,
+        answerAndQuestion("run-2", ["now make it blue"]),
+      ),
+      "the answer-and-question turn",
     );
-    expectNoRunError(events, "the answer-and-question turn");
 
     expectSaid(modelSawTexts(second.model, 0), "now make it blue");
     expectToolCallsAnsweredImmediately(second.model.seenMessages[0]!);
 
-    // The store is read back on its own terms. The client's question is
-    // there, and it is still its own message.
-    const persisted = persistedSnapshot(dir).data.messages;
-    const texts = persisted.flatMap((message) =>
-      ((message as { content?: unknown[] }).content ?? []).flatMap((block) => {
-        const text = (block as { text?: unknown }).text;
-        return typeof text === "string" ? [text] : [];
-      }),
+    // The store is read back on its own terms. The client's question is there,
+    // it is still its own message, and it is still after the answer it
+    // followed.
+    expect(storedTurns(dir)).toEqual([
+      "user: make it red",
+      "assistant: ",
+      "user: ",
+      "user: now make it blue",
+      "assistant: The color is now red.",
+    ]);
+  });
+
+  it("puts the question after the answer in the provider's own request", async () => {
+    const dir = storageDir();
+    const first = bootProcess(dir, CALLS_FRONTEND_TOOL);
+    expectNoRunError(await collect(first.agent, firstRun()), "first run");
+
+    const second = bootProcess(dir, ANSWERS);
+    expectNoRunError(
+      await collect(
+        second.agent,
+        answerAndQuestion("run-2", ["now make it blue"]),
+      ),
+      "the answer-and-question turn",
     );
-    expect(texts).toContain("now make it blue");
-    expect(texts).toContain("make it red");
+
+    // Through the real Chat Completions formatter, not a description of it.
+    const bound = await openAIBoundMessages(second.model.seenMessages[0]!);
+    expect(openAIAdjacency(bound)).toBe("ok");
+
+    // Chronological: the tool's answer, and only then the new question. A
+    // bridge that folded the question into an earlier turn would leave the
+    // tool message last and have the model answer the question it already
+    // answered.
+    expect(bound.map((message) => message.role).slice(-2)).toEqual([
+      "tool",
+      "user",
+    ]);
+    const last = bound[bound.length - 1]!;
+    expect(JSON.stringify(last)).toContain("now make it blue");
+  });
+
+  it("keeps the question in place when a later turn follows the restart", async () => {
+    const dir = storageDir();
+    const first = bootProcess(dir, CALLS_FRONTEND_TOOL);
+    expectNoRunError(await collect(first.agent, firstRun()), "first run");
+
+    const second = bootProcess(dir, ANSWERS);
+    expectNoRunError(
+      await collect(
+        second.agent,
+        answerAndQuestion("run-2", ["now make it blue"]),
+      ),
+      "the answer-and-question turn",
+    );
+
+    // A third process, reading the thread back off disk and carrying on.
+    const third = bootProcess(dir, ANSWERS);
+    expectNoRunError(
+      await collect(
+        third.agent,
+        answerAndQuestion("run-3", ["now make it blue", "and now green"]),
+      ),
+      "the turn after the restart",
+    );
+
+    expect(storedTurns(dir)).toEqual([
+      "user: make it red",
+      "assistant: ",
+      "user: ",
+      "user: now make it blue",
+      "assistant: The color is now red.",
+      "user: and now green",
+      "assistant: The color is now red.",
+    ]);
+
+    // What the later model call read matches the order the store holds.
+    expect(modelSawTexts(third.model, 0)).toEqual([
+      "make it red",
+      "color applied",
+      "now make it blue",
+      "The color is now red.",
+      "and now green",
+    ]);
   });
 });

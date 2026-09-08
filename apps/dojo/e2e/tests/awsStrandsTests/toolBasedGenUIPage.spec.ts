@@ -33,25 +33,11 @@ test("[Strands] Haiku generation and UI consistency for two different prompts", 
   await genAIAgent.checkGeneratedHaiku();
   await genAIAgent.checkHaikuDisplay(page);
 
-  const cardsAfterFirst = await page
-    .locator('[data-testid="haiku-card"]')
-    .count();
+  const afterFirst = await genAIAgent.snapshotHaiku(page);
 
   const prompt2 = 'Generate Haiku for "The moon shines bright"';
   await genAIAgent.generateHaiku(prompt2);
-
-  // A second card must actually ARRIVE. Without this the rest of the test is
-  // satisfied by the first turn's DOM: the helpers read `cards.last()` and poll
-  // the whole carousel, so a second turn that rendered nothing would still pass.
-  // Asserting an INCREASE rather than inequality, because a count that dropped
-  // would satisfy "different" while meaning the opposite. No exact target: one
-  // haiku paints both an in-chat card and a carousel entry.
-  await expect
-    .poll(() => page.locator('[data-testid="haiku-card"]').count(), {
-      timeout: 30_000,
-    })
-    .toBeGreaterThan(cardsAfterFirst);
-
+  await genAIAgent.checkLaterHaikuArrived(page, afterFirst);
   await genAIAgent.checkGeneratedHaiku();
   await genAIAgent.checkHaikuDisplay(page);
 });
