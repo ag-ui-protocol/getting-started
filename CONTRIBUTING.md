@@ -11,7 +11,7 @@ Here's how to get involved:
 Pick the right spot so we can help you faster:
 
 - **I want to contribute [Fixes / Feature Requests]** → [GitHub Issues](https://github.com/ag-ui-protocol/ag-ui/issues)
-- **"How do I...?** → [Discord](https://discord.gg/Jd3FzfdJa8) → `#-💎-contributing`
+- **"How do I...?"** → [Discord](https://discord.gg/Jd3FzfdJa8) → `#-💎-contributing`
 - **Introduce Yourself** → [Discord](https://discord.gg/Jd3FzfdJa8) → `🤝-intro`
 
 ---
@@ -25,7 +25,7 @@ We love community contributions! That said, we want to make sure we're all on th
 Investing a lot of time and effort just to find out it doesn't align with the upstream project feels awful, and we don't want that to happen.
 It also helps to make sure the work you're planning isn't already in progress.
 
-If you'd confirmed that the **[x]** work hasn't been started yet, please file an issue first: https://github.com/ag-ui-protocol/ag-ui/issues
+If you've confirmed the work hasn't been started yet, please file an issue first: <https://github.com/ag-ui-protocol/ag-ui/issues>
 
 1. **Find Something to Work On**
    Browse open issues on [GitHub](https://github.com/ag-ui-protocol/ag-ui/issues).
