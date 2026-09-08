@@ -33,6 +33,7 @@ from .types import (
     LangGraphReasoning
 )
 from .utils import (
+    ADAPTER_OWNED_FORWARDED_PROPS,
     agui_messages_to_langchain,
     DEFAULT_SCHEMA_KEYS,
     filter_object_by_schema_keys,
@@ -2374,7 +2375,25 @@ class LangGraphAgent:
                 state=state,
                 schema_keys=self.active_run["schema_keys"],
             )
-            stream_input = {**forwarded_props, **payload_input} if payload_input else None
+            # forwardedProps are an explicit per-run instruction, so they win
+            # over the client's synced state. The previous order
+            # ({**forwarded_props, **payload_input}) lost every collision to
+            # that state: on the first run of a thread the client holds no
+            # graph keys, so a forwarded value came through, but from the
+            # second run onward the client echoes back the STATE_SNAPSHOT the
+            # graph wrote and its stale value silently replaced the forwarded
+            # one (CopilotKit#3168).
+            #
+            # ADAPTER_OWNED_FORWARDED_PROPS stay out of the graph input
+            # entirely. They are run controls or merge-built channels, never
+            # graph state, and leaking them in is what made #3168 look like it
+            # worked on run 1.
+            forwarded_state = {
+                key: value
+                for key, value in forwarded_props.items()
+                if key not in ADAPTER_OWNED_FORWARDED_PROPS
+            }
+            stream_input = {**payload_input, **forwarded_state} if payload_input else None
 
 
         subgraphs_stream_enabled = input.forwarded_props.get('stream_subgraphs', True) if input.forwarded_props else True
