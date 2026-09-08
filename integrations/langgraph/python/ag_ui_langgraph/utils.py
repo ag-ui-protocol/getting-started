@@ -1825,11 +1825,11 @@ def resolve_reasoning_content(chunk: Any) -> LangGraphReasoning | None:
         # AWS Bedrock Converse format: { type: "reasoning_content", reasoning_content: { text: "...", signature: "..." } }
         if block_type == "reasoning_content" and isinstance(block.get("reasoning_content"), dict):
             rc = block["reasoning_content"]
-            if rc.get("text"):
+            if "text" in rc or rc.get("signature"):
                 result = LangGraphReasoning(
-                    text=rc["text"],
+                    text=rc.get("text", ""),
                     type="text",
-                    index=rc.get("index", 0),
+                    index=rc.get("index", block.get("index", 0)),
                 )
                 if rc.get("signature"):
                     result["signature"] = rc["signature"]
@@ -1870,16 +1870,6 @@ def resolve_reasoning_content(chunk: Any) -> LangGraphReasoning | None:
                     if block.get("id") and data.get("index", 0) == 0:
                         result["id"] = str(block["id"])
                     return result
-
-        # Bedrock Converse API format: { type: "reasoning_content", reasoning_content: { type: "text", text: "..." } }
-        if block_type == "reasoning_content" and isinstance(block.get("reasoning_content"), dict):
-            inner = block["reasoning_content"]
-            if inner.get("text"):
-                return LangGraphReasoning(
-                    type="text",
-                    text=inner["text"],
-                    index=inner.get("index", 0)
-                )
 
     # OpenAI legacy format via additional_kwargs
     additional_kwargs = _dual_get(chunk, "additional_kwargs")

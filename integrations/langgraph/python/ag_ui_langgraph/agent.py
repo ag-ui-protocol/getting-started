@@ -3816,6 +3816,10 @@ class LangGraphAgent:
         if not reasoning_data["text"]:
             if reasoning_data.get("id"):
                 self.active_run.setdefault("pending_reasoning_ids", {})[lane] = reasoning_data["id"]
+            if reasoning_data.get("signature"):
+                reasoning_process = self._get_reasoning_process(lane)
+                if reasoning_process is not None:
+                    reasoning_process["signature"] = reasoning_data["signature"]
             return
 
         reasoning_step_index = reasoning_data.get("index", 0)

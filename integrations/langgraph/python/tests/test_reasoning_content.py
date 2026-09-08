@@ -100,6 +100,30 @@ class TestResolveReasoningContent(unittest.TestCase):
         assert result is not None
         assert result["index"] == 3
 
+    def test_bedrock_converse_empty_text_flush_is_preserved(self):
+        chunk = FakeChunk(content=[{
+            "type": "reasoning_content",
+            "reasoning_content": {"text": ""},
+            "index": 0,
+        }])
+        result = resolve_reasoning_content(chunk)
+        assert result is not None
+        assert result["text"] == ""
+        assert result["index"] == 0
+        assert result.get("signature") is None
+
+    def test_bedrock_converse_signature_only_chunk_is_preserved(self):
+        chunk = FakeChunk(content=[{
+            "type": "reasoning_content",
+            "reasoning_content": {"signature": "EpcCC=="},
+            "index": 0,
+        }])
+        result = resolve_reasoning_content(chunk)
+        assert result is not None
+        assert result["text"] == ""
+        assert result["index"] == 0
+        assert result["signature"] == "EpcCC=="
+
     def test_empty_content_returns_none(self):
         chunk = FakeChunk(content=[])
         assert resolve_reasoning_content(chunk) is None
