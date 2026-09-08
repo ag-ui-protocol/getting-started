@@ -1251,6 +1251,34 @@ export async function anthropicRequestMessages(
   return body?.messages ?? [];
 }
 
+/**
+ * The Responses-API `input` items the real OpenAI client would have sent, each
+ * as `kind(id)`. This is the SDK's DEFAULT OpenAI mode, and it splits tool
+ * calls and results out of the message the same way Chat Completions does, so
+ * it needs its own check rather than inheriting the Chat one.
+ */
+export async function openAIResponsesRequestItems(
+  history: readonly StrandsMessage[],
+): Promise<string[]> {
+  let body: { input?: Array<Record<string, unknown>> } | undefined;
+  const model = new OpenAIModel({
+    modelId: "gpt-4o",
+    apiKey: "test-key",
+    clientConfig: {
+      maxRetries: 0,
+      fetch: capturingFetch((captured) => {
+        body = captured as { input?: Array<Record<string, unknown>> };
+      }),
+    },
+  });
+  await captureRequestBody(model, history, () => body);
+  return (body?.input ?? []).map((item) => {
+    const kind = typeof item.type === "string" ? item.type : "message";
+    const id = item.call_id ?? item.role ?? "";
+    return `${kind}(${String(id)})`;
+  });
+}
+
 /** Provider-bound roles, naming the tool ids each message opens or answers. */
 export function openAIRoleSequence(
   messages: readonly OpenAIChatRequestMessage[],

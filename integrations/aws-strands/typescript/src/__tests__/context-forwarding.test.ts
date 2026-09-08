@@ -65,6 +65,7 @@ import {
   modelSawTexts,
   modelTurn,
   openAIChatRequestMessages,
+  openAIResponsesRequestItems,
   openAIRoleSequence,
   persistedSnapshot,
   realStrandsAgent,
@@ -761,6 +762,21 @@ describe("provider-bound ordering during a tool continuation", () => {
 
     expect(openAIRoleSequence(await openAIChatRequestMessages(withContext))).toEqual(
       openAIRoleSequence(await openAIChatRequestMessages(without)),
+    );
+  });
+
+  it("does not change the Responses-API item sequence either", async () => {
+    // The SDK's default OpenAI mode is the Responses API, which splits tool
+    // calls and results into their own `input` items and pushes a message's
+    // content ahead of both. So it needs its own control, not the Chat one.
+    const without = await continuationTurns([], { parallel: true });
+    const withContext = await continuationTurns(
+      [{ description: "selected invoice", value: "123" }],
+      { parallel: true },
+    );
+
+    expect(await openAIResponsesRequestItems(withContext)).toEqual(
+      await openAIResponsesRequestItems(without),
     );
   });
 
