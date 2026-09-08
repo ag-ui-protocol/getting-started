@@ -990,8 +990,16 @@ export class LangGraphAgent extends AbstractAgent {
             ...latestStateValues,
             ...chunk.data,
           };
-          latestRootStateValues = chunk.data;
-          hasOrderedRootStateValues = true;
+          // Before events-mode model streaming begins, `values` is the only
+          // ordered root boundary available. Once events-mode is active,
+          // multiplexed `values` can race ahead of the event currently being
+          // processed. Keep that newer state available for ordinary snapshots,
+          // but advance subgraph boundaries only from causal on_chain_end
+          // output below so future messages/state cannot leak early.
+          if (!this.eventsStreamActive) {
+            latestRootStateValues = chunk.data;
+            hasOrderedRootStateValues = true;
+          }
           continue;
         } else if (
           subgraphsStreamEnabled &&
@@ -1046,10 +1054,17 @@ export class LangGraphAgent extends AbstractAgent {
             boundaryCheckpointStep,
             input.forwardedProps?.durability ?? "async",
           );
-          // A root values snapshot describes the boundary that follows it. Do
-          // not reuse it after crossing that boundary: a subgraph may commit
-          // newer state before the next root values event arrives.
-          hasOrderedRootStateValues = false;
+          if (currentSubgraph === ROOT_SUBGRAPH_NAME) {
+            // A checkpoint-selected root boundary is ordered by construction
+            // and can seed the next subgraph even when no root node runs in
+            // between.
+            latestRootStateValues = latestStateValues;
+            hasOrderedRootStateValues = true;
+          } else {
+            // Do not reuse a root boundary after entering a subgraph. The next
+            // root boundary or root on_chain_end output will advance it.
+            hasOrderedRootStateValues = false;
+          }
         }
 
         // Set server-assigned run id as soon as available
@@ -1121,6 +1136,7 @@ export class LangGraphAgent extends AbstractAgent {
                 ...latestRootStateValues,
                 ...outputUpdate,
               };
+              hasOrderedRootStateValues = true;
             }
           }
         }
