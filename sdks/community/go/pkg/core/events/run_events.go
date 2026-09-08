@@ -111,6 +111,24 @@ type RunFinishedOutcome struct {
 	Interrupts []types.Interrupt `json:"interrupts,omitempty"`
 }
 
+// MarshalJSON implements json.Marshaler.
+//
+// Interrupts belongs only to the interrupt variant. TypeScript parses the
+// outcome as a strict discriminated union and Python models each variant as its
+// own type, so a success outcome carrying the key is rejected by both; dropping
+// it here means a caller that sets both cannot put an unparseable event on the
+// wire.
+func (o RunFinishedOutcome) MarshalJSON() ([]byte, error) {
+	// Alias the type so marshalling does not recurse into this method.
+	type outcome RunFinishedOutcome
+
+	if o.Type != RunFinishedOutcomeTypeInterrupt {
+		o.Interrupts = nil
+	}
+
+	return json.Marshal(outcome(o))
+}
+
 // RunFinishedEvent indicates that an agent run has finished successfully
 type RunFinishedEvent struct {
 	*BaseEvent
@@ -208,6 +226,14 @@ func (e *RunFinishedEvent) Validate() error {
 
 	if e.RunIDValue == "" {
 		return fmt.Errorf("RunFinishedEvent validation failed: runId field is required")
+	}
+
+	// The peer SDKs require at least one interrupt on this variant: TypeScript
+	// with `.min(1)`, Python with a non-empty validator. Go's `omitempty` would
+	// otherwise drop an empty list and emit a bare {"type": "interrupt"}, which
+	// both reject as missing a required field.
+	if e.Outcome != nil && e.Outcome.Type == RunFinishedOutcomeTypeInterrupt && len(e.Outcome.Interrupts) == 0 {
+		return fmt.Errorf("RunFinishedEvent validation failed: outcome 'interrupt' requires at least one interrupt")
 	}
 
 	return nil
