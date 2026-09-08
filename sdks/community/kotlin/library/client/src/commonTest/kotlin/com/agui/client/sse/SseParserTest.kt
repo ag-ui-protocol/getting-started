@@ -87,4 +87,38 @@ class SseParserTest {
         assertEquals(1, events.size)
         assertIs<TextMessageStartEvent>(events.first())
     }
+
+    @Test
+    fun parseFlow_admitsTheLimitAndRefusesOneLevelPast() = runTest {
+        val parser = SseParser()
+        // The limit itself is the deepest payload that gets through, so the last container the
+        // deserializer is asked to descend is the MAX_JSON_DEPTH-th one and no deeper.
+        val atLimit = nestedCustomEvent(SseParser.MAX_JSON_DEPTH)
+        val pastLimit = nestedCustomEvent(SseParser.MAX_JSON_DEPTH + 1)
+
+        assertEquals(1, parser.parseFlow(flowOf(atLimit)).toList().size)
+        assertEquals(0, parser.parseFlow(flowOf(pastLimit)).toList().size)
+    }
+
+    @Test
+    fun maxJsonDepth_staysWithinTheMeasuredStackMargin() {
+        /*
+         * A debug Kotlin/Native arm64 build dies past depth 534 on a 512 KB stack, the Darwin
+         * default for secondary threads, at roughly 980 bytes of stack per nesting level. 128
+         * keeps about 4x of that; raising the limit needs a fresh measurement on the target with
+         * the smallest stack rather than an edit here.
+         */
+        assertTrue(
+            SseParser.MAX_JSON_DEPTH <= 128,
+            "MAX_JSON_DEPTH is ${SseParser.MAX_JSON_DEPTH}, past the measured stack margin"
+        )
+    }
+
+    /** A CUSTOM event whose `value` is [depth] levels of nesting, one container per level. */
+    private fun nestedCustomEvent(depth: Int): String {
+        // The event object itself is the first level, so the array nesting supplies depth - 1.
+        val arrays = depth - 1
+        val nested = "[".repeat(arrays) + "]".repeat(arrays)
+        return """{"type":"CUSTOM","name":"deep","value":$nested}"""
+    }
 }
