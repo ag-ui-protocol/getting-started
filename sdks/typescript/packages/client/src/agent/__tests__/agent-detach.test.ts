@@ -1,16 +1,15 @@
-/**
- * `detachActiveRun()` across CONCURRENT runs.
- *
- * The agent supports more than one run in flight at a time (see
- * agent-concurrent.test.ts). The detach handle used to be a single field, so a
- * second run overwrote the first one's — leaving the first run with nothing
- * that could ever tear it down.
- */
-import { Observable, Subscriber } from "rxjs";
+import { Observable, of, Subscriber } from "rxjs";
 import { AbstractAgent } from "@/agent";
-import { BaseEvent, EventType, RunAgentInput, RunStartedEvent } from "@ag-ui/core";
+import {
+  BaseEvent,
+  EventType,
+  MessagesSnapshotEvent,
+  RunAgentInput,
+  RunFinishedEvent,
+  RunStartedEvent,
+} from "@ag-ui/core";
 
-/** Emits RUN_STARTED and then hangs, until the test decides otherwise. */
+/** Emits RUN_STARTED and stays open until detached. */
 class HangingAgent extends AbstractAgent {
   public open: Array<Subscriber<BaseEvent>> = [];
   public teardowns = 0;
@@ -18,95 +17,99 @@ class HangingAgent extends AbstractAgent {
   run(input: RunAgentInput): Observable<BaseEvent> {
     return new Observable<BaseEvent>((subscriber) => {
       this.open.push(subscriber);
-      subscriber.next({
+      const started: RunStartedEvent = {
         type: EventType.RUN_STARTED,
         threadId: input.threadId,
         runId: input.runId,
-      } as RunStartedEvent);
+      };
+      subscriber.next(started);
       return () => {
         this.teardowns += 1;
       };
     });
   }
+
+  protected connect(input: RunAgentInput): Observable<BaseEvent> {
+    return this.run(input);
+  }
 }
 
-const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+class StartupFailureAgent extends AbstractAgent {
+  private attempts = 0;
+
+  run(input: RunAgentInput): Observable<BaseEvent> {
+    if (++this.attempts === 1) throw new Error("startup failed");
+    const started: RunStartedEvent = {
+      type: EventType.RUN_STARTED,
+      threadId: input.threadId,
+      runId: input.runId,
+    };
+    const finished: RunFinishedEvent = {
+      type: EventType.RUN_FINISHED,
+      threadId: input.threadId,
+      runId: input.runId,
+    };
+    return of(started, finished);
+  }
+}
 
 async function waitForRuns(agent: HangingAgent, count: number): Promise<void> {
-  for (let attempt = 0; attempt < 200 && agent.open.length < count; attempt++) {
-    await tick();
-  }
-  expect(agent.open.length).toBe(count);
+  await vi.waitFor(() => expect(agent.open).toHaveLength(count));
 }
 
-/** Whether every promise settled before the deadline. */
-async function settledWithin(promises: Promise<unknown>[], ms: number): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<"timeout">((resolve) => {
-    timer = setTimeout(() => resolve("timeout"), ms);
-  });
-  try {
-    const outcome = await Promise.race([
-      Promise.allSettled(promises).then(() => "settled" as const),
-      deadline,
-    ]);
-    return outcome === "settled";
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
+describe("single-run detachment", () => {
+  it.each(["runAgent", "connectAgent"] as const)(
+    "detaches %s before reusing the agent and ignores the old stream",
+    async (method) => {
+      const agent = new HangingAgent({ debug: false });
+      const onRunFinalized = vi.fn();
+      const first = agent[method]({ runId: "detach-first" }, { onRunFinalized });
+      await waitForRuns(agent, 1);
 
-describe("detachActiveRun with more than one run in flight", () => {
-  it("tears down every in-flight run, not only the most recent", async () => {
-    const agent = new HangingAgent();
+      await agent.detachActiveRun();
+      await first;
 
-    const first = agent.runAgent({ runId: "detach-r1" });
-    await waitForRuns(agent, 1);
-    const second = agent.runAgent({ runId: "detach-r2" });
-    await waitForRuns(agent, 2);
+      expect(agent.teardowns).toBe(1);
+      expect(agent.isRunning).toBe(false);
+      expect(onRunFinalized).toHaveBeenCalledTimes(1);
 
+      const second = agent[method]({ runId: "detach-second" });
+      await waitForRuns(agent, 2);
+      const staleSnapshot: MessagesSnapshotEvent = {
+        type: EventType.MESSAGES_SNAPSHOT,
+        messages: [{ id: "stale", role: "assistant", content: "Must be ignored" }],
+      };
+      agent.open[0].next(staleSnapshot);
+      expect(agent.messages).toEqual([]);
+      expect(agent.isRunning).toBe(true);
+
+      await agent.detachActiveRun();
+      await second;
+      expect(agent.teardowns).toBe(2);
+      expect(agent.isRunning).toBe(false);
+    },
+  );
+
+  it("is a no-op when idle and does not affect a later run", async () => {
+    const agent = new HangingAgent({ debug: false });
     await agent.detachActiveRun();
-
-    expect(await settledWithin([first, second], 500)).toBe(true);
-    expect(agent.teardowns).toBe(2);
-  });
-
-  it("leaves a still-running sibling alone when one run finishes on its own", async () => {
-    // The mirror of the bug: each run's finalize must clear only ITS OWN
-    // handle, or a run that ends normally disarms detach for the others.
-    const agent = new HangingAgent();
-
-    const first = agent.runAgent({ runId: "detach-r3" });
-    await waitForRuns(agent, 1);
-    const second = agent.runAgent({ runId: "detach-r4" });
-    await waitForRuns(agent, 2);
-
-    agent.open[1].complete();
-    await second;
-
-    await agent.detachActiveRun();
-    expect(await settledWithin([first], 500)).toBe(true);
-  });
-
-  it("is a no-op when nothing is running", async () => {
-    // "Resolves with undefined" is what an early return and a full teardown of
-    // nothing both look like. What "no-op" actually claims is that it touched
-    // no run and awaited no completion, so assert that: no subscription was
-    // ever opened, nothing was torn down, and a run started AFTERWARDS is
-    // unaffected by the call.
-    const agent = new HangingAgent();
-
-    await agent.detachActiveRun();
-
     expect(agent.open).toHaveLength(0);
     expect(agent.teardowns).toBe(0);
 
-    const later = agent.runAgent({ runId: "detach-r5" });
+    const later = agent.runAgent({ runId: "after-idle-detach" });
     await waitForRuns(agent, 1);
     expect(agent.teardowns).toBe(0);
 
     await agent.detachActiveRun();
-    expect(await settledWithin([later], 500)).toBe(true);
+    await later;
     expect(agent.teardowns).toBe(1);
+  });
+
+  it("can detach after recovering from a synchronous startup failure", async () => {
+    const agent = new StartupFailureAgent({ debug: false });
+    await expect(agent.runAgent()).rejects.toThrow("startup failed");
+    await expect(agent.runAgent()).resolves.toEqual({ result: undefined, newMessages: [] });
+    expect(agent.isRunning).toBe(false);
+    await expect(agent.detachActiveRun()).resolves.toBeUndefined();
   });
 });

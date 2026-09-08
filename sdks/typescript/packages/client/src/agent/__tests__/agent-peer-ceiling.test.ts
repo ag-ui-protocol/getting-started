@@ -1,8 +1,7 @@
 /**
  * The peer ceiling (`maxProtocolVersion`, and its deprecated alias
- * `maxVersion`) is read in two places that a subclass can break: the alias
- * cycle between the two getters, and the constructor's version gates, which
- * run before a subclass's instance fields exist.
+ * `maxVersion`) must preserve subclass overrides through both spellings.
+ * Constructor version gates run before subclass instance fields exist.
  */
 import { AbstractAgent } from "@/agent";
 import { BaseEvent, Message, RunAgentInput } from "@ag-ui/core";
@@ -15,57 +14,132 @@ abstract class SilentAgent extends AbstractAgent {
   }
 }
 
-describe("the maxVersion <-> maxProtocolVersion alias cycle", () => {
-  it("terminates when a maxVersion override defers to super.maxVersion", () => {
-    class SuperSpelling extends SilentAgent {
-      override get maxVersion(): string {
-        return super.maxVersion;
-      }
+function createPinnedAgent(name: "maxVersion" | "maxProtocolVersion", readPin: () => string) {
+  class LegacyPinned extends SilentAgent {
+    override get maxVersion(): string {
+      return readPin();
     }
-    expect(new SuperSpelling().maxProtocolVersion).toBe(packageJson.version);
-  });
+  }
+  class ModernPinned extends SilentAgent {
+    override get maxProtocolVersion(): string {
+      return readPin();
+    }
+  }
+  return name === "maxVersion" ? new LegacyPinned() : new ModernPinned();
+}
 
-  it("terminates when a maxVersion override defers to this.maxProtocolVersion", () => {
-    // The other spelling of the same deferral. The recursion guard only
-    // covered `super.maxVersion`, so this one blew the stack.
-    class ThisSpelling extends SilentAgent {
-      override get maxVersion(): string {
-        return this.maxProtocolVersion;
-      }
-    }
-    expect(new ThisSpelling().maxProtocolVersion).toBe(packageJson.version);
-  });
+describe("peer-ceiling getter compatibility", () => {
+  beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => {}));
+  afterEach(() => vi.restoreAllMocks());
 
-  it("clears the guard after a resolution, so a second read still resolves the override", () => {
-    // What this proves: the flag is not left SET once a resolution finishes.
-    // If it were, the second read would take the early-return branch at the
-    // top of the getter and answer with the package default instead of the
-    // override — which is why the expected value is the pin and not
-    // `packageJson.version`.
-    //
-    // What it does NOT prove, and cannot: that `finally` RESTORES the previous
-    // value rather than hard-setting `false`. The two are indistinguishable by
-    // construction. The getter's first statement returns early whenever the
-    // flag is already set, so the save/restore line is only ever reached with
-    // the flag false — `wasResolving` can never be `true` there. A nested
-    // resolution that would tell them apart is therefore not constructible
-    // through the public surface, and an earlier version of this comment
-    // claimed otherwise.
-    class Pinned extends SilentAgent {
-      override get maxVersion(): string {
-        return "0.0.45";
+  it.each(["maxVersion", "maxProtocolVersion"] as const)(
+    "evaluates a legacy override once when reading %s through super.maxVersion",
+    (name) => {
+      let reads = 0;
+      class SuperSpelling extends SilentAgent {
+        override get maxVersion(): string {
+          reads++;
+          return super.maxVersion;
+        }
       }
-    }
-    const agent = new Pinned();
-    expect(agent.maxProtocolVersion).toBe("0.0.45");
-    expect(agent.maxProtocolVersion).toBe("0.0.45");
-    expect(agent.maxProtocolVersion).not.toBe(packageJson.version);
-  });
+      const agent = new SuperSpelling();
+      reads = 0;
+
+      expect(agent[name]).toBe(packageJson.version);
+      expect(reads).toBe(1);
+    },
+  );
+
+  it.each(["maxVersion", "maxProtocolVersion"] as const)(
+    "evaluates a modern override once when reading %s through super.maxProtocolVersion",
+    (name) => {
+      let reads = 0;
+      class SuperSpelling extends SilentAgent {
+        override get maxProtocolVersion(): string {
+          reads++;
+          return super.maxProtocolVersion;
+        }
+      }
+      const agent = new SuperSpelling();
+      reads = 0;
+
+      expect(agent[name]).toBe(packageJson.version);
+      expect(reads).toBe(1);
+    },
+  );
+
+  it.each(["maxVersion", "maxProtocolVersion"] as const)(
+    "preserves an inherited legacy super chain when reading %s",
+    (name) => {
+      let parentReads = 0;
+      let childReads = 0;
+      class Parent extends SilentAgent {
+        override get maxVersion(): string {
+          parentReads++;
+          return super.maxVersion;
+        }
+      }
+      class Child extends Parent {
+        override get maxVersion(): string {
+          childReads++;
+          return super.maxVersion;
+        }
+      }
+      const agent = new Child();
+      parentReads = childReads = 0;
+
+      expect(agent[name]).toBe(packageJson.version);
+      expect(parentReads).toBe(1);
+      expect(childReads).toBe(1);
+    },
+  );
+
+  it.each(["maxVersion", "maxProtocolVersion"] as const)(
+    "terminates when reading %s from a legacy override that forwards to this.maxProtocolVersion",
+    (name) => {
+      class ThisSpelling extends SilentAgent {
+        override get maxVersion(): string {
+          return this.maxProtocolVersion;
+        }
+      }
+      expect(new ThisSpelling()[name]).toBe(packageJson.version);
+    },
+  );
+
+  it.each(["maxVersion", "maxProtocolVersion"] as const)(
+    "keeps a %s pin live through both spellings",
+    (name) => {
+      let pin = "0.0.39";
+      const agent = createPinnedAgent(name, () => pin);
+      expect(agent.maxVersion).toBe(pin);
+      expect(agent.maxProtocolVersion).toBe(pin);
+
+      pin = "0.0.45";
+      expect(agent.maxVersion).toBe(pin);
+      expect(agent.maxProtocolVersion).toBe(pin);
+    },
+  );
+
+  it.each(["maxVersion", "maxProtocolVersion"] as const)(
+    "resolves a %s override again after it throws",
+    (name) => {
+      let failure: Error | undefined;
+      const agent = createPinnedAgent(name, () => {
+        if (failure) throw failure;
+        return "0.0.39";
+      });
+      const alias = name === "maxVersion" ? "maxProtocolVersion" : "maxVersion";
+
+      failure = new Error("ceiling lookup failed");
+      expect(() => agent[alias]).toThrow(failure);
+      failure = undefined;
+      expect(agent[alias]).toBe("0.0.39");
+    },
+  );
 });
 
 describe("the constructor's peer-ceiling gates", () => {
-  const unavailableCeiling =
-    /maxProtocolVersion resolved to .* during construction/;
+  const unavailableCeiling = /maxProtocolVersion resolved to .* during construction/;
 
   it("names the defect when a maxVersion override reads an instance field", () => {
     // Field initialisers run AFTER super(), so the constructor's version gates

@@ -124,57 +124,48 @@ export abstract class AbstractAgent {
    *  Cleared when a subsequent run completes successfully. */
   public pendingInterrupts: Interrupt[] = [];
   private middlewares: Middleware[] = [];
-  /**
-   * One entry per run currently in flight: the subject that detaches it, and
-   * the promise that resolves when its pipeline has finished unwinding.
-   *
-   * A SET, not a single field. Concurrent runs on one agent are supported (see
-   * agent-concurrent.test.ts), and a single slot meant the second run
-   * overwrote the first one's handle: `detachActiveRun()` then tore down only
-   * the newest run and returned immediately, while the older one kept
-   * processing its stream with nothing left that could ever stop it.
-   */
-  private activeRuns = new Set<{ detach$: Subject<void>; completion: Promise<void> }>();
+  // Emits to immediately detach from the active run (stop processing its stream)
+  private activeRunDetach$?: Subject<void>;
+  private activeRunCompletionPromise?: Promise<void>;
 
-  /** Breaks the alias cycle for an override that defers to super.maxVersion. */
+  /** Stops a legacy override that forwards to this.maxProtocolVersion. */
   private resolvingPeerCeiling = false;
 
-  get maxProtocolVersion(): string {
-    // Already resolving: a `maxVersion` override has deferred back to the
-    // alias it is standing in for. Both spellings of that deferral land here —
-    // `super.maxVersion` reaches the base alias below, and
-    // `this.maxProtocolVersion` reaches this getter — so the guard has to be
-    // read on BOTH sides or the second spelling recurses until the stack
-    // blows. Answering with the default ends the cycle in one hop.
+  private resolvePeerCeiling(name: "maxVersion" | "maxProtocolVersion"): string {
     if (this.resolvingPeerCeiling) {
       return packageJson.version;
     }
-    // A subclass that still overrides the deprecated name keeps working: the
-    // override is what this getter answers with, so every internal gate that
-    // reads maxProtocolVersion sees the pinned value the integration set.
+
+    // Inspect descriptors without executing either public getter.
+    let legacyOverride = Object.getOwnPropertyDescriptor(this, "maxVersion");
+    let modernOverride = Object.getOwnPropertyDescriptor(this, "maxProtocolVersion");
     let proto = Object.getPrototypeOf(this);
     while (proto && proto !== AbstractAgent.prototype) {
-      if (Object.getOwnPropertyDescriptor(proto, "maxVersion")) {
-        // Save/restore rather than a bare `= false` in `finally`. Today the
-        // two are equivalent and provably so: the early return at the top of
-        // this getter fires whenever the flag is already set, so this line is
-        // only ever reached with it false and `wasResolving` can never be
-        // true. It is written this way so that the clearing stays correct if
-        // that early return is ever relaxed to allow a nested resolution — the
-        // shape a reader would otherwise have to re-derive. What the tests can
-        // pin is the property that matters, that the flag does not stay SET
-        // (agent-peer-ceiling.test.ts, "clears the guard after a resolution").
-        const wasResolving = this.resolvingPeerCeiling;
-        this.resolvingPeerCeiling = true;
-        try {
-          return this.maxVersion;
-        } finally {
-          this.resolvingPeerCeiling = wasResolving;
-        }
-      }
+      legacyOverride ??= Object.getOwnPropertyDescriptor(proto, "maxVersion");
+      modernOverride ??= Object.getOwnPropertyDescriptor(proto, "maxProtocolVersion");
       proto = Object.getPrototypeOf(proto);
     }
-    return packageJson.version;
+
+    // With a legacy override, this base getter is reached via super.maxVersion.
+    // Return the base ceiling instead of entering that override a second time.
+    if (name === "maxVersion" && legacyOverride) {
+      return packageJson.version;
+    }
+    const override = name === "maxProtocolVersion" ? legacyOverride : modernOverride;
+    if (!override) {
+      return packageJson.version;
+    }
+
+    this.resolvingPeerCeiling = true;
+    try {
+      return override.get ? override.get.call(this) : override.value;
+    } finally {
+      this.resolvingPeerCeiling = false;
+    }
+  }
+
+  get maxProtocolVersion(): string {
+    return this.resolvePeerCeiling("maxProtocolVersion");
   }
 
   /**
@@ -184,18 +175,13 @@ export abstract class AbstractAgent {
    * package's DEPRECATIONS.md; removal no earlier than 2.0.
    */
   get maxVersion(): string {
-    if (this.resolvingPeerCeiling) {
-      // Reached via super.maxVersion from an override maxProtocolVersion is
-      // already resolving: answer with the default rather than recursing.
-      return packageJson.version;
-    }
-    if (!warnedDeprecatedMaxVersion) {
+    if (!this.resolvingPeerCeiling && !warnedDeprecatedMaxVersion) {
       warnedDeprecatedMaxVersion = true;
       console.warn(
         "[ag-ui] AbstractAgent.maxVersion is deprecated — use maxProtocolVersion. Same value; the new name says whose version it is and that it is a ceiling.",
       );
     }
-    return this.maxProtocolVersion;
+    return this.resolvePeerCeiling("maxVersion");
   }
 
   get debug(): ResolvedAgentDebugConfig {
@@ -344,16 +330,12 @@ export abstract class AbstractAgent {
 
       await this.onInitialize(input, subscribers);
 
-      // Per-run detachment signal + completion promise. Held in locals as well
-      // as in the set, so every stage below closes over THIS run's handle
-      // rather than reading whichever run registered last.
-      const detach$ = new Subject<void>();
+      // Per-run detachment signal + completion promise
+      this.activeRunDetach$ = new Subject<void>();
       let resolveActiveRunCompletion: (() => void) | undefined;
-      const completion = new Promise<void>((resolve) => {
+      this.activeRunCompletionPromise = new Promise<void>((resolve) => {
         resolveActiveRunCompletion = resolve;
       });
-      const activeRun = { detach$, completion };
-      this.activeRuns.add(activeRun);
 
       const pipeline = pipe(
         () => {
@@ -391,7 +373,7 @@ export abstract class AbstractAgent {
         transformChunks(this.debugLogger),
         verifyEvents(this.debugLogger),
         // Stop processing immediately when this run is detached
-        (source$) => source$.pipe(takeUntil(detach$)),
+        (source$) => source$.pipe(takeUntil(this.activeRunDetach$!)),
         (source$) => this.apply(input, source$, subscribers),
         (source$) => this.processApplyEvents(input, source$, subscribers),
         catchError((error) => {
@@ -409,11 +391,10 @@ export abstract class AbstractAgent {
           });
           this.isRunning = false;
           void this.onFinalize(input, subscribers);
-          // Only THIS run leaves the set: a run that ends on its own must not
-          // disarm detach for a sibling still in flight.
-          this.activeRuns.delete(activeRun);
           resolveActiveRunCompletion?.();
           resolveActiveRunCompletion = undefined;
+          this.activeRunCompletionPromise = undefined;
+          this.activeRunDetach$ = undefined;
         }),
       );
 
@@ -459,16 +440,12 @@ export abstract class AbstractAgent {
 
       await this.onInitialize(input, subscribers);
 
-      // Per-run detachment signal + completion promise. Held in locals as well
-      // as in the set, so every stage below closes over THIS run's handle
-      // rather than reading whichever run registered last.
-      const detach$ = new Subject<void>();
+      // Per-run detachment signal + completion promise
+      this.activeRunDetach$ = new Subject<void>();
       let resolveActiveRunCompletion: (() => void) | undefined;
-      const completion = new Promise<void>((resolve) => {
+      this.activeRunCompletionPromise = new Promise<void>((resolve) => {
         resolveActiveRunCompletion = resolve;
       });
-      const activeRun = { detach$, completion };
-      this.activeRuns.add(activeRun);
 
       const pipeline = pipe(
         () => defer(() => this.connect(input)),
@@ -480,7 +457,7 @@ export abstract class AbstractAgent {
         transformChunks(this.debugLogger),
         verifyEvents(this.debugLogger),
         // Stop processing immediately when this run is detached
-        (source$) => source$.pipe(takeUntil(detach$)),
+        (source$) => source$.pipe(takeUntil(this.activeRunDetach$!)),
         (source$) => this.apply(input, source$, subscribers),
         (source$) => this.processApplyEvents(input, source$, subscribers),
         catchError((error) => {
@@ -493,11 +470,10 @@ export abstract class AbstractAgent {
         finalize(() => {
           this.isRunning = false;
           void this.onFinalize(input, subscribers);
-          // Only THIS run leaves the set: a run that ends on its own must not
-          // disarm detach for a sibling still in flight.
-          this.activeRuns.delete(activeRun);
           resolveActiveRunCompletion?.();
           resolveActiveRunCompletion = undefined;
+          this.activeRunCompletionPromise = undefined;
+          this.activeRunDetach$ = undefined;
         }),
       );
 
@@ -516,18 +492,13 @@ export abstract class AbstractAgent {
   public abortRun() {}
 
   public async detachActiveRun(): Promise<void> {
-    // Snapshotted first: signalling a run makes it finalize, which removes it
-    // from the set, and iterating the live set while it shrinks would skip
-    // entries.
-    const running = [...this.activeRuns];
-    if (running.length === 0) {
+    if (!this.activeRunDetach$) {
       return;
     }
-    for (const run of running) {
-      run.detach$.next();
-      run.detach$.complete();
-    }
-    await Promise.all(running.map((run) => run.completion));
+    const completion = this.activeRunCompletionPromise ?? Promise.resolve();
+    this.activeRunDetach$.next();
+    this.activeRunDetach$?.complete();
+    await completion;
   }
 
   protected apply(
@@ -803,11 +774,6 @@ export abstract class AbstractAgent {
     cloned.subscribers = [...this.subscribers];
     cloned.middlewares = [...this.middlewares];
     cloned.pendingInterrupts = structuredClone_(this.pendingInterrupts);
-    // Object.create skips class field initializers, so every field this clone
-    // needs has to be set here. A clone has no runs in flight of its own — the
-    // original's are the original's — so it starts with an empty set rather
-    // than a share of the source's.
-    cloned.activeRuns = new Set();
 
     return cloned;
   }

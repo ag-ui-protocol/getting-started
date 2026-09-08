@@ -82,13 +82,8 @@ describe("HttpAgent cloning", () => {
 });
 
 /**
- * A clone's runs are ITS OWN.
- *
- * `clone()` builds the copy with `Object.create`, which runs no class field
- * initialisers, so every field has to be assigned by hand — `activeRuns`
- * included. Left out, the clone has no set at all and its first run throws on
- * `this.activeRuns.add(...)`; shared with the source, detaching one agent tears
- * down the other's in-flight runs.
+ * A clone manages its own active run. Detaching one agent must not detach
+ * another agent, including the source from which it was cloned.
  */
 describe("a clone's in-flight runs", () => {
   interface Opened {
@@ -104,11 +99,12 @@ describe("a clone's in-flight runs", () => {
       return new Observable<BaseEvent>((subscriber) => {
         const entry: Opened = { owner: this, subscriber, tornDown: false };
         opened.push(entry);
-        subscriber.next({
+        const started: RunStartedEvent = {
           type: EventType.RUN_STARTED,
           threadId: input.threadId,
           runId: input.runId,
-        } as RunStartedEvent);
+        };
+        subscriber.next(started);
         return () => {
           entry.tornDown = true;
         };
@@ -133,14 +129,14 @@ describe("a clone's in-flight runs", () => {
 
   it("detaches on the clone without touching the source, and vice versa", async () => {
     const source = new HangingAgent();
-    const cloned = source.clone() as HangingAgent;
+    const cloned = source.clone();
 
     const sourceRun = source.runAgent({ runId: "clone-source" });
     const sourceEntry = await waitForOpen(source);
     const clonedRun = cloned.runAgent({ runId: "clone-copy" });
     const clonedEntry = await waitForOpen(cloned);
 
-    // Two distinct runs, one per agent — not one set shared between them.
+    // Two distinct runs, one per agent.
     expect(sourceEntry).not.toBe(clonedEntry);
 
     await cloned.detachActiveRun();
@@ -153,15 +149,13 @@ describe("a clone's in-flight runs", () => {
     await sourceRun;
   });
 
-  it("gives the clone an EMPTY set, not a share of the source's", async () => {
+  it("does not inherit the source's active run", async () => {
     const source = new HangingAgent();
     const sourceRun = source.runAgent({ runId: "clone-source-2" });
     const sourceEntry = await waitForOpen(source);
 
-    // Cloned WHILE a run is in flight. A shared set would hand that run to the
-    // clone, so the clone's detach — which has nothing of its own to detach —
-    // would tear down the source's run.
-    const cloned = source.clone() as HangingAgent;
+    // Cloning while a run is in flight must not give the clone its handle.
+    const cloned = source.clone();
     await cloned.detachActiveRun();
 
     expect(sourceEntry.tornDown).toBe(false);
