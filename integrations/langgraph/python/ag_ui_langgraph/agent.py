@@ -790,6 +790,39 @@ class LangGraphAgent:
             return (self.active_run.get("current_subagent_run_id"), public_call_id)
         return public_call_id
 
+    def _seed_streamed_tool_call_ids_from_input(self, input: RunAgentInput) -> None:
+        """Seed streamed_tool_call_ids from the client-echoed message history.
+
+        The set is rebuilt empty per HTTP request, which only holds while one
+        logical turn fits in one request. A LangGraph ``interrupt()`` splits a
+        turn across two: the tool call is announced in the first request and its
+        OnToolEnd lands in the second, where the empty set makes
+        ``already_streamed`` False and the fallback re-emits Start/Args/End for a
+        call the client already has. TOOL_CALL_ARGS is a delta keyed by
+        tool-call id, so a persisting client appends — the stored arguments
+        become two concatenated JSON documents that no longer parse, and history
+        replays every turn, so the thread stays broken. See #2515, and #2014 for
+        the TypeScript twin.
+
+        A tool call in the inbound history is by definition one the client
+        already received. Derived from the input each run, exactly like
+        _seed_public_ids_from_input — no state is retained between runs.
+        Subagent-tagged messages are skipped: their lane ids are minted per run,
+        so keying them into the root lane's membership space would be wrong (see
+        _streamed_call_key).
+        """
+        for message in input.messages or []:
+            if getattr(message, "role", None) != "assistant":
+                continue
+            if getattr(message, "subagent_run_id", None) is not None:
+                continue
+            for tool_call in getattr(message, "tool_calls", None) or []:
+                call_id = getattr(tool_call, "id", None)
+                if isinstance(call_id, str):
+                    self.active_run["streamed_tool_call_ids"].add(
+                        self._streamed_call_key(call_id)
+                    )
+
     def _dispatch_event(self, event: ProcessedEvents) -> ProcessedEvents:
         if event.type == EventType.RAW:
             event.event = make_json_safe(event.event)
@@ -1632,6 +1665,10 @@ class LangGraphAgent:
             "usage_run_ids": set(),
         }
         self.active_run = INITIAL_ACTIVE_RUN
+        # Must run BEFORE _seed_public_ids_from_input, which rewrites minted
+        # root ids in the input back to their raw form: the ids the client
+        # holds are the public ones, and those are what OnToolEnd resolves to.
+        self._seed_streamed_tool_call_ids_from_input(input)
         # Seed the public-id registry from the run's INPUT (client-echoed
         # history), and translate minted root ids back to their raw form for
         # graph consumption. Derived from the input each run — no state is
