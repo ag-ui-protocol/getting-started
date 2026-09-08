@@ -23,6 +23,7 @@ class RoleTest {
         assertEquals(Role.ASSISTANT, Role.fromValue("assistant"));
         assertEquals(Role.USER, Role.fromValue("user"));
         assertEquals(Role.TOOL, Role.fromValue("tool"));
+        assertEquals(Role.REASONING, Role.fromValue("reasoning"));
     }
 
     @Test
