@@ -69,6 +69,10 @@ export abstract class AbstractAgent {
   // Emits to immediately detach from the active run (stop processing its stream)
   private activeRunDetach$?: Subject<void>;
   private activeRunCompletionPromise?: Promise<void>;
+  // Set when abortRun() is called, cleared when the next run starts. A cancelled
+  // run ends its stream early and with no terminal event, which verifyEvents
+  // would otherwise report as a truncated run (#2300).
+  private runAborted: boolean = false;
 
   get maxVersion() {
     return packageJson.version;
@@ -134,6 +138,30 @@ export abstract class AbstractAgent {
     if (compareVersions(this.maxVersion, "0.0.57") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_57());
     }
+
+    this.trackRunAborts();
+  }
+
+  /**
+   * Makes abortRun() record the cancellation before whatever the subclass
+   * override does. The bookkeeping cannot live in abortRun() itself: most
+   * overrides never call super.abortRun(), and the ones that do call it LAST --
+   * by which point an agent whose transport completes its Observable
+   * synchronously on abort (MastraAgent does, see #2288) has already reached the
+   * verifier's end-of-stream check with the flag still unset. Shadowing the
+   * prototype method with an own property runs first in every case; `abort` is
+   * the most-derived implementation, so the override still runs exactly once.
+   *
+   * Called from the constructor and from clone(), which builds its copy with
+   * Object.create and so never runs one.
+   */
+  private trackRunAborts() {
+    this.runAborted = false;
+    const abort = this.abortRun.bind(this);
+    this.abortRun = () => {
+      this.runAborted = true;
+      abort();
+    };
   }
 
   public subscribe(subscriber: AgentSubscriber) {
@@ -193,6 +221,7 @@ export abstract class AbstractAgent {
       await this.onInitialize(input, subscribers);
 
       // Per-run detachment signal + completion promise
+      this.runAborted = false;
       this.activeRunDetach$ = new Subject<void>();
       let resolveActiveRunCompletion: (() => void) | undefined;
       this.activeRunCompletionPromise = new Promise<void>((resolve) => {
@@ -223,7 +252,7 @@ export abstract class AbstractAgent {
           return chainedAgent.run(input);
         },
         transformChunks(this.debugLogger),
-        verifyEvents(this.debugLogger),
+        verifyEvents(this.debugLogger, { isCancelled: () => this.runAborted }),
         // Stop processing immediately when this run is detached
         (source$) => source$.pipe(takeUntil(this.activeRunDetach$!)),
         (source$) => this.apply(input, source$, subscribers),
@@ -292,6 +321,7 @@ export abstract class AbstractAgent {
       await this.onInitialize(input, subscribers);
 
       // Per-run detachment signal + completion promise
+      this.runAborted = false;
       this.activeRunDetach$ = new Subject<void>();
       let resolveActiveRunCompletion: (() => void) | undefined;
       this.activeRunCompletionPromise = new Promise<void>((resolve) => {
@@ -301,7 +331,7 @@ export abstract class AbstractAgent {
       const pipeline = pipe(
         () => defer(() => this.connect(input)),
         transformChunks(this.debugLogger),
-        verifyEvents(this.debugLogger),
+        verifyEvents(this.debugLogger, { isCancelled: () => this.runAborted }),
         // Stop processing immediately when this run is detached
         (source$) => source$.pipe(takeUntil(this.activeRunDetach$!)),
         (source$) => this.apply(input, source$, subscribers),
@@ -335,6 +365,11 @@ export abstract class AbstractAgent {
     }
   }
 
+  /**
+   * Cancels the in-flight run. Subclasses override this to tear down their
+   * transport; the cancellation is recorded for the verifier by the wrapper the
+   * constructor installs, so an override need not (and most do not) call super.
+   */
   public abortRun() {}
 
   public async detachActiveRun(): Promise<void> {
@@ -592,6 +627,7 @@ export abstract class AbstractAgent {
     cloned.subscribers = [...this.subscribers];
     cloned.middlewares = [...this.middlewares];
     cloned.pendingInterrupts = structuredClone_(this.pendingInterrupts);
+    cloned.trackRunAborts();
 
     return cloned;
   }

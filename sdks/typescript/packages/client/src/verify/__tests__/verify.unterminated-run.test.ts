@@ -1,4 +1,4 @@
-import { Observable, Subject, firstValueFrom, of } from "rxjs";
+import { Observable, Subject, defer, firstValueFrom, of } from "rxjs";
 import { toArray } from "rxjs/operators";
 import { describe, it, expect } from "vitest";
 import { verifyEvents } from "../verify";
@@ -66,6 +66,56 @@ const verify = async (events: BaseEvent[]): Promise<{ ok: boolean; error?: any }
   source$.complete();
 
   return promise;
+};
+
+/**
+ * An agent whose transport completes its stream synchronously on abort, mid
+ * message and with no terminal event. MastraAgent does exactly this (#2288):
+ * the cancelled path skips its flush, so RUN_FINISHED would leave a text
+ * message open and trip the verifier's unfinished-message rule instead.
+ */
+class AbortCompletesStreamAgent extends AbstractAgent {
+  // Created per run rather than per instance so a clone (which copies no
+  // subclass fields) works the same as the original.
+  private events$?: Subject<BaseEvent>;
+
+  run(_input: RunAgentInput): Observable<BaseEvent> {
+    return defer(() => {
+      const events$ = (this.events$ = new Subject<BaseEvent>());
+      queueMicrotask(() => {
+        events$.next(runStarted());
+        events$.next(messageStart());
+        events$.next(messageContent());
+      });
+      return events$;
+    });
+  }
+
+  // Deliberately does NOT call super.abortRun(), like most overrides in the
+  // repo, and completes the stream before it would have anyway.
+  override abortRun(): void {
+    this.events$?.complete();
+  }
+}
+
+/** Aborts as soon as the truncated message's content arrives. */
+const runAndAbort = (agent: AbortCompletesStreamAgent) => {
+  let aborted = false;
+  let runFailedCalls = 0;
+  const finished = agent.runAgent(
+    {},
+    {
+      onRunFailed: () => {
+        runFailedCalls++;
+      },
+      onTextMessageContentEvent: () => {
+        if (aborted) return;
+        aborted = true;
+        agent.abortRun();
+      },
+    },
+  );
+  return { finished, state: () => ({ aborted, runFailedCalls }) };
 };
 
 class FixedEventsAgent extends AbstractAgent {
@@ -204,6 +254,23 @@ describe("AbstractAgent surfaces an unterminated run (#2300)", () => {
     expect(runFailedCalls).toBe(1);
     expect(runErrorEventCalls).toBe(0);
     expect(agent.messages.some((message) => message.id === "msg_1")).toBe(false);
+  });
+
+  it("resolves a run the consumer aborted, and does not report it as truncated", async () => {
+    const run = runAndAbort(new AbortCompletesStreamAgent());
+
+    await expect(run.finished).resolves.toBeDefined();
+    expect(run.state()).toEqual({ aborted: true, runFailedCalls: 0 });
+  });
+
+  // clone() builds its copy with Object.create, so it has to reinstall the
+  // abort bookkeeping the constructor would otherwise have done.
+  it("resolves an aborted run on a cloned agent too", async () => {
+    const agent = new AbortCompletesStreamAgent().clone() as AbortCompletesStreamAgent;
+    const run = runAndAbort(agent);
+
+    await expect(run.finished).resolves.toBeDefined();
+    expect(run.state()).toEqual({ aborted: true, runFailedCalls: 0 });
   });
 
   it("resolves normally for a correctly terminated run", async () => {

@@ -3,8 +3,19 @@ import { Observable, throwError, of, concat, defer, EMPTY } from "rxjs";
 import { mergeMap } from "rxjs/operators";
 import { type DebugLoggerInput, resolveDebugLogger } from "@/debug-logger";
 
+/** Extra context verifyEvents needs that the event stream itself cannot carry. */
+export interface VerifyEventsOptions {
+  /**
+   * Reports whether the consumer cancelled this run (see AbstractAgent.abortRun).
+   * A cancelled run ends its stream deliberately and early, with no terminal
+   * event, so the completion check at the bottom of this operator must not
+   * report it as a truncated run.
+   */
+  isCancelled?: () => boolean;
+}
+
 export const verifyEvents =
-  (debugLogger?: DebugLoggerInput) =>
+  (debugLogger?: DebugLoggerInput, options?: VerifyEventsOptions) =>
   (source$: Observable<BaseEvent>): Observable<BaseEvent> => {
     const log = resolveDebugLogger(debugLogger);
     // Declare variables in closure to maintain state across events.
@@ -1054,8 +1065,13 @@ export const verifyEvents =
     // A stream that ends without 'RUN_FINISHED' or 'RUN_ERROR' is a truncated
     // run (dropped connection, idle timeout, evicted server) and must not be
     // reported as a successful run.
+    //
+    // A cancelled run is the one legitimate way to end early: the consumer
+    // asked for it, and a producer that stops mid-turn cannot honestly emit
+    // RUN_FINISHED (see #2417). Surfacing a truncation error there would turn
+    // every abortRun() into a rejected run, so cancellation is exempt.
     const verifyCompletion$ = defer(() => {
-      if (runFinished || runError) {
+      if (runFinished || runError || options?.isCancelled?.()) {
         return EMPTY;
       }
 
