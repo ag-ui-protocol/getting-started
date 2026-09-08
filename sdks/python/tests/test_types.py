@@ -65,6 +65,22 @@ class TestBaseTypes(unittest.TestCase):
         self.assertIn("toolCallId", serialized)
         self.assertEqual(serialized["toolCallId"], "call_456")
 
+    def test_tool_message_optional_name(self):
+        """ToolMessage accepts an optional name and serializes it as camelCase-neutral"""
+        tool_msg = ToolMessage(
+            id="tool_123",
+            content="Tool result",
+            tool_call_id="call_456",
+            name="request_page_oncall",
+        )
+        self.assertEqual(tool_msg.name, "request_page_oncall")
+        serialized = tool_msg.model_dump(by_alias=True, exclude_none=True)
+        self.assertEqual(serialized.get("name"), "request_page_oncall")
+
+        omitted = ToolMessage(id="t2", content="r", tool_call_id="c2")
+        self.assertIsNone(omitted.name)
+        self.assertNotIn("name", omitted.model_dump(by_alias=True, exclude_none=True))
+
     def test_activity_message(self):
         """Test creating and serializing an activity message"""
         content = {"steps": ["search", "summarize"]}

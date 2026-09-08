@@ -151,6 +151,7 @@ export const ToolMessageSchema = z.object({
   content: z.string(),
   role: z.literal("tool"),
   toolCallId: z.string(),
+  name: z.string().optional(),
   error: z.string().optional(),
   encryptedValue: z.string().optional(),
   subagentRunId: z.string().optional(),

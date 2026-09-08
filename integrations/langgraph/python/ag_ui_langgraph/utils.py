@@ -762,6 +762,7 @@ def langchain_messages_to_agui(messages: List[BaseMessage]) -> List[AGUIMessage]
                 role="tool",
                 content=stringify_if_needed(resolve_message_content(message.content)),
                 tool_call_id=message.tool_call_id,
+                name=message.name,
                 # A LangChain tool result signals failure only through `status`, with
                 # no error text. Restore AG-UI's `error` so the failure survives the
                 # round trip; the value is a fixed sentinel (#2305) because the
@@ -1770,6 +1771,7 @@ def agui_messages_to_langchain(messages: List[AGUIMessage]) -> List[BaseMessage]
                 id=message.id,
                 content=message.content,
                 tool_call_id=message.tool_call_id,
+                name=getattr(message, "name", None),
                 # Carry the AG-UI failure signal onto LangChain's tool-result status, so a
                 # client-reported tool failure is not delivered to the model as a success.
                 status="error" if message.error else "success",
