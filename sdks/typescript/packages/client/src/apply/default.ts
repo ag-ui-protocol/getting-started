@@ -1231,6 +1231,20 @@ export const defaultApplyEvents = (
           if (mutation.stopPropagation !== true) {
             const { messageId, subagentRunId } = event as ReasoningMessageStartEvent;
             const existingMessage = messages.find((m) => m.id === messageId);
+
+            if (existingMessage?.role === "activity") {
+              // Message ids are unique across the conversation, so an activity message under
+              // this id means the producer reused it. Streaming reasoning into it would
+              // overwrite its structured content with a string. Leave it alone and drop the
+              // event — and with it its metadata, which describes a reasoning message that
+              // never exists.
+              console.warn(
+                `REASONING_MESSAGE_START: Message '${messageId}' is an activity message — ` +
+                  `message ids must be unique across activity and reasoning messages`,
+              );
+              return emitUpdates();
+            }
+
             let targetMessage = existingMessage;
 
             if (!targetMessage) {
@@ -1258,6 +1272,15 @@ export const defaultApplyEvents = (
           const targetMessage = messages.find((m) => m.id === messageId);
           if (!targetMessage) {
             console.warn(`REASONING_MESSAGE_CONTENT: No message found with ID '${messageId}'`);
+            return emitUpdates();
+          }
+          if (targetMessage.role === "activity") {
+            // Appending here would replace the activity message's structured content with a
+            // string, leaving it no longer a valid ActivityMessage.
+            console.warn(
+              `REASONING_MESSAGE_CONTENT: Message '${messageId}' is an activity message — ` +
+                `message ids must be unique across activity and reasoning messages`,
+            );
             return emitUpdates();
           }
 
@@ -1294,6 +1317,15 @@ export const defaultApplyEvents = (
           const targetMessage = messages.find((m) => m.id === messageId);
           if (!targetMessage) {
             console.warn(`REASONING_MESSAGE_END: No message found with ID '${messageId}'`);
+            return emitUpdates();
+          }
+          if (targetMessage.role === "activity") {
+            // The matching REASONING_MESSAGE_START was dropped for the same reason, so there
+            // is no reasoning message to finish — don't announce the activity message as one.
+            console.warn(
+              `REASONING_MESSAGE_END: Message '${messageId}' is an activity message — ` +
+                `message ids must be unique across activity and reasoning messages`,
+            );
             return emitUpdates();
           }
 
