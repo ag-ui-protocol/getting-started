@@ -1,0 +1,33 @@
+name: unit-swift-sdk
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sdks/community/swift/**"
+      - ".github/workflows/unit-swift-sdk.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "sdks/community/swift/**"
+      - ".github/workflows/unit-swift-sdk.yml"
+
+jobs:
+  swift:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Resolve dependencies
+        working-directory: sdks/community/swift
+        run: swift package resolve
+
+      - name: Build
+        working-directory: sdks/community/swift
+        run: swift build
+
+      - name: Run tests
+        working-directory: sdks/community/swift
+        run: swift test

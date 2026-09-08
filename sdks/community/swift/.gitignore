@@ -1,0 +1,57 @@
+# Xcode
+
+## User settings
+xcuserdata/
+
+## Compatibility files no longer needed since Xcode 9
+*.xcscmblueprint
+*.xccheckout
+
+## Compatibility files no longer needed since Xcode 4
+build/
+DerivedData/
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+## Obj-C/Swift specific
+*.hmap
+
+## App packaging
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+## Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager
+.build/
+# Package.resolved is intentionally checked in — this is a library package and
+# pinning transitive dependencies makes CI reproducible without a separate lock file.
+
+# macOS
+.DS_Store
+
+# Documentation (generated files, keep README.md and .nojekyll)
+docs/*
+!docs/README.md
+!docs/.nojekyll
+!docs/WORKFLOW.md
+
+# SwiftLint
+.swiftlintcache
+
+# Claude Code worktrees
+.claude/worktrees/
+
+# Local documentation (not for public repository)
+MEDIUM_ARTICLE.md
+docs-test/

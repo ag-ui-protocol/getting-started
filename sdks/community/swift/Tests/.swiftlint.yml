@@ -1,0 +1,9 @@
+# SwiftLint Configuration for Test Files
+# 
+# Disable sorted_imports for test files to allow @testable imports after regular imports.
+# SwiftLint sorts alphabetically, but Swift convention prefers @testable after regular imports.
+
+disabled_rules:
+  - sorted_imports
+
+

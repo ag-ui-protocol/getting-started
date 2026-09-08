@@ -1,0 +1,731 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A50000000000000000000001 /* ChatAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000001 /* ChatAppApp.swift */; };
+		A50000000000000000000002 /* AgentConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000002 /* AgentConfig.swift */; };
+		A50000000000000000000003 /* DisplayMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000003 /* DisplayMessage.swift */; };
+		A50000000000000000000004 /* ChatUIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000004 /* ChatUIState.swift */; };
+		A50000000000000000000005 /* AgentDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000005 /* AgentDraft.swift */; };
+		A50000000000000000000006 /* ChatAppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000006 /* ChatAppStore.swift */; };
+		A50000000000000000000007 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000007 /* RootView.swift */; };
+		A50000000000000000000008 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000008 /* ChatView.swift */; };
+		A50000000000000000000009 /* MessageBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000009 /* MessageBubbleView.swift */; };
+		A5000000000000000000000A /* AgentListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000000A /* AgentListView.swift */; };
+		A5000000000000000000000B /* AgentFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000000B /* AgentFormView.swift */; };
+		A5000000000000000000000C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000000C /* Assets.xcassets */; };
+		A5000000000000000000000D /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = A80000000000000000000003 /* MarkdownUI */; };
+		A5000000000000000000000E /* AGUIAgentSDK in Frameworks */ = {isa = PBXBuildFile; productRef = A80000000000000000000004 /* AGUIAgentSDK */; };
+		A5000000000000000000000F /* MockAgUiAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000000D /* MockAgUiAgent.swift */; };
+		A50000000000000000000010 /* ChatAppStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000000E /* ChatAppStoreTests.swift */; };
+		A50000000000000000000011 /* AGUIAgentSDK in Frameworks */ = {isa = PBXBuildFile; productRef = A80000000000000000000005 /* AGUIAgentSDK */; };
+		A50000000000000000000012 /* AGUICore in Frameworks */ = {isa = PBXBuildFile; productRef = A80000000000000000000006 /* AGUICore */; };
+		A50000000000000000000013 /* AGUICore in Frameworks */ = {isa = PBXBuildFile; productRef = A80000000000000000000007 /* AGUICore */; };
+		A50000000000000000000014 /* EphemeralSlot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000012 /* EphemeralSlot.swift */; };
+		A50000000000000000000015 /* SupplementalMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000013 /* SupplementalMessage.swift */; };
+		A50000000000000000000016 /* ChatRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000014 /* ChatRow.swift */; };
+		A50000000000000000000017 /* ChangeBackgroundToolExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000015 /* ChangeBackgroundToolExecutor.swift */; };
+		A50000000000000000000018 /* ChatAppToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000016 /* ChatAppToolRegistry.swift */; };
+		A50000000000000000000019 /* ChatAppStore+EventProcessing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000017 /* ChatAppStore+EventProcessing.swift */; };
+		A5000000000000000000001A /* AGUITools in Frameworks */ = {isa = PBXBuildFile; productRef = A80000000000000000000008 /* AGUITools */; };
+		A5000000000000000000001B /* AGUITools in Frameworks */ = {isa = PBXBuildFile; productRef = A80000000000000000000009 /* AGUITools */; };
+		A5000000000000000000001C /* ChangeBackgroundToolExecutorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000018 /* ChangeBackgroundToolExecutorTests.swift */; };
+		A5000000000000000000001D /* TypingDotsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000019 /* TypingDotsView.swift */; };
+		A5000000000000000000001E /* StreamingCursorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000001A /* StreamingCursorView.swift */; };
+		A5000000000000000000001F /* A2UIComponent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000001B /* A2UIComponent.swift */; };
+		A50000000000000000000020 /* A2UISurfaceStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000001C /* A2UISurfaceStateManager.swift */; };
+		A50000000000000000000021 /* ChatAppStore+A2UI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000001D /* ChatAppStore+A2UI.swift */; };
+		A50000000000000000000022 /* A2UIComponentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000001E /* A2UIComponentView.swift */; };
+		A50000000000000000000023 /* A2UISurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000001F /* A2UISurfaceView.swift */; };
+		A50000000000000000000024 /* A2UIComponentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000020 /* A2UIComponentTests.swift */; };
+		A50000000000000000000025 /* A2UISurfaceStateManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000021 /* A2UISurfaceStateManagerTests.swift */; };
+		A50000000000000000000026 /* AGUIClient in Frameworks */ = {isa = PBXBuildFile; productRef = A8000000000000000000000A /* AGUIClient */; };
+		A50000000000000000000027 /* ClawgUIPairingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000022 /* ClawgUIPairingState.swift */; };
+		A50000000000000000000028 /* ClawgUIDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000023 /* ClawgUIDetector.swift */; };
+		A50000000000000000000029 /* ClawgUIPairingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000024 /* ClawgUIPairingManager.swift */; };
+		A5000000000000000000002A /* ClawgUIPairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000025 /* ClawgUIPairingView.swift */; };
+		A5000000000000000000002B /* ClawgUIDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000026 /* ClawgUIDetectorTests.swift */; };
+		A5000000000000000000002C /* ClawgUIPairingManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000027 /* ClawgUIPairingManagerTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A40000000000000000000001 /* ChatAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatAppApp.swift; sourceTree = "<group>"; };
+		A40000000000000000000002 /* AgentConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentConfig.swift; sourceTree = "<group>"; };
+		A40000000000000000000003 /* DisplayMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayMessage.swift; sourceTree = "<group>"; };
+		A40000000000000000000004 /* ChatUIState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatUIState.swift; sourceTree = "<group>"; };
+		A40000000000000000000005 /* AgentDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDraft.swift; sourceTree = "<group>"; };
+		A40000000000000000000006 /* ChatAppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatAppStore.swift; sourceTree = "<group>"; };
+		A40000000000000000000007 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		A40000000000000000000008 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		A40000000000000000000009 /* MessageBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubbleView.swift; sourceTree = "<group>"; };
+		A4000000000000000000000A /* AgentListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentListView.swift; sourceTree = "<group>"; };
+		A4000000000000000000000B /* AgentFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentFormView.swift; sourceTree = "<group>"; };
+		A4000000000000000000000C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A4000000000000000000000D /* MockAgUiAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAgUiAgent.swift; sourceTree = "<group>"; };
+		A4000000000000000000000E /* ChatAppStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatAppStoreTests.swift; sourceTree = "<group>"; };
+		A4000000000000000000000F /* ChatApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ChatApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A40000000000000000000010 /* ChatAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChatAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A40000000000000000000011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A40000000000000000000012 /* EphemeralSlot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EphemeralSlot.swift; sourceTree = "<group>"; };
+		A40000000000000000000013 /* SupplementalMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupplementalMessage.swift; sourceTree = "<group>"; };
+		A40000000000000000000014 /* ChatRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRow.swift; sourceTree = "<group>"; };
+		A40000000000000000000015 /* ChangeBackgroundToolExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangeBackgroundToolExecutor.swift; sourceTree = "<group>"; };
+		A40000000000000000000016 /* ChatAppToolRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatAppToolRegistry.swift; sourceTree = "<group>"; };
+		A40000000000000000000017 /* ChatAppStore+EventProcessing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatAppStore+EventProcessing.swift"; sourceTree = "<group>"; };
+		A40000000000000000000018 /* ChangeBackgroundToolExecutorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangeBackgroundToolExecutorTests.swift; sourceTree = "<group>"; };
+		A40000000000000000000019 /* TypingDotsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingDotsView.swift; sourceTree = "<group>"; };
+		A4000000000000000000001A /* StreamingCursorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingCursorView.swift; sourceTree = "<group>"; };
+		A4000000000000000000001B /* A2UIComponent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2UIComponent.swift; sourceTree = "<group>"; };
+		A4000000000000000000001C /* A2UISurfaceStateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2UISurfaceStateManager.swift; sourceTree = "<group>"; };
+		A4000000000000000000001D /* ChatAppStore+A2UI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatAppStore+A2UI.swift"; sourceTree = "<group>"; };
+		A4000000000000000000001E /* A2UIComponentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2UIComponentView.swift; sourceTree = "<group>"; };
+		A4000000000000000000001F /* A2UISurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2UISurfaceView.swift; sourceTree = "<group>"; };
+		A40000000000000000000020 /* A2UIComponentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2UIComponentTests.swift; sourceTree = "<group>"; };
+		A40000000000000000000021 /* A2UISurfaceStateManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2UISurfaceStateManagerTests.swift; sourceTree = "<group>"; };
+		A40000000000000000000022 /* ClawgUIPairingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawgUIPairingState.swift; sourceTree = "<group>"; };
+		A40000000000000000000023 /* ClawgUIDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawgUIDetector.swift; sourceTree = "<group>"; };
+		A40000000000000000000024 /* ClawgUIPairingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawgUIPairingManager.swift; sourceTree = "<group>"; };
+		A40000000000000000000025 /* ClawgUIPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawgUIPairingView.swift; sourceTree = "<group>"; };
+		A40000000000000000000026 /* ClawgUIDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawgUIDetectorTests.swift; sourceTree = "<group>"; };
+		A40000000000000000000027 /* ClawgUIPairingManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawgUIPairingManagerTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A60000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A5000000000000000000000D /* MarkdownUI in Frameworks */,
+				A5000000000000000000000E /* AGUIAgentSDK in Frameworks */,
+				A50000000000000000000012 /* AGUICore in Frameworks */,
+				A5000000000000000000001A /* AGUITools in Frameworks */,
+				A50000000000000000000026 /* AGUIClient in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A60000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A50000000000000000000011 /* AGUIAgentSDK in Frameworks */,
+				A50000000000000000000013 /* AGUICore in Frameworks */,
+				A5000000000000000000001B /* AGUITools in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A30000000000000000000001 /* ChatApp */ = {
+			isa = PBXGroup;
+			children = (
+				A30000000000000000000003 /* Sources */,
+				A30000000000000000000009 /* Tests */,
+				A30000000000000000000002 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A30000000000000000000002 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A4000000000000000000000F /* ChatApp.app */,
+				A40000000000000000000010 /* ChatAppTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A30000000000000000000003 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				A30000000000000000000004 /* App */,
+				A30000000000000000000005 /* Models */,
+				A30000000000000000000006 /* Store */,
+				A30000000000000000000007 /* Views */,
+				A30000000000000000000008 /* Resources */,
+				A3000000000000000000000C /* Tools */,
+				A3000000000000000000000D /* A2UI */,
+				A3000000000000000000000F /* ClawgUI */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		A30000000000000000000004 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000001 /* ChatAppApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A30000000000000000000005 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000002 /* AgentConfig.swift */,
+				A40000000000000000000003 /* DisplayMessage.swift */,
+				A40000000000000000000004 /* ChatUIState.swift */,
+				A40000000000000000000005 /* AgentDraft.swift */,
+				A40000000000000000000012 /* EphemeralSlot.swift */,
+				A40000000000000000000013 /* SupplementalMessage.swift */,
+				A40000000000000000000014 /* ChatRow.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A30000000000000000000006 /* Store */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000006 /* ChatAppStore.swift */,
+				A40000000000000000000017 /* ChatAppStore+EventProcessing.swift */,
+				A4000000000000000000001D /* ChatAppStore+A2UI.swift */,
+			);
+			path = Store;
+			sourceTree = "<group>";
+		};
+		A30000000000000000000007 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000007 /* RootView.swift */,
+				A40000000000000000000008 /* ChatView.swift */,
+				A40000000000000000000009 /* MessageBubbleView.swift */,
+				A4000000000000000000000A /* AgentListView.swift */,
+				A4000000000000000000000B /* AgentFormView.swift */,
+				A40000000000000000000019 /* TypingDotsView.swift */,
+				A4000000000000000000001A /* StreamingCursorView.swift */,
+				A3000000000000000000000E /* A2UI */,
+				A30000000000000000000010 /* ClawgUI */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		A30000000000000000000008 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A4000000000000000000000C /* Assets.xcassets */,
+				A40000000000000000000011 /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		A30000000000000000000009 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				A3000000000000000000000A /* ChatAppTests */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		A3000000000000000000000A /* ChatAppTests */ = {
+			isa = PBXGroup;
+			children = (
+				A3000000000000000000000B /* Mocks */,
+				A4000000000000000000000E /* ChatAppStoreTests.swift */,
+				A40000000000000000000018 /* ChangeBackgroundToolExecutorTests.swift */,
+				A40000000000000000000020 /* A2UIComponentTests.swift */,
+				A40000000000000000000021 /* A2UISurfaceStateManagerTests.swift */,
+				A40000000000000000000026 /* ClawgUIDetectorTests.swift */,
+				A40000000000000000000027 /* ClawgUIPairingManagerTests.swift */,
+			);
+			path = ChatAppTests;
+			sourceTree = "<group>";
+		};
+		A3000000000000000000000B /* Mocks */ = {
+			isa = PBXGroup;
+			children = (
+				A4000000000000000000000D /* MockAgUiAgent.swift */,
+			);
+			path = Mocks;
+			sourceTree = "<group>";
+		};
+		A3000000000000000000000C /* Tools */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000015 /* ChangeBackgroundToolExecutor.swift */,
+				A40000000000000000000016 /* ChatAppToolRegistry.swift */,
+			);
+			path = Tools;
+			sourceTree = "<group>";
+		};
+		A3000000000000000000000D /* A2UI */ = {
+			isa = PBXGroup;
+			children = (
+				A4000000000000000000001B /* A2UIComponent.swift */,
+				A4000000000000000000001C /* A2UISurfaceStateManager.swift */,
+			);
+			path = A2UI;
+			sourceTree = "<group>";
+		};
+		A3000000000000000000000E /* A2UI */ = {
+			isa = PBXGroup;
+			children = (
+				A4000000000000000000001E /* A2UIComponentView.swift */,
+				A4000000000000000000001F /* A2UISurfaceView.swift */,
+			);
+			path = A2UI;
+			sourceTree = "<group>";
+		};
+		A3000000000000000000000F /* ClawgUI */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000022 /* ClawgUIPairingState.swift */,
+				A40000000000000000000023 /* ClawgUIDetector.swift */,
+				A40000000000000000000024 /* ClawgUIPairingManager.swift */,
+			);
+			path = ClawgUI;
+			sourceTree = "<group>";
+		};
+		A30000000000000000000010 /* ClawgUI */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000025 /* ClawgUIPairingView.swift */,
+			);
+			path = ClawgUI;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A70000000000000000000001 /* ChatApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000002 /* Build configuration list for PBXNativeTarget "ChatApp" */;
+			buildPhases = (
+				A60000000000000000000001 /* Sources */,
+				A60000000000000000000002 /* Resources */,
+				A60000000000000000000003 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ChatApp;
+			packageProductDependencies = (
+				A80000000000000000000003 /* MarkdownUI */,
+				A80000000000000000000004 /* AGUIAgentSDK */,
+				A80000000000000000000006 /* AGUICore */,
+				A80000000000000000000008 /* AGUITools */,
+				A8000000000000000000000A /* AGUIClient */,
+			);
+			productName = ChatApp;
+			productReference = A4000000000000000000000F /* ChatApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A70000000000000000000002 /* ChatAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000003 /* Build configuration list for PBXNativeTarget "ChatAppTests" */;
+			buildPhases = (
+				A60000000000000000000004 /* Sources */,
+				A60000000000000000000005 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ChatAppTests;
+			packageProductDependencies = (
+				A80000000000000000000005 /* AGUIAgentSDK */,
+				A80000000000000000000007 /* AGUICore */,
+				A80000000000000000000009 /* AGUITools */,
+			);
+			productName = ChatAppTests;
+			productReference = A40000000000000000000010 /* ChatAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A00000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					A70000000000000000000001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					A70000000000000000000002 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = A70000000000000000000001;
+					};
+				};
+			};
+			buildConfigurationList = A10000000000000000000001 /* Build configuration list for PBXProject "ChatApp" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A30000000000000000000001 /* ChatApp */;
+			packageReferences = (
+				A80000000000000000000001 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				A80000000000000000000002 /* XCLocalSwiftPackageReference "../../" */,
+			);
+			productRefGroup = A30000000000000000000002 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A70000000000000000000001 /* ChatApp */,
+				A70000000000000000000002 /* ChatAppTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A60000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A5000000000000000000000C /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A60000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A50000000000000000000001 /* ChatAppApp.swift in Sources */,
+				A50000000000000000000002 /* AgentConfig.swift in Sources */,
+				A50000000000000000000003 /* DisplayMessage.swift in Sources */,
+				A50000000000000000000004 /* ChatUIState.swift in Sources */,
+				A50000000000000000000005 /* AgentDraft.swift in Sources */,
+				A50000000000000000000006 /* ChatAppStore.swift in Sources */,
+				A50000000000000000000007 /* RootView.swift in Sources */,
+				A50000000000000000000008 /* ChatView.swift in Sources */,
+				A50000000000000000000009 /* MessageBubbleView.swift in Sources */,
+				A5000000000000000000000A /* AgentListView.swift in Sources */,
+				A5000000000000000000000B /* AgentFormView.swift in Sources */,
+				A50000000000000000000014 /* EphemeralSlot.swift in Sources */,
+				A50000000000000000000015 /* SupplementalMessage.swift in Sources */,
+				A50000000000000000000016 /* ChatRow.swift in Sources */,
+				A50000000000000000000017 /* ChangeBackgroundToolExecutor.swift in Sources */,
+				A50000000000000000000018 /* ChatAppToolRegistry.swift in Sources */,
+				A50000000000000000000019 /* ChatAppStore+EventProcessing.swift in Sources */,
+				A5000000000000000000001D /* TypingDotsView.swift in Sources */,
+				A5000000000000000000001E /* StreamingCursorView.swift in Sources */,
+				A5000000000000000000001F /* A2UIComponent.swift in Sources */,
+				A50000000000000000000020 /* A2UISurfaceStateManager.swift in Sources */,
+				A50000000000000000000021 /* ChatAppStore+A2UI.swift in Sources */,
+				A50000000000000000000022 /* A2UIComponentView.swift in Sources */,
+				A50000000000000000000023 /* A2UISurfaceView.swift in Sources */,
+				A50000000000000000000027 /* ClawgUIPairingState.swift in Sources */,
+				A50000000000000000000028 /* ClawgUIDetector.swift in Sources */,
+				A50000000000000000000029 /* ClawgUIPairingManager.swift in Sources */,
+				A5000000000000000000002A /* ClawgUIPairingView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A60000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A5000000000000000000000F /* MockAgUiAgent.swift in Sources */,
+				A50000000000000000000010 /* ChatAppStoreTests.swift in Sources */,
+				A5000000000000000000001C /* ChangeBackgroundToolExecutorTests.swift in Sources */,
+				A50000000000000000000024 /* A2UIComponentTests.swift in Sources */,
+				A50000000000000000000025 /* A2UISurfaceStateManagerTests.swift in Sources */,
+				A5000000000000000000002B /* ClawgUIDetectorTests.swift in Sources */,
+				A5000000000000000000002C /* ClawgUIPairingManagerTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A20000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A20000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		A20000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.agui.ChatApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A20000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.agui.ChatApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A20000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.agui.ChatAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ChatApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ChatApp";
+			};
+			name = Debug;
+		};
+		A20000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.agui.ChatAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ChatApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ChatApp";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A10000000000000000000001 /* Build configuration list for PBXProject "ChatApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A20000000000000000000001 /* Debug */,
+				A20000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000000000000000000002 /* Build configuration list for PBXNativeTarget "ChatApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A20000000000000000000003 /* Debug */,
+				A20000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000000000000000000003 /* Build configuration list for PBXNativeTarget "ChatAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A20000000000000000000005 /* Debug */,
+				A20000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A80000000000000000000002 /* XCLocalSwiftPackageReference "../../" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../..";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A80000000000000000000001 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A80000000000000000000003 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A80000000000000000000001 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
+		};
+		A80000000000000000000004 /* AGUIAgentSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A80000000000000000000002 /* XCLocalSwiftPackageReference "../../" */;
+			productName = AGUIAgentSDK;
+		};
+		A80000000000000000000005 /* AGUIAgentSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A80000000000000000000002 /* XCLocalSwiftPackageReference "../../" */;
+			productName = AGUIAgentSDK;
+		};
+		A80000000000000000000006 /* AGUICore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A80000000000000000000002 /* XCLocalSwiftPackageReference "../../" */;
+			productName = AGUICore;
+		};
+		A80000000000000000000007 /* AGUICore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A80000000000000000000002 /* XCLocalSwiftPackageReference "../../" */;
+			productName = AGUICore;
+		};
+		A80000000000000000000008 /* AGUITools */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A80000000000000000000002 /* XCLocalSwiftPackageReference "../../" */;
+			productName = AGUITools;
+		};
+		A80000000000000000000009 /* AGUITools */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A80000000000000000000002 /* XCLocalSwiftPackageReference "../../" */;
+			productName = AGUITools;
+		};
+		A8000000000000000000000A /* AGUIClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A80000000000000000000002 /* XCLocalSwiftPackageReference "../../" */;
+			productName = AGUIClient;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+	};
+	rootObject = A00000000000000000000001 /* Project object */;
+}

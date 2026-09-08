@@ -1,0 +1,26 @@
+included:
+  - Sources
+  - Package.swift
+
+excluded:
+  - .build
+  - Tests
+
+only_rules:
+  - force_cast
+  - force_try
+  - force_unwrapping
+  - custom_rules
+  - large_tuple
+
+custom_rules:
+  no_assume_isolated:
+    name: "No assumeIsolated"
+    regex: "\\b(?:MainActor|[A-Za-z_][A-Za-z0-9_]*)\\.assumeIsolated\\s*(?:\\(|\\{)"
+    match_kinds:
+      - identifier
+    message: "Do not use assumeIsolated. Use explicit actor isolation or restructure the code to stay within structured concurrency."
+    severity: error
+
+large_tuple:
+  warning_length: 3
