@@ -66,6 +66,7 @@
     "@vitest/coverage-istanbul": "^4.0.18",
     "cors": "^2.8.5",
     "express": "^5.0.0",
+    "openai": "^6.10.0",
     "publint": "^0.3.12",
     "rxjs": "7.8.1",
     "tsdown": "^0.20.1",

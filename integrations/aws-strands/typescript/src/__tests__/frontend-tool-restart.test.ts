@@ -264,6 +264,18 @@ function timesSaid(texts: readonly string[], line: string): number {
 }
 
 /**
+ * Assert the model was told `line` somewhere in the turn's text.
+ *
+ * Not an exact match on one block: a prompt that cannot travel as a turn of its
+ * own merges into the question's own text block, so what the model reads is the
+ * question and the line joined. What matters is that the line was said, once.
+ */
+function expectSaid(texts: readonly string[], line: string): void {
+  expect(timesSaid(texts, line), `model was not told ${JSON.stringify(line)}`)
+    .toBe(1);
+}
+
+/**
  * The same decoration, applied to a placeholder an activated checkpoint PARKED.
  *
  * A checkpoint parks its completed tool results outside `agent.messages`, so a
@@ -1492,7 +1504,7 @@ describe("frontend tool result with a session manager, same process", () => {
     expect(persistedToolResults(dir).map((r) => r.content)).toEqual([
       [{ text: "color applied" }],
     ]);
-    expect(modelSawTexts(model, 1)).toContain("now make it blue");
+    expectSaid(modelSawTexts(model, 1), "now make it blue");
   });
 });
 
@@ -1943,7 +1955,8 @@ describe("frontend tool result recovery across a restart", () => {
     ]);
     // Detection stays permissive, so the gate still sees a stub and the real
     // result reaches the model through the fallback prompt instead.
-    expect(modelSawTexts(second.model, 0)).toContain(
+    expectSaid(
+      modelSawTexts(second.model, 0),
       `${TOOL} returned: color applied`,
     );
   });
@@ -2058,7 +2071,16 @@ describe("a continuation whose reconcile declines only some results", () => {
       {
         store: {
           messages: [
-            { role: "user", blocks: ["text:make it red"] },
+            // The prompt travels inside the question rather than after the
+            // trailing `toolResult` turn or inside it: after it is two
+            // consecutive user turns, which the one-to-one formatters reject,
+            // and inside it puts text ahead of the tool messages, which the
+            // splitting formatters reject. The turn goes out reshaped, so it
+            // persists that way too.
+            {
+              role: "user",
+              blocks: [`text:make it red\n\n${DECLINED_LINE}`],
+            },
             {
               role: "assistant",
               blocks: [
@@ -2066,16 +2088,11 @@ describe("a continuation whose reconcile declines only some results", () => {
                 `toolUse:${TOOL}#${DECLINED_ID}`,
               ],
             },
-            // The prompt travels inside the trailing `toolResult` turn rather
-            // than after it, because two consecutive user turns are a shape no
-            // provider accepts. The turn goes out reshaped, so it persists that
-            // way too.
             {
               role: "user",
               blocks: [
                 `toolResult:#${NATIVE_ID}`,
                 `toolResult:#${DECLINED_ID}`,
-                `text:${DECLINED_LINE}`,
               ],
             },
             { role: "assistant", blocks: ["text:The color is now red."] },
@@ -2256,7 +2273,7 @@ describe("a client answer whose placeholder can never be repaired", () => {
     // Exactly one: the persisted turn-2 prompt the model already holds. A
     // second is this turn restating it.
     expect(timesSaid(modelSawTexts(third.model, 0), LINE)).toBe(1);
-    expect(modelSawTexts(third.model, 0)).toContain("now make it blue");
+    expectSaid(modelSawTexts(third.model, 0), "now make it blue");
 
     const fourth = bootProcess(dir, ANSWERS);
     const fourthEvents = await collect(
@@ -2380,7 +2397,7 @@ describe("a client answer whose placeholder can never be repaired", () => {
     const seen = modelSawTexts(third.model, 0);
     expect(timesSaid(seen, LINE)).toBe(1);
     expect(timesSaid(seen, OTHER_LINE)).toBe(1);
-    expect(seen).toContain("now make it blue");
+    expectSaid(seen, "now make it blue");
   });
 });
 
@@ -2452,11 +2469,12 @@ describe("a reconcile whose snapshot write the store refuses", () => {
 
     expect(model.calls).toBe(1);
     // The legacy path in full: the stub still stands in the history the model
-    // reads, and the client's answer arrives as the prompt beside it.
+    // reads, and the client's answer arrives as the prompt beside it. The
+    // prompt rides in the question rather than in the stub's own turn, which
+    // is the one placement no provider formatter rejects.
     expect(modelSawTexts(model, 0)).toEqual([
-      "make it red",
+      `make it red\n\n${TOOL} returned: color applied`,
       PROXY_RESULT_PLACEHOLDER,
-      `${TOOL} returned: color applied`,
     ]);
   });
 
@@ -2469,18 +2487,16 @@ describe("a reconcile whose snapshot write the store refuses", () => {
       {
         store: {
           messages: [
-            { role: "user", blocks: ["text:make it red"] },
-            { role: "assistant", blocks: [`toolUse:${TOOL}#${NATIVE_ID}`] },
-            // One user turn, carrying both: the prompt travels inside the
-            // trailing `toolResult` turn rather than after it, because two
-            // consecutive user turns are a shape no provider accepts.
+            // No turn of its own: the prompt travels inside the question,
+            // because a user turn after the trailing `toolResult` turn is two
+            // consecutive user turns and text inside that turn goes out ahead
+            // of the tool message answering the call.
             {
               role: "user",
-              blocks: [
-                `toolResult:#${NATIVE_ID}`,
-                `text:${TOOL} returned: color applied`,
-              ],
+              blocks: [`text:make it red\n\n${TOOL} returned: color applied`],
             },
+            { role: "assistant", blocks: [`toolUse:${TOOL}#${NATIVE_ID}`] },
+            { role: "user", blocks: [`toolResult:#${NATIVE_ID}`] },
             { role: "assistant", blocks: ["text:The color is now red."] },
           ],
           // The stub and its call id both survive, so a later run can still
@@ -2612,7 +2628,8 @@ describe("a continuation carrying one admitted and one unadmitted result", () =>
     const texts = modelSawTexts(model, 0);
     // Both answers arrive together, in the one place that can carry the
     // unadmitted one.
-    expect(texts).toContain(
+    expectSaid(
+      texts,
       `${TOOL} returned: color applied\n${TOOL} returned: second applied`,
     );
     // And neither is also stated as a corrected toolResult beside it.

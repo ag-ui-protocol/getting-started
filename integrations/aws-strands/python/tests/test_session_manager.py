@@ -899,9 +899,14 @@ class TestSessionFrontendToolReconciliation:
         )
 
         assert instance.stream_prompts == [None]
-        assert instance.model_messages[-1][-1]["content"][0] == {
+        # A delta-only store holds no question for the block to ride in, so it
+        # opens the history as a user turn of its own. That keeps the tool call
+        # answered by the turn right after it, which is what the splitting
+        # provider formatters need, and leaves the roles alternating.
+        assert instance.model_messages[-1][0]["content"][0] == {
             "text": "Context provided by the application:\n- account: premium"
         }
+        assert instance.model_messages[-1][-1]["content"][0].get("toolResult") is not None
         assert instance.messages[-1]["content"][0].get("toolResult") is not None
         persisted = sm.session_repository.list_messages(sm.session_id, "default")
         assert "Context provided by the application" not in repr(persisted)

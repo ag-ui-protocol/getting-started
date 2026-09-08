@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from strands import Agent
+from strands import tool as strands_tool
 from strands.agent.state import AgentState
 from strands.hooks.registry import HookRegistry
 from strands.models.model import Model
@@ -21,6 +22,7 @@ from strands.tools.registry import ToolRegistry
 from ag_ui.core import (
     AssistantMessage,
     Context,
+    EventType,
     ImageInputContent,
     InputContentDataSource,
     RunAgentInput,
@@ -38,9 +40,14 @@ except ImportError:
         class JSONSerializableDict(dict):  # type: ignore[no-redef]
             def set(self, key, value): self[key] = value  # noqa: E704
 
-from ag_ui_strands.agent import StrandsAgent
+from ag_ui_strands.agent import StrandsAgent, describe_model_bound_history
 from ag_ui_strands.config import StrandsAgentConfig
 from tests.hook_helpers import invoke_after_model_call, invoke_before_model_call
+from tests.provider_binding import (
+    PROVIDER_FORMATTERS,
+    SPLITTING,
+    assert_binds_cleanly,
+)
 
 
 class _CapturingModel(Model):
@@ -160,7 +167,7 @@ async def test_empty_context_writes_empty_list():
 
 
 @pytest.mark.asyncio
-async def test_context_is_transient_before_latest_message_when_history_is_replayed():
+async def test_context_rides_in_the_latest_user_turn_when_history_is_replayed():
     template = Agent(model=_mock_model())
     ag = StrandsAgent(template, name="test")
     lookalike_description = "A2UI Component Schema for customer preferences"
@@ -173,6 +180,9 @@ async def test_context_is_transient_before_latest_message_when_history_is_replay
     with patch("ag_ui_strands.agent.StrandsAgentCore", _CapturingCore):
         instance = await _drive(ag, _run_input(context), complete=True)
 
+    # One turn and one text block. A turn of its own would be a second user
+    # turn beside the question, which the one-to-one formatters reject, and a
+    # second text block inside the turn is what the writer formatter refuses.
     assert instance.model_messages == [[
         {
             "role": "user",
@@ -182,11 +192,11 @@ async def test_context_is_transient_before_latest_message_when_history_is_replay
                         "Context provided by the application:\n"
                         f"- {lookalike_description}: keep me\n"
                         "- user_id: u-42"
+                        "\n\nhello"
                     )
-                }
+                },
             ],
         },
-        {"role": "user", "content": [{"text": "hello"}]},
     ]]
     assert instance.messages == [
         {"role": "user", "content": [{"text": "hello"}]}
@@ -215,10 +225,14 @@ async def test_context_is_transient_when_history_replay_is_disabled():
         {
             "role": "user",
             "content": [
-                {"text": "Context provided by the application:\n- account: premium"}
+                {
+                    "text": (
+                        "Context provided by the application:\n- account: premium"
+                        "\n\nhello"
+                    )
+                },
             ],
         },
-        {"role": "user", "content": [{"text": "hello"}]},
     ]]
 
 
@@ -265,13 +279,12 @@ async def test_context_is_transient_for_a_multimodal_direct_prompt():
         {
             "role": "user",
             "content": [
-                {"text": "Context provided by the application:\n- locale: nl-NL"}
-            ],
-        },
-        {
-            "role": "user",
-            "content": [
-                {"text": "hello"},
+                {
+                    "text": (
+                        "Context provided by the application:\n- locale: nl-NL"
+                        "\n\nhello"
+                    )
+                },
                 {
                     "image": {
                         "format": "png",
@@ -313,7 +326,7 @@ async def test_a2ui_schema_only_context_does_not_change_the_model_prompt():
 
 
 @pytest.mark.asyncio
-async def test_current_context_follows_stale_history_but_keeps_latest_user_unchanged():
+async def test_current_context_follows_stale_history_into_the_latest_user_turn():
     template = Agent(model=_mock_model())
     agent = StrandsAgent(template, name="test")
     run_input = RunAgentInput(
@@ -343,11 +356,11 @@ async def test_current_context_follows_stale_history_but_keeps_latest_user_uncha
                     "text": (
                         "Context provided by the application:\n"
                         "- selected invoice: 123"
+                        "\n\nwhich invoice is selected?"
                     )
-                }
+                },
             ],
         },
-        {"role": "user", "content": [{"text": "which invoice is selected?"}]},
     ]]
 
 
@@ -398,3 +411,158 @@ async def test_session_context_is_visible_for_one_model_call_but_never_persisted
         session.session_id, instance.agent_id
     )
     assert "secret-value" not in repr(persisted_after_second)
+
+
+# ---------------------------------------------------------------------------
+# What the block binds to
+# ---------------------------------------------------------------------------
+
+
+class _ToolThenTextModel(Model):
+    """One tool call, then a plain answer, recording what each call was handed."""
+
+    def __init__(self):
+        self.calls = []
+
+    def get_config(self):
+        return {}
+
+    def update_config(self, **kwargs):
+        pass
+
+    async def structured_output(self, *args, **kwargs):
+        raise NotImplementedError
+
+    async def stream(self, messages, tool_specs=None, system_prompt=None, **kwargs):
+        self.calls.append(copy.deepcopy(messages))
+        yield {"messageStart": {"role": "assistant"}}
+        if len(self.calls) == 1:
+            yield {
+                "contentBlockStart": {
+                    "start": {"toolUse": {"toolUseId": "t1", "name": "lookup"}}
+                }
+            }
+            yield {"contentBlockDelta": {"delta": {"toolUse": {"input": "{}"}}}}
+            yield {"contentBlockStop": {}}
+            yield {"messageStop": {"stopReason": "tool_use"}}
+            return
+        yield {"contentBlockDelta": {"delta": {"text": "done"}}}
+        yield {"contentBlockStop": {}}
+        yield {"messageStop": {"stopReason": "end_turn"}}
+
+
+class _ProviderRuleModel(_ToolThenTextModel):
+    """A model that refuses the shapes the providers refuse.
+
+    A replaying double answers whatever it is handed, so on its own it cannot
+    tell a run that would have worked from one OpenAI would have answered with a
+    400. This one applies both rules first, which is what makes the terminal
+    event below mean anything: a raise here reaches the client as the same
+    ``STRANDS_FORCE_STOP`` the provider's own rejection produces."""
+
+    async def stream(self, messages, tool_specs=None, system_prompt=None, **kwargs):
+        for provider in PROVIDER_FORMATTERS:
+            try:
+                roles = provider.bind(list(messages))
+            except ImportError:
+                continue
+            if provider.family is SPLITTING:
+                for index, role in enumerate(roles):
+                    if role != "assistant":
+                        continue
+                    answer = roles[index + 1] if index + 1 < len(roles) else None
+                    if answer != "tool":
+                        raise RuntimeError(
+                            "An assistant message with 'tool_calls' must be "
+                            "followed by tool messages responding to each "
+                            f"'tool_call_id' ({provider.name}: {roles})"
+                        )
+            else:
+                for index in range(1, len(roles)):
+                    if roles[index] == roles[index - 1]:
+                        raise RuntimeError(
+                            "A conversation must alternate between user and "
+                            f"assistant roles ({provider.name}: {roles})"
+                        )
+        async for event in super().stream(
+            messages, tool_specs=tool_specs, system_prompt=system_prompt, **kwargs
+        ):
+            yield event
+
+
+@strands_tool
+def lookup() -> dict:
+    """Look an invoice up."""
+    return {"invoice": 42}
+
+
+def _tool_round_trip_agent(model: Model) -> StrandsAgent:
+    template = Agent(model=model, tools=[lookup], callback_handler=None)
+    return StrandsAgent(template, name="test")
+
+
+def _context_run(thread_id: str) -> RunAgentInput:
+    return _run_input(
+        [Context(description="selected invoice", value="123")],
+        thread_id=thread_id,
+        content="which invoice is selected?",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", PROVIDER_FORMATTERS, ids=str)
+async def test_the_context_block_binds_to_a_request_the_provider_accepts(provider):
+    """The turn that answers a tool call is the one place the block may not go.
+
+    The bridge does not know which provider the host configured, so the history
+    it shows the model has to satisfy both families at once: the splitting
+    formatters need every tool call answered with nothing in between, and the
+    one-to-one formatters need the roles to alternate."""
+    model = _ToolThenTextModel()
+    agent = _tool_round_trip_agent(model)
+
+    events = [event async for event in agent.run(_context_run(f"ctx-{provider}"))]
+    assert [e for e in events if e.type == EventType.RUN_ERROR] == []
+
+    # The second call is the one whose history ends on the tool result.
+    assert len(model.calls) == 2
+    assert_binds_cleanly(provider, model.calls[1])
+
+
+@pytest.mark.asyncio
+async def test_a_run_finishes_under_a_model_that_enforces_the_provider_rules():
+    model = _ProviderRuleModel()
+    agent = _tool_round_trip_agent(model)
+
+    events = [event async for event in agent.run(_context_run("ctx-rules"))]
+
+    assert [e for e in events if e.type == EventType.RUN_ERROR] == []
+    assert [e.type for e in events][-1] == EventType.RUN_FINISHED
+
+
+def test_the_diagnostic_names_the_turn_that_breaks_a_tool_call():
+    folded = [
+        {"role": "user", "content": [{"text": "call the tool"}]},
+        {
+            "role": "assistant",
+            "content": [{"toolUse": {"toolUseId": "t1", "name": "lookup", "input": {}}}],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "toolResult": {
+                        "toolUseId": "t1",
+                        "status": "success",
+                        "content": [{"text": "ok"}],
+                    }
+                },
+                {"text": "lookup returned: ok"},
+            ],
+        },
+    ]
+
+    assert describe_model_bound_history(folded) == (
+        "roles=[user, assistant, user] tool-call adjacency=broken at [2] "
+        "role alternation=ok"
+    )

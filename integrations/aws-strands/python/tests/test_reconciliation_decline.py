@@ -38,12 +38,13 @@ from strands.agent.state import AgentState
 from strands.hooks.registry import HookRegistry
 from strands.interrupt import Interrupt as StrandsInterrupt
 
-from ag_ui_strands.agent import StrandsAgent
+from ag_ui_strands.agent import StrandsAgent, describe_model_bound_history
 from ag_ui_strands.client_proxy_tool import PROXY_RESULT_PLACEHOLDER
 from ag_ui_strands.config import StrandsAgentConfig
 from ag_ui_strands.session_reconcile import AG_UI_FRONTEND_CALL_IDS_STATE_KEY
 from tests.hook_helpers import invoke_after_model_call, invoke_before_model_call
 from tests.interrupt_state_stub import InterruptStateStub
+from tests.provider_binding import PROVIDER_FORMATTERS, assert_binds_cleanly
 
 RECONCILE_LOGGER = "ag_ui_strands.agent"
 
@@ -415,8 +416,26 @@ class TestReplayThatWouldDropTheAnswer:
             )
 
         assert _errors(events) == []
-        assert core.messages == before
-        assert core.stream_prompts == ["get_weather returned: sunny, 22C"]
+        # The cached conversation is still there; the answer is added to its
+        # question rather than replacing it. It cannot go out as a prompt of
+        # its own here, because the history ends on the turn that answers the
+        # tool call and a user turn after that one is a shape the one-to-one
+        # provider formatters reject.
+        assert core.messages == [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "text": (
+                            "what is the weather"
+                            "\n\nget_weather returned: sunny, 22C"
+                        )
+                    }
+                ],
+            },
+            *before[1:],
+        ]
+        assert core.stream_prompts == [None]
 
     @pytest.mark.asyncio
     async def test_a_history_that_answers_itself_still_replays(self):
@@ -477,3 +496,59 @@ class TestReconciliationDisabled:
         assert core.stream_prompts == [
             'approveTool returned: {"approved": false}\nand now what?'
         ]
+
+
+# ---------------------------------------------------------------------------
+# What the carried answer binds to
+# ---------------------------------------------------------------------------
+
+
+class TestTheCarriedAnswerBindsCleanly:
+    """A prompt that cannot travel as a turn of its own still has to reach a
+    provider in a shape it accepts.
+
+    When the cached history already ends on the turn that answers the tool call,
+    handing Strands a prompt appends a second user turn, which the one-to-one
+    formatters reject, and folding it into that turn puts text ahead of the tool
+    message, which the splitting formatters reject. The answer therefore merges
+    into the question, and this is where that is checked against the real
+    formatters rather than against a description of them.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", PROVIDER_FORMATTERS, ids=str)
+    async def test_the_history_the_model_reads_binds_cleanly(self, provider):
+        core = _no_session_core(_cached_history_awaiting_an_answer())
+
+        with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
+            events = await _collect(
+                _adapter(),
+                _run_input(
+                    [ToolMessage(id="t1", tool_call_id="fe-1", content="sunny, 22C")],
+                    tools=[Tool(name="get_weather", description="w", parameters={})],
+                ),
+            )
+
+        assert _errors(events) == []
+        assert core.stream_prompts == [None]
+        assert_binds_cleanly(provider, core.messages)
+
+    @pytest.mark.asyncio
+    async def test_the_answer_is_said_once_in_the_question(self):
+        core = _no_session_core(_cached_history_awaiting_an_answer())
+
+        with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
+            await _collect(
+                _adapter(),
+                _run_input(
+                    [ToolMessage(id="t1", tool_call_id="fe-1", content="sunny, 22C")],
+                    tools=[Tool(name="get_weather", description="w", parameters={})],
+                ),
+            )
+
+        assert describe_model_bound_history(core.messages) == (
+            "roles=[user, assistant, user] tool-call adjacency=ok "
+            "role alternation=ok"
+        )
+        said = repr(core.messages).count("get_weather returned: sunny, 22C")
+        assert said == 1, f"the answer was said {said} times: {core.messages}"

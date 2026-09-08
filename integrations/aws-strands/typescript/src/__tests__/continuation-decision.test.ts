@@ -288,7 +288,7 @@ interface Observed {
    * user turn is just this run's prompt, and a row that called one the other
    * would report a fallback that never ran.
    */
-  path: "history" | "prompt" | "user-turn" | "none";
+  path: "history" | "prompt" | "question-turn" | "user-turn" | "none";
   /** The trailing user text, verbatim, on either of the two prompt paths. */
   prompt: string | null;
   /**
@@ -358,20 +358,35 @@ function clientUserText(input: RunAgentInput): string | undefined {
 }
 
 /**
- * Which path the continuation took, and the trailing user text it carried.
+ * Which path the continuation took, and the user text it carried.
  *
- * A run that continues from native history ends that history on the `toolResult`
- * the client's answer belongs to and adds no user text of its own. Either prompt
- * path adds one, so the trailing user text is what separates history from prompt
- * without the test having to reach into the adapter. It is the TEXT and not the
- * message boundary that says so: two consecutive user turns are a shape no
- * provider accepts, so a prompt sent while the history already ends on a
- * user-role `toolResult` turn travels inside that turn rather than after it, and
- * a reader keyed on the boundary would call such a run a history continuation
- * that sent no answer at all. Which prompt it is comes from comparing the text
- * against what the client sent: identical means the client's own turn went out,
- * anything else is the adapter's own wording.
+ * A run that continues from native history adds no user text of its own. Either
+ * prompt path adds one, so the added text is what separates history from prompt
+ * without the test having to reach into the adapter.
+ *
+ * Where that text sits is not fixed. A prompt sent while the history already
+ * ends on a user-role `toolResult` turn cannot travel as a turn of its own, and
+ * cannot travel inside the `toolResult` turn either: the first shape is two
+ * consecutive user turns and the second binds as
+ * `assistant(tool_calls) -> user(text) -> tool(result)`, and each is a shape one
+ * family of provider formatters rejects. It therefore rides in the question, the
+ * latest user turn carrying no tool result, appended after what the client typed
+ * there. So a tail that answers a tool call sends the reader to that turn, where
+ * a second text block is the adapter's wording and a single one is the client's
+ * question alone.
+ *
+ * Which prompt it is comes from comparing the text against what the client sent:
+ * identical means the client's own turn went out, anything else is the adapter's
+ * own wording.
  */
+function textBlocksOf(message: { role: string; content: unknown }): string[] {
+  return message.role === "user"
+    ? (message.content as unknown[])
+        .map((block) => (block as { text?: unknown }).text)
+        .filter((text): text is string => typeof text === "string")
+    : [];
+}
+
 function classifyPath(
   model: Booted["model"],
   call: number,
@@ -380,13 +395,24 @@ function classifyPath(
   const messages = model.seenMessages[call];
   if (!messages || messages.length === 0) return { path: "none", prompt: null };
   const last = messages[messages.length - 1]!;
-  const texts =
-    last.role === "user"
-      ? (last.content as unknown[])
-          .map((block) => (block as { text?: unknown }).text)
-          .filter((text): text is string => typeof text === "string")
-      : [];
-  if (texts.length === 0) return { path: "history", prompt: null };
+  const texts = textBlocksOf(last);
+  if (texts.length === 0) {
+    const question = [...messages]
+      .reverse()
+      .find(
+        (message) =>
+          message.role === "user" && textBlocksOf(message).length > 0,
+      );
+    const written = question ? textBlocksOf(question).join("\n") : "";
+    // The wording merged into the question rather than travelling as a turn of
+    // its own, and it merged into that turn's own text block, so what the run
+    // added cannot be told from what the client typed without knowing the
+    // question. Reported whole, under a path of its own.
+    if (!written || !written.includes("\n\n")) {
+      return { path: "history", prompt: null };
+    }
+    return { path: "question-turn", prompt: written };
+  }
   const prompt = texts.join("\n");
   return { path: prompt === sent ? "user-turn" : "prompt", prompt };
 }
@@ -726,13 +752,12 @@ const ROWS: Row[] = [
     expected: {
       turn1: { errors: [], results: [stub(FIRST)], callIds: [FIRST] },
       errors: [],
-      path: "prompt",
+      path: "question-turn",
       modelCalls: 1,
-      prompt: `${TOOL} returned: color applied`,
+      prompt: `${USER}\n\n${TOOL} returned: color applied`,
       modelSaw: [
-        USER,
+        `${USER}\n\n${TOOL} returned: color applied`,
         PROXY_RESULT_PLACEHOLDER,
-        `${TOOL} returned: color applied`,
       ],
       results: [stub(FIRST)],
       callIds: [],
@@ -753,16 +778,18 @@ const ROWS: Row[] = [
         callIds: [FIRST, SECOND],
       },
       errors: [],
-      path: "prompt",
+      path: "question-turn",
       modelCalls: 1,
       // The denial has to reach the model. Repairing only the admitted half is
       // what leaves the model reading the other half's stub as a success.
-      prompt: `${TOOL} returned: color applied\n${TOOL} failed: user denied`,
+      prompt:
+        `${USER}\n\n${TOOL} returned: color applied\n` +
+        `${TOOL} failed: user denied`,
       modelSaw: [
-        USER,
+        `${USER}\n\n${TOOL} returned: color applied\n` +
+          `${TOOL} failed: user denied`,
         PROXY_RESULT_PLACEHOLDER,
         PROXY_RESULT_PLACEHOLDER,
-        `${TOOL} returned: color applied\n${TOOL} failed: user denied`,
       ],
       results: [stub(FIRST), stub(SECOND)],
       callIds: [FIRST],
@@ -794,13 +821,15 @@ const ROWS: Row[] = [
     expected: {
       turn1: { errors: [], results: [stub(FIRST)], callIds: [FIRST] },
       errors: [],
-      path: "prompt",
+      path: "question-turn",
       modelCalls: 1,
-      prompt: `${TOOL} returned: color applied\n${TOOL} returned: color applied`,
+      prompt:
+        `${USER}\n\n${TOOL} returned: color applied\n` +
+        `${TOOL} returned: color applied`,
       modelSaw: [
-        USER,
+        `${USER}\n\n${TOOL} returned: color applied\n` +
+          `${TOOL} returned: color applied`,
         PROXY_RESULT_PLACEHOLDER,
-        `${TOOL} returned: color applied\n${TOOL} returned: color applied`,
       ],
       results: [stub(FIRST)],
       callIds: [],
@@ -1098,10 +1127,14 @@ const ROWS: Row[] = [
       errors: [],
       // The client's own turn, not a fallback the adapter phrased: the repair
       // landed, so the history already carries the answer.
-      path: "user-turn",
+      path: "question-turn",
       modelCalls: 1,
-      prompt: "and darker",
-      modelSaw: [USER, "color applied", "and darker"],
+      // The client's newest turn rides in the question rather than after the
+      // tool result: a user turn following one is a shape the one-to-one
+      // formatters reject, and folding it into that turn is one the splitting
+      // formatters reject.
+      prompt: `${USER}\n\nand darker`,
+      modelSaw: [`${USER}\n\nand darker`, "color applied"],
       results: [answered(FIRST, "color applied")],
       callIds: [],
       parkedIds: [],
@@ -1236,17 +1269,18 @@ const ROWS: Row[] = [
     expected: {
       turn1: { errors: [], results: [stub(FIRST)], callIds: [FIRST] },
       errors: [],
-      path: "prompt",
+      path: "question-turn",
       modelCalls: 1,
       // Not the greeting. A name resolved off the native history with no other
       // signal reads as a tool Strands ran itself, and filing the client's
       // answer that way is what left the prompt a bare "Hello" and had the
       // model call the same tool again.
-      prompt: `${TOOL} returned: color applied`,
+      // Reported whole because the wording merged into the question's own text
+      // block; see classifyPath.
+      prompt: `${USER}\n\n${TOOL} returned: color applied`,
       modelSaw: [
-        USER,
+        `${USER}\n\n${TOOL} returned: color applied`,
         PROXY_RESULT_PLACEHOLDER,
-        `${TOOL} returned: color applied`,
       ],
       results: [stub(FIRST)],
       callIds: [],
@@ -1274,17 +1308,19 @@ const ROWS: Row[] = [
         callIds: [FIRST, SECOND],
       },
       errors: [],
-      path: "prompt",
+      path: "question-turn",
       modelCalls: 1,
       // In payload order, and ahead of nothing else: the answers are all this
       // run has to say, and the older one reaching the model nowhere at all is
       // what left the model to re-fire the call it was being answered about.
-      prompt: `${TOOL} returned: color applied\n${TOOL} returned: size applied`,
+      prompt:
+        `${USER}\n\n${TOOL} returned: color applied\n` +
+        `${TOOL} returned: size applied`,
       modelSaw: [
-        USER,
+        `${USER}\n\n${TOOL} returned: color applied\n` +
+          `${TOOL} returned: size applied`,
         PROXY_RESULT_PLACEHOLDER,
         PROXY_RESULT_PLACEHOLDER,
-        `${TOOL} returned: color applied\n${TOOL} returned: size applied`,
       ],
       results: [stub(FIRST), stub(SECOND)],
       callIds: [SECOND],

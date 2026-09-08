@@ -25,6 +25,7 @@ import {
 
 import { StrandsAgent } from "../agent";
 import type { StrandsAgentConfig } from "../config";
+import { describeModelBoundHistory } from "../model-context";
 import { AG_UI_FRONTEND_CALL_IDS_STATE_KEY } from "../session-reconcile";
 
 export function minimalRunInput(
@@ -524,9 +525,16 @@ export function realStrandsAgent(
     throwOnCall?: number;
     /** Forwarded to every per-thread agent, so a hook can edit its state. */
     plugins?: unknown[];
+    /**
+     * A `ScriptedModel` subclass to drive the agent with, for a test that needs
+     * the model boundary to do more than replay (see the provider-rule doubles
+     * in the continuation suites). `turns` and `throwOnCall` are ignored when
+     * one is supplied, since the caller constructed it with its own script.
+     */
+    model?: ScriptedModel;
   } = {},
 ): { agent: StrandsAgent; model: ScriptedModel; template: StrandsAgentCore } {
-  const model = new ScriptedModel(turns, options.throwOnCall);
+  const model = options.model ?? new ScriptedModel(turns, options.throwOnCall);
   const template = new StrandsAgentCore({
     model,
     tools: (options.tools ?? []) as never,
@@ -654,6 +662,46 @@ export function expectNoRunError(events: BaseEvent[], label = "run"): void {
   const codes = errorCodes(events);
   expect(codes, `${label} emitted RUN_ERROR ${JSON.stringify(codes)}`).toEqual(
     [],
+  );
+}
+
+/**
+ * Assert every tool call in a model-bound history is answered with nothing in
+ * between, the rule the splitting provider formatters (openai, litellm,
+ * mistral, writer, llamaapi, llamacpp) enforce.
+ *
+ * Those formatters turn one native user turn into several provider messages,
+ * and the turn's non-tool content becomes a message of its own emitted AHEAD
+ * of the tool messages, whatever the order of the blocks inside the turn. A
+ * turn that carries both a tool result and text therefore binds as
+ * `assistant(tool_calls) -> user(text) -> tool(result)`, and OpenAI answers
+ * that with HTTP 400 "An assistant message with 'tool_calls' must be followed
+ * by tool messages responding to each 'tool_call_id'".
+ */
+export function expectToolCallsAnsweredImmediately(
+  history: readonly unknown[],
+  label = "model-bound history",
+): void {
+  const described = describeModelBoundHistory(history);
+  expect(described, `${label}: ${described}`).toContain(
+    "tool-call adjacency=ok",
+  );
+}
+
+/**
+ * Assert a model-bound history never puts two turns of the same role in a row,
+ * the rule the one-to-one provider formatters (anthropic, bedrock, gemini)
+ * enforce. Those map each native message to one provider message, so two
+ * consecutive user turns reach the provider as two consecutive user messages,
+ * which each of them rejects.
+ */
+export function expectRolesAlternate(
+  history: readonly unknown[],
+  label = "model-bound history",
+): void {
+  const described = describeModelBoundHistory(history);
+  expect(described, `${label}: ${described}`).toContain(
+    "role alternation=ok",
   );
 }
 

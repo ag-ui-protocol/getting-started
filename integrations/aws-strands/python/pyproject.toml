@@ -34,6 +34,16 @@ asyncio_mode = "auto"
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=1.3.0",
+    # The provider-binding tests run the native history through the real
+    # formatters the Strands SDK ships. bedrock and llamacpp need nothing extra
+    # (boto3 is a strands dependency, llamacpp speaks HTTP), and those two cover
+    # one formatter from each family on their own. openai is installed as well
+    # because it is the formatter whose 400 the adjacency rule is about, so the
+    # suite asserts against the provider that actually rejects the bad shape.
+    # The remaining six are exercised when their SDK happens to be present.
+    # Pinned to the range strands-agents itself supports for this provider, so
+    # the suite exercises a formatter/SDK pairing the SDK actually claims.
+    "openai>=1.68.0,<3.0.0",
     # The HTTP-layer tests drive the endpoint over real requests: httpx backs
     # fastapi's TestClient, and uvicorn serves the disconnect tests, which need
     # a real socket to close.

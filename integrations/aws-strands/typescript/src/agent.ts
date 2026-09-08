@@ -73,10 +73,14 @@ import {
   A2UI_STREAM_KEY,
 } from "./a2ui-tool";
 import {
+  describeModelBoundHistory,
   ensureTransientContextHook,
   formatAguiContext,
   installOrchestratorContextHooks,
+  isToolResultBlock,
+  latestQuestionIndex,
   normalizeAguiContext,
+  placeUserText,
   pullWithModelContext,
   restoreOrchestratorContext,
   restoreTransientModelContext,
@@ -3798,50 +3802,41 @@ export class StrandsAgent {
       // with the user-role toolResult turn, so handing the synthetic
       // continuation prompt to `stream()` would have Strands append a SECOND
       // user message. The provider-bound roles become user -> assistant ->
-      // user -> user, which Bedrock refuses for failing role alternation.
-      // Folding the prompt into the turn that is already there keeps the
-      // continuation as one user turn carrying both the toolResult block and
-      // the prompt. Only reached on the opt-out; the documented default
-      // returns above with `invokeArgs = undefined`.
+      // user -> user, which Bedrock refuses for failing role alternation. The
+      // prompt therefore rides inside an existing user turn, and which turn
+      // that is has to be one that carries no tool result: a turn carrying
+      // both binds as assistant(tool_calls) -> user(text) -> tool(result) on
+      // every splitting formatter, which OpenAI refuses for the mirror-image
+      // reason. `placeUserText` owns that choice, and the context hook in
+      // `model-context.ts` goes through the same function. Only reached on the
+      // opt-out; the documented default returns above with
+      // `invokeArgs = undefined`.
       if (
         !replayHistory &&
         !resumeSubmitted &&
         typeof invokeArgs === "string"
       ) {
         const seeded = (strandsAgent as { messages?: unknown[] }).messages;
-        const tail = seeded?.[seeded.length - 1] as
-          | { role?: string; content?: unknown[] }
-          | undefined;
+        const tail = seeded?.[seeded.length - 1];
+        const tailContent = (tail as { content?: unknown } | undefined)
+          ?.content;
         const tailCarriesToolResult =
-          tail?.role === "user" &&
-          Array.isArray(tail.content) &&
-          tail.content.some((b) => {
-            // Seeded history arrives as ContentBlock INSTANCES, which carry a
-            // `type` discriminant; the plain-object form carries the key
-            // itself. Both shapes reach here depending on the path.
-            const block = b as { toolResult?: unknown; type?: string };
-            return (
-              block?.toolResult !== undefined ||
-              block?.type === "toolResultBlock"
-            );
-          });
-        if (tailCarriesToolResult) {
-          // Rebuilt from the serialized form so the appended text block is a
-          // real instance like the ones already there; Bedrock's formatter
-          // dispatches on `block.type`, which only instances carry.
-          const tailData = (
-            tail as unknown as { toJSON?: () => { content?: unknown[] } }
-          ).toJSON?.() ?? { content: tail!.content };
-          (strandsAgent as { messages: unknown[] }).messages = [
-            ...seeded!.slice(0, -1),
-            StrandsMessage.fromMessageData({
-              role: "user",
-              content: [
-                ...((tailData.content ?? []) as never[]),
-                { text: invokeArgs } as never,
-              ] as never,
-            }),
-          ];
+          (tail as { role?: string } | undefined)?.role === "user" &&
+          Array.isArray(tailContent) &&
+          tailContent.some(isToolResultBlock);
+        // No question to ride in means no safe placement: the history is an
+        // orphan tool result nothing in it answers, which is already a shape a
+        // provider rejects, and adding a user turn beside it only breaks role
+        // alternation as well. Left as the prompt it was, so this path changes
+        // nothing about a history it cannot repair.
+        if (tailCarriesToolResult && latestQuestionIndex(seeded) >= 0) {
+          // A postscript, not a preamble: the prompt says what the tools
+          // returned, so it reads after the question rather than before it.
+          placeUserText(seeded, invokeArgs, "append");
+          this._log.debug(
+            `${LOG_PREFIX} Continuation prompt placed into the seeded ` +
+              `history: ${describeModelBoundHistory(seeded)}`,
+          );
           invokeArgs = undefined;
         }
       }
