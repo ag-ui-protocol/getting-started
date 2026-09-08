@@ -3095,8 +3095,15 @@ def _without_a2ui_render_guides(context: list, tool_names: List[str]) -> list:
 
 
 def _block_call_id(named: Any) -> str:
-    """The call id a ``toolUse`` or ``toolResult`` block names."""
-    return str(named.get("toolUseId")) if isinstance(named, dict) else str(named)
+    """The call id a ``toolUse`` or ``toolResult`` block names.
+
+    A block with no id renders as ``<none>`` rather than as ``"None"``, so two
+    unrelated malformed blocks cannot read as a matched call and answer. The
+    payload itself is never stringified: it holds the tool input or result, and
+    this line is documented as carrying neither.
+    """
+    call_id = named.get("toolUseId") if isinstance(named, dict) else None
+    return str(call_id) if isinstance(call_id, (str, int)) else "<none>"
 
 
 def describe_model_bound_history(messages: Sequence[Any]) -> str:
@@ -3196,7 +3203,14 @@ class _TransientModelContextHook:
         registry.add_callback(AfterModelCallEvent, self._after_model_call)
 
     def _before_model_call(self, event: Any) -> None:
-        if not self._place_context(event):
+        try:
+            placed = self._place_context(event)
+        except Exception:
+            # A raise leaves no outline either. Reporting an earlier run's model
+            # call as this one's is what this record exists to avoid.
+            event.agent.__dict__.pop(_MODEL_BOUND_HISTORY_OUTLINE, None)
+            raise
+        if not placed:
             # A run with no context leaves no outline behind. Per-thread agents
             # are reused, so a stale one would report a previous run's history
             # as the history this call was handed, which is worse than saying
@@ -5588,6 +5602,11 @@ class StrandsAgent:
             # has to. Filled in by whichever branch below settles it.
             uncarried_result_ids: list[str] = []
             context_block = _format_agui_context(model_context)
+            # Per-thread agents are reused, so an outline left by an earlier run
+            # has to go before this one starts. Clearing only when a model call
+            # records one would leave a run that force-stops before its first
+            # model call reporting the previous run's history as its own.
+            strands_agent.__dict__.pop(_MODEL_BOUND_HISTORY_OUTLINE, None)
             if context_block and not _ensure_transient_context_hook(strands_agent):
                 raise RuntimeError(
                     "Strands agent does not expose a hook registry for transient context"

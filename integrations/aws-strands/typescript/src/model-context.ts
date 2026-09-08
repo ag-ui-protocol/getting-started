@@ -97,8 +97,8 @@ export function normalizeAguiContext(context: unknown): AguiContextEntry[] {
  * feeds the `generate_a2ui` path and would only bloat the prompt here.
  *
  * `JSON.stringify` and `json.dumps` agree on strings, integers, booleans and
- * `null`, which is what a lax caller can realistically send in a field the
- * wire types as a string. They disagree on the shapes the wire never carries:
+ * `null` for the value, which is what a lax caller can realistically send in a
+ * field the wire types as a string. They disagree on the shapes the wire never carries:
  * objects and arrays (`json.dumps` puts a space after `,` and `:`), integral
  * floats (`1.0` against `1`) and non-ASCII text (`json.dumps` escapes it).
  * Those are left to differ rather than papered over with a Python emulation.
@@ -144,8 +144,10 @@ const modelContextBlock = new AsyncLocalStorage<string>();
  * duration of one `next()` and left again before the event is handed back to
  * the run loop, so the block is visible to the SDK while it serves the pull
  * and to nothing that runs between pulls. Both run loops pull through here.
- * An empty block skips the store entirely so a run with no context costs
- * nothing and, more to the point, cannot see a block another run set.
+ * The store is entered either way. A run with no context enters it with an
+ * empty block, which the hook reads as "nothing to show", and which is also
+ * what stops a run nested inside another run's continuation from reading the
+ * outer run's block as its own.
  */
 export function pullWithModelContext<T, R>(
   iterator: AsyncIterator<T, R>,
@@ -234,12 +236,22 @@ function toolUsePayload(block: unknown): unknown {
     : record.toolUse;
 }
 
-/** The call id a `toolUse` or `toolResult` block names. */
+/**
+ * The call id a `toolUse` or `toolResult` block names.
+ *
+ * A block with no id renders as `<none>` rather than as the string
+ * `"undefined"`, so two unrelated malformed blocks cannot read as a matched
+ * call and answer. The payload itself is never stringified: it holds the tool
+ * input or result, and this line is documented as carrying neither.
+ */
 function blockCallId(named: unknown): string {
-  if (named !== null && typeof named === "object") {
-    return String((named as { toolUseId?: unknown }).toolUseId);
-  }
-  return String(named);
+  const id =
+    named !== null && typeof named === "object"
+      ? (named as { toolUseId?: unknown }).toolUseId
+      : undefined;
+  return typeof id === "string" || typeof id === "number"
+    ? String(id)
+    : "<none>";
 }
 
 /** A block's kind, from the instance discriminant or the wrapped-data key. */
@@ -269,6 +281,11 @@ function blockKindOf(block: unknown): string {
  * block-level formatters' role alternation is a different question over a
  * different sequence, and the suites answer it against the real provider
  * bodies rather than against a second rendering nobody can index reliably.
+ *
+ * The Python counterpart is `describe_model_bound_history`. The two agree on
+ * roles, tool ids and structure; block-kind names follow each SDK's own block
+ * vocabulary, so a reasoning block reads as `reasoning` here and
+ * `reasoningContent` there.
  */
 export function describeModelBoundHistory(messages: unknown): string {
   if (!Array.isArray(messages)) return "unrecorded";
@@ -285,8 +302,8 @@ export function describeModelBoundHistory(messages: unknown): string {
     const resultIds: string[] = [];
     const blockKinds: string[] = [];
     for (const block of blocks) {
-      // The same reads `isToolResultBlock` and `toolUseOf` apply, so placement
-      // and this line cannot disagree about what kind of block this is.
+      // The same reads `isToolUseBlock` and `isToolResultBlock` apply, so
+      // placement and this line cannot disagree about a block's kind.
       if (isToolUseBlock(block)) {
         toolCallIds.push(blockCallId(toolUsePayload(block)));
       } else if (isToolResultBlock(block)) {
@@ -363,7 +380,18 @@ function contextHostIndex(messages: unknown[]): number {
 /** Record what the model was just handed, for a later failure report. */
 function injectModelContext(event: BeforeModelCallEvent): void {
   const agent = event.agent as unknown as MessagesOwner;
-  if (!placeModelContext(event)) {
+  let placed: boolean;
+  try {
+    placed = placeModelContext(event);
+  } catch (error) {
+    // A throw leaves no outline either. Reporting an earlier run's model call
+    // as this one's is the outcome this record exists to avoid.
+    if (agent !== null && typeof agent === "object") {
+      historyOutlines.delete(agent as object);
+    }
+    throw error;
+  }
+  if (!placed) {
     // A run with no context leaves no outline behind. Per-thread agents are
     // reused, so a stale one would report a previous run's history as the
     // history this call was handed, which is worse than saying nothing.
@@ -493,7 +521,9 @@ export function restoreTransientModelContext(agent: unknown): void {
   if (agent === null || typeof agent !== "object") return;
   const mutation = mutations.get(agent);
   if (!mutation) return;
-  mutations.delete(agent);
+  // Cleared only once the removals are done. Disarming the loud not-restored
+  // guard first would leave a throw in the removal path with the block still
+  // spliced in and nothing left to report it.
   if (mutation.kind === "prepend") {
     removeByIdentity(mutation.content, mutation.inserted, 0);
     // The recorded array is searched first, then every live turn, in case the
@@ -509,6 +539,7 @@ export function restoreTransientModelContext(agent: unknown): void {
         }
       }
     }
+    mutations.delete(agent);
     return;
   }
   removeByIdentity(mutation.messages, mutation.inserted, mutation.index);
@@ -516,6 +547,7 @@ export function restoreTransientModelContext(agent: unknown): void {
   if (Array.isArray(live) && live !== mutation.messages) {
     removeByIdentity(live, mutation.inserted, mutation.index);
   }
+  mutations.delete(agent);
 }
 
 type AddHook = (
@@ -538,16 +570,24 @@ export function ensureTransientContextHook(agent: unknown): boolean {
   if (typeof addHook !== "function") return false;
   // Both or neither. An injector installed without its restorer would splice
   // the block in on every model call and never take it back out, which is the
-  // leak into durable history this module exists to prevent.
+  // leak into durable history this module exists to prevent. The agent is not
+  // in `hookedAgents` yet, so undoing means calling the cleanup the SDK hands
+  // back for the first hook rather than removing a set entry that is not there.
+  const undoInjector = (addHook as AddHook).call(
+    agent,
+    BeforeModelCallEvent,
+    injectModelContext,
+  );
   try {
-    (addHook as AddHook).call(agent, BeforeModelCallEvent, injectModelContext);
     (addHook as AddHook).call(
       agent,
       AfterModelCallEvent,
       (event: AfterModelCallEvent) => restoreTransientModelContext(event.agent),
     );
   } catch (error) {
-    hookedAgents.delete(agent);
+    if (typeof undoInjector === "function") {
+      (undoInjector as () => void)();
+    }
     throw error;
   }
   hookedAgents.add(agent);

@@ -6,10 +6,7 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    // The SDK publishes its providers on subpath exports, which "node"
-    // resolution cannot follow. `examples/tsconfig.json` already overrides it
-    // for the same reason.
-    "moduleResolution": "bundler",
+    "moduleResolution": "node",
     "skipLibCheck": true,
     "strict": true,
     "jsx": "react-jsx",
@@ -24,5 +21,8 @@
     "stripInternal": true
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist"]
+  // The tests are typechecked by `tsconfig.test.json`, which needs a different
+  // module resolution to follow the SDK's provider subpath exports. Widening it
+  // here would loosen the check over the published sources too.
+  "exclude": ["node_modules", "dist", "src/__tests__"]
 }

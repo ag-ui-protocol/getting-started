@@ -1021,7 +1021,9 @@ describe("the model-bound history outline", () => {
       describeModelBoundHistory([
         { role: "user", content: [{ toolResult: undefined }] },
       ]),
-    ).toBe("tool(undefined)");
+      // `<none>`, not the word undefined: two unrelated malformed blocks must
+      // not read as a matched call and answer.
+    ).toBe("tool(<none>)");
   });
 
   it("carries no message text", async () => {

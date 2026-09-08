@@ -879,7 +879,9 @@ class TestModelBoundHistoryOutline:
         message = {"role": "user", "content": [block]}
 
         assert _carries_tool_result(message) is True
-        assert describe_model_bound_history([message]) == "tool(None)"
+        # `<none>`, not the payload and not the word None: two unrelated
+        # malformed blocks must not read as a matched call and answer.
+        assert describe_model_bound_history([message]) == "tool(<none>)"
 
     def test_the_outline_carries_no_message_text(self):
         messages = copy.deepcopy(_TOOL_CONTINUATION)
@@ -1055,10 +1057,16 @@ async def test_the_block_is_withdrawn_when_the_consumer_abandons_the_run():
             [Context(description="token", value="s3cret")], thread_id="t-cancel"
         )
     )
-    async for _ in stream:
-        break
+    # Abandoned only once the model has actually been called and the block was
+    # actually spliced in. Breaking on the first event would leave nothing to
+    # restore, and every assertion below would hold over an untouched history.
+    async for event in stream:
+        if event.type == EventType.TOOL_CALL_END:
+            break
     await stream.aclose()
 
     instance = agent._agents_by_thread["t-cancel"]
+    assert model.calls, "the model was never called, so nothing was injected"
+    assert "s3cret" in repr(model.calls[0]), "the block never reached the model"
     assert "s3cret" not in repr(instance.messages)
     assert _MODEL_CONTEXT_MUTATION_MARKER not in instance.__dict__
