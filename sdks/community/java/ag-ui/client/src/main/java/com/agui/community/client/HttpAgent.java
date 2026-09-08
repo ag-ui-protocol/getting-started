@@ -3,7 +3,9 @@ package com.agui.community.client;
 import com.agui.community.core.agent.Agent;
 import com.agui.community.core.agent.RunAgentInput;
 import com.agui.community.core.event.Event;
+import com.agui.community.core.serialization.SerializationException;
 import com.agui.community.core.serialization.Serializer;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -14,7 +16,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.SubmissionPublisher;
-import java.util.stream.Stream;
 
 /**
  * An {@link Agent} that runs against a remote AG-UI endpoint over HTTP. It
@@ -51,6 +52,7 @@ public final class HttpAgent implements Agent {
     private final HttpClient httpClient;
     private final Executor executor;
     private final Duration requestTimeout;
+    private final SseLimits sseLimits;
 
     /**
      * Creates an agent using a default {@link HttpClient} and a cached thread
@@ -60,8 +62,19 @@ public final class HttpAgent implements Agent {
      * @param serializer the serializer used to encode the input and decode events
      */
     public HttpAgent(URI endpoint, Serializer serializer) {
+        this(endpoint, serializer, SseLimits.DEFAULT);
+    }
+
+    /**
+     * Creates an agent with default transport settings and custom SSE limits.
+     *
+     * @param endpoint the URI of the remote AG-UI endpoint
+     * @param serializer the serializer used to encode input and decode events
+     * @param sseLimits the per-line and per-event response size limits
+     */
+    public HttpAgent(URI endpoint, Serializer serializer, SseLimits sseLimits) {
         this(endpoint, serializer, HttpClient.newHttpClient(), DEFAULT_EXECUTOR,
-                DEFAULT_REQUEST_TIMEOUT);
+                DEFAULT_REQUEST_TIMEOUT, sseLimits);
     }
 
     /**
@@ -78,11 +91,30 @@ public final class HttpAgent implements Agent {
      */
     public HttpAgent(URI endpoint, Serializer serializer, HttpClient httpClient, Executor executor,
                      Duration requestTimeout) {
+        this(endpoint, serializer, httpClient, executor, requestTimeout, SseLimits.DEFAULT);
+    }
+
+    /**
+     * Creates an agent with custom transport settings and SSE size limits.
+     * Limit failures close the response and signal {@link HttpAgentException}
+     * through {@code onError}. Limits apply independently to each line/event;
+     * there is no lifetime byte budget for a long-running stream.
+     *
+     * @param endpoint the URI of the remote AG-UI endpoint
+     * @param serializer the serializer used to encode input and decode events
+     * @param httpClient the HTTP client to use
+     * @param executor the executor used for blocking reads and event publication
+     * @param requestTimeout the per-request timeout
+     * @param sseLimits the per-line and per-event response size limits
+     */
+    public HttpAgent(URI endpoint, Serializer serializer, HttpClient httpClient, Executor executor,
+                     Duration requestTimeout, SseLimits sseLimits) {
         this.endpoint = Objects.requireNonNull(endpoint, "endpoint must not be null");
         this.serializer = Objects.requireNonNull(serializer, "serializer must not be null");
         this.httpClient = Objects.requireNonNull(httpClient, "httpClient must not be null");
         this.executor = Objects.requireNonNull(executor, "executor must not be null");
         this.requestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout must not be null");
+        this.sseLimits = Objects.requireNonNull(sseLimits, "sseLimits must not be null");
     }
 
     @Override
@@ -104,21 +136,22 @@ public final class HttpAgent implements Agent {
                     .POST(HttpRequest.BodyPublishers.ofString(serializer.serialize(input)))
                     .build();
 
-            HttpResponse<Stream<String>> response =
-                    httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+            HttpResponse<InputStream> response =
+                    httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
 
-            if (response.statusCode() >= 400) {
-                publisher.closeExceptionally(new HttpAgentException(
-                        "AG-UI endpoint returned HTTP " + response.statusCode()));
-                return;
-            }
+            try (InputStream body = response.body()) {
+                if (response.statusCode() >= 400) {
+                    throw new HttpAgentException("AG-UI endpoint returned HTTP " + response.statusCode());
+                }
 
-            SseEventParser parser = new SseEventParser();
-            try (Stream<String> lines = response.body()) {
-                lines.forEach(line ->
-                        parser.feed(line).ifPresent(data -> publisher.submit(decode(data))));
+                SseEventParser parser = new SseEventParser(sseLimits.maxEventBytes());
+                SseLineReader lines = new SseLineReader(body, sseLimits.maxLineBytes());
+                String line;
+                while ((line = lines.readLine()) != null) {
+                    parser.feed(line).ifPresent(data -> publisher.submit(decode(data)));
+                }
+                parser.flush().ifPresent(data -> publisher.submit(decode(data)));
             }
-            parser.flush().ifPresent(data -> publisher.submit(decode(data)));
             publisher.close();
         } catch (InterruptedException e) {
             // Restore the interrupt status before surfacing the failure, so callers
@@ -131,6 +164,12 @@ public final class HttpAgent implements Agent {
     }
 
     private Event decode(String data) {
-        return serializer.deserialize(data, Event.class);
+        try {
+            return serializer.deserialize(data, Event.class);
+        } catch (StackOverflowError e) {
+            // A serializer may recurse on untrusted JSON. Terminate this run,
+            // without swallowing other VM errors or attempting to keep parsing.
+            throw new SerializationException("Serializer stack overflow while decoding an AG-UI event", e);
+        }
     }
 }

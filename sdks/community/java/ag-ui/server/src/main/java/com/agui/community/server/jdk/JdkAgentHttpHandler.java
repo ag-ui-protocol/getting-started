@@ -48,8 +48,12 @@ public final class JdkAgentHttpHandler implements HttpHandler {
     /** Id under which the single-agent convenience constructor registers its agent. */
     static final String DEFAULT_AGENT_ID = "default";
 
+    /** Default maximum request body size, in bytes (8 MiB). */
+    public static final int DEFAULT_MAX_REQUEST_BODY_BYTES = 8 * 1024 * 1024;
+
     private final AgentRegistry registry;
     private final Serializer serializer;
+    private final int maxRequestBodyBytes;
 
     /**
      * Creates a handler that serves a single agent. It answers on the base path
@@ -60,8 +64,19 @@ public final class JdkAgentHttpHandler implements HttpHandler {
      *                   (required)
      */
     public JdkAgentHttpHandler(Agent agent, Serializer serializer) {
+        this(agent, serializer, DEFAULT_MAX_REQUEST_BODY_BYTES);
+    }
+
+    /**
+     * Creates a single-agent handler with a custom request body size limit.
+     *
+     * @param agent the agent to run for each request
+     * @param serializer the serializer used to read input and encode events
+     * @param maxRequestBodyBytes the positive maximum body size in bytes
+     */
+    public JdkAgentHttpHandler(Agent agent, Serializer serializer, int maxRequestBodyBytes) {
         this(AgentRegistry.of(Map.of(DEFAULT_AGENT_ID, Objects.requireNonNull(agent, "agent must not be null"))),
-                serializer);
+                serializer, maxRequestBodyBytes);
     }
 
     /**
@@ -73,8 +88,25 @@ public final class JdkAgentHttpHandler implements HttpHandler {
      *                   (required)
      */
     public JdkAgentHttpHandler(AgentRegistry registry, Serializer serializer) {
+        this(registry, serializer, DEFAULT_MAX_REQUEST_BODY_BYTES);
+    }
+
+    /**
+     * Creates a routing handler with a custom request body size limit. Oversized
+     * bodies, including chunked requests, receive {@code 413 Payload Too Large}
+     * before deserialization or agent invocation.
+     *
+     * @param registry the agents addressable by this handler
+     * @param serializer the serializer used to read input and encode events
+     * @param maxRequestBodyBytes the positive maximum body size in bytes
+     */
+    public JdkAgentHttpHandler(AgentRegistry registry, Serializer serializer, int maxRequestBodyBytes) {
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
         this.serializer = Objects.requireNonNull(serializer, "serializer must not be null");
+        if (maxRequestBodyBytes <= 0) {
+            throw new IllegalArgumentException("maxRequestBodyBytes must be positive");
+        }
+        this.maxRequestBodyBytes = maxRequestBodyBytes;
     }
 
     @Override
@@ -92,7 +124,13 @@ public final class JdkAgentHttpHandler implements HttpHandler {
             }
             AgentRunHandler handler = new AgentRunHandler(agent, serializer);
 
-            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            byte[] bytes = exchange.getRequestBody().readNBytes(maxRequestBodyBytes);
+            if (exchange.getRequestBody().read() != -1) {
+                respondPlain(exchange, 413,
+                        "AG-UI request body exceeds maximum size of " + maxRequestBodyBytes + " bytes");
+                return;
+            }
+            String body = new String(bytes, StandardCharsets.UTF_8);
 
             RunAgentInput input;
             try {

@@ -1,5 +1,6 @@
 package com.agui.community.client;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 /**
@@ -16,8 +17,18 @@ import java.util.Optional;
  */
 final class SseEventParser {
 
-    private final StringBuilder data = new StringBuilder();
+    private final int maxEventBytes;
+    private StringBuilder data = new StringBuilder();
+    private int dataBytes;
     private boolean hasData;
+
+    SseEventParser() {
+        this(SseLimits.DEFAULT.maxEventBytes());
+    }
+
+    SseEventParser(int maxEventBytes) {
+        this.maxEventBytes = maxEventBytes;
+    }
 
     /**
      * Feeds a single line (without its terminator) into the parser.
@@ -48,10 +59,17 @@ final class SseEventParser {
             }
         }
         if (field.equals("data")) {
+            int valueBytes = value.getBytes(StandardCharsets.UTF_8).length;
+            long combinedBytes = (long) dataBytes + valueBytes + (hasData ? 1 : 0);
+            if (combinedBytes > maxEventBytes) {
+                throw new HttpAgentException(
+                        "SSE event data exceeds maximum size of " + maxEventBytes + " bytes");
+            }
             if (hasData) {
                 data.append('\n');
             }
             data.append(value);
+            dataBytes = (int) combinedBytes;
             hasData = true;
         }
         return Optional.empty();
@@ -73,7 +91,10 @@ final class SseEventParser {
             return Optional.empty();
         }
         String payload = data.toString();
-        data.setLength(0);
+        // Release the backing capacity so a large event is not retained for the
+        // rest of a long-lived stream.
+        data = new StringBuilder();
+        dataBytes = 0;
         hasData = false;
         return Optional.of(payload);
     }

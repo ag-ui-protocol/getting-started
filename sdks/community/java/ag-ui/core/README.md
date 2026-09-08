@@ -10,13 +10,13 @@ dependencies** — streaming is expressed with the JDK's
 
 ## What's inside
 
-| Package | Contents |
-|---------|----------|
-| [`agent`](src/main/java/com/agui/community/core/agent) | The `Agent` functional interface, plus `RunAgentInput` and `Context` describing a single run. |
-| [`event`](src/main/java/com/agui/community/core/event) | The `Event` model — a `sealed interface` with one record per event variant, discriminated by `EventType`. |
-| [`message`](src/main/java/com/agui/community/core/message) | Conversation messages: `UserMessage`, `AssistantMessage`, `SystemMessage`, `DeveloperMessage`, `ToolMessage`, plus `Role`, `ToolCall`, and `FunctionCall`. |
-| [`tool`](src/main/java/com/agui/community/core/tool) | `Tool` and `ToolParameters` describing tools available to an agent. |
-| [`serialization`](src/main/java/com/agui/community/core/serialization) | The `Serializer` interface (and `SerializationException`) — the JSON binding seam. The core ships no concrete implementation. |
+| Package                                                                | Contents                                                                                                                                                   |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`agent`](src/main/java/com/agui/community/core/agent)                 | The `Agent` functional interface, plus `RunAgentInput` and `Context` describing a single run.                                                              |
+| [`event`](src/main/java/com/agui/community/core/event)                 | The `Event` model — a `sealed interface` with one record per event variant, discriminated by `EventType`.                                                  |
+| [`message`](src/main/java/com/agui/community/core/message)             | Conversation messages: `UserMessage`, `AssistantMessage`, `SystemMessage`, `DeveloperMessage`, `ToolMessage`, plus `Role`, `ToolCall`, and `FunctionCall`. |
+| [`tool`](src/main/java/com/agui/community/core/tool)                   | `Tool` and `ToolParameters` describing tools available to an agent.                                                                                        |
+| [`serialization`](src/main/java/com/agui/community/core/serialization) | The `Serializer` interface (and `SerializationException`) — the JSON binding seam. The core ships no concrete implementation.                              |
 
 ## The event model
 
@@ -58,6 +58,13 @@ order and then completes, or signals `onError` on failure.
 `core` does not bind to any JSON library. Implement `Serializer` to plug in
 Jackson, Gson, or another library; client and server modules accept a
 `Serializer` so the choice stays at the application's edge.
+
+This repository provides the `Serializer` interface and `SerializationException`
+only; it does not ship a concrete JSON `Serializer` implementation.
+Implementations must configure parser constraints appropriate to the chosen JSON
+library, including nesting depth, token count, and string size limits, and must
+wrap serialization or deserialization library failures in
+`SerializationException`.
 
 ## Dependency
 

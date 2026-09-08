@@ -17,21 +17,21 @@ third-party dependencies.
 
 ### Transport-neutral core (`com.agui.community.server`)
 
-| Type | Purpose |
-|------|---------|
-| [`AgentRunHandler`](src/main/java/com/agui/community/server/AgentRunHandler.java) | Parses a request body into a `RunAgentInput`, runs the `Agent`, and relays its events to an `EventSink`, framing each through an `EventEncoder`. Knows nothing about HTTP or the wire protocol. |
-| [`AgentRegistry`](src/main/java/com/agui/community/server/AgentRegistry.java) | A lookup from agent id to `Agent`, so a transport can route `/agent/{id}` to one of several agents. `single()` exposes the sole agent when exactly one is registered. |
-| [`EventEncoder`](src/main/java/com/agui/community/server/EventEncoder.java) | Frames an `Event` for a particular protocol — the single point of variation between SSE and a future transport such as WebSocket. |
-| [`EventSink`](src/main/java/com/agui/community/server/EventSink.java) | A transport-neutral destination for already-encoded frames; an adapter implements it over its response. |
-| [`SseEventEncoder`](src/main/java/com/agui/community/server/SseEventEncoder.java) | The SSE `EventEncoder`: encodes an `Event` as a `data:` frame using the injected `Serializer`. |
-| [`EventRelaySubscriber`](src/main/java/com/agui/community/server/EventRelaySubscriber.java) | A `Flow.Subscriber<Event>` that writes encoded frames to the sink, requesting one event at a time for backpressure, and surfaces failures in band as a terminal `RUN_ERROR` frame. |
-| [`OutputStreamEventSink`](src/main/java/com/agui/community/server/OutputStreamEventSink.java) | An `EventSink` over a blocking `OutputStream` (flushes per frame). |
+| Type                                                                                          | Purpose                                                                                                                                                                                         |
+| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`AgentRunHandler`](src/main/java/com/agui/community/server/AgentRunHandler.java)             | Parses a request body into a `RunAgentInput`, runs the `Agent`, and relays its events to an `EventSink`, framing each through an `EventEncoder`. Knows nothing about HTTP or the wire protocol. |
+| [`AgentRegistry`](src/main/java/com/agui/community/server/AgentRegistry.java)                 | A lookup from agent id to `Agent`, so a transport can route `/agent/{id}` to one of several agents. `single()` exposes the sole agent when exactly one is registered.                           |
+| [`EventEncoder`](src/main/java/com/agui/community/server/EventEncoder.java)                   | Frames an `Event` for a particular protocol — the single point of variation between SSE and a future transport such as WebSocket.                                                               |
+| [`EventSink`](src/main/java/com/agui/community/server/EventSink.java)                         | A transport-neutral destination for already-encoded frames; an adapter implements it over its response.                                                                                         |
+| [`SseEventEncoder`](src/main/java/com/agui/community/server/SseEventEncoder.java)             | The SSE `EventEncoder`: encodes an `Event` as a `data:` frame using the injected `Serializer`.                                                                                                  |
+| [`EventRelaySubscriber`](src/main/java/com/agui/community/server/EventRelaySubscriber.java)   | A `Flow.Subscriber<Event>` that writes encoded frames to the sink, requesting one event at a time for backpressure, and surfaces failures in band as a terminal `RUN_ERROR` frame.              |
+| [`OutputStreamEventSink`](src/main/java/com/agui/community/server/OutputStreamEventSink.java) | An `EventSink` over a blocking `OutputStream` (flushes per frame).                                                                                                                              |
 
 ### JDK transport (`com.agui.community.server.jdk`)
 
-| Type | Purpose |
-|------|---------|
-| [`JdkAgentHttpHandler`](src/main/java/com/agui/community/server/jdk/JdkAgentHttpHandler.java) | An `HttpHandler` for the JDK's built-in `com.sun.net.httpserver`. Routes `/agent/{id}` to an agent from an `AgentRegistry` (single-agent alias on the base path), streams events as `text/event-stream`, and rejects unknown ids with `404`, malformed input with `400`, and non-`POST` with `405`. No third-party dependencies. |
+| Type                                                                                          | Purpose                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`JdkAgentHttpHandler`](src/main/java/com/agui/community/server/jdk/JdkAgentHttpHandler.java) | An `HttpHandler` for the JDK's built-in `com.sun.net.httpserver`. Routes `/agent/{id}` to an agent from an `AgentRegistry` (single-agent alias on the base path), streams events as `text/event-stream`, and rejects unknown ids with `404`, malformed input with `400`, oversized request bodies with `413`, and non-`POST` with `405`. No third-party dependencies. |
 
 ## Usage
 
@@ -53,6 +53,10 @@ server.start();
 Point the [`HttpAgent`](../client) client at `http://localhost:8080/agent` to
 drive it.
 
+`JdkAgentHttpHandler` reads at most 8 MiB of request body by default before
+parsing. Oversized requests, including chunked requests, receive
+`413 Payload Too Large` before deserialization or agent invocation.
+
 ### Multiple agents
 
 Pass an [`AgentRegistry`](src/main/java/com/agui/community/server/AgentRegistry.java)
@@ -70,6 +74,16 @@ server.createContext("/agent", new JdkAgentHttpHandler(registry, serializer));
 
 The single-agent constructor above is shorthand for a one-entry registry: it is
 served on the base path (the alias) and on `/agent/default`.
+
+Use the overloads that accept `maxRequestBodyBytes` to set a positive custom
+request body cap:
+
+```java
+server.createContext("/agent", new JdkAgentHttpHandler(
+        registry,
+        serializer,
+        2 * 1024 * 1024));
+```
 
 ### Bringing your own transport
 

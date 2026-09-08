@@ -9,11 +9,12 @@ agnostic to the concrete JSON library you use.
 
 ## What's inside
 
-| Type | Purpose |
-|------|---------|
-| [`HttpAgent`](src/main/java/com/agui/community/client/HttpAgent.java) | An `Agent` that serializes a `RunAgentInput` to JSON, POSTs it to a remote endpoint, and decodes the Server-Sent Events response into a `Flow.Publisher<Event>`. |
-| [`SseEventParser`](src/main/java/com/agui/community/client/SseEventParser.java) | Parses a Server-Sent Events byte/line stream into AG-UI events. |
-| [`HttpAgentException`](src/main/java/com/agui/community/client/HttpAgentException.java) | Raised (via `onError`) when a request fails or returns an error status. |
+| Type                                                                                    | Purpose                                                                                                                                                          |
+| --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`HttpAgent`](src/main/java/com/agui/community/client/HttpAgent.java)                   | An `Agent` that serializes a `RunAgentInput` to JSON, POSTs it to a remote endpoint, and decodes the Server-Sent Events response into a `Flow.Publisher<Event>`. |
+| [`SseLimits`](src/main/java/com/agui/community/client/SseLimits.java)                   | Positive per-line and per-event byte caps for an SSE response. Defaults are 1 MiB per line and 8 MiB per event data payload.                                     |
+| [`SseEventParser`](src/main/java/com/agui/community/client/SseEventParser.java)         | Parses a Server-Sent Events byte/line stream into AG-UI events.                                                                                                  |
+| [`HttpAgentException`](src/main/java/com/agui/community/client/HttpAgentException.java) | Raised (via `onError`) when a request fails or returns an error status.                                                                                          |
 
 ## Usage
 
@@ -45,10 +46,22 @@ are emitted in order, and the publisher completes when the stream ends.
 
 ### Customizing the transport
 
-The default constructor uses `HttpClient.newHttpClient()`, the common
-`ForkJoinPool`, and a 5-minute request timeout. Use the full constructor to
-control the `HttpClient`, the `Executor` on which the response stream is
-consumed, and the per-request timeout:
+The default constructor uses `HttpClient.newHttpClient()`, a cached thread pool
+for stream processing, a 5-minute request timeout, and `SseLimits.DEFAULT`.
+`SseLimits.DEFAULT` allows up to 1 MiB per SSE line and 8 MiB per decoded event
+`data` payload.
+
+Use the `SseLimits` overload when you only need custom response limits:
+
+```java
+Agent agent = new HttpAgent(
+        URI.create("https://example.com/agent"),
+        serializer,
+        new SseLimits(256 * 1024, 2 * 1024 * 1024));
+```
+
+Use the full constructor to control the `HttpClient`, the `Executor` on which
+the response stream is consumed, the per-request timeout, and the SSE limits:
 
 ```java
 Agent agent = new HttpAgent(
@@ -56,8 +69,16 @@ Agent agent = new HttpAgent(
         serializer,
         myHttpClient,
         myExecutor,
-        Duration.ofSeconds(30));
+        Duration.ofSeconds(30),
+        new SseLimits(256 * 1024, 2 * 1024 * 1024));
 ```
+
+Both limits count UTF-8 bytes, not Java characters. The line limit excludes the
+CR/LF terminator, but applies to every wire line, including comments and fields
+that the AG-UI client ignores. The event limit applies to the combined decoded
+`data` payload, including the newline bytes inserted between multiple `data:`
+fields. These caps are per line and per event; there is no lifetime byte budget
+for a long-running stream.
 
 ## Dependency
 
