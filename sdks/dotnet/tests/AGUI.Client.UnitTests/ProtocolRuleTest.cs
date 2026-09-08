@@ -288,6 +288,78 @@ public sealed class ProtocolRuleTest
     }
 
     [Fact]
+    public async Task ToolCall_EndSurfacesFunctionCallBeforeSiblingResult()
+    {
+        // TOOL_CALL_END must yield FunctionCallContent immediately. Waiting until
+        // every parallel TOOL_CALL_RESULT arrived hid in-progress backend tools
+        // and delayed unrelated calls (issue #2577).
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ToolCallStartEvent { ToolCallId = "c1", ToolCallName = "slow" },
+            new ToolCallEndEvent { ToolCallId = "c1" },
+            new ToolCallStartEvent { ToolCallId = "c2", ToolCallName = "fast" },
+            new ToolCallEndEvent { ToolCallId = "c2" },
+            new ToolCallResultEvent { MessageId = "r2", ToolCallId = "c2", Content = "done-2" },
+            new ToolCallResultEvent { MessageId = "r1", ToolCallId = "c1", Content = "done-1" },
+            new RunFinishedEvent { ThreadId = "t1", RunId = "r1" }
+        };
+
+        var result = await ProcessEventsAsync(events);
+        var kinds = result
+            .Select(u => u.Contents.FirstOrDefault() switch
+            {
+                FunctionCallContent fcc => $"call:{fcc.CallId}",
+                FunctionResultContent frc => $"result:{frc.CallId}",
+                _ => null
+            })
+            .Where(s => s is not null)
+            .ToList();
+
+        Assert.Equal(["call:c1", "call:c2", "result:c2", "result:c1"], kinds);
+    }
+
+    [Fact]
+    public async Task ToolCall_InterruptEmitsApprovalAfterTheCallHasAlreadySurfaced()
+    {
+        // TOOL_CALL_END yields FunctionCallContent immediately so a UI can show
+        // the in-progress call. RUN_FINISHED with a tool-call interrupt still
+        // emits ToolApprovalRequestContent for HITL; it must not swallow the
+        // earlier call update or skip the approval.
+        var events = new BaseEvent[]
+        {
+            new RunStartedEvent { ThreadId = "t1", RunId = "r1" },
+            new ToolCallStartEvent { ToolCallId = "tc1", ToolCallName = "delete_file" },
+            new ToolCallArgsEvent { ToolCallId = "tc1", Delta = "{}" },
+            new ToolCallEndEvent { ToolCallId = "tc1" },
+            new RunFinishedEvent
+            {
+                ThreadId = "t1",
+                RunId = "r1",
+                Outcome = new RunFinishedInterruptOutcome
+                {
+                    Interrupts =
+                    {
+                        new AGUIInterrupt
+                        {
+                            Id = "int-1",
+                            Reason = InterruptReasons.ToolCall,
+                            ToolCallId = "tc1"
+                        }
+                    }
+                }
+            }
+        };
+
+        var result = await ProcessEventsAsync(events);
+        var callIndex = result.FindIndex(u => u.Contents.OfType<FunctionCallContent>().Any());
+        var approvalIndex = result.FindIndex(u => u.Contents.OfType<ToolApprovalRequestContent>().Any());
+        Assert.InRange(callIndex, 0, result.Count - 1);
+        Assert.InRange(approvalIndex, 0, result.Count - 1);
+        Assert.True(callIndex < approvalIndex);
+    }
+
+    [Fact]
     public async Task ToolCall_ConcurrentWithDifferentIds_AllComplete()
     {
         var events = new BaseEvent[]

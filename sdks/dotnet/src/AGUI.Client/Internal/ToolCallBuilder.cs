@@ -12,6 +12,9 @@ internal sealed class ToolCallBuilder
 {
     private readonly Dictionary<string, ToolCallState> _activeToolCalls = new();
     private readonly HashSet<string> _pendingToolCallIds = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ChatResponseUpdate> _heldCalls = new(StringComparer.Ordinal);
+    private readonly List<string> _heldCallOrder = new();
+    private readonly HashSet<string> _yieldedCallIds = new(StringComparer.Ordinal);
     private readonly List<ChatResponseUpdate> _buffer = new();
 
     // callId -> the message id the TypeScript reducer mints for the assistant message
@@ -60,7 +63,7 @@ internal sealed class ToolCallBuilder
         state.Arguments.Append(evt.Delta);
     }
 
-    public void EndToolCall(ToolCallEndEvent evt, JsonSerializerOptions jsonSerializerOptions)
+    public ChatResponseUpdate EndToolCall(ToolCallEndEvent evt, JsonSerializerOptions jsonSerializerOptions)
     {
         if (!_activeToolCalls.TryGetValue(evt.ToolCallId, out var state))
         {
@@ -75,8 +78,7 @@ internal sealed class ToolCallBuilder
             name: state.Name,
             arguments: DeserializeArguments(state.Arguments.ToString(), jsonSerializerOptions));
 
-        _pendingToolCallIds.Add(evt.ToolCallId);
-        _buffer.Add(new ChatResponseUpdate(ChatRole.Assistant, [functionCall])
+        var update = new ChatResponseUpdate(ChatRole.Assistant, [functionCall])
         {
             ConversationId = _conversationId,
             ResponseId = _responseId,
@@ -90,8 +92,15 @@ internal sealed class ToolCallBuilder
             MessageId = state.ParentMessageId ?? evt.ToolCallId,
             CreatedAt = DateTimeOffset.UtcNow,
             RawRepresentation = evt
-        });
+        };
+
+        _pendingToolCallIds.Add(evt.ToolCallId);
+        _heldCalls[evt.ToolCallId] = update;
+        _heldCallOrder.Add(evt.ToolCallId);
+        return update;
     }
+
+    public void MarkCallYielded(string toolCallId) => _yieldedCallIds.Add(toolCallId);
 
     /// <summary>
     /// The message id minted for the assistant message carrying <paramref name="toolCallId"/>,
@@ -103,16 +112,27 @@ internal sealed class ToolCallBuilder
     public IReadOnlyList<ChatResponseUpdate> AddResult(string toolCallId, ChatResponseUpdate resultUpdate)
     {
         _pendingToolCallIds.Remove(toolCallId);
-        _buffer.Add(resultUpdate);
+
+        var flushed = new List<ChatResponseUpdate>();
+        if (_heldCalls.TryGetValue(toolCallId, out var callUpdate))
+        {
+            _heldCalls.Remove(toolCallId);
+            _heldCallOrder.Remove(toolCallId);
+            if (!_yieldedCallIds.Contains(toolCallId))
+            {
+                flushed.Add(callUpdate);
+            }
+        }
+
+        flushed.Add(resultUpdate);
 
         if (_pendingToolCallIds.Count == 0)
         {
-            var flushed = new List<ChatResponseUpdate>(_buffer);
+            flushed.AddRange(_buffer);
             _buffer.Clear();
-            return flushed;
         }
 
-        return Array.Empty<ChatResponseUpdate>();
+        return flushed;
     }
 
     public void BufferUpdate(ChatResponseUpdate update)
@@ -122,13 +142,25 @@ internal sealed class ToolCallBuilder
 
     public IReadOnlyList<ChatResponseUpdate> FlushAsToolCalls()
     {
-        if (_buffer.Count == 0)
+        if (_heldCalls.Count == 0 && _buffer.Count == 0)
         {
             return Array.Empty<ChatResponseUpdate>();
         }
 
-        var flushed = new List<ChatResponseUpdate>(_buffer);
+        var flushed = new List<ChatResponseUpdate>();
+        foreach (var toolCallId in _heldCallOrder)
+        {
+            if (_heldCalls.TryGetValue(toolCallId, out var update)
+                && !_yieldedCallIds.Contains(toolCallId))
+            {
+                flushed.Add(update);
+            }
+        }
+
+        flushed.AddRange(_buffer);
         _buffer.Clear();
+        _heldCalls.Clear();
+        _heldCallOrder.Clear();
         _pendingToolCallIds.Clear();
         return flushed;
     }
@@ -136,7 +168,7 @@ internal sealed class ToolCallBuilder
     public IReadOnlyList<ChatResponseUpdate> FlushWithInterrupts(
         RunFinishedInterruptOutcome interruptOutcome)
     {
-        if (_buffer.Count == 0)
+        if (_heldCalls.Count == 0 && _buffer.Count == 0)
         {
             return Array.Empty<ChatResponseUpdate>();
         }
@@ -152,14 +184,22 @@ internal sealed class ToolCallBuilder
             }
         }
 
-        var updates = new List<ChatResponseUpdate>(_buffer.Count);
-        foreach (var update in _buffer)
+        var updates = new List<ChatResponseUpdate>();
+        foreach (var toolCallId in _heldCallOrder)
         {
+            if (!_heldCalls.TryGetValue(toolCallId, out var update))
+            {
+                continue;
+            }
+
             if (update.Contents.Count == 1
                 && update.Contents[0] is FunctionCallContent fcc
                 && interruptById.TryGetValue(fcc.CallId, out var interrupt))
             {
-                // This tool call is interrupted — replace with ToolApprovalRequestContent
+                // This tool call is interrupted — emit ToolApprovalRequestContent.
+                // The call update itself may already have been yielded at TOOL_CALL_END
+                // so a UI can show the in-progress call; this replacement is the HITL
+                // signal and must still be produced.
                 var approvalRequest = new ToolApprovalRequestContent(
                     interrupt.Id, fcc)
                 {
@@ -170,7 +210,7 @@ internal sealed class ToolCallBuilder
                 {
                     ConversationId = update.ConversationId,
                     ResponseId = update.ResponseId,
-                    // The buffered call update's message identity must survive the
+                    // The held call update's message identity must survive the
                     // replacement, or the coalescer hoists this update's attribution
                     // onto the ChatResponse and the approval comes back parent-owned
                     // (see EndToolCall).
@@ -179,13 +219,16 @@ internal sealed class ToolCallBuilder
                     RawRepresentation = update.RawRepresentation
                 });
             }
-            else
+            else if (!_yieldedCallIds.Contains(toolCallId))
             {
                 updates.Add(update);
             }
         }
 
+        updates.AddRange(_buffer);
         _buffer.Clear();
+        _heldCalls.Clear();
+        _heldCallOrder.Clear();
         _pendingToolCallIds.Clear();
         return updates;
     }
@@ -203,6 +246,9 @@ internal sealed class ToolCallBuilder
     {
         _activeToolCalls.Clear();
         _pendingToolCallIds.Clear();
+        _heldCalls.Clear();
+        _heldCallOrder.Clear();
+        _yieldedCallIds.Clear();
         _buffer.Clear();
         // Minted identities are per run like everything else here: entity ids are
         // run-global, so a later run reusing a call id must not coalesce its
