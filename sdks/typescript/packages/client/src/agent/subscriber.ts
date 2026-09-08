@@ -399,6 +399,12 @@ export async function runSubscribersWithMutation(
         break;
       }
     } catch (error) {
+      // Preserve the test-mode failure policy independently of the freeze guard:
+      // ordinary callback bugs must reject even when inputs are too large to freeze.
+      if (isTestEnvironment && error instanceof TypeError) {
+        throw error;
+      }
+
       // Two different failures used to be conflated here. `error instanceof
       // TypeError` alone attributed EVERY TypeError to the freeze guard --
       // including the everyday `Cannot read properties of undefined`, which
@@ -407,12 +413,8 @@ export async function runSubscribersWithMutation(
       // non-extensible object is a freeze violation, and the engine says so in
       // the message.
       if (freezeInputs && isDev && isFrozenWriteError(error)) {
-        // In test environments, re-throw so tests fail fast and the violation is visible.
         // In development (non-test), log a specific message to distinguish freeze violations
         // from ordinary subscriber errors.
-        if (isTestEnvironment) {
-          throw error;
-        }
         console.error(
           "AG-UI: Subscriber attempted to mutate frozen inputs in-place. " +
             "Return mutations via AgentStateMutation instead of mutating directly.",
