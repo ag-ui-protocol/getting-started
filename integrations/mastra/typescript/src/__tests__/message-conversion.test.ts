@@ -574,6 +574,33 @@ describe("convertAGUIMessagesToMastra", () => {
     });
   });
 
+  describe("developer messages", () => {
+    it("forwards a developer message as a user message", () => {
+      const messages: Message[] = [
+        { id: "d1", role: "developer", content: "Answer in German." },
+      ];
+
+      const result = convertAGUIMessagesToMastra(messages);
+
+      expect(result).toEqual([
+        { id: "d1", role: "user", content: "Answer in German." },
+      ]);
+    });
+
+    it("keeps a developer message in its position between other messages", () => {
+      const messages: Message[] = [
+        { id: "u1", role: "user", content: "Hi" },
+        { id: "d1", role: "developer", content: "Be brief." },
+        { id: "a1", role: "assistant", content: "Hello" },
+      ];
+
+      const result = convertAGUIMessagesToMastra(messages);
+
+      expect(result.map((m) => (m as any).id)).toEqual(["u1", "d1", "a1"]);
+      expect(result[1]).toEqual({ id: "d1", role: "user", content: "Be brief." });
+    });
+  });
+
   describe("mixed conversations", () => {
     it("converts a full conversation with user, assistant, and tool messages", () => {
       const messages: Message[] = [
