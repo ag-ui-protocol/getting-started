@@ -1,16 +1,24 @@
 import type {
+  AssistantMessage,
   InputContent,
   InputContentDataSource,
   InputContentUrlSource,
   Message,
+  ToolCall,
+  ToolMessage,
 } from "@ag-ui/client";
 import { AbstractAgent } from "@ag-ui/client";
 import { MastraClient } from "@mastra/client-js";
 import type { Mastra } from "@mastra/core";
 import type { CoreMessage } from "@mastra/core/llm";
+import type {
+  MastraDBMessage,
+  MastraMessagePart,
+} from "@mastra/core/agent";
 import { Agent as LocalMastraAgent } from "@mastra/core/agent";
 import { RequestContext } from "@mastra/core/request-context";
 import { MastraAgent, MastraTracingOptions } from "./mastra";
+import { continuationMessageId, toolResultMessageId } from "./message-ids";
 
 /**
  * CoreMessage extended with an optional `id` field.
@@ -217,6 +225,209 @@ export function convertAGUIMessagesToMastra(
         ],
       } as CoreMessage);
     }
+  }
+
+  return result;
+}
+
+/**
+ * Turns the ordered parts of a stored Mastra USER message into AG-UI user
+ * content. A single text part collapses to a plain string (the shape the live
+ * bridge and every AG-UI client produce for typed input); anything richer
+ * becomes an InputContent array.
+ */
+function mastraPartsToAGUIUserContent(
+  parts: MastraMessagePart[],
+): string | InputContent[] {
+  const content: InputContent[] = [];
+  for (const part of parts) {
+    if (part.type === "text") {
+      if (part.text) content.push({ type: "text", text: part.text });
+    } else if (part.type === "file") {
+      const mimeType = part.mimeType || "application/octet-stream";
+      const kind = mimeType.startsWith("image/")
+        ? ("image" as const)
+        : mimeType.startsWith("audio/")
+          ? ("audio" as const)
+          : mimeType.startsWith("video/")
+            ? ("video" as const)
+            : ("document" as const);
+      content.push({
+        type: kind,
+        source: { type: "data", mimeType, value: part.data },
+      } as InputContent);
+    }
+    // `source`, `source-document`, `step-start`, `data-*`: no AG-UI input
+    // equivalent, so they are dropped rather than guessed at.
+  }
+  if (content.length === 1 && content[0]!.type === "text") {
+    return (content[0] as Extract<InputContent, { type: "text" }>).text;
+  }
+  return content;
+}
+
+/** Concatenated text of a stored message's text parts. */
+function mastraPartsToText(parts: MastraMessagePart[]): string {
+  return parts
+    .filter(
+      (part): part is Extract<MastraMessagePart, { type: "text" }> =>
+        part.type === "text",
+    )
+    .map((part) => part.text)
+    .join("");
+}
+
+/** Stored tool-invocation states that carry a settled result. */
+const SETTLED_TOOL_STATES = new Set(["result", "output-error", "output-denied"]);
+
+/**
+ * Converts stored Mastra messages into AG-UI messages — the inverse of
+ * {@link convertAGUIMessagesToMastra}.
+ *
+ * The input is what Mastra's own history APIs return: `memory.recall()` on a
+ * local agent, or `MastraClient.getMemoryThread(...).listMessages()` against a
+ * Mastra server. Both hand back `MastraDBMessage[]`. Use it to rehydrate a
+ * thread that Mastra Memory already owns (e.g. after a page reload on a
+ * self-hosted runtime, where there is no CopilotKit-side event store to replay
+ * from) by seeding the client with the returned messages, or by emitting them
+ * as a MESSAGES_SNAPSHOT.
+ *
+ * A Mastra assistant turn stores text, tool calls, tool results and further
+ * text as ordered parts of ONE message, while AG-UI models the same turn as
+ * assistant -> tool -> assistant. The turn is therefore split at each tool
+ * boundary, reusing the live bridge's continuation ids (see `./message-ids`) so
+ * the restored history dedups against Mastra's stored ids on the next run
+ * instead of being persisted again.
+ *
+ * Parts with no AG-UI equivalent (`step-start`, `source`, `source-document`,
+ * `data-*`) are dropped. `signal` messages are Mastra-internal and skipped.
+ */
+export function convertMastraMessagesToAGUI(
+  messages: MastraDBMessage[],
+): Message[] {
+  const result: Message[] = [];
+
+  for (const message of messages) {
+    const parts = message.content?.parts ?? [];
+
+    if (message.role === "signal") continue;
+
+    if (message.role === "system") {
+      const text = mastraPartsToText(parts) || message.content?.content || "";
+      if (text) {
+        result.push({ id: message.id, role: "system", content: text });
+      }
+      continue;
+    }
+
+    if (message.role === "user") {
+      const content = mastraPartsToAGUIUserContent(parts);
+      const isEmpty = typeof content === "string" ? !content : !content.length;
+      if (!isEmpty) {
+        result.push({ id: message.id, role: "user", content });
+      }
+      continue;
+    }
+
+    // assistant: walk the parts in order, flushing a segment at every
+    // tool -> text boundary so the transcript keeps call -> result -> text.
+    let text = "";
+    let toolCalls: ToolCall[] = [];
+    let toolResults: ToolMessage[] = [];
+    // Reasoning for the segment being built, and reasoning that arrived after
+    // its tool call and therefore belongs to the NEXT segment (the trailing
+    // text), kept apart so a flush cannot hoist it above the tool result.
+    let reasoning: Message[] = [];
+    let carriedReasoning: Message[] = [];
+    let reasoningCount = 0;
+    let segment = 0;
+
+    const flush = () => {
+      // Reasoning leads its segment: the model reasons, then answers.
+      result.push(...reasoning);
+      if (text || toolCalls.length > 0) {
+        const assistant: AssistantMessage = {
+          id:
+            segment === 0
+              ? message.id
+              : continuationMessageId(message.id, segment),
+          role: "assistant",
+          ...(text ? { content: text } : {}),
+          ...(toolCalls.length > 0 ? { toolCalls } : {}),
+        };
+        result.push(assistant);
+      }
+      result.push(...toolResults);
+      text = "";
+      toolCalls = [];
+      toolResults = [];
+      reasoning = carriedReasoning;
+      carriedReasoning = [];
+      segment += 1;
+    };
+
+    for (const part of parts) {
+      if (part.type === "text") {
+        // Text that follows a tool call belongs to the next AG-UI message.
+        if (toolCalls.length > 0) flush();
+        text += part.text;
+        continue;
+      }
+
+      if (part.type === "tool-invocation") {
+        const invocation = part.toolInvocation;
+        toolCalls.push({
+          id: invocation.toolCallId,
+          type: "function",
+          function: {
+            name: invocation.toolName,
+            arguments: JSON.stringify(invocation.args ?? {}),
+          },
+        });
+        if (SETTLED_TOOL_STATES.has(invocation.state)) {
+          const raw = invocation.result ?? "";
+          const failed = invocation.state !== "result";
+          const toolMessage: ToolMessage = {
+            id: toolResultMessageId(invocation.toolCallId),
+            role: "tool",
+            toolCallId: invocation.toolCallId,
+            content: typeof raw === "string" ? raw : JSON.stringify(raw),
+            ...(failed
+              ? {
+                  error:
+                    invocation.errorText ??
+                    (invocation.state === "output-denied"
+                      ? "tool call denied"
+                      : "tool call failed"),
+                }
+              : {}),
+          };
+          toolResults.push(toolMessage);
+        }
+        continue;
+      }
+
+      if (part.type === "reasoning") {
+        // Held until the segment flushes rather than emitted inline: flushing
+        // here would either reorder the segment's text or split it across two
+        // messages sharing one id. Only a tool boundary opens a new segment,
+        // matching the live bridge's id scheme.
+        if (part.reasoning) {
+          reasoningCount += 1;
+          const reasoningMessage: Message = {
+            id: `${message.id}-reasoning-${reasoningCount}`,
+            role: "reasoning",
+            content: part.reasoning,
+          };
+          // After a tool call, hold it for the next segment so it renders below
+          // the tool result rather than above the call that produced it.
+          if (toolCalls.length > 0) carriedReasoning.push(reasoningMessage);
+          else reasoning.push(reasoningMessage);
+        }
+        continue;
+      }
+    }
+    flush();
   }
 
   return result;
