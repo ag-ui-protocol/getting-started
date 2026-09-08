@@ -1,0 +1,37 @@
+name: unit-nim-sdk
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sdks/nim/**"
+      - ".github/workflows/unit-nim-sdk.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "sdks/nim/**"
+      - ".github/workflows/unit-nim-sdk.yml"
+
+jobs:
+  nim:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Install mise
+        uses: jdx/mise-action@v2
+        with:
+          version: latest
+          install: true
+          cache: true
+          directory: sdks/nim
+
+      - name: Install dependencies
+        working-directory: sdks/nim
+        run: nimble install -y
+
+      - name: Run tests
+        working-directory: sdks/nim
+        run: nimble test

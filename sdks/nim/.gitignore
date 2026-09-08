@@ -1,0 +1,17 @@
+# Nim build artifacts
+nimcache/
+nim-sdk/nimcache/
+*.exe
+*.out
+*.o
+*.obj
+
+# OS specific files
+.DS_Store
+
+# Temporary files
+*.tmp
+
+# Nimble artifacts
+nimble/
+nimbledeps/
