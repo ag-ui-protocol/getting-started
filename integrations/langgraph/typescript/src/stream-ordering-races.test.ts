@@ -65,6 +65,13 @@ function eventChunk(
   };
 }
 
+function valuesChunk(values: Record<string, unknown>): EventsStreamEvent {
+  return {
+    event: "values",
+    data: values,
+  } as unknown as EventsStreamEvent;
+}
+
 function lateMessageTuple(): MessagesTupleStreamEvent {
   const message: LangGraphMessage = {
     id: "late-message",
@@ -232,6 +239,86 @@ describe("load-dependent stream ordering", () => {
     expect(
       messagesSnapshot?.messages.map((message) => message.id),
     ).not.toContain("experience-1");
+  });
+
+  it("does not let an early root values chunk seed future subgraph state", async () => {
+    const agent = new LangGraphAgent({
+      deploymentUrl: "http://localhost:2024",
+      graphId: "test-graph",
+    });
+    const user: LangGraphMessage = {
+      id: "user-1",
+      type: "human",
+      content: "Plan my trip",
+    };
+    const rootAssistant: LangGraphMessage = {
+      id: "root-1",
+      type: "ai",
+      content: "I will find experiences next",
+    };
+    const futureExperience: LangGraphMessage = {
+      id: "experience-1",
+      type: "ai",
+      content: "Future experiences response",
+    };
+    const preEntryState = threadState({
+      messages: [user, rootAssistant],
+      itinerary: { city: "Amsterdam" },
+    });
+    const getState = vi
+      .spyOn(agent.client.threads, "getState")
+      .mockResolvedValue(
+        threadState({
+          messages: [user, rootAssistant, futureExperience],
+          itinerary: {
+            city: "Amsterdam",
+            experience: "Canal tour",
+          },
+        }),
+      );
+
+    const events = await runUntilStreamError(
+      agent,
+      [
+        eventChunk(
+          "on_chat_model_stream",
+          { langgraph_node: "supervisor" },
+          { chunk: { content: "", response_metadata: {} } },
+        ),
+        valuesChunk({
+          messages: [user, rootAssistant, futureExperience],
+          itinerary: {
+            city: "Amsterdam",
+            experience: "Canal tour",
+          },
+        }),
+        eventChunk(
+          "on_chain_start",
+          {
+            langgraph_node: "experiences_agent",
+            langgraph_checkpoint_ns:
+              "experiences_agent:outer|experiences_agent_node:inner",
+          },
+          {},
+        ),
+      ],
+      preEntryState,
+    );
+
+    expect(getState).not.toHaveBeenCalled();
+    const boundarySnapshot = events.find(
+      (event): event is StateSnapshotEvent =>
+        event.type === EventType.STATE_SNAPSHOT && event.rawEvent === undefined,
+    );
+    expect(boundarySnapshot?.snapshot).toEqual(preEntryState.values);
+    const messagesSnapshot = events.find(
+      (event): event is MessagesSnapshotEvent =>
+        event.type === EventType.MESSAGES_SNAPSHOT,
+    );
+    expect(messagesSnapshot?.messages.map((message) => message.id)).toEqual([
+      "user-1",
+      "root-1",
+    ]);
   });
 
   it("seeds the first subgraph boundary from root on_chain_end object output without a values chunk", async () => {
