@@ -40,7 +40,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "ag-ui-a2ui-toolkit", specifier = ">=0.0.4" },
-    { name = "ag-ui-protocol", specifier = ">=0.1.21" },
+    { name = "ag-ui-protocol", directory = "../../../sdks/python" },
     { name = "fastapi", marker = "extra == 'fastapi'", specifier = ">=0.115.12" },
     { name = "langchain", specifier = ">=1.2.0" },
     { name = "langchain-core", specifier = ">=0.3.0" },
@@ -59,15 +59,14 @@ dev = [
 
 [[package]]
 name = "ag-ui-protocol"
-version = "0.1.21"
-source = { registry = "https://pypi.org/simple" }
+version = "0.1.22"
+source = { directory = "../../../sdks/python" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3e/a8/86e3dec527a47a798f4aba5cddc68deedacd78dcf0f638d0cf7c9ac21525/ag_ui_protocol-0.1.21.tar.gz", hash = "sha256:42f6fb809399cd2ced5417ed928f821feda2534f4e55aebeada170823a6b1a5f", size = 15102, upload-time = "2026-08-27T11:48:28.235Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/e5/4229590a6c0561ef9979e251d12962b85df5c5e88685c6dd2fbdf221ba7d/ag_ui_protocol-0.1.21-py3-none-any.whl", hash = "sha256:628203b9decd66eb98995f86edca5536de330ecdfbcb809809863e4408ddeb57", size = 18527, upload-time = "2026-08-27T11:48:27.343Z" },
-]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.11.2" }]
 
 [[package]]
 name = "annotated-doc"

@@ -37,7 +37,7 @@ import {
   LegacyActionExecutionMessage,
   LegacyResultMessage,
   LegacyActionExecutionResult,
-  LegacyRunError
+  LegacyRunError,
 } from "./types";
 import untruncateJson from "untruncate-json";
 
@@ -333,6 +333,22 @@ export const convertToLegacyEvents =
               return [];
             }
 
+            let legacyMessages: LegacyMessage[] | null = null;
+            if (syncedMessages) {
+              try {
+                legacyMessages = convertMessagesToLegacyFormat(syncedMessages);
+              } catch (error) {
+                // Surface the failure on the stream instead of tearing it down
+                // with an opaque JSON parsing error.
+                return [
+                  {
+                    type: LegacyRuntimeEventTypes.enum.RunError,
+                    message: (error as Error).message,
+                  } as LegacyRunError,
+                ];
+              }
+            }
+
             return [
               {
                 type: LegacyRuntimeEventTypes.enum.AgentStateMessage,
@@ -344,11 +360,7 @@ export const convertToLegacyEvents =
                 role: "assistant",
                 state: JSON.stringify({
                   ...currentState,
-                  ...(syncedMessages
-                    ? {
-                        messages: convertMessagesToLegacyFormat(syncedMessages),
-                      }
-                    : {}),
+                  ...(legacyMessages ? { messages: legacyMessages } : {}),
                 }),
                 active: false,
               } as LegacyAgentStateMessage,
@@ -427,10 +439,19 @@ export function convertMessagesToLegacyFormat(messages: Message[]): LegacyMessag
       }
       if (message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
         for (const toolCall of message.toolCalls) {
+          let parsedArguments: unknown;
+          try {
+            parsedArguments = JSON.parse(toolCall.function.arguments);
+          } catch (error) {
+            throw new Error(
+              `Failed to parse arguments for tool call '${toolCall.id}' ` +
+                `(${toolCall.function.name}): ${(error as Error).message}`,
+            );
+          }
           const actionExecutionMessage: LegacyActionExecutionMessage = {
             id: toolCall.id,
             name: toolCall.function.name,
-            arguments: JSON.parse(toolCall.function.arguments),
+            arguments: parsedArguments,
             parentMessageId: message.id,
           };
           result.push(actionExecutionMessage);

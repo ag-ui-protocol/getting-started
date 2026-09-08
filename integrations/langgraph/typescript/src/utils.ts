@@ -1081,11 +1081,21 @@ function suppliedFilename(
  * Mirrors Python's `_incoming_image_url`, which already read it this way.
  */
 function incomingImageUrl(payload: unknown): string | undefined {
-  if (typeof payload === "string") return payload || undefined;
-  if (payload !== null && typeof payload === "object") {
-    return firstNonEmptyString((payload as { url?: unknown }).url);
-  }
-  return undefined;
+  const url =
+    typeof payload === "string"
+      ? payload
+      : payload !== null && typeof payload === "object"
+        ? firstNonEmptyString((payload as { url?: unknown }).url)
+        : undefined;
+  if (url === undefined) return undefined;
+  // TRIMMED, because whitespace is the side door into the empty-value defect
+  // this function already rejects. A url of `"   "` is truthy, so the checks
+  // above let it through to mint an attachment pointing at nothing, and a
+  // LEADING space on `"  data:image/png;base64,…"` is worse than that: the
+  // caller's `startsWith("data:")` says false, so a base64 payload is filed as
+  // a remote url the client then tries to fetch. Mirrors Python's
+  // `_incoming_image_url`.
+  return url.trim() || undefined;
 }
 
 /**
@@ -1134,13 +1144,27 @@ function incomingImageUrl(payload: unknown): string | undefined {
  * MESSAGES_SNAPSHOT — a block kind missing here is an attachment that vanishes
  * from a reopened thread.
  */
-function convertLangchainMultimodalToAgui(content: IncomingMediaBlock[]): InputContent[] {
+function convertLangchainMultimodalToAgui(content: (IncomingMediaBlock | string)[]): InputContent[] {
   const aguiContent: InputContent[] = [];
 
   for (const item of content) {
-    // A content array relayed by the LangGraph server can carry a JSON `null`
-    // (or a bare string) where a block is expected, and `item.type` on one of
-    // those aborts the conversion of every OTHER block and every other message.
+    // A plain string entry is CONTENT, not a malformed block. LangChain types
+    // message content as `str | list[str | dict]` and folds a bare entry in as
+    // text — `convert_to_openai_messages(["hello", {type: "text", text: " world"}])`
+    // sends the model `"hello\n world"` — so dropping it loses the user's own
+    // words rather than discarding junk. Mirrors the `isinstance(item, str)`
+    // branch in the Python adapter.
+    if (typeof item === "string") {
+      aguiContent.push({
+        type: "text",
+        text: item,
+      });
+      continue;
+    }
+
+    // A content array relayed by the LangGraph server can carry a JSON `null`, a
+    // number, or a nested array where a block is expected, and `item.type` on one
+    // of those aborts the conversion of every OTHER block and every other message.
     // One unusable block is dropped like any other unusable block.
     if (!item || typeof item !== "object") {
       console.warn("[convertLangchainMultimodalToAgui] Dropping content block: not an object");
@@ -1249,6 +1273,12 @@ function convertLangchainMultimodalToAgui(content: IncomingMediaBlock[]): InputC
         // {@link readIncomingMediaBlock} already rejects on the standard-block
         // path, where an empty `data`/`base64` drops the block. This branch was
         // the one place that kept it.
+        // No `.trim()` here, deliberately: {@link incomingImageUrl} already
+        // trimmed the whole url, so a payload that is nothing but whitespace
+        // has ALREADY become the empty string by the time it reaches this
+        // guard. A payload with INTERNAL whitespace keeps it, which is correct
+        // — MIME-wrapped base64 legitimately carries newlines and both atob and
+        // Python's b64decode ignore them.
         if (!data) {
           console.warn(
             "[convertLangchainMultimodalToAgui] Dropping image_url block: data URL carries no payload"
@@ -1265,8 +1295,12 @@ function convertLangchainMultimodalToAgui(content: IncomingMediaBlock[]): InputC
         // The MEDIA TYPE is unaffected either way — `aguiMediaTypeForMimeType`
         // answers "image" for both `""` and `image/png` — so this only stops an
         // unusable MIME type from being recorded, it does not retype anything.
-        const mimeType =
-          (header.includes(":") ? header.split(":")[1].split(";")[0] : "") || "image/png";
+        // A BLANK mediatype (`data:   ;base64,…`) is "present but empty" wearing
+        // whitespace, and unusable for the same reason the empty one is. Only a
+        // blank one collapses — a padded but REAL mediatype keeps its padding,
+        // which the parity table pins on both runtimes.
+        const rawMimeType = header.includes(":") ? header.split(":")[1].split(";")[0] : "";
+        const mimeType = (rawMimeType.trim() ? rawMimeType : "") || "image/png";
 
         aguiContent.push({
           // The MIME type this adapter put in the data URL on the way out is

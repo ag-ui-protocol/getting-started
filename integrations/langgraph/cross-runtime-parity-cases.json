@@ -802,13 +802,13 @@
     {
       "id": "inbound/non-object-entry/bare-string",
       "direction": "inbound",
-      "axis": "malformed",
-      "why": "a bare string where a block is expected",
+      "axis": "wellformed",
+      "why": "a bare string entry is text content, not a malformed block",
       "content": ["just a string"],
       "expect": {
-        "kept": [],
-        "dropped": 1,
-        "loggedDrops": 1
+        "kept": [{ "kind": "text", "text": "just a string" }],
+        "dropped": 0,
+        "loggedDrops": 0
       }
     },
     {
@@ -3792,6 +3792,109 @@
             "value": "https://example.com/a.bin",
             "mimeType": null,
             "filename": "report.bin"
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/url-whitespace-only",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "a whitespace-only url is truthy, so a bare falsiness check lets it through to mint an attachment pointing at nothing",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "   "
+          }
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/url-bare-string-whitespace-only",
+      "direction": "inbound",
+      "axis": "malformed",
+      "why": "the same defect through the bare-string shape rather than the {url} object",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": "  \t "
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/data-url-leading-whitespace",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "a LEADING space makes the data: test false, so base64 bytes are filed as a remote url the client then tries to fetch",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": "  data:image/png;base64,QUJD"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/png",
+            "filename": null
+          }
+        ],
+        "dropped": 0,
+        "loggedDrops": 0
+      }
+    },
+    {
+      "id": "inbound/image_url/data-url-payload-whitespace-only",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "a whitespace-only payload is truthy and mints the same empty-valued attachment the no-payload guard rejects",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": "data:image/png;base64,   "
+        }
+      ],
+      "expect": {
+        "kept": [],
+        "dropped": 1,
+        "loggedDrops": 1
+      }
+    },
+    {
+      "id": "inbound/image_url/data-url-mediatype-blank",
+      "direction": "inbound",
+      "axis": "data-url",
+      "why": "a blank mediatype is present-but-empty wearing whitespace and must take the image/png default like the empty one; a PADDED REAL mediatype keeps its padding, which modality-padded-major pins",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": "data:   ;base64,QUJD"
+        }
+      ],
+      "expect": {
+        "kept": [
+          {
+            "kind": "image",
+            "source": "data",
+            "value": "QUJD",
+            "mimeType": "image/png",
+            "filename": null
           }
         ],
         "dropped": 0,

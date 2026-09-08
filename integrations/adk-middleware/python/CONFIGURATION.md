@@ -11,6 +11,7 @@ This guide covers all configuration options for the ADK Middleware.
 - [Memory Configuration](#memory-configuration)
 - [Timeout Configuration](#timeout-configuration)
 - [Concurrent Execution Limits](#concurrent-execution-limits)
+- [FastAPI Integration](#fastapi-integration)
 
 ## Basic Configuration
 
@@ -357,6 +358,91 @@ add_adk_fastapi_endpoint(
 add_adk_fastapi_endpoint(app, general_agent, path="/agents/general")
 add_adk_fastapi_endpoint(app, technical_agent, path="/agents/technical")
 ```
+
+### Endpoint Agent Resolver
+
+Configure `agent_resolver` when one endpoint needs to dispatch to different
+`ADKAgent` instances per request:
+
+```python
+from ag_ui_adk import add_adk_fastapi_endpoint
+
+
+async def extract_tenant_state(request, input_data):
+    return {"tenant": request.headers.get("x-tenant")}
+
+
+async def agent_resolver(request, input_data):
+    state = input_data.state if isinstance(input_data.state, dict) else {}
+    if state.get("tenant") == "enterprise":
+        return enterprise_agent
+    return None  # Use the default agent
+
+
+add_adk_fastapi_endpoint(
+    app,
+    default_agent,
+    path="/chat",
+    extract_state_from_request=extract_tenant_state,
+    agent_resolver=agent_resolver,
+)
+```
+
+Resolver behavior:
+- Runs after `extract_state_from_request` or legacy `extract_headers` has
+  merged request-derived state into `input_data.state`
+- Receives the FastAPI `Request` and the post-extraction `RunAgentInput`
+- Must return an `ADKAgent` instance or `None`
+- Applies to the run endpoint, `/chat/capabilities`, and `/agents/state`
+- Falls back to the default agent when it returns `None`
+
+For `/chat/capabilities` and `/agents/state`, the middleware constructs a
+synthetic `RunAgentInput` before calling the resolver. Those requests should be
+routed from the FastAPI `Request` or extractor-populated state, not from
+tool-history messages or arbitrary run-body state.
+
+For trusted tenant, authorization, or data-boundary routing, read from
+`request.headers` directly or use a custom `extract_state_from_request` that
+writes authoritative top-level routing keys. Do not route from `state.headers`
+when using legacy `extract_headers`; client-provided `state.headers` values take
+precedence over extracted header values for backwards compatibility.
+
+This is useful for tenant routing, request-header routing, and agent registries
+where each target owns a separate middleware configuration. It does not replace
+ADK's `sub_agents` delegation model inside a single ADK application.
+
+For tool-result resumption, prefer resolving the latest tool result back to the
+agent that emitted the matching tool call before applying normal request-state
+routing:
+
+```python
+from ag_ui_adk import resolve_agent_from_message_history
+
+AGENT_REGISTRY = {
+    "default": default_agent,
+    "support": support_agent,
+    "billing": billing_agent,
+}
+
+
+async def agent_resolver(request, input_data):
+    history_agent = resolve_agent_from_message_history(
+        input_data.messages,
+        AGENT_REGISTRY,
+    )
+    if history_agent is not None:
+        return history_agent
+
+    state = input_data.state if isinstance(input_data.state, dict) else {}
+    return AGENT_REGISTRY.get(state.get("to_agent"))
+```
+
+`resolve_agent_from_message_history()` treats `AssistantMessage.name` as the
+agent registry key, checks only the latest `ToolMessage`, and matches that
+tool result to the prior assistant `tool_calls[].id`. Include every possible
+tool-call origin in the registry, and preserve the assistant message and
+`name` field in client-supplied histories when resumptions must be pinned to
+their originating agent.
 
 ### Header Extraction
 

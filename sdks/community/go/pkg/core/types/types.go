@@ -45,6 +45,13 @@ type ToolCall struct {
 	Type string `json:"type"`
 	// Function is the function call payload.
 	Function FunctionCall `json:"function"`
+	// Metadata is optional extra information about the tool call.
+	//
+	// A tool call is not a message, so it carries its own metadata rather than
+	// folding into the assistant message that owns it. Several tool calls can
+	// share one parent, and merging them all into it would make the result
+	// depend on their relative order.
+	Metadata Metadata `json:"metadata,omitempty"`
 }
 
 const (
@@ -188,6 +195,11 @@ type Message struct {
 	Error string `json:"error,omitempty"`
 	// ActivityType is an optional activity discriminator for activity messages.
 	ActivityType string `json:"activityType,omitempty"`
+	// Metadata is optional extra information attached to the message.
+	Metadata Metadata `json:"metadata,omitempty"`
+	// SubagentRunID attributes this message to a subagent invocation.
+	// Empty when the message comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler and supports snake_case compatibility.
@@ -227,6 +239,12 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	if err := unmarshalField(raw, &m.ActivityType, "activityType", "activity_type"); err != nil {
 		return err
 	}
+	if err := unmarshalField(raw, &m.Metadata, "metadata"); err != nil {
+		return err
+	}
+	if err := unmarshalField(raw, &m.SubagentRunID, "subagentRunId", "subagent_run_id"); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -247,6 +265,8 @@ type Tool struct {
 	Description string `json:"description"`
 	// Parameters contains the JSON Schema for the tool parameters.
 	Parameters any `json:"parameters"`
+	// Metadata is optional arbitrary tool metadata (e.g. an A2UI schema).
+	Metadata Metadata `json:"metadata,omitempty"`
 }
 
 // Interrupt represents a pause point requiring user input before the agent can continue.
@@ -264,7 +284,14 @@ type Interrupt struct {
 	// ExpiresAt is an optional ISO 8601 timestamp after which the interrupt is no longer valid.
 	ExpiresAt string `json:"expiresAt,omitempty"`
 	// Metadata is optional arbitrary metadata associated with the interrupt.
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Metadata Metadata `json:"metadata,omitempty"`
+	// SubagentRunID is the subagent whose work raised this interrupt, when it
+	// was raised inside one. Empty for a root-raised interrupt.
+	//
+	// Attribution lives on each interrupt rather than on RUN_FINISHED because
+	// one run can carry interrupts from several subagents. It lets a client
+	// render the approval request inside that subagent's group.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler and supports snake_case compatibility.
@@ -295,6 +322,9 @@ func (i *Interrupt) UnmarshalJSON(data []byte) error {
 	if err := unmarshalField(raw, &i.Metadata, "metadata"); err != nil {
 		return err
 	}
+	if err := unmarshalField(raw, &i.SubagentRunID, "subagentRunId", "subagent_run_id"); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -317,6 +347,10 @@ type ResumeEntry struct {
 	Status ResumeStatus `json:"status"`
 	// Payload is an optional response payload for the interrupt.
 	Payload any `json:"payload,omitempty"`
+	// Metadata is optional envelope data about the response — signatures,
+	// routing keys — as opposed to Payload, which is the answer the agent asked
+	// for and will act on.
+	Metadata Metadata `json:"metadata,omitempty"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler and supports snake_case compatibility.
@@ -333,6 +367,9 @@ func (e *ResumeEntry) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if err := unmarshalField(raw, &e.Payload, "payload"); err != nil {
+		return err
+	}
+	if err := unmarshalField(raw, &e.Metadata, "metadata"); err != nil {
 		return err
 	}
 

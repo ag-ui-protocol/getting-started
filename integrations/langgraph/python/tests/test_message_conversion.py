@@ -280,6 +280,20 @@ class TestLangchainMessagesToAgui(unittest.TestCase):
         assert content[0].source.mime_type == "image/jpeg"
         assert content[0].source.value == "abc123"
 
+    def test_multimodal_plain_string_entry_preserved(self):
+        msg = HumanMessage(
+            id="m3",
+            content=["hello", {"type": "text", "text": " world"}],
+        )
+        result = langchain_messages_to_agui([msg])
+        content = result[0].content
+        assert isinstance(content, list)
+        assert len(content) == 2
+        assert content[0].type == "text"
+        assert content[0].text == "hello"
+        assert content[1].type == "text"
+        assert content[1].text == " world"
+
 
 class TestRoundTrip(unittest.TestCase):
     """Tests that messages survive conversion in both directions."""

@@ -1,6 +1,8 @@
 """FastAPI endpoint utilities for Langroid integration."""
 
-from fastapi import FastAPI, Request
+from typing import Any
+
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ag_ui.core import RunAgentInput
@@ -9,14 +11,25 @@ from .agent import LangroidAgent
 
 
 def add_langroid_fastapi_endpoint(
-    app: FastAPI,
+    app: FastAPI | APIRouter,
     agent: LangroidAgent,
     path: str,
-    **kwargs
+    **kwargs: Any,
 ) -> None:
-    """Add a Langroid agent endpoint to FastAPI app."""
-    
-    @app.post(path)
+    """Add a Langroid agent endpoint to FastAPI app.
+
+    Args:
+        app: FastAPI application or APIRouter to register the routes on.
+        agent: Langroid agent to serve.
+        path: Path of the agent route.
+        **kwargs: Forwarded to ``app.post`` for the agent route (``name``,
+            ``tags``, ``operation_id``, ``dependencies``, ``include_in_schema``,
+            ...). They do not apply to the other routes this helper registers,
+            because values such as ``operation_id`` and ``name`` must stay
+            unique per operation.
+    """
+
+    @app.post(path, **kwargs)
     async def langroid_endpoint(input_data: RunAgentInput, request: Request):
         """Langroid agent endpoint."""
         accept_header = request.headers.get("accept")
@@ -60,6 +73,7 @@ def create_langroid_app(
     agent: LangroidAgent,
     path: str = "/",
     origins: list[str] | None = None,
+    **kwargs: Any,
 ) -> FastAPI:
     """Create a FastAPI app with a single Langroid agent endpoint.
 
@@ -70,6 +84,7 @@ def create_langroid_app(
             development. Credentials are only enabled when explicit, non-wildcard
             origins are supplied — a wildcard origin can never be combined with
             ``allow_credentials=True``.
+        **kwargs: Forwarded to :func:`add_langroid_fastapi_endpoint`.
     """
     app = FastAPI(title=f"Langroid - {agent.name}")
 
@@ -85,7 +100,7 @@ def create_langroid_app(
     )
     
     # Add the agent endpoint
-    add_langroid_fastapi_endpoint(app, agent, path)
+    add_langroid_fastapi_endpoint(app, agent, path, **kwargs)
     
     return app
 

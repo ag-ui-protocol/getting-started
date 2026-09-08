@@ -1,0 +1,57 @@
+---
+title: "Schema files"
+description: "The machine-readable schema, its address, and how to use it — draft"
+---
+
+<Warning>
+  **Draft — not yet ratified.** Published for review. The address below is
+  stable for the draft, but the draft's *contents* change without notice. Pin a
+  frozen version once one exists.
+</Warning>
+
+The schema is authoritative for structure: which fields exist, which are
+required, what type each carries, and which values a discriminator may take.
+This page is where to fetch it.
+
+## The file
+
+<Card title="schema.json" href="/spec/draft/schema.json" icon="brackets-curly">
+  The complete draft schema — every event, message, and the run input.
+</Card>
+
+```
+https://ag-ui.com/spec/draft/schema.json
+```
+
+The file states that address in its own `$id`, so a validator that follows
+references resolves them against it without configuration. The address serves
+the file directly: no redirect stands between a tool and the schema, and the
+response carries a cross-origin header so a browser-based tool can read it.
+
+It is [JSON Schema draft 2020-12](https://json-schema.org/draft/2020-12/release-notes).
+Every definition is reachable by anchor — `#TextMessageStartEvent`,
+`#RunAgentInput` — so a tool can address one shape without slicing the file.
+
+## Using it
+
+```bash
+curl -sS https://ag-ui.com/spec/draft/schema.json -o ag-ui-draft.json
+```
+
+Validate an event against the whole schema and let the discriminator select the
+member, or validate against a single anchor when you already know the shape.
+
+The schema is strict where the protocol is strict: it closes the objects whose
+shape it fixes, so a validator run against it rejects material the protocol does
+not describe. Objects that are open by design stay open — `metadata` and the
+JSON Patch operations among them — because the protocol carries whatever a
+consumer puts there. That strictness is for authoring and for tests. A *runtime* consumer
+does the opposite — it accepts unrecognised material and strips it, as
+[Processing model](/spec/draft/basic/processing) requires. Do not
+wire the strict schema into a receive path and call the result conformance.
+
+## What the schema does not say
+
+Ordering, lifecycle, attribution, error handling and compatibility are
+behavioural, and no JSON Schema can express them. They are specified in the
+other pages of this document, starting at the [overview](/spec/draft).

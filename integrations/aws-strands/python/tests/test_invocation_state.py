@@ -18,7 +18,7 @@ from ag_ui.core import (
 )
 from ag_ui_strands.agent import StrandsAgent
 from ag_ui_strands.config import StrandsAgentConfig
-from ag_ui_strands.session_reconcile import AG_UI_WIRE_MAP_STATE_KEY
+from ag_ui_strands.session_reconcile import AG_UI_FRONTEND_CALL_IDS_STATE_KEY
 from strands import Agent
 from strands.agent.state import AgentState
 from strands.tools.registry import ToolRegistry
@@ -38,7 +38,7 @@ def _run_input(thread_id: str, *, reconcile: bool = False) -> RunAgentInput:
                 content="",
                 tool_calls=[
                     ToolCall(
-                        id="wire-1",
+                        id="native-1",
                         function=FunctionCall(name="approve", arguments="{}"),
                     )
                 ],
@@ -47,7 +47,7 @@ def _run_input(thread_id: str, *, reconcile: bool = False) -> RunAgentInput:
                 id="tool-1",
                 role="tool",
                 content="approved",
-                tool_call_id="wire-1",
+                tool_call_id="native-1",
             )
         ]
         if reconcile
@@ -74,7 +74,7 @@ class _CapturingCore:
     def __init__(self, **_kwargs):
         self.tool_registry = ToolRegistry()
         self.state = AgentState()
-        self.state.set(AG_UI_WIRE_MAP_STATE_KEY, {"wire-1": "native-1"})
+        self.state.set(AG_UI_FRONTEND_CALL_IDS_STATE_KEY, ["native-1"])
         self.messages = []
         self.calls: list[tuple[object, dict]] = []
         type(self).instances.append(self)

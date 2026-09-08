@@ -20,6 +20,7 @@
 import { describe, it, expect, vi } from "vitest";
 
 import { EventType } from "@ag-ui/core";
+import { GENERATE_A2UI_TOOL_DESCRIPTION } from "@ag-ui/a2ui-toolkit";
 import {
   getA2UITools,
   planA2UIInjection,
@@ -211,6 +212,38 @@ describe("planA2UIInjection — auto-inject decision", () => {
     // A dev-wired tool carries no marker.
     expect(isAutoInjectedA2UITool(getA2UITools({ model: stubModel }))).toBe(
       false,
+    );
+  });
+});
+
+describe("planA2UIInjection forwards a configured tool description", () => {
+  it("advertises a configured toolDescription on the injected tool", () => {
+    const description =
+      "Render a sales dashboard surface. Use for anything chart-shaped.";
+    const plan = planA2UIInjection({
+      model: stubModel,
+      input: minimalRunInput({ forwardedProps: { injectA2UITool: true } }),
+      existingToolNames: [],
+      config: { toolDescription: description },
+    });
+    expect(plan).not.toBeNull();
+    // Both are read by planners: Strands advertises `toolSpec`, while the
+    // adapter's own registry/logging paths read `description`.
+    expect(plan!.tool.description).toBe(description);
+    expect(plan!.tool.toolSpec?.description).toBe(description);
+  });
+
+  it("falls back to the toolkit's canonical description when config omits one", () => {
+    const plan = planA2UIInjection({
+      model: stubModel,
+      input: minimalRunInput({ forwardedProps: { injectA2UITool: true } }),
+      existingToolNames: [],
+      config: { defaultCatalogId: "dojo" },
+    });
+    expect(plan).not.toBeNull();
+    expect(plan!.tool.description).toBe(GENERATE_A2UI_TOOL_DESCRIPTION);
+    expect(plan!.tool.toolSpec?.description).toBe(
+      GENERATE_A2UI_TOOL_DESCRIPTION,
     );
   });
 });

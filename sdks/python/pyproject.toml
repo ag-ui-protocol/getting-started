@@ -1,6 +1,6 @@
 [project]
 name = "ag-ui-protocol"
-version = "0.1.21"
+version = "0.1.22"
 description = ""
 license-files = ["LICENSE"]
 authors = [

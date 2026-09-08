@@ -10,6 +10,9 @@ type RawEvent struct {
 	*BaseEvent
 	Event  any     `json:"event"`
 	Source *string `json:"source,omitempty"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewRawEvent creates a new raw event
@@ -59,6 +62,9 @@ type CustomEvent struct {
 	*BaseEvent
 	Name  string `json:"name"`
 	Value any    `json:"value,omitempty"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewCustomEvent creates a new custom event

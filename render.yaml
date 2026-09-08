@@ -158,19 +158,22 @@ projects:
       runtime: python
       repo: https://github.com/ag-ui-protocol/ag-ui
       plan: starter
+      # Single instance: Agno's resumable demo runs use process-local storage.
       scaling:
         minInstances: 1
-        maxInstances: 3
+        maxInstances: 1
         targetMemoryPercent: 70
         targetCPUPercent: 70
       envVars:
       - key: OPENAI_API_KEY
         sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
       - key: PORT
         sync: false
       region: virginia
-      buildCommand: uv sync
-      startCommand: uv run dev
+      buildCommand: uv sync --frozen
+      startCommand: uv run --frozen dev
       autoDeployTrigger: commit
       rootDir: integrations/agno/python/examples
     - type: web

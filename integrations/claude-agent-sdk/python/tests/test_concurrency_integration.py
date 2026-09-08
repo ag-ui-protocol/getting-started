@@ -159,6 +159,83 @@ def _install_scripted_client(monkeypatch, instances, *, fail_when=None, release_
     return releases
 
 
+@pytest.mark.asyncio
+async def test_real_worker_passes_multimodal_prompt_to_sdk_client(
+    make_input, monkeypatch
+):
+    """Exercise the real adapter and SessionWorker up to the SDK client."""
+    instances = []
+    _install_scripted_client(monkeypatch, instances)
+    adapter = ClaudeAgentAdapter(name="t")
+    inp = make_input(
+        thread_id="multimodal-thread",
+        messages=[
+            {
+                "id": "1",
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "describe"},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "data",
+                            "value": "aW1hZ2U=",
+                            "mime_type": "image/png",
+                        },
+                    },
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "data",
+                            "value": "cGRm",
+                            "mime_type": "application/pdf",
+                        },
+                    },
+                ],
+            }
+        ],
+    )
+
+    try:
+        _ = [event async for event in adapter.run(inp)]
+        assert len(instances) == 1
+        prompt, session_id = instances[0].query_calls[0]
+        sdk_messages = [message async for message in prompt]
+
+        assert session_id == "multimodal-thread"
+        assert sdk_messages == [
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "describe"},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": "aW1hZ2U=",
+                            },
+                        },
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": "cGRm",
+                            },
+                        },
+                    ],
+                },
+                "parent_tool_use_id": None,
+                "session_id": "multimodal-thread",
+            }
+        ]
+    finally:
+        await adapter.shutdown()
+
+
 async def _drive(adapter, inp):
     return [e async for e in adapter.run(inp)]
 

@@ -1,0 +1,59 @@
+---
+title: "Event Streams"
+description: "The eight event families, and who reacts to each — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+Everything a producer has to say arrives as events, in eight families. Each
+family binds one of the [event patterns](/spec/draft/basic/patterns) and adds
+its own rules; each is addressed to a different part of the consumer:
+
+| Family | Events | Pattern | Consumed by |
+| --- | --- | --- | --- |
+| [Runs and steps](/spec/draft/events/lifecycle) | `RUN_STARTED` · `RUN_FINISHED` · `RUN_ERROR` · `STEP_STARTED` · `STEP_FINISHED` | lifecycle | the client itself |
+| [Text messages](/spec/draft/events/text-messages) | `TEXT_MESSAGE_*` | streaming | the UI |
+| [Tool calls](/spec/draft/events/tool-calls) | `TOOL_CALL_*` | streaming | the application |
+| [Reasoning](/spec/draft/events/reasoning) | `REASONING_*` | streaming | the UI |
+| [State](/spec/draft/events/state) | `STATE_SNAPSHOT` · `STATE_DELTA` · `MESSAGES_SNAPSHOT` | snapshot–delta | the application store |
+| [Activity](/spec/draft/events/activity) | `ACTIVITY_SNAPSHOT` · `ACTIVITY_DELTA` | snapshot–delta | the UI |
+| [Subagents](/spec/draft/events/subagents) | `SUBAGENT_STARTED` · `SUBAGENT_FINISHED` · `SUBAGENT_ERROR` | lifecycle | the client itself |
+| [Passthrough](/spec/draft/events/passthrough) | `RAW` · `CUSTOM` | standalone | the application, opt-in |
+
+The thirty-one event types these families comprise are enumerated on
+[The Event Model](/spec/draft/basic), and their shapes are the
+[schema](/spec/draft/schema)'s. Only the run lifecycle is mandatory for a
+producer — every other family is a feature it emits when it has something to
+say with it. A consumer MUST accept all of them: an event from a family a
+consumer has no use for is still a well-formed event, not
+[unrecognised material](/spec/draft/basic/processing).
+
+<CardGroup cols={2}>
+  <Card title="Runs and steps" href="/spec/draft/events/lifecycle">
+    When a run begins and ends, and how steps mark its phases.
+  </Card>
+  <Card title="Text messages" href="/spec/draft/events/text-messages">
+    The conversation itself, streamed as it is generated.
+  </Card>
+  <Card title="Tool calls" href="/spec/draft/events/tool-calls">
+    The agent proposes, the application disposes.
+  </Card>
+  <Card title="Reasoning" href="/spec/draft/events/reasoning">
+    The model's thinking, streamed, and the encrypted artefacts that
+    round-trip it.
+  </Card>
+  <Card title="State" href="/spec/draft/events/state">
+    Shared state and the conversation, replaced and amended.
+  </Card>
+  <Card title="Activity" href="/spec/draft/events/activity">
+    Structured progress a UI renders outside the transcript.
+  </Card>
+  <Card title="Subagents" href="/spec/draft/events/subagents">
+    Attribution, ownership, nesting, and how delegated work terminates.
+  </Card>
+  <Card title="Raw and custom events" href="/spec/draft/events/passthrough">
+    The escape hatches, and their limits.
+  </Card>
+</CardGroup>

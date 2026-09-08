@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import TypeAdapter
 from pydantic_core import PydanticSerializationError
 from typing import List, Any, Dict, NamedTuple, Union
+from collections.abc import Mapping
 from dataclasses import is_dataclass, asdict, fields
 from datetime import date, datetime
 
@@ -294,13 +295,32 @@ def _incoming_image_url(payload: Any) -> str | None:
     Mirrors the `item.image_url` read in the TypeScript adapter's
     `convertLangchainMultimodalToAgui`, which skips the same blocks.
     """
-    if isinstance(payload, str):
-        return payload or None
-    if isinstance(payload, dict):
-        url = payload.get("url")
-        if isinstance(url, str) and url:
-            return url
-    return None
+    url = payload if isinstance(payload, str) else None
+    if url is None and isinstance(payload, dict):
+        # `dict.get`, not `payload.get`, for the same reason `str.strip` is
+        # spelled that way below: a dict SUBCLASS off the wire can override
+        # `.get` and raise from it, and an exception here escapes the whole
+        # MESSAGES_SNAPSHOT.
+        candidate = dict.get(payload, "url")
+        url = candidate if isinstance(candidate, str) else None
+    if url is None:
+        return None
+
+    # `str.strip`, not `url.strip()`, and the reason is not style. It does two
+    # jobs at once:
+    #
+    # 1. Whitespace is the side door into the empty-value defect this function
+    #    already rejects. A url of "   " is truthy, so a bare falsiness check
+    #    lets it through to mint an attachment pointing at nothing, and a
+    #    LEADING space on "  data:image/png;base64,…" is worse than that: the
+    #    caller's `startswith("data:")` says False, so a base64 payload is
+    #    filed as a remote url the client then tries to fetch.
+    # 2. It returns a plain `str` even for a `str` SUBCLASS, so every operation
+    #    the caller runs downstream — startswith, split — is a built-in on a
+    #    built-in. A subclass arriving off the wire cannot override its way
+    #    into an exception that escapes MESSAGES_SNAPSHOT, which is rule 1 of
+    #    the malformed-input contract.
+    return str.strip(url) or None
 
 
 def _supplied_filename(
@@ -396,8 +416,17 @@ def _agui_media_from_standard_block(item: Dict[str, Any]):
 # `convertLangchainMultimodalToAgui`. The two must not drift.
 
 
-def convert_langchain_multimodal_to_agui(content: List[Dict[str, Any]]) -> List[AGUIContentItem]:
+def convert_langchain_multimodal_to_agui(content: Union[str, List[Union[str, Dict[str, Any]]]]) -> List[AGUIContentItem]:
     """Convert LangChain's multimodal content to AG-UI format.
+
+    Plain string entries are preserved in place as text. LangChain declares
+    message content as ``str | list[str | dict]``, so a string sitting beside the
+    blocks is content rather than a malformed block, and dropping it lost the
+    user's words. A bare string ARGUMENT is normalized to a one-entry list as a
+    defensive convenience for direct callers — a str is itself iterable, so
+    walking one would shred it into a content item per character. The production
+    caller (:func:`langchain_messages_to_agui`) only routes list content here and
+    converts bare-string message content itself.
 
     ``image_url`` blocks are converted with the appropriate source type (data or
     URL) and to the media class their MIME type names — ``image_url`` is the
@@ -417,9 +446,25 @@ def convert_langchain_multimodal_to_agui(content: List[Dict[str, Any]]) -> List[
     exception here does not degrade one attachment — it escapes the conversion
     and costs the client every message in the thread.
     """
+    if isinstance(content, str):
+        content = [content]
+    elif not isinstance(content, list):
+        # Rule 2, one level further out than the `else` at the end of this loop:
+        # the whole content value, not one of its items. A dict reaching here
+        # would otherwise be walked as a sequence of its own KEY NAMES.
+        logger.warning(
+            "Dropping content: not a str or list (%s)", _describe_type(content)
+        )
+        return []
+
     agui_content: List[AGUIContentItem] = []
     for item in content:
-        if isinstance(item, dict):
+        if isinstance(item, str):
+            agui_content.append(TextInputContent(
+                type="text",
+                text=item
+            ))
+        elif isinstance(item, dict):
             # Read ONCE, into a local. `item.get("type") in _AGUI_MEDIA_CLASSES`
             # below raises `TypeError: unhashable type` for a `type` that is a
             # list or a dict — a rule-1 violation that takes the whole snapshot
@@ -476,6 +521,13 @@ def convert_langchain_multimodal_to_agui(content: List[Dict[str, Any]]) -> List[
                     # `_read_incoming_media_block` already rejects on the
                     # standard-block path, where an empty `data`/`base64` drops the
                     # block. This branch was the one place that kept it.
+                    # No `.strip()` here, deliberately: `_incoming_image_url`
+                    # already stripped the whole url, so a payload that is
+                    # nothing but whitespace has ALREADY become the empty
+                    # string by the time it reaches this guard. A payload with
+                    # INTERNAL whitespace keeps it, which is correct —
+                    # MIME-wrapped base64 legitimately carries newlines and
+                    # both atob and b64decode ignore them.
                     if not data:
                         logger.warning(
                             "Dropping image_url block: data URL carries no payload"
@@ -496,9 +548,17 @@ def convert_langchain_multimodal_to_agui(content: List[Dict[str, Any]]) -> List[
                     # answers "image" for both "" and "image/png" — so this only
                     # stops an unusable MIME type from being recorded, it does not
                     # retype anything.
-                    mime_type = (
+                    # The `or` guard treats a MIME-less "data:;base64,…" as
+                    # absent. "data:   ;base64,…" is the same thing wearing
+                    # whitespace: present-but-blank, and unusable for the same
+                    # reason. Note this collapses a BLANK mediatype only — a
+                    # padded but real one keeps its padding, which the
+                    # cross-runtime parity table pins because the TypeScript
+                    # adapter records it verbatim too.
+                    raw_mime = (
                         header.split(":")[1].split(";")[0] if ":" in header else ""
-                    ) or "image/png"
+                    )
+                    mime_type = (raw_mime if raw_mime.strip() else "") or "image/png"
 
                     # The MIME type this adapter put in the data URL on the way out
                     # is enough to recover the modality on the way back.
@@ -538,10 +598,12 @@ def convert_langchain_multimodal_to_agui(content: List[Dict[str, Any]]) -> List[
                 )
         else:
             # Same rule, one level out. A content list relayed by the LangGraph
-            # server can carry a JSON `null`, a bare string, or a number where a
+            # server can carry a JSON `null`, a number, or a nested list where a
             # block is expected. `.get` on one of those would raise out of the
             # whole message list, so this loop never called it — but it said
-            # nothing either. The TypeScript adapter already warns here.
+            # nothing either. The TypeScript adapter already warns here. A bare
+            # string is NOT one of these — LangChain accepts one as content, and
+            # the branch at the top of the loop keeps it.
             logger.warning(
                 "Dropping content block: not a dict (%s)", _describe_type(item)
             )
@@ -1853,7 +1915,17 @@ def resolve_encrypted_reasoning_content(chunk: Any) -> str | None:
     - `redacted_thinking` blocks with encrypted `data` (redacted chain-of-thought)
     """
     content = _dual_get(chunk, "content") if chunk is not None else None
-    if not content or not isinstance(content, list) or not content or not content[0]:
+    # `Mapping`, not a truthiness check: the next line dereferences
+    # `content[0].get(...)`, and `list[str]` is a first-class LangChain content
+    # shape, so a chunk of ["hello"] raised AttributeError straight out of a
+    # function that runs per streamed chunk in `_handle_single_event` with no
+    # enclosing try. Rule 1 of the malformed-input contract, on the streaming
+    # leg. `Mapping` rather than `dict` because the old check accepted any
+    # duck-typed mapping through `.get`, and narrowing to `dict` would silently
+    # drop the mapping-backed blocks some providers return; `Mapping` still
+    # excludes `str`, which is the shape that crashed. The sibling
+    # `resolve_reasoning_content` already guards its own block read.
+    if not isinstance(content, list) or not content or not isinstance(content[0], Mapping):
         return None
 
     # Anthropic redacted_thinking block: { type: "redacted_thinking", data: "..." }

@@ -25,6 +25,7 @@ os.environ.setdefault("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "all")
 from strands import Agent
 from ag_ui_strands import StrandsAgent, create_strands_app
 from server.model_factory import create_model
+from server.settings import cors_origins
 
 
 model = create_model()
@@ -49,4 +50,4 @@ agui_agent = StrandsAgent(
     description="AWS Strands haiku generator with frontend-rendered tool",
 )
 
-app = create_strands_app(agui_agent, "/")
+app = create_strands_app(agui_agent, "/", origins=cors_origins())

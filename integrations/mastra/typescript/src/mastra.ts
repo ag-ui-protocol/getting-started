@@ -483,6 +483,13 @@ interface MastraAgentStreamOptions {
    */
   onMessageId?: (messageId: string) => void;
   onTextPart?: (text: string) => void;
+  /**
+   * Raw assistant text arrived but is being held for a later boundary
+   * (`useProcessedFinalText`). Segment identity is decided from the state as it
+   * is when the text arrives, not as it is when the text is finally released:
+   * by then a tool call may have opened a boundary this text belongs before.
+   */
+  onTextBuffered?: () => void;
   onReasoningStart?: () => void;
   onReasoningPart?: (text: string) => void;
   onReasoningEnd?: () => void;
@@ -603,14 +610,41 @@ export class MastraAgent extends AbstractAgent {
   private static readonly ASSISTANT_TEXT_CONTINUATION_SUFFIX = "-agui-text";
 
   /**
-   * Deterministic id for the "trailing text" continuation message split off a
-   * turn whose tool call already rendered under `baseId`. Deterministic (a pure
-   * function of the stored turn id) so re-sent history dedups: `selectNewMessages`
-   * recomputes it from each stored id and filters the continuation message out,
-   * so the split text is never re-forwarded (and duplicated) on later turns.
+   * Matches any id produced by {@link continuationMessageId}, capturing the base
+   * id it was derived from. Used by `selectNewMessages` to recognise the whole
+   * continuation family of a stored turn without knowing how many segments the
+   * turn had.
    */
-  private static continuationMessageId(baseId: string): string {
-    return `${baseId}${MastraAgent.ASSISTANT_TEXT_CONTINUATION_SUFFIX}`;
+  private static readonly CONTINUATION_ID_PATTERN = new RegExp(
+    `^(.+)${MastraAgent.ASSISTANT_TEXT_CONTINUATION_SUFFIX}(?:-\\d+)?$`,
+  );
+
+  /**
+   * Deterministic id for the `index`-th "trailing text" continuation message
+   * split off a turn whose tool call already rendered under `baseId`. A turn can
+   * alternate text -> tool -> text more than once, so each contiguous run of
+   * text after a tool call gets its own index and therefore its own AG-UI
+   * message (reusing one id makes the client append later segments onto the
+   * message at its original index — run-on text above the cards it followed).
+   *
+   * Index 1 is the bare suffix, so single-boundary turns keep the exact id they
+   * had before. Deterministic (a pure function of the stored turn id and the
+   * segment index) so re-sent history dedups: `selectNewMessages` recognises the
+   * whole family from each stored id and filters the continuation messages out,
+   * so split text is never re-forwarded (and duplicated) on later turns.
+   */
+  private static continuationMessageId(baseId: string, index = 1): string {
+    const suffix = MastraAgent.ASSISTANT_TEXT_CONTINUATION_SUFFIX;
+    return index <= 1 ? `${baseId}${suffix}` : `${baseId}${suffix}-${index}`;
+  }
+
+  /**
+   * The base id a continuation id was derived from, or null if `id` is not a
+   * continuation id at all. Callers must still check the result against the ids
+   * Mastra actually stored — the suffix shape alone does not make an id ours.
+   */
+  private static continuationBaseId(id: string): string | null {
+    return MastraAgent.CONTINUATION_ID_PATTERN.exec(id)?.[1] ?? null;
   }
 
   constructor(private config: MastraAgentConfig) {
@@ -962,12 +996,13 @@ export class MastraAgent extends AbstractAgent {
               }
 
               let stopped = false;
-              const { handleChunk, flush } = this.createChunkProcessor({
-                ...callbacks,
-                onError: (error) => {
-                  subscriber.error(error);
-                },
-              });
+              const { handleChunk, flush, getUsage } =
+                this.createChunkProcessor({
+                  ...callbacks,
+                  onError: (error) => {
+                    subscriber.error(error);
+                  },
+                });
 
               await response.processDataStream({
                 onChunk: async (chunk: any) => {
@@ -985,7 +1020,7 @@ export class MastraAgent extends AbstractAgent {
                 flush();
                 await finishResume(
                   await this.resolveTraceId(response),
-                  await this.resolveUsage(response),
+                  await this.resolveUsage(response, getUsage()),
                 );
               }
             }
@@ -1244,9 +1279,12 @@ export class MastraAgent extends AbstractAgent {
    * (no usage, remote agent, rejected promise) yields an empty array so the run
    * still finishes without usage.
    */
-  private async resolveUsage(response: any): Promise<TokenUsage[]> {
+  private async resolveUsage(
+    response: any,
+    streamedUsage?: unknown,
+  ): Promise<TokenUsage[]> {
     try {
-      const raw = await response?.usage;
+      const raw = streamedUsage ?? (await response?.usage);
       const identity = this.getModelIdentity();
       const entry = tokenUsageFromAiSdkUsage(raw, identity);
       return entry ? [entry] : [];
@@ -1354,7 +1392,26 @@ export class MastraAgent extends AbstractAgent {
     // step boundary (the real bug: text collapses onto the tool id) or omits
     // the id and relies on messageId rotation (each step already gets a fresh
     // id, so nothing collides and no split happens).
-    const toolCallParentIds = new Set<string>();
+    // Per base id: how many tool->text boundaries have opened on it so far. 0
+    // means no tool call has rendered under this id yet, so text keeps the base
+    // id. Each further boundary bumps the index, giving that run of text its own
+    // continuation message (#2380) — a turn can alternate more than once.
+    const continuationIndexByParentId = new Map<string, number>();
+    // Whether text has streamed since the last tool call on the current base id.
+    // Back-to-back tool calls (parallel calls) must not burn a segment index.
+    let textSinceLastToolCall = false;
+    // The id the currently buffered segment was assigned when its first raw
+    // delta arrived, held until that text is released. Only used under
+    // `useProcessedFinalText`; undefined means nothing is being held.
+    let bufferedSegmentMessageId: string | undefined;
+
+    // The id a segment starting now would carry.
+    const segmentMessageIdFor = (currentId: string) => {
+      const segmentIndex = continuationIndexByParentId.get(currentId) ?? 0;
+      return segmentIndex === 0
+        ? currentId
+        : MastraAgent.continuationMessageId(currentId, segmentIndex);
+    };
 
     const closeReasoning = () => {
       if (isReasoning && reasoningMessageId) {
@@ -1413,9 +1470,11 @@ export class MastraAgent extends AbstractAgent {
         // a fresh id (no tool call on it) keeps that id — including text that
         // legitimately precedes a tool call in the same message.
         const currentId = getMessageId();
-        const textMessageId = toolCallParentIds.has(currentId)
-          ? MastraAgent.continuationMessageId(currentId)
-          : currentId;
+        // A held segment already chose its id, back when its text arrived.
+        const textMessageId =
+          bufferedSegmentMessageId ?? segmentMessageIdFor(currentId);
+        bufferedSegmentMessageId = undefined;
+        textSinceLastToolCall = true;
         subscriber.next({
           type: EventType.TEXT_MESSAGE_CHUNK,
           role: "assistant",
@@ -1423,12 +1482,32 @@ export class MastraAgent extends AbstractAgent {
           delta: text,
         } as TextMessageChunkEvent);
       },
+      onTextBuffered: () => {
+        /*
+         * Claim the id now, while the state still describes where this text sits.
+         *
+         * `textSinceLastToolCall` is deliberately not touched here. The release path sets it, and
+         * a tool call arriving between the buffered deltas and that release is the case the flag
+         * already handles correctly: the first boundary opens on it and a second consecutive tool
+         * call does not burn an index. Setting it here as well changed no observable behaviour and
+         * no test could distinguish it, so it is left out rather than shipped uncovered.
+         */
+        bufferedSegmentMessageId ??= segmentMessageIdFor(getMessageId());
+      },
       onToolCallStart: (streamPart) => {
         closeReasoning();
         const parentMessageId = getMessageId();
-        // Record the id this tool call renders under; trailing text on the same
-        // id is then split to a continuation message (see onTextPart).
-        toolCallParentIds.add(parentMessageId);
+        // Open a text-continuation boundary on the id this tool call renders
+        // under; trailing text on the same id is then split to a continuation
+        // message (see onTextPart). Only advance past the first boundary once
+        // text has actually streamed into the current segment, so consecutive
+        // tool calls share one boundary instead of skipping segment ids.
+        const openBoundaries =
+          continuationIndexByParentId.get(parentMessageId) ?? 0;
+        if (openBoundaries === 0 || textSinceLastToolCall) {
+          continuationIndexByParentId.set(parentMessageId, openBoundaries + 1);
+        }
+        textSinceLastToolCall = false;
         subscriber.next({
           type: EventType.TOOL_CALL_START,
           parentMessageId,
@@ -1548,15 +1627,22 @@ export class MastraAgent extends AbstractAgent {
    * path (processDataStream callback) — single source of truth for chunk
    * handling and buffering logic.
    *
-   * @returns An object with two methods:
+   * @returns An object with three methods:
    *   - `handleChunk`: processes a single chunk; returns `true` if processing should stop (error or malformed chunk).
    *   - `flush`: emits any buffered tool-call (call at end of stream).
+   *   - `getUsage`: returns usage reported by the terminal `finish` chunk.
    */
   private createChunkProcessor(
     callbacks: MastraAgentStreamOptions,
     clientToolNames: Set<string> = new Set(),
     initialState: Record<string, any> = {},
   ) {
+    // Remote processDataStream responses report token usage on the terminal
+    // `finish` chunk rather than on the response object. Keep only that
+    // boundary's value: `step-finish` can repeat usage for each model step and
+    // would double-count the run if included.
+    let usage: unknown;
+
     // Running client-side working-memory state, mapped to AG-UI shared state.
     // Seeded from the run's input.state (the base the client already holds), so
     // the first STATE_DELTA patches from what the UI shows, not from empty.
@@ -2082,6 +2168,7 @@ export class MastraAgent extends AbstractAgent {
             // Hold deltas until a finish boundary — the processor-modified text
             // arrives via finish.payload.response.uiMessages.
             bufferedText += chunk.payload.text;
+            callbacks.onTextBuffered?.();
           } else {
             callbacks.onTextPart?.(chunk.payload.text);
           }
@@ -2342,6 +2429,7 @@ export class MastraAgent extends AbstractAgent {
         case "finish": {
           flush();
           releaseBufferedText(chunk.payload, true);
+          usage = chunk.payload?.output?.usage ?? chunk.payload?.usage;
           callbacks.onFinishMessagePart?.();
           break;
         }
@@ -2511,7 +2599,7 @@ export class MastraAgent extends AbstractAgent {
       return false;
     };
 
-    return { handleChunk, flush };
+    return { handleChunk, flush, getUsage: () => usage };
   }
 
   /**
@@ -2579,15 +2667,20 @@ export class MastraAgent extends AbstractAgent {
       for (const m of (stored ?? []) as Array<{ id?: string }>) {
         if (!m?.id) continue;
         storedIds.add(m.id);
-        // The bridge streams assistant text that follows a tool call under a
-        // deterministic continuation id derived from the turn's base id (see
-        // makeStreamCallbacks). Mastra stores the whole turn under the base id,
-        // so the continuation id never appears in recall — treat it as stored
-        // here, otherwise the split text is re-sent (and duplicated) each turn.
-        storedIds.add(MastraAgent.continuationMessageId(m.id));
       }
       if (storedIds.size === 0) return messages; // first turn / empty thread
-      const fresh = messages.filter((m) => !(m.id && storedIds.has(m.id)));
+      // The bridge streams assistant text that follows a tool call under
+      // continuation ids derived from the turn's base id — one per text segment
+      // (see makeStreamCallbacks). Mastra stores the whole turn under the base
+      // id, so no continuation id ever appears in recall. Match the whole family
+      // back to its stored base instead, otherwise the split text is re-sent
+      // (and duplicated) each turn.
+      const isStored = (id: string): boolean => {
+        if (storedIds.has(id)) return true;
+        const base = MastraAgent.continuationBaseId(id);
+        return base !== null && storedIds.has(base);
+      };
+      const fresh = messages.filter((m) => !(m.id && isStored(m.id)));
       // Never send an empty turn (a no-op run). If everything was already
       // stored, fall back to forwarding the full list.
       if (fresh.length === 0) return messages;
@@ -2825,6 +2918,7 @@ export class MastraAgent extends AbstractAgent {
     {
       onMessageId,
       onTextPart,
+      onTextBuffered,
       onReasoningStart,
       onReasoningPart,
       onReasoningEnd,
@@ -2973,6 +3067,7 @@ export class MastraAgent extends AbstractAgent {
             {
               onMessageId,
               onTextPart,
+              onTextBuffered,
               onReasoningStart,
               onReasoningPart,
               onReasoningEnd,
@@ -3046,10 +3141,11 @@ export class MastraAgent extends AbstractAgent {
         // Remote agents use processDataStream (callback-based) — share
         // chunk handling logic via createChunkProcessor.
         if (response && typeof response.processDataStream === "function") {
-          const { handleChunk, flush } = this.createChunkProcessor(
+          const { handleChunk, flush, getUsage } = this.createChunkProcessor(
             {
               onMessageId,
               onTextPart,
+              onTextBuffered,
               onReasoningStart,
               onReasoningPart,
               onReasoningEnd,
@@ -3085,7 +3181,7 @@ export class MastraAgent extends AbstractAgent {
           if (!stopped) {
             flush();
             const traceId = await this.resolveTraceId(response);
-            const usage = await this.resolveUsage(response);
+            const usage = await this.resolveUsage(response, getUsage());
             await onRunFinished?.(traceId, usage);
           }
         } else {

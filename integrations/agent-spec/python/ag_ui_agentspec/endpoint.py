@@ -1,6 +1,8 @@
 import asyncio
 
-from fastapi import FastAPI, Request
+from typing import Any
+
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import StreamingResponse
 
 from ag_ui.encoder import EventEncoder
@@ -14,11 +16,23 @@ from ag_ui_agentspec.agent import AgentSpecAgent
 from ag_ui_agentspec.agentspec_tracing_exporter import EVENT_QUEUE
 
 
-def add_agentspec_fastapi_endpoint(app: FastAPI, agentspec_agent: AgentSpecAgent, path: str = "/"):
-    """Adds an Agent Spec endpoint to the FastAPI app."""
-    
+def add_agentspec_fastapi_endpoint(
+    app: FastAPI | APIRouter,
+    agentspec_agent: AgentSpecAgent,
+    path: str = "/",
+    **kwargs: Any,
+):
+    """Adds an Agent Spec endpoint to the FastAPI app.
 
-    @app.post(path)
+    Args:
+        app: FastAPI application or APIRouter to register the route on.
+        agentspec_agent: Agent Spec agent to serve.
+        path: Path of the agent route.
+        **kwargs: Forwarded to ``app.post`` (``name``, ``tags``,
+            ``operation_id``, ``dependencies``, ``include_in_schema``, ...).
+    """
+
+    @app.post(path, **kwargs)
     async def agentic_chat_endpoint(input_data: RunAgentInput, request: Request):
         """Agentic chat endpoint"""
 

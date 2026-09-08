@@ -3,8 +3,10 @@
 import type { RunAgentInput, BaseEvent } from "@ag-ui/core";
 import type { AgentConfig, SessionManager } from "@strands-agents/sdk";
 import type { A2UIInjectConfig } from "./a2ui-tool";
+import type { TemplateToolSelectionEntry } from "./template-tools";
 
 import type { Logger } from "./logger";
+import type { UrlFetchPolicy } from "./utils";
 
 export type StatePayload = Record<string, unknown>;
 
@@ -140,6 +142,15 @@ export type ThreadAgentConfigProvider = (
   input: RunAgentInput,
 ) => Partial<AgentConfig> | Promise<Partial<AgentConfig>>;
 
+/**
+ * Chooses which of the template's tools one request may see.
+ *
+ * See {@link StrandsAgentConfig.templateToolsProvider}.
+ */
+export type TemplateToolsProvider = (
+  input: RunAgentInput,
+) => MaybePromise<Iterable<TemplateToolSelectionEntry> | null | undefined>;
+
 /** Top-level configuration for the Strands agent adapter. */
 export interface StrandsAgentConfig {
   /** Per-tool overrides keyed by the Strands tool name. */
@@ -207,6 +218,75 @@ export interface StrandsAgentConfig {
    */
   threadAgentConfig?: ThreadAgentConfigProvider;
   /**
+   * Which of the template agent's tools this request may see.
+   *
+   * Called once per request with that request's `RunAgentInput`, so the answer
+   * can vary turn by turn on one thread: the caller's identity is in
+   * `forwardedProps` or `context`, and a tool the request must not reach is
+   * simply left out of the returned iterable. May be async.
+   *
+   * Return the tools themselves or their names, whichever is to hand. Return
+   * `null` or `undefined` to decline filtering, which leaves every template
+   * tool available; an empty array is a real answer and leaves none of them. A
+   * name the template does not contribute is dropped with a warning, because
+   * this hook narrows the wrapped agent's tools and cannot add one.
+   *
+   * The container is checked rather than merely iterated. A `string` and a
+   * `Map` are both refused, as is a plain object: a bare name would come apart
+   * into characters, and a permission map would have its keys read as an
+   * allow-list while its values went unread, so a name mapped to `false` would
+   * still be allowed. Arrays, sets and generators are all accepted.
+   *
+   * Applied to the live per-thread agent's tool registry, never by rebuilding
+   * that agent: the instance holds the thread's `SessionManager`, its native
+   * interrupt checkpoint and its history, so replacing it to change a tool list
+   * would discard a conversation and any approval waiting inside it.
+   *
+   * Three consequences worth knowing:
+   *
+   * - A tool in the batch a live interrupt checkpoint would resume stays
+   *   registered whatever this returns. The human's answer is about to be
+   *   routed back into that batch, and an absent tool turns it into a "tool not
+   *   found" the model re-fires. This is the rule `syncProxyTools` already
+   *   applies to a proxy parked in a frontend-tool interrupt. The exemption
+   *   does not outlast what it is for: the narrowing is re-applied inside the
+   *   run once the batch has been dispatched, before the model is asked again.
+   * - History is never rewritten. A filtered-out tool's earlier calls and
+   *   results stay in the thread's messages, so the model can still read what
+   *   it did with a tool it can no longer call, and a provider that returns
+   *   different sets across turns does not invalidate the transcript.
+   * - If it throws, the run yields `RUN_ERROR` with code
+   *   `TEMPLATE_TOOLS_PROVIDER_ERROR` and stops, matching `threadAgentConfig`.
+   *   A filter that fails open would hand the model tools the caller meant to
+   *   withhold.
+   *
+   * Client-declared tools on `RunAgentInput.tools` are outside this hook: they
+   * are re-synchronised from the request every turn already, so a caller that
+   * wants fewer of those sends fewer. Not applied on the multi-agent
+   * orchestrator path, which has no template registry to filter.
+   *
+   * One deployment note. With an `agentsByThread` map a request-scoped wrapper
+   * is rebuilt per request while the cached thread agent keeps the registry it
+   * already had, so a template whose tools are built per request hands the
+   * adapter equivalent but not identical objects. Ownership of a registry
+   * entry therefore falls back from object identity to the tool's name plus
+   * "not one of the adapter's other producers". Stable tool objects are still
+   * the simpler thing to hand it.
+   *
+   * @example
+   * ```ts
+   * new StrandsAgent({
+   *   agent: template,
+   *   name: "assistant",
+   *   config: {
+   *     templateToolsProvider: (input) =>
+   *       input.forwardedProps?.role === "admin" ? null : ["read_docs"],
+   *   },
+   * })
+   * ```
+   */
+  templateToolsProvider?: TemplateToolsProvider;
+  /**
    * Emit `MessagesSnapshotEvent` at lifecycle boundaries (after the initial
    * `STATE_SNAPSHOT`, after each `TOOL_CALL_END` / `TOOL_CALL_RESULT`, and
    * after each terminal `TEXT_MESSAGE_END`).
@@ -216,14 +296,23 @@ export interface StrandsAgentConfig {
    */
   emitMessagesSnapshot?: boolean;
   /**
-   * When `true` (and the cached Strands agent has no `sessionManager`),
-   * reconcile the per-thread `Agent.messages` list with
-   * `RunAgentInput.messages` before invoking `stream()`.
+   * When `true` (and the cached Strands agent has no `sessionManager`, and the
+   * run submitted no `resume[]`), reconcile the per-thread `Agent.messages`
+   * list with `RunAgentInput.messages` before invoking `stream()`. Python's
+   * `replay_history` carves out a resume the same way.
    *
    * Prevents the LLM from re-firing frontend tools every turn because
    * Strands' internal history was missing the tool result the frontend
    * produced. Disable only if you manage Strands history yourself.
    * Default: `true`.
+   *
+   * Scoped to that replay alone. When a `sessionManager` is wired it owns
+   * history, and correcting the placeholder `toolResult` the adapter persisted
+   * for a frontend call is not something a caller can do in its place, so that
+   * correction runs whatever this is set to. Python's gate is a disjunction:
+   * this flag governs one arm, and the other reconciles on a resume carrying
+   * parked proxy placeholders whatever the flag is set to. So the two adapters
+   * differ only on the ordinary non-resume continuation, deliberately.
    */
   replayHistoryIntoStrands?: boolean;
   /**
@@ -248,6 +337,10 @@ export interface StrandsAgentConfig {
    *     components; required for a real model to compose them.
    *   - `catalog` — inline catalog for catalog-aware (semantic) recovery.
    *   - `recovery` — attempt cap / retry-UI threshold.
+   *   - `toolDescription` sets the description advertised to the planner,
+   *     steering when it reaches for `generate_a2ui`.
+   *   - `defaultSurfaceId` is stamped when the sub-agent omits a surface id.
+   *   - `onA2UIAttempt` is a per-attempt recovery hook for host status/traces.
    */
   a2ui?: A2UIInjectConfig;
   /**
@@ -264,6 +357,57 @@ export interface StrandsAgentConfig {
    * (modulo camelCase / snake_case) so cross-SDK log diffs are straightforward.
    */
   logger?: Logger;
+  /**
+   * The policy applied to every server-side fetch of a URL content source.
+   *
+   * A user message may carry an image, document, video or audio clip as a URL
+   * instead of inline data, and the adapter fetches it, so the fetch runs
+   * with the server's own network reach rather than the client's. Anyone who
+   * can post a `RunAgentInput` can name the URL.
+   *
+   * `undefined` uses `DEFAULT_URL_FETCH_POLICY`, which fetches only `http`
+   * and `https`, refuses any host that resolves outside the public internet
+   * (loopback, private, link-local, multicast, reserved, unspecified,
+   * including the cloud metadata endpoints), pins the connection to the
+   * address it validated so a second DNS answer cannot move it, re-checks
+   * every redirect hop under this same policy, refuses a redirect that drops
+   * TLS, and caps one attachment's size and the time it may take.
+   *
+   * Private-network access is opt-in and is the host's decision, never the
+   * client's. A deployment whose attachments live on a private CDN or behind
+   * split DNS spreads the opt-in over the default:
+   *
+   * ```ts
+   * import { DEFAULT_URL_FETCH_POLICY } from "@ag-ui/aws-strands";
+   *
+   * config: {
+   *   urlFetchPolicy: {
+   *     ...DEFAULT_URL_FETCH_POLICY,
+   *     allowPrivateNetworks: true,
+   *   },
+   * }
+   * ```
+   *
+   * Link-local addresses and the cloud metadata endpoints stay blocked even
+   * under that opt-in. `allowedSchemes` can only be narrowed, never widened:
+   * an http/https request is issued through a transport pinned to the
+   * addresses that passed validation, and any other scheme would go through a
+   * client that resolves the host again at connection time, reopening the
+   * rebinding window this policy exists to close. Narrow it with
+   * `allowedSchemes: new Set(["https"])`.
+   *
+   * An unusable policy (a limit below one, a fractional redirect cap, a
+   * scheme outside http/https, a non-boolean `allowPrivateNetworks`) fails
+   * the run with `RUN_ERROR { code: "URL_FETCH_POLICY_INVALID" }` before any
+   * attachment is fetched. It never silently reverts to the default.
+   *
+   * Python's `url_fetch_policy` is the same option, and the two policies do
+   * not carry quite the same fields: Python adds a run-wide attachment,
+   * byte and time budget, and TypeScript adds `maxRedirects` and
+   * `nat64Prefixes`. That divergence predates this option being configurable
+   * at all.
+   */
+  urlFetchPolicy?: UrlFetchPolicy;
 }
 
 // Prototype-pollution guard for keys flattened from `context[]`. Plain

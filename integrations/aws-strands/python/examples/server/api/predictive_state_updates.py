@@ -44,6 +44,7 @@ from ag_ui_strands import (
     create_strands_app,
 )
 from server.model_factory import create_model
+from server.settings import cors_origins
 
 
 def build_document_prompt(input_data, user_message: str) -> str:
@@ -143,4 +144,4 @@ agui_agent = StrandsAgent(
     config=predictive_state_config,
 )
 
-app = create_strands_app(agui_agent, "/")
+app = create_strands_app(agui_agent, "/", origins=cors_origins())

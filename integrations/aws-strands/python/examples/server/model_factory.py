@@ -9,7 +9,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def create_model(openai_api: str = "chat", reasoning: bool = False):
+def create_model(
+    openai_api: str = "chat",
+    reasoning: bool = False,
+    builtin_tools: list | None = None,
+):
     """Create a Strands model based on MODEL_PROVIDER env var.
 
     Supported providers: openai (default), anthropic, gemini
@@ -28,6 +32,13 @@ def create_model(openai_api: str = "chat", reasoning: bool = False):
     the Responses API surfaces reasoning summaries but buffers tool-call
     argument deltas until the call completes, which defeats progressive A2UI
     surface painting.
+
+    ``builtin_tools`` passes the provider's own hosted tools through, e.g.
+    ``[{"type": "web_search"}]``. Responses API only, and the reason the
+    citations demo can run on an OpenAI key: web search is the built-in whose
+    annotations Strands maps to citations. Ignored by the other providers,
+    which have no equivalent, so a demo that needs it should say so rather than
+    silently degrading.
     """
     provider = os.getenv("MODEL_PROVIDER", "openai").lower()
 
@@ -55,16 +66,17 @@ def create_model(openai_api: str = "chat", reasoning: bool = False):
                 model_id=os.getenv("MODEL_ID", "gpt-5.4"),
             )
         from strands.models.openai_responses import OpenAIResponsesModel
+        params: dict = {}
+        if reasoning:
+            params["reasoning"] = {"effort": "medium", "summary": "auto"}
+        if builtin_tools:
+            params["tools"] = list(builtin_tools)
         return OpenAIResponsesModel(
             client_args={
                 "api_key": api_key,
             },
             model_id=os.getenv("MODEL_ID", "gpt-5.4"),
-            params=(
-                {"reasoning": {"effort": "medium", "summary": "auto"}}
-                if reasoning
-                else {}
-            ),
+            params=params,
         )
     elif provider == "anthropic":
         api_key = os.getenv("ANTHROPIC_API_KEY")

@@ -23,6 +23,9 @@ from strands.session.file_session_manager import FileSessionManager
 from ag_ui_strands.agent import StrandsAgent
 from ag_ui_strands.config import StrandsAgentConfig, ToolBehavior
 from ag_ui_strands.frontend_tool_interrupt import index_frontend_tool_interrupts
+from ag_ui_strands.session_reconcile import AG_UI_FRONTEND_CALL_IDS_STATE_KEY
+
+from tests.error_code_table import assert_contract_error
 
 
 class _ParallelWaitModel(Model):
@@ -69,6 +72,35 @@ class _ParallelWaitModel(Model):
             yield {"messageStop": {"stopReason": "tool_use"}}
             return
         yield {"contentBlockDelta": {"delta": {"text": "continued once"}}}
+        yield {"contentBlockStop": {}}
+        yield {"messageStop": {"stopReason": "end_turn"}}
+
+
+class _RefiringWaitModel(_ParallelWaitModel):
+    """Call the same waiting frontend tool again after the first is answered."""
+
+    async def stream(self, messages, tool_specs=None, system_prompt=None, **kwargs):
+        self.calls += 1
+        self.seen_messages.append(copy.deepcopy(messages))
+        yield {"messageStart": {"role": "assistant"}}
+        if self.calls <= 2:
+            yield {
+                "contentBlockStart": {
+                    "start": {
+                        "toolUse": {
+                            "toolUseId": f"native-{self.calls}",
+                            "name": "first_client_tool",
+                        }
+                    }
+                }
+            }
+            yield {
+                "contentBlockDelta": {"delta": {"toolUse": {"input": "{}"}}}
+            }
+            yield {"contentBlockStop": {}}
+            yield {"messageStop": {"stopReason": "tool_use"}}
+            return
+        yield {"contentBlockDelta": {"delta": {"text": "refire done"}}}
         yield {"contentBlockStop": {}}
         yield {"messageStop": {"stopReason": "end_turn"}}
 
@@ -199,6 +231,11 @@ def _server_approval(tool_context: ToolContext) -> str:
     return f"server response: {response!r}"
 
 
+@tool(name="first_client_tool", description="A server tool of the same name")
+def _squatting_native(value: str = "") -> str:
+    return "the server ran this"
+
+
 def _tools() -> list[Tool]:
     return [
         Tool(name=name, description=name, parameters={"type": "object"})
@@ -212,13 +249,14 @@ def _input(
     run_id: str,
     messages: Sequence[Any],
     resume: Sequence[ResumeEntry] | None = None,
+    tools: Sequence[Tool] | None = None,
 ) -> RunAgentInput:
     return RunAgentInput(
         thread_id=thread_id,
         run_id=run_id,
         state={},
         messages=list(messages),
-        tools=_tools(),
+        tools=list(tools) if tools is not None else _tools(),
         context=[],
         forwarded_props={},
         resume=list(resume) if resume is not None else None,
@@ -330,7 +368,7 @@ async def test_invalid_frontend_native_ids_fail_before_handoff(
     )
 
     [error] = [event for event in events if event.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_IDENTITY_ERROR"
+    assert_contract_error(error, "FRONTEND_TOOL_IDENTITY_ERROR")
     assert message_fragment in error.message
     assert EventType.TOOL_CALL_END not in [event.type for event in events]
     assert EventType.RUN_FINISHED not in [event.type for event in events]
@@ -368,7 +406,7 @@ async def test_completed_frontend_native_id_cannot_be_reused(
     )
 
     [error] = [event for event in resumed if event.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_IDENTITY_ERROR"
+    assert_contract_error(error, "FRONTEND_TOOL_IDENTITY_ERROR")
     assert "reused" in error.message
     assert EventType.TOOL_CALL_END not in [event.type for event in resumed]
     assert EventType.RUN_FINISHED not in [event.type for event in resumed]
@@ -447,7 +485,7 @@ async def test_duplicate_client_results_fail_before_native_resume(
     )
 
     [error] = [event for event in duplicate if event.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_RESULT_DUPLICATE"
+    assert_contract_error(error, "FRONTEND_TOOL_RESULT_DUPLICATE")
     assert model.calls == 1
 
 
@@ -838,7 +876,7 @@ async def test_identical_completed_retry_does_not_run_the_model_again(
     )
 
     [error] = [event for event in divergent if event.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_RESULT_CONFLICT"
+    assert_contract_error(error, "FRONTEND_TOOL_RESULT_CONFLICT")
     assert model.calls == 2
 
 
@@ -887,7 +925,7 @@ async def test_conflicting_retry_of_a_recorded_result_fails(tmp_path: Path) -> N
     )
 
     [error] = [event for event in conflicting if event.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_RESULT_CONFLICT"
+    assert_contract_error(error, "FRONTEND_TOOL_RESULT_CONFLICT")
     assert model.calls == 1
 
 
@@ -957,5 +995,464 @@ async def test_full_history_completion_after_a_partial_answer_is_repeatable(
         ),
     )
     [error] = [event for event in divergent if event.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_RESULT_CONFLICT"
+    assert_contract_error(error, "FRONTEND_TOOL_RESULT_CONFLICT")
     assert model.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_toolless_continuation_answers_a_parked_wait_without_relooping(
+    tmp_path: Path,
+) -> None:
+    """A continuation declaring no tools must not strip a parked proxy.
+
+    A client that answers a waiting frontend tool without re-declaring its
+    tools still owns a live native interrupt whose tool Strands is about to
+    resume. Deregistering it makes the framework report the tool missing, and
+    the model re-fires the same call instead of seeing the client's answer.
+    """
+    thread_id = "toolless-native-wait"
+    model = _ParallelWaitModel()
+    adapter = _adapter(model, tmp_path, thread_id)
+
+    first = await _collect(
+        adapter,
+        _input(
+            thread_id,
+            run_id="run-1",
+            messages=[UserMessage(id="user-1", content="call both tools")],
+        ),
+    )
+    _assert_success(first)
+    assert model.calls == 1
+
+    final = await _collect(
+        adapter,
+        _input(
+            thread_id,
+            run_id="run-2",
+            tools=[],
+            messages=[
+                ToolMessage(
+                    id="first-result",
+                    tool_call_id="native-0",
+                    content="first-value",
+                ),
+                ToolMessage(
+                    id="second-result",
+                    tool_call_id="native-1",
+                    content="second-value",
+                ),
+            ],
+        ),
+    )
+
+    _assert_success(final)
+    assert model.calls == 2
+    assert not any(event.type == EventType.TOOL_CALL_START for event in final)
+    final_messages = repr(model.seen_messages[-1])
+    assert "first-value" in final_messages
+    assert "second-value" in final_messages
+
+
+@pytest.mark.asyncio
+async def test_parked_proxy_exemption_lifts_once_the_wait_is_answered(
+    tmp_path: Path,
+) -> None:
+    """The exemption tracks the checkpoint, so it never pins a proxy forever."""
+    thread_id = "toolless-native-wait-release"
+    model = _ParallelWaitModel()
+    adapter = _adapter(model, tmp_path, thread_id)
+
+    _assert_success(
+        await _collect(
+            adapter,
+            _input(
+                thread_id,
+                run_id="run-1",
+                messages=[UserMessage(id="user-1", content="call both tools")],
+            ),
+        )
+    )
+
+    _assert_success(
+        await _collect(
+            adapter,
+            _input(
+                thread_id,
+                run_id="run-2",
+                tools=[],
+                messages=[
+                    ToolMessage(
+                        id="first-result",
+                        tool_call_id="native-0",
+                        content="first-value",
+                    ),
+                    ToolMessage(
+                        id="second-result",
+                        tool_call_id="native-1",
+                        content="second-value",
+                    ),
+                ],
+            ),
+        )
+    )
+    core = adapter._agents_by_thread[thread_id]
+    assert {tool.name for tool in _tools()} <= set(core.tool_registry.registry)
+
+    _assert_success(
+        await _collect(
+            adapter,
+            _input(
+                thread_id,
+                run_id="run-3",
+                tools=[],
+                messages=[UserMessage(id="user-2", content="anything else")],
+            ),
+        )
+    )
+
+    assert not {tool.name for tool in _tools()} & set(core.tool_registry.registry)
+    assert adapter._proxy_tool_names_by_thread[thread_id] == set()
+
+
+@pytest.mark.asyncio
+async def test_retained_proxy_stays_a_frontend_tool_on_a_toolless_turn(
+    tmp_path: Path,
+) -> None:
+    """A proxy kept for a parked wait must not read as a backend tool.
+
+    The turn's frontend-tool set is built from the client's declarations, which
+    a toolless continuation leaves empty. A proxy retained for the checkpoint is
+    still offered to the model, so classifying it as backend makes the adapter
+    answer a re-fire itself: it publishes a result the client never produced and
+    parks a fresh interrupt nobody is told about, wedging the next turn.
+    """
+    thread_id = "toolless-refire"
+    model = _RefiringWaitModel()
+    adapter = _adapter(model, tmp_path, thread_id)
+
+    _assert_success(
+        await _collect(
+            adapter,
+            _input(
+                thread_id,
+                run_id="run-1",
+                messages=[UserMessage(id="user-1", content="call the tool")],
+            ),
+        )
+    )
+
+    second = await _collect(
+        adapter,
+        _input(
+            thread_id,
+            run_id="run-2",
+            tools=[],
+            messages=[
+                ToolMessage(
+                    id="first-result",
+                    tool_call_id="native-1",
+                    content="answer-one",
+                )
+            ],
+        ),
+    )
+
+    _assert_success(second)
+    # The re-fire is a frontend call: the client is asked to run it, rather than
+    # being handed a result the server invented for a tool it never executed.
+    assert [
+        event.tool_call_name
+        for event in second
+        if event.type == EventType.TOOL_CALL_START
+    ] == ["first_client_tool"]
+    assert not any(event.type == EventType.TOOL_CALL_RESULT for event in second)
+
+    # A re-fire the client was actually asked to run can be answered; one the
+    # adapter answered itself leaves a checkpoint that refuses every later turn.
+    third = await _collect(
+        adapter,
+        _input(
+            thread_id,
+            run_id="run-3",
+            tools=[],
+            messages=[
+                ToolMessage(
+                    id="second-result",
+                    tool_call_id="native-2",
+                    content="answer-two",
+                )
+            ],
+        ),
+    )
+    _assert_success(third)
+
+
+@pytest.mark.asyncio
+async def test_toolless_continuation_after_a_restart_fails_loudly(
+    tmp_path: Path,
+) -> None:
+    """A parked wait whose tool this process never registered must not proceed.
+
+    Proxy registrations live in memory, so a process that restarts between
+    turns holds none. A continuation that also declares no tools leaves the
+    checkpoint with nothing to resume into: Strands reports the tool missing,
+    the client's answer is replaced by an error the model then acts on, and the
+    run still reports success. Refusing the turn tells the caller what to do
+    (re-declare the tool) instead of silently discarding the answer.
+    """
+    thread_id = "restarted-native-wait"
+    model = _ParallelWaitModel()
+
+    _assert_success(
+        await _collect(
+            _adapter(model, tmp_path, thread_id),
+            _input(
+                thread_id,
+                run_id="run-1",
+                messages=[UserMessage(id="user-1", content="call both tools")],
+            ),
+        )
+    )
+
+    restarted = _adapter(model, tmp_path, thread_id)
+    events = await _collect(
+        restarted,
+        _input(
+            thread_id,
+            run_id="run-2",
+            tools=[],
+            messages=[
+                ToolMessage(
+                    id="first-result",
+                    tool_call_id="native-0",
+                    content="first-value",
+                )
+            ],
+        ),
+    )
+
+    [error] = [e for e in events if e.type == EventType.RUN_ERROR]
+    assert_contract_error(error, "FRONTEND_TOOL_NOT_REGISTERED")
+    assert "first_client_tool" in error.message
+    assert not any(e.type == EventType.RUN_FINISHED for e in events)
+    assert model.calls == 1
+
+    # Re-declaring the tools is the documented way out, and it still works.
+    recovered = await _collect(
+        _adapter(model, tmp_path, thread_id),
+        _input(
+            thread_id,
+            run_id="run-3",
+            messages=[
+                ToolMessage(
+                    id="first-result",
+                    tool_call_id="native-0",
+                    content="first-value",
+                ),
+                ToolMessage(
+                    id="second-result",
+                    tool_call_id="native-1",
+                    content="second-value",
+                ),
+            ],
+        ),
+    )
+    _assert_success(recovered)
+    assert "first-value" in repr(model.seen_messages[-1])
+
+
+@pytest.mark.asyncio
+async def test_partial_tool_list_keeps_a_parked_proxy_registered(
+    tmp_path: Path,
+) -> None:
+    """Declaring some tools must not strip a parked one.
+
+    A client that re-declares only the tools it still offers is the same hazard
+    as one that declares none: the proxy Strands is about to resume disappears
+    from the registry because this turn's list omits it.
+    """
+    thread_id = "partial-list-native-wait"
+    model = _ParallelWaitModel()
+    adapter = _adapter(model, tmp_path, thread_id)
+
+    _assert_success(
+        await _collect(
+            adapter,
+            _input(
+                thread_id,
+                run_id="run-1",
+                messages=[UserMessage(id="user-1", content="call both tools")],
+            ),
+        )
+    )
+
+    final = await _collect(
+        adapter,
+        _input(
+            thread_id,
+            run_id="run-2",
+            tools=[_tools()[1]],
+            messages=[
+                ToolMessage(
+                    id="first-result",
+                    tool_call_id="native-0",
+                    content="first-value",
+                ),
+                ToolMessage(
+                    id="second-result",
+                    tool_call_id="native-1",
+                    content="second-value",
+                ),
+            ],
+        ),
+    )
+
+    _assert_success(final)
+    assert model.calls == 2
+    final_messages = repr(model.seen_messages[-1])
+    assert "first-value" in final_messages
+    assert "second-value" in final_messages
+
+
+@pytest.mark.asyncio
+async def test_a_native_wait_is_not_recorded_as_a_reconcilable_call(
+    tmp_path: Path,
+) -> None:
+    """Waiting tools produce no placeholder, so they belong in no provenance.
+
+    The recorded ids exist to admit a returning result into placeholder
+    reconciliation. A native wait never writes a placeholder, so recording it
+    makes the next turn try to correct one that was never there, fail, and drop
+    the whole turn to the legacy path.
+    """
+    thread_id = "native-wait-not-recorded"
+    adapter = _adapter(_ParallelWaitModel(), tmp_path, thread_id)
+
+    _assert_success(
+        await _collect(
+            adapter,
+            _input(
+                thread_id,
+                run_id="run-1",
+                messages=[UserMessage(id="user-1", content="call both tools")],
+            ),
+        )
+    )
+
+    core = adapter._agents_by_thread[thread_id]
+    assert not core.state.get(AG_UI_FRONTEND_CALL_IDS_STATE_KEY)
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_parked_wait_needs_the_tool_too(tmp_path: Path) -> None:
+    """Cancelling is delivered into the tool body, so it needs it registered.
+
+    A cancelled entry carries a real response that Strands hands to the proxy,
+    exactly like an answer. Waving cancellation past the registration check
+    lets the same silent substitution through: the run reports success while
+    the framework's "tool not found" text lands in the thread's history.
+    """
+    thread_id = "restarted-cancel"
+    model = _ParallelWaitModel()
+
+    first_adapter = _adapter(model, tmp_path, thread_id)
+    _assert_success(
+        await _collect(
+            first_adapter,
+            _input(
+                thread_id,
+                run_id="run-1",
+                messages=[UserMessage(id="user-1", content="call both tools")],
+            ),
+        )
+    )
+    parked = index_frontend_tool_interrupts(
+        first_adapter._agents_by_thread[thread_id]
+    )
+    assert set(parked) == {"native-0", "native-1"}
+    cancellations = [
+        ResumeEntry(interrupt_id=interrupt.id, status="cancelled")
+        for interrupt in parked.values()
+    ]
+
+    refused_adapter = _adapter(model, tmp_path, thread_id)
+    refused = await _collect(
+        refused_adapter,
+        _input(
+            thread_id,
+            run_id="run-2",
+            tools=[],
+            messages=[UserMessage(id="user-2", content="never mind")],
+            resume=cancellations,
+        ),
+    )
+    [error] = [e for e in refused if e.type == EventType.RUN_ERROR]
+    assert_contract_error(error, "FRONTEND_TOOL_NOT_REGISTERED")
+    assert not any(e.type == EventType.RUN_FINISHED for e in refused)
+    # This is where the regression would land: without the gate the checkpoint
+    # resumes into nothing and the framework's text replaces the cancellation.
+    refused_core = refused_adapter._agents_by_thread[thread_id]
+    assert "Unknown tool" not in repr(refused_core.messages)
+
+    # Re-declaring the tools is the way out, and cancelling then works.
+    accepted = await _collect(
+        _adapter(model, tmp_path, thread_id),
+        _input(
+            thread_id,
+            run_id="run-3",
+            messages=[UserMessage(id="user-3", content="never mind")],
+            resume=cancellations,
+        ),
+    )
+    _assert_success(accepted)
+
+
+@pytest.mark.asyncio
+async def test_a_native_tool_under_the_parked_name_does_not_satisfy_the_gate(
+    tmp_path: Path,
+) -> None:
+    """The parked wait needs OUR proxy back, not merely the name occupied.
+
+    Checking the registry for the name alone lets an unrelated server tool
+    stand in: the run proceeds, Strands resumes into that tool instead, and the
+    client's answer is swallowed by something it never called.
+    """
+    thread_id = "squatted-native-wait"
+    model = _RefiringWaitModel()
+
+    _assert_success(
+        await _collect(
+            _adapter(model, tmp_path, thread_id),
+            _input(
+                thread_id,
+                run_id="run-1",
+                messages=[UserMessage(id="user-1", content="call the tool")],
+            ),
+        )
+    )
+
+    restarted = _adapter(
+        model, tmp_path, thread_id, core_tools=[_squatting_native]
+    )
+    events = await _collect(
+        restarted,
+        _input(
+            thread_id,
+            run_id="run-2",
+            tools=[],
+            messages=[
+                ToolMessage(
+                    id="first-result",
+                    tool_call_id="native-1",
+                    content="first-value",
+                )
+            ],
+        ),
+    )
+
+    [error] = [e for e in events if e.type == EventType.RUN_ERROR]
+    assert_contract_error(error, "FRONTEND_TOOL_NOT_REGISTERED")
+    assert not any(e.type == EventType.RUN_FINISHED for e in events)
+    core = restarted._agents_by_thread[thread_id]
+    assert "the server ran this" not in repr(core.messages)

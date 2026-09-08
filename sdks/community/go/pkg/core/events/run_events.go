@@ -111,6 +111,24 @@ type RunFinishedOutcome struct {
 	Interrupts []types.Interrupt `json:"interrupts,omitempty"`
 }
 
+// MarshalJSON implements json.Marshaler.
+//
+// Interrupts belongs only to the interrupt variant. TypeScript parses the
+// outcome as a strict discriminated union and Python models each variant as its
+// own type, so a success outcome carrying the key is rejected by both; dropping
+// it here means a caller that sets both cannot put an unparseable event on the
+// wire.
+func (o RunFinishedOutcome) MarshalJSON() ([]byte, error) {
+	// Alias the type so marshalling does not recurse into this method.
+	type outcome RunFinishedOutcome
+
+	if o.Type != RunFinishedOutcomeTypeInterrupt {
+		o.Interrupts = nil
+	}
+
+	return json.Marshal(outcome(o))
+}
+
 // RunFinishedEvent indicates that an agent run has finished successfully
 type RunFinishedEvent struct {
 	*BaseEvent
@@ -118,6 +136,10 @@ type RunFinishedEvent struct {
 	RunIDValue    string              `json:"runId"`
 	Result        interface{}         `json:"result,omitempty"`
 	Outcome       *RunFinishedOutcome `json:"outcome,omitempty"`
+	// Usage is optional per-(provider, model) token usage for the completed run.
+	// A list so runs that invoke multiple models keep them separate for
+	// downstream display; consumers that only need totals sum across entries.
+	Usage []TokenUsage `json:"usage,omitempty"`
 }
 
 // NewRunFinishedEvent creates a new run finished event
@@ -179,6 +201,13 @@ func WithOutcome(outcome RunFinishedOutcome) RunFinishedOption {
 	}
 }
 
+// WithUsage sets the token usage for the run finished event
+func WithUsage(usage []TokenUsage) RunFinishedOption {
+	return func(e *RunFinishedEvent) {
+		e.Usage = usage
+	}
+}
+
 // WithSuccessOutcome sets the outcome to success for the run finished event
 func WithSuccessOutcome() RunFinishedOption {
 	return func(e *RunFinishedEvent) {
@@ -210,6 +239,18 @@ func (e *RunFinishedEvent) Validate() error {
 		return fmt.Errorf("RunFinishedEvent validation failed: runId field is required")
 	}
 
+	// The peer SDKs require at least one interrupt on this variant: TypeScript
+	// with `.min(1)`, Python with a non-empty validator. Go's `omitempty` would
+	// otherwise drop an empty list and emit a bare {"type": "interrupt"}, which
+	// both reject as missing a required field.
+	if e.Outcome != nil && e.Outcome.Type == RunFinishedOutcomeTypeInterrupt && len(e.Outcome.Interrupts) == 0 {
+		return fmt.Errorf("RunFinishedEvent validation failed: outcome 'interrupt' requires at least one interrupt")
+	}
+
+	if err := validateUsage("RunFinished", e.Usage); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -234,6 +275,9 @@ type RunErrorEvent struct {
 	Code       *string `json:"code,omitempty"`
 	Message    string  `json:"message"`
 	RunIDValue string  `json:"runId,omitempty"`
+	// Usage is optional partial token usage for a run that failed after one or
+	// more model calls completed. Same numeric-only shape as RUN_FINISHED.
+	Usage []TokenUsage `json:"usage,omitempty"`
 }
 
 // NewRunErrorEvent creates a new run error event
@@ -257,6 +301,13 @@ type RunErrorOption func(*RunErrorEvent)
 func WithErrorCode(code string) RunErrorOption {
 	return func(e *RunErrorEvent) {
 		e.Code = &code
+	}
+}
+
+// WithErrorUsage sets the partial token usage for the run error event
+func WithErrorUsage(usage []TokenUsage) RunErrorOption {
+	return func(e *RunErrorEvent) {
+		e.Usage = usage
 	}
 }
 
@@ -286,6 +337,10 @@ func (e *RunErrorEvent) Validate() error {
 		return fmt.Errorf("RunErrorEvent validation failed: message field is required")
 	}
 
+	if err := validateUsage("RunError", e.Usage); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -303,6 +358,9 @@ func (e *RunErrorEvent) ToJSON() ([]byte, error) {
 type StepStartedEvent struct {
 	*BaseEvent
 	StepName string `json:"stepName"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewStepStartedEvent creates a new step started event
@@ -361,6 +419,9 @@ func (e *StepStartedEvent) ToJSON() ([]byte, error) {
 type StepFinishedEvent struct {
 	*BaseEvent
 	StepName string `json:"stepName"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewStepFinishedEvent creates a new step finished event

@@ -27,16 +27,32 @@ function appThatFailsToBind(failure: Error): Express {
   } as unknown as Express;
 }
 
-/** An app that binds successfully, exposing the emitter the harness wires up. */
-function appThatBinds(): { app: Express; emitter: EventEmitter } {
+/**
+ * An app that binds successfully, exposing the emitter the harness wires up
+ * and the arguments it was asked to bind with.
+ */
+function appThatBinds(): {
+  app: Express;
+  emitter: EventEmitter;
+  boundTo: () => { port: number; host: string };
+} {
   const emitter = new EventEmitter();
+  let bound: { port: number; host: string } | undefined;
   const app = {
-    listen: (_port: number, onListening: () => void) => {
+    listen: (port: number, host: string, onListening: () => void) => {
+      bound = { port, host };
       setImmediate(onListening);
       return emitter;
     },
   } as unknown as Express;
-  return { app, emitter };
+  return {
+    app,
+    emitter,
+    boundTo: () => {
+      if (!bound) throw new Error("listen was never called");
+      return bound;
+    },
+  };
 }
 
 describe("listen reports a bind failure instead of hanging", () => {
@@ -59,6 +75,17 @@ describe("listen reports a bind failure instead of hanging", () => {
       new Promise((resolve) => setTimeout(() => resolve("still pending"), 500)),
     ]);
     expect(settled).toBe(failure);
+  });
+
+  // The probes all dial `127.0.0.1`, and an unspecified host binds the IPv6
+  // wildcard instead. A process already holding the IPv4 wildcard on the port
+  // the kernel hands out then answers those probes in this server's place, so
+  // dropping the host does not fail here or anywhere obvious: it hands a
+  // stranger's reply to whichever suite drew the colliding number.
+  it("binds the loopback address the probes dial, not the wildcard", async () => {
+    const { app, boundTo } = appThatBinds();
+    await listen(app);
+    expect(boundTo()).toEqual({ port: 0, host: "127.0.0.1" });
   });
 
   it("does not absorb a post-bind server error into the settled promise", async () => {

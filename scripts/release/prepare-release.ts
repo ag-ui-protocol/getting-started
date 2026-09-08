@@ -383,11 +383,24 @@ function writePyVersion(pyprojectPath: string, newVersion: string): void {
  * crew-ai 0.3.0 (#2366) and aws-strands 0.2.5 (#2374) both needed a hand-pushed
  * "sync uv.lock" commit before their release PRs could go green.
  */
-function relockPythonPackage(pyprojectPath: string): string | null {
+function relockPythonPackage(repoRoot: string, pyprojectPath: string): string[] {
   const pkgDir = path.dirname(pyprojectPath);
   const lockPath = path.join(pkgDir, "uv.lock");
-  if (!fs.existsSync(lockPath)) return null;
 
+  const rewritten: string[] = [];
+  if (fs.existsSync(lockPath)) {
+    runUvLock(pkgDir);
+    rewritten.push(lockPath);
+  }
+  for (const dependentLock of findPathDependentLocks(repoRoot, pkgDir)) {
+    runUvLock(path.dirname(dependentLock));
+    rewritten.push(dependentLock);
+  }
+  return rewritten;
+}
+
+/** `uv lock` in one directory, with the missing-uv case spelled out. */
+function runUvLock(pkgDir: string): void {
   try {
     // stdout belongs to this script's JSON summary -- discard uv's so the
     // summary stays parseable, and pass its stderr through for diagnostics.
@@ -405,8 +418,68 @@ function relockPythonPackage(pyprojectPath: string): string | null {
     }
     throw error;
   }
+}
 
-  return lockPath;
+/**
+ * Every OTHER first-party uv.lock that pulls ``pkgDir`` in from the filesystem.
+ *
+ * A ``[tool.uv.sources]`` path override makes a consumer's lock carry the
+ * released package's VERSION, not just its name:
+ *
+ *     [[package]]
+ *     name = "ag-ui-protocol"
+ *     version = "0.1.20"
+ *     source = { directory = "../../../sdks/python" }
+ *
+ * So bumping the released package strands every such consumer, and the
+ * ``uv lock --check`` gate then fails in a package the release never touched.
+ * That is #2553: release/next bumped ag-ui-protocol 0.1.20 -> 0.1.21 and both
+ * the ``lockfiles`` and ``langgraph-python`` jobs went red on
+ * integrations/langgraph/python/uv.lock.
+ *
+ * Scope matches the gate this exists to satisfy (see the ``lockfiles`` job in
+ * unit-python-sdk.yml): first-party locks only, ``examples/`` excluded. Example
+ * locks are deliberately left alone -- they are not gated, several are stale
+ * today, and dojo-e2e relocks them non-frozen anyway, so touching them here
+ * would drag unrelated dependency churn into every release PR.
+ *
+ * Matching is on the resolved directory rather than the literal string, because
+ * the same package is reached by a different relative path from each consumer.
+ */
+function findPathDependentLocks(repoRoot: string, pkgDir: string): string[] {
+  const SKIP = new Set(["node_modules", ".venv", ".git", "examples"]);
+  const found: string[] = [];
+
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (SKIP.has(entry.name)) continue;
+        walk(path.join(dir, entry.name));
+      } else if (entry.name === "uv.lock" && dir !== pkgDir) {
+        found.push(path.join(dir, entry.name));
+      }
+    }
+  };
+  walk(repoRoot);
+
+  return found.filter((lockPath) => {
+    const lockDir = path.dirname(lockPath);
+    // uv has three directory-based source forms, and all three embed the
+    // dependency's version, so all three go stale on a bump:
+    //   directory -- a non-editable path source
+    //   editable  -- an editable path source
+    //   virtual   -- a path source whose target sets `[tool.uv] package = false`
+    // `virtual` is easy to miss because it is the one that does not correspond to
+    // something installable, but uv still records `version = "..."` for it and
+    // still fails `uv lock --check` when that version moves.
+    const sources = fs
+      .readFileSync(lockPath, "utf-8")
+      .matchAll(/^source = \{ (?:directory|editable|virtual) = "([^"]+)" \}$/gm);
+    for (const [, rel] of sources) {
+      if (path.resolve(lockDir, rel) === pkgDir) return true;
+    }
+    return false;
+  });
 }
 
 function readDotnetVersion(propsPath: string): string {
@@ -617,6 +690,7 @@ function readVersion(repoRoot: string, pkg: PackageConfig, versionSource?: strin
 
 /** Returns the absolute path of every file written (Maven fans out to modules). */
 function writeVersionFile(
+  repoRoot: string,
   filePath: string,
   ecosystem: PackageConfig["ecosystem"],
   newVersion: string
@@ -629,10 +703,10 @@ function writeVersionFile(
     return writeMavenVersion(filePath, newVersion);
   } else {
     writePyVersion(filePath, newVersion);
-    // The re-locked uv.lock is a second modified file and must be reported, or
-    // the release workflow never stages it -- see relockPythonPackage.
-    const lockPath = relockPythonPackage(filePath);
-    if (lockPath) return [filePath, lockPath];
+    // Each re-locked uv.lock -- this package's own, plus any consumer that
+    // path-depends on it -- is a further modified file and must be reported, or
+    // the release workflow never stages it. See relockPythonPackage.
+    return [filePath, ...relockPythonPackage(repoRoot, filePath)];
   }
   return [filePath];
 }
@@ -644,7 +718,7 @@ function writeVersion(
   versionSource?: string
 ): string[] {
   const filePath = getVersionFilePath(repoRoot, pkg, versionSource);
-  return writeVersionFile(filePath, pkg.ecosystem, newVersion);
+  return writeVersionFile(repoRoot, filePath, pkg.ecosystem, newVersion);
 }
 
 function computeNewVersion(
@@ -719,7 +793,7 @@ function main(): void {
     console.error(`[${args.scope}] Shared version: ${currentVersion} -> ${newVersion}`);
 
     if (versionSourceEcosystem === "dotnet" && args.bump !== "prerelease" && !args.dryRun) {
-      recordWritten(writeVersionFile(versionSourcePath, versionSourceEcosystem, newVersion));
+      recordWritten(writeVersionFile(repoRoot, versionSourcePath, versionSourceEcosystem, newVersion));
       const written = readVersionFile(versionSourcePath, versionSourceEcosystem);
       if (written !== newVersion) {
         console.error(`ERROR: Verification failed for ${scopeConfig.versionSource}: expected ${newVersion}, got ${written}`);
@@ -732,7 +806,7 @@ function main(): void {
     // -p:VersionSuffix and the props file stays put), the pom is the only place
     // a Maven version exists.
     if (versionSourceEcosystem === "maven" && !args.dryRun) {
-      recordWritten(writeVersionFile(versionSourcePath, versionSourceEcosystem, newVersion));
+      recordWritten(writeVersionFile(repoRoot, versionSourcePath, versionSourceEcosystem, newVersion));
       const written = readVersionFile(versionSourcePath, versionSourceEcosystem);
       if (written !== newVersion) {
         console.error(`ERROR: Verification failed for ${scopeConfig.versionSource}: expected ${newVersion}, got ${written}`);

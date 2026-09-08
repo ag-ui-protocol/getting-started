@@ -21,8 +21,8 @@ export interface Logger {
 /**
  * Internal fallback used when `StrandsAgentConfig.logger` is omitted.
  * Mirrors Python's stdlib default: warnings + errors go to the console,
- * debug is dropped. Not exported — callers who want different behaviour
- * inject their own logger.
+ * debug is dropped. Callers who want different behaviour inject their own
+ * logger rather than reaching for this one.
  */
 export const DEFAULT_LOGGER: Logger = {
   debug() {},

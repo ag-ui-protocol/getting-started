@@ -21,11 +21,13 @@
   "dependencies": {
     "@ag-ui/a2ui-toolkit": "workspace:*",
     "@ag-ui/aws-strands": "workspace:*",
+    "@ag-ui/client": "workspace:*",
     "@ag-ui/core": "workspace:*",
     "@ag-ui/encoder": "workspace:*",
     "@anthropic-ai/sdk": "^0.92.0",
     "@google/genai": "^1.40.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@opentelemetry/api": "^1.9.0",
     "@strands-agents/sdk": "^1.1.0",
     "cors": "^2.8.5",
     "express": "5.1.0",
@@ -36,6 +38,8 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^20.11.19",
+    "@types/semver": "^7.7.1",
+    "semver": "^7.8.5",
     "tsx": "^4.20.6",
     "typescript": "^5.3.3",
     "vitest": "^4.0.18"

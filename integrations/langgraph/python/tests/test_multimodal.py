@@ -700,6 +700,126 @@ class TestMultimodalConversion(unittest.TestCase):
         self.assertEqual(agui_content[0].source.mime_type, "image/jpeg")
         self.assertEqual(agui_content[0].source.value, "/9j/4AAQ")
 
+    def test_langchain_plain_string_entries_preserved(self):
+        """Test plain string entries survive conversion alongside structured blocks."""
+        lc_content = ["hello", {"type": "text", "text": " world"}]
+
+        agui_content = convert_langchain_multimodal_to_agui(lc_content)
+
+        self.assertEqual(len(agui_content), 2)
+        self.assertIsInstance(agui_content[0], TextInputContent)
+        self.assertEqual(agui_content[0].text, "hello")
+        self.assertIsInstance(agui_content[1], TextInputContent)
+        self.assertEqual(agui_content[1].text, " world")
+
+    def test_langchain_plain_string_interleaved_with_image_keeps_order(self):
+        """Test plain strings keep their position among structured image blocks."""
+        lc_content = [
+            "before",
+            {"type": "image_url", "image_url": {"url": "https://example.com/pic.png"}},
+            "after",
+        ]
+
+        agui_content = convert_langchain_multimodal_to_agui(lc_content)
+
+        self.assertEqual(len(agui_content), 3)
+        self.assertIsInstance(agui_content[0], TextInputContent)
+        self.assertEqual(agui_content[0].text, "before")
+        self.assertIsInstance(agui_content[1], ImageInputContent)
+        self.assertIsInstance(agui_content[1].source, InputContentUrlSource)
+        self.assertEqual(agui_content[1].source.value, "https://example.com/pic.png")
+        self.assertIsInstance(agui_content[2], TextInputContent)
+        self.assertEqual(agui_content[2].text, "after")
+
+    def test_langchain_plain_string_entries_preserved_verbatim(self):
+        """Test plain string entries keep whitespace, case and non-ASCII characters."""
+        lc_content = ["  Padded MixedCase  ", "\tGrüße 日本\n", "   "]
+
+        agui_content = convert_langchain_multimodal_to_agui(lc_content)
+
+        self.assertEqual(len(agui_content), 3)
+        self.assertEqual(agui_content[0].text, "  Padded MixedCase  ")
+        self.assertEqual(agui_content[1].text, "\tGrüße 日本\n")
+        self.assertEqual(agui_content[2].text, "   ")
+
+    def test_langchain_empty_string_entry_preserved(self):
+        """Test an empty string entry still produces a text item."""
+        lc_content = ["", {"type": "text", "text": "world"}]
+
+        agui_content = convert_langchain_multimodal_to_agui(lc_content)
+
+        self.assertEqual(len(agui_content), 2)
+        self.assertIsInstance(agui_content[0], TextInputContent)
+        self.assertEqual(agui_content[0].text, "")
+        self.assertEqual(agui_content[1].text, "world")
+
+    def test_langchain_bare_string_content_becomes_single_text_item(self):
+        """Test a bare string content is treated as the whole content, not iterated."""
+        agui_content = convert_langchain_multimodal_to_agui("hi there")
+
+        self.assertEqual(len(agui_content), 1)
+        self.assertIsInstance(agui_content[0], TextInputContent)
+        self.assertEqual(agui_content[0].text, "hi there")
+
+    def test_langchain_bare_string_content_preserved_verbatim(self):
+        """Test a bare string keeps its padding, case and non-ASCII characters."""
+        agui_content = convert_langchain_multimodal_to_agui("  Hallö Wörld  ")
+
+        self.assertEqual(len(agui_content), 1)
+        self.assertEqual(agui_content[0].text, "  Hallö Wörld  ")
+
+    def test_langchain_bare_empty_string_content_becomes_single_text_item(self):
+        """Test an empty bare string still yields one empty text item."""
+        agui_content = convert_langchain_multimodal_to_agui("")
+
+        self.assertEqual(len(agui_content), 1)
+        self.assertIsInstance(agui_content[0], TextInputContent)
+        self.assertEqual(agui_content[0].text, "")
+
+    def test_langchain_non_list_content_yields_no_items(self):
+        """Test non-list content is not walked element-wise into fabricated text."""
+        # A stray dict must not be shredded into its key names, and no other
+        # iterable may be traversed as if it were a list of content blocks.
+        # Non-iterables yield [] too, where the pre-branch code raised TypeError.
+        self.assertEqual(
+            convert_langchain_multimodal_to_agui({"type": "text", "text": "x"}), []
+        )
+        self.assertEqual(convert_langchain_multimodal_to_agui(("a", "b")), [])
+        self.assertEqual(convert_langchain_multimodal_to_agui({"a", "b"}), [])
+        self.assertEqual(convert_langchain_multimodal_to_agui(None), [])
+
+    def test_langchain_unconvertible_entries_are_skipped(self):
+        """Test entries that are neither a string nor a dict are dropped, not raised on."""
+        lc_content = ["keep", 5, None, ["nested"], {"type": "text", "text": "also keep"}]
+
+        agui_content = convert_langchain_multimodal_to_agui(lc_content)
+
+        self.assertEqual(len(agui_content), 2)
+        self.assertEqual(agui_content[0].text, "keep")
+        self.assertEqual(agui_content[1].text, "also keep")
+
+    def test_langchain_unknown_block_type_is_not_fabricated_into_content(self):
+        """Test an unrecognized content block is dropped, never fabricated into an item."""
+        # An unknown block must not reach the image_url handler, which would mint an
+        # ImageInputContent with an empty source. This asserts hollowness rather than
+        # a count: if the converter is later taught langchain-core's standard blocks,
+        # these should become real image and audio items — never sourceless ones.
+        lc_content = [
+            {"type": "text", "text": "look"},
+            {"type": "image", "base64": "AAAA", "mime_type": "image/png"},
+            {"type": "audio", "base64": "BBBB", "mime_type": "audio/wav"},
+            {"no_type_key": True},
+        ]
+
+        agui_content = convert_langchain_multimodal_to_agui(lc_content)
+
+        self.assertEqual(
+            [c.text for c in agui_content if isinstance(c, TextInputContent)], ["look"]
+        )
+        for item in agui_content:
+            if isinstance(item, ImageInputContent):
+                self.assertTrue(item.source.value, f"sourceless media item: {item!r}")
+
     # ── Round-trip tests ────────────────────────────────────────────────
 
     def test_round_trip_langchain_url_to_agui_and_back(self):
@@ -3009,7 +3129,6 @@ class TestMalformedInputContract(unittest.TestCase):
         the loop never called it — but it said nothing either."""
         for entry, described in [
             (None, "NoneType"),
-            ("just a string", "str"),
             (7, "int"),
             (True, "bool"),
             (["x"], "list"),
@@ -3772,6 +3891,85 @@ class TestMalformedInputContract(unittest.TestCase):
 
         second = self._outbound(read_back.content)
         self.assertEqual(second.content, first.content)
+
+
+class TestOverridableCallsOnOffWireValues(unittest.TestCase):
+    """Rule 1 of the malformed-input contract, for values that are the RIGHT
+    type but not the built-in one.
+
+    A `str`/`dict` arriving off the wire may be a SUBCLASS, and every method
+    the converter calls on it — ``strip``, ``startswith``, ``split``, ``get``
+    — is overridable. An override that raises escapes the whole
+    MESSAGES_SNAPSHOT, which is the failure the contract's first rule exists
+    to prevent, reached through a door an ``isinstance`` check holds open.
+
+    These cases live here rather than in ``cross-runtime-parity-cases.json``
+    because a subclass is not expressible in JSON, and because they are
+    Python-only: TypeScript strings and objects are primitives with no
+    equivalent hazard. The converter answers them by normalizing through the
+    BASE operations (``str.strip``, ``dict.get``), which both bypass the
+    override and return a built-in, so everything downstream is a built-in
+    method on a built-in value.
+    """
+
+    def test_str_subclass_that_raises_from_its_overrides_still_converts(self):
+        class Hostile(str):
+            def strip(self, *args):
+                raise RuntimeError("strip exploded")
+
+            def startswith(self, *args):
+                raise RuntimeError("startswith exploded")
+
+            def split(self, *args, **kwargs):
+                raise RuntimeError("split exploded")
+
+        agui_content = convert_langchain_multimodal_to_agui([
+            {"type": "image_url", "image_url": Hostile("  data:image/png;base64,QUJD  ")},
+        ])
+
+        self.assertEqual(len(agui_content), 1)
+        self.assertIsInstance(agui_content[0].source, InputContentDataSource)
+        self.assertEqual(agui_content[0].source.value, "QUJD")
+        self.assertEqual(agui_content[0].source.mime_type, "image/png")
+
+    def test_str_subclass_in_the_nested_url_slot_still_converts(self):
+        class Hostile(str):
+            def strip(self, *args):
+                raise RuntimeError("strip exploded")
+
+        agui_content = convert_langchain_multimodal_to_agui([
+            {"type": "image_url", "image_url": {"url": Hostile("https://example.com/a.png")}},
+        ])
+
+        self.assertEqual(len(agui_content), 1)
+        self.assertEqual(agui_content[0].source.value, "https://example.com/a.png")
+
+    def test_dict_subclass_that_raises_from_get_still_converts(self):
+        class Hostile(dict):
+            def get(self, *args, **kwargs):
+                raise RuntimeError("get exploded")
+
+        agui_content = convert_langchain_multimodal_to_agui([
+            {"type": "image_url", "image_url": Hostile(url="https://example.com/a.png")},
+        ])
+
+        self.assertEqual(len(agui_content), 1)
+        self.assertEqual(agui_content[0].source.value, "https://example.com/a.png")
+
+    def test_a_hostile_subclass_costs_only_its_own_block(self):
+        """Rule 3: even when the hostile value is unusable, the blocks around
+        it convert."""
+        class Hostile(str):
+            def strip(self, *args):
+                raise RuntimeError("strip exploded")
+
+        agui_content = convert_langchain_multimodal_to_agui([
+            {"type": "text", "text": "before"},
+            {"type": "image_url", "image_url": {"url": Hostile("   ")}},
+            {"type": "text", "text": "after"},
+        ])
+
+        self.assertEqual([c.text for c in agui_content], ["before", "after"])
 
 
 class TestCrossRuntimeParityTable(unittest.TestCase):
