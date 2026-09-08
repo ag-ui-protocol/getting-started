@@ -7,9 +7,9 @@
  * SDK handed it, and the durable history, the `MESSAGES_SNAPSHOT` and the
  * session store are read back afterwards to prove the block stayed out of all
  * three. Mirrors the Python bridge's `tests/test_context_forwarding.py` case
- * for case, then covers the arms that file leaves to other suites: the
- * tool-result turn, cancellation, concurrent runs, orchestrators, the refusal
- * on an agent with no hook registry, and the A2UI render-guide exclusion.
+ * for case, and adds the arms that file leaves to other suites: concurrent
+ * runs, orchestrators, the refusal on an agent with no hook registry, and the
+ * A2UI render-guide exclusion.
  *
  * The native history is only half the contract: a turn can look right and
  * still serialize into a request the provider rejects, which is what shipped.
@@ -787,23 +787,6 @@ describe("provider-bound ordering during a tool continuation", () => {
       await openAIResponsesRequestItems(without),
     );
   });
-
-  it("reports the outline the real formatter agrees with", async () => {
-    // The failure-path diagnostic has to describe the request the provider
-    // actually saw, or a future 400 report sends the reader the wrong way.
-    const turns = await continuationTurns(
-      [{ description: "selected invoice", value: "123" }],
-      { parallel: true },
-    );
-    const sequence = openAIRoleSequence(await openAIChatRequestMessages(turns));
-
-    const outline = describeModelBoundHistory(turns);
-
-    expect(outline).toContain("tool-call adjacency=ok");
-    expect(outline.split(" | ")[0]!.replace(/\[[^\]]*\]/g, "")).toBe(
-      sequence.join(" -> "),
-    );
-  });
 });
 
 describe("a tool continuation carrying context finishes the run", () => {
@@ -917,6 +900,35 @@ describe("provider-bound ordering for an ordinary turn", () => {
 });
 
 describe("context placement with no question turn", () => {
+  it("appends a trailing turn when nothing in the history can host the block", async () => {
+    // No user turn at all, so there is no question to join and the history
+    // ends on an assistant turn. A new trailing user turn both alternates and
+    // sits closest to the generation it informs. Mutating the placement to the
+    // head instead leaves this red.
+    const { agent, model } = realStrandsAgent([modelTurn.text("ok")]);
+
+    const events = await collect(
+      agent,
+      contextRun([{ description: "locale", value: "en-US" }], {
+        messages: [
+          { id: "a1", role: "assistant", content: "anything else?" },
+        ] as AguiMessage[],
+      }),
+    );
+
+    expectCompletedRun(events);
+    const seen = model.seenMessages[0]!;
+    expect(historyShape(seen)).toEqual([
+      { role: "assistant", blocks: ["textBlock"] },
+      { role: "user", blocks: ["textBlock"] },
+    ]);
+    expect(modelSawTexts(model, 0)).toEqual([
+      "anything else?",
+      blockOf("- locale: en-US"),
+    ]);
+    await expectRolesAlternate(seen);
+  });
+
   it("gives a replayed tool exchange the block as its opening turn", async () => {
     const { agent, model } = toolContinuationAgent();
     const events = await collect(
@@ -953,10 +965,6 @@ describe("context placement with no question turn", () => {
 });
 
 describe("the model-bound history outline", () => {
-  const question = StrandsMessage.fromMessageData({
-    role: "user",
-    content: [{ text: "q" }],
-  });
   const toolUse = (id: string) => ({
     toolUse: { toolUseId: id, name: "a", input: {} },
   });
@@ -966,71 +974,54 @@ describe("the model-bound history outline", () => {
   const turn = (role: "user" | "assistant", content: unknown[]) =>
     StrandsMessage.fromMessageData({ role, content: content as never });
 
-  it("reports both verdicts, in the string the Python bridge emits", () => {
-    // Pinned as a literal in both suites, so a drift on either side is a
-    // failing test rather than a silent parity break.
-    expect(
-      describeModelBoundHistory([
-        turn("user", [{ text: "ctx" }, { text: "q" }]),
-        turn("assistant", [toolUse("t1"), toolUse("t2")]),
-        turn("user", [toolResult("t1"), toolResult("t2")]),
-      ]),
-    ).toBe(
-      "user[text+text] -> assistant(tool_calls=t1,t2) -> tool(t1) -> tool(t2)" +
-        " | tool-call adjacency=ok | role alternation=ok",
-    );
-  });
-
-  it("reports a wedged message as a broken adjacency", () => {
-    expect(
-      describeModelBoundHistory([
-        question,
-        turn("assistant", [toolUse("t1")]),
-        turn("user", [{ text: "ctx" }, toolResult("t1")]),
-      ]),
-    ).toContain("tool-call adjacency=broken at [1]");
-  });
-
-  it("treats results answering out of order as adjacent", () => {
-    expect(
-      describeModelBoundHistory([
-        question,
-        turn("assistant", [toolUse("t1"), toolUse("t2")]),
-        turn("user", [toolResult("t2"), toolResult("t1")]),
-      ]),
-    ).toContain("tool-call adjacency=ok");
-  });
-
-  it("reports a repeated role even when adjacency holds", () => {
-    const outline = describeModelBoundHistory([
-      turn("user", [{ text: "ctx" }]),
-      question,
-    ]);
-
-    expect(outline).toContain("tool-call adjacency=ok");
-    expect(outline).toContain("role alternation=repeats at [1]");
-  });
-
-  it("does not misread a tool id carrying punctuation", () => {
-    expect(
-      describeModelBoundHistory([
-        question,
-        turn("assistant", [toolUse("a,b)c")]),
-        turn("user", [toolResult("a,b)c")]),
-      ]),
-    ).toContain("tool-call adjacency=ok");
-  });
-
-  it("agrees with the real formatter about the sequence", async () => {
+  it("renders the sequence the real formatter builds", async () => {
+    // A diagnostic describing a request the provider never saw is worse than
+    // none, so the whole line is pinned against the formatter.
     const turns = await continuationTurns(
       [{ description: "selected invoice", value: "123" }],
       { parallel: true },
     );
     const sequence = openAIRoleSequence(await openAIChatRequestMessages(turns));
 
-    const rendered = describeModelBoundHistory(turns).split(" | ")[0]!;
+    expect(describeModelBoundHistory(turns).replace(/\[[^\]]*\]/g, "")).toBe(
+      sequence.join(" -> "),
+    );
+  });
 
-    expect(rendered.replace(/\[[^\]]*\]/g, "")).toBe(sequence.join(" -> "));
+  it("makes a wedged message visible in the line", () => {
+    // The whole point: the reader sees the break without re-deriving it. Same
+    // line the Python bridge emits for the same history.
+    expect(
+      describeModelBoundHistory([
+        turn("user", [{ text: "q" }]),
+        turn("assistant", [toolUse("t1")]),
+        turn("user", [{ text: "ctx" }, toolResult("t1")]),
+      ]),
+    ).toBe("user[text] -> assistant(tool_calls=t1) -> user[text] -> tool(t1)");
+  });
+
+  it("keeps a tool id carrying punctuation intact", () => {
+    const weird = "a,b)c";
+
+    expect(
+      describeModelBoundHistory([
+        turn("assistant", [toolUse(weird)]),
+        turn("user", [toolResult(weird)]),
+      ]),
+    ).toBe(`assistant(tool_calls=${weird}) -> tool(${weird})`);
+  });
+
+  it("treats a block naming a call with nothing in it as a tool block", () => {
+    // Placement reads the same predicate, so the two cannot disagree about a
+    // block's kind. Python pins the placement half via `_carries_tool_result`.
+    // A plain object, not a `Message`: the SDK's own constructor rejects this
+    // shape, so it can only arrive as the wrapped-data form the outline and
+    // the placement predicate both have to read the same way.
+    expect(
+      describeModelBoundHistory([
+        { role: "user", content: [{ toolResult: undefined }] },
+      ]),
+    ).toBe("tool(undefined)");
   });
 
   it("carries no message text", async () => {

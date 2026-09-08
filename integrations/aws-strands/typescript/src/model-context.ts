@@ -151,7 +151,9 @@ export function pullWithModelContext<T, R>(
   iterator: AsyncIterator<T, R>,
   contextBlock: string,
 ): Promise<IteratorResult<T, R>> {
-  if (!contextBlock) return iterator.next();
+  // Entered even for an empty block. Returning `iterator.next()` bare would
+  // leave whatever store is already in scope, so a run nested inside another
+  // run's continuation would read the outer run's context as its own.
   return modelContextBlock.run(contextBlock, () => iterator.next());
 }
 
@@ -184,214 +186,60 @@ const mutations = new WeakMap<object, ContextMutation>();
 type MessagesOwner = { messages?: unknown };
 
 /**
- * Whether a content block is a tool result. Seeded history reaches the agent
- * as ContentBlock instances, which carry a `type` discriminant; the
- * plain-object form carries the `toolResult` key itself. Both shapes occur,
- * and the run loop's own tail check reads them the same way.
+ * Whether a content block names a tool call or its answer.
+ *
+ * Seeded history reaches the agent as ContentBlock instances, which carry a
+ * `type` discriminant; the plain-object form carries the key itself. Both
+ * shapes occur, and the run loop's own tail check reads them the same way.
+ *
+ * Key presence, not a defined value: a block naming a call with nothing useful
+ * in it is still that kind of block, which is what Python's
+ * `_carries_tool_result` decides too. Placement and the outline both read
+ * through these, so they cannot disagree about a block's kind.
  */
 function isToolResultBlock(block: unknown): boolean {
   if (block === null || typeof block !== "object") return false;
-  const record = block as { toolResult?: unknown; type?: unknown };
-  return record.toolResult !== undefined || record.type === "toolResultBlock";
+  const record = block as { type?: unknown };
+  return "toolResult" in record || record.type === "toolResultBlock";
 }
 
-/**
- * One provider-bound step, built from message objects rather than from
- * rendered text so a tool id carrying a comma or a bracket cannot be misread
- * when the verdicts are computed.
- */
-type OutlineEntry =
-  | {
-      kind: "message";
-      role: string;
-      blockKinds: string[];
-      toolCallIds: string[];
-    }
-  | { kind: "tool"; callId: string };
-
-/**
- * Split a native history into the two views a provider validates.
- *
- * The first is the OpenAI-compatible expansion: a turn's non-tool content
- * becomes its own message and each tool result becomes a `tool` message after
- * it, which is where tool-call adjacency is decided. The second is the roles a
- * block-level formatter sees, one per native message, which is where role
- * alternation is decided. Python's `_outline_entries` is the counterpart.
- */
-function outlineEntries(messages: unknown[]): {
-  expanded: OutlineEntry[];
-  nativeRoles: string[];
-} {
-  const expanded: OutlineEntry[] = [];
-  const nativeRoles: string[] = [];
-  for (const message of messages) {
-    const record = message as { role?: unknown; content?: unknown } | null;
-    if (record === null || typeof record !== "object") {
-      expanded.push({
-        kind: "message",
-        role: "?",
-        blockKinds: [],
-        toolCallIds: [],
-      });
-      nativeRoles.push("?");
-      continue;
-    }
-    const role = typeof record.role === "string" ? record.role : "?";
-    const blocks = Array.isArray(record.content) ? record.content : [];
-    const toolCallIds: string[] = [];
-    const resultIds: string[] = [];
-    const blockKinds: string[] = [];
-    for (const block of blocks) {
-      const use = toolUseIdOf(block);
-      if (use !== undefined) {
-        toolCallIds.push(use);
-        continue;
-      }
-      const result = toolResultIdOf(block);
-      if (result !== undefined) {
-        resultIds.push(result);
-        continue;
-      }
-      blockKinds.push(blockKindOf(block));
-    }
-    if (blocks.length > 0) nativeRoles.push(role);
-    if (
-      blockKinds.length > 0 ||
-      (toolCallIds.length === 0 && resultIds.length === 0)
-    ) {
-      expanded.push({ kind: "message", role, blockKinds, toolCallIds });
-    } else if (toolCallIds.length > 0) {
-      expanded.push({ kind: "message", role, blockKinds: [], toolCallIds });
-    }
-    for (const callId of resultIds) expanded.push({ kind: "tool", callId });
-  }
-  return { expanded, nativeRoles };
-}
-
-/** Render one entry, byte for byte what Python's `_render_outline_entry` does. */
-function renderOutlineEntry(entry: OutlineEntry): string {
-  if (entry.kind === "tool") return `tool(${entry.callId})`;
-  const { role, blockKinds, toolCallIds } = entry;
-  let label = blockKinds.length > 0 ? `${role}[${blockKinds.join("+")}]` : role;
-  if (toolCallIds.length > 0) {
-    label = `${label}(tool_calls=${toolCallIds.join(",")})`;
-  } else if (blockKinds.length === 0) {
-    label = `${role}[]`;
-  }
-  return label;
-}
-
-/**
- * Indices whose tool calls are not answered by the messages right after.
- *
- * Order among the answers does not matter to the provider, only that the
- * messages immediately following are the tool results for exactly those ids,
- * so this compares them as a set.
- */
-function toolCallAdjacencyBreaks(expanded: OutlineEntry[]): number[] {
-  const breaks: number[] = [];
-  expanded.forEach((entry, index) => {
-    if (entry.kind !== "message" || entry.toolCallIds.length === 0) return;
-    const opened = entry.toolCallIds;
-    const answers = expanded.slice(index + 1, index + 1 + opened.length);
-    if (
-      answers.length !== opened.length ||
-      answers.some((answer) => answer.kind !== "tool")
-    ) {
-      breaks.push(index);
-      return;
-    }
-    const answered = answers
-      .map((answer) => (answer.kind === "tool" ? answer.callId : ""))
-      .sort();
-    if (answered.join("\u0000") !== [...opened].sort().join("\u0000")) {
-      breaks.push(index);
-    }
-  });
-  return breaks;
-}
-
-/** Indices where a native message repeats the role of the one before it. */
-function roleAlternationBreaks(nativeRoles: string[]): number[] {
-  const breaks: number[] = [];
-  for (let index = 1; index < nativeRoles.length; index++) {
-    if (nativeRoles[index] === nativeRoles[index - 1]) breaks.push(index);
-  }
-  return breaks;
-}
-
-/**
- * One-line structural outline of the history a model call was handed.
- *
- * Text, tool inputs and tool results are dropped, so the line is safe to log:
- * it carries only what decides whether a provider accepts the request, which
- * is the roles, the block kinds and the tool ids that have to sit adjacent.
- * The rendered sequence is the OpenAI-compatible expansion, where a turn's
- * non-tool content becomes its own message ahead of the tool results it
- * appends, because that ordering is what a 400 over tool-call adjacency is
- * complaining about.
- *
- * Two verdicts follow it, one per provider family and neither implying the
- * other: tool-call adjacency, which the OpenAI-compatible formatters enforce,
- * and role alternation, which the block-level formatters (Anthropic, Bedrock,
- * Gemini) enforce over the native messages one to one. A request can satisfy
- * either and fail the other, so a report naming only one would send the reader
- * the wrong way. Neither verdict claims the request is well formed in every
- * other respect; an orphan tool result, for instance, is outside what these
- * two check. The Python counterpart is `describe_model_bound_history` and
- * emits the same string for the same history.
- */
-export function describeModelBoundHistory(messages: unknown): string {
-  if (!Array.isArray(messages)) return "unrecorded";
-  const { expanded, nativeRoles } = outlineEntries(messages);
-  const rendered = expanded.map(renderOutlineEntry).join(" -> ");
-  const adjacency = toolCallAdjacencyBreaks(expanded);
-  const alternation = roleAlternationBreaks(nativeRoles);
-  const adjacencyVerdict =
-    adjacency.length === 0 ? "ok" : `broken at [${adjacency.join(",")}]`;
-  const alternationVerdict =
-    alternation.length === 0 ? "ok" : `repeats at [${alternation.join(",")}]`;
-  return (
-    `${rendered} | tool-call adjacency=${adjacencyVerdict}` +
-    ` | role alternation=${alternationVerdict}`
-  );
-}
-
-/**
- * The tool-use id a block opens, for both the instance and plain-object forms.
- * A block naming a call without a string id still counts as opening one, or
- * the outline would render it as ordinary content and call an unanswered call
- * adjacent. Python stringifies whatever is there for the same reason.
- */
-function toolUseIdOf(block: unknown): string | undefined {
-  const record = block as {
-    type?: unknown;
-    toolUseId?: unknown;
-    toolUse?: unknown;
-  } | null;
-  if (record === null || typeof record !== "object") return undefined;
-  if (record.type === "toolUseBlock") return String(record.toolUseId);
-  const nested = record.toolUse;
-  if (nested !== null && typeof nested === "object") {
-    return String((nested as { toolUseId?: unknown }).toolUseId);
-  }
-  return undefined;
-}
-
-/** The tool-use id a block answers, for both block forms. */
-function toolResultIdOf(block: unknown): string | undefined {
+/** The `toolResult` payload, normalized across the two block shapes. */
+function toolResultPayload(block: unknown): unknown {
   const record = block as {
     type?: unknown;
     toolUseId?: unknown;
     toolResult?: unknown;
-  } | null;
-  if (record === null || typeof record !== "object") return undefined;
-  if (record.type === "toolResultBlock") return String(record.toolUseId);
-  const nested = record.toolResult;
-  if (nested !== null && typeof nested === "object") {
-    return String((nested as { toolUseId?: unknown }).toolUseId);
+  };
+  return record.type === "toolResultBlock"
+    ? { toolUseId: record.toolUseId }
+    : record.toolResult;
+}
+
+/** Whether a content block opens a tool call. Counterpart of the above. */
+function isToolUseBlock(block: unknown): boolean {
+  if (block === null || typeof block !== "object") return false;
+  const record = block as { type?: unknown };
+  return "toolUse" in record || record.type === "toolUseBlock";
+}
+
+/** The `toolUse` payload, normalized across the two block shapes. */
+function toolUsePayload(block: unknown): unknown {
+  const record = block as {
+    type?: unknown;
+    toolUseId?: unknown;
+    toolUse?: unknown;
+  };
+  return record.type === "toolUseBlock"
+    ? { toolUseId: record.toolUseId }
+    : record.toolUse;
+}
+
+/** The call id a `toolUse` or `toolResult` block names. */
+function blockCallId(named: unknown): string {
+  if (named !== null && typeof named === "object") {
+    return String((named as { toolUseId?: unknown }).toolUseId);
   }
-  return undefined;
+  return String(named);
 }
 
 /** A block's kind, from the instance discriminant or the wrapped-data key. */
@@ -404,6 +252,64 @@ function blockKindOf(block: unknown): string {
     if (key) return key;
   }
   return "?";
+}
+
+/**
+ * One-line sanitized outline of the history a model call was handed.
+ *
+ * Text, tool inputs and tool results are dropped, so the line is safe to log:
+ * it carries only what decides whether a provider accepts the request, which
+ * is the roles, the block kinds and the tool ids that have to sit adjacent.
+ *
+ * The sequence is the OpenAI-compatible expansion, where a turn's non-tool
+ * content becomes its own message ahead of the tool results it appends. That
+ * is deliberately the only view here: a 400 over tool-call adjacency is about
+ * this sequence, and reading it says directly whether each assistant call is
+ * followed by its own answers. Whether a request would also satisfy the
+ * block-level formatters' role alternation is a different question over a
+ * different sequence, and the suites answer it against the real provider
+ * bodies rather than against a second rendering nobody can index reliably.
+ */
+export function describeModelBoundHistory(messages: unknown): string {
+  if (!Array.isArray(messages)) return "unrecorded";
+  const labels: string[] = [];
+  for (const message of messages) {
+    const record = message as { role?: unknown; content?: unknown } | null;
+    if (record === null || typeof record !== "object") {
+      labels.push("?");
+      continue;
+    }
+    const role = typeof record.role === "string" ? record.role : "?";
+    const blocks = Array.isArray(record.content) ? record.content : [];
+    const toolCallIds: string[] = [];
+    const resultIds: string[] = [];
+    const blockKinds: string[] = [];
+    for (const block of blocks) {
+      // The same reads `isToolResultBlock` and `toolUseOf` apply, so placement
+      // and this line cannot disagree about what kind of block this is.
+      if (isToolUseBlock(block)) {
+        toolCallIds.push(blockCallId(toolUsePayload(block)));
+      } else if (isToolResultBlock(block)) {
+        resultIds.push(blockCallId(toolResultPayload(block)));
+      } else {
+        blockKinds.push(blockKindOf(block));
+      }
+    }
+    if (
+      blockKinds.length > 0 ||
+      (toolCallIds.length === 0 && resultIds.length === 0)
+    ) {
+      let label = `${role}[${blockKinds.join("+")}]`;
+      if (toolCallIds.length > 0) {
+        label = `${label}(tool_calls=${toolCallIds.join(",")})`;
+      }
+      labels.push(label);
+    } else if (toolCallIds.length > 0) {
+      labels.push(`${role}(tool_calls=${toolCallIds.join(",")})`);
+    }
+    for (const callId of resultIds) labels.push(`tool(${callId})`);
+  }
+  return labels.join(" -> ");
 }
 
 /**
@@ -466,6 +372,7 @@ function injectModelContext(event: BeforeModelCallEvent): void {
     }
     return;
   }
+  historyOutlines.delete(agent as object);
   try {
     historyOutlines.set(
       agent as object,
@@ -475,7 +382,11 @@ function injectModelContext(event: BeforeModelCallEvent): void {
     // The block is already spliced in and the mutation already recorded, so a
     // throw here would abort the run, leave the block in the durable history
     // and make the next call fail the not-restored guard. Observability is not
-    // allowed to cost any of that.
+    // allowed to cost any of that. The delete above runs first, so a failure
+    // leaves no outline rather than an earlier run's, and the forced-stop
+    // report then says `unrecorded` instead of naming the wrong call. Nothing
+    // is logged because this hook has no access to the run's injected logger
+    // and the default one drops debug, so a line here would go nowhere.
   }
 }
 
@@ -518,7 +429,14 @@ function placeModelContext(event: BeforeModelCallEvent): boolean {
     throw new Error("Transient AG-UI model context was not restored");
   }
   const messages = agent.messages;
-  if (!Array.isArray(messages)) return false;
+  if (!Array.isArray(messages)) {
+    // Returning `false` here would read to the caller as "this run carried no
+    // context" and drop the application's context with no error, which is the
+    // one outcome the caller explicitly refuses.
+    throw new Error(
+      "Strands agent exposes no message list for transient context",
+    );
+  }
 
   const hostIndex = contextHostIndex(messages);
   if (hostIndex >= 0) {
@@ -618,12 +536,20 @@ export function ensureTransientContextHook(agent: unknown): boolean {
   if (hookedAgents.has(agent)) return true;
   const addHook = (agent as { addHook?: unknown }).addHook;
   if (typeof addHook !== "function") return false;
-  (addHook as AddHook).call(agent, BeforeModelCallEvent, injectModelContext);
-  (addHook as AddHook).call(
-    agent,
-    AfterModelCallEvent,
-    (event: AfterModelCallEvent) => restoreTransientModelContext(event.agent),
-  );
+  // Both or neither. An injector installed without its restorer would splice
+  // the block in on every model call and never take it back out, which is the
+  // leak into durable history this module exists to prevent.
+  try {
+    (addHook as AddHook).call(agent, BeforeModelCallEvent, injectModelContext);
+    (addHook as AddHook).call(
+      agent,
+      AfterModelCallEvent,
+      (event: AfterModelCallEvent) => restoreTransientModelContext(event.agent),
+    );
+  } catch (error) {
+    hookedAgents.delete(agent);
+    throw error;
+  }
   hookedAgents.add(agent);
   return true;
 }

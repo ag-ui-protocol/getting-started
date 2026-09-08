@@ -57,6 +57,7 @@ from ag_ui_strands.agent import (
     _MODEL_CONTEXT_MUTATION_MARKER,
     StrandsAgent,
     _TransientModelContextHook,
+    _carries_tool_result,
     describe_model_bound_history,
 )
 from ag_ui_strands.config import StrandsAgentConfig
@@ -568,7 +569,11 @@ def _assert_tool_calls_answered_immediately(messages):
         assert [answer["role"] for answer in answers] == ["tool"] * len(
             expected_ids
         ), f"tool_calls at {index} not answered immediately: {_openai_role_sequence(messages)}"
-        assert [answer["tool_call_id"] for answer in answers] == expected_ids
+        # As a set: the provider requires the answers to be the messages right
+        # after the call, not to arrive in the order the calls were made.
+        assert sorted(answer["tool_call_id"] for answer in answers) == sorted(
+            expected_ids
+        )
 
 
 def _block_level_role_sequence(messages):
@@ -651,18 +656,6 @@ class TestToolContinuationProviderOrdering:
             {"text": "weather and time in SF?"},
         ]
         assert messages[1:] == _TOOL_CONTINUATION[1:]
-
-    def test_a_replay_with_no_question_gets_the_block_as_its_own_opening_turn(self):
-        """A cold continuation replays only the exchange, so nothing can absorb it."""
-        messages = copy.deepcopy(_TOOL_CONTINUATION[1:])
-        block = "Context provided by the application:\n- locale: en-US"
-
-        _inject_context(messages, block)
-
-        assert messages[0] == {"role": "user", "content": [{"text": block}]}
-        assert messages[1:] == _TOOL_CONTINUATION[1:]
-        _assert_tool_calls_answered_immediately(messages)
-        _assert_roles_alternate(messages)
 
     def test_the_block_is_withdrawn_after_the_model_call(self):
         messages = copy.deepcopy(_TOOL_CONTINUATION)
@@ -776,6 +769,9 @@ class _ProviderRuleModel(_CapturingModel):
     )
 
     async def stream(self, messages, tool_specs=None, system_prompt=None, **kwargs):
+        # Recorded before the rule runs, so a rejected call still counts and
+        # the call-count assertions report what actually happened.
+        self.calls.append(copy.deepcopy(messages))
         formatted = _openai_request_messages(messages)
         for index, message in enumerate(formatted):
             tool_calls = message.get("tool_calls")
@@ -784,6 +780,7 @@ class _ProviderRuleModel(_CapturingModel):
             answers = formatted[index + 1 : index + 1 + len(tool_calls)]
             if [answer["role"] for answer in answers] != ["tool"] * len(tool_calls):
                 raise RuntimeError(self.PROVIDER_400)
+        self.calls.pop()
         async for event in super().stream(
             messages, tool_specs=tool_specs, system_prompt=system_prompt, **kwargs
         ):
@@ -840,27 +837,19 @@ class TestModelBoundHistoryOutline:
     def _tool_result(call_id):
         return {"toolResult": {"toolUseId": call_id, "content": [{"text": "r"}]}}
 
-    def test_a_healthy_continuation_reports_both_verdicts_ok(self):
-        outline = describe_model_bound_history(
-            [
-                {"role": "user", "content": [{"text": "ctx"}, {"text": "q"}]},
-                {
-                    "role": "assistant",
-                    "content": [self._tool_use("t1"), self._tool_use("t2")],
-                },
-                {
-                    "role": "user",
-                    "content": [self._tool_result("t1"), self._tool_result("t2")],
-                },
-            ]
-        )
+    def test_it_renders_the_sequence_the_real_formatter_builds(self):
+        """A diagnostic describing a request the provider never saw is worse
+        than none, so the whole line is pinned against the formatter."""
+        messages = copy.deepcopy(_TOOL_CONTINUATION)
+        _inject_context(messages, "Context provided by the application:\n- l: en")
 
-        assert outline == (
-            "user[text+text] -> assistant(tool_calls=t1,t2) -> tool(t1) -> tool(t2)"
-            " | tool-call adjacency=ok | role alternation=ok"
-        )
+        rendered = describe_model_bound_history(messages)
+        stripped = re.sub(r"\[[^\]]*\]", "", rendered)
 
-    def test_a_wedged_message_is_reported_as_a_broken_adjacency(self):
+        assert stripped == " -> ".join(_openai_role_sequence(messages))
+
+    def test_a_wedged_message_is_visible_in_the_line(self):
+        """The whole point: the reader can see the break without re-deriving it."""
         outline = describe_model_bound_history(
             [
                 self.QUESTION,
@@ -869,61 +858,34 @@ class TestModelBoundHistoryOutline:
             ]
         )
 
-        assert "tool-call adjacency=broken at [1]" in outline
-
-    def test_results_answering_out_of_order_are_still_adjacent(self):
-        """Order among the answers is not something a provider requires."""
-        outline = describe_model_bound_history(
-            [
-                self.QUESTION,
-                {
-                    "role": "assistant",
-                    "content": [self._tool_use("t1"), self._tool_use("t2")],
-                },
-                {
-                    "role": "user",
-                    "content": [self._tool_result("t2"), self._tool_result("t1")],
-                },
-            ]
+        assert outline == (
+            "user[text] -> assistant(tool_calls=t1) -> user[text] -> tool(t1)"
         )
 
-        assert "tool-call adjacency=ok" in outline
-
-    def test_a_repeated_role_is_reported_even_when_adjacency_holds(self):
-        outline = describe_model_bound_history(
-            [{"role": "user", "content": [{"text": "ctx"}]}, self.QUESTION]
-        )
-
-        assert "tool-call adjacency=ok" in outline
-        assert "role alternation=repeats at [1]" in outline
-
-    def test_a_tool_id_carrying_punctuation_is_not_misread(self):
-        """The verdicts read the message objects, not the rendered line."""
+    def test_a_tool_id_carrying_punctuation_survives_intact(self):
         weird = "a,b)c"
         outline = describe_model_bound_history(
             [
-                self.QUESTION,
                 {"role": "assistant", "content": [self._tool_use(weird)]},
                 {"role": "user", "content": [self._tool_result(weird)]},
             ]
         )
 
-        assert "tool-call adjacency=ok" in outline
+        assert outline == f"assistant(tool_calls={weird}) -> tool({weird})"
 
-    def test_it_agrees_with_the_real_formatter_about_the_sequence(self):
-        """A diagnostic that describes a request the provider never saw is worse
-        than none, so the rendered half is pinned against the formatter."""
-        messages = copy.deepcopy(_TOOL_CONTINUATION)
-        _inject_context(messages, "Context provided by the application:\n- l: en")
+    def test_a_block_naming_a_call_with_nothing_in_it_is_still_a_tool_block(self):
+        """Placement and the outline must not disagree about a block's kind."""
+        block = {"toolResult": None}
+        message = {"role": "user", "content": [block]}
 
-        rendered = describe_model_bound_history(messages).split(" | ")[0]
-        stripped = re.sub(r"\[[^\]]*\]", "", rendered)
-
-        assert stripped == " -> ".join(_openai_role_sequence(messages))
+        assert _carries_tool_result(message) is True
+        assert describe_model_bound_history([message]) == "tool(None)"
 
     def test_the_outline_carries_no_message_text(self):
         messages = copy.deepcopy(_TOOL_CONTINUATION)
-        _inject_context(messages, "Context provided by the application:\n- token: s3cret")
+        _inject_context(
+            messages, "Context provided by the application:\n- token: s3cret"
+        )
 
         outline = describe_model_bound_history(messages)
 
@@ -1004,8 +966,8 @@ async def test_a_forced_stop_reports_the_history_the_failing_call_was_handed(
     assert forced, f"no forced-stop line: {[r.getMessage() for r in caplog.records]}"
     line = forced[0].getMessage()
     assert "model_bound_history=" in line
-    assert "tool-call adjacency=" in line
-    assert "role alternation=" in line
+    # The sequence itself, which is what says whether each call was answered.
+    assert "user[" in line
     assert "en-US" not in line, "the outline must not carry context text"
 
 
@@ -1073,3 +1035,30 @@ class TestOrdinaryTurnProviderOrdering:
             {"role": "user", "content": [{"text": block}, {"text": "hello"}]}
         ]
         _assert_roles_alternate(messages)
+
+
+@pytest.mark.asyncio
+async def test_the_block_is_withdrawn_when_the_consumer_abandons_the_run():
+    """Cancellation is the path where the after-hook never fires, so the run
+    loop's teardown is the only thing that takes the block back out."""
+    model = _CapturingModel(turns=[_tool_use_turn(("t1", "get_weather"))])
+
+    @strands_tool(name="get_weather", description="d")
+    def get_weather() -> str:  # pragma: no cover - the run is abandoned first
+        return "sunny"
+
+    template = Agent(model=model, tools=[get_weather], callback_handler=None)
+    agent = StrandsAgent(template, name="test")
+
+    stream = agent.run(
+        _run_input(
+            [Context(description="token", value="s3cret")], thread_id="t-cancel"
+        )
+    )
+    async for _ in stream:
+        break
+    await stream.aclose()
+
+    instance = agent._agents_by_thread["t-cancel"]
+    assert "s3cret" not in repr(instance.messages)
+    assert _MODEL_CONTEXT_MUTATION_MARKER not in instance.__dict__

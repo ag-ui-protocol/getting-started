@@ -687,7 +687,12 @@ jobs:
           STRANDS_FLOOR: ${{ steps.floor.outputs.version }}
         run: |
           set -euo pipefail
-          uv pip install "strands-agents==${STRANDS_FLOOR}"
+          # With the extras: the suite serializes history through the real
+          # provider formatters, which import their provider package at module
+          # level. Reinstalling bare would leave those pinned to the lock while
+          # strands itself moved, and collection would fail for reasons that
+          # have nothing to do with the adapter this lane tests.
+          uv pip install "strands-agents[openai,anthropic]==${STRANDS_FLOOR}"
           uv run --no-sync python -c \
             "import importlib.metadata as m; print('strands-agents', m.version('strands-agents'))"
 
@@ -749,7 +754,8 @@ jobs:
         # for unrelated reasons is a gate people learn to ignore.
         run: |
           set -euo pipefail
-          uv pip install --upgrade-package strands-agents strands-agents
+          uv pip install --upgrade-package strands-agents \
+            "strands-agents[openai,anthropic]"
           uv run --no-sync python -c \
             "import importlib.metadata as m; print('strands-agents', m.version('strands-agents'))"
 

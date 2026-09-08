@@ -1343,11 +1343,13 @@ export async function expectToolCallsAnsweredImmediately(
   messages.forEach((message, index) => {
     const calls = message.tool_calls;
     if (!calls || calls.length === 0) return;
-    const expected = calls.map((call) => `tool(${call.id})`);
+    const answers = sequence.slice(index + 1, index + 1 + calls.length);
+    // Sorted: the provider requires the answers to be the messages right after
+    // the call, not to arrive in the order the calls were made.
     expect(
-      sequence.slice(index + 1, index + 1 + expected.length),
+      [...answers].sort(),
       `tool_calls at ${index} are not answered immediately: ${sequence.join(" -> ")}`,
-    ).toEqual(expected);
+    ).toEqual(calls.map((call) => `tool(${call.id})`).sort());
   });
 }
 
