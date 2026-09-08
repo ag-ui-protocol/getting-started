@@ -1,6 +1,6 @@
 import { Observable, Subject } from "rxjs";
 import { HttpEvent, HttpEventType } from "../run/http-request";
-import { BaseEvent } from "@ag-ui/core";
+import { BaseEvent, EventSchemas } from "@ag-ui/core";
 import * as proto from "@ag-ui/proto";
 
 /**
@@ -64,11 +64,10 @@ export const parseProtoStream = (source$: Observable<HttpEvent>): Observable<Bas
         // Extract the message (skipping the 4-byte header)
         const message = buffer.slice(4, totalLength);
 
-        // Decode the protocol buffer message using the imported decode function
-        const event = proto.decode(message);
+        // Decode, then apply the same EventSchemas contract as the SSE path.
+        const event = EventSchemas.parse(proto.decode(message));
 
-        // Emit the parsed event
-        eventSubject.next(event);
+        eventSubject.next(event as BaseEvent);
 
         // Remove the processed message from the buffer
         buffer = buffer.slice(totalLength);
