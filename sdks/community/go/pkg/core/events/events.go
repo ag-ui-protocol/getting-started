@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 )
 
 // EventType represents the type of AG-UI event.
@@ -140,6 +142,10 @@ type BaseEvent struct {
 	EventType   EventType `json:"type"`
 	TimestampMs *int64    `json:"timestamp,omitempty"`
 	RawEvent    any       `json:"rawEvent,omitempty"`
+	// Metadata is declared here rather than per event, so every event type
+	// carries it. Reach it through GetBaseEvent on the Event interface, which
+	// stays unchanged so existing implementations keep compiling.
+	Metadata types.Metadata `json:"metadata,omitempty"`
 }
 
 // Type returns the event type
@@ -178,6 +184,10 @@ func (b *BaseEvent) ToJSON() ([]byte, error) {
 
 	if b.RawEvent != nil {
 		eventData["data"] = b.RawEvent
+	}
+
+	if len(b.Metadata) > 0 {
+		eventData["metadata"] = b.Metadata
 	}
 
 	return json.Marshal(eventData)
