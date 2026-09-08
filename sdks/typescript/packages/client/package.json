@@ -33,7 +33,6 @@
     "unlink:global": "pnpm unlink --global"
   },
   "dependencies": {
-    "@ag-ui/core": "workspace:*",
     "@ag-ui/encoder": "workspace:*",
     "@ag-ui/proto": "workspace:*",
     "@types/uuid": "^10.0.0",
@@ -44,7 +43,11 @@
     "uuid": "^11.1.0",
     "zod": "^3.22.4"
   },
+  "peerDependencies": {
+    "@ag-ui/core": ">=0.0.42"
+  },
   "devDependencies": {
+    "@ag-ui/core": "workspace:*",
     "@types/node": "^20.11.19",
     "@vitest/coverage-istanbul": "^4.0.18",
     "eslint": "^9.37.0",

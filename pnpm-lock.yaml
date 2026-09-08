@@ -1578,9 +1578,6 @@ importers:
 
   sdks/typescript/packages/client:
     dependencies:
-      '@ag-ui/core':
-        specifier: workspace:*
-        version: link:../core
       '@ag-ui/encoder':
         specifier: workspace:*
         version: link:../encoder
@@ -1609,6 +1606,9 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
     devDependencies:
+      '@ag-ui/core':
+        specifier: workspace:*
+        version: link:../core
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
         version: 0.17.4
@@ -1664,13 +1664,13 @@ importers:
 
   sdks/typescript/packages/encoder:
     dependencies:
-      '@ag-ui/core':
-        specifier: workspace:*
-        version: link:../core
       '@ag-ui/proto':
         specifier: workspace:*
         version: link:../proto
     devDependencies:
+      '@ag-ui/core':
+        specifier: workspace:*
+        version: link:../core
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
         version: 0.17.4
@@ -1695,9 +1695,6 @@ importers:
 
   sdks/typescript/packages/proto:
     dependencies:
-      '@ag-ui/core':
-        specifier: workspace:*
-        version: link:../core
       '@bufbuild/protobuf':
         specifier: ^2.2.5
         version: 2.9.0
@@ -1705,6 +1702,9 @@ importers:
         specifier: ^2.11.1
         version: 2.11.1
     devDependencies:
+      '@ag-ui/core':
+        specifier: workspace:*
+        version: link:../core
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
         version: 0.17.4
