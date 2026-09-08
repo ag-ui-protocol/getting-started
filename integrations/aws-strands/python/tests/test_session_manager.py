@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from strands.agent.state import AgentState
 from strands.hooks.registry import HookRegistry
+from strands.models.model import Model
 from strands.session import SessionManager
 
 from ag_ui_strands.session_reconcile import AG_UI_FRONTEND_CALL_IDS_STATE_KEY
@@ -1551,3 +1552,130 @@ class TestPreUnificationSessionState:
 
         assert instance.stream_prompts == []
         _assert_continuation_name_error(instance.collected_events, ["minted-1"])
+
+
+# ---------------------------------------------------------------------------
+# What the store keeps when a turn carries both an answer and a question
+# ---------------------------------------------------------------------------
+
+
+class _ToolThenTextModel(Model):
+    """Calls a tool while nothing has answered one, then answers in words."""
+
+    async def stream(self, messages, tool_specs=None, system_prompt=None, **kwargs):
+        answered = any(
+            "toolResult" in block
+            for message in messages
+            for block in message.get("content", [])
+        )
+        yield {"messageStart": {"role": "assistant"}}
+        if not answered:
+            yield {
+                "contentBlockStart": {
+                    "start": {"toolUse": {"toolUseId": "native-1", "name": "get_weather"}}
+                }
+            }
+            yield {"contentBlockDelta": {"delta": {"toolUse": {"input": "{}"}}}}
+            yield {"contentBlockStop": {}}
+            yield {"messageStop": {"stopReason": "tool_use"}}
+            return
+        yield {"contentBlockDelta": {"delta": {"text": "done"}}}
+        yield {"contentBlockStop": {}}
+        yield {"messageStop": {"stopReason": "end_turn"}}
+
+    def get_config(self):
+        return {}
+
+    def update_config(self, **kwargs):
+        pass
+
+    async def structured_output(self, *args, **kwargs):
+        raise NotImplementedError
+
+
+_WEATHER = Tool(
+    name="get_weather",
+    description="w",
+    parameters={"type": "object", "properties": {}},
+)
+
+
+class TestATurnCarryingBothAnAnswerAndAQuestion:
+    """A continuation whose payload holds a tool result and the user's next
+    question has to reach the model in a shape a provider accepts AND leave the
+    store holding what the client actually sent.
+
+    Those pull in opposite directions. The provider will not take two
+    consecutive user turns, so the model is shown the question and the answer
+    folded together; the store has to keep them apart, because this session
+    manager writes a message when it is added and never rewrites an older one,
+    so a fold applied to the durable history is a turn the store never records.
+    The fold therefore lives for one model call. This reads the store back after
+    a reload to prove it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_both_survive_a_session_reload(self, tmp_path):
+        from strands import Agent
+        from strands.session.file_session_manager import FileSessionManager
+
+        thread = "thread-answer-and-question"
+        session = FileSessionManager(session_id=thread, storage_dir=str(tmp_path))
+        adapter = StrandsAgent(
+            Agent(model=_ToolThenTextModel(), callback_handler=None),
+            name="test",
+            config=StrandsAgentConfig(session_manager_provider=lambda _i: session),
+        )
+
+        first = RunAgentInput(
+            thread_id=thread,
+            run_id="run-1",
+            state={},
+            messages=[UserMessage(id="u1", content="what is the weather")],
+            tools=[_WEATHER],
+            context=[],
+            forwarded_props={},
+        )
+        assert [e async for e in adapter.run(first)] is not None
+
+        second = RunAgentInput(
+            thread_id=thread,
+            run_id="run-2",
+            state={},
+            messages=[
+                UserMessage(id="u1", content="what is the weather"),
+                AssistantMessage(
+                    id="a1",
+                    tool_calls=[
+                        ToolCall(
+                            id="native-1",
+                            function=FunctionCall(name="get_weather", arguments="{}"),
+                        )
+                    ],
+                ),
+                ToolMessage(id="t1", tool_call_id="native-1", content="sunny, 22C"),
+                UserMessage(id="u2", content="and in Paris?"),
+            ],
+            tools=[_WEATHER],
+            context=[],
+            forwarded_props={},
+        )
+        events = [e async for e in adapter.run(second)]
+        assert [e for e in events if e.type == EventType.RUN_ERROR] == []
+
+        instance = adapter._agents_by_thread[thread]
+        reloaded = FileSessionManager(session_id=thread, storage_dir=str(tmp_path))
+        stored = reloaded.session_repository.list_messages(thread, instance.agent_id)
+        texts = [
+            block["text"]
+            for record in stored
+            for block in record.message.get("content", [])
+            if "text" in block
+        ]
+
+        # Both survive, and as separate turns: the question the client typed is
+        # not fused into an older one.
+        assert "and in Paris?" in texts
+        assert "what is the weather" in texts
+        roles = [record.message["role"] for record in stored]
+        assert roles == ["user", "assistant", "user", "user", "assistant"]

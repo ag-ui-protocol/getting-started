@@ -82,6 +82,10 @@ class _MockStrandsCore:
         self.model = MagicMock()
         self.messages = []
         self.stream_prompts = []
+        # A deep copy of the history as it stood inside the model call, which
+        # is the only place the transient reshape is observable: it is undone
+        # again before the call returns.
+        self.model_messages = []
         self.hooks = HookRegistry()
         self.session_manager = session_manager
         self._interrupt_state = InterruptStateStub()
@@ -93,7 +97,15 @@ class _MockStrandsCore:
     async def stream_async(self, prompt):
         self.stream_prompts.append(prompt)
         self._interrupt_state.resume(prompt)
+        # Strands appends a text prompt as its own user turn before the model
+        # call. Reproduced here so the hooks below see the history the real SDK
+        # would have shown them.
+        if isinstance(prompt, str) and prompt:
+            self.messages.append({"role": "user", "content": [{"text": prompt}]})
+        elif isinstance(prompt, list):
+            self.messages.append({"role": "user", "content": prompt})
         invoke_before_model_call(self.hooks, self)
+        self.model_messages.append(copy.deepcopy(self.messages))
         invoke_after_model_call(self.hooks, self)
         return
         yield  # pragma: no cover - generator marker
@@ -416,26 +428,17 @@ class TestReplayThatWouldDropTheAnswer:
             )
 
         assert _errors(events) == []
-        # The cached conversation is still there; the answer is added to its
-        # question rather than replacing it. It cannot go out as a prompt of
-        # its own here, because the history ends on the turn that answers the
-        # tool call and a user turn after that one is a shape the one-to-one
-        # provider formatters reject.
+        # The cached conversation is still there, with the answer added to it
+        # as its own turn. That is what the session store records; the model
+        # reads it folded into the question, which the class below covers.
         assert core.messages == [
+            *before,
             {
                 "role": "user",
-                "content": [
-                    {
-                        "text": (
-                            "what is the weather"
-                            "\n\nget_weather returned: sunny, 22C"
-                        )
-                    }
-                ],
+                "content": [{"text": "get_weather returned: sunny, 22C"}],
             },
-            *before[1:],
         ]
-        assert core.stream_prompts == [None]
+        assert core.stream_prompts == ["get_weather returned: sunny, 22C"]
 
     @pytest.mark.asyncio
     async def test_a_history_that_answers_itself_still_replays(self):
@@ -530,8 +533,15 @@ class TestTheCarriedAnswerBindsCleanly:
             )
 
         assert _errors(events) == []
-        assert core.stream_prompts == [None]
-        assert_binds_cleanly(provider, core.messages)
+        # The durable history is the conversation, two consecutive user turns
+        # and all; what the provider is sent is the reshaped view.
+        assert [message["role"] for message in core.messages] == [
+            "user",
+            "assistant",
+            "user",
+            "user",
+        ]
+        assert_binds_cleanly(provider, core.model_messages[0])
 
     @pytest.mark.asyncio
     async def test_the_answer_is_said_once_in_the_question(self):
@@ -546,9 +556,15 @@ class TestTheCarriedAnswerBindsCleanly:
                 ),
             )
 
-        assert describe_model_bound_history(core.messages) == (
+        assert describe_model_bound_history(core.model_messages[0]) == (
             "roles=[user, assistant, user] tool-call adjacency=ok "
             "role alternation=ok"
         )
-        said = repr(core.messages).count("get_weather returned: sunny, 22C")
-        assert said == 1, f"the answer was said {said} times: {core.messages}"
+        seen = core.model_messages[0]
+        said = repr(seen).count("get_weather returned: sunny, 22C")
+        assert said == 1, f"the answer was said {said} times: {seen}"
+        # And the reshape is undone: the store keeps the turn the client sent.
+        assert core.messages[-1] == {
+            "role": "user",
+            "content": [{"text": "get_weather returned: sunny, 22C"}],
+        }

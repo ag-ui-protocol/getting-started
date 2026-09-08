@@ -492,11 +492,13 @@ describe("a continuation whose assistant turn the request omits", () => {
     expectCompletedRun(events);
     // The whole picture, not just "the answer is in there somewhere": a replay
     // that wins here hands the model the question and nothing else, which is
-    // precisely the re-fire loop.
+    // precisely the re-fire loop. The answer rides in the question because a
+    // user turn following the one that answers the tool call is a shape the
+    // one-to-one formatters reject; the turn is still its own message in the
+    // history the store keeps, which the case below reads.
     expect(modelSawTexts(model, 1)).toEqual([
-      USER_TEXT,
+      `${USER_TEXT}\n\n${COLOR_TOOL} returned: color applied`,
       PROXY_RESULT_PLACEHOLDER,
-      `${COLOR_TOOL} returned: color applied`,
     ]);
   });
 

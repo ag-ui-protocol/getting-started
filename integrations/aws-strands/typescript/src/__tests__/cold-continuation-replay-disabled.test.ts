@@ -49,25 +49,6 @@ import {
   realStrandsAgent,
 } from "./helpers";
 
-/**
- * The messages the model was actually handed, per invocation.
- *
- * Snapshotted, not aliased: the SDK keeps mutating the same array after the
- * call, so holding the reference would report the end-of-run history rather
- * than what the model was given.
- */
-function recordModelInput(model: {
-  stream: (...a: unknown[]) => unknown;
-}): StrandsMessage[][] {
-  const seen: StrandsMessage[][] = [];
-  const original = model.stream.bind(model);
-  model.stream = (...args: unknown[]) => {
-    seen.push([...((args[0] ?? []) as StrandsMessage[])]);
-    return original(...args);
-  };
-  return seen;
-}
-
 function continuationInput(threadId: string) {
   return minimalRunInput({
     threadId,
@@ -208,7 +189,6 @@ describe("cold frontend-tool continuation with replay disabled", () => {
     const { agent, model } = realStrandsAgent([modelTurn.text("done")], {
       config: { replayHistoryIntoStrands: false },
     });
-    const seen = recordModelInput(model as never);
 
     const events: BaseEvent[] = [];
     for await (const e of agent.run(continuationInput("cold-1"))) {
@@ -216,9 +196,12 @@ describe("cold frontend-tool continuation with replay disabled", () => {
     }
 
     expectCompletedRun(events);
-    expect(seen).toHaveLength(1);
+    // `seenMessages` and not the live array: the reshape is undone once the
+    // model call returns, so anything that aliased the agent's own messages
+    // would report the restored history rather than what the model was given.
+    expect(model.seenMessages).toHaveLength(1);
 
-    const history = seen[0]!;
+    const history = model.seenMessages[0]!;
     const roles = history.map((m) => m.role);
     expect(roles).toEqual(["user", "assistant", "user"]);
 
@@ -239,7 +222,6 @@ describe("cold frontend-tool continuation with replay disabled", () => {
     const { agent, model } = realStrandsAgent([modelTurn.text("done")], {
       config: { replayHistoryIntoStrands: false },
     });
-    const seen = recordModelInput(model as never);
 
     const events: BaseEvent[] = [];
     for await (const e of agent.run(continuationInput("cold-openai"))) {
@@ -247,7 +229,7 @@ describe("cold frontend-tool continuation with replay disabled", () => {
     }
     expectCompletedRun(events);
 
-    const bound = await openAIBoundMessages(seen[0]!);
+    const bound = await openAIBoundMessages(model.seenMessages[0]!);
     expect(bound.map((message) => message.role)).toEqual([
       "user",
       "assistant",
@@ -272,7 +254,6 @@ describe("cold frontend-tool continuation with replay disabled", () => {
     const { agent, model } = realStrandsAgent([modelTurn.text("done")], {
       config: { replayHistoryIntoStrands: false },
     });
-    const seen = recordModelInput(model as never);
 
     const events: BaseEvent[] = [];
     for await (const e of agent.run(continuationInput("cold-2"))) {
@@ -284,7 +265,7 @@ describe("cold frontend-tool continuation with replay disabled", () => {
     // non-empty acknowledgement the replay path already substitutes, not as
     // the blank text block the provider rejects.
     const serialised = JSON.stringify(
-      seen[0]!.map(
+      model.seenMessages[0]!.map(
         (m) => (m as unknown as { toJSON?: () => unknown }).toJSON?.() ?? m,
       ),
     );

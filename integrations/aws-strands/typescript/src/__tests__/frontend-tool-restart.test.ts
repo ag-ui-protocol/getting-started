@@ -45,7 +45,9 @@ import {
   expectCompletedRun,
   expectDurableRecovery,
   expectNoRunError,
+  expectRolesAlternate,
   expectStoreMatchesMemory,
+  expectToolCallsAnsweredImmediately,
   historyTexts,
   IDLE_CHECKPOINT,
   liveCheckpoint,
@@ -2071,16 +2073,7 @@ describe("a continuation whose reconcile declines only some results", () => {
       {
         store: {
           messages: [
-            // The prompt travels inside the question rather than after the
-            // trailing `toolResult` turn or inside it: after it is two
-            // consecutive user turns, which the one-to-one formatters reject,
-            // and inside it puts text ahead of the tool messages, which the
-            // splitting formatters reject. The turn goes out reshaped, so it
-            // persists that way too.
-            {
-              role: "user",
-              blocks: [`text:make it red\n\n${DECLINED_LINE}`],
-            },
+            { role: "user", blocks: ["text:make it red"] },
             {
               role: "assistant",
               blocks: [
@@ -2095,6 +2088,12 @@ describe("a continuation whose reconcile declines only some results", () => {
                 `toolResult:#${DECLINED_ID}`,
               ],
             },
+            // Its own message, and durable. The model reads it folded into the
+            // question, because a user turn following the one that answers the
+            // tool call is a shape the one-to-one formatters reject, but that
+            // reshape lives for one model call: what the store keeps is the
+            // conversation as it happened.
+            { role: "user", blocks: [`text:${DECLINED_LINE}`] },
             { role: "assistant", blocks: ["text:The color is now red."] },
           ],
           toolResults: [
@@ -2487,16 +2486,12 @@ describe("a reconcile whose snapshot write the store refuses", () => {
       {
         store: {
           messages: [
-            // No turn of its own: the prompt travels inside the question,
-            // because a user turn after the trailing `toolResult` turn is two
-            // consecutive user turns and text inside that turn goes out ahead
-            // of the tool message answering the call.
-            {
-              role: "user",
-              blocks: [`text:make it red\n\n${TOOL} returned: color applied`],
-            },
+            { role: "user", blocks: ["text:make it red"] },
             { role: "assistant", blocks: [`toolUse:${TOOL}#${NATIVE_ID}`] },
             { role: "user", blocks: [`toolResult:#${NATIVE_ID}`] },
+            // Its own message, and durable; see the partial-decline case above
+            // for why the model still reads it folded into the question.
+            { role: "user", blocks: [`text:${TOOL} returned: color applied`] },
             { role: "assistant", blocks: ["text:The color is now red."] },
           ],
           // The stub and its call id both survive, so a later run can still
@@ -3196,5 +3191,64 @@ describe("a proxy left over from an earlier turn", () => {
 
     expect(native.calls).toHaveLength(1);
     expect(resultContents(events)).toEqual([JSON.stringify({ ran: TOOL })]);
+  });
+});
+
+/**
+ * A continuation whose payload holds a tool result and the user's next
+ * question has to reach the model in a shape a provider accepts AND leave the
+ * store holding what the client actually sent.
+ *
+ * Those pull in opposite directions. No provider will take two consecutive
+ * user turns, so the model is shown the question and the trailing turn folded
+ * together; the store has to keep them apart, or a client that reloads the
+ * thread finds its own question fused into an older message. The fold
+ * therefore lives for one model call. This reads the store back after a
+ * restart to prove it, and is the TypeScript half of the Python suite's
+ * `TestATurnCarryingBothAnAnswerAndAQuestion`.
+ */
+describe("a turn carrying both an answer and a question", () => {
+  it("keeps both as their own messages across a restart", async () => {
+    const dir = storageDir();
+    const first = bootProcess(dir, CALLS_FRONTEND_TOOL);
+    expectNoRunError(await collect(first.agent, firstRun()), "first run");
+
+    const second = bootProcess(dir, ANSWERS);
+    const events = await collect(
+      second.agent,
+      minimalRunInput({
+        runId: "run-2",
+        messages: [
+          { id: "u1", role: "user", content: "make it red" } as never,
+          {
+            id: "t1",
+            role: "tool",
+            toolCallId: NATIVE_ID,
+            content: "color applied",
+          } as never,
+          { id: "u2", role: "user", content: "now make it blue" } as never,
+        ],
+        tools: CLIENT_TOOLS,
+      }),
+    );
+    expectNoRunError(events, "the answer-and-question turn");
+
+    // The model read them folded, which is the only shape every formatter
+    // takes.
+    expectSaid(modelSawTexts(second.model, 0), "now make it blue");
+    expectToolCallsAnsweredImmediately(second.model.seenMessages[0]!);
+    expectRolesAlternate(second.model.seenMessages[0]!);
+
+    // The store is read back on its own terms. The client's question is
+    // there, and it is still its own message.
+    const persisted = persistedSnapshot(dir).data.messages;
+    const texts = persisted.flatMap((message) =>
+      ((message as { content?: unknown[] }).content ?? []).flatMap((block) => {
+        const text = (block as { text?: unknown }).text;
+        return typeof text === "string" ? [text] : [];
+      }),
+    );
+    expect(texts).toContain("now make it blue");
+    expect(texts).toContain("make it red");
   });
 });

@@ -3798,48 +3798,15 @@ export class StrandsAgent {
         }
       }
 
-      // Replay disabled, cold agent, continuation run: the seed already ends
-      // with the user-role toolResult turn, so handing the synthetic
-      // continuation prompt to `stream()` would have Strands append a SECOND
-      // user message. The provider-bound roles become user -> assistant ->
-      // user -> user, which Bedrock refuses for failing role alternation. The
-      // prompt therefore rides inside an existing user turn, and which turn
-      // that is has to be one that carries no tool result: a turn carrying
-      // both binds as assistant(tool_calls) -> user(text) -> tool(result) on
-      // every splitting formatter, which OpenAI refuses for the mirror-image
-      // reason. `placeUserText` owns that choice, and the context hook in
-      // `model-context.ts` goes through the same function. Only reached on the
-      // opt-out; the documented default returns above with
-      // `invokeArgs = undefined`.
-      if (
-        !replayHistory &&
-        !resumeSubmitted &&
-        typeof invokeArgs === "string"
-      ) {
-        const seeded = (strandsAgent as { messages?: unknown[] }).messages;
-        const tail = seeded?.[seeded.length - 1];
-        const tailContent = (tail as { content?: unknown } | undefined)
-          ?.content;
-        const tailCarriesToolResult =
-          (tail as { role?: string } | undefined)?.role === "user" &&
-          Array.isArray(tailContent) &&
-          tailContent.some(isToolResultBlock);
-        // No question to ride in means no safe placement: the history is an
-        // orphan tool result nothing in it answers, which is already a shape a
-        // provider rejects, and adding a user turn beside it only breaks role
-        // alternation as well. Left as the prompt it was, so this path changes
-        // nothing about a history it cannot repair.
-        if (tailCarriesToolResult && latestQuestionIndex(seeded) >= 0) {
-          // A postscript, not a preamble: the prompt says what the tools
-          // returned, so it reads after the question rather than before it.
-          placeUserText(seeded, invokeArgs, "append");
-          this._log.debug(
-            `${LOG_PREFIX} Continuation prompt placed into the seeded ` +
-              `history: ${describeModelBoundHistory(seeded)}`,
-          );
-          invokeArgs = undefined;
-        }
-      }
+      // Nothing reshapes the history here. A continuation whose payload
+      // carries both a tool result and the user's next question ends the
+      // conversation on `user(toolResult)` then the prompt Strands appends,
+      // which is two consecutive user messages and a shape the one-to-one
+      // formatters reject. That is repaired for the length of each model call
+      // by the hook in `model-context.ts` and put back afterwards, rather than
+      // here: the client's turn has to reach the session store as its own
+      // message, and a turn this loop folded away before `stream()` is a turn
+      // the store never records.
 
       // Native ids already in this thread's history, captured after any history
       // replacement above and before the stream appends this run's own calls.
@@ -3870,7 +3837,11 @@ export class StrandsAgent {
       // the app asked the model to know. Python raises the same way at the
       // same point, after RUN_STARTED, so the client sees a RUN_ERROR.
       const contextBlock = formatAguiContext(modelContext);
-      if (contextBlock && !ensureTransientContextHook(strandsAgent)) {
+      // Installed whether or not there is context: the same hook folds a
+      // trailing user turn the provider would refuse. Only a non-empty block
+      // makes a missing registry fatal, because only that drops something the
+      // app asked the model to know.
+      if (!ensureTransientContextHook(strandsAgent) && contextBlock) {
         throw new Error(
           "Strands agent does not expose a hook registry for transient context",
         );
