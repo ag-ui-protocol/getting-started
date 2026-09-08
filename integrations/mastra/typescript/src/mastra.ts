@@ -12,6 +12,7 @@ import type {
   ReasoningMessageEndEvent,
   ReasoningEndEvent,
   RunAgentInput,
+  RunErrorEvent,
   RunFinishedEvent,
   RunFinishedInterruptOutcome,
   RunStartedEvent,
@@ -710,6 +711,42 @@ export class MastraAgent extends AbstractAgent {
     const pendingInterrupts: Interrupt[] = [];
 
     return new Observable<BaseEvent>((subscriber) => {
+      /*
+       * A failed run still has to terminate the AG-UI stream.
+       *
+       * RUN_ERROR is the terminal event, mirroring LangGraph and AWS Strands, and it goes out
+       * before the failure is surfaced on the rxjs error channel that callers already depend on.
+       * Cancellation is deliberately not routed through here: an aborted run is settled by the
+       * abort listener, and reporting it as a run error would tell the caller their own stop was
+       * a failure.
+       */
+      const failRun = (error: unknown) => {
+        if (subscriber.closed) return;
+        subscriber.next({
+          type: EventType.RUN_ERROR,
+          message:
+            error instanceof Error
+              ? error.message
+              : String(error ?? "Unknown error"),
+        } as RunErrorEvent);
+        /*
+         * Yield before erroring, so RUN_ERROR is actually delivered.
+         *
+         * The client applies events through `concatMap(async …)`, and an rxjs error notification
+         * does not queue behind that — it propagates immediately and discards the async work still
+         * in flight. Erroring in the same tick as the `next` above therefore destroys the terminal
+         * event on its way through the pipeline: a caller on `runAgent` sees the run fail with no
+         * RUN_ERROR, while a test subscribing to `run()` directly sees both and looks fine.
+         *
+         * A macrotask rather than a microtask, because the subscriber callbacks the pipeline awaits
+         * settle across several microtasks and a single `queueMicrotask` can still land first.
+         */
+        setTimeout(() => {
+          if (subscriber.closed) return;
+          subscriber.error(error);
+        }, 0);
+      };
+
       // Cancellation channel for THIS subscription. The teardown below fires it
       // so unsubscribing (or abortRun()) propagates into the Mastra stream.
       const abortController = new AbortController();
@@ -833,7 +870,7 @@ export class MastraAgent extends AbstractAgent {
                 ? JSON.parse(forwardedCommand.interruptEvent)
                 : forwardedCommand.interruptEvent;
           } catch (err) {
-            subscriber.error(
+            failRun(
               new Error("Invalid interruptEvent: malformed JSON", {
                 cause: err,
               }),
@@ -843,7 +880,7 @@ export class MastraAgent extends AbstractAgent {
 
           // Validate required fields for resume
           if (!interruptEvent?.toolCallId || !interruptEvent?.runId) {
-            subscriber.error(
+            failRun(
               new Error("Invalid interruptEvent: missing toolCallId or runId"),
             );
             return;
@@ -932,7 +969,7 @@ export class MastraAgent extends AbstractAgent {
                 typeof response !== "object" ||
                 !response.fullStream
               ) {
-                subscriber.error(
+                failRun(
                   new Error(
                     "resumeStream returned no valid response (missing fullStream)",
                   ),
@@ -945,7 +982,7 @@ export class MastraAgent extends AbstractAgent {
                 {
                   ...callbacks,
                   onError: (error) => {
-                    subscriber.error(error);
+                    failRun(error);
                   },
                 },
                 abortController.signal,
@@ -970,7 +1007,7 @@ export class MastraAgent extends AbstractAgent {
                 abortController.signal,
               ) as unknown as Partial<RemoteResumableAgent>;
               if (typeof remoteAgent.resumeStream !== "function") {
-                subscriber.error(
+                failRun(
                   new Error(
                     "Resume from interrupt requires a @mastra/client-js version that supports agent.resumeStream(); please upgrade @mastra/client-js",
                   ),
@@ -987,7 +1024,7 @@ export class MastraAgent extends AbstractAgent {
                 !response ||
                 typeof response.processDataStream !== "function"
               ) {
-                subscriber.error(
+                failRun(
                   new Error(
                     "resumeStream returned no valid response (missing processDataStream)",
                   ),
@@ -1000,7 +1037,7 @@ export class MastraAgent extends AbstractAgent {
                 this.createChunkProcessor({
                   ...callbacks,
                   onError: (error) => {
-                    subscriber.error(error);
+                    failRun(error);
                   },
                 });
 
@@ -1028,7 +1065,7 @@ export class MastraAgent extends AbstractAgent {
             // Aborting the fetch rejects here. That is a cancellation, not a
             // failure: the run is settled by the abort listener above.
             if (abortController.signal.aborted) return;
-            subscriber.error(error);
+            failRun(error);
           }
           return;
         }
@@ -1041,7 +1078,7 @@ export class MastraAgent extends AbstractAgent {
         try {
           await this.syncInputStateToWorkingMemory(input);
         } catch (error) {
-          subscriber.error(error);
+          failRun(error);
           return;
         }
 
@@ -1061,7 +1098,7 @@ export class MastraAgent extends AbstractAgent {
             {
               ...streamCallbacks,
               onError: (error) => {
-                subscriber.error(error);
+                failRun(error);
               },
               onRunFinished: async (traceId, usage) => {
                 await this.emitWorkingMemorySnapshot(
@@ -1083,13 +1120,12 @@ export class MastraAgent extends AbstractAgent {
             abortController.signal,
           );
         } catch (error) {
-          subscriber.error(error);
+          failRun(error);
         }
       };
 
       run().catch((err) => {
-        if (subscriber.closed) return;
-        subscriber.error(err);
+        failRun(err);
       });
 
       // Teardown runs on unsubscribe AND on normal completion (RxJS closes the
