@@ -56,6 +56,7 @@ from ag_ui_strands.session_reconcile import (
     AG_UI_TOOL_CALL_MAP_STATE_KEY,
     active_proxy_placeholder_ids,
 )
+from tests.error_code_table import assert_contract_error
 from tests.interrupt_state_stub import InterruptStateStub
 from tests.hook_helpers import invoke_after_model_call, invoke_before_model_call
 
@@ -201,7 +202,7 @@ def _snapshot_mutable_core_state(core: _MockStrandsCore) -> dict:
 def _assert_single_run_error(events: list, code: str) -> None:
     errors = [event for event in events if event.type == EventType.RUN_ERROR]
     assert len(errors) == 1
-    assert errors[0].code == code
+    assert_contract_error(errors[0], code)
     assert not any(event.type == EventType.RUN_FINISHED for event in events)
 
 
@@ -597,6 +598,65 @@ async def test_resume_preflight_rejects_invalid_batch_before_any_mutation(case):
     expected_code = (
         "UNKNOWN_INTERRUPT_ID" if case == "inactive" else "INTERRUPT_RESUME_ERROR"
     )
+    _assert_single_run_error(events, expected_code)
+    assert core.stream_prompts == []
+    assert _snapshot_mutable_core_state(core) == before
+
+
+@pytest.mark.parametrize(
+    ("expires_at", "expected_code"),
+    [
+        pytest.param("2000-01-01T00:00:00Z", "INTERRUPT_EXPIRED", id="past-zulu"),
+        pytest.param(
+            "2000-01-01T00:00:00+00:00", "INTERRUPT_EXPIRED", id="past-offset"
+        ),
+        pytest.param("2000-01-01T00:00:00", "INTERRUPT_EXPIRED", id="past-naive"),
+        pytest.param(
+            "2000-01-01T02:00:00+03:00", "INTERRUPT_EXPIRED", id="past-shifted"
+        ),
+        pytest.param("2999-01-01T00:00:00Z", None, id="future-zulu"),
+        pytest.param("2999-01-01T00:00:00+00:00", None, id="future-offset"),
+        pytest.param("2999-01-01T00:00:00", None, id="future-naive"),
+        pytest.param("tomorrow", "INTERRUPT_RESUME_ERROR", id="unreadable"),
+        pytest.param("", None, id="blank-is-no-expiry"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_resume_reads_every_expiry_form_an_integrator_can_supply(
+    expires_at, expected_code
+):
+    """``expiresAt`` is documented as ISO-8601, which admits more than one form.
+
+    A trailing ``Z`` and an offsetless timestamp are both ordinary things to
+    store, and neither may end the run with a traceback: a live interrupt
+    resumes, a stale one is refused with INTERRUPT_EXPIRED, and a string that
+    is not a timestamp at all is refused with INTERRUPT_RESUME_ERROR.
+    """
+    core = _MockStrandsCore(interrupts=[StrandsInterrupt(id="open", name="confirm")])
+    agent = _make_base_agent()
+    agent._pending_interrupts_by_thread["thread-1"] = {
+        "open": Interrupt(id="open", reason="confirm", expires_at=expires_at)
+    }
+    before = _snapshot_mutable_core_state(core)
+    resume = [ResumeEntry(interrupt_id="open", status="resolved", payload=True)]
+
+    with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
+        events = await _collect_events(agent, _make_run_input(resume=resume))
+
+    if expected_code is None:
+        assert not any(event.type == EventType.RUN_ERROR for event in events)
+        assert core.stream_prompts == [
+            [
+                {
+                    "interruptResponse": {
+                        "interruptId": "open",
+                        "response": {"response": True},
+                    }
+                }
+            ]
+        ]
+        return
+
     _assert_single_run_error(events, expected_code)
     assert core.stream_prompts == []
     assert _snapshot_mutable_core_state(core) == before

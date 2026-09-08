@@ -4,8 +4,15 @@ This package exposes a lightweight wrapper that lets any `strands.Agent` speak t
 
 ## Prerequisites
 
-- Python 3.10+
-- `poetry` (recommended) or `pip`
+- Python 3.10 to 3.14. `pyproject.toml` declares `requires-python = ">=3.10, <3.15"`,
+  so the upper bound is enforced at install time, not just documented.
+- `strands-agents>=1.15.0`, which is the declared floor. Some behaviour described
+  below is release-dependent: the SDK's own concurrency lock arrives in 1.22.0 and
+  the citations demo needs 1.35.0, while the Gemini guardrail hint and the release
+  that turned a provider failure from `STRANDS_ERROR` into `STRANDS_FORCE_STOP`
+  were never bisected. [ARCHITECTURE.md](../ARCHITECTURE.md) records which
+  releases each observation was made against.
+- `uv` (the package is built with hatchling and locked by `uv.lock`) or `pip`. The example server under `examples/` is a separate Poetry project and is installed with `poetry install`.
 - A model key for the provider `MODEL_PROVIDER` selects. It defaults to
   `openai`, which requires `OPENAI_API_KEY`; `anthropic` and `gemini` need
   `ANTHROPIC_API_KEY` and `GOOGLE_API_KEY` instead.
@@ -54,7 +61,7 @@ It exposes:
 | `/backend-tool-rendering`   | Backend tool rendering demo                    |
 | `/shared-state`             | Shared recipe state                            |
 | `/agentic-generative-ui`    | Agentic UI with PredictState                   |
-| `/human-in-the-loop`        | Frontend proxy tool with halt-after-call       |
+| `/human-in-the-loop`        | Frontend tool parked in a native Strands wait  |
 | `/interrupt`                | Tool pauses to ask the user for a meeting time |
 | `/predictive-state-updates` | Document editor driven by streaming tool args  |
 | `/tool-based-generative-ui` | Frontend-rendered tool (`generate_haiku`)      |
@@ -70,20 +77,61 @@ This is the easiest way to test multiple flows locally. Each route still follows
 The integration has three main layers:
 
 - **StrandsAgent** – wraps `strands.Agent.stream_async`. It translates Strands events into AG-UI events (text chunks, tool calls, PredictState, snapshots, reasoning/thinking, multi-agent steps, etc.).
-- **Configuration** – `StrandsAgentConfig` + `ToolBehavior` + `PredictStateMapping` let you describe tool-specific quirks declaratively (skip message snapshots, emit state, stream args, send confirm actions, etc.).
+- **Configuration** – `StrandsAgentConfig` + `ToolBehavior` + `PredictStateMapping` let you describe tool-specific quirks declaratively. `ToolBehavior`'s fields are `skip_messages_snapshot`, `continue_after_frontend_call`, `stop_streaming_after_result`, `interrupt_on_call`, `predict_state`, `args_streamer`, `state_from_args`, `state_from_result`, `custom_result_handler` and `tool_stream_event_handler`; `StrandsAgentConfig` adds `tool_behaviors`, `state_context_builder`, `thread_agent_kwargs`, `session_manager_provider`, `emit_messages_snapshot`, `replay_history_into_strands`, `a2ui` and `url_fetch_policy`.
 - **Transport helpers** – `create_strands_app` and `add_strands_fastapi_endpoint` expose the agent via SSE. They are thin shells over the shared `ag_ui.encoder.EventEncoder`.
 
 See [ARCHITECTURE.md](../ARCHITECTURE.md) for diagrams and a deeper dive.
 
+## Per-thread agents: hooks and plugins
+
+The wrapper does not run the agent you hand it. That one is a template: the
+adapter reads its constructor settings back off the instance and builds a fresh
+`strands.Agent` per `thread_id`, so one conversation cannot see another's
+history. Most settings survive that rebuild automatically.
+
+Two do not, because Strands consumes them during construction rather than
+keeping the list you passed. Hooks become a `HookRegistry`, and plugins are run
+against the agent that received them and recorded in a registry bound to it.
+Neither can be read back or handed to a second agent, so a template is the one
+place they will not work. Pass them to the wrapper instead and every per-thread
+agent gets its own:
+
+```python
+agui_agent = StrandsAgent(
+    agent=strands_agent,
+    name="my_agent",
+    hooks=[MyHookProvider()],
+    plugins=[AgentSkills(skills="./skills/")],
+)
+```
+
+Set either on the template and the adapter logs a warning naming the setting
+the first time a thread is built, rather than dropping it in silence. For a
+value that has to differ per thread, build it in
+`StrandsAgentConfig.thread_agent_kwargs`, which runs per request and wins over
+both routes above.
+
+| Scenario                                                | Support boundary                                                                                                                                                        |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `hooks=[...]`                                           | Supported on every release this package supports.                                                                                                                        |
+| `plugins=[...]`                                         | Requires `strands-agents >= 1.28.0`, the release that added `plugins` to `Agent`. On an older release the wrapper raises `TypeError` when it is constructed, not on the first request. |
+| `hooks` / `plugins` with a multi-agent orchestrator     | Ignored. An orchestrator is invoked directly, so there is no per-thread agent to attach them to.                                                                          |
+
 ## Key Files
 
-| File                            | Description                                                                     |
-| ------------------------------- | ------------------------------------------------------------------------------- |
-| `src/ag_ui_strands/agent.py`    | Core wrapper translating Strands streams into AG-UI events                      |
-| `src/ag_ui_strands/config.py`   | Config primitives (`StrandsAgentConfig`, `ToolBehavior`, `PredictStateMapping`) |
-| `src/ag_ui_strands/endpoint.py` | FastAPI endpoint helper                                                         |
-| `src/ag_ui_strands/utils.py`    | `create_strands_app`, multimodal conversion, and `UrlFetchPolicy`               |
-| `examples/server/api/*.py`      | Ready-to-run demo apps                                                          |
+| File                                           | Description                                                                     |
+| ---------------------------------------------- | ------------------------------------------------------------------------------- |
+| `src/ag_ui_strands/agent.py`                   | Core wrapper translating Strands streams into AG-UI events                      |
+| `src/ag_ui_strands/config.py`                  | Config primitives (`StrandsAgentConfig`, `ToolBehavior`, `PredictStateMapping`) |
+| `src/ag_ui_strands/endpoint.py`                | FastAPI endpoint helper                                                         |
+| `src/ag_ui_strands/utils.py`                   | `create_strands_app`, multimodal conversion, and `UrlFetchPolicy`               |
+| `src/ag_ui_strands/citations.py`               | Provider citations normalised onto the message they annotate                    |
+| `src/ag_ui_strands/a2ui_tool.py`               | A2UI tool injection and the validate-and-retry recovery loop                    |
+| `src/ag_ui_strands/session_reconcile.py`       | Frontend-result reconciliation against a persisted session                      |
+| `src/ag_ui_strands/client_proxy_tool.py`       | Frontend tools registered into the Strands tool registry                        |
+| `src/ag_ui_strands/template_tools.py`          | Per-request filter over the template agent's own tools                          |
+| `src/ag_ui_strands/frontend_tool_interrupt.py` | The native checkpoint a waiting frontend tool parks in                          |
+| `examples/server/api/*.py`                     | Ready-to-run demo apps                                                          |
 
 ## Amazon Bedrock AgentCore considerations
 
@@ -96,14 +144,14 @@ If you are planning to deploy your agent into Amazon Bedrock AgentCore (AC), ple
 To implement the path mentioned above, you can use the helper function `create_strands_app` and pass the agent interaction path and the ping path as shown below. Pass `origins` too: omitting every CORS option selects the deprecated implicit wildcard and emits a `FutureWarning`.
 
 ```python
-    create_strands_app(agui_agent, "/invocations", "/ping", origins=["https://app.example"])
+create_strands_app(agui_agent, "/invocations", "/ping", origins=["https://app.example"])
 ```
 
 You can also use the helper functions `add_strands_fastapi_endpoint` and `add_ping` for adding the mentioned paths to a FastAPI app that you are creating separately:
 
 ```python
-    add_strands_fastapi_endpoint(app, agent, "/invocations")
-    add_ping(app, "/ping")
+add_strands_fastapi_endpoint(app, agui_agent, "/invocations")
+add_ping(app, "/ping")
 ```
 
 ## Securing the endpoint
@@ -162,6 +210,12 @@ agentcore configure -e my_agui_server.py --protocol AGUI
 agentcore deploy
 ```
 
+The starter toolkit's repository says its CLI is superseded by `@aws/agentcore`,
+which carries the same `--protocol AGUI` value under its own command names, while
+the AG-UI deployment guide linked below still gives the starter-toolkit commands.
+Where the two disagree, that guide is the one to follow: it is AWS's own
+instructions for this protocol.
+
 For the complete deployment walkthrough, see [Deploy AG-UI servers in AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-agui.html).
 
 ## Request-scoped invocation state
@@ -198,11 +252,106 @@ trusted values from client-controlled `forwarded_props`; derive them from
 authenticated request context instead. Custom routes can pass the same state
 directly with `agent.run(input_data, invocation_state={...})`.
 
+## Per-request tool filtering
+
+`StrandsAgentConfig.template_tools_provider` decides which of the template
+agent's tools one request may see. It is called once per request with that
+request's `RunAgentInput`, so the answer can vary turn by turn on a single
+thread:
+
+```python
+from ag_ui.core import RunAgentInput
+from ag_ui_strands import StrandsAgent, StrandsAgentConfig
+
+READ_ONLY = ["search_docs", "get_order"]
+
+def tools_for(input_data: RunAgentInput):
+    # Derive the role from authenticated request context in production;
+    # forwarded_props is client-controlled.
+    if (input_data.forwarded_props or {}).get("role") == "admin":
+        return None  # no filtering: every template tool stays available
+    return READ_ONLY
+
+agui_agent = StrandsAgent(
+    strands_agent,
+    name="assistant",
+    config=StrandsAgentConfig(template_tools_provider=tools_for),
+)
+```
+
+Return the tools themselves or their names. `None` declines to filter; an empty
+list is a real answer and withholds all of them. A name the template does not
+contribute is dropped with a warning, because the hook narrows the wrapped
+agent's tools and cannot add one. The provider may be async.
+
+Two boundary rules follow from that:
+
+- **The return value is checked, not merely iterated.** A string and a mapping
+  are both iterable and both mean something other than what iterating them
+  produces: a bare name would come apart into characters, and a permission map
+  would have its keys read as an allow-list while its values went unread, so a
+  name mapped to `False` would still be allowed. Both are refused with
+  `TEMPLATE_TOOLS_PROVIDER_ERROR`. Lists, tuples, sets and generators are all
+  accepted, and a generator that raises partway through iteration reports the
+  same code, because the answer is read inside the same guarded step that calls
+  the provider.
+- **The filter reaches the registry, not only the advertised tool specs.** A
+  model that calls a withheld name anyway, primed by a stale turn or by the
+  visible history, is refused by the dispatcher rather than served.
+
+The filter is applied to the tool registry the thread's live Strands `Agent`
+already owns, the same way client-declared tools are synchronised, and never by
+rebuilding that agent. The per-thread instance holds the thread's
+`SessionManager`, its native interrupt checkpoint and its history, so replacing
+it to change a tool list would discard a conversation and any approval waiting
+inside it.
+
+Three consequences follow from that:
+
+- **A parked call is never orphaned.** A tool in the batch a live interrupt
+  checkpoint would resume stays registered whatever the provider returns: the
+  human's answer is about to be routed back into that batch, and an absent tool
+  turns it into a "tool not found" the model re-fires. Filtering resumes once
+  the pause closes. This is the rule `sync_proxy_tools` already applies to a
+  proxy parked in a frontend-tool interrupt.
+- **History is never rewritten.** A filtered-out tool's earlier calls and
+  results stay in the thread's messages, so the model can still read what it
+  did with a tool it can no longer call.
+- **A failure is terminal.** If the provider raises, the run yields `RUN_ERROR`
+  with code `TEMPLATE_TOOLS_PROVIDER_ERROR` and stops, matching
+  `thread_agent_kwargs`. A filter that failed open would hand the model exactly
+  the tools the caller meant to withhold.
+
+The narrowing is also re-applied inside the run, once a tool batch has been
+dispatched. The exemption above keeps a denied tool registered so a human's
+answer can reach it, and Strands then carries on in the same run: it
+re-dispatches the batch and makes its next model call from the same registry,
+which would otherwise still be advertising what the request denied. The two
+bridges hook different SDK events for this, because the SDKs read the tool
+specs at different points relative to the events they dispatch; the effect is
+the same on both.
+
+Scope is the template's own tools. Client-declared tools on
+`RunAgentInput.tools` are re-synchronised from the request every turn already,
+so a caller that wants fewer of those sends fewer. The hook is not applied on
+the multi-agent orchestrator path, which has no template registry to filter.
+
+One deployment note. With an external per-thread agent map, a request-scoped
+wrapper is rebuilt per request while the cached thread agent keeps the registry
+it already had. If the template's tools are built per request too, the adapter
+is handed equivalent but not identical objects, so which registry entry belongs
+to the template is decided by name plus "not one of the adapter's other
+producers" rather than by object identity alone. Stable tool objects are still
+the simpler thing to hand it.
+
 ## Human-in-the-loop (native Strands interrupts)
 
-Python frontend tools explicitly configured with
+Python frontend tools configured with
 `ToolBehavior(continue_after_frontend_call=False)` wait in Strands' native
-interrupt checkpoint. This is an internal implementation detail; the AG-UI
+interrupt checkpoint. Note that `False` is that field's default, so a frontend
+tool given a `ToolBehavior` for any other reason waits too. Only
+`continue_after_frontend_call=True`, or no `ToolBehavior` at all, keeps the
+legacy placeholder path. This is an internal implementation detail; the AG-UI
 client contract remains `TOOL_CALL_*` -> successful `RUN_FINISHED` -> an
 ordinary `ToolMessage` on the next request. The client does not receive a
 frontend-tool interrupt outcome, does not send `resume[]`, and does not receive
@@ -226,8 +375,8 @@ checkpoint only to correlate the client's `ToolMessage` by the native Strands
 `toolUseId`, which is also the AG-UI `tool_call_id`. Missing, blank, duplicate,
 or reused native IDs fail loudly; affected model providers should upgrade to a
 Strands/provider version that supplies stable IDs or avoid parallel frontend
-calls. Unconfigured tools and explicit `True` retain the legacy placeholder
-path. This native frontend-wait bridge is currently Python-specific; it does
+calls. A tool with no `ToolBehavior`, and one whose
+`continue_after_frontend_call` is `True`, retain the legacy placeholder path. This native frontend-wait bridge is currently Python-specific; it does
 not claim TypeScript parity.
 
 Tools that pause with `tool_context.interrupt(...)` are bridged to the AG-UI
@@ -236,28 +385,63 @@ interrupt round-trip:
 - When a run pauses, it finishes with `RUN_FINISHED` carrying a
   `RunFinishedInterruptOutcome` (`outcome.type == "interrupt"`) and one AG-UI
   `Interrupt` per Strands interrupt. Generic native interrupts preserve the
-  Strands name as the AG-UI reason and the free-form Strands reason under
-  `metadata.reason`. Tools configured with `ToolBehavior(interrupt_on_call=True)`
-  instead emit a `tool_call` approval interrupt with an `approved` response
-  schema. Applies to server-executed tools only. For client-provided tools, gate
+  Strands name as the AG-UI reason, falling back to `"interrupt"` when the
+  interrupt carries no name, and the free-form Strands reason under
+  `metadata.reason`. The fallback is not quite the same on the two bridges: this
+  one reads a blank name as no name and substitutes `"interrupt"`, while
+  TypeScript substitutes only for a genuinely absent one and passes a blank
+  through. Tools configured with `ToolBehavior(interrupt_on_call=True)`
+  instead emit a `tool_call` approval interrupt, which always carries a
+  `message`, an `approved` `response_schema`, and
+  `tool_name` / `tool_input` / `strandsName` in `metadata`, the same keys the
+  TypeScript package publishes. Two keys are conditional: `tool_call_id`, which
+  an approval raised without a native tool use has none of, and `reason`, which
+  is published only when the native reason carried nothing the other keys could
+  hold. Published `tool_input` is
+  a detached copy, so inspecting it cannot reach into the SDK's live checkpoint.
+  The `ag_ui:tool_call:` name prefix is **reserved** for this adapter's approval
+  hook; an interrupt raised anywhere else under that prefix is classified,
+  schema-checked and answered as an approval.
+  Applies to server-executed tools only. For client-provided tools, gate
   execution in the client — define the tool with a `render` that calls `respond`,
   not a `handler` — since the tool runs in the browser and the adapter has already
   finished the public AG-UI run.
 - To resume, the client sends the next `RunAgentInput` on the **same
   `thread_id`** with `resume=[ResumeEntry(interrupt_id=..., status="resolved",
-payload=...)]`. Strands' resume gate is truthiness-based (`if
-interrupt_.response:`), so a falsy `payload` (`None`, `False`, `""`, `0`,
-  `[]`, `{}`) would otherwise re-raise the same interrupt and re-run the tool
-  body forever. To prevent that, `interrupt()` does **not** return `payload`
-  directly — it returns a truthy envelope: `{"response": payload}` on
-  resolve, `{"cancelled": True}` on cancel. Destructure it with
-  `.get("response")` / `.get("cancelled")`. Adapter-managed
-  `interrupt_on_call` approvals are the exception: their
-  `{"approved": bool}` payload is passed through directly.
-- For generic native interrupts, `status="cancelled"` resumes the tool with
-  the sentinel `{"cancelled": True}` (`ag_ui_strands.INTERRUPT_CANCELLED`)
-  so it can treat the pause as a denial. An adapter-managed approval receives
-  `{"approved": False}` instead.
+payload=...)]`. The minimum supported Strands release gates its resume on
+  truthiness (`if interrupt_.response:`), so a falsy `payload` (`None`,
+  `False`, `""`, `0`, `[]`, `{}`) would otherwise re-raise the same interrupt
+  and re-run the tool body forever, and every release reads an absent answer
+  the same way. To prevent that, `interrupt()` does **not** return `payload`
+  directly. It returns an envelope, which is always present and always truthy:
+
+  | `resume` entry                     | what the paused `interrupt()` returns                              |
+  | ---------------------------------- | ------------------------------------------------------------------ |
+  | `status="resolved"`, any `payload` | `{"response": payload}`                                            |
+  | `status="resolved"`, no `payload`  | `{"response": None}`                                               |
+  | `status="cancelled"`               | `{"cancelled": True}`, matching the exported `INTERRUPT_CANCELLED` |
+
+  Destructure it with `.get("response")` / `.get("cancelled")`, and do not
+  truthiness-check the envelope itself, since it is always truthy on resolve.
+  Compare a cancellation by value rather than by identity: `INTERRUPT_CANCELLED`
+  is exported so you can match its shape, and every answer is built fresh rather
+  than copied from the export, so mutating the export cannot change what a tool
+  receives. Treat what you receive as read-only: it is the
+  same object Strands records as the answer, so mutating it changes what a later
+  replay is compared against. This is the same contract the
+  `@ag-ui/aws-strands` TypeScript package applies, so a tool body ports between
+  the two unchanged.
+
+- Adapter-managed `interrupt_on_call` approvals are the exception in both
+  languages: a resolved approval's `{"approved": bool}` payload is passed through
+  raw, because the approval hook reads `approved` off it directly, and anything
+  else is answered `{"approved": False}` rather than with the sentinel.
+- A frontend tool parked in a native interrupt is a third, Python-only shape. It
+  is answered under a reserved key,
+  `{"__ag_ui_frontend_tool_response__": {"content": str, "is_error": bool}}`,
+  translated from the client's ordinary `ToolMessage`. It has no TypeScript
+  counterpart, because that adapter halts the stream for frontend tools instead
+  of parking one, so this is not part of the cross-language contract above.
 - **Re-execution on resume:** resuming a paused tool re-runs its body from
   the top — any code before the `interrupt()` call executes again. Guard
   side effects that must not repeat:
@@ -283,12 +467,12 @@ interrupt_.response:`), so a falsy `payload` (`None`, `False`, `""`, `0`,
 
 ### Persistence and proxy-tool boundaries
 
-| Scenario                                                                        | Support boundary                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Native-only pause and resume on the same live wrapper, process, and `thread_id` | Supported without a `SessionManager`; the cached per-thread Strands agent is the checkpoint.                                                                                                                                                                                                     |
-| Wrapper recreation or cross-process resume                                      | Requires a compatible durable `SessionManager` that restores the same session and stable Strands `agent_id`.                                                                                                                                                                                     |
-| Legacy placeholder proxy and native interrupt in the same checkpoint            | Requires `session_id` plus `session_repository.list_messages()` and `session_repository.update_message()`. Without a manager the run emits `INTERRUPT_SESSION_REQUIRED`; without those capabilities it emits `INTERRUPT_SESSION_CAPABILITY_ERROR`. The checkpoint is not advertised or consumed. |
-| Explicitly waiting frontend tools, alone or mixed with ordinary interrupts      | Uses the native Strands checkpoint. Frontend answers arrive as `ToolMessage`s; ordinary interrupt answers retain `resume[]`. Partial batches are passed through and remain paused until Strands reports the checkpoint complete.                                                                 |
+| Scenario                                                                        | Support boundary                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native-only pause and resume on the same live wrapper, process, and `thread_id` | Supported without a `SessionManager`; the cached per-thread Strands agent is the checkpoint.                                                                                                                                                                                                                                                                                                 |
+| Wrapper recreation or cross-process resume                                      | Requires a compatible durable `SessionManager` that restores the same session and stable Strands `agent_id`.                                                                                                                                                                                                                                                                                 |
+| Legacy placeholder proxy and native interrupt in the same checkpoint            | Requires `session_id`, a stable `agent_id`, and a `session_repository` exposing `list_messages()` and `update_message()`, which is what the `INTERRUPT_SESSION_CAPABILITY_ERROR` message itself names. Without a manager the run emits `INTERRUPT_SESSION_REQUIRED`; without those capabilities it emits `INTERRUPT_SESSION_CAPABILITY_ERROR`. The checkpoint is not advertised or consumed. |
+| Explicitly waiting frontend tools, alone or mixed with ordinary interrupts      | Uses the native Strands checkpoint. Frontend answers arrive as `ToolMessage`s; ordinary interrupt answers retain `resume[]`. Partial batches are passed through and remain paused until Strands reports the checkpoint complete.                                                                                                                                                             |
 
 Submitted resume batches are validated before streaming or reconciliation.
 They must contain unique, non-blank, currently open interrupt ids. An
@@ -345,6 +529,9 @@ Link-local addresses stay blocked under `allow_private_networks`, and
 `allowed_schemes` can only be narrowed, never widened: a scheme with no pinned
 transport would resolve the host again at connection time.
 
+A run whose media all fail conversion with no text fallback ends with
+`RUN_ERROR` under `MEDIA_RESOLUTION_FAILED`.
+
 ## Supported AG-UI Events
 
 The integration supports the following AG-UI event families:
@@ -353,11 +540,190 @@ The integration supports the following AG-UI event families:
 - **Text streaming**: `TEXT_MESSAGE_START`, `TEXT_MESSAGE_CONTENT`, `TEXT_MESSAGE_END`
 - **Reasoning**: `REASONING_*` events for models with extended thinking
 - **Tool calls**: `TOOL_CALL_START`, `TOOL_CALL_ARGS`, `TOOL_CALL_END`, `TOOL_CALL_RESULT`
-- **State management**: `STATE_SNAPSHOT`
+- **State management**: `STATE_SNAPSHOT`, and `STATE_DELTA` where a
+  `custom_result_handler` emits one; the adapter produces no delta of its own
 - **Multi-agent**: `STEP_STARTED`, `STEP_FINISHED`, and `MultiAgentHandoff` custom events
 - **Generative UI**: `PredictState` custom events for optimistic UI updates
+- **Message history**: `MESSAGES_SNAPSHOT` after the opening state snapshot and
+  after each `TOOL_CALL_END`, `TOOL_CALL_RESULT` and terminal `TEXT_MESSAGE_END`,
+  each carrying the complete thread as known so far. On by default; turn it off
+  globally with `StrandsAgentConfig.emit_messages_snapshot`, or per tool with
+  `ToolBehavior.skip_messages_snapshot`. The multi-agent orchestrator path emits
+  none whatever those say.
 - **Multimodal**: Image, document, and video content in user messages (converted to Strands ContentBlock format)
 - **Citations**: source passages attached to the assistant message's `metadata` (see below)
+- **Custom**: `PredictState`, `MultiAgentHandoff`, `AgentStopped` (an abnormal
+  model stop reason) and `hook_error` (a developer callback that threw), all as
+  `CUSTOM` events keyed by `name`
+- **Interrupts**: `RUN_FINISHED` carries an interrupt outcome when a backend tool
+  or hook paused the run (see above)
+- **Raw passthrough**: `RAW` for Strands events this adapter does not map (see
+  below)
+
+## Unmapped Strands events reach the client as `RAW`
+
+A Strands stream event with no AG-UI translation is forwarded rather than
+dropped, as `RawEvent(event=<payload>, source="strands")`. Bedrock's per-turn
+`metadata` (token usage, latency, trace ids) arrives this way, and so does
+anything a future SDK release starts emitting before this adapter learns to map
+it.
+
+> **`event` is a framework-shaped payload, not an AG-UI one.** Its contents are
+> whatever `strands-agents` put on the wire for that event, and the SDK is free
+> to change that shape in any release without it being a break in this package.
+> Read it defensively, and do not build a required UI path on a field you found
+> in it. Anything this adapter promises to keep stable is a mapped event with a
+> name, not a `RAW` one.
+
+Forwarding is filtered rather than coerced. Keys belonging to the per-run
+invocation state are stripped, since Strands merges them into otherwise public
+model events, and a payload that will not survive a strict `json.dumps` /
+`json.loads` round trip is dropped with a warning rather than stringified.
+Coercing it, with `default=str` for instance, would ship the `repr` of the live
+`Agent`, system prompt and conversation history included, to every connected
+client.
+
+## Multi-agent orchestration
+
+Pass a Strands `Graph` or `Swarm` where `StrandsAgent(agent=...)` would normally
+take an `Agent`. The adapter detects the orchestrator structurally (it has no
+`model`) and drives its `stream_async()` directly instead of cloning a
+per-thread agent, so per-thread caching, session managers and proxy-tool sync do
+not apply: the orchestrator owns its own nodes. Both bridges do this; see
+Strands' [Graph](https://strandsagents.com/docs/user-guide/concepts/multi-agent/graph/)
+and [Swarm](https://strandsagents.com/docs/user-guide/concepts/multi-agent/swarm/)
+guides for what each pattern is for. `/multi-agent` in the demo server is a live
+example.
+
+Each node opens a `STEP_STARTED` named `{node_type}:{node_id}` and closes it with
+`STEP_FINISHED`, a handoff becomes `CUSTOM` `MultiAgentHandoff` carrying
+`from_nodes` / `to_nodes` / `message`, and each node's text and tool calls stream
+inside its own message envelope, kept per node so a Graph running a batch
+concurrently cannot interleave two nodes into one.
+
+What this path does **not** do, deliberately or otherwise:
+
+- No `MESSAGES_SNAPSHOT`, whatever `emit_messages_snapshot` says. A node's
+  `TEXT_MESSAGE_END` is the final carrier for anything riding message metadata,
+  citations included.
+- No `AgentStopped`. The abnormal-stop hint is emitted from the single-agent
+  path only here, where the TypeScript bridge reads it off each node's result
+  and does emit one.
+- None of the per-tool or per-prompt hooks run, `state_context_builder`
+  included, so a hook configured on a `Graph` or `Swarm` is silently inert and
+  produces no `hook_error` either.
+
+A node failure is not swallowed. A Python `Graph` fails fast: the first node
+exception cancels its siblings and re-raises, so the adapter closes whatever
+message and step envelopes are open and ends the run with `RUN_ERROR`. The
+TypeScript bridge differs, because its SDK turns a node throw into a FAILED node
+result and returns normally there. The orchestration budgets a `Graph` or
+`Swarm` is built with escape as ordinary exceptions and report
+`STRANDS_ERROR`, since they are not model stop reasons.
+
+Native interrupts work on this path: an orchestrator that pauses reports the
+interrupt outcome on `RUN_FINISHED` and is parked for its thread until the
+resume arrives.
+
+## One run at a time per thread
+
+A second run starting on a thread that already has one in flight is refused
+before the body is entered, with `RUN_ERROR` under `THREAD_BUSY` and the message
+`Another run is already in progress on thread "<id>". Wait for RUN_FINISHED
+before starting another.` One Strands `Agent` is cached per thread and cannot be
+multiplexed, and an unguarded overlap corrupts the cached history rather than
+merely racing: the second run's history reconciliation overwrites the first
+run's user turn before reaching the model, so the first run answers a question
+the transcript no longer contains.
+
+The guard matters more here than on the TypeScript side, not less. The TS SDK
+raises `ConcurrentInvocationError` on a second `stream()` against one instance,
+so an unguarded overlap there is at least loud. `Agent.stream_async` grew the
+same protection only in `strands-agents` 1.22.0. At the declared floor of 1.15.0
+nothing is raised and the overlap is silent.
+
+The orchestrator path carries its own arm of the guard, because a shared
+orchestrator instance cannot be multiplexed at all: any overlapping run is
+refused whatever its thread, and an instance parked at an interrupt is refused
+to everyone except the resume for the thread that parked it, under its own
+sentence. Passing a callable in place of the orchestrator builds a fresh
+instance per run, which narrows the key back to the thread.
+
+The slot is released when the run generator's teardown completes. A caller
+driving `agent.run(...)` directly rather than through the transport owes that
+generator a `close()`: breaking out of the loop, or pulling one event and
+dropping it, leaves the slot held until the event loop finalizes the abandoned
+generator, and the thread refuses runs for as long as that takes. The FastAPI
+transport closes it explicitly, including on client disconnect. From
+`strands-agents` 1.22.0 onward that close is load-bearing for a second reason:
+an abandoned invocation holding the SDK's own concurrency lock would block the
+thread's next run however promptly this guard released its slot.
+
+The refusal is per adapter instance and no wider. Two instances sharing one
+`agents_by_thread` map, which is exactly what request-scoped serverless wrappers
+do, each start with an empty busy set and can both accept a run on the same
+thread. TypeScript has the same limit.
+
+## Abnormal model stop reasons
+
+A terminal `AgentResult` whose `stop_reason` is `guardrail_intervened` or
+`content_filtered` emits `CUSTOM` `AgentStopped` with
+`value={"stop_reason": <reason>}` ahead of an ordinary `RUN_FINISHED`, so a UI
+can explain a short, empty or filtered answer instead of reading it as success.
+`end_turn` and `tool_use` are the normal stops and emit nothing.
+
+The `max_tokens` arm exists in the table but is unreachable in a real run: the
+SDK raises `MaxTokensReachedException` as soon as the model reports that stop
+reason, so no `AgentResult` is produced and the run reports `STRANDS_ERROR`
+instead. TypeScript behaves identically.
+
+Whether a hint can arrive at all is the provider's choice, because the hint is
+only as good as the provider's own stop-reason mapping. Read against the Python
+SDK's own providers: Bedrock forwards the Converse API's stop reason untouched
+and produces both hints; Gemini maps `SAFETY` to `guardrail_intervened` and
+produces that one only, and only on releases that carry the `SAFETY` arm at all;
+OpenAI's chat-completions and Responses providers collapse everything else to
+`end_turn` and produce none; Anthropic forwards its own stop reason untouched, so
+a refusal arrives unkeyed and carries no hint. The TypeScript providers map
+differently, so that survey does not answer for this one; both are in
+[ARCHITECTURE.md](../ARCHITECTURE.md).
+
+## Terminal error codes
+
+Every `RUN_ERROR` code either bridge can emit, and the message text that goes
+with each one, is enumerated in
+[`../error-codes.json`](../error-codes.json). That file is a wire contract
+rather than documentation: clients and mock harnesses match both the code and
+the message literally, and both test suites drive their bridge to each terminal
+path and assert the emitted frame against it, so a reworded message fails a test
+instead of reaching a client.
+
+Most codes are shared with the TypeScript bridge. Where a shared code has a
+template at all, it is byte-identical on both sides; two shared codes have none,
+carrying a per-side sentence instead, and are discussed below. Two others share a
+template and add a sentence one side alone can produce: `THREAD_BUSY` has a
+Python-only one for an orchestrator parked at an interrupt, and
+`UNKNOWN_INTERRUPT_ID` a TypeScript-only one.
+
+That second one is worth reading before writing a client. Both bridges emit
+`UNKNOWN_INTERRUPT_ID` with `No pending interrupts for this thread.` when a
+resume arrives on a thread holding none. They diverge only when the thread does
+hold open interrupts and the resume names one that is not among them: TypeScript
+answers that under `UNKNOWN_INTERRUPT_ID` too, with its own second sentence,
+while this bridge rejects it earlier, in the resume preflight, under
+`INTERRUPT_RESUME_ERROR`. The one-sided ones are recorded there with the reason: the four
+`FRONTEND_TOOL_*` codes of the durable frontend-result recovery path
+(`FRONTEND_TOOL_NOT_REGISTERED`, `FRONTEND_TOOL_RESULT_CONFLICT`,
+`FRONTEND_TOOL_RESULT_DUPLICATE`, `FRONTEND_TOOL_WAIT_STATE_ERROR`, but not the
+shared `FRONTEND_TOOL_IDENTITY_ERROR`) and
+`INTERRUPT_RESUME_ERROR` are Python-only, `SEED_BUILD_ERROR` is TypeScript-only,
+`THREAD_AGENT_KWARGS_ERROR` is this bridge's half of a failure TypeScript reports
+as `THREAD_AGENT_CONFIG_ERROR`, and two shared codes deliberately carry a
+different sentence on each side for reasons of their own:
+`INTERRUPT_SESSION_CAPABILITY_ERROR` because the capability each side names is a
+different SDK API, and `SESSION_MANAGER_INVALID_TYPE` only because the
+configuration option it names is spelled `session_manager_provider` here and
+`sessionManagerProvider` there.
 
 ## Citations
 
@@ -368,9 +734,13 @@ quarterly-report.pdf" next to a claim instead of asking the reader to take the
 answer on trust. Bedrock calls these citations. Strands documents them only as
 an API reference, and only for its TypeScript SDK, at
 [`CitationsBlock`](https://strandsagents.com/docs/api/typescript/CitationsBlock/).
-The Python SDK models the same concept in `strands.types.citations`, with the
-document and search-result location kinds; some fields on that page exist only
-on the TypeScript side, and the table below says which.
+The Python SDK models the same concept in `strands.types.citations`, though
+narrowly: at the 1.18.0 this project locks, that module declares the three
+document location kinds and nothing else, no search-result or web kind and no
+`source` field. The wider shape below is what this adapter normalises to, not
+what that module declares. The `Bedrock` column says which fields Bedrock
+actually sends; it is not a Python-versus-TypeScript column, and the paragraphs
+after it are where the two bridges are compared.
 
 The model emits them between the text deltas of the answer, so a citation
 arrives in the middle of the message it belongs to. This adapter attaches them
@@ -418,7 +788,8 @@ its SDK produces them.
 `location` is `{ "type": "documentChar" \| "documentPage" \| "documentChunk",
 "documentIndex", "start", "end" }` for document sources,
 `{ "type": "searchResult", "searchResultIndex", "start", "end" }` for search
-results, and `{ "type": "web", "url", "domain" }` for web ones.
+results, and `{ "type": "web", "url", "domain" }` for web ones, where `domain`
+is omitted when the provider did not supply one.
 
 A location must arrive in one of two tagged forms: Bedrock's single-key
 wrapper (`{"documentChar": {...}}`) or a discriminated object carrying a string

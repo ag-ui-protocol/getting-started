@@ -239,7 +239,7 @@ describe("StrandsAgent native interrupt bridge (Strands SDK 1.1.0+)", () => {
     expect(forwarded).toBeInstanceOf(InterruptResponseContent);
     expect(forwarded.interruptResponse.interruptId).toBe(id);
     expect(forwarded.interruptResponse.response).toEqual({
-      status: "cancelled",
+      approved: false,
     });
     expect(calls, "cancelled resume executed the tool").toEqual([]);
     expect(
@@ -365,7 +365,8 @@ describe("Resume responses recorded on the native interrupt", () => {
   // interruptFromAgent that re-throws InterruptError). Handing it an
   // undefined response re-raises the same interrupt on every resume, and a
   // generic interrupt publishes no responseSchema, so nothing upstream
-  // rejects an empty payload first.
+  // rejects an empty payload first. The envelope a generic answer is wrapped
+  // in is always present, so no answer can be read as absent.
   it("records a defined response when a resolved entry carries no payload", async () => {
     const response = await forwardedResumeResponse({
       interruptId: "int-absent",
@@ -373,7 +374,7 @@ describe("Resume responses recorded on the native interrupt", () => {
     });
 
     expect(response.response).not.toBeUndefined();
-    expect(response.response).toStrictEqual({});
+    expect(response.response).toStrictEqual({ response: null });
   });
 
   it("records a defined response when a resolved payload is explicitly undefined", async () => {
@@ -384,11 +385,11 @@ describe("Resume responses recorded on the native interrupt", () => {
     });
 
     expect(response.response).not.toBeUndefined();
-    expect(response.response).toStrictEqual({});
+    expect(response.response).toStrictEqual({ response: null });
   });
 
-  // The substitution above must not become a blanket rewrite: a payload that
-  // is present is what the tool destructures, falsy values included.
+  // The envelope must not rewrite the answer inside it: whatever the client
+  // sent is what the tool reads off `.response`, falsy values included.
   it.each([
     ["an object", { approved: true }],
     ["false", false],
@@ -398,20 +399,19 @@ describe("Resume responses recorded on the native interrupt", () => {
     ["an empty array", []],
     ["an empty object", {}],
     ["a string", "approved"],
-  ])("forwards a present payload unchanged: %s", async (_label, payload) => {
+  ])("carries a present payload unchanged: %s", async (_label, payload) => {
     const response = await forwardedResumeResponse({
       interruptId: "int-present",
       status: "resolved",
       payload,
     });
 
-    expect(response.response).toStrictEqual(payload);
+    expect(response.response).toStrictEqual({ response: payload });
   });
 
-  // The replay short-circuit answers from a fingerprint, so the fingerprint has
-  // to separate whatever this converter separates. Reading an absent payload
-  // and an explicit null as one resume answers the second with a success the
-  // SDK never produced.
+  // An absent payload and an explicit null submit the same answer, so only the
+  // fingerprint keeps the two resumes apart. Collapsing them would answer the
+  // second with a success the SDK never produced.
   it("does not read an explicit null payload as a replay of an absent one", async () => {
     const forwarded: InterruptResponse[] = [];
     const stubAgent = scriptedAgent([], {
@@ -464,8 +464,8 @@ describe("Resume responses recorded on the native interrupt", () => {
     );
 
     expect(forwarded.map((response) => response.response)).toStrictEqual([
-      {},
-      null,
+      { response: null },
+      { response: null },
     ]);
     expect(second.some((e) => e.type === EventType.RUN_ERROR)).toBe(false);
     expect(

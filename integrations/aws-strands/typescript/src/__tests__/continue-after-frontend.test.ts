@@ -9,15 +9,28 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { ToolUseBlock } from "@strands-agents/sdk";
-import type { AgentStreamEvent } from "@strands-agents/sdk";
+import type { AgentStreamEvent, ModelStreamEvent } from "@strands-agents/sdk";
 import { EventType, type RunAgentInput } from "@ag-ui/core";
 
+import { createProxyTool } from "../client-proxy-tool";
 import {
   collect,
   minimalRunInput,
+  realStrandsAgent,
   scriptedStrandsAgent,
   stream,
 } from "./helpers";
+
+/**
+ * The proxy the adapter registered for `set_color`, as the SDK hands it back on
+ * `AfterToolCallEvent.tool`. The placeholder suppression reads the executed
+ * tool, so an event carrying no tool describes a call that never ran a proxy.
+ */
+const SET_COLOR_PROXY = createProxyTool({
+  name: "set_color",
+  description: "Sets a UI color.",
+  parameters: { type: "object", properties: { color: { type: "string" } } },
+});
 
 /**
  * Run with the adapter's error logging captured instead of printed.
@@ -72,7 +85,7 @@ const scriptedEvents: AgentStreamEvent[] = [
   {
     type: "afterToolCallEvent",
     toolUse: { toolUseId: "fe-1", name: "set_color", input: { color: "red" } },
-    tool: undefined,
+    tool: SET_COLOR_PROXY,
     result: {
       toolUseId: "fe-1",
       status: "success",
@@ -97,6 +110,49 @@ describe("continueAfterFrontendCall", () => {
       .map((e) => (e as unknown as { delta: string }).delta)
       .join("");
     expect(content).not.toContain("after-tool");
+  });
+
+  it("default (halt): trailing reasoning after a frontend tool call is suppressed", async () => {
+    // Reasoning belongs to the same turn as the trailing text above and is muted
+    // by the same flag. Driven through the real agent loop, because the mute has
+    // to land on the delta shape the SDK actually forwards.
+    const { agent } = realStrandsAgent([
+      [
+        { type: "modelMessageStartEvent", role: "assistant" },
+        {
+          type: "modelContentBlockStartEvent",
+          start: {
+            type: "toolUseStart",
+            toolUseId: "fe-1",
+            name: "set_color",
+          },
+        },
+        {
+          type: "modelContentBlockDeltaEvent",
+          delta: {
+            type: "toolUseInputDelta",
+            input: JSON.stringify({ color: "red" }),
+          },
+        },
+        { type: "modelContentBlockStopEvent" },
+        { type: "modelContentBlockStartEvent" },
+        {
+          type: "modelContentBlockDeltaEvent",
+          delta: { type: "reasoningContentDelta", text: "after-tool musing" },
+        },
+        { type: "modelContentBlockStopEvent" },
+        { type: "modelMessageStopEvent", stopReason: "toolUse" },
+      ] as ModelStreamEvent[],
+    ]);
+
+    const events = await collect(agent, frontendToolInput());
+
+    const kinds = events.map((e) => e.type);
+    expect(kinds).toContain(EventType.TOOL_CALL_END);
+    expect(kinds[kinds.length - 1]).toBe(EventType.RUN_FINISHED);
+    expect(kinds).not.toContain(EventType.REASONING_START);
+    expect(kinds).not.toContain(EventType.REASONING_MESSAGE_CONTENT);
+    expect(kinds).not.toContain(EventType.REASONING_MESSAGE_END);
   });
 
   it("continueAfterFrontendCall=true: trailing text IS delivered to the client", async () => {
@@ -168,7 +224,7 @@ describe("continueAfterFrontendCall", () => {
           name: "set_color",
           input: { color: "blue" },
         },
-        tool: undefined,
+        tool: SET_COLOR_PROXY,
         result: {
           toolUseId: "fe-2",
           status: "success",

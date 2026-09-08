@@ -490,8 +490,8 @@ export function addPing(app: Express, path: string): void {
 /**
  * Static description of what this adapter actually supports. Every event
  * family here can be observed on the wire; anything missing is either not
- * emitted by this adapter (e.g. `ACTIVITY_*`, `RAW`) or only emitted in
- * specific configurations (the `*_CHUNK` events, gated by
+ * emitted by this adapter (e.g. `ACTIVITY_*`, `SUBAGENT_*`) or only emitted
+ * in specific configurations (the `*_CHUNK` events, gated by
  * `emitChunkEvents` — use {@link capabilitiesFor} to derive the matrix
  * from a concrete agent and pick those flags up automatically).
  *
@@ -596,7 +596,7 @@ export const DEFAULT_CAPABILITIES: StrandsAguiCapabilities = {
     CUSTOM: true,
     ACTIVITY_SNAPSHOT: false,
     ACTIVITY_DELTA: false,
-    RAW: false,
+    RAW: true,
   },
   features: {
     interrupts: true,

@@ -96,6 +96,13 @@ export const featureConfig: FeatureConfig[] = [
     tags: ["Chat", "Multi-agent architecture", "Streaming", "Subgraphs"],
   }),
   createFeatureConfig({
+    id: "deepagents_subagents",
+    name: "Deepagents Subagents",
+    description:
+      "A deepagents supervisor delegates to a research subagent that pauses for your approval mid-task; its messages group under one card keyed by subagentRunId",
+    tags: ["Chat", "Multi-agent architecture", "Streaming", "Subagents"],
+  }),
+  createFeatureConfig({
     id: "multi_agent",
     name: "Multi-Agent",
     description: "Watch a graph of specialist agents hand work down a pipeline",

@@ -161,7 +161,12 @@ function mimeToFormat(
  * past the size cap. These are logged at `error` level, so the signal stays
  * specific to a request that was actually turned away.
  *
- * @internal not part of the package's public API; exported for tests.
+ * Part of the package's public API, re-exported from `src/index.ts`, so a host
+ * configuring `StrandsAgentConfig.urlFetchPolicy` can identify a refusal it
+ * caused. Unlike its neighbours here it therefore carries no internal-only
+ * marker: `stripInternal` is on, and a marked declaration is dropped from the
+ * emitted types, which makes it unexportable from the entry. Do not add one
+ * back without removing the re-export.
  */
 export class UrlFetchPolicyError extends Error {
   constructor(message: string) {
@@ -288,10 +293,12 @@ function scrubSecrets(text: string, ...urls: string[]): string {
  * There is no port dimension: a host whose addresses are all public is
  * reachable on any port, as in the Python fix this mirrors (#2491).
  *
- * Relaxing the address checks requires passing a custom policy directly to
- * `fetchUrlContent`, which no conversion path does, so in practice the
- * defaults are what a consumer gets. Even
- * under `allowPrivateNetworks`, this-network, link-local ranges and the cloud
+ * Relaxing the address checks is an explicit opt-in, and only ever the
+ * host's: `StrandsAgentConfig.urlFetchPolicy` is threaded into every
+ * conversion the adapter makes, and a direct `fetchUrlContent` caller can
+ * pass one too. Nothing a client puts in a `RunAgentInput` reaches it, so
+ * absent that configuration the defaults are what a consumer gets. Even under
+ * `allowPrivateNetworks`, this-network, link-local ranges and the cloud
  * metadata endpoints listed in `ALWAYS_BLOCKED_IPV4`/`ALWAYS_BLOCKED_IPV6`
  * stay blocked; that list covers the major providers rather than every
  * provider.
@@ -889,8 +896,26 @@ function formatAddress(ip: IpAddress): string {
 /** The largest delay `setTimeout` accepts without silently clamping to 1ms. */
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 
-/** Reject a policy whose limits cannot express a meaningful decision. */
-function assertUsablePolicy(policy: UrlFetchPolicy): void {
+/**
+ * Reject a policy whose limits cannot express a meaningful decision.
+ *
+ * Throws a plain `Error`: an unusable policy is a programming or
+ * configuration mistake, not a fetch outcome, so it is deliberately not one
+ * of the two errors {@link fetchUrlContent} turns into a logged `null`.
+ *
+ * `fetchUrlContent` calls this itself, which is enough to fail closed but
+ * fails once per attachment and, on the history-replay path, inside a
+ * try/catch that would report it as a conversion that fell back to text. The
+ * adapter therefore calls this once up front, before the run fetches
+ * anything, so a misconfigured policy surfaces as a run-level error naming
+ * the field. Python has no equivalent call because its `UrlFetchPolicy` is a
+ * frozen dataclass that validates in `__post_init__`; a TypeScript interface
+ * has no constructor to validate in.
+ *
+ * @internal not part of the package's public API; exported for the adapter's
+ * configuration check and for tests.
+ */
+export function assertUsablePolicy(policy: UrlFetchPolicy): void {
   if (!Number.isInteger(policy.maxBytes) || policy.maxBytes < 1) {
     throw new Error(
       `URL fetch policy maxBytes must be an integer of at least 1, got ${policy.maxBytes}`,
@@ -1446,7 +1471,7 @@ function decodeBase64(
 }
 
 /**
- * Per-request memo of what each URL returned, keyed by URL.
+ * Per-request memo of what each URL returned, keyed by URL and policy.
  *
  * One conversation turn is converted more than once on a cold run: once
  * building the construction-time seed and again reconciling the replayed
@@ -1458,6 +1483,10 @@ function decodeBase64(
  * the same time share the one request. Failures are memoised too: a URL the
  * policy refused stays refused for the rest of the run rather than being
  * retried per conversion.
+ *
+ * Entries are keyed on the URL together with the policy it is fetched under,
+ * not the URL alone, so the memoised refusal above belongs to the policy that
+ * made it and is never handed to a caller running under a different one.
  *
  * Every consumer of one URL receives the SAME `Uint8Array`, not a copy. That
  * is the point (the bytes are held once however many blocks reference them),
@@ -1496,6 +1525,42 @@ export interface MediaConversionOptions {
    * leaves a slow attachment transferring until it finishes or times out.
    */
   readonly signal?: AbortSignal;
+  /**
+   * The policy every URL source in this request is fetched under.
+   *
+   * `undefined` means {@link DEFAULT_URL_FETCH_POLICY}. The adapter sets this
+   * once per run from `StrandsAgentConfig.urlFetchPolicy`, so the construction
+   * seed, the replayed history and the live turn all fetch under the same one.
+   */
+  readonly urlFetchPolicy?: UrlFetchPolicy;
+}
+
+/**
+ * A cache key that cannot confuse two policies, or two URLs.
+ *
+ * Every field here changes what a fetch returns for the same URL, so all of
+ * them are in the key. The refusals matter most: a URL a strict policy turned
+ * away is memoised as `null`, and serving that to a caller who opted into the
+ * private network would silently ignore the opt-in.
+ *
+ * `JSON.stringify` over one array, rather than a `${a}:${b}` join, because a
+ * join has no delimiter a value cannot contain: a URL may hold any character,
+ * including whatever separator was picked. The array's own structure keeps the
+ * parts apart, and both lists are sorted so a policy spelled in a different
+ * order is still the same policy. The `?? []` on the prefixes mirrors what
+ * `nat64Prefixes` tolerates, so a policy this key accepts is one the checks
+ * accept too.
+ */
+function fetchCacheKey(url: string, policy: UrlFetchPolicy): string {
+  return JSON.stringify([
+    url,
+    [...policy.allowedSchemes].sort(),
+    policy.allowPrivateNetworks,
+    policy.maxBytes,
+    policy.timeoutMs,
+    policy.maxRedirects,
+    [...(policy.nat64Prefixes ?? [])].sort(),
+  ]);
 }
 
 function fetchUrlContentCached(
@@ -1505,16 +1570,24 @@ function fetchUrlContentCached(
 ): Promise<FetchedContent | null> {
   const cache = options?.fetchCache;
   const signal = options?.signal;
-  // Every conversion runs under the default policy: nothing plumbs another
-  // one this far. The cache key is therefore the URL alone, which stops being
-  // true the moment a per-conversion policy exists.
+  const policy = options?.urlFetchPolicy ?? DEFAULT_URL_FETCH_POLICY;
   if (!cache) {
-    return fetchUrlContent(url, log, DEFAULT_URL_FETCH_POLICY, signal);
+    return fetchUrlContent(url, log, policy, signal);
   }
-  let pending = cache.get(url);
+  // Checked before the key is built rather than only inside the fetch, so an
+  // unusable policy cannot reach the iteration the key does over its fields
+  // and surface as a bare TypeError instead of the sentence naming the field.
+  assertUsablePolicy(policy);
+  // Keyed on the URL AND the policy. One run passes one policy, so the
+  // sharing this cache exists for is untouched: two conversions of the same
+  // URL in a run still make one request. A caller that mixes policies over
+  // one cache gets one entry per pair instead of the first policy's answer
+  // for all of them.
+  const key = fetchCacheKey(url, policy);
+  let pending = cache.get(key);
   if (!pending) {
-    pending = fetchUrlContent(url, log, DEFAULT_URL_FETCH_POLICY, signal);
-    cache.set(url, pending);
+    pending = fetchUrlContent(url, log, policy, signal);
+    cache.set(key, pending);
   }
   return pending;
 }
@@ -2046,4 +2119,56 @@ export function flattenContentToText(content: unknown): string {
     return flattenContentToText([content]);
   }
   return "";
+}
+
+/** Best-effort string view of an AG-UI message content field. */
+export function _coerceText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (content == null) return "";
+  if (Array.isArray(content)) return flattenContentToText(content);
+  return String(content);
+}
+
+/**
+ * Build a Strands `toolResult` content block from an AG-UI tool message body.
+ *
+ * AG-UI's wire shape requires `ToolMessage.content` to be a string. Frontends
+ * (e.g. CopilotKit's `useHumanInTheLoop`) typically JSON-encode structured
+ * results before transport, so the string the adapter receives looks like
+ * `'{"accepted":true,"steps":[...]}'`. Forwarding that as a `text` block leaves
+ * the LLM with two competing payloads: the original `toolUse.input` (full
+ * args) and an opaque-looking JSON string in the result. The model often
+ * defaults to the args.
+ *
+ * Strands' `ToolResultContentData` accepts a `JsonBlock` shape (see
+ * `@strands-agents/sdk` `messages.ts`). When the message content parses as a
+ * JSON object/array, emit it as `{ json: parsed }` so the LLM sees a real
+ * structured result. Fall back to `{ text: ... }` for everything else.
+ */
+export function _buildToolResultContent(
+  content: unknown,
+): { text: string } | { json: unknown } {
+  const text = _coerceText(content);
+  const trimmed = text.trim();
+  // Render-only frontend tools (e.g. CopilotKit `useComponent`) legitimately
+  // produce an empty client tool result. Forwarding an empty `text` block to
+  // the Strands model reaches OpenAI, which rejects tool messages with empty
+  // content (HTTP 400). Synthesize a non-empty acknowledgement instead. The
+  // Python adapter has no equivalent synthesis on either its history or its
+  // reconciliation path, so it still forwards the empty block; that divergence
+  // is deliberate here rather than drift. The UI-bound TOOL_CALL_RESULT event is
+  // emitted on a separate path and stays faithfully empty.
+  if (trimmed.length === 0)
+    return { text: "Tool executed successfully with no return value." };
+  const first = trimmed[0];
+  if (first !== "{" && first !== "[") return { text };
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed !== null && typeof parsed === "object") {
+      return { json: parsed };
+    }
+  } catch {
+    // Not valid JSON, so fall through to text.
+  }
+  return { text };
 }

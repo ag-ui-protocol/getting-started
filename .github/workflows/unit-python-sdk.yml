@@ -9,6 +9,10 @@ on:
       - "integrations/watsonx/python/**"
       - "integrations/adk-middleware/python/**"
       - "integrations/aws-strands/python/**"
+      # Outside the python tree, but the aws-strands python suite reads this
+      # shared error-code table and asserts its own terminal frames against it,
+      # so editing the table alone can turn that suite red.
+      - "integrations/aws-strands/error-codes.json"
       - "integrations/langroid/python/**"
       - "integrations/crew-ai/python/**"
       - "integrations/claude-managed-agents/python/**"
@@ -36,6 +40,10 @@ on:
       - "integrations/watsonx/python/**"
       - "integrations/adk-middleware/python/**"
       - "integrations/aws-strands/python/**"
+      # Outside the python tree, but the aws-strands python suite reads this
+      # shared error-code table and asserts its own terminal frames against it,
+      # so editing the table alone can turn that suite red.
+      - "integrations/aws-strands/error-codes.json"
       - "integrations/langroid/python/**"
       - "integrations/crew-ai/python/**"
       - "integrations/claude-managed-agents/python/**"
@@ -73,7 +81,7 @@ jobs:
         # id so the lockfile assertion below can gate on this step's outcome — see
         # the comment there for why !cancelled() alone is not enough.
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -90,14 +98,14 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: sdks/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('sdks/python/uv.lock') }}
@@ -140,7 +148,7 @@ jobs:
         # id so the lockfile assertion below can gate on this step's outcome — see
         # the comment there for why !cancelled() alone is not enough.
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -157,14 +165,14 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: integrations/langgraph/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-langgraph-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/langgraph/python/uv.lock') }}
@@ -218,12 +226,12 @@ jobs:
         # id so the lockfile assertion below can gate on this step's outcome. See
         # that step for why !cancelled() alone is not enough.
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
@@ -357,7 +365,7 @@ jobs:
         # id so the lockfile assertion below can gate on this step's outcome — see
         # the comment there for why !cancelled() alone is not enough.
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -374,14 +382,14 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: integrations/watsonx/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-watsonx-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/watsonx/python/uv.lock') }}
@@ -420,7 +428,7 @@ jobs:
         # id so the lockfile assertion below can gate on this step's outcome — see
         # the comment there for why !cancelled() alone is not enough.
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -437,14 +445,14 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: integrations/adk-middleware/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-adk-middleware-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/adk-middleware/python/uv.lock') }}
@@ -493,7 +501,7 @@ jobs:
         # id so the lockfile assertion below can gate on this step's outcome — see
         # the comment there for why !cancelled() alone is not enough.
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -510,7 +518,7 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
@@ -569,7 +577,7 @@ jobs:
         # id so the lockfile assertion below can gate on this step's outcome — see
         # the comment there for why !cancelled() alone is not enough.
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -586,14 +594,14 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: integrations/aws-strands/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-aws-strands-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/aws-strands/python/uv.lock') }}
@@ -640,12 +648,12 @@ jobs:
         # id so the lockfile assertion below can gate on this step's outcome. See
         # that step for why !cancelled() alone is not enough.
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
@@ -717,12 +725,12 @@ jobs:
         # id so the lockfile assertion below can gate on this step's outcome. See
         # the locked lane for why !cancelled() alone is not enough.
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
@@ -755,7 +763,6 @@ jobs:
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         uses: ./.github/actions/assert-lockfiles-unchanged
 
-
   langroid-python:
     runs-on: ubuntu-latest
 
@@ -764,7 +771,7 @@ jobs:
         # id so the lockfile assertion below can gate on this step's outcome — see
         # the comment there for why !cancelled() alone is not enough.
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -781,14 +788,14 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: integrations/langroid/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-langroid-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/langroid/python/uv.lock') }}
@@ -827,7 +834,7 @@ jobs:
         # id so the lockfile assertion below can gate on this step's outcome — see
         # the comment there for why !cancelled() alone is not enough.
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -844,14 +851,14 @@ jobs:
           GITHUB_EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: integrations/crew-ai/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-crewai-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/crew-ai/python/uv.lock') }}
@@ -937,12 +944,12 @@ jobs:
         # id so the lockfile assertion below can gate on this step's outcome — see
         # the comment there for why !cancelled() alone is not enough.
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
@@ -1032,7 +1039,7 @@ jobs:
         # id so the lockfile assertion below can gate on this step's outcome — see
         # the comment there for why !cancelled() alone is not enough.
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -1051,14 +1058,14 @@ jobs:
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Load cached venv
         id: cached-uv-dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: integrations/claude-managed-agents/python/.venv
           key: ${{ steps.fork-check.outputs.prefix }}venv-${{ runner.os }}-claude-managed-agents-py${{ env.PYTHON_VERSION }}-uv${{ env.UV_VERSION }}-${{ hashFiles('integrations/claude-managed-agents/python/uv.lock') }}
@@ -1118,12 +1125,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}

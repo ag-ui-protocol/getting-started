@@ -49,14 +49,13 @@ import type { Agent, AgentStreamEvent, StopReason } from "@strands-agents/sdk";
 import { EventType } from "@ag-ui/core";
 import type { BaseEvent, RunAgentInput } from "@ag-ui/core";
 
+import { FORCE_STOP_FALLBACK } from "./error-code-table";
 import {
   collect,
   minimalRunInput,
   scriptedStrandsAgent,
   stream,
 } from "./helpers";
-
-const FORCE_STOP_FALLBACK = "The Strands agent stopped unexpectedly.";
 
 type RunError = { type: string; code?: string; message?: string };
 type CustomEvent = { type: string; name?: string; value?: unknown };
@@ -403,32 +402,55 @@ describe("forced stop", () => {
     expect(runError(events)?.code).toBe("STRANDS_FORCE_STOP");
   });
 
-  it("keeps an adapter code defect out of the forced-stop code", async () => {
-    // TypeError/ReferenceError mean the adapter is broken, not that the
-    // provider failed, so they keep their own classification.
+  it("reports a TypeError from inside the stream as the forced stop", async () => {
+    // A TypeError is not this adapter's defect: it arrived from inside the SDK
+    // call, where the model, the SDK and the integrator's tools all run. Nor
+    // is it a case of its own. Strands caught it mid-cycle, which is what
+    // Python reports through `force_stop` whatever the exception type, so it
+    // gets the code and the closeout every other failure from this call gets.
     const agent = scriptedStrandsAgent([], {
       stubOverrides: throwingAfter([], new TypeError("cannot read 'x'")),
     });
 
     const { events } = await collectQuietly(agent);
 
-    expect(runError(events)?.code).toBe("ADAPTER_BUG");
+    expect(runError(events)).toMatchObject({
+      code: "STRANDS_FORCE_STOP",
+      message: "cannot read 'x'",
+    });
     expect(agentStoppedEvents(events)).toEqual([]);
   });
 
-  it("keeps a ReferenceError out of the forced-stop code", async () => {
-    // The second half of that classification. Driven on this path as well as
-    // on the orchestrator's, because the two paths reach `ADAPTER_BUG` through
-    // different code: the shared reporter rethrows, and it is each path's own
-    // outer handler that decides the code from there.
+  it("reports a ReferenceError from inside the stream as the forced stop", async () => {
     const agent = scriptedStrandsAgent([], {
       stubOverrides: throwingAfter([], new ReferenceError("x is not defined")),
     });
 
     const { events } = await collectQuietly(agent);
 
-    expect(runError(events)?.code).toBe("ADAPTER_BUG");
+    expect(runError(events)?.code).toBe("STRANDS_FORCE_STOP");
     expect(agentStoppedEvents(events)).toEqual([]);
+  });
+
+  it("closes an open message before reporting a TypeError from the stream", async () => {
+    // The regression this shares with every other failure out of the same
+    // call: a TypeError used to skip the closeout on its way to the outer
+    // handler, leaving a client holding a TEXT_MESSAGE_START that never ended.
+    const agent = scriptedStrandsAgent([], {
+      stubOverrides: throwingAfter(
+        [stream.textDelta("half a sentence")],
+        new TypeError("cannot read 'x'"),
+      ),
+    });
+
+    const { events } = await collectQuietly(agent);
+
+    const kinds = events.map((e) => e.type);
+    expect(kinds).toContain(EventType.TEXT_MESSAGE_END);
+    expect(kinds.indexOf(EventType.TEXT_MESSAGE_END)).toBeLessThan(
+      kinds.indexOf(EventType.RUN_ERROR),
+    );
+    expect(kinds).not.toContain(EventType.RUN_FINISHED);
   });
 
   it("commits the partial assistant text to a snapshot before the error", async () => {
@@ -837,25 +859,27 @@ describe("failures inside the frontend-halt window", () => {
     expect(kinds).not.toContain(EventType.RUN_FINISHED);
   });
 
-  it("keeps an adapter code defect out of the halt swallow", async () => {
+  it("keeps a TypeError out of the halt swallow", async () => {
     const { events } = await collectHalting(new TypeError("cannot read 'x'"));
 
-    expect(runError(events)?.code).toBe("ADAPTER_BUG");
+    expect(runError(events)?.code).toBe("STRANDS_FORCE_STOP");
   });
 
   it("keeps a ReferenceError shaped like the sentinel out of the halt swallow", async () => {
-    // The sentinel check accepts a bare `Error` carrying no `cause`, so a code
-    // defect whose `name` reads "Error" matches it by shape and nothing else.
-    // The `instanceof` classification runs BEFORE the swallow for exactly this
-    // reason: a defect must not be able to finish a run by looking like
-    // expected flow. Reading `name` off the thrown value is what makes this
-    // reachable at all, so this is the case that arm exists for.
+    // The sentinel check accepts a bare `Error` carrying no `cause`, so a
+    // failure whose `name` reads "Error" matches it by shape and nothing else.
+    // The `instanceof` arm runs BEFORE the swallow for exactly this reason: a
+    // real failure must not be able to finish a run by looking like expected
+    // flow. Reading `name` off the thrown value is what makes this reachable
+    // at all, so this is the case that arm exists for. It excludes the value
+    // from the SWALLOW only; what it reports is the same forced stop anything
+    // else out of that call reports.
     const failure = new ReferenceError("x is not defined");
     Object.defineProperty(failure, "name", { value: "Error" });
 
     const { events } = await collectHalting(failure);
 
-    expect(runError(events)?.code).toBe("ADAPTER_BUG");
+    expect(runError(events)?.code).toBe("STRANDS_FORCE_STOP");
     const kinds = events.map((e) => e.type);
     expect(kinds).not.toContain(EventType.RUN_FINISHED);
   });

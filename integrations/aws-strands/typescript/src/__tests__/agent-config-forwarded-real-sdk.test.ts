@@ -12,9 +12,10 @@
  * can actually fail.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   Agent,
+  McpClient,
   SlidingWindowConversationManager,
   tool,
   type AgentConfig,
@@ -140,6 +141,52 @@ describe("template forwarding against the real Strands SDK", () => {
 
     expect(first.id).toBe("wizard-001");
     expect(second.id).toBe(first.id);
+  });
+
+  it("warns when the template Agent holds an unresolved McpClient", () => {
+    // The SDK routes an `McpClient` out of `tools` into a private client list
+    // and registers its tools only in `Agent.initialize()`, which the template
+    // Agent never runs. So `agent.tools` stays empty, the per-thread clones
+    // inherit nothing, and the model silently loses every MCP tool. Reading
+    // the resolved tool list cannot see this, which is why the client list is
+    // what gets probed.
+    const client = new McpClient({
+      // Never touched: `McpClient`'s constructor stores the transport and
+      // connects only on demand, so the suite needs no live MCP server.
+      transport: {} as never,
+    });
+    const template = realTemplate({ tools: [client] });
+
+    // Pinned so the assertion below is about the warning and not about a
+    // client that happened to resolve.
+    expect(template.tools).toHaveLength(0);
+
+    const warn = vi.fn();
+    new StrandsAgent({
+      agent: template,
+      name: "adapter-name",
+      config: { logger: { debug: vi.fn(), warn, error: vi.fn() } },
+    });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("McpClient");
+  });
+
+  it("stays quiet when the caller spread the resolved MCP tools in", () => {
+    const echo = tool({
+      name: "echo",
+      description: "echo",
+      inputSchema: z.object({ v: z.string() }),
+      callback: (input) => ({ echoed: input.v }),
+    });
+    const warn = vi.fn();
+    new StrandsAgent({
+      agent: realTemplate({ tools: [echo] }),
+      name: "adapter-name",
+      config: { logger: { debug: vi.fn(), warn, error: vi.fn() } },
+    });
+
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("builds a working Agent from the forwarded config", () => {

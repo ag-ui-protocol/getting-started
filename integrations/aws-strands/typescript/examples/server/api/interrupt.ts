@@ -10,6 +10,11 @@
  * returns the user's choice from that same `interrupt()` call so the tool body
  * continues where it left off.
  *
+ * The resume payload arrives wrapped: a resolved answer as `{ response: ... }`,
+ * a client-side cancel as `{ cancelled: true }`. The adapter wraps it so one tool
+ * body reads the same on both bridges, and because an answer the SDK reads as
+ * absent would re-raise the same interrupt forever.
+ *
  * Pause and resume happen on the same live wrapper and process here, so no
  * `SessionManager` is needed. Durable, cross-process resume requires one.
  */
@@ -21,12 +26,18 @@ import { createStrandsApp } from "@ag-ui/aws-strands/server";
 import { createModel } from "../model-factory";
 import { demoPort, listenOrExit, runIfMain } from "../run-if-main";
 
-/** What the picker sends back, plus the shape a cancelled resume entry carries. */
+/** What the picker sends back. */
 interface MeetingChoice {
   chosen_time?: string;
   chosen_label?: string;
   cancelled?: boolean;
-  status?: string;
+}
+
+/** The envelope the adapter hands a resumed tool. */
+interface ResumeEnvelope {
+  /** `null` when the client answered with no payload at all. */
+  response?: MeetingChoice | null;
+  cancelled?: boolean;
 }
 
 const scheduleMeeting = tool({
@@ -48,20 +59,28 @@ const scheduleMeeting = tool({
     // `attendee` is optional, and the reason has to be JSON, which has no
     // `undefined`. Omitted rather than sent as undefined so the picker sees the
     // field missing instead of present-and-empty.
-    const answer = context.interrupt<MeetingChoice>({
+    const answer = context.interrupt<ResumeEnvelope>({
       name: "schedule_meeting",
       reason: attendee === undefined ? { topic } : { topic, attendee },
     });
 
-    // Two cancel shapes reach here: the adapter's own marker for a cancelled
-    // resume entry, and the picker's Cancel button, which resolves with a
-    // `cancelled` flag. Unlike the Python adapter, this one passes a resolved
-    // payload through unwrapped, so the fields are read at the top level.
-    if (answer?.cancelled || answer?.status === "cancelled") {
+    // Two cancel shapes reach here: the adapter's sentinel for a cancelled
+    // resume entry, and the picker's own Cancel button, which resolves with a
+    // `cancelled` flag inside the payload.
+    //
+    // The answer is whatever the client sent, so it need not be an object at
+    // all. Checked rather than assumed, and checked the same way the Python
+    // example does: reading fields off a bare string or number silently yields
+    // nothing here and raises there, which is the two demos disagreeing about
+    // the same input.
+    const inner = answer?.response;
+    const payload: MeetingChoice =
+      inner && typeof inner === "object" ? inner : {};
+    if (answer?.cancelled || payload.cancelled) {
       return `User cancelled. Meeting NOT scheduled: ${topic}`;
     }
 
-    const label = answer?.chosen_label ?? answer?.chosen_time;
+    const label = payload.chosen_label ?? payload.chosen_time;
     return label
       ? `Meeting scheduled for ${label}: ${topic}`
       : `User did not pick a time. Meeting NOT scheduled: ${topic}`;

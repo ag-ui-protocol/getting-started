@@ -704,6 +704,71 @@ export function strandsToolResultsToAgui(
 // Auto-inject decision
 // ---------------------------------------------------------------------------
 
+/**
+ * Exact description `@ag-ui/a2ui-middleware` stamps on the usage guide it
+ * injects for a render tool. A wire-format marker, not prose: it must stay
+ * byte-identical to the middleware's string and to the Python bridge's
+ * `_a2ui_render_guide_description`, em dash included.
+ */
+export function a2uiRenderGuideDescription(toolName: string): string {
+  return (
+    "A2UI render tool usage guide — how to call " +
+    `${toolName} with valid arguments.`
+  );
+}
+
+/**
+ * Drop only the usage guides for render tools this adapter replaced.
+ *
+ * Once auto-injection swaps the middleware's `render_a2ui` proxy for
+ * `generate_a2ui`, the guide that taught the model how to call the proxy is
+ * stale and must reach neither the outer model nor the recovery subagent.
+ * Everything else in the context stays. Python's `_without_a2ui_render_guides`
+ * is the same filter.
+ */
+export function withoutA2UIRenderGuides<T extends { description?: unknown }>(
+  context: readonly T[],
+  toolNames: readonly string[],
+): T[] {
+  const guides = new Set(toolNames.map(a2uiRenderGuideDescription));
+  return context.filter(
+    (entry) =>
+      typeof entry?.description !== "string" || !guides.has(entry.description),
+  );
+}
+
+/**
+ * The run state the recovery subagent is given.
+ *
+ * Lifts the A2UI schema and the remaining context under `state["ag-ui"]` so
+ * the subagent prompt carries the component schema plus context, the same way
+ * the LangGraph adapter routes context into graph state. Uses the shared
+ * toolkit split so both adapters agree on the schema-context description, and
+ * drops the usage guides for the render tools in `dropToolNames`, since those
+ * tools are the ones this injection replaces. Python builds `a2ui_ag_ui` the
+ * same way.
+ */
+export function buildA2UISubagentState(
+  input: RunAgentInput,
+  dropToolNames: readonly string[],
+): Record<string, unknown> {
+  const [schemaValue, regularContext] = splitA2UISchemaContext(
+    input.context as Array<Record<string, unknown>> | undefined,
+  );
+  const baseState: Record<string, unknown> =
+    input.state &&
+    typeof input.state === "object" &&
+    !Array.isArray(input.state)
+      ? { ...(input.state as Record<string, unknown>) }
+      : {};
+  const agUi: Record<string, unknown> = {
+    context: withoutA2UIRenderGuides(regularContext, dropToolNames),
+  };
+  if (schemaValue !== undefined) agUi.a2ui_schema = schemaValue;
+  baseState["ag-ui"] = agUi;
+  return baseState;
+}
+
 /** Backend override knobs (mirrors the runtime `injectA2UITool` flag). */
 export interface A2UIInjectConfig {
   /**
@@ -822,20 +887,7 @@ export function planA2UIInjection<TModel = Model>(
 
   const renderToolName = typeof flag === "string" ? flag : RENDER_A2UI_TOOL_NAME;
 
-  // Lift the A2UI schema + remaining context under state["ag-ui"] so the
-  // sub-agent prompt carries the component schema + context, same as the
-  // LangGraph adapter routes context into graph state. Uses the shared toolkit
-  // split so both adapters agree on the schema-context description.
-  const [schemaValue, regularContext] = splitA2UISchemaContext(
-    input.context as Array<Record<string, unknown>> | undefined,
-  );
-  const baseState: Record<string, unknown> =
-    input.state && typeof input.state === "object" && !Array.isArray(input.state)
-      ? { ...(input.state as Record<string, unknown>) }
-      : {};
-  const agUi: Record<string, unknown> = { context: regularContext };
-  if (schemaValue !== undefined) agUi.a2ui_schema = schemaValue;
-  baseState["ag-ui"] = agUi;
+  const baseState = buildA2UISubagentState(input, [renderToolName]);
 
   // Resolve the frontend-registered catalog from run state (native a2ui_schema
   // or an "A2UI catalog" context entry) so surfaces bind to the host's catalog

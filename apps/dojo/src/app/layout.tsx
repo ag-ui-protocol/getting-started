@@ -75,7 +75,7 @@ export default function RootLayout({
                 e = "${REO_KEY}";
                 t = function() {
                   if (window.Reo) {
-                    window.Reo.init({ clientID: "${REO_KEY}" });
+                    window.Reo.init({ clientID: "${REO_KEY}", enableThirdPartyTracking: true });
                   }
                 };
                 n = document.createElement("script");

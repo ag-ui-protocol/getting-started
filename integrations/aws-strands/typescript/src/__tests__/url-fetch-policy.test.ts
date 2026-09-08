@@ -20,6 +20,7 @@ import {
   UrlFetchPolicyError,
   UrlFetchUnavailableError,
   cidr,
+  createUrlFetchCache,
   urlFetchTransport,
   convertAguiContentToStrands,
   fetchUrlBytes,
@@ -499,6 +500,67 @@ describe("URL fetch policy: redirects", () => {
     expect(attempted).toHaveLength(1);
     expect(log.warn).toHaveBeenCalledOnce();
   });
+
+  // Every hop is validated against the policy the CALLER passed, not against
+  // the default. The two directions are separate claims: a policy that opens
+  // something has to open it on a later hop as well as on the first, and a
+  // policy that closes something has to close it there too. A hop revalidated
+  // against the default would fail one of them while passing the other.
+  it("lets an opt-in policy through a later hop the default refuses", async () => {
+    const startUrl = "http://public.example/start";
+    const privateHop = "http://10.0.0.5/asset.bin";
+    mockDns(PUBLIC_IP);
+    const handler = (url: string) =>
+      url === startUrl ? redirectTo(privateHop) : new Response("private body");
+
+    const underDefault = stubFetch(handler);
+    expect(await fetchUrlBytes(startUrl, makeLog())).toBeNull();
+    expect(underDefault.attempted).toEqual([startUrl]);
+    vi.restoreAllMocks();
+
+    mockDns(PUBLIC_IP);
+    const underOptIn = stubFetch(handler);
+    const bytes = await fetchUrlBytes(
+      startUrl,
+      makeLog(),
+      policy({ allowPrivateNetworks: true }),
+    );
+
+    expect(bytes && Buffer.from(bytes).toString()).toBe("private body");
+    expect(underOptIn.attempted).toEqual([startUrl, privateHop]);
+  });
+
+  it("refuses a later hop the default would allow when the policy is narrowed", async () => {
+    const startUrl = "http://public.example/one";
+    const midUrl = "http://public.example/two";
+    const finalUrl = "http://public.example/three";
+    const handler = (url: string) => {
+      if (url === startUrl) return redirectTo(midUrl);
+      if (url === midUrl) return redirectTo(finalUrl);
+      return new Response("final body");
+    };
+
+    mockDns(PUBLIC_IP);
+    const underDefault = stubFetch(handler);
+    const bytes = await fetchUrlBytes(startUrl, makeLog());
+    expect(bytes && Buffer.from(bytes).toString()).toBe("final body");
+    expect(underDefault.attempted).toEqual([startUrl, midUrl, finalUrl]);
+    vi.restoreAllMocks();
+
+    mockDns(PUBLIC_IP);
+    const underNarrowed = stubFetch(handler);
+    const log = makeLog();
+
+    expect(
+      await fetchUrlBytes(startUrl, log, policy({ maxRedirects: 1 })),
+    ).toBeNull();
+    // Refused at the SECOND redirect, so the narrowing governed a hop the
+    // first-hop check had already let past.
+    expect(underNarrowed.attempted).toEqual([startUrl, midUrl]);
+    expect(String(log.error.mock.calls[0][0])).toContain(
+      "more than 1 redirects",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -825,6 +887,154 @@ describe("content conversion does not fetch blocked URLs", () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One memo per (url, policy) pair
+// ---------------------------------------------------------------------------
+
+describe("URL fetch policy: what a shared fetch cache may reuse", () => {
+  function imageFrom(url: string): InputContent[] {
+    return [
+      {
+        type: "image",
+        source: { type: "url", value: url, mimeType: "image/png" },
+      },
+    ] as InputContent[];
+  }
+
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+
+  function imageBytesOf(blocks: unknown[]): (Uint8Array | undefined)[] {
+    return blocks.map(
+      (block) => (block as { source?: { bytes?: Uint8Array } }).source?.bytes,
+    );
+  }
+
+  it("does not serve one policy's refusal to a caller under another", async () => {
+    // The hazard the pair key exists for. A loopback URL the default turns
+    // away is memoised as a refusal; keyed on the URL alone, the opt-in
+    // conversion behind it would read that refusal back and the opt-in would
+    // do nothing at all.
+    const url = "http://127.0.0.1:9/private.png";
+    const { spy } = stubFetch(
+      () =>
+        new Response(PNG, {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        }),
+    );
+    const fetchCache = createUrlFetchCache();
+
+    const refused = await convertAguiContentToStrands(
+      imageFrom(url),
+      makeLog(),
+      {
+        fetchCache,
+      },
+    );
+    expect(refused).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
+
+    const delivered = await convertAguiContentToStrands(
+      imageFrom(url),
+      makeLog(),
+      { fetchCache, urlFetchPolicy: policy({ allowPrivateNetworks: true }) },
+    );
+
+    expect(imageBytesOf(delivered)).toEqual([PNG]);
+    expect(spy).toHaveBeenCalledOnce();
+    // One entry per pair, not one per URL.
+    expect(fetchCache.size).toBe(2);
+  });
+
+  it("still downloads one url once when the policy is the same", async () => {
+    // The sharing this cache exists for, and the property the pair key must
+    // not cost: a run passes one policy, and a cold run converts the same turn
+    // twice.
+    mockDns(PUBLIC_IP);
+    const { spy } = stubFetch(
+      () =>
+        new Response(PNG, {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        }),
+    );
+    const fetchCache = createUrlFetchCache();
+    const options = { fetchCache, urlFetchPolicy: DEFAULT_URL_FETCH_POLICY };
+    const url = "https://cdn.example/logo.png";
+
+    const first = await convertAguiContentToStrands(
+      imageFrom(url),
+      makeLog(),
+      options,
+    );
+    const second = await convertAguiContentToStrands(
+      imageFrom(url),
+      makeLog(),
+      options,
+    );
+
+    expect(imageBytesOf(first)).toEqual([PNG]);
+    expect(imageBytesOf(second)).toEqual([PNG]);
+    expect(spy).toHaveBeenCalledOnce();
+    expect(fetchCache.size).toBe(1);
+  });
+
+  it("shares one download across equal policies that are not the same object", async () => {
+    // Keyed by the policy's VALUES, so the adapter's own object identity is
+    // not what the sharing depends on, and a scheme list written in a
+    // different order is still the same policy.
+    mockDns(PUBLIC_IP);
+    const { spy } = stubFetch(
+      () =>
+        new Response(PNG, {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        }),
+    );
+    const fetchCache = createUrlFetchCache();
+    const url = "https://cdn.example/logo.png";
+
+    await convertAguiContentToStrands(imageFrom(url), makeLog(), {
+      fetchCache,
+      urlFetchPolicy: policy({ allowedSchemes: new Set(["http", "https"]) }),
+    });
+    await convertAguiContentToStrands(imageFrom(url), makeLog(), {
+      fetchCache,
+      urlFetchPolicy: policy({ allowedSchemes: new Set(["https", "http"]) }),
+    });
+
+    expect(spy).toHaveBeenCalledOnce();
+    expect(fetchCache.size).toBe(1);
+  });
+
+  it("keys a url apart from a policy field that could be confused with it", async () => {
+    // A `${url}:${fields}` key has no separator a URL cannot contain, so a
+    // crafted URL could be made to read as another URL under another policy.
+    // The key is JSON over an array instead, whose parts cannot run together.
+    mockDns(PUBLIC_IP);
+    const { spy } = stubFetch(
+      () =>
+        new Response(PNG, {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        }),
+    );
+    const fetchCache = createUrlFetchCache();
+
+    for (const url of [
+      'https://cdn.example/a.png","https://cdn.example/b.png',
+      "https://cdn.example/a.png",
+    ]) {
+      await convertAguiContentToStrands(imageFrom(url), makeLog(), {
+        fetchCache,
+      });
+    }
+
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(fetchCache.size).toBe(2);
   });
 });
 

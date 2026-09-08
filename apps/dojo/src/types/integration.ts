@@ -13,6 +13,7 @@ export type Feature =
   | "agentic_chat_citations"
   | "agentic_chat_multimodal"
   | "subgraphs"
+  | "deepagents_subagents"
   | "multi_agent"
   | "a2a_chat"
   | "vnext_chat"

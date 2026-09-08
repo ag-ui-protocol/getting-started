@@ -1,4 +1,4 @@
-from ag_ui.core import ToolMessage
+from ag_ui.core import AssistantMessage, FunctionCall, ToolCall, ToolMessage
 
 from ag_ui_strands.agent import _build_strands_history, _build_snapshot_messages
 
@@ -14,17 +14,39 @@ def _tool_message(**overrides):
     return ToolMessage(**fields)
 
 
+def _answered_turn(tool_message):
+    """The call the result answers, ahead of the result itself.
+
+    Replay drops a ``toolResult`` no replayed ``toolUse`` answers, so a status
+    assertion needs the pair rather than the result alone.
+    """
+    return [
+        AssistantMessage(
+            id="a1",
+            tool_calls=[
+                ToolCall(
+                    id=tool_message.tool_call_id,
+                    function=FunctionCall(name="do_thing", arguments="{}"),
+                )
+            ],
+        ),
+        tool_message,
+    ]
+
+
 class TestBedrockToolResultStatus:
     def test_error_maps_onto_bedrock_status(self):
         # A client-reported tool failure must reach the model as an error, not a
         # silent success -- AG-UI's ToolMessage.error sets Bedrock's toolResult status.
-        history = _build_strands_history([_tool_message(error="invalid id")])
-        tool_result = history[0]["content"][0]["toolResult"]
+        history = _build_strands_history(
+            _answered_turn(_tool_message(error="invalid id"))
+        )
+        tool_result = history[-1]["content"][0]["toolResult"]
         assert tool_result["status"] == "error"
 
     def test_defaults_to_success_without_error(self):
-        history = _build_strands_history([_tool_message(content="42")])
-        tool_result = history[0]["content"][0]["toolResult"]
+        history = _build_strands_history(_answered_turn(_tool_message(content="42")))
+        tool_result = history[-1]["content"][0]["toolResult"]
         assert tool_result["status"] == "success"
 
 

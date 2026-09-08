@@ -6,8 +6,19 @@
 
 import { z } from "zod";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
-import type { RunAgentInput, Tool, AssistantMessage, ToolCall, Message } from "@ag-ui/core";
-import type { SDKAssistantMessage } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  RunAgentInput,
+  Tool,
+  AssistantMessage,
+  ToolCall,
+  Message,
+  InputContent,
+} from "@ag-ui/core";
+import type {
+  SDKAssistantMessage,
+  SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
+import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages/messages";
 import type { BetaToolUseBlock } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import {
   ALLOWED_FORWARDED_PROPS,
@@ -63,9 +74,220 @@ export function stripMcpPrefix(toolName: string): string {
  * Result from processing messages.
  */
 export type ProcessMessagesResult = {
-  userMessage: string;
+  userMessage: string | AsyncIterable<SDKUserMessage>;
   hasPendingToolResult: boolean;
 };
+
+const SUPPORTED_IMAGE_MEDIA_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
+
+function normalizedMediaType(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const mediaType = value.split(";", 1)[0]?.trim().toLowerCase();
+  return mediaType || undefined;
+}
+
+function requireString(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`[ClaudeAdapter] ${field} must be a non-empty string`);
+  }
+  return value;
+}
+
+function requireText(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`[ClaudeAdapter] ${field} must be a string`);
+  }
+  return value;
+}
+
+function requireRemoteUrl(value: unknown, field: string): string {
+  const url = requireString(value, field);
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`[ClaudeAdapter] ${field} must be a valid URL`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`[ClaudeAdapter] ${field} must use http or https`);
+  }
+  return url;
+}
+
+function imageBlock(source: unknown, field: string): ContentBlockParam {
+  if (!source || typeof source !== "object") {
+    throw new Error(`[ClaudeAdapter] ${field} must be an object`);
+  }
+  const value = source as {
+    type?: unknown;
+    value?: unknown;
+    mimeType?: unknown;
+  };
+  const mediaType = normalizedMediaType(value.mimeType);
+
+  if (value.type === "data") {
+    if (!mediaType || !SUPPORTED_IMAGE_MEDIA_TYPES.has(mediaType)) {
+      throw new Error(
+        `[ClaudeAdapter] ${field}.mimeType must be image/jpeg, image/png, image/gif, or image/webp`,
+      );
+    }
+    return {
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: mediaType as
+          | "image/jpeg"
+          | "image/png"
+          | "image/gif"
+          | "image/webp",
+        data: requireString(value.value, `${field}.value`),
+      },
+    };
+  }
+
+  if (value.type === "url") {
+    if (mediaType && !SUPPORTED_IMAGE_MEDIA_TYPES.has(mediaType)) {
+      throw new Error(
+        `[ClaudeAdapter] ${field}.mimeType is not a supported image type`,
+      );
+    }
+    return {
+      type: "image",
+      source: {
+        type: "url",
+        url: requireRemoteUrl(value.value, `${field}.value`),
+      },
+    };
+  }
+
+  throw new Error(`[ClaudeAdapter] ${field}.type must be data or url`);
+}
+
+function documentBlock(source: unknown, field: string): ContentBlockParam {
+  if (!source || typeof source !== "object") {
+    throw new Error(`[ClaudeAdapter] ${field} must be an object`);
+  }
+  const value = source as {
+    type?: unknown;
+    value?: unknown;
+    mimeType?: unknown;
+  };
+  const mediaType = normalizedMediaType(value.mimeType);
+
+  if (value.type === "data") {
+    if (mediaType !== "application/pdf") {
+      throw new Error(
+        `[ClaudeAdapter] ${field}.mimeType must be application/pdf`,
+      );
+    }
+    return {
+      type: "document",
+      source: {
+        type: "base64",
+        media_type: "application/pdf",
+        data: requireString(value.value, `${field}.value`),
+      },
+    };
+  }
+
+  if (value.type === "url") {
+    if (mediaType && mediaType !== "application/pdf") {
+      throw new Error(
+        `[ClaudeAdapter] ${field}.mimeType must be application/pdf when provided`,
+      );
+    }
+    return {
+      type: "document",
+      source: {
+        type: "url",
+        url: requireRemoteUrl(value.value, `${field}.value`),
+      },
+    };
+  }
+
+  throw new Error(`[ClaudeAdapter] ${field}.type must be data or url`);
+}
+
+function legacyBinaryBlock(
+  block: Extract<InputContent, { type: "binary" }>,
+  index: number,
+): ContentBlockParam {
+  const mediaType = normalizedMediaType(block.mimeType);
+  const source = block.data
+    ? { type: "data", value: block.data, mimeType: mediaType }
+    : block.url
+      ? { type: "url", value: block.url, mimeType: mediaType }
+      : undefined;
+
+  if (!source) {
+    throw new Error(
+      `[ClaudeAdapter] content[${index}] uses an opaque file id, which the Claude Agent SDK adapter cannot resolve`,
+    );
+  }
+  if (mediaType && SUPPORTED_IMAGE_MEDIA_TYPES.has(mediaType)) {
+    return imageBlock(source, `content[${index}]`);
+  }
+  if (mediaType === "application/pdf") {
+    return documentBlock(source, `content[${index}]`);
+  }
+  throw new Error(
+    `[ClaudeAdapter] content[${index}].mimeType is not supported`,
+  );
+}
+
+function convertContentBlock(
+  block: InputContent,
+  index: number,
+): ContentBlockParam | undefined {
+  if (!block || typeof block !== "object" || typeof block.type !== "string") {
+    throw new Error(
+      `[ClaudeAdapter] content[${index}] must be a typed content object`,
+    );
+  }
+
+  switch (block.type) {
+    case "text": {
+      const text = requireText(block.text, `content[${index}].text`);
+      if (text.trim().length === 0) return undefined;
+      return {
+        type: "text",
+        text,
+      };
+    }
+    case "image":
+      return imageBlock(block.source, `content[${index}].source`);
+    case "document":
+      return documentBlock(block.source, `content[${index}].source`);
+    case "binary":
+      return legacyBinaryBlock(block, index);
+    case "audio":
+    case "video":
+      throw new Error(
+        `[ClaudeAdapter] content[${index}] type ${block.type} is not supported`,
+      );
+    default:
+      throw new Error(
+        `[ClaudeAdapter] content[${index}] has an unsupported type`,
+      );
+  }
+}
+
+async function* structuredUserMessage(
+  content: ContentBlockParam[],
+  sessionId: string,
+): AsyncIterable<SDKUserMessage> {
+  yield {
+    type: "user",
+    message: { role: "user", content },
+    parent_tool_use_id: null,
+    session_id: sessionId,
+  };
+}
 
 /**
  * Process and validate all messages from RunAgentInput.
@@ -83,39 +305,46 @@ export function processMessages(input: RunAgentInput): ProcessMessagesResult {
     if (lastMsg.role === "tool") {
       hasPendingToolResult = true;
       console.debug(
-        `[ClaudeAdapter] Pending tool result detected: toolCallId=${(lastMsg as { toolCallId?: string }).toolCallId ?? "unknown"}, threadId=${input.threadId}`
+        `[ClaudeAdapter] Pending tool result detected: toolCallId=${(lastMsg as { toolCallId?: string }).toolCallId ?? "unknown"}, threadId=${input.threadId}`,
       );
     }
   }
 
   // Log message counts for debugging
   console.debug(
-    `[ClaudeAdapter] Processing ${messages.length} messages for threadId=${input.threadId}`
+    `[ClaudeAdapter] Processing ${messages.length} messages for threadId=${input.threadId}`,
   );
 
   // Extract content from the LAST message (any role - user, tool, or assistant)
   // Claude SDK manages conversation history via session_id, we just need the latest input
-  let userMessage = "";
+  let userMessage: string | AsyncIterable<SDKUserMessage> = "";
+  let hasUserContent = false;
   if (messages.length > 0) {
     const lastMsg = messages[messages.length - 1];
     const content = lastMsg.content;
 
     if (typeof content === "string") {
       userMessage = content;
+      hasUserContent = content.length > 0;
     } else if (Array.isArray(content)) {
-      // Content blocks format - extract text from first text block
-      for (const block of content) {
-        if (typeof block === "object" && block !== null && "text" in block) {
-          userMessage = (block as { text: string }).text;
-          break;
-        }
+      const blocks: ContentBlockParam[] = [];
+      content.forEach((block, index) => {
+        const converted = convertContentBlock(block, index);
+        if (converted) blocks.push(converted);
+      });
+      if (blocks.length > 0) {
+        userMessage = structuredUserMessage(
+          blocks,
+          input.threadId ?? "default",
+        );
+        hasUserContent = true;
       }
     }
   }
 
-  if (!userMessage) {
+  if (!hasUserContent) {
     console.warn(
-      `[ClaudeAdapter] No user message found in ${messages.length} messages`
+      `[ClaudeAdapter] No user message found in ${messages.length} messages`,
     );
   }
 
@@ -146,9 +375,7 @@ export function buildStateContextAddendum(input: RunAgentInput): string {
   // Add current state if provided (skip empty objects)
   if (hasState(input.state)) {
     parts.push("## Current Shared State");
-    parts.push(
-      "This state is shared with the frontend UI and can be updated."
-    );
+    parts.push("This state is shared with the frontend UI and can be updated.");
     try {
       const stateJson = JSON.stringify(input.state, null, 2);
       parts.push(`\`\`\`json\n${stateJson}\n\`\`\``);
@@ -157,7 +384,7 @@ export function buildStateContextAddendum(input: RunAgentInput): string {
     }
     parts.push("");
     parts.push(
-      "To update this state, use the `ag_ui_update_state` tool with your changes."
+      "To update this state, use the `ag_ui_update_state` tool with your changes.",
     );
     parts.push("");
   }
@@ -169,9 +396,7 @@ export function buildStateContextAddendum(input: RunAgentInput): string {
  * Convert a basic JSON Schema type string to a Zod type.
  * Falls back to z.any() for complex or unknown types.
  */
-function jsonSchemaTypeToZod(
-  prop: Record<string, unknown>
-): z.ZodTypeAny {
+function jsonSchemaTypeToZod(prop: Record<string, unknown>): z.ZodTypeAny {
   const type = prop.type as string | undefined;
   const description = prop.description as string | undefined;
 
@@ -213,7 +438,7 @@ function jsonSchemaTypeToZod(
  * with z.any() fallback for complex nested schemas.
  */
 function jsonSchemaToZodShape(
-  schema: Record<string, unknown>
+  schema: Record<string, unknown>,
 ): Record<string, z.ZodTypeAny> {
   const properties = (schema.properties ?? {}) as Record<
     string,
@@ -245,7 +470,7 @@ function jsonSchemaToZodShape(
  * since actual execution happens on the client side.
  */
 export function convertAguiToolToClaudeSdk(
-  toolDef: Tool
+  toolDef: Tool,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): any {
   const toolName = toolDef.name ?? "unknown";
@@ -274,10 +499,8 @@ export function createStateManagementTool(): any {
     "Update the shared application state. Use this to persist changes that should be visible in the UI. Pass the complete updated state object.",
     { state_updates: z.record(z.string(), z.unknown()) },
     async () => ({
-      content: [
-        { type: "text" as const, text: "State updated successfully" },
-      ],
-    })
+      content: [{ type: "text" as const, text: "State updated successfully" }],
+    }),
   );
 }
 
@@ -291,7 +514,7 @@ export function createStateManagementTool(): any {
 export function applyForwardedProps(
   forwardedProps: Record<string, unknown> | undefined,
   mergedOptions: Record<string, unknown>,
-  allowedKeys: Set<string> = ALLOWED_FORWARDED_PROPS
+  allowedKeys: Set<string> = ALLOWED_FORWARDED_PROPS,
 ): Record<string, unknown> {
   if (
     !forwardedProps ||
@@ -306,17 +529,19 @@ export function applyForwardedProps(
     if (allowedKeys.has(key) && value != null) {
       mergedOptions[key] = value;
       appliedCount++;
-      console.debug(`[ClaudeAdapter] Applied forwarded_prop: ${key} = ${String(value)}`);
+      console.debug(
+        `[ClaudeAdapter] Applied forwarded_prop: ${key} = ${String(value)}`,
+      );
     } else if (!allowedKeys.has(key)) {
       console.warn(
-        `[ClaudeAdapter] Ignoring non-whitelisted forwarded_prop: ${key}. See ALLOWED_FORWARDED_PROPS for supported keys.`
+        `[ClaudeAdapter] Ignoring non-whitelisted forwarded_prop: ${key}. See ALLOWED_FORWARDED_PROPS for supported keys.`,
       );
     }
   }
 
   if (appliedCount > 0) {
     console.debug(
-      `[ClaudeAdapter] Applied ${appliedCount} forwarded_props as option overrides`
+      `[ClaudeAdapter] Applied ${appliedCount} forwarded_props as option overrides`,
     );
   }
 
@@ -344,7 +569,7 @@ export function isStateManagementTool(name: string): boolean {
  */
 export function buildAguiAssistantMessage(
   sdkMessage: SDKAssistantMessage,
-  messageId: string
+  messageId: string,
 ): AssistantMessage | null {
   const contentBlocks = sdkMessage.message?.content ?? [];
 
@@ -404,7 +629,7 @@ export function buildAguiAssistantMessage(
  */
 export function buildAguiToolMessage(
   toolUseId: string,
-  content: unknown
+  content: unknown,
 ): Message {
   let resultStr = "";
   try {

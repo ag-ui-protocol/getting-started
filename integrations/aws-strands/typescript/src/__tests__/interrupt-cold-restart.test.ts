@@ -884,7 +884,12 @@ describe.each(interruptShapes)(
         );
         // The answered sibling is neither demanded nor re-submitted.
         expect(submittedInterruptAnswers()).toEqual([
-          [{ interruptId: "int-open", response: { environment: "prod" } }],
+          [
+            {
+              interruptId: "int-open",
+              response: { response: { environment: "prod" } },
+            },
+          ],
         ]);
       },
     );

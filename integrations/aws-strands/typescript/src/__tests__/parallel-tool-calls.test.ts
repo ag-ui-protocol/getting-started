@@ -118,6 +118,21 @@ describe("Parallel frontend tool calls — all emitted", () => {
     expect(startIds).toEqual(endIds);
     expect(startIds.size).toBe(2);
   });
+
+  it("the closeout drain does not re-close a burst-emitted call", async () => {
+    // The burst emit path records both envelope events on its tracking entry,
+    // so the terminal drain (which closes calls that started but never ended)
+    // has nothing left to do. Recording only the start would double-close it.
+    const block = new ToolUseBlock({
+      name: "frontend_a",
+      toolUseId: "st-a",
+      input: {},
+    });
+    const agent = scriptedStrandsAgent([block as unknown as AgentStreamEvent]);
+    const result = await collect(agent, minimalRunInput({ tools: TOOLS }));
+    const ends = result.filter((e) => e.type === EventType.TOOL_CALL_END);
+    expect(ends).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

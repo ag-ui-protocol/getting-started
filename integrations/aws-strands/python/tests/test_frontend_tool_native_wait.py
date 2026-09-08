@@ -25,6 +25,8 @@ from ag_ui_strands.config import StrandsAgentConfig, ToolBehavior
 from ag_ui_strands.frontend_tool_interrupt import index_frontend_tool_interrupts
 from ag_ui_strands.session_reconcile import AG_UI_FRONTEND_CALL_IDS_STATE_KEY
 
+from tests.error_code_table import assert_contract_error
+
 
 class _ParallelWaitModel(Model):
     """Emit two frontend calls together, then continue once both resolve."""
@@ -366,7 +368,7 @@ async def test_invalid_frontend_native_ids_fail_before_handoff(
     )
 
     [error] = [event for event in events if event.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_IDENTITY_ERROR"
+    assert_contract_error(error, "FRONTEND_TOOL_IDENTITY_ERROR")
     assert message_fragment in error.message
     assert EventType.TOOL_CALL_END not in [event.type for event in events]
     assert EventType.RUN_FINISHED not in [event.type for event in events]
@@ -404,7 +406,7 @@ async def test_completed_frontend_native_id_cannot_be_reused(
     )
 
     [error] = [event for event in resumed if event.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_IDENTITY_ERROR"
+    assert_contract_error(error, "FRONTEND_TOOL_IDENTITY_ERROR")
     assert "reused" in error.message
     assert EventType.TOOL_CALL_END not in [event.type for event in resumed]
     assert EventType.RUN_FINISHED not in [event.type for event in resumed]
@@ -483,7 +485,7 @@ async def test_duplicate_client_results_fail_before_native_resume(
     )
 
     [error] = [event for event in duplicate if event.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_RESULT_DUPLICATE"
+    assert_contract_error(error, "FRONTEND_TOOL_RESULT_DUPLICATE")
     assert model.calls == 1
 
 
@@ -874,7 +876,7 @@ async def test_identical_completed_retry_does_not_run_the_model_again(
     )
 
     [error] = [event for event in divergent if event.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_RESULT_CONFLICT"
+    assert_contract_error(error, "FRONTEND_TOOL_RESULT_CONFLICT")
     assert model.calls == 2
 
 
@@ -923,7 +925,7 @@ async def test_conflicting_retry_of_a_recorded_result_fails(tmp_path: Path) -> N
     )
 
     [error] = [event for event in conflicting if event.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_RESULT_CONFLICT"
+    assert_contract_error(error, "FRONTEND_TOOL_RESULT_CONFLICT")
     assert model.calls == 1
 
 
@@ -993,7 +995,7 @@ async def test_full_history_completion_after_a_partial_answer_is_repeatable(
         ),
     )
     [error] = [event for event in divergent if event.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_RESULT_CONFLICT"
+    assert_contract_error(error, "FRONTEND_TOOL_RESULT_CONFLICT")
     assert model.calls == 2
 
 
@@ -1231,7 +1233,7 @@ async def test_toolless_continuation_after_a_restart_fails_loudly(
     )
 
     [error] = [e for e in events if e.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_NOT_REGISTERED"
+    assert_contract_error(error, "FRONTEND_TOOL_NOT_REGISTERED")
     assert "first_client_tool" in error.message
     assert not any(e.type == EventType.RUN_FINISHED for e in events)
     assert model.calls == 1
@@ -1386,7 +1388,7 @@ async def test_cancelling_a_parked_wait_needs_the_tool_too(tmp_path: Path) -> No
         ),
     )
     [error] = [e for e in refused if e.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_NOT_REGISTERED"
+    assert_contract_error(error, "FRONTEND_TOOL_NOT_REGISTERED")
     assert not any(e.type == EventType.RUN_FINISHED for e in refused)
     # This is where the regression would land: without the gate the checkpoint
     # resumes into nothing and the framework's text replaces the cancellation.
@@ -1450,7 +1452,7 @@ async def test_a_native_tool_under_the_parked_name_does_not_satisfy_the_gate(
     )
 
     [error] = [e for e in events if e.type == EventType.RUN_ERROR]
-    assert error.code == "FRONTEND_TOOL_NOT_REGISTERED"
+    assert_contract_error(error, "FRONTEND_TOOL_NOT_REGISTERED")
     assert not any(e.type == EventType.RUN_FINISHED for e in events)
     core = restarted._agents_by_thread[thread_id]
     assert "the server ran this" not in repr(core.messages)

@@ -11,6 +11,9 @@ Mirrors the TypeScript ``threadAgentConfig`` suite.
 
 from __future__ import annotations
 
+import logging
+import weakref
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -174,3 +177,104 @@ async def test_hook_failure_ends_the_run_and_leaves_the_thread_uncached():
         async for _ in ag.run(_run_input()):
             pass
     assert calls["n"] == 2
+
+
+# ---------------------------------------------------------------------------
+# plugins
+# ---------------------------------------------------------------------------
+#
+# ``plugins`` has a dedicated kwarg on the adapter, so it reaches this hook
+# with something already in the box. Three sources can name it at once: the
+# template, which cannot carry; the kwarg; and this hook. These fix the order
+# between them, and fix that using either route silences the warning about
+# the template.
+
+
+# Plain sentinels rather than real plugins: the adapter hands this list to the
+# per-thread constructor unexamined, and the stub below is what receives it.
+# That keeps these running at the declared strands-agents floor, which has no
+# plugin system at all.
+
+
+class _FakePluginRegistry:
+    """A plugin registry in the shape the adapter reads."""
+
+    def __init__(self, owner, names):
+        self._agent_ref = weakref.ref(owner)
+        self._plugins = {name: SimpleNamespace(name=name) for name in names}
+
+
+def _template_with_plugins(*names: str):
+    agent = Agent(model=_mock_model())
+    agent._plugin_registry = _FakePluginRegistry(agent, names)
+    return agent
+
+
+def _as_if_sdk_took_plugins():
+    """Declare the capability the stub core already assumes.
+
+    The wrap-time check refuses ``plugins=`` on a release whose Agent has no
+    such parameter. The per-thread core here is a stub that takes any kwarg, so
+    declaring the capability is what lets the precedence rule be asserted at
+    the declared floor instead of skipped there.
+    """
+    return patch("ag_ui_strands.agent._STRANDS_ACCEPTS_PLUGINS", True)
+
+
+@pytest.mark.asyncio
+async def test_the_hook_can_supply_plugins():
+    """The general route still works for the param that gained a kwarg.
+
+    A caller who wants a plugin built per thread, rather than one instance
+    shared by every thread, has nowhere else to do it.
+    """
+    plugin = object()
+    template = Agent(model=_mock_model())
+    config = StrandsAgentConfig(thread_agent_kwargs=lambda _input: {"plugins": [plugin]})
+    ag = StrandsAgent(template, name="test", config=config)
+
+    await _build(ag)
+
+    assert _CapturingCore.instances[-1].init_kwargs["plugins"] == [plugin]
+
+
+@pytest.mark.asyncio
+async def test_hook_plugins_win_over_the_adapter_kwarg():
+    """Same precedence every other param has, and for the same reason.
+
+    The hook sees the request; the constructor kwarg was fixed once at
+    startup. Whichever knows more about this thread should be the one that
+    decides, so the later writer wins.
+    """
+    from_ctor = object()
+    from_hook = object()
+    template = Agent(model=_mock_model())
+    config = StrandsAgentConfig(
+        thread_agent_kwargs=lambda _input: {"plugins": [from_hook]}
+    )
+    with _as_if_sdk_took_plugins():
+        ag = StrandsAgent(template, name="test", plugins=[from_ctor], config=config)
+        await _build(ag)
+
+    assert _CapturingCore.instances[-1].init_kwargs["plugins"] == [from_hook]
+
+
+@pytest.mark.asyncio
+async def test_no_warning_about_template_plugins_the_hook_supplies(caplog):
+    """Acting on the warning through this route has to make it stop too.
+
+    The message names the constructor kwarg, but the hook answers it just as
+    completely, and a caller who took that route has lost nothing.
+    """
+    template = _template_with_plugins("on-template")
+    config = StrandsAgentConfig(
+        thread_agent_kwargs=lambda _input: {"plugins": [object()]}
+    )
+    ag = StrandsAgent(template, name="test", config=config)
+
+    with caplog.at_level(logging.WARNING, logger="ag_ui_strands.agent"):
+        await _build(ag)
+
+    assert not [m for m in caplog.messages if "plugins" in m], (
+        f"warned about plugins the hook supplied; got {caplog.messages}"
+    )

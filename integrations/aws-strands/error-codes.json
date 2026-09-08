@@ -1,0 +1,225 @@
+{
+  "about": [
+    "Every RUN_ERROR code the two AWS Strands bridges can emit, and the message text that goes with each one.",
+    "Clients and mock harnesses match both the code and the message literally, so this file is a wire contract and not documentation.",
+    "One table, two runtimes. Both suites read this file: Python through tests/error_code_table.py, TypeScript through src/__tests__/error-code-table.ts. Each drives its own bridge to the terminal paths below and asserts the emitted RUN_ERROR against the entry here, so a code marked shared carries the same text on both sides because both sides are matched against this one copy of it.",
+    "Message templates render every interpolated value as {} so the two languages can be compared without their interpolation syntax getting in the way, and are otherwise the literal text exactly, whitespace included: a run of spaces or a newline a bridge puts on the wire is text a client matching literally has to match, and a bridge that pads or wraps its sentence differently from the other one has diverged.",
+    "'messages' must hold identical text on every side listed in 'sides'. 'sideOnlyMessages' carries text one side alone can produce, and needs a note saying why.",
+    "Known limit: this is data, not a reading of either source. Adding a code to one bridge without adding it here fails nothing. See the error-code contract section of ARCHITECTURE.md."
+  ],
+  "codes": [
+    {
+      "code": "ADAPTER_BUG",
+      "sides": ["python", "typescript"],
+      "messages": ["{}"],
+      "note": "Reported for the escaping exceptions that point at this adapter's own code rather than at the provider or the SDK. The trigger sets are each language's equivalents, not the same names: TypeError and NameError in Python, TypeError and ReferenceError in TypeScript, plus AttributeError in Python for the property access TypeScript already reports as a TypeError. Those types are also what code outside this adapter raises, so each bridge withholds the claim where it knows the fault came from elsewhere: a failure arriving from inside the Strands call, and a tool result JSON cannot carry. Both bridges are exposed to the second one, through json.dumps in Python and through JSON.stringify in TypeScript, but not over the same values: JSON.stringify drops functions, undefined and symbols rather than failing over them, and throws only over a BigInt or a structure that refers back to itself, where json.dumps has no undefined or symbol to drop and raises a TypeError over a function. Adapter code that runs inside the Strands call, a registered hook or a proxy tool, raises past that boundary, so it reports STRANDS_ERROR in Python and on the TypeScript orchestrator path, and STRANDS_FORCE_STOP on the TypeScript single-agent path, where every throw out of agent.stream() is recorded as the forced stop and never reaches the classifier."
+    },
+    {
+      "code": "CONTINUATION_TOOL_NAME_UNRESOLVED",
+      "sides": ["python", "typescript"],
+      "messages": [
+        "Cannot name the tool behind continuation tool result(s) {}: absent from the input messages and from the native session history"
+      ]
+    },
+    {
+      "code": "ENCODING_ERROR",
+      "sides": ["python", "typescript"],
+      "messages": ["Encoding error: {}"]
+    },
+    {
+      "code": "FRONTEND_TOOL_IDENTITY_ERROR",
+      "sides": ["python", "typescript"],
+      "messages": ["{}"],
+      "note": "Reports a frontend call that cannot be correlated through Strands' native tool-use id. The template is bare because the message is the raised identity exception's own text, so what a client reads here is not pinned by this file at all. The three sentences that exception is constructed with are worded the same on both sides, and differ only in how they quote the offending value: Python interpolates it with !r where TypeScript wraps it in single quotes, which render alike for any ordinary tool name or native tool-use id and diverge only for a value that itself contains a quote."
+    },
+    {
+      "code": "FRONTEND_TOOL_NOT_REGISTERED",
+      "sides": ["python"],
+      "messages": [
+        "Cannot resume the frontend tool calls waiting on this thread: {}."
+      ],
+      "note": "Python only. Refuses a resume whose parked frontend tool calls cannot be matched to a registered tool, and is part of the durable frontend-result recovery path that has no TypeScript counterpart yet."
+    },
+    {
+      "code": "FRONTEND_TOOL_RESULT_CONFLICT",
+      "sides": ["python"],
+      "messages": [
+        "A different result is already recorded for frontend tool call {}.",
+        "A different result is already recorded for this frontend tool call."
+      ],
+      "note": "Python only. Part of the durable frontend-result recovery path."
+    },
+    {
+      "code": "FRONTEND_TOOL_RESULT_DUPLICATE",
+      "sides": ["python"],
+      "messages": ["Duplicate frontend tool result: {}"],
+      "note": "Python only. Part of the durable frontend-result recovery path."
+    },
+    {
+      "code": "FRONTEND_TOOL_WAIT_STATE_ERROR",
+      "sides": ["python"],
+      "messages": ["{}"],
+      "note": "Python only. Part of the durable frontend-result recovery path."
+    },
+    {
+      "code": "INTERRUPT_EXPIRED",
+      "sides": ["python", "typescript"],
+      "messages": ["Interrupt '{}' has expired."]
+    },
+    {
+      "code": "INTERRUPT_RECONCILIATION_ERROR",
+      "sides": ["python", "typescript"],
+      "messages": ["Active interrupt tool result reconciliation failed"]
+    },
+    {
+      "code": "INTERRUPT_RESUME_ERROR",
+      "sides": ["python"],
+      "messages": [
+        "A submitted resume must contain at least one entry",
+        "Cannot resume without an active native interrupt checkpoint",
+        "Interrupt '{}' carries an expiry that is not a timestamp: {}",
+        "Resume contains duplicate interrupt id: {}",
+        "Resume entries must contain a non-blank interrupt id",
+        "Resume references an interrupt that is not open: {}"
+      ],
+      "note": "Python only. One of the four typed interrupt-protocol failures. It also covers the resume entries TypeScript rejects under UNKNOWN_INTERRUPT_ID, so the two bridges answer an unknown interrupt id with different codes. The unreadable-expiry message is Python-only in behaviour as well: TypeScript reads expiresAt through the Date constructor, which turns an unparseable value into an Invalid Date that compares false, so that bridge lets the resume through where this one refuses it."
+    },
+    {
+      "code": "INTERRUPT_SESSION_CAPABILITY_ERROR",
+      "sides": ["python", "typescript"],
+      "messages": [],
+      "sideOnlyMessages": {
+        "python": [
+          "Mixed frontend-proxy/native interrupt state requires session_id, a stable agent_id, and a session_repository exposing list_messages() and update_message()"
+        ],
+        "typescript": [
+          "Mixed frontend-proxy/native interrupt state requires a session manager exposing saveSnapshot() and an agent exposing messages"
+        ]
+      },
+      "note": "Both bridges refuse the same checkpoint, and each sentence names the capability its own SDK's session API actually has. Python's reconciliation rewrites persisted messages one at a time, so its probe reads session_id, a stable agent_id and a session_repository exposing list_messages() and update_message(); TypeScript's writes a whole-agent snapshot, so its probe reads a session manager exposing saveSnapshot() and an agent exposing messages. Sharing one sentence would name an API the reader's SDK does not have, which is the reasoning SESSION_MANAGER_INVALID_TYPE already carries. The TypeScript gate asks for one thing its sentence does not name, a readable and writable agent app state, so the two texts are not a summary of the same check either."
+    },
+    {
+      "code": "INTERRUPT_SESSION_REQUIRED",
+      "sides": ["python", "typescript"],
+      "messages": [
+        "A SessionManager is required for a mixed frontend-proxy/native interrupt checkpoint"
+      ]
+    },
+    {
+      "code": "INVALID_PAYLOAD",
+      "sides": ["python", "typescript"],
+      "messages": [
+        "Invalid payload for interrupt '{}': expected an object.",
+        "Invalid payload for interrupt '{}': missing required keys: {}.",
+        "Invalid payload for interrupt '{}': {}"
+      ]
+    },
+    {
+      "code": "MEDIA_RESOLUTION_FAILED",
+      "sides": ["python", "typescript"],
+      "messages": [
+        "All media content blocks failed conversion and no text fallback is available"
+      ]
+    },
+    {
+      "code": "PARTIAL_RESUME",
+      "sides": ["python", "typescript"],
+      "messages": [
+        "Partial resume: missing interrupt IDs: {}. All open interrupts must be addressed."
+      ]
+    },
+    {
+      "code": "PENDING_INTERRUPTS",
+      "sides": ["python", "typescript"],
+      "messages": [
+        "Thread has pending interrupts. Include resume[] to address them."
+      ]
+    },
+    {
+      "code": "SEED_BUILD_ERROR",
+      "sides": ["typescript"],
+      "messages": ["Failed to build conversation seed: {}"],
+      "note": "TypeScript only. Python seeds a thread's history inside the run rather than through a separate preflight build, so it has no point at which this can fail on its own."
+    },
+    {
+      "code": "SESSION_MANAGER_ERROR",
+      "sides": ["python", "typescript"],
+      "messages": ["Failed to initialize session manager: {}"]
+    },
+    {
+      "code": "SESSION_MANAGER_INVALID_TYPE",
+      "sides": ["python", "typescript"],
+      "messages": [],
+      "sideOnlyMessages": {
+        "python": [
+          "session_manager_provider returned {}; expected a SessionManager instance"
+        ],
+        "typescript": [
+          "sessionManagerProvider returned {}; expected a SessionManager instance"
+        ]
+      },
+      "note": "The message names the configuration option that returned the wrong value, and that option is spelled session_manager_provider in Python and sessionManagerProvider in TypeScript. Sharing one spelling would point a developer at an option their SDK does not have."
+    },
+    {
+      "code": "STRANDS_ERROR",
+      "sides": ["python", "typescript"],
+      "messages": ["{}"]
+    },
+    {
+      "code": "STRANDS_FORCE_STOP",
+      "sides": ["python", "typescript"],
+      "messages": ["{}"]
+    },
+    {
+      "code": "TEMPLATE_TOOLS_PROVIDER_ERROR",
+      "sides": ["python", "typescript"],
+      "messages": ["Failed to resolve the template tools for this request: {}"],
+      "note": "Reported when the per-request template-tools hook throws. Unlike the per-thread agent hook beside it, the option carries one name on both sides (template_tools_provider / templateToolsProvider) and returns the same thing, a selection of the template's tools, so there is one code and one sentence. Terminal rather than degrading to an unfiltered run: the hook exists to withhold tools from a caller, and failing open would hand the model exactly what the caller meant to keep back."
+    },
+    {
+      "code": "THREAD_AGENT_CONFIG_ERROR",
+      "sides": ["typescript"],
+      "messages": ["Failed to build per-thread agent config: {}"],
+      "note": "Reported when the caller's per-thread agent hook throws. The hook is genuinely not the same option on the two sides: TypeScript spells it threadAgentConfig and it returns a partial AgentConfig, Python spells it thread_agent_kwargs and it returns keyword arguments for StrandsAgentCore, so each bridge names the option a developer of that SDK actually has and the sentence is per side, on the reasoning SESSION_MANAGER_INVALID_TYPE already carries. The CODE differing is a separate matter and is not defended here: the Python half is THREAD_AGENT_KWARGS_ERROR, the two are one failure under two code names, and unifying them is follow-up work for whoever owns the per-thread agent provider."
+    },
+    {
+      "code": "THREAD_AGENT_KWARGS_ERROR",
+      "sides": ["python"],
+      "messages": ["Failed to build per-thread agent kwargs: {}"],
+      "note": "The Python half of THREAD_AGENT_CONFIG_ERROR. See that entry for why the option is named differently on each side, and for the note that unifying the two code names is follow-up work."
+    },
+    {
+      "code": "THREAD_BUSY",
+      "sides": ["python", "typescript"],
+      "messages": [
+        "Another run is already in progress on {}. Wait for RUN_FINISHED before starting another."
+      ],
+      "sideOnlyMessages": {
+        "python": [
+          "This orchestrator is paused at an interrupt on thread \"{}\". Answer that interrupt before starting another run."
+        ]
+      },
+      "note": "Only Python parks an orchestrator at an interrupt across runs, so only Python can refuse a turn for that reason, and the refusal is its own sentence because no run is in flight then and answering the interrupt, not RUN_FINISHED, is the way out. The shared template is the same text on both sides but not the same range of renderings: the scope it interpolates is a thread on either side, and on Python also the whole orchestrator when one instance is shared by every thread, which TypeScript guards per thread only."
+    },
+    {
+      "code": "UNKNOWN_INTERRUPT_ID",
+      "sides": ["python", "typescript"],
+      "messages": ["No pending interrupts for this thread."],
+      "sideOnlyMessages": {
+        "typescript": [
+          "This agent did not issue any interrupts to resume: {}. Resume entries must reference an outstanding interruptId."
+        ]
+      },
+      "note": "Python rejects a resume entry naming an interrupt it never issued in its resume preflight, under INTERRUPT_RESUME_ERROR, so it never produces this second message."
+    },
+    {
+      "code": "URL_FETCH_POLICY_INVALID",
+      "sides": ["typescript"],
+      "messages": ["Unusable urlFetchPolicy: {}"],
+      "note": "TypeScript only, and structurally so. Both bridges expose the URL fetch policy through configuration (urlFetchPolicy / url_fetch_policy), but Python's is a frozen dataclass that validates in __post_init__, so an unusable one raises ValueError where the host constructs it and no run ever starts with it. A TypeScript interface has no constructor to validate in, so the adapter checks the configured policy itself, once per run, before the first attachment is fetched, and reports it here. The interpolated text is the sentence naming the offending field, from the same check fetchUrlContent applies per fetch."
+    }
+  ],
+  "sharedMessageConstants": {
+    "forceStopFallback": "The Strands agent stopped unexpectedly."
+  }
+}

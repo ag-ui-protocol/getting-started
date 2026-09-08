@@ -30,6 +30,8 @@ load_dotenv(dotenv_path=env_path)
 os.environ.setdefault("OTEL_SDK_DISABLED", "true")
 os.environ.setdefault("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "all")
 
+from collections.abc import Mapping
+
 from strands import Agent, tool
 from strands.types.tools import ToolContext
 from ag_ui_strands import StrandsAgent, create_strands_app
@@ -53,7 +55,14 @@ def schedule_meeting(topic: str, tool_context: ToolContext, attendee: str = "") 
     # Two cancel shapes reach here: the adapter's sentinel for a cancelled
     # resume entry, and the picker's own Cancel button, which resolves with a
     # `cancelled` flag inside the payload.
-    payload = answer.get("response") or {}
+    #
+    # The envelope is the adapter's, but the value inside it is whatever the
+    # client sent, so it need not be a mapping at all. Checked rather than
+    # assumed, and checked the same way the TypeScript example does: reading
+    # fields off a bare string raises here and silently yields nothing there,
+    # which is the two demos disagreeing about the same input.
+    inner = answer.get("response")
+    payload = inner if isinstance(inner, Mapping) else {}
     if answer.get("cancelled") or payload.get("cancelled"):
         return f"User cancelled. Meeting NOT scheduled: {topic}"
 
