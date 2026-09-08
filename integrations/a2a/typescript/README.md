@@ -33,7 +33,9 @@ const client = new A2AClient("https://my-a2a-agent");
 
 const agent = new A2AAgent({
   a2aClient: client,
-  initialMessages: [{ id: "user-1", role: "user", content: "Plan a team offsite" } as any],
+  initialMessages: [
+    { id: "user-1", role: "user", content: "Plan a team offsite" } as any,
+  ],
 });
 
 const { result, newMessages } = await agent.runAgent();
@@ -42,6 +44,23 @@ console.log(newMessages);
 ```
 
 You can inject your own `A2AClient` instance via the `client` option, override default instructions, or force blocking mode by setting `strategy: "blocking"`.
+
+## Frontend tools are not forwarded
+
+`A2AAgent` cannot deliver frontend tools to an A2A agent. The A2A protocol has no field for client-side tool definitions — its `Message` carries `parts` plus an untyped `metadata` bag, and no server-side behaviour is specified for reading tools out of it. `RunAgentInput.tools` is therefore dropped.
+
+This is easy to misread, because nothing fails: the run succeeds and the tool is simply never called, even though the same tool works over the plain AG-UI HTTP transport. `A2AAgent` logs a warning once per instance when it receives tools, so the cause is visible.
+
+To combine frontend tools with A2A agents, use `A2AMiddlewareAgent` from `@ag-ui/a2a-middleware`. It keeps your tools on an orchestration agent — which receives them the ordinary way — and reaches A2A agents through its own `send_message_to_a2a_agent` tool:
+
+```ts
+import { A2AMiddlewareAgent } from "@ag-ui/a2a-middleware";
+
+const agent = new A2AMiddlewareAgent({
+  orchestrationAgent, // a normal AG-UI agent; your frontend tools stay here
+  agentUrls: ["http://localhost:10007"],
+});
+```
 
 ## Configuration reference
 
