@@ -232,6 +232,20 @@ class ToolCallResultEvent(BaseEvent):
     tool_call_id: str
     content: str
     role: Optional[Literal["tool"]] = None
+    # The event-side twin of ToolMessage.error: set when the tool call failed,
+    # so a consumer can render the failure from the live stream instead of
+    # waiting for the MESSAGES_SNAPSHOT that carries the message. A failure is
+    # reported when `error` is a non-null string, "" included — a producer that
+    # sends the empty string chose to send it. `None` reports nothing about
+    # failure, which is not the same as the call having succeeded.
+    #
+    # Declaring it narrows the wire rather than purely extending it: extra="allow"
+    # used to let an `error` of any shape ride along as an extra, and a non-string
+    # one now fails validation. An explicit JSON null still validates and reads
+    # back as None, as it does for every optional field here, so the contract is
+    # stated on the value rather than on presence; only the TypeScript schema
+    # rejects the null outright.
+    error: Optional[str] = None
     subagent_run_id: Optional[str] = None
 
 class ThinkingStartEvent(BaseEvent):

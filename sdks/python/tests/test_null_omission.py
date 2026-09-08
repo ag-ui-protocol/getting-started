@@ -1,15 +1,23 @@
 """
 Guards the rule that a producer omits a field with no value instead of writing ``null``.
 
-Three tests, each doing a different job:
+Four test classes, each doing a different job:
 
 * ``TestNullOmissionSweep`` walks every wire type the SDK defines, by reflection, and fails
   on any ``null`` for a field that has no value. It is deliberately not a list of known
   fields — a new optional field is covered the moment it is declared.
 * ``TestNullOmissionIsTheBaseModelsDoing`` reverts the setting on one class and shows the
   ``null`` come back, so a passing sweep can't be credited to something else.
+* ``TestLegitimateNullsRoundTrip`` guards the other side of the rule: a ``null`` that IS a
+  value — under a metadata key, inside a state snapshot, in a required field, in an extra —
+  has to survive, so the omission above cannot be implemented by stripping every ``null``.
 * ``TestNullOmissionCrossLanguageFixture`` runs the shared fixture that the TypeScript and
-  .NET SDKs run too, so all three are held to the same text.
+  .NET SDKs run too, so all three are held to the same text. Re-serializing a case is not on
+  its own enough to hold *this* SDK to it, because ``ConfiguredBaseModel`` uses
+  ``extra="allow"``: an undeclared key in a case's ``input`` survives validation as an extra
+  and is written straight back out, so the round-trip would pass for a field Python has never
+  heard of. Each case therefore also asserts that every key it expects is a declared field —
+  at every depth, because ``extra="allow"`` leaks at every depth too.
 """
 
 import enum
@@ -31,6 +39,10 @@ from ag_ui.encoder.encoder import EventEncoder
 FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "null-omission.json"
 
 SDK_NAME = "python"
+
+# The number of fixture cases this SDK is held to. See
+# TestNullOmissionCrossLanguageFixture.test_fixture_still_carries_every_case_this_sdk_is_held_to.
+EXPECTED_CASE_COUNT = 36
 
 # Placeholder values used to fill required fields when building a probe instance. Keyed by
 # the concrete type the annotation resolves to.
@@ -314,8 +326,18 @@ class TestNullOmissionCrossLanguageFixture(unittest.TestCase):
             if SDK_NAME in case["producedBy"]
         ]
 
-    def test_fixture_covers_this_sdk(self):
-        self.assertGreater(len(self._cases()), 15, "fixture lost most of its Python cases")
+    def test_fixture_still_carries_every_case_this_sdk_is_held_to(self):
+        """Pinned exactly, not as a floor.
+
+        A floor cannot notice a deletion: under the previous ``> 15`` bound, with 35 cases
+        present, deleting a case outright left this suite — and the TypeScript and .NET ones
+        — green. Bump this deliberately when adding or removing a case.
+        """
+        self.assertEqual(
+            EXPECTED_CASE_COUNT,
+            len(self._cases()),
+            "the fixture gained or lost a Python case; update EXPECTED_CASE_COUNT if deliberate",
+        )
 
     def test_every_case_reserializes_to_its_expected_json(self):
         encoder = EventEncoder()
@@ -324,6 +346,61 @@ class TestNullOmissionCrossLanguageFixture(unittest.TestCase):
                 event = self.event_adapter.validate_python(payload)
                 encoded = encoder.encode(event)
                 self.assertEqual(expected, json.loads(encoded[len("data: ") : -len("\n\n")]))
+
+    def test_every_expected_key_is_a_declared_field(self):
+        """The keys a case expects are fields this SDK declares, not ``extra="allow"`` extras.
+
+        Without this, deleting a field from the model leaves its fixture case green: the
+        value rides through validation as an extra and is re-serialized unchanged. .NET gets
+        this for free (System.Text.Json drops unknown keys) and the TypeScript harness
+        asserts the same thing against the Zod variant's shape.
+
+        The walk is recursive because ``extra="allow"`` is not a top-level setting. Deleting
+        ``ToolMessage.tool_call_id`` or ``RunAgentInput.forwarded_props`` — both nested
+        inside a case's ``expected`` — used to leave every test in this file green, because a
+        top-level-only walk never looked at them and the extra carried the value straight
+        back out.
+        """
+        for name, payload, expected in self._cases():
+            with self.subTest(case=name):
+                self._assert_keys_are_declared(
+                    expected, self.event_adapter.validate_python(payload), name, ""
+                )
+
+    def _assert_keys_are_declared(
+        self, expected: Dict[str, Any], instance: BaseModel, case_name: str, path: str
+    ) -> None:
+        """Assert every key of ``expected`` is declared by ``instance``'s model, recursively."""
+        field_for_key: Dict[str, str] = {}
+        for field_name, field in type(instance).model_fields.items():
+            field_for_key[field_name] = field_name
+            if field.alias is not None:
+                field_for_key[field.alias] = field_name
+
+        undeclared = sorted(set(expected) - set(field_for_key))
+        self.assertEqual(
+            [],
+            undeclared,
+            f"case '{case_name}' expects {undeclared} at '{path or '/'}' on the wire, which "
+            f"{type(instance).__qualname__} does not declare — the round-trip only passes "
+            f"because extra='allow' carried the key through",
+        )
+
+        for key, value in expected.items():
+            self._descend(value, getattr(instance, field_for_key[key]), case_name, f"{path}/{key}")
+
+    def _descend(self, expected: Any, actual: Any, case_name: str, path: str) -> None:
+        """Follow ``expected`` into ``actual`` as far as the model tree goes.
+
+        Descent stops wherever the validated value is not a model: an opaque JSON payload — a
+        state snapshot, a raw event, a metadata bag — validates to a plain ``dict``, and there
+        an arbitrary key IS the contract rather than an undeclared field riding through.
+        """
+        if isinstance(expected, dict) and isinstance(actual, BaseModel):
+            self._assert_keys_are_declared(expected, actual, case_name, path)
+        elif isinstance(expected, list) and isinstance(actual, list):
+            for index, (expected_item, actual_item) in enumerate(zip(expected, actual)):
+                self._descend(expected_item, actual_item, case_name, f"{path}/{index}")
 
 
 if __name__ == "__main__":

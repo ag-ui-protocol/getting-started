@@ -332,6 +332,31 @@ var evt = new ToolCallResultEvent
 | `ToolCallId` | `toolCallId` | `string` | Tool call ID |
 | `Content` | `content` | `string` | Tool result content |
 | `Role` | `role` | `string?` | Optional role, typically `"tool"` |
+| `Error` | `error` | `string?` | Failure detail; a non-null string reports a failed call |
+
+`Error` is the event-side twin of `AGUIToolMessage.Error`. The call is reported
+as failed when `Error` is non-null — `string.Empty` included, since a producer
+that sends it chose to, so `string.IsNullOrEmpty(Error)` misreads a reported
+failure as a success. Test `Error is not null`; a non-string value never
+deserializes, so non-null already means a string. An absent JSON key and an
+explicit JSON `null` both leave `Error` as `null`, so the property cannot tell
+them apart — which is why the contract is stated on the value rather than on
+presence. `Content` and `Error` are independent, and a `null` `Error` reports
+nothing about failure, which is not the same as success.
+
+`AGUIChatClient` maps only `Content` when it converts the event to a
+`ChatResponseUpdate`, into a `FunctionResultContent`. To surface the failure from
+the live stream, read `Error` off the event itself — either by consuming
+`IAGUIEventStreamFormatter.ReadAsync` directly, or through
+`ChatResponseUpdate.RawRepresentation`, which holds the originating
+`ToolCallResultEvent`.
+
+Declaring `Error` narrows what the deserializer accepts: a structured value under
+this key used to be dropped, and now throws a `JsonException` out of the SSE
+reader, which ends the run. (An explicit JSON null is still accepted, as `null`.)
+A producer already sending a structured `error` must flatten it to a string.
+
+See [Events](/concepts/events#toolcallresult) for the language-neutral contract.
 
 ## State Management Events
 

@@ -268,6 +268,25 @@
       }
     },
     {
+      "name": "tool_call_start_for_the_call_that_fails",
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
+      "note": "Opens tc_3, the tool call whose result two cases below carries an error. Without it that case names a call the stream never starts. Like the tc_1 opening above it leaves parentMessageId out; unlike tc_1 no TOOL_CALL_END follows, because the call timed out rather than finishing.",
+      "input": {
+        "type": "TOOL_CALL_START",
+        "toolCallId": "tc_3",
+        "toolCallName": "search"
+      },
+      "expected": {
+        "type": "TOOL_CALL_START",
+        "toolCallId": "tc_3",
+        "toolCallName": "search"
+      }
+    },
+    {
       "name": "tool_call_result_without_role",
       "producedBy": [
         "typescript",
@@ -285,6 +304,29 @@
         "messageId": "msg_2",
         "toolCallId": "tc_1",
         "content": "{\"hits\":2}"
+      }
+    },
+    {
+      "name": "tool_call_result_with_error",
+      "producedBy": [
+        "typescript",
+        "python",
+        "dotnet"
+      ],
+      "note": "The failure twin of the case above: when `error` IS set, every SDK listed here must carry it on the wire under that exact key, alongside the empty `content`. This case pins round-trip fidelity for a populated `error`, not null omission — Python and .NET cover the omission half with their own reflection sweeps over every optional field, TypeScript gets it from `JSON.stringify` dropping `undefined`, and the preceding case covers it here only insofar as it carries no `error` at all.",
+      "input": {
+        "type": "TOOL_CALL_RESULT",
+        "messageId": "msg_7",
+        "toolCallId": "tc_3",
+        "content": "",
+        "error": "SearchTimeout: upstream did not respond within 30s"
+      },
+      "expected": {
+        "type": "TOOL_CALL_RESULT",
+        "messageId": "msg_7",
+        "toolCallId": "tc_3",
+        "content": "",
+        "error": "SearchTimeout: upstream did not respond within 30s"
       }
     },
     {

@@ -873,6 +873,8 @@ AGUI.Abstractions.ToolCallEndEvent.SubagentRunId.get -> string?
 AGUI.Abstractions.ToolCallEndEvent.SubagentRunId.set -> void
 AGUI.Abstractions.ToolCallResultEvent.SubagentRunId.get -> string?
 AGUI.Abstractions.ToolCallResultEvent.SubagentRunId.set -> void
+AGUI.Abstractions.ToolCallResultEvent.Error.get -> string?
+AGUI.Abstractions.ToolCallResultEvent.Error.set -> void
 AGUI.Abstractions.ToolCallStartEvent.SubagentRunId.get -> string?
 AGUI.Abstractions.ToolCallStartEvent.SubagentRunId.set -> void
 const AGUI.Abstractions.AGUIEventTypes.SubagentError = "SUBAGENT_ERROR" -> string!

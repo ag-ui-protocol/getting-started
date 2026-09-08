@@ -388,6 +388,38 @@ the tool's output.
 | `toolCallId` | Matches the ID from the corresponding `ToolCallStart` event |
 | `content`    | The actual result/output content from the tool execution    |
 | `role`       | Optional role identifier, typically "tool" for tool results |
+| `error`      | Failure detail; a non-null string reports a failed call     |
+
+A tool call is reported as failed when `error` is a non-null string. The empty
+string counts: a producer that sends `""` chose to send it, so a consumer that
+tests `error` for truthiness misreads a reported failure as a success. Test the
+type, not the truthiness.
+
+A producer with no failure to report omits the key. Writing an explicit JSON
+null instead is not allowed: TypeScript rejects it outright, while Python and
+.NET read it back as their own null, indistinguishable from the key being
+absent — which is why this rule is stated on the value rather than on presence.
+And "no failure reported" is not "succeeded": it covers a call that succeeded
+and a call that failed without saying so. Producers adopt `error` at their own
+pace, so never read an absent `error` as a success signal.
+
+`content` and `error` are independent. A failed result conventionally leaves
+`content` empty and carries the detail in `error`, but the protocol does not
+require it, and a consumer must not infer failure from `content` alone.
+
+Typing this key narrowed the wire. A value of any other shape used to be
+ignored: TypeScript and Python carried it through as an unrecognized key, and
+.NET dropped it. A structured `error` is now a hard parse failure that ends the
+run in all three — TypeScript's `EventSchemas.parse` throws, Python raises a
+`ValidationError`, and .NET throws a `JsonException` out of the SSE reader — and
+TypeScript rejects an explicit null on top of that. A producer already sending a
+structured `error` on `TOOL_CALL_RESULT` must flatten it to a string or move it
+to another key.
+
+Coverage is not uniform across SDKs. The TypeScript, Python and .NET SDKs model
+`error`; the community Go, Java, Kotlin and Dart SDKs have no such field on this
+event, and Go's strict decoder (`DisallowUnknownFields`) rejects the key outright
+rather than ignoring it.
 
 ### ToolCallChunk
 

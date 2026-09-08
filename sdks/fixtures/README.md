@@ -63,6 +63,12 @@ events are absent from .NET, for instance. It is not an escape hatch for a case 
 | Python     | `sdks/python/tests/test_null_omission.py`                                  |
 | .NET       | `sdks/dotnet/tests/AGUI.Abstractions.UnitTests/NullOmissionFixtureTest.cs` |
 
+Each consumer also pins the number of cases it runs **exactly**, not as a lower bound. A lower
+bound cannot notice a deletion — with a `> 15` floor and 35 cases present, deleting a case
+outright left all three suites green — so removing or adding a case here means updating the pinned
+count in each consumer in the same commit. That is the intended friction: a case leaving this file
+should be a decision, not a side effect.
+
 Those fixture tests check that the SDKs agree with each other. Each SDK additionally has a
 reflection-driven test that walks _every_ wire type it defines — not just the ones named here — and
 fails on any `null` the contract does not permit. Adding a case here does not remove the need for

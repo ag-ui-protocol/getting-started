@@ -341,6 +341,7 @@ type ToolCallResultEvent = BaseEvent & {
   toolCallId: string
   content: string
   role?: "tool"
+  error?: string
 }
 ```
 
@@ -350,6 +351,30 @@ type ToolCallResultEvent = BaseEvent & {
 | `toolCallId` | `string`            | Matches the ID from the corresponding ToolCallStartEvent    |
 | `content`    | `string`            | The actual result/output content from the tool execution    |
 | `role`       | `"tool"` (optional) | Optional role identifier, typically "tool" for tool results |
+| `error`      | `string` (optional) | Failure detail; a non-null string reports a failed call     |
+
+`error` is the event-side twin of `ToolMessage.error`. The `defaultApplyEvents`
+reducer in `@ag-ui/client` copies it onto the tool message it accumulates, so a
+client can render a failed tool call as it streams instead of waiting for the
+`MESSAGES_SNAPSHOT` that carries the finished message.
+
+The call is reported as failed when `error` is a string — `""` included, since a
+producer that sends it chose to, so `if (event.error)` misreads a reported
+failure as a success. Guard with `typeof event.error === "string"`, which is what
+the client itself does: an event reaching a subscriber has not necessarily been
+through `EventSchemas.parse`, so a nullish check would let a non-string through.
+`content` and `error` are independent — a failed result conventionally leaves
+`content` empty and carries the detail in `error`, but the protocol does not
+require it, and a consumer must not infer failure from `content` alone. An absent
+`error` reports nothing about failure, which is not the same as success.
+
+Declaring `error` narrows what the schema accepts. `BaseEventSchema` is
+`.passthrough()`, so an `error` of any other shape — a structured object, an
+explicit `null` — used to survive `EventSchemas.parse` as an unrecognized key. It
+now fails the parse, which aborts the run. A producer already sending a
+structured `error` must flatten it to a string.
+
+See [Events](/concepts/events#toolcallresult) for the language-neutral contract.
 
 ## State Management Events
 
