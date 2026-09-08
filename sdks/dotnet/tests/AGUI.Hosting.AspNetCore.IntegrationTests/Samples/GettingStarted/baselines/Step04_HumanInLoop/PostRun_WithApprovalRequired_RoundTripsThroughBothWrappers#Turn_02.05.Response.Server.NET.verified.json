@@ -1,0 +1,272 @@
+﻿[
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "functionCall",
+        "name": "ApproveExpenseReport",
+        "arguments": {
+          "expenseReportId": "EXP-2024-001"
+        },
+        "informationalOnly": true,
+        "callId": "call_Id_1"
+      }
+    ],
+    "responseId": "guid_Id_1",
+    "messageId": "guid_Id_1"
+  },
+  {
+    "role": "tool",
+    "contents": [
+      {
+        "$type": "functionResult",
+        "result": "Expense report EXP-2024-001 has been approved and processed.",
+        "callId": "call_Id_1"
+      }
+    ],
+    "responseId": "guid_Id_2",
+    "messageId": "guid_Id_2"
+  },
+  {
+    "contents": [],
+    "responseId": "",
+    "messageId": "",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": ""
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "Done"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " \u2014"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " expense"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " report"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " EXP"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "-"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "202"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "4"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "-"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "001"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " has"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " been"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " approved"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " and"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " processed"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "."
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "finishReason": "stop",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "usage",
+        "details": {
+          "inputTokenCount": 199,
+          "outputTokenCount": 20,
+          "cachedInputTokenCount": 0,
+          "reasoningTokenCount": 0,
+          "additionalCounts": {
+            "InputTokenDetails.AudioTokenCount": 0,
+            "OutputTokenDetails.AudioTokenCount": 0,
+            "OutputTokenDetails.AcceptedPredictionTokenCount": 0,
+            "OutputTokenDetails.RejectedPredictionTokenCount": 0
+          }
+        }
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "finishReason": "stop",
+    "modelId": ""
+  }
+]

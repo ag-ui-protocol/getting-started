@@ -5,9 +5,17 @@
 import logging
 import uuid
 import warnings
-from typing import Any, Callable, Coroutine, List, Optional
+from collections.abc import Sequence
+from typing import Any, Awaitable, Callable, Coroutine, List, Mapping, Optional
 
-from ag_ui.core import EventType, RunAgentInput, RunErrorEvent
+from ag_ui.core import (
+    AssistantMessage,
+    EventType,
+    Message,
+    RunAgentInput,
+    RunErrorEvent,
+    ToolMessage,
+)
 from ag_ui.encoder import EventEncoder
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -30,6 +38,45 @@ from .event_translator import adk_events_to_messages
 
 logger = logging.getLogger(__name__)
 
+AgentResolver = Callable[[Request, RunAgentInput], Awaitable[ADKAgent | None]]
+
+
+def resolve_agent_from_message_history(
+    messages: Sequence[Message],
+    agent_registry: Mapping[str, ADKAgent],
+) -> ADKAgent | None:
+    """Resolve a tool-result resumption to its originating agent.
+
+    This helper treats ``AssistantMessage.name`` as an explicit agent registry
+    key. It scopes routing to the latest ``ToolMessage``, matches its
+    ``ToolMessage.tool_call_id`` value to prior
+    ``AssistantMessage.tool_calls[].id`` values in the same message history,
+    and returns the corresponding registry agent.
+
+    ``None`` is returned when the latest message is not a tool result, the
+    matching assistant message is absent, the assistant message has no
+    registry key in ``name``, or the key is unknown. This keeps the helper
+    conservative so the caller can safely fall back to its normal routing
+    policy.
+    """
+    if not messages or not isinstance(messages[-1], ToolMessage):
+        return None
+
+    tool_message = messages[-1]
+    for message in reversed(messages[:-1]):
+        if not isinstance(message, AssistantMessage):
+            continue
+
+        tool_call_ids = {tool_call.id for tool_call in message.tool_calls or []}
+        if tool_message.tool_call_id not in tool_call_ids:
+            continue
+
+        if not message.name:
+            return None
+        return agent_registry.get(message.name)
+
+    return None
+
 
 def _build_run_error(message: str, code: str) -> RunErrorEvent:
     """Construct a ``RunErrorEvent`` with the given message and code.
@@ -39,6 +86,44 @@ def _build_run_error(message: str, code: str) -> RunErrorEvent:
     drive the error-encoding fallback path directly.
     """
     return RunErrorEvent(type=EventType.RUN_ERROR, message=message, code=code)
+
+
+async def _merge_extractor_state(
+    input_data: RunAgentInput,
+    request: Request,
+    extract_state_fn: Optional[
+        Callable[[Request, RunAgentInput], Coroutine[dict[str, Any], Any, Any]]
+    ],
+) -> RunAgentInput:
+    """Run the request extractor and merge returned state over input state."""
+    if not extract_state_fn:
+        return input_data
+
+    extracted_state_dict = await extract_state_fn(request, input_data)
+    if not extracted_state_dict:
+        return input_data
+
+    existing_state = input_data.state if isinstance(input_data.state, dict) else {}
+    merged_state = {**existing_state, **extracted_state_dict}
+    return input_data.model_copy(update={"state": merged_state})
+
+
+async def _resolve_agent(
+    default_agent: ADKAgent,
+    request: Request,
+    input_data: RunAgentInput,
+    agent_resolver: Optional[AgentResolver],
+) -> ADKAgent:
+    """Resolve the request-scoped agent, falling back to the default agent."""
+    if agent_resolver is None:
+        return default_agent
+
+    resolved_agent = await agent_resolver(request, input_data)
+    if resolved_agent is None:
+        return default_agent
+    if not isinstance(resolved_agent, ADKAgent):
+        raise TypeError("agent_resolver must return an ADKAgent instance or None")
+    return resolved_agent
 
 
 def _sse_event(raw_data: str, *, event: Optional[str] = None) -> ServerSentEvent:
@@ -230,6 +315,8 @@ def add_adk_fastapi_endpoint(
     path: str = "/",
     extract_headers: Optional[List[str]] = None,
     extract_state_from_request: Optional[Callable[[Request, RunAgentInput], Coroutine[dict[str,Any], Any, Any]]] = None,
+    agent_resolver: Optional[AgentResolver] = None,
+    **kwargs: Any,
 ):
     """Add ADK middleware endpoint to FastAPI app.
 
@@ -242,11 +329,52 @@ def add_adk_fastapi_endpoint(
             State values returned from this function will override any existing state values. 
             The RunAgentInput is provided so conflicts can be identified and resolved appropriately.
             Cannot be used with extract_headers.
+        agent_resolver: Optional async function that can select an ``ADKAgent``
+            for the request after state extraction. Returning ``None`` uses
+            the default agent.
+        **kwargs: Forwarded to ``app.post`` for the agent route (``name``,
+            ``tags``, ``operation_id``, ``dependencies``, ``include_in_schema``,
+            ...). They do not apply to the other routes this helper registers,
+            because values such as ``operation_id`` and ``name`` must stay
+            unique per operation.
 
     Note:
         This function also adds an experimental POST /agents/state endpoint for
         consumption by front-end frameworks that need to retrieve thread state and
         message history. This endpoint is subject to change in future versions.
+        When ``agent_resolver`` is configured, routing is applied to the run
+        endpoint, ``/capabilities``, and ``/agents/state`` after request state
+        extraction. Routed agents should share a session backend when continuity
+        across route switches is expected. During HITL or long-running tool
+        resumption, the resolver is responsible for returning the same agent
+        that originated the open tool call.
+
+        A resolver can pin tool-result resumptions to the agent that emitted
+        the matching tool call by treating ``AssistantMessage.name`` as the
+        agent registry key. For this convention to work, the inbound message
+        history must preserve the assistant message that created the tool call,
+        with ``name`` set to that registry key. Histories built only from live
+        reducer events may not include that key unless the client preserves it.
+
+        .. code-block:: python
+
+            from ag_ui_adk import resolve_agent_from_message_history
+
+            AGENT_REGISTRY = {
+                "supervisor": supervisor_agent,
+                "subagent1": subagent1_agent,
+            }
+
+            async def agent_resolver(request, input_data):
+                history_agent = resolve_agent_from_message_history(
+                    input_data.messages,
+                    AGENT_REGISTRY,
+                )
+                if history_agent is not None:
+                    return history_agent
+
+                state = input_data.state if isinstance(input_data.state, dict) else {}
+                return AGENT_REGISTRY.get(state.get("to_agent"))
     """
     extract_state_fn = extract_state_from_request
     if extract_headers is not None:
@@ -261,7 +389,9 @@ def add_adk_fastapi_endpoint(
         else:
             raise ValueError("Cannot use both 'extract_headers' and 'extract_state_from_request' parameters together.")
 
-    @app.post(path)
+    default_agent = agent
+
+    @app.post(path, **kwargs)
     async def adk_endpoint(input_data: RunAgentInput, request: Request):
         """ADK middleware endpoint.
 
@@ -280,14 +410,10 @@ def add_adk_fastapi_endpoint(
           continue to work without keep-alive pings (which are SSE-specific).
         """
 
-        # Extract headers into state.headers if list provided
-        if extract_state_fn:
-            extracted_state_dict = await extract_state_fn(request, input_data)
-
-            if extracted_state_dict:
-                existing_state = input_data.state if isinstance(input_data.state, dict) else {}
-                merged_state = {**existing_state, **extracted_state_dict}
-                input_data = input_data.model_copy(update={"state": merged_state})
+        input_data = await _merge_extractor_state(input_data, request, extract_state_fn)
+        agent = await _resolve_agent(
+            default_agent, request, input_data, agent_resolver
+        )
 
         # ``EventEncoder`` types ``accept`` as ``str`` (not ``Optional[str]``);
         # pass an empty string when the client didn't send an ``Accept`` header
@@ -306,14 +432,31 @@ def add_adk_fastapi_endpoint(
     capabilities_path = f"{path.rstrip('/')}/capabilities" if path != "/" else "/capabilities"
 
     @app.get(capabilities_path)
-    async def capabilities_endpoint():
+    async def capabilities_endpoint(request: Request):
         """Return the agent's declared capabilities.
 
         Allows frontend clients to discover what features the agent supports
         before initiating a run (e.g., predictive chips, suggested questions).
-        Returns an empty object when no capabilities are configured.
+        The request extractor and resolver are applied with a fixed synthetic
+        input so selection only depends on request/extractor context. Returns
+        an empty object when no capabilities are configured.
         """
         try:
+            synthetic_input = RunAgentInput(
+                thread_id="capabilities",
+                run_id="capabilities",
+                state={},
+                messages=[],
+                tools=[],
+                context=[],
+                forwarded_props=None,
+            )
+            synthetic_input = await _merge_extractor_state(
+                synthetic_input, request, extract_state_fn
+            )
+            agent = await _resolve_agent(
+                default_agent, request, synthetic_input, agent_resolver
+            )
             caps = agent.get_capabilities()
             if caps is None:
                 logger.debug("Capabilities endpoint called but no capabilities configured on agent")
@@ -367,11 +510,13 @@ def add_adk_fastapi_endpoint(
             )
 
             if extract_state_fn:
-                extracted_state_dict = await extract_state_fn(request, synthetic_input)
-                if extracted_state_dict:
-                    synthetic_input = synthetic_input.model_copy(
-                        update={"state": extracted_state_dict}
-                    )
+                synthetic_input = await _merge_extractor_state(
+                    synthetic_input, request, extract_state_fn
+                )
+
+            agent = await _resolve_agent(
+                default_agent, request, synthetic_input, agent_resolver
+            )
 
             extractor_state = (
                 synthetic_input.state if isinstance(synthetic_input.state, dict) else {}
@@ -513,6 +658,8 @@ def create_adk_app(
     path: str = "/",
     extract_headers: Optional[List[str]] = None,
     extract_state_from_request: Optional[Callable[[Request, RunAgentInput], Coroutine[dict[str,Any], Any, Any]]] = None,
+    agent_resolver: Optional[AgentResolver] = None,
+    **kwargs: Any,
 ) -> FastAPI:
     """Create a FastAPI app with ADK middleware endpoint.
 
@@ -524,10 +671,26 @@ def create_adk_app(
             State values returned from this function will override any existing state values. 
             The RunAgentInput is provided so conflicts can be identified and resolved appropriately.
             Cannot be used with extract_headers.
+        agent_resolver: Optional async function that can select an ``ADKAgent``
+            for the request after state extraction. Returning ``None`` uses
+            the default agent.
+        **kwargs: Forwarded to ``app.post`` for the agent route (``name``,
+            ``tags``, ``operation_id``, ``dependencies``, ``include_in_schema``,
+            ...). They do not apply to the other routes this helper registers,
+            because values such as ``operation_id`` and ``name`` must stay
+            unique per operation.
 
     Returns:
         FastAPI application instance
     """
     app = FastAPI(title="ADK Middleware for AG-UI Protocol")
-    add_adk_fastapi_endpoint(app, agent, path, extract_headers=extract_headers, extract_state_from_request=extract_state_from_request)
+    add_adk_fastapi_endpoint(
+        app,
+        agent,
+        path,
+        extract_headers=extract_headers,
+        extract_state_from_request=extract_state_from_request,
+        agent_resolver=agent_resolver,
+        **kwargs,
+    )
     return app

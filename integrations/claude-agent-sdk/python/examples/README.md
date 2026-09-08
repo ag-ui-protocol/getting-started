@@ -14,7 +14,7 @@ cd examples
 ANTHROPIC_API_KEY=sk-ant-xxx python server.py
 ```
 
-Server runs on **http://localhost:8888**
+Server runs on **http://localhost:8019**
 
 ## Testing with Dojo
 

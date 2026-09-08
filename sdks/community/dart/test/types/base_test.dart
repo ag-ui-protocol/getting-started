@@ -175,7 +175,8 @@ void main() {
         expect(
           () => JsonDecoder.requireField<String>(json, 'name'),
           throwsA(isA<AGUIValidationError>()
-              .having((e) => e.message, 'message', contains('Missing required field'))
+              .having((e) => e.message, 'message',
+                  contains('Missing required field'))
               .having((e) => e.field, 'field', 'name')),
         );
       });
@@ -184,8 +185,8 @@ void main() {
         final json = {'name': null};
         expect(
           () => JsonDecoder.requireField<String>(json, 'name'),
-          throwsA(isA<AGUIValidationError>()
-              .having((e) => e.message, 'message', contains('Required field is null'))),
+          throwsA(isA<AGUIValidationError>().having(
+              (e) => e.message, 'message', contains('Required field is null'))),
         );
       });
 
@@ -216,8 +217,8 @@ void main() {
             'age',
             transform: (value) => int.parse(value as String),
           ),
-          throwsA(isA<AGUIValidationError>()
-              .having((e) => e.message, 'message', contains('Failed to transform'))),
+          throwsA(isA<AGUIValidationError>().having(
+              (e) => e.message, 'message', contains('Failed to transform'))),
         );
       });
     });
@@ -263,7 +264,9 @@ void main() {
 
     group('requireListField', () {
       test('extracts required list field', () {
-        final json = {'items': ['a', 'b', 'c']};
+        final json = {
+          'items': ['a', 'b', 'c']
+        };
         final items = JsonDecoder.requireListField<String>(json, 'items');
         expect(items, equals(['a', 'b', 'c']));
       });
@@ -298,15 +301,38 @@ void main() {
             'numbers',
             itemTransform: (value) => int.parse(value as String),
           ),
-          throwsA(isA<AGUIValidationError>()
-              .having((e) => e.message, 'message', contains('Failed to transform list item'))),
+          throwsA(isA<AGUIValidationError>().having((e) => e.message, 'message',
+              contains('Failed to transform list item'))),
         );
+      });
+
+      test('item transform error reports index in field name', () {
+        // Regression for I3: itemTransform errors must name the bad index
+        // (`numbers[1]`) rather than the bare field name (`numbers`), matching
+        // the _eagerCast no-transform path's `field: '$field[$i]'` contract.
+        final json = {
+          'numbers': ['1', 'bad', '3']
+        };
+        AGUIValidationError? caught;
+        try {
+          JsonDecoder.requireListField<int>(
+            json,
+            'numbers',
+            itemTransform: (value) => int.parse(value as String),
+          );
+        } on AGUIValidationError catch (e) {
+          caught = e;
+        }
+        expect(caught, isNotNull);
+        expect(caught!.field, equals('numbers[1]'));
       });
     });
 
     group('optionalListField', () {
       test('extracts optional list field when present', () {
-        final json = {'items': ['a', 'b']};
+        final json = {
+          'items': ['a', 'b']
+        };
         final items = JsonDecoder.optionalListField<String>(json, 'items');
         expect(items, equals(['a', 'b']));
       });

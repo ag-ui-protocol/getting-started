@@ -7,7 +7,7 @@ import '../types/base.dart';
 class EncoderError extends AGUIError {
   /// The source data that caused the error.
   final dynamic source;
-  
+
   /// The underlying cause of the error, if any.
   final Object? cause;
 
@@ -81,7 +81,7 @@ class EncodeError extends EncoderError {
 class ValidationError extends EncoderError {
   /// The field that failed validation.
   final String? field;
-  
+
   /// The value that failed validation.
   final dynamic value;
 

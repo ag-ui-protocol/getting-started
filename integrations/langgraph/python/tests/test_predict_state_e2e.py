@@ -408,5 +408,109 @@ class TestPredictStateOutcome(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(predict_state_events), 0)
 
 
+class TestToolCallResultMessageId(unittest.IsolatedAsyncioTestCase):
+    """message_id on TOOL_CALL_RESULT must use ToolMessage.id (or tool_call_id
+    as fallback) so the streamed event matches the MESSAGES_SNAPSHOT id-based merge."""
+
+    async def test_direct_tool_end_uses_tool_call_id_when_id_absent(self):
+        """Non-Command OnToolEnd with ToolMessage.id=None falls back to tool_call_id."""
+        events = [
+            _event("on_chain_start", node="model"),
+            _tool_end_event("my_tool", tool_call_id="tc_abc"),
+            _chain_end_event("tools", output={"messages": []}),
+        ]
+        dispatched = await _run_stream(events)
+        results = [
+            ev for ev in dispatched
+            if getattr(ev, "type", None) == EventType.TOOL_CALL_RESULT
+        ]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].message_id, "tc_abc")
+        self.assertEqual(results[0].tool_call_id, "tc_abc")
+
+    async def test_direct_tool_end_uses_tool_message_id_when_present(self):
+        """Non-Command OnToolEnd with ToolMessage.id set uses that id."""
+        from langchain_core.messages import ToolMessage
+        ev = _event(
+            "on_tool_end",
+            node="tools",
+            data={
+                "output": ToolMessage(
+                    content="Done.",
+                    tool_call_id="tc_abc",
+                    name="my_tool",
+                    id="msg_explicit_id",
+                ),
+                "input": {},
+            },
+        )
+        events = [
+            _event("on_chain_start", node="model"),
+            ev,
+            _chain_end_event("tools", output={"messages": []}),
+        ]
+        dispatched = await _run_stream(events)
+        results = [
+            ev for ev in dispatched
+            if getattr(ev, "type", None) == EventType.TOOL_CALL_RESULT
+        ]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].message_id, "msg_explicit_id")
+        self.assertEqual(results[0].tool_call_id, "tc_abc")
+
+    async def test_command_tool_end_uses_tool_call_id_when_id_absent(self):
+        """Command-style OnToolEnd with ToolMessage.id=None falls back to tool_call_id."""
+        events = [
+            _event("on_chain_start", node="model"),
+            _command_tool_end_event("my_tool", tool_call_id="tc_xyz"),
+            _chain_end_event("tools", output={"messages": []}),
+        ]
+        dispatched = await _run_stream(events)
+        results = [
+            ev for ev in dispatched
+            if getattr(ev, "type", None) == EventType.TOOL_CALL_RESULT
+        ]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].message_id, "tc_xyz")
+        self.assertEqual(results[0].tool_call_id, "tc_xyz")
+
+    async def test_command_tool_end_uses_tool_message_id_when_present(self):
+        """Command-style OnToolEnd with ToolMessage.id set uses that id."""
+        from langchain_core.messages import ToolMessage
+        from langgraph.types import Command
+        ev = _event(
+            "on_tool_end",
+            node="tools",
+            data={
+                "output": Command(
+                    update={
+                        "messages": [
+                            ToolMessage(
+                                content="Done.",
+                                tool_call_id="tc_xyz",
+                                name="my_tool",
+                                id="msg_cmd_id",
+                            )
+                        ],
+                    },
+                ),
+                "input": {},
+            },
+        )
+        events = [
+            _event("on_chain_start", node="model"),
+            ev,
+            _chain_end_event("tools", output={"messages": []}),
+        ]
+        dispatched = await _run_stream(events)
+        results = [
+            ev for ev in dispatched
+            if getattr(ev, "type", None) == EventType.TOOL_CALL_RESULT
+        ]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].message_id, "msg_cmd_id")
+        self.assertEqual(results[0].tool_call_id, "tc_xyz")
+
+
 if __name__ == "__main__":
     unittest.main()

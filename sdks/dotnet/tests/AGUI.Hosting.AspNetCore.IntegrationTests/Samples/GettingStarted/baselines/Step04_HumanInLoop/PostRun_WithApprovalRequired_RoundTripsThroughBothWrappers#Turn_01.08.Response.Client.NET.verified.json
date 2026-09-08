@@ -1,0 +1,125 @@
+﻿[
+  {
+    "role": "assistant",
+    "contents": [],
+    "additionalProperties": {
+      "agui_thread_id": "thread_Id_1"
+    },
+    "responseId": "run_Id_1",
+    "rawRepresentation": {
+      "type": "RUN_STARTED",
+      "threadId": "thread_Id_1",
+      "runId": "run_Id_1"
+    }
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "toolApprovalRequest",
+        "toolCall": {
+          "$type": "functionCall",
+          "name": "ApproveExpenseReport",
+          "arguments": {
+            "expenseReportId": "EXP-2024-001"
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        },
+        "requestId": "ficc_Id_1"
+      }
+    ],
+    "responseId": "run_Id_1",
+    "messageId": "call_Id_1",
+    "rawRepresentation": {
+      "type": "TOOL_CALL_END",
+      "toolCallId": "call_Id_1",
+      "rawEvent": {
+        "authorName": null,
+        "role": "assistant",
+        "contents": [
+          {
+            "$type": "functionCall",
+            "name": "request_approval",
+            "arguments": {
+              "request": {
+                "approval_Id_1": "ficc_Id_1",
+                "function_name": "ApproveExpenseReport",
+                "function_arguments": {
+                  "expenseReportId": "EXP-2024-001"
+                },
+                "message": "Approve execution of \u0027ApproveExpenseReport\u0027?"
+              }
+            },
+            "informationalOnly": false,
+            "callId": "call_Id_1",
+            "annotations": null,
+            "additionalProperties": null
+          }
+        ],
+        "additionalProperties": null,
+        "responseId": "",
+        "messageId": "",
+        "conversationId": null,
+        "finishReason": "tool_calls",
+        "modelId": "",
+        "continuationToken": null
+      }
+    }
+  },
+  {
+    "role": "assistant",
+    "contents": [],
+    "responseId": "run_Id_1",
+    "finishReason": "stop",
+    "rawRepresentation": {
+      "type": "RUN_FINISHED",
+      "threadId": "thread_Id_1",
+      "runId": "run_Id_1",
+      "outcome": {
+        "type": "success"
+      },
+      "usage": [
+        {
+          "inputTokens": 146,
+          "outputTokens": 97,
+          "totalTokens": 243,
+          "reasoningTokens": 64,
+          "cachedInputTokens": 0
+        }
+      ]
+    }
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "usage",
+        "details": {
+          "inputTokenCount": 146,
+          "outputTokenCount": 97,
+          "cachedInputTokenCount": 0,
+          "reasoningTokenCount": 64
+        }
+      }
+    ],
+    "responseId": "run_Id_1",
+    "rawRepresentation": {
+      "type": "RUN_FINISHED",
+      "threadId": "thread_Id_1",
+      "runId": "run_Id_1",
+      "outcome": {
+        "type": "success"
+      },
+      "usage": [
+        {
+          "inputTokens": 146,
+          "outputTokens": 97,
+          "totalTokens": 243,
+          "reasoningTokens": 64,
+          "cachedInputTokens": 0
+        }
+      ]
+    }
+  }
+]

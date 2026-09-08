@@ -13,8 +13,8 @@ export const LOG_A2UI_EVENT_TOOL_NAME = "log_a2ui_event";
 /**
  * Tool definition for rendering A2UI surfaces.
  * This tool is injected into the agent's available tools when injectA2UITool is true.
- * Uses structured parameters (surfaceId, catalogId, components, data)
- * instead of a raw JSON string.
+ * Uses structured parameters (surfaceId, components, data) — the catalog id
+ * is owned by the middleware config, not chosen by the model.
  */
 export const RENDER_A2UI_TOOL: Tool = {
   name: RENDER_A2UI_TOOL_NAME,
@@ -27,10 +27,6 @@ export const RENDER_A2UI_TOOL: Tool = {
       surfaceId: {
         type: "string",
         description: "Unique surface identifier.",
-      },
-      catalogId: {
-        type: "string",
-        description: "The catalog ID for the component catalog.",
       },
       components: {
         type: "array",
@@ -61,9 +57,10 @@ export const RENDER_A2UI_TOOL_GUIDELINES = (toolName: string) => `\
 You MUST provide ALL required arguments when calling ${toolName}:
 
 - **surfaceId** (string, required): Unique ID for the surface (e.g. "sales-dashboard").
-- **catalogId** (string): The catalog ID. Use the catalog ID from the available components context.
 - **components** (array, REQUIRED): A2UI v0.9 flat component array. NEVER omit this.
 - **data** (object, optional): Initial data model for path-bound component values.
+
+Note: the catalog id is set by the host, not by you. Do not include a catalogId argument.
 
 ### Component format (v0.9 flat)
 
@@ -78,7 +75,6 @@ Components are a flat array — children are referenced by ID, not nested:
 \`\`\`json
 {
   "surfaceId": "my-dashboard",
-  "catalogId": "copilotkit://app-dashboard-catalog",
   "components": [
     { "id": "root", "component": "Column", "children": ["title", "row1"] },
     { "id": "title", "component": "Title", "text": "Overview" },

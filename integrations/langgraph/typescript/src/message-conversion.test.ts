@@ -4,8 +4,28 @@
  */
 
 import { Message as LangGraphMessage } from "@langchain/langgraph-sdk";
-import { Message } from "@ag-ui/client";
+import { Message, ReasoningMessage } from "@ag-ui/client";
 import { aguiMessagesToLangChain, langchainMessagesToAgui } from "./utils";
+
+// Runtime shape of a reasoning content block on a LangChain assistant message
+// (not part of the LangGraph SDK's typed content union).
+type ReasoningBlock = {
+  type?: string;
+  id?: string;
+  text?: string;
+  encrypted_content?: string;
+  summary?: { text?: string }[];
+};
+
+// The LangGraph SDK's MessageContent type models only string | (text|image)
+// blocks, so a reasoning content block has no place in it. These two helpers
+// centralize the single unavoidable cast at that boundary — building a fixture
+// AIMessage whose content carries reasoning blocks, and reading those blocks
+// back out — so the test bodies stay cast-free.
+const aiMessageWithBlocks = (id: string, content: unknown[]): LangGraphMessage =>
+  ({ id, type: "ai", content }) as unknown as LangGraphMessage;
+const contentBlocksOf = (message: LangGraphMessage): ReasoningBlock[] =>
+  message.content as unknown as ReasoningBlock[];
 
 describe("Message Conversion - All Types", () => {
   describe("aguiMessagesToLangChain", () => {
@@ -58,6 +78,23 @@ describe("Message Conversion - All Types", () => {
       expect(result[0].type).toBe("tool");
       expect(result[0].content).toBe("42");
       expect(result[0].tool_call_id).toBe("tc1");
+      // A tool result with no error maps to LangChain's default "success" status.
+      expect(result[0].status).toBe("success");
+    });
+
+    it("should map a tool message error onto LangChain's status flag", () => {
+      // A client-reported tool failure must reach the model as an error, not a
+      // silent success — AG-UI's ToolMessage.error becomes status: "error".
+      const msg: Message = {
+        id: "t1",
+        role: "tool",
+        content: "Tool failed: invalid id",
+        toolCallId: "tc1",
+        error: "invalid id",
+      };
+      const result: any[] = aguiMessagesToLangChain([msg]);
+      expect(result[0].type).toBe("tool");
+      expect(result[0].status).toBe("error");
     });
 
     it("should throw for unsupported role", () => {
@@ -78,10 +115,10 @@ describe("Message Conversion - All Types", () => {
       expect(result[2].type).toBe("human");
     });
 
-    it("should drop reasoning messages (display-only)", () => {
-      // Reasoning content already lives inside the assistant AIMessage's
-      // content blocks at the LangChain layer; emitting a separate LangGraph
-      // message would duplicate context on the next turn.
+    it("should fold reasoning messages onto the adjacent assistant (not drop)", () => {
+      // Reasoning belongs as a content block ON the assistant AIMessage — not a
+      // standalone message (would duplicate context), but not dropped either
+      // (the model would lose its chain-of-thought on a stateless turn).
       const msgs: Message[] = [
         { id: "u1", role: "user", content: "Hi" },
         { id: "r1", role: "reasoning", content: "thinking..." },
@@ -91,6 +128,9 @@ describe("Message Conversion - All Types", () => {
       expect(result).toHaveLength(2);
       expect(result[0].type).toBe("human");
       expect(result[1].type).toBe("ai");
+      const reasoningBlocks = contentBlocksOf(result[1]).filter((b) => b.type === "reasoning");
+      expect(reasoningBlocks).toHaveLength(1);
+      expect(reasoningBlocks[0].id).toBe("r1");
     });
 
     it("should drop developer messages (handled by agent system prompt)", () => {
@@ -139,6 +179,24 @@ describe("Message Conversion - All Types", () => {
       const result: any[] = langchainMessagesToAgui([msg]);
       expect(result[0].role).toBe("tool");
       expect(result[0].toolCallId).toBe("tc1");
+      // No status / "success" carries no failure signal, so error stays unset.
+      expect(result[0].error).toBeUndefined();
+    });
+
+    it("should map a tool message error status onto AG-UI's error field", () => {
+      // The reverse of #2263: a LangChain tool result with status "error" must set
+      // AG-UI's error so the failure survives the round trip. The value is a fixed
+      // sentinel — the original text is not recoverable from the flag alone (#2305).
+      const msg = {
+        id: "t1",
+        type: "tool",
+        content: "Tool failed: invalid id",
+        tool_call_id: "tc1",
+        status: "error",
+      } as any as LangGraphMessage;
+      const result: any[] = langchainMessagesToAgui([msg]);
+      expect(result[0].role).toBe("tool");
+      expect(result[0].error).toBe("error");
     });
 
     it("should handle generic (ChatMessage) type as assistant", () => {
@@ -277,6 +335,163 @@ describe("Message Conversion - All Types", () => {
       expect(back[0].role).toBe("tool");
       expect(back[0].content).toBe("done");
       expect(back[0].toolCallId).toBe("tc1");
+    });
+  });
+
+  // Reasoning must survive AG-UI <-> LangChain conversion losslessly so a
+  // stateless client can hand a reasoning model back its own chain-of-thought.
+  describe("reasoning round-trip", () => {
+    it("should fold a reasoning message onto the adjacent assistant message", () => {
+      const msgs: Message[] = [
+        { id: "u1", role: "user", content: "Hi" },
+        { id: "rs_abc", role: "reasoning", content: "step 1; step 2", encryptedValue: "ENC123" },
+        { id: "a1", role: "assistant", content: "Hello" },
+      ];
+      const result = aguiMessagesToLangChain(msgs);
+
+      expect(result).toHaveLength(2); // reasoning folded in, not standalone
+      expect(result[0].type).toBe("human");
+      expect(result[1].type).toBe("ai");
+      const blocks = contentBlocksOf(result[1]);
+      const reasoningBlocks = blocks.filter((b) => b.type === "reasoning");
+      expect(reasoningBlocks).toHaveLength(1);
+      expect(reasoningBlocks[0].id).toBe("rs_abc");
+      expect(reasoningBlocks[0].encrypted_content).toBe("ENC123");
+      expect(blocks.some((b) => b.type === "text" && b.text === "Hello")).toBe(true);
+    });
+
+    it("should emit a reasoning message for an AI reasoning content block", () => {
+      const msg = aiMessageWithBlocks("a1", [
+        { type: "reasoning", id: "rs_abc", summary: [{ type: "summary_text", text: "step 1; step 2" }], encrypted_content: "ENC123" },
+        { type: "text", text: "Hello" },
+      ]);
+      const result = langchainMessagesToAgui([msg]);
+
+      expect(result).toHaveLength(2);
+      const reasoning = result[0] as ReasoningMessage;
+      expect(reasoning.role).toBe("reasoning");
+      expect(reasoning.id).toBe("rs_abc");
+      expect(reasoning.content).toBe("step 1; step 2");
+      expect(reasoning.encryptedValue).toBe("ENC123");
+      expect(result[1].role).toBe("assistant");
+      expect(result[1].content).toBe("Hello");
+    });
+
+    it("should preserve a reasoning block that carries only an id (store=true)", () => {
+      // Real OpenAI Responses (store=true) persists reasoning as just an rs_ id
+      // with empty summary; the id is the round-trip handle.
+      const msg = aiMessageWithBlocks("a1", [
+        { type: "reasoning", id: "rs_only", summary: [], content: [] },
+        { type: "text", text: "Done." },
+      ]);
+      const agui = langchainMessagesToAgui([msg]);
+      const reasoning = agui.filter((m) => m.role === "reasoning");
+      expect(reasoning).toHaveLength(1);
+      expect(reasoning[0].id).toBe("rs_only");
+
+      const back = aguiMessagesToLangChain(agui);
+      const blocks = contentBlocksOf(back[0]).filter((b) => b.type === "reasoning");
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].id).toBe("rs_only");
+    });
+
+    it("should round-trip reasoning losslessly (langchain -> agui -> langchain)", () => {
+      const original = aiMessageWithBlocks("a1", [
+        { type: "reasoning", id: "rs_abc", summary: [{ type: "summary_text", text: "because X" }], encrypted_content: "ENC123" },
+        { type: "text", text: "The answer is 42." },
+      ]);
+      const agui = langchainMessagesToAgui([original]);
+      const back = aguiMessagesToLangChain(agui);
+
+      expect(back).toHaveLength(1);
+      const allBlocks = contentBlocksOf(back[0]);
+      const blocks = allBlocks.filter((b) => b.type === "reasoning");
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].id).toBe("rs_abc");
+      expect(blocks[0].encrypted_content).toBe("ENC123");
+      // The summary text and the assistant's own text must survive too.
+      const summaryText = (blocks[0].summary ?? []).map((s) => s.text).join("");
+      expect(summaryText).toContain("because X");
+      expect(allBlocks.some((b) => b.type === "text" && b.text === "The answer is 42.")).toBe(true);
+    });
+
+    it("should preserve every part of a multi-part summary on round-trip", () => {
+      const original = aiMessageWithBlocks("a1", [
+        { type: "reasoning", id: "rs_multi", summary: [{ text: "first part" }, { text: "second part" }] },
+        { type: "text", text: "Answer." },
+      ]);
+      const back = aguiMessagesToLangChain(langchainMessagesToAgui([original]));
+      const block = contentBlocksOf(back[0]).find((b) => b.type === "reasoning")!;
+      const text = (block.summary ?? []).map((s) => s.text).join("");
+      expect(text).toContain("first part");
+      expect(text).toContain("second part");
+    });
+
+    it("should give multiple id-less reasoning blocks distinct ids", () => {
+      const msg = aiMessageWithBlocks("a1", [
+        { type: "reasoning", summary: [{ text: "alpha" }] },
+        { type: "reasoning", summary: [{ text: "beta" }] },
+        { type: "text", text: "Done." },
+      ]);
+      const reasoning = langchainMessagesToAgui([msg]).filter((m) => m.role === "reasoning");
+      expect(reasoning).toHaveLength(2);
+      expect(reasoning[0].id).not.toBe(reasoning[1].id);
+    });
+
+    it("should fold two buffered reasoning messages onto one assistant", () => {
+      const msgs: Message[] = [
+        { id: "rs_1", role: "reasoning", content: "first" },
+        { id: "rs_2", role: "reasoning", content: "second" },
+        { id: "a1", role: "assistant", content: "Hello" },
+      ];
+      const result = aguiMessagesToLangChain(msgs);
+      expect(result).toHaveLength(1);
+      const ids = contentBlocksOf(result[0]).filter((b) => b.type === "reasoning").map((b) => b.id);
+      expect(ids).toEqual(["rs_1", "rs_2"]);
+    });
+
+    it("should drop reasoning that is not immediately followed by an assistant", () => {
+      // No assistant to attach to; materializing standalone loops under
+      // add_messages, so the drop is deliberate. Lock in the behavior.
+      const trailing = aguiMessagesToLangChain([
+        { id: "u1", role: "user", content: "Hi" },
+        { id: "rs_x", role: "reasoning", content: "orphan" },
+      ]);
+      expect(trailing.map((m) => m.type)).toEqual(["human"]);
+
+      const followedByUser = aguiMessagesToLangChain([
+        { id: "rs_y", role: "reasoning", content: "orphan" },
+        { id: "u1", role: "user", content: "Hi" },
+      ]);
+      expect(followedByUser.map((m) => m.type)).toEqual(["human"]);
+    });
+  });
+
+  // Tool-call argument handling must match the Python converter (no crash on
+  // empty arguments; no `undefined` emitted for missing args).
+  describe("tool-call argument robustness", () => {
+    it("should not throw on an assistant tool call with empty arguments", () => {
+      const msg: Message = {
+        id: "a1",
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "tc1", type: "function", function: { name: "noargs", arguments: "" } }],
+      };
+      const result = aguiMessagesToLangChain([msg]);
+      const ai = result[0] as { tool_calls?: { args: unknown }[] };
+      expect(ai.tool_calls?.[0].args).toEqual({});
+    });
+
+    it("should emit \"{}\" (not undefined) for a tool call with no args", () => {
+      const msg = {
+        id: "a1",
+        type: "ai",
+        content: "",
+        tool_calls: [{ id: "tc1", name: "noargs" }],
+      } as unknown as LangGraphMessage;
+      const result = langchainMessagesToAgui([msg]);
+      const assistant = result[0] as { toolCalls?: { function: { arguments: string } }[] };
+      expect(assistant.toolCalls?.[0].function.arguments).toBe("{}");
     });
   });
 });

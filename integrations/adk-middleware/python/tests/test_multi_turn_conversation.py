@@ -32,10 +32,11 @@ from ag_ui_adk import ADKAgent
 from ag_ui_adk.session_manager import SessionManager
 from google.adk.agents import Agent, LlmAgent
 from google.genai import types
+from tests.constants import LIVE_TEST_MODEL
 
 
 # Default model for live tests
-DEFAULT_MODEL = "gemini-2.0-flash"
+DEFAULT_MODEL = LIVE_TEST_MODEL
 
 
 def create_mock_adk_event(text: str, is_final: bool = False, partial: bool = True):

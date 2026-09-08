@@ -3,6 +3,7 @@ use ag_ui_client::agent::{Agent, RunAgentParams};
 use ag_ui_client::core::types::{Message, Role};
 
 #[tokio::test]
+#[ignore = "requires a live AG-UI backend (localhost:3001); not provided in CI"]
 async fn test_http_agent_basic_functionality() {
     env_logger::init();
 
@@ -54,6 +55,7 @@ async fn test_http_agent_basic_functionality() {
 }
 
 #[tokio::test]
+#[ignore = "requires a live AG-UI backend (localhost:3001); not provided in CI"]
 async fn test_http_agent_tool_calls() {
     // Create an HttpAgent
     let agent = HttpAgent::builder()

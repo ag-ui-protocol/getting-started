@@ -95,7 +95,7 @@ weather_tool = Tool(
 # 2. Set up ADK agent with tool support
 agent = LlmAgent(
     name="assistant",
-    model="gemini-2.0-flash",
+    model="gemini-3.5-flash",
     instruction="""You are a helpful assistant that can request approvals and perform calculations.
     Use request_approval for sensitive operations that need human review.
     Use calculate for math operations and get_weather for weather information."""

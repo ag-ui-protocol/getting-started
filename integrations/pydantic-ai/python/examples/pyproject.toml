@@ -11,7 +11,9 @@ requires-python = ">=3.10,<4.0"
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
-    "pydantic-ai-slim[openai,ag-ui]==1.22.0",
+    "pydantic-ai-slim[openai,ag-ui]>=2,<3",
+    # Below 0.1.15 the multimodal path is silently skipped (lazy import gate).
+    "ag-ui-protocol>=0.1.15",
     "dotenv>=0.9.9"
 ]
 authors = []

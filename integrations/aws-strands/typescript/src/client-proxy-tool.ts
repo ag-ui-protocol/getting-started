@@ -15,6 +15,14 @@ import { DEFAULT_LOGGER, type Logger } from "./logger";
 
 const LOG_PREFIX = "[@ag-ui/aws-strands]";
 
+/**
+ * Result text a proxy tool returns server-side, standing in for the answer the
+ * client is going to produce. Exported so reconciliation can recognise the
+ * exact stub it has to overwrite; the string itself is matched verbatim
+ * against persisted history, so it must not be reworded.
+ */
+export const PROXY_RESULT_PLACEHOLDER = "Forwarded to client";
+
 /** Derived from `Agent.toolRegistry` because Strands doesn't re-export the type. */
 export type StrandsToolRegistry = Agent["toolRegistry"];
 
@@ -61,7 +69,7 @@ export function createProxyTool(tool: AguiTool): Tool {
       return new ToolResultBlock({
         toolUseId: toolContext.toolUse.toolUseId,
         status: "success",
-        content: [new TextBlock("Forwarded to client")],
+        content: [new TextBlock(PROXY_RESULT_PLACEHOLDER)],
       });
     },
   };

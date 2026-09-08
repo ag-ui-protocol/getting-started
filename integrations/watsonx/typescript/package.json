@@ -2,6 +2,7 @@
   "name": "@ag-ui/watsonx",
   "author": "AG-UI Contributors",
   "version": "0.0.1",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/ag-ui-protocol/ag-ui.git"
@@ -53,8 +54,8 @@
   },
   "exports": {
     ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "require": "./dist/index.js",
+      "import": "./dist/index.mjs"
     },
     "./package.json": "./package.json"
   }

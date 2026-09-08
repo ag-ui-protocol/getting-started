@@ -1,14 +1,16 @@
 [project]
 name = "ag-ui-claude-sdk"
-version = "0.1.1"
+version = "0.1.5"
 description = "AG-UI integration for Anthropic Claude Agent SDK"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
 authors = [
-  { name = "Ambient Code Platform" }
+  { name = "Ambient Code Platform", email = "gkrumbac@redhat.com" }
 ]
 dependencies = [
-  "ag-ui-protocol>=0.1.0",
+  "ag-ui-protocol>=0.1.15",
   "claude-agent-sdk>=0.1.12",
   "anthropic>=0.68.0",
   "fastapi>=0.100.0",
@@ -16,14 +18,24 @@ dependencies = [
   "pydantic>=2.0.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "pytest>=7.4.0",
   "pytest-asyncio>=0.21.0",
   "httpx>=0.24.0",
 ]
 
+[tool.ag-ui.scripts]
+test = "python -m pytest"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ag_ui_claude_sdk*"]
 

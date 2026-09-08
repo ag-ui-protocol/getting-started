@@ -14,6 +14,8 @@ For full documentation on ClaudeAgentOptions, see:
 https://platform.claude.com/docs/en/agent-sdk/python
 """
 
+from importlib.metadata import version, PackageNotFoundError
+
 from .adapter import ClaudeAgentAdapter
 from .endpoint import add_claude_fastapi_endpoint
 from .config import (
@@ -22,7 +24,10 @@ from .config import (
     AG_UI_MCP_SERVER_NAME,
 )
 
-__version__ = "0.1.0"
+try:
+    __version__ = version("ag-ui-claude-sdk")
+except PackageNotFoundError:
+    __version__ = "0.0.0+unknown"
 __all__ = [
     "ClaudeAgentAdapter",
     "add_claude_fastapi_endpoint",

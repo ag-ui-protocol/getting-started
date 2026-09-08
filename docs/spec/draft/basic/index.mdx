@@ -1,0 +1,133 @@
+---
+title: "The Event Model"
+description: "The event envelope, its general fields, the identifiers, and the map of every event — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+The base protocol is what every implementation speaks regardless of which
+features it uses:
+
+- **The event model** — this page: the envelope every event shares, its general
+  fields, and the identifiers that tie events together.
+- **[Run input](/spec/draft/basic/run-input)** — the one message that travels
+  the other way.
+- **[Metadata](/spec/draft/basic/metadata)** — the open channel on everything,
+  and how it merges.
+- **[Event patterns](/spec/draft/basic/patterns)** — the ways events compose
+  into streams.
+- **[Transports](/spec/draft/basic/transports)** — how streams are framed and
+  delivered.
+- **[Processing model](/spec/draft/basic/processing)** — what a consumer does
+  with material it does not recognise.
+- **[Versioning and compatibility](/spec/draft/basic/versioning)** — talking to
+  an older or newer peer.
+
+All implementations MUST support the event model and the event patterns. The
+[event families](/spec/draft/events) beyond the run lifecycle are features: a
+producer emits the ones it has something to say with.
+
+## Events
+
+Every event is a JSON object sharing one envelope, defined by the schema as
+`BaseEvent`:
+
+- `type` — REQUIRED. The discriminator, one of the 31 values of `EventType`.
+  Every rule in this specification attaches to events through this field.
+- `timestamp` — OPTIONAL. When the event was created. Informational: a consumer
+  MUST NOT use it to order events — arrival order is the protocol's order. By
+  convention the unit is milliseconds since the Unix epoch.
+- `rawEvent` — OPTIONAL. The provider-native event this one was translated
+  from, carried verbatim. A consumer MUST NOT derive protocol behaviour from
+  it.
+- `metadata` — OPTIONAL. See [General fields](#general-fields).
+
+Events that can belong to a subagent's work additionally carry an OPTIONAL
+`subagentRunId` (the schema's `Attributable`); the
+[subagent rules](/spec/draft/events/subagents) govern it. Run-scoped events —
+`RUN_STARTED`, `RUN_FINISHED`, `RUN_ERROR`, `MESSAGES_SNAPSHOT` — describe the
+run or the conversation as a whole and carry no attribution.
+
+## General fields
+
+### `metadata`
+
+The open channel on everything: open by key, any JSON value under a key,
+accumulated across the events that build an item — key by key, last write
+winning, no recursion — with per-family merge targets and a reserved `ag-ui`
+key. It has its own page: [Metadata](/spec/draft/basic/metadata).
+
+### Absent means absent
+
+An optional field that has no value MUST be omitted rather than sent as `null`.
+
+The rule binds a field whose schema does not itself admit `null` — which is
+most of them. Some fields carry arbitrary JSON, `rawEvent` and
+`RUN_FINISHED.result` among them, and for those `null` is a value the schema
+permits: a producer MAY send it, a consumer MUST preserve it, and nothing can
+distinguish it from an "absent" null because there is no such thing there.
+Whether a field admits `null` is a structural question, so the
+[schema](/spec/draft/schema) answers it.
+
+<Note>
+  This is not a style preference. A consumer that must accept both spellings
+  has to treat them as equal everywhere, and every such tolerance is permanent
+  once shipped. The protocol carries the one spelling every implementation can
+  represent.
+</Note>
+
+A `null` *value under an open-by-key object* — a metadata value, something
+inside `state` — is data and MUST be preserved. Only a `null` standing in for a
+whole absent field is prohibited.
+
+Where the protocol has already shipped tolerance for a `null` in an optional
+position, it is handled by a compatibility shim rather than by this rule. See
+[Versioning and compatibility](/spec/draft/basic/versioning).
+
+## Identifiers
+
+- `threadId` identifies a conversation. It is minted by the application and is
+  stable across runs.
+- `runId` identifies one run. It MUST NOT be reused for another run on the same
+  thread.
+- `messageId` identifies a message. It crosses run boundaries — a snapshot in a
+  later run MAY restate a message by its id — so it MUST be unique within its
+  thread.
+- `toolCallId` identifies one tool call, and ties its result and any interrupt
+  concerning it back to it.
+- `subagentRunId` is an opaque handle for one subagent *invocation*, not a
+  reusable name for a subagent definition: two invocations of the same subagent
+  carry two different values.
+
+All identifiers are opaque strings: a consumer MUST NOT parse structure out of
+them.
+
+## The events
+
+Thirty-one event types, in eight families:
+
+| Family | Events | Pattern |
+| --- | --- | --- |
+| [Runs and steps](/spec/draft/events/lifecycle) | `RUN_STARTED` `RUN_FINISHED` `RUN_ERROR` `STEP_STARTED` `STEP_FINISHED` | lifecycle |
+| [Text messages](/spec/draft/events/text-messages) | `TEXT_MESSAGE_START` `TEXT_MESSAGE_CONTENT` `TEXT_MESSAGE_END` `TEXT_MESSAGE_CHUNK` | [streaming](/spec/draft/basic/patterns/streaming) |
+| [Tool calls](/spec/draft/events/tool-calls) | `TOOL_CALL_START` `TOOL_CALL_ARGS` `TOOL_CALL_END` `TOOL_CALL_CHUNK` `TOOL_CALL_RESULT` | [streaming](/spec/draft/basic/patterns/streaming) |
+| [Reasoning](/spec/draft/events/reasoning) | `REASONING_START` `REASONING_END` `REASONING_MESSAGE_START` `REASONING_MESSAGE_CONTENT` `REASONING_MESSAGE_END` `REASONING_MESSAGE_CHUNK` `REASONING_ENCRYPTED_VALUE` | [streaming](/spec/draft/basic/patterns/streaming) |
+| [State](/spec/draft/events/state) | `STATE_SNAPSHOT` `STATE_DELTA` `MESSAGES_SNAPSHOT` | [snapshot–delta](/spec/draft/basic/patterns/snapshots) |
+| [Activity](/spec/draft/events/activity) | `ACTIVITY_SNAPSHOT` `ACTIVITY_DELTA` | [snapshot–delta](/spec/draft/basic/patterns/snapshots) |
+| [Subagents](/spec/draft/events/subagents) | `SUBAGENT_STARTED` `SUBAGENT_FINISHED` `SUBAGENT_ERROR` | lifecycle |
+| [Passthrough](/spec/draft/events/passthrough) | `RAW` `CUSTOM` | standalone |
+
+## Schema
+
+The full structure of the protocol is defined by the JSON Schema at
+[`/spec/draft/schema.json`](/spec/draft/schema.json). It is the source of
+truth: the TypeScript, Python and .NET models are generated from it, and where
+this document mentions a field it is naming something the schema defines, never
+restating its shape.
+
+The schema deliberately does not say what this document says: ordering,
+lifecycle, attribution, error handling and compatibility are behavioural, and
+the schema cannot express them. If the two ever disagree about structure, the
+schema wins and this document has a bug.

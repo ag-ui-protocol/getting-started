@@ -13,9 +13,9 @@ import 'package:ag_ui/src/sse/backoff_strategy.dart';
 // Custom mock client that supports streaming responses
 class MockStreamingClient extends http.BaseClient {
   final Future<http.StreamedResponse> Function(http.BaseRequest) _handler;
-  
+
   MockStreamingClient(this._handler);
-  
+
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     return _handler(request);
@@ -26,14 +26,16 @@ void main() {
   group('AgUiClient', () {
     late AgUiClient client;
     late MockStreamingClient mockHttpClient;
-    
+
     setUp(() {
       mockHttpClient = MockStreamingClient((request) async {
         // Default mock response
         return http.StreamedResponse(
           Stream.fromIterable([
-            utf8.encode('data: {"type":"RUN_STARTED","threadId":"t1","runId":"r1"}\n\n'),
-            utf8.encode('data: {"type":"RUN_FINISHED","threadId":"t1","runId":"r1"}\n\n'),
+            utf8.encode(
+                'data: {"type":"RUN_STARTED","threadId":"t1","runId":"r1"}\n\n'),
+            utf8.encode(
+                'data: {"type":"RUN_FINISHED","threadId":"t1","runId":"r1"}\n\n'),
           ]),
           200,
           headers: {'content-type': 'text/event-stream'},
@@ -49,26 +51,32 @@ void main() {
       test('sends correct request and receives stream events', () async {
         final expectedRunId = 'run_123';
         final expectedThreadId = 'thread_456';
-        
+
         mockHttpClient = MockStreamingClient((request) async {
           expect(request.method, equals('POST'));
-          expect(request.url.toString(), equals('https://api.example.com/test_endpoint'));
+          expect(request.url.toString(),
+              equals('https://api.example.com/test_endpoint'));
           expect(request.headers['Content-Type'], contains('application/json'));
           expect(request.headers['Accept'], contains('text/event-stream'));
-          
+
           if (request is http.Request) {
             final body = json.decode(request.body) as Map<String, dynamic>;
             expect(body['messages'], isA<List>());
             expect(body['config']['temperature'], equals(0.7));
           }
-          
+
           return http.StreamedResponse(
             Stream.fromIterable([
-              utf8.encode('data: {"type":"RUN_STARTED","threadId":"$expectedThreadId","runId":"$expectedRunId"}\n\n'),
-              utf8.encode('data: {"type":"TEXT_MESSAGE_START","messageId":"msg1","role":"assistant"}\n\n'),
-              utf8.encode('data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"msg1","delta":"Hello!"}\n\n'),
-              utf8.encode('data: {"type":"TEXT_MESSAGE_END","messageId":"msg1"}\n\n'),
-              utf8.encode('data: {"type":"RUN_FINISHED","threadId":"$expectedThreadId","runId":"$expectedRunId"}\n\n'),
+              utf8.encode(
+                  'data: {"type":"RUN_STARTED","threadId":"$expectedThreadId","runId":"$expectedRunId"}\n\n'),
+              utf8.encode(
+                  'data: {"type":"TEXT_MESSAGE_START","messageId":"msg1","role":"assistant"}\n\n'),
+              utf8.encode(
+                  'data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"msg1","delta":"Hello!"}\n\n'),
+              utf8.encode(
+                  'data: {"type":"TEXT_MESSAGE_END","messageId":"msg1"}\n\n'),
+              utf8.encode(
+                  'data: {"type":"RUN_FINISHED","threadId":"$expectedThreadId","runId":"$expectedRunId"}\n\n'),
             ]),
             200,
             headers: {'content-type': 'text/event-stream'},
@@ -80,24 +88,27 @@ void main() {
           httpClient: mockHttpClient,
         );
 
-        final events = await client.runAgent(
-          'test_endpoint',
-          SimpleRunAgentInput(
-            messages: [UserMessage(id: 'msg1', content: 'Hello')],
-            config: {'temperature': 0.7},
-          ),
-        ).toList();
+        final events = await client
+            .runAgent(
+              'test_endpoint',
+              SimpleRunAgentInput(
+                messages: [UserMessage(id: 'msg1', content: 'Hello')],
+                config: {'temperature': 0.7},
+              ),
+            )
+            .toList();
 
         expect(events.length, greaterThan(0));
-        
+
         final runStarted = events.whereType<RunStartedEvent>().first;
         expect(runStarted.runId, equals(expectedRunId));
         expect(runStarted.threadId, equals(expectedThreadId));
-        
+
         final runFinished = events.whereType<RunFinishedEvent>().first;
         expect(runFinished.runId, equals(expectedRunId));
-        
-        final textMessages = events.whereType<TextMessageContentEvent>().toList();
+
+        final textMessages =
+            events.whereType<TextMessageContentEvent>().toList();
         expect(textMessages.isNotEmpty, isTrue);
         expect(textMessages.first.delta, equals('Hello!'));
       });
@@ -123,7 +134,8 @@ void main() {
         );
 
         expect(
-          () => client.runAgent('test_endpoint', SimpleRunAgentInput()).toList(),
+          () =>
+              client.runAgent('test_endpoint', SimpleRunAgentInput()).toList(),
           throwsA(isA<TransportError>()),
         );
       });
@@ -146,8 +158,9 @@ void main() {
         );
 
         expect(
-          () => client.runAgent('test_endpoint', SimpleRunAgentInput()).toList(),
-          throwsA(isA<TimeoutError>()),
+          () =>
+              client.runAgent('test_endpoint', SimpleRunAgentInput()).toList(),
+          throwsA(isA<AGUITimeoutError>()),
         );
       });
     });
@@ -157,9 +170,11 @@ void main() {
         mockHttpClient = MockStreamingClient((request) async {
           return http.StreamedResponse(
             Stream.fromIterable([
-              utf8.encode('data: {"type":"RUN_STARTED","threadId":"t1","runId":"r1"}\n\n'),
+              utf8.encode(
+                  'data: {"type":"RUN_STARTED","threadId":"t1","runId":"r1"}\n\n'),
               utf8.encode('data: invalid json\n\n'), // Invalid JSON
-              utf8.encode('data: {"type":"RUN_FINISHED","threadId":"t1","runId":"r1"}\n\n'),
+              utf8.encode(
+                  'data: {"type":"RUN_FINISHED","threadId":"t1","runId":"r1"}\n\n'),
             ]),
             200,
             headers: {'content-type': 'text/event-stream'},
@@ -177,24 +192,26 @@ void main() {
         // Note: In a production implementation, you might want to skip invalid events
         // but the current implementation throws on decode errors
         expect(
-          () => client.runAgent('test_endpoint', SimpleRunAgentInput()).toList(),
+          () =>
+              client.runAgent('test_endpoint', SimpleRunAgentInput()).toList(),
           throwsA(isA<DecodingError>()),
         );
       });
 
       test('supports cancellation', () async {
         final cancelToken = CancelToken();
-        
+
         mockHttpClient = MockStreamingClient((request) async {
           // Use async generator for lazy evaluation that respects cancellation
           Stream<List<int>> generateEvents() async* {
             for (int i = 0; i < 10; i++) {
               await Future.delayed(Duration(milliseconds: 100));
               if (cancelToken.isCancelled) break;
-              yield utf8.encode('data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"msg1","delta":"chunk$i"}\n\n');
+              yield utf8.encode(
+                  'data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"msg1","delta":"chunk$i"}\n\n');
             }
           }
-          
+
           return http.StreamedResponse(
             generateEvents(),
             200,
@@ -210,11 +227,13 @@ void main() {
         );
 
         final events = <BaseEvent>[];
-        final subscription = client.runAgent(
-          'test_endpoint',
-          SimpleRunAgentInput(),
-          cancelToken: cancelToken,
-        ).listen(events.add);
+        final subscription = client
+            .runAgent(
+              'test_endpoint',
+              SimpleRunAgentInput(),
+              cancelToken: cancelToken,
+            )
+            .listen(events.add);
 
         // Cancel after a short delay
         await Future.delayed(Duration(milliseconds: 250));
@@ -231,12 +250,13 @@ void main() {
     group('endpoint methods', () {
       test('runAgenticChat uses correct endpoint', () async {
         String? capturedUrl;
-        
+
         mockHttpClient = MockStreamingClient((request) async {
           capturedUrl = request.url.toString();
           return http.StreamedResponse(
             Stream.fromIterable([
-              utf8.encode('data: {"type":"RUN_FINISHED","threadId":"t1","runId":"r1"}\n\n'),
+              utf8.encode(
+                  'data: {"type":"RUN_FINISHED","threadId":"t1","runId":"r1"}\n\n'),
             ]),
             200,
             headers: {'content-type': 'text/event-stream'},
@@ -254,12 +274,13 @@ void main() {
 
       test('runHumanInTheLoop uses correct endpoint', () async {
         String? capturedUrl;
-        
+
         mockHttpClient = MockStreamingClient((request) async {
           capturedUrl = request.url.toString();
           return http.StreamedResponse(
             Stream.fromIterable([
-              utf8.encode('data: {"type":"RUN_FINISHED","threadId":"t1","runId":"r1"}\n\n'),
+              utf8.encode(
+                  'data: {"type":"RUN_FINISHED","threadId":"t1","runId":"r1"}\n\n'),
             ]),
             200,
             headers: {'content-type': 'text/event-stream'},
@@ -272,19 +293,21 @@ void main() {
         );
 
         await client.runHumanInTheLoop(SimpleRunAgentInput()).toList();
-        expect(capturedUrl, equals('https://api.example.com/human_in_the_loop'));
+        expect(
+            capturedUrl, equals('https://api.example.com/human_in_the_loop'));
       });
     });
 
     group('configuration', () {
       test('respects custom headers', () async {
         Map<String, String>? capturedHeaders;
-        
+
         mockHttpClient = MockStreamingClient((request) async {
           capturedHeaders = request.headers;
           return http.StreamedResponse(
             Stream.fromIterable([
-              utf8.encode('data: {"type":"RUN_FINISHED","threadId":"t1","runId":"r1"}\n\n'),
+              utf8.encode(
+                  'data: {"type":"RUN_FINISHED","threadId":"t1","runId":"r1"}\n\n'),
             ]),
             200,
             headers: {'content-type': 'text/event-stream'},
@@ -303,7 +326,7 @@ void main() {
         );
 
         await client.runAgent('test', SimpleRunAgentInput()).toList();
-        
+
         expect(capturedHeaders?['X-API-Key'], equals('secret-key'));
         expect(capturedHeaders?['X-Custom-Header'], equals('custom-value'));
       });

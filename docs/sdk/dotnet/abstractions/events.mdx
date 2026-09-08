@@ -1,0 +1,685 @@
+---
+title: "Events"
+description: "Documentation for the streaming event types in AGUI.Abstractions"
+---
+
+# Events
+
+AG-UI uses a streaming event-based architecture. Events are the units of
+communication from an agent backend to a frontend UI. In .NET, every protocol
+event derives from `BaseEvent` and has a `type` discriminator.
+
+## Event Type Constants
+
+`AGUIEventTypes` defines the SCREAMING_SNAKE_CASE wire discriminators:
+
+```csharp
+AGUIEventTypes.RunStarted; // "RUN_STARTED"
+AGUIEventTypes.RunFinished; // "RUN_FINISHED"
+AGUIEventTypes.RunError; // "RUN_ERROR"
+AGUIEventTypes.StepStarted; // "STEP_STARTED"
+AGUIEventTypes.StepFinished; // "STEP_FINISHED"
+AGUIEventTypes.TextMessageStart; // "TEXT_MESSAGE_START"
+AGUIEventTypes.TextMessageContent; // "TEXT_MESSAGE_CONTENT"
+AGUIEventTypes.TextMessageEnd; // "TEXT_MESSAGE_END"
+AGUIEventTypes.ToolCallStart; // "TOOL_CALL_START"
+AGUIEventTypes.ToolCallArgs; // "TOOL_CALL_ARGS"
+AGUIEventTypes.ToolCallEnd; // "TOOL_CALL_END"
+AGUIEventTypes.ToolCallResult; // "TOOL_CALL_RESULT"
+AGUIEventTypes.StateSnapshot; // "STATE_SNAPSHOT"
+AGUIEventTypes.StateDelta; // "STATE_DELTA"
+AGUIEventTypes.MessagesSnapshot; // "MESSAGES_SNAPSHOT"
+AGUIEventTypes.ActivitySnapshot; // "ACTIVITY_SNAPSHOT"
+AGUIEventTypes.ActivityDelta; // "ACTIVITY_DELTA"
+AGUIEventTypes.ReasoningStart; // "REASONING_START"
+AGUIEventTypes.ReasoningMessageStart; // "REASONING_MESSAGE_START"
+AGUIEventTypes.ReasoningMessageContent; // "REASONING_MESSAGE_CONTENT"
+AGUIEventTypes.ReasoningMessageEnd; // "REASONING_MESSAGE_END"
+AGUIEventTypes.ReasoningMessageChunk; // "REASONING_MESSAGE_CHUNK"
+AGUIEventTypes.ReasoningEnd; // "REASONING_END"
+AGUIEventTypes.ReasoningEncryptedValue; // "REASONING_ENCRYPTED_VALUE"
+AGUIEventTypes.Raw; // "RAW"
+AGUIEventTypes.Custom; // "CUSTOM"
+```
+
+## BaseEvent
+
+All events inherit from `BaseEvent`.
+
+```csharp
+public abstract class BaseEvent
+{
+    public abstract string Type { get; } // "type"
+    public long? Timestamp { get; set; } // "timestamp"
+    public JsonElement? RawEvent { get; set; } // "rawEvent"
+    public JsonElement? Metadata { get; set; } // "metadata"
+}
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `string` | Event discriminator |
+| `Timestamp` | `timestamp` | `long?` | Optional event timestamp |
+| `RawEvent` | `rawEvent` | `JsonElement?` | Optional original event data |
+| `Metadata`  | `metadata`  | `JsonElement?` | Optional extra information, open by key |
+
+`Metadata` is open by key: any JSON value is allowed under a key, including
+`null`. The object may be absent, but a present one is never `null` — an
+explicit `null` is read back as absent, and an absent object is omitted from the
+wire rather than serialized as `null`. `AGUIMetadata.ReservedKey` (`"ag-ui"`) is
+reserved for AG-UI's own use.
+
+## Lifecycle Events
+
+Lifecycle events represent the run and step lifecycle.
+
+### RunStartedEvent
+
+Signals the start of an agent run.
+
+```csharp
+var evt = new RunStartedEvent
+{
+    ThreadId = "thread-1",
+    RunId = "run-1",
+    ParentRunId = "run-0",
+    Input = input
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"RUN_STARTED"` | Event discriminator |
+| `ThreadId` | `threadId` | `string` | Conversation thread ID |
+| `RunId` | `runId` | `string` | Agent run ID |
+| `ParentRunId` | `parentRunId` | `string?` | Optional parent run ID |
+| `Input` | `input` | `RunAgentInput?` | Optional input payload for the run |
+
+### RunFinishedEvent
+
+Signals the completion of an agent run.
+
+```csharp
+var evt = new RunFinishedEvent
+{
+    ThreadId = "thread-1",
+    RunId = "run-1",
+    Outcome = new RunFinishedSuccessOutcome()
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"RUN_FINISHED"` | Event discriminator |
+| `ThreadId` | `threadId` | `string` | Conversation thread ID |
+| `RunId` | `runId` | `string` | Agent run ID |
+| `Result` | `result` | `JsonElement?` | Optional run result |
+| `Outcome` | `outcome` | `RunFinishedOutcome?` | Optional typed outcome |
+| `Usage` | `usage` | `IList<TokenUsage>?` | Optional token usage for the run |
+
+`RunFinishedOutcome` is a polymorphic value with `type: "success"` or
+`type: "interrupt"`. `RunFinishedInterruptOutcome` carries `interrupts`, an
+`IList<AGUIInterrupt>`.
+
+`Usage` is described under [TokenUsage](#tokenusage).
+
+### RunErrorEvent
+
+Signals an error during an agent run.
+
+```csharp
+var evt = new RunErrorEvent
+{
+    Message = "The model request failed.",
+    Code = "model_error"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"RUN_ERROR"` | Event discriminator |
+| `Message` | `message` | `string` | Error message |
+| `Code` | `code` | `string?` | Optional error code |
+| `Usage` | `usage` | `IList<TokenUsage>?` | Optional partial usage accrued before the failure |
+
+### TokenUsage
+
+Provider-reported token usage, carried by both terminal run events. One entry per
+`(provider, model)` pair, so a run that invokes several models keeps them separate;
+consumers that only need totals can sum across the entries.
+
+```csharp
+var evt = new RunFinishedEvent
+{
+    ThreadId = "thread-1",
+    RunId = "run-1",
+    Outcome = new RunFinishedSuccessOutcome(),
+    Usage =
+    [
+        new TokenUsage
+        {
+            Provider = "openai",
+            Model = "gpt-4o",
+            InputTokens = 658,
+            OutputTokens = 188,
+            TotalTokens = 846
+        }
+    ]
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Provider` | `provider` | `string?` | Provider that served the request |
+| `Model` | `model` | `string?` | Model that served the request |
+| `InputTokens` | `inputTokens` | `long?` | Input tokens, including cached input tokens |
+| `OutputTokens` | `outputTokens` | `long?` | Output tokens, including reasoning tokens |
+| `TotalTokens` | `totalTokens` | `long?` | Total tokens billed |
+| `ReasoningTokens` | `reasoningTokens` | `long?` | Output tokens spent on internal reasoning |
+| `CachedInputTokens` | `cachedInputTokens` | `long?` | Input tokens served from cache |
+
+Every field is optional. A null count means the provider did not report it, which is
+distinct from a reported zero — so `usage` never fabricates a count the provider
+withheld. The type is numeric-only by design: it carries no prompts, completions,
+messages, tool arguments, or thread/run/user identifiers.
+
+When hosting with `AGUI.Server`, usage reported by Microsoft.Extensions.AI as
+`UsageContent` is accumulated automatically and attached to the terminal event.
+`ModelId` supplies the model label; set the provider label with
+`AGUIStreamOptions.WithUsageProvider("openai")`.
+
+### StepStartedEvent
+
+Signals the start of a named step.
+
+```csharp
+var evt = new StepStartedEvent { StepName = "plan" };
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"STEP_STARTED"` | Event discriminator |
+| `StepName` | `stepName` | `string` | Step name |
+
+### StepFinishedEvent
+
+Signals the completion of a named step.
+
+```csharp
+var evt = new StepFinishedEvent { StepName = "plan" };
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"STEP_FINISHED"` | Event discriminator |
+| `StepName` | `stepName` | `string` | Step name |
+
+## Text Message Events
+
+Text message events stream assistant text as a start/content/end sequence.
+
+### TextMessageStartEvent
+
+```csharp
+var evt = new TextMessageStartEvent
+{
+    MessageId = "msg-1",
+    Role = AGUIRoles.Assistant,
+    Name = "assistant"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"TEXT_MESSAGE_START"` | Event discriminator |
+| `MessageId` | `messageId` | `string` | Message ID |
+| `Role` | `role` | `string` | Message role, typically `"assistant"` |
+| `Name` | `name` | `string?` | Optional sender name |
+
+### TextMessageContentEvent
+
+```csharp
+var evt = new TextMessageContentEvent
+{
+    MessageId = "msg-1",
+    Delta = "Hello"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"TEXT_MESSAGE_CONTENT"` | Event discriminator |
+| `MessageId` | `messageId` | `string` | Message ID from the start event |
+| `Delta` | `delta` | `string` | Text delta |
+
+### TextMessageEndEvent
+
+```csharp
+var evt = new TextMessageEndEvent { MessageId = "msg-1" };
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"TEXT_MESSAGE_END"` | Event discriminator |
+| `MessageId` | `messageId` | `string` | Message ID from the start event |
+
+## Tool Call Events
+
+Tool call events stream tool invocation arguments and optional server-side
+results.
+
+### ToolCallStartEvent
+
+```csharp
+var evt = new ToolCallStartEvent
+{
+    ParentMessageId = "msg-1",
+    ToolCallId = "call-1",
+    ToolCallName = "get_weather"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"TOOL_CALL_START"` | Event discriminator |
+| `ParentMessageId` | `parentMessageId` | `string?` | Optional parent assistant message ID |
+| `ToolCallId` | `toolCallId` | `string` | Tool call ID |
+| `ToolCallName` | `toolCallName` | `string` | Tool name |
+
+### ToolCallArgsEvent
+
+```csharp
+var evt = new ToolCallArgsEvent
+{
+    ToolCallId = "call-1",
+    Delta = """{"city":"Seattle"}"""
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"TOOL_CALL_ARGS"` | Event discriminator |
+| `ToolCallId` | `toolCallId` | `string` | Tool call ID |
+| `Delta` | `delta` | `string` | Argument JSON chunk |
+
+### ToolCallEndEvent
+
+```csharp
+var evt = new ToolCallEndEvent { ToolCallId = "call-1" };
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"TOOL_CALL_END"` | Event discriminator |
+| `ToolCallId` | `toolCallId` | `string` | Tool call ID |
+
+### ToolCallResultEvent
+
+```csharp
+var evt = new ToolCallResultEvent
+{
+    MessageId = "tool-msg-1",
+    ToolCallId = "call-1",
+    Content = """{"temperature":72}""",
+    Role = AGUIRoles.Tool
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"TOOL_CALL_RESULT"` | Event discriminator |
+| `MessageId` | `messageId` | `string` | Tool result message ID |
+| `ToolCallId` | `toolCallId` | `string` | Tool call ID |
+| `Content` | `content` | `string` | Tool result content |
+| `Role` | `role` | `string?` | Optional role, typically `"tool"` |
+
+## State Management Events
+
+State events synchronize frontend state and message history.
+
+### StateSnapshotEvent
+
+Provides a complete state snapshot.
+
+```csharp
+var evt = new StateSnapshotEvent
+{
+    Snapshot = JsonDocument.Parse("""{"draft":"hello"}""").RootElement.Clone()
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"STATE_SNAPSHOT"` | Event discriminator |
+| `Snapshot` | `snapshot` | `JsonElement` | Complete state value |
+
+### StateDeltaEvent
+
+Provides incremental state changes, commonly as JSON Patch operations.
+
+```csharp
+var evt = new StateDeltaEvent
+{
+    Delta = JsonDocument.Parse("""
+        [{ "op": "replace", "path": "/draft", "value": "hello world" }]
+        """).RootElement.Clone()
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"STATE_DELTA"` | Event discriminator |
+| `Delta` | `delta` | `JsonElement` | State delta payload |
+
+### MessagesSnapshotEvent
+
+Replaces the frontend conversation history with the server's view.
+
+```csharp
+var evt = new MessagesSnapshotEvent
+{
+    Messages =
+    [
+        new AGUIUserMessage { Id = "user-1", Content = "Hello" }
+    ]
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"MESSAGES_SNAPSHOT"` | Event discriminator |
+| `Messages` | `messages` | `IList<AGUIMessage>` | Complete message list |
+
+## Reasoning Events
+
+Reasoning events expose a model or agent reasoning stream. They can create and
+update `AGUIReasoningMessage` entries in message history.
+
+### ReasoningStartEvent
+
+```csharp
+var evt = new ReasoningStartEvent { MessageId = "reasoning-1" };
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"REASONING_START"` | Event discriminator |
+| `MessageId` | `messageId` | `string` | Reasoning phase ID |
+
+### ReasoningMessageStartEvent
+
+```csharp
+var evt = new ReasoningMessageStartEvent
+{
+    MessageId = "reasoning-1",
+    Role = AGUIRoles.Reasoning
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"REASONING_MESSAGE_START"` | Event discriminator |
+| `MessageId` | `messageId` | `string` | Reasoning message ID |
+| `Role` | `role` | `string` | Defaults to `"reasoning"` |
+
+### ReasoningMessageContentEvent
+
+```csharp
+var evt = new ReasoningMessageContentEvent
+{
+    MessageId = "reasoning-1",
+    Delta = "Checking constraints..."
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"REASONING_MESSAGE_CONTENT"` | Event discriminator |
+| `MessageId` | `messageId` | `string` | Reasoning message ID |
+| `Delta` | `delta` | `string` | Reasoning content delta |
+
+### ReasoningMessageEndEvent
+
+```csharp
+var evt = new ReasoningMessageEndEvent { MessageId = "reasoning-1" };
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"REASONING_MESSAGE_END"` | Event discriminator |
+| `MessageId` | `messageId` | `string` | Reasoning message ID |
+
+### ReasoningMessageChunkEvent
+
+Compact reasoning message chunk event with optional fields.
+
+```csharp
+var evt = new ReasoningMessageChunkEvent
+{
+    MessageId = "reasoning-1",
+    Delta = "Partial reasoning..."
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"REASONING_MESSAGE_CHUNK"` | Event discriminator |
+| `MessageId` | `messageId` | `string?` | Optional reasoning message ID |
+| `Delta` | `delta` | `string?` | Optional reasoning content delta |
+
+### ReasoningEndEvent
+
+```csharp
+var evt = new ReasoningEndEvent { MessageId = "reasoning-1" };
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"REASONING_END"` | Event discriminator |
+| `MessageId` | `messageId` | `string` | Reasoning phase ID |
+
+### ReasoningEncryptedValueEvent
+
+Attaches an encrypted value to a message or tool call.
+
+```csharp
+var evt = new ReasoningEncryptedValueEvent
+{
+    Subtype = "message",
+    EntityId = "reasoning-1",
+    EncryptedValue = "opaque-token"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"REASONING_ENCRYPTED_VALUE"` | Event discriminator |
+| `Subtype` | `subtype` | `string` | Entity subtype, such as `"message"` or `"tool-call"` |
+| `EntityId` | `entityId` | `string` | Message or tool call ID |
+| `EncryptedValue` | `encryptedValue` | `string` | Opaque encrypted value |
+
+## Activity Events
+
+Activity events carry structured progress state for UI renderers.
+
+### ActivitySnapshotEvent
+
+```csharp
+var evt = new ActivitySnapshotEvent
+{
+    MessageId = "activity-1",
+    ActivityType = "PLAN",
+    Content = JsonDocument.Parse("""{"status":"running"}""").RootElement.Clone(),
+    Replace = true
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"ACTIVITY_SNAPSHOT"` | Event discriminator |
+| `MessageId` | `messageId` | `string` | Activity message ID |
+| `ActivityType` | `activityType` | `string` | Activity discriminator |
+| `Content` | `content` | `JsonElement` | Structured activity content |
+| `Replace` | `replace` | `bool?` | Optional replace/merge hint |
+
+### ActivityDeltaEvent
+
+```csharp
+var evt = new ActivityDeltaEvent
+{
+    MessageId = "activity-1",
+    ActivityType = "PLAN",
+    Patch = JsonDocument.Parse("""
+        [{ "op": "replace", "path": "/status", "value": "done" }]
+        """).RootElement.Clone()
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"ACTIVITY_DELTA"` | Event discriminator |
+| `MessageId` | `messageId` | `string` | Activity message ID |
+| `ActivityType` | `activityType` | `string` | Activity discriminator |
+| `Patch` | `patch` | `JsonElement` | Activity JSON Patch payload |
+
+## Subagent Events
+
+These events report that the agent delegated work to a child agent, so a frontend
+can attribute output to the subagent that produced it. Attribution itself travels
+as an optional `SubagentRunId` on most other event types.
+
+`SubagentRunId` identifies **one invocation**, not a reusable subagent
+definition — the same subagent run twice yields two different values. See
+[Subagents](/concepts/subagents) for the full model.
+
+### SubagentStartedEvent
+
+Announces a new subagent invocation and names it for display.
+
+```csharp
+var evt = new SubagentStartedEvent
+{
+    SubagentRunId = "sub-1",
+    Name = "researcher",
+    Description = "Searches for supporting sources"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"SUBAGENT_STARTED"` | Event discriminator |
+| `SubagentRunId` | `subagentRunId` | `string` | Opaque id for this invocation |
+| `Name` | `name` | `string` | Declared subagent name, for display |
+| `Description` | `description` | `string?` | Optional description |
+| `ParentSubagentRunId` | `parentSubagentRunId` | `string?` | Enclosing subagent, when nesting |
+| `ParentToolCallId` | `parentToolCallId` | `string?` | Tool call that spawned this subagent |
+| `ParentMessageId` | `parentMessageId` | `string?` | Message holding that tool call |
+
+### SubagentFinishedEvent
+
+Marks a subagent invocation as complete.
+
+```csharp
+var evt = new SubagentFinishedEvent { SubagentRunId = "sub-1" };
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"SUBAGENT_FINISHED"` | Event discriminator |
+| `SubagentRunId` | `subagentRunId` | `string` | Matches the id from `SubagentStartedEvent` |
+| `Result` | `result` | `object?` | Optional payload, mirroring `RunFinishedEvent.Result` |
+| `Outcome` | `outcome` | `SubagentFinishedOutcome?` | `SubagentFinishedSuccessOutcome` or `SubagentFinishedSuspendedOutcome` (with optional `InterruptIds`); `null` means success (the legacy reading). Suspended says the subagent is checkpointed awaiting outside input; `InterruptIds` names the run-level interrupts whose answers resume it. |
+
+### SubagentErrorEvent
+
+Marks a subagent invocation as failed.
+
+```csharp
+var evt = new SubagentErrorEvent
+{
+    SubagentRunId = "sub-1",
+    Message = "Search backend unavailable"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"SUBAGENT_ERROR"` | Event discriminator |
+| `SubagentRunId` | `subagentRunId` | `string` | Matches the id from `SubagentStartedEvent` |
+| `Message` | `message` | `string` | Human-readable error message |
+| `Code` | `code` | `string?` | Optional error code |
+
+### Attribution on other events
+
+Most event types expose an optional `SubagentRunId`. An event without it belongs
+to the parent agent, so a stream that never sets it behaves exactly as it did
+before subagents existed.
+
+`RunStartedEvent`, `RunFinishedEvent` and `RunErrorEvent` are not attributable —
+they describe the run as a whole. `MessagesSnapshotEvent` carries attribution
+per-message instead.
+
+`StateSnapshotEvent` and `StateDeltaEvent` are attributable, but attribution on
+them is provenance rather than ownership — it records which subagent produced the
+update. State stays run-scoped, so an attributed snapshot or delta is applied to
+the run's one state document just as an unattributed one is.
+
+When events are converted to `Microsoft.Extensions.AI` types, attribution is
+preserved on `ChatMessage.AdditionalProperties` under the key
+`agui.subagentRunId`, since those types have no dedicated field for it.
+
+## Special Events
+
+### RawEvent
+
+Passes through unprocessed external data.
+
+```csharp
+var evt = new RawEvent
+{
+    Event = JsonDocument.Parse("""{"provider":"example","event":"token"}""").RootElement.Clone(),
+    Source = "provider"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"RAW"` | Event discriminator |
+| `Event` | `event` | `JsonElement` | Raw payload |
+| `Source` | `source` | `string?` | Optional source identifier |
+
+### CustomEvent
+
+Carries application-specific data.
+
+```csharp
+var evt = new CustomEvent
+{
+    Name = "progress",
+    Value = JsonDocument.Parse("""{"percent":50}""").RootElement.Clone()
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Type` | `type` | `"CUSTOM"` | Event discriminator |
+| `Name` | `name` | `string` | Custom event name |
+| `Value` | `value` | `JsonElement?` | Optional custom payload |
+
+## Serialization
+
+`BaseEvent` uses a discriminator-based JSON converter keyed on the `type` field.
+All concrete event types are registered in `AGUIJsonSerializerContext`.
+
+```csharp
+BaseEvent evt = new TextMessageContentEvent
+{
+    MessageId = "msg-1",
+    Delta = "Hello"
+};
+
+var json = JsonSerializer.Serialize(
+    evt,
+    AGUIJsonSerializerContext.Default.BaseEvent);
+```
+

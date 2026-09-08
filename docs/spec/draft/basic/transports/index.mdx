@@ -1,0 +1,75 @@
+---
+title: "Transports"
+description: "What a transport must provide to carry AG-UI, and the standard bindings — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+Protocol semantics are identical on every transport. A transport is a
+**binding**: it defines how the [run input](/spec/draft/basic/run-input) is
+delivered, how events are framed and encoded, and how a stream terminates or
+fails. It does not define what events mean — the
+[event patterns](/spec/draft/basic/patterns) and the
+[processing model](/spec/draft/basic/processing) are the same on every
+binding.
+
+## The binding contract
+
+A binding MUST provide:
+
+- **Ordered, complete delivery** of a run's events, in the order the producer
+  emitted them. The protocol's order is arrival order; a transport that can
+  reorder or drop events cannot carry AG-UI without a layer that restores both.
+- **Delivery of the `RunAgentInput` that opens the exchange**, before any
+  events. A stream that goes on to carry
+  [further runs](/spec/draft/events/lifecycle#several-runs-on-one-stream) —
+  a replayed thread — delivers no further input for them: those runs are the
+  producer restating history, and each `RUN_STARTED` MAY carry its own
+  `input` echo.
+- **A termination signal** a consumer can tell from truncation: a stream that
+  ends cleanly after a terminal event is a closed run, and a connection that
+  dies without one is a truncated run.
+- **An error path for rejected input** — a structurally invalid
+  `RunAgentInput` is refused before `RUN_STARTED`, outside the stream.
+
+Authentication and authorization are properties of the binding and the
+application, not of the protocol: AG-UI defines no credential, and a binding
+carries whatever its channel uses (HTTP authentication, ambient process
+identity, or nothing).
+
+## Standard bindings
+
+1. [HTTP + Server-Sent Events](/spec/draft/basic/transports/http-sse): the run
+   input is an HTTP POST; the events stream back as SSE frames carrying JSON.
+2. [HTTP + Protobuf](/spec/draft/basic/transports/http-protobuf): the same
+   POST, negotiated to a binary response of length-prefixed protobuf frames.
+
+Both bindings share the request half; they differ only in the response
+encoding, selected by content negotiation. An implementation that speaks HTTP
+MUST support the SSE binding; the protobuf binding is OPTIONAL.
+
+## Truncation
+
+A consumer whose stream ends without a terminal event has a truncated run: the
+producer may have kept going, but this consumer will never see the rest. A
+truncated run has no outcome. A consumer MUST NOT synthesize a `RUN_FINISHED`
+for it and MUST NOT report it as having succeeded; everything the run
+delivered before the break remains delivered. Whether and how to surface the
+truncation beyond that — leaving the run unresolved, or raising a synthetic
+failure — is the consumer's business; re-running is a new run with a new
+`runId`.
+
+## Custom transports
+
+Implementations MAY carry AG-UI over other channels — WebSockets, message
+buses, in-process pipes. A custom transport MUST preserve the event model, the
+event patterns, and the processing rules, and MUST satisfy the binding
+contract above. It SHOULD document its framing, its input delivery, and its
+termination and error signals, to aid interoperability.
+
+A custom transport that carries JSON SHOULD frame events exactly as the SSE
+binding does — one event object per frame — rather than inventing a new
+envelope: the SSE binding's framing is the protocol's JSON framing, and only
+its HTTP mechanics are specific to HTTP.

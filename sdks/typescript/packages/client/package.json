@@ -1,7 +1,8 @@
 {
   "name": "@ag-ui/client",
   "author": "Markus Ecker <markus.ecker@gmail.com>",
-  "version": "0.0.54",
+  "version": "0.0.59",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/ag-ui-protocol/ag-ui.git"
@@ -20,6 +21,7 @@
   ],
   "scripts": {
     "build": "tsdown",
+    "lint": "eslint \"src/**/*.ts*\"",
     "dev": "tsdown --watch",
     "clean": "git clean -fdX --exclude=\"!.env\"",
     "typecheck": "tsc --noEmit",
@@ -45,6 +47,7 @@
   "devDependencies": {
     "@types/node": "^20.11.19",
     "@vitest/coverage-istanbul": "^4.0.18",
+    "eslint": "^9.37.0",
     "publint": "^0.3.12",
     "@arethetypeswrong/cli": "^0.17.4",
     "vitest": "^4.0.18",

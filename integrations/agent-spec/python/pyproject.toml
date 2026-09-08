@@ -1,38 +1,50 @@
 [project]
 name = "ag-ui-agent-spec"
-version = "0.1.0"
+version = "0.1.1"
 description = "AG-UI FastAPI adapter for Agent-Spec (LangGraph/Wayflow)"
-license = "MIT"
+license = "Apache-2.0 OR UPL-1.0"
 readme = "README.md"
 requires-python = ">=3.10,<3.14.0"
 dependencies = [
   "fastapi>=0.115.0",
   "ag-ui-protocol>=0.1.10",
-  "pyagentspec",
+  "pyagentspec>=26.1.2",
   "json-repair>=0.30.0,<0.45.0",
 ]
 authors = [{ name = "Agent Spec team" }]
 
+[dependency-groups]
+dev = [
+  "pytest>=7.4.0",
+  "pytest-asyncio>=0.21.0",
+  "langgraph>=0.2.0",
+  "langchain-core>=0.3.0",
+]
+
 [tool.ag-ui.scripts]
-test = "python -c \"print('Warning: no tests configured for ag-ui-agent-spec')\""
+test = "python -m pytest"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=77.0.0"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.build.targets.wheel]
-packages = ["ag_ui_agentspec"]
+[tool.setuptools]
+license-files = ["LICENSE-APACHE", "LICENSE-UPL"]
 
-[tool.hatch.metadata]
-allow-direct-references = true
+[tool.setuptools.packages.find]
+include = ["ag_ui_agentspec*"]
 
 [tool.uv.sources]
-wayflowcore = { git = "https://github.com/oracle/wayflow.git ", rev = "main", subdirectory = "wayflowcore" }
-pyagentspec = { git = "https://github.com/oracle/agent-spec.git ", rev = "main", subdirectory = "pyagentspec" }
+wayflowcore = { git = "https://github.com/oracle/wayflow.git", rev = "wayflow-26.1.2", subdirectory = "wayflowcore" }
+pyagentspec = { git = "https://github.com/oracle/agent-spec.git", rev = "agent-spec-26.1.2", subdirectory = "pyagentspec" }
 
 [project.optional-dependencies]
 langgraph = ["pyagentspec[langgraph]"]
-wayflow = ["wayflowcore"]
+wayflow = ["wayflowcore>=26.1.2"]
 
 [tool.uv]
 package = true

@@ -45,7 +45,7 @@ void main() {
       for (var i = 0; i < 20; i++) {
         final delay = backoff.nextDelay(0);
         final delayMs = delay.inMilliseconds;
-        
+
         // Expected: 10000ms ± 30% = 7000ms to 13000ms
         expect(delayMs, greaterThanOrEqualTo(7000));
         expect(delayMs, lessThanOrEqualTo(13000));

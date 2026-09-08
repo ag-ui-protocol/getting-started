@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AGUI.Client</RootNamespace>
+    <PackageId>AGUI.Client</PackageId>
+    <Description>AG-UI HTTP client and IChatClient implementation for consuming AG-UI agent endpoints.</Description>
+    <PackageTags>$(PackageTags);client;http;chat;microsoft-extensions-ai;sse</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(SignAssembly)' != 'true'">
+    <InternalsVisibleTo Include="AGUI.Client.UnitTests" />
+    <InternalsVisibleTo Include="AGUI.Hosting.AspNetCore.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AGUI.Abstractions\AGUI.Abstractions.csproj" />
+    <ProjectReference Include="..\AGUI.Formatting\AGUI.Formatting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.AI" />
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
+    <PackageReference Include="System.Net.ServerSentEvents" />
+  </ItemGroup>
+
+  <!-- System.Net.Http.Json (JsonContent) ships in the shared framework on net8.0+, but must be
+       referenced explicitly on netstandard2.0/net472. -->
+  <ItemGroup Condition=" '$(TargetFramework)' == 'netstandard2.0' OR '$(TargetFramework)' == 'net472' ">
+    <PackageReference Include="System.Net.Http.Json" />
+  </ItemGroup>
+
+  <!-- Shared helper compiled for every target framework. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)..\Shared\ArgumentNullThrowHelper.cs" Link="Internal\ArgumentNullThrowHelper.cs" />
+  </ItemGroup>
+
+  <!-- Compiler-feature polyfills compiled only where the BCL lacks them (init, required, etc.). -->
+  <ItemGroup Condition=" '$(TargetFramework)' == 'netstandard2.0' OR '$(TargetFramework)' == 'net472' ">
+    <Compile Include="$(MSBuildThisFileDirectory)..\Shared\Polyfills\*.cs" LinkBase="Internal\Polyfills" />
+  </ItemGroup>
+
+</Project>

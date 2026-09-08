@@ -1,5 +1,7 @@
 {
   "name": "@ag-ui/langroid",
+  "//": "private: @ag-ui/langroid is currently an empty HttpAgent subclass with no added behavior — intentionally NOT published. See src/index.ts for what would make it publishable.",
+  "private": true,
   "author": "AG-UI Contributors",
   "version": "0.0.1",
   "main": "./dist/index.js",

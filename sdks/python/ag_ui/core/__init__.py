@@ -43,10 +43,20 @@ from ag_ui.core.events import (
     RunFinishedOutcome,
     RunFinishedSuccessOutcome,
     RunFinishedInterruptOutcome,
+    SubagentStartedEvent,
+    SubagentFinishedEvent,
+    SubagentFinishedOutcome,
+    SubagentFinishedSuccessOutcome,
+    SubagentFinishedSuspendedOutcome,
+    SubagentErrorEvent,
+    TokenUsage,
     Event
 )
 
 from ag_ui.core.types import (
+    AGUI_METADATA_KEY,
+    Metadata,
+    MetadataMixin,
     FunctionCall,
     ToolCall,
     BaseMessage,
@@ -83,6 +93,11 @@ from ag_ui.core.types import (
     InputContentPart,
 )
 
+from ag_ui.core.token_usage import (
+    token_usage_from_langchain_metadata,
+    aggregate_token_usage,
+)
+
 from ag_ui.core.capabilities import (
     SubAgentInfo,
     IdentityCapabilities,
@@ -101,6 +116,9 @@ from ag_ui.core.capabilities import (
 )
 
 __all__ = [
+    "AGUI_METADATA_KEY",
+    "Metadata",
+    "MetadataMixin",
     # Events
     "EventType",
     "BaseEvent",
@@ -141,7 +159,17 @@ __all__ = [
     "ReasoningMessageRole",
     "RunFinishedOutcome",
     "RunFinishedSuccessOutcome",
+    "TokenUsage",
+    # Token usage mapping / aggregation
+    "token_usage_from_langchain_metadata",
+    "aggregate_token_usage",
     "RunFinishedInterruptOutcome",
+    "SubagentStartedEvent",
+    "SubagentFinishedEvent",
+    "SubagentFinishedOutcome",
+    "SubagentFinishedSuccessOutcome",
+    "SubagentFinishedSuspendedOutcome",
+    "SubagentErrorEvent",
     "Event",
     # Types
     "FunctionCall",

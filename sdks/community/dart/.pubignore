@@ -1,0 +1,10 @@
+# Files to exclude from the package published to pub.dev (gitignore syntax).
+# pub.dev only needs lib/, example/, and the docs to serve and score the
+# package; the test suite and build artifacts add weight without value.
+#
+# 0.1.0 unintentionally shipped test/ (plus large committed artifacts in
+# example/). Keep 0.3.0+ lean and, in particular, never ship compiled kernel
+# (.dill) or disabled (.skip) files.
+test/
+*.dill
+*.skip

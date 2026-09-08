@@ -13,7 +13,11 @@ export function getStorage(): LibSQLStore | DynamoDBStore {
   } else {
     return new LibSQLStore({
       id: 'storage-memory',
-      url: ":memory:"
+      // File-backed (not ":memory:"): with connection pooling, an in-memory
+      // libsql gives each connection its own empty DB, so migrated tables
+      // (e.g. mastra_workflow_snapshot) vanish and resume can't load the
+      // suspended snapshot. A file keeps one shared, migrated DB.
+      url: process.env.LIBSQL_URL || "file:./.mastra-demo.db",
     });
   }
 }

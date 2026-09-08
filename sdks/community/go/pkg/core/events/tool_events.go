@@ -11,6 +11,9 @@ type ToolCallStartEvent struct {
 	ToolCallID      string  `json:"toolCallId"`
 	ToolCallName    string  `json:"toolCallName"`
 	ParentMessageID *string `json:"parentMessageId,omitempty"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewToolCallStartEvent creates a new tool call start event
@@ -74,6 +77,9 @@ type ToolCallArgsEvent struct {
 	*BaseEvent
 	ToolCallID string `json:"toolCallId"`
 	Delta      string `json:"delta"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewToolCallArgsEvent creates a new tool call args event
@@ -138,6 +144,9 @@ func (e *ToolCallArgsEvent) ToJSON() ([]byte, error) {
 type ToolCallEndEvent struct {
 	*BaseEvent
 	ToolCallID string `json:"toolCallId"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewToolCallEndEvent creates a new tool call end event
@@ -199,6 +208,9 @@ type ToolCallResultEvent struct {
 	ToolCallID string  `json:"toolCallId"`
 	Content    string  `json:"content"`
 	Role       *string `json:"role,omitempty"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewToolCallResultEvent creates a new tool call result event
@@ -246,6 +258,9 @@ type ToolCallChunkEvent struct {
 	ToolCallName    *string `json:"toolCallName,omitempty"`
 	ParentMessageID *string `json:"parentMessageId,omitempty"`
 	Delta           *string `json:"delta,omitempty"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewToolCallChunkEvent creates a new tool call chunk event

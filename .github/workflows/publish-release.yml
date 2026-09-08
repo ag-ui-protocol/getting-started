@@ -1,38 +1,140 @@
 name: release / publish
 
-# Mirrors CopilotKit's `release / publish` DX. Fires automatically on any
-# merged PR to main, and also supports manual dispatch (useful for retries
-# after a partial failure, or for forcing a publish of a version that's
-# already on main but not yet on the registries).
+# Mirrors CopilotKit's `release / publish` DX. This is the SINGLE npm OIDC
+# entry point for ag-ui — it handles BOTH stable releases (merged release PRs)
+# AND prerelease canary publishes (manual workflow_dispatch with mode=prerelease).
 #
-# We differ from CopilotKit in one way: we detect version changes by
+# We differ from CopilotKit in one way: stable mode detects version changes by
 # diffing against the npm/PyPI registries (rather than parsing the merged
 # branch name), which lets BOTH the automated release-PR flow and plain
-# version-bump PRs from external maintainers trigger a publish.
+# version-bump PRs from external maintainers trigger a publish. Prerelease
+# mode takes an explicit `scope` input and runs prepare-release.ts in-place
+# (no commit) to bump versions before pack+publish.
 #
 # Handles stable AND prerelease versions:
 #   "1.2.3"              → publishes to npm `latest` / PyPI normal
 #   "1.2.3-alpha.0"      → publishes to npm `alpha` / PyPI (pip needs --pre)
+#   "1.2.3-canary.<suffix>" → publishes to npm `canary` (prerelease mode)
 #   "1.2.3a0" / "1.2.3b0" / "1.2.3rc0" → same, with PEP 440 prerelease tags
 #
-# SECURITY: Build and publish are split into separate jobs. Publishing
-# secrets (NPM_TOKEN, PYPI_API_TOKEN) are only available in the publish
-# job, never in the same process tree as build-time code execution.
+# SECURITY: Build and publish are split into separate jobs. Publishing secrets
+# (PYPI_API_TOKEN, SONATYPE_*/GPG_*) are only available in publish jobs, never in
+# the same process tree as build-time code execution. npm and NuGet publishing
+# use OIDC trusted publishing (no long-lived package token at all) — see below.
+#
+# MAVEN CENTRAL is STABLE-ONLY. Central has no dist-tag / prerelease channel and
+# every upload is permanent and immutable, so there is no throwaway equivalent of
+# an npm `canary` tag. A prerelease dispatch that resolves to a Maven scope FAILS
+# LOUD in the build job rather than silently publishing junk versions into a
+# public namespace forever (or, worse, silently doing nothing).
+#
+# OIDC ENTRY POINT: This workflow is the ONLY workflow that publishes to npm
+# under OIDC. The npm trusted publisher records for every @ag-ui/* package
+# are bound to THIS workflow file path. npm matches the OIDC token's
+# `workflow_ref` claim against the CALLER workflow path (NOT
+# `job_workflow_ref` of a reusable workflow). That is why both stable and
+# prerelease publishing physically run from this file as `mode`-gated steps,
+# NOT via `workflow_call` indirection from a separate prerelease workflow.
+#
+# WARNING: npm trusted-publisher binding pins to:
+#   repository: ag-ui-protocol/ag-ui
+#   workflow_file_path: .github/workflows/publish-release.yml
+#   environment_name: npm
+# Renaming this file, this `environment:` value, or the workflow path
+# breaks npm publishing for every @ag-ui/* package silently until the
+# trusted-publisher config on npmjs.org is updated to match. Do NOT add
+# NPM_TOKEN-based publishing to any other workflow either — there can be
+# only ONE trusted-publisher record per package on npm, and it is bound here.
+#
+# Dispatch examples:
+#   gh workflow run publish-release.yml -R ag-ui-protocol/ag-ui \
+#     -f mode=stable -f dry_run=true
+#
+#   gh workflow run publish-release.yml -R ag-ui-protocol/ag-ui \
+#     -f mode=prerelease -f scope=integration-langgraph-py -f suffix=fix-user-issue
 
 on:
-  # Version bumps can only live in package.json or pyproject.toml, so we
-  # gate the trigger on those paths. Combined with the release.config.json
+  # Version bumps can only live in package.json, pyproject.toml, the .NET SDK's
+  # Directory.Build.props, or a Maven reactor pom.xml, so we gate the trigger on
+  # those paths. Combined with the release.config.json
   # allowlist in detect-ts-version-changes.sh this gives defense in depth:
-  # unrelated PRs don't even start the workflow, and any workflow run that
+  # unrelated pushes don't even start the workflow, and any workflow run that
   # does fire still filters to enrolled packages before touching a registry.
-  pull_request:
-    types: [closed]
+  #
+  # We trigger stable releases on push-to-main (NOT pull_request: closed) so
+  # the workflow run's ref is refs/heads/main. Prerelease dispatches are
+  # intentionally allowed from any selected branch; the npm GitHub Environment
+  # must therefore allow those deployment branches while stable branch safety is
+  # enforced by the build job's mode-aware guard below.
+  push:
     branches: [main]
     paths:
       - "**/package.json"
       - "**/pyproject.toml"
+      # Every Directory.Build.props that carries a released .NET VersionPrefix.
+      - "sdks/dotnet/Directory.Build.props"
+      - "integrations/claude-managed-agents/dotnet/Directory.Build.props"
+      # Every reactor pom.xml that carries a released Maven version. A module
+      # pom only repeats its <parent><version>, so the reactor pom is the
+      # authoritative trigger. Kept in step with release.config.json by
+      # verify-release-scope-dropdowns.sh.
+      - "sdks/community/java/ag-ui/pom.xml"
   workflow_dispatch:
     inputs:
+      mode:
+        description: "Publish mode: stable (full release with tag + GH Release) or prerelease (canary, --tag canary, no tag/release)"
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - prerelease
+      scope:
+        description: "Prerelease scope (ignored when mode=stable). Regenerated from scripts/release/release.config.json — do NOT hand-edit."
+        required: false
+        type: choice
+        options:
+          - integration-a2a
+          - integration-adk-py
+          - integration-adk-ts
+          - integration-ag2
+          - integration-agent-spec
+          - integration-agno
+          - integration-aws-strands-py
+          - integration-aws-strands-ts
+          - integration-claude-agent-sdk-py
+          - integration-claude-agent-sdk-ts
+          - integration-claude-managed-agents-dotnet
+          - integration-claude-managed-agents-py
+          - integration-claude-managed-agents-ts
+          - integration-cloudflare-agents
+          - integration-crewai-py
+          - integration-crewai-ts
+          - integration-langchain
+          - integration-langgraph-py
+          - integration-langgraph-ts
+          - integration-langroid
+          - integration-llama-index
+          - integration-mastra
+          - integration-pydantic-ai
+          - integration-spring-ai
+          - integration-watsonx-py
+          - integration-watsonx-ts
+          - middleware-a2a
+          - middleware-a2ui
+          - middleware-mcp
+          - middleware-mcp-apps
+          - sdk-py
+          - sdk-py-a2ui-toolkit
+          - sdk-dotnet
+          - sdk-java
+          - sdk-ts
+          - sdk-ts-a2ui-toolkit
+          - create-ag-ui-app
+      suffix:
+        description: "Prerelease suffix (e.g. 'fix-user-issue'); blank = unix timestamp. Allowed: [a-zA-Z0-9._-]+. Ignored when mode=stable."
+        required: false
+        type: string
       dry_run:
         description: "Dry run (detect but don't publish). Useful for previewing."
         required: false
@@ -45,59 +147,141 @@ concurrency:
 
 env:
   NX_VERBOSE_LOGGING: true
+  # Pinned Python build toolchain — see .github/python-toolchain.env, which also
+  # records the green run these versions came from. Kept in step with every other
+  # Python job by the python-toolchain-pins job in lint-release-workflows.yml.
+  # PYTHON_VERSION is the same 3.12 the `Setup Python` step already pins.
+  #
+  # Audited for frozen mode: prerelease builds rewrite package versions on
+  # purpose, but the only uv commands here are `uv build` and `uv publish`,
+  # neither of which reads or rewrites uv.lock (verified against uv 0.12.1), so
+  # this file needs no frozen-mode exemption.
+  UV_VERSION: "0.12.1"
+  PYTHON_VERSION: "3.12"
+  # Budget for the post-publish registry visibility check, shared by the stable
+  # and canary TypeScript publish loops.
+  #
+  # npm's CDN can take minutes to serve a freshly published version back, and
+  # npm says so itself on every publish: "Your package is being processed and
+  # may take a few minutes to become available." The check has to outlast that,
+  # because timing out here fails the release AFTER the packages are already
+  # live and immutable on the registry -- no git tags, no GitHub Releases, and
+  # publish-dotnet / publish-maven (which `needs: publish`) never run at all.
+  #
+  # This has now been tuned upward twice from real false positives: 15s, then
+  # 60s. Run 33068467612 is the 60s case -- all four @ag-ui packages published
+  # fine, then each timed out at exactly 60s in turn, taking NuGet and Maven
+  # Central down with them and leaving npm/PyPI published but untagged.
+  #
+  # The asymmetry is what sets the value: a false positive breaks a release
+  # that already shipped and needs hand recovery, while a slow true negative
+  # only delays the error report in a rare failure mode (silent OIDC fallback).
+  # So this is deliberately generous. The fast path is unaffected -- the loop
+  # breaks as soon as the version is visible, usually on the first attempt.
+  NPM_VISIBILITY_ATTEMPTS: "30"
+  NPM_VISIBILITY_INTERVAL_SECONDS: "10"
 
 permissions:
   contents: read
 
 jobs:
   build:
-    # Fires on merged release PRs OR on manual dispatch (retry / forced publish).
+    # Fires on push-to-main (stable; a merged release PR lands a commit here),
+    # on stable manual workflow_dispatch from main (retry escape hatch), or on
+    # prerelease manual workflow_dispatch from any selected branch. Canary
+    # publishes are intentionally branch-scoped so maintainers can push a
+    # button on feature work without merging first.
     if: >
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+      (github.event_name == 'workflow_dispatch' &&
+        (inputs.mode == 'prerelease' || github.ref == 'refs/heads/main')) ||
+      github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
     outputs:
+      mode: ${{ steps.meta.outputs.mode }}
+      scope: ${{ steps.meta.outputs.scope }}
+      # Stable-only outputs (populated when mode=stable).
       ts_packages: ${{ steps.detect_ts.outputs.packages }}
       ts_count: ${{ steps.detect_ts.outputs.count }}
       py_packages: ${{ steps.detect_py.outputs.packages }}
       py_count: ${{ steps.detect_py.outputs.count }}
+      dotnet_packages: ${{ steps.detect_dotnet.outputs.packages }}
+      dotnet_count: ${{ steps.detect_dotnet.outputs.count }}
+      java_packages: ${{ steps.detect_java.outputs.packages }}
+      java_count: ${{ steps.detect_java.outputs.count }}
       ts_groups_json: ${{ steps.save_groups.outputs.groups }}
+      # Prerelease-only outputs (populated when mode=prerelease).
+      pre_ts_packages_json: ${{ steps.pre_ts.outputs.packages_json }}
+      pre_ts_projects: ${{ steps.pre_ts.outputs.projects }}
+      pre_ts_count: ${{ steps.pre_ts.outputs.count }}
+      pre_has_py_packages: ${{ steps.pre_py.outputs.has_packages }}
+      pre_dotnet_packages_json: ${{ steps.pre_dotnet.outputs.packages_json }}
+      pre_dotnet_count: ${{ steps.pre_dotnet.outputs.count }}
+      # NOTE: there is deliberately no pre_java_* output. Maven Central is
+      # stable-only (see the header); the prerelease path fails loud instead.
     steps:
-      - name: Checkout merged main
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - name: Determine mode and scope
+        id: meta
+        env:
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_SCOPE: ${{ inputs.scope }}
+        run: |
+          set -euo pipefail
+          # Default mode to 'stable' when the workflow is invoked from a
+          # push event (where inputs.mode is the empty string). Every
+          # downstream conditional MUST read steps.meta.outputs.mode rather
+          # than raw inputs.mode — referencing inputs.mode directly on a
+          # push run yields "" and silently misroutes the build.
+          MODE="${INPUT_MODE:-stable}"
+          SCOPE="${INPUT_SCOPE:-}"
+          {
+            echo "mode=$MODE"
+            echo "scope=$SCOPE"
+          } >> "$GITHUB_OUTPUT"
+          echo "Detected mode: $MODE, scope: $SCOPE"
+
+      - name: Checkout release ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ steps.meta.outputs.mode == 'prerelease' && github.ref || 'main' }}
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
         with:
           version: "10.33.4"
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: "22"
-
-      - name: Install protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # v3.0.0
-        with:
-          version: "25.x"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          node-version-file: ".node-version"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          # The publish job's copy of this step documents the same post-step
+          # failure and turns caching off, because `uv publish` never writes the
+          # cache. Here uv DOES write it — `uv build` runs for every Python
+          # scope — so the cache stays on and we only stop the post step from
+          # treating "nothing to cache" as an error.
+          #
+          # Without this, a scope with no Python packages (every sdk-ts,
+          # integration-*-ts and middleware-* canary) never invokes uv, so the
+          # cache dir is never created and the post step fails the `build` job
+          # after a completely green build. `publish` needs `build`, so it is
+          # skipped and nothing ships — while the logs show every package
+          # building fine.
+          ignore-nothing-to-cache: true
 
       - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Poetry
         run: pip install poetry
@@ -112,30 +296,158 @@ jobs:
         # regardless of job separation.
         run: pnpm install --frozen-lockfile
 
+      # ===== Stable mode: detect version changes vs registries =====
       - name: Detect TypeScript version changes vs npm
         id: detect_ts
+        if: steps.meta.outputs.mode == 'stable'
         run: |
-          CHANGED=$(bash scripts/release/detect-ts-version-changes.sh 2>detect-ts.log || echo "[]")
+          set -euo pipefail
+          # Fail loud if the detect script itself errors. Previously this used
+          # `|| echo "[]"` which converted a SCRIPT failure (registry down,
+          # parser bug, jq missing, etc.) into "nothing to publish" — a release
+          # could silently no-op. Capture the script's exit code explicitly and
+          # surface its log on failure. An empty array from a SUCCESSFUL run is
+          # still valid and routes through the "nothing to publish" branch.
+          set +e
+          CHANGED=$(bash scripts/release/detect-ts-version-changes.sh 2>detect-ts.log)
+          RC=$?
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::detect-ts-version-changes.sh exited with status $RC"
+            echo "::group::detect-ts.log"
+            cat detect-ts.log || true
+            echo "::endgroup::"
+            exit 1
+          fi
           cat detect-ts.log || true
           [ -z "$CHANGED" ] && CHANGED="[]"
           [ "$CHANGED" = "null" ] && CHANGED="[]"
+          # Validate that the script's stdout parses as JSON. Without this, a
+          # script that prints diagnostic text to stdout would flow into
+          # downstream `jq` calls and fail with confusing parse errors far from
+          # the source.
+          if ! echo "$CHANGED" | jq -e . >/dev/null 2>&1; then
+            echo "::error::detect-ts-version-changes.sh produced non-JSON stdout"
+            echo "::group::stdout (first 200 chars)"
+            printf '%s\n' "$CHANGED" | head -c 200
+            echo
+            echo "::endgroup::"
+            exit 1
+          fi
           echo "packages=$CHANGED" >> "$GITHUB_OUTPUT"
           COUNT=$(echo "$CHANGED" | jq 'length')
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
 
       - name: Detect Python version changes vs PyPI
         id: detect_py
+        if: steps.meta.outputs.mode == 'stable'
         run: |
-          CHANGED=$(bash scripts/release/detect-py-version-changes.sh 2>detect-py.log || echo "[]")
+          set -euo pipefail
+          # Fail loud if the detect script itself errors. Previously this used
+          # `|| echo "[]"` which converted a SCRIPT failure (registry down,
+          # parser bug, jq missing, etc.) into "nothing to publish" — a release
+          # could silently no-op. Capture the script's exit code explicitly and
+          # surface its log on failure. An empty array from a SUCCESSFUL run is
+          # still valid and routes through the "nothing to publish" branch.
+          set +e
+          CHANGED=$(bash scripts/release/detect-py-version-changes.sh 2>detect-py.log)
+          RC=$?
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::detect-py-version-changes.sh exited with status $RC"
+            echo "::group::detect-py.log"
+            cat detect-py.log || true
+            echo "::endgroup::"
+            exit 1
+          fi
           cat detect-py.log || true
           [ -z "$CHANGED" ] && CHANGED="[]"
           [ "$CHANGED" = "null" ] && CHANGED="[]"
+          # Validate that the script's stdout parses as JSON. Without this, a
+          # script that prints diagnostic text to stdout would flow into
+          # downstream `jq` calls and fail with confusing parse errors far from
+          # the source.
+          if ! echo "$CHANGED" | jq -e . >/dev/null 2>&1; then
+            echo "::error::detect-py-version-changes.sh produced non-JSON stdout"
+            echo "::group::stdout (first 200 chars)"
+            printf '%s\n' "$CHANGED" | head -c 200
+            echo
+            echo "::endgroup::"
+            exit 1
+          fi
           echo "packages=$CHANGED" >> "$GITHUB_OUTPUT"
           COUNT=$(echo "$CHANGED" | jq 'length')
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
 
-      - name: Nothing to publish
-        if: steps.detect_ts.outputs.count == '0' && steps.detect_py.outputs.count == '0'
+      - name: Detect .NET version changes vs NuGet
+        id: detect_dotnet
+        if: steps.meta.outputs.mode == 'stable'
+        run: |
+          set -euo pipefail
+          set +e
+          CHANGED=$(bash scripts/release/detect-dotnet-version-changes.sh 2>detect-dotnet.log)
+          RC=$?
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::detect-dotnet-version-changes.sh exited with status $RC"
+            echo "::group::detect-dotnet.log"
+            cat detect-dotnet.log || true
+            echo "::endgroup::"
+            exit 1
+          fi
+          cat detect-dotnet.log || true
+          [ -z "$CHANGED" ] && CHANGED="[]"
+          [ "$CHANGED" = "null" ] && CHANGED="[]"
+          if ! echo "$CHANGED" | jq -e . >/dev/null 2>&1; then
+            echo "::error::detect-dotnet-version-changes.sh produced non-JSON stdout"
+            echo "::group::stdout (first 200 chars)"
+            printf '%s\n' "$CHANGED" | head -c 200
+            echo
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "packages=$CHANGED" >> "$GITHUB_OUTPUT"
+          COUNT=$(echo "$CHANGED" | jq 'length')
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Detect Java version changes vs Maven Central
+        id: detect_java
+        if: steps.meta.outputs.mode == 'stable'
+        run: |
+          set -euo pipefail
+          set +e
+          CHANGED=$(bash scripts/release/detect-java-version-changes.sh 2>detect-java.log)
+          RC=$?
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::detect-java-version-changes.sh exited with status $RC"
+            echo "::group::detect-java.log"
+            cat detect-java.log || true
+            echo "::endgroup::"
+            exit 1
+          fi
+          cat detect-java.log || true
+          [ -z "$CHANGED" ] && CHANGED="[]"
+          [ "$CHANGED" = "null" ] && CHANGED="[]"
+          if ! echo "$CHANGED" | jq -e . >/dev/null 2>&1; then
+            echo "::error::detect-java-version-changes.sh produced non-JSON stdout"
+            echo "::group::stdout (first 200 chars)"
+            printf '%s\n' "$CHANGED" | head -c 200
+            echo
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "packages=$CHANGED" >> "$GITHUB_OUTPUT"
+          COUNT=$(echo "$CHANGED" | jq 'length')
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Nothing to publish (stable)
+        if: >
+          steps.meta.outputs.mode == 'stable' &&
+          steps.detect_ts.outputs.count == '0' &&
+          steps.detect_py.outputs.count == '0' &&
+          steps.detect_dotnet.outputs.count == '0' &&
+          steps.detect_java.outputs.count == '0'
         run: |
           {
             echo "## release / publish"
@@ -143,8 +455,8 @@ jobs:
             echo "No version changes detected — nothing to publish."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Extract TypeScript project names
-        if: steps.detect_ts.outputs.count != '0'
+      - name: Extract TypeScript project names (stable)
+        if: steps.meta.outputs.mode == 'stable' && steps.detect_ts.outputs.count != '0'
         id: ts_projects
         env:
           TS_PACKAGES: ${{ steps.detect_ts.outputs.packages }}
@@ -153,20 +465,20 @@ jobs:
           echo "projects=$PROJECTS" >> "$GITHUB_OUTPUT"
           echo "Scoped build/test to TypeScript projects: $PROJECTS"
 
-      - name: Build TypeScript packages in scope
-        if: steps.detect_ts.outputs.count != '0'
+      - name: Build TypeScript packages in scope (stable)
+        if: steps.meta.outputs.mode == 'stable' && steps.detect_ts.outputs.count != '0'
         run: npx nx run-many -t build --projects="${STEPS_TS_PROJECTS_OUTPUTS_PROJECTS}"
         env:
           STEPS_TS_PROJECTS_OUTPUTS_PROJECTS: ${{ steps.ts_projects.outputs.projects }}
 
-      - name: Test TypeScript packages in scope
-        if: steps.detect_ts.outputs.count != '0'
+      - name: Test TypeScript packages in scope (stable)
+        if: steps.meta.outputs.mode == 'stable' && steps.detect_ts.outputs.count != '0'
         run: npx nx run-many -t test --projects="${STEPS_TS_PROJECTS_OUTPUTS_PROJECTS}"
         env:
           STEPS_TS_PROJECTS_OUTPUTS_PROJECTS: ${{ steps.ts_projects.outputs.projects }}
 
-      - name: Group TypeScript packages by dist-tag
-        if: steps.detect_ts.outputs.count != '0'
+      - name: Group TypeScript packages by dist-tag (stable)
+        if: steps.meta.outputs.mode == 'stable' && steps.detect_ts.outputs.count != '0'
         id: ts_groups
         env:
           TS_PACKAGES: ${{ steps.detect_ts.outputs.packages }}
@@ -186,8 +498,8 @@ jobs:
           PYEOF
           cat /tmp/ts-groups.json
 
-      - name: Save groups to output
-        if: steps.detect_ts.outputs.count != '0'
+      - name: Save groups to output (stable)
+        if: steps.meta.outputs.mode == 'stable' && steps.detect_ts.outputs.count != '0'
         id: save_groups
         run: |
           {
@@ -196,19 +508,20 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Upload TypeScript build artifacts
-        if: steps.detect_ts.outputs.count != '0'
+      - name: Upload TypeScript build artifacts (stable)
+        if: steps.meta.outputs.mode == 'stable' && steps.detect_ts.outputs.count != '0'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: ts-build-artifacts
           path: |
             sdks/typescript/packages/*/dist/
             integrations/*/typescript/dist/
+            integrations/**/typescript/dist/
             middlewares/*/dist/
           retention-days: 1
 
-      - name: Build Python packages
-        if: steps.detect_py.outputs.count != '0'
+      - name: Build Python packages (stable)
+        if: steps.meta.outputs.mode == 'stable' && steps.detect_py.outputs.count != '0'
         env:
           PY_PACKAGES: ${{ steps.detect_py.outputs.packages }}
         run: |
@@ -226,21 +539,238 @@ jobs:
             cd "$GITHUB_WORKSPACE"
           done < <(echo "$PY_PACKAGES" | jq -c '.[]')
 
-      - name: Upload Python build artifacts
-        if: steps.detect_py.outputs.count != '0'
+      - name: Upload Python build artifacts (stable)
+        if: steps.meta.outputs.mode == 'stable' && steps.detect_py.outputs.count != '0'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: py-build-artifacts
           path: |
             sdks/python/dist/
+            sdks/python/*/dist/
             integrations/*/python/dist/
+          if-no-files-found: error
+          retention-days: 1
+
+      # Java builds and tests HERE, in the secretless build job, rather than in
+      # publish-maven. `mvn -Prelease deploy` has to re-run the lifecycle from
+      # source anyway (it signs what it packs), so there is nothing to hand over
+      # as an artifact — but running the test suite here keeps arbitrary
+      # build-time code out of the process tree that holds the Sonatype
+      # credentials and GPG key, which is the security model stated at the top
+      # of this file.
+      - name: Set up JDK 17 (stable)
+        if: steps.meta.outputs.mode == 'stable' && steps.detect_java.outputs.count != '0'
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: maven
+
+      - name: Build and test Java packages (stable)
+        if: steps.meta.outputs.mode == 'stable' && steps.detect_java.outputs.count != '0'
+        env:
+          JAVA_PACKAGES: ${{ steps.detect_java.outputs.packages }}
+        run: |
+          set -euo pipefail
+          # One reactor per distinct versionSource, so a second Maven scope
+          # builds its own tree instead of silently riding on the first.
+          while read -r pom; do
+            echo "=== Building and testing Maven reactor ${pom} ==="
+            mvn -B -f "$pom" install
+          done < <(echo "$JAVA_PACKAGES" | jq -r '[.[].file] | unique | .[]')
+
+      # ===== Prerelease mode: validate suffix, bump in place, build/test, upload =====
+      # Validate user-supplied suffix against npm-safe charset BEFORE invoking
+      # prepare-release.ts. Empty suffix → fall back to unix timestamp.
+      # Mirrors CPK's bump-prerelease.ts gating; prevents shell-injection and
+      # registry-name-validation failures downstream.
+      - name: Compute prerelease version and bump
+        if: steps.meta.outputs.mode == 'prerelease'
+        id: pre_bump
+        env:
+          INPUT_SUFFIX: ${{ inputs.suffix }}
+          INPUT_SCOPE: ${{ inputs.scope }}
+        run: |
+          set -euo pipefail
+          SUFFIX="$INPUT_SUFFIX"
+          if [ -n "$SUFFIX" ]; then
+            if ! [[ "$SUFFIX" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+              echo "::error::Invalid suffix '$SUFFIX'. Allowed: [a-zA-Z0-9._-]+"
+              exit 1
+            fi
+          else
+            SUFFIX=$(date +%s)
+          fi
+          if [ -z "$INPUT_SCOPE" ]; then
+            echo "::error::mode=prerelease requires a scope input"
+            exit 1
+          fi
+
+          RESULT=$(pnpm tsx scripts/release/prepare-release.ts \
+            --scope "$INPUT_SCOPE" \
+            --bump prerelease \
+            --preid "canary.${SUFFIX}")
+
+          echo "$RESULT" > /tmp/bump-result.json
+
+          {
+            echo "## Prerelease packages"
+            jq -r '.packages[] | "- **\(.name)**: \(.oldVersion) → \(.newVersion)"' /tmp/bump-result.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Extract TypeScript projects in scope (prerelease)
+        if: steps.meta.outputs.mode == 'prerelease'
+        id: pre_ts
+        run: |
+          PROJECTS=$(jq -r '[.packages[] | select(.ecosystem == "typescript") | .name] | join(",")' /tmp/bump-result.json)
+          COUNT=$(jq '[.packages[] | select(.ecosystem == "typescript")] | length' /tmp/bump-result.json)
+          echo "projects=$PROJECTS" >> "$GITHUB_OUTPUT"
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          # Per-package JSON for the unified publish job. Shape mirrors what
+          # the stable publish loop consumes (name/version/path). `path` is
+          # the workspace-relative dir containing package.json, derived from
+          # the `file` field that prepare-release.ts already emits — no
+          # script change required.
+          PACKAGES_JSON=$(jq -c '[.packages[] | select(.ecosystem == "typescript") | {name: .name, version: .newVersion, path: (.file | sub("/package\\.json$"; ""))}]' /tmp/bump-result.json)
+          echo "packages_json=$PACKAGES_JSON" >> "$GITHUB_OUTPUT"
+          if [ "$COUNT" -gt 0 ]; then
+            echo "TypeScript projects in scope: $PROJECTS"
+            echo "TypeScript packages JSON: $PACKAGES_JSON"
+          else
+            echo "No TypeScript projects in scope — build/test/publish will be skipped"
+          fi
+
+      - name: Check for Python packages (prerelease)
+        if: steps.meta.outputs.mode == 'prerelease'
+        id: pre_py
+        run: |
+          PY_COUNT=$(jq '[.packages[] | select(.ecosystem == "python")] | length' /tmp/bump-result.json)
+          if [ "$PY_COUNT" -gt 0 ]; then
+            echo "has_packages=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_packages=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract .NET packages in scope (prerelease)
+        if: steps.meta.outputs.mode == 'prerelease'
+        id: pre_dotnet
+        run: |
+          set -euo pipefail
+          COUNT=$(jq '[.packages[] | select(.ecosystem == "dotnet")] | length' /tmp/bump-result.json)
+          PACKAGES_JSON=$(jq -c '[.packages[] | select(.ecosystem == "dotnet") | {name: .name, version: .newVersion, path: .path, file: .file}]' /tmp/bump-result.json)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "packages_json=$PACKAGES_JSON" >> "$GITHUB_OUTPUT"
+          if [ "$COUNT" -gt 0 ]; then
+            echo "NuGet packages JSON: $PACKAGES_JSON"
+          else
+            echo "No .NET packages in scope — NuGet publish will be skipped"
+          fi
+
+      # Maven Central has no canary channel: every upload is permanent and
+      # immutable, so a `0.1.1-canary.<ts>` would sit in the public
+      # com.ag-ui.community namespace forever. Refuse the run instead of
+      # publishing junk — and instead of silently doing nothing, which would
+      # read as a successful canary that never shipped anything.
+      - name: Reject Maven scopes (prerelease)
+        if: steps.meta.outputs.mode == 'prerelease'
+        run: |
+          set -euo pipefail
+          COUNT=$(jq '[.packages[] | select(.ecosystem == "maven")] | length' /tmp/bump-result.json)
+          if [ "$COUNT" -gt 0 ]; then
+            echo "::error::Scope contains Maven packages, which cannot be canary-published."
+            echo "::error::Maven Central has no dist-tag/prerelease channel and every upload is permanent."
+            echo "::error::Ship it as a stable release instead: run 'release / create-pr' with this scope and merge the release PR."
+            jq -r '.packages[] | select(.ecosystem == "maven") | "  - \(.name)"' /tmp/bump-result.json
+            exit 1
+          fi
+
+      - name: Build TypeScript packages in scope (prerelease)
+        if: steps.meta.outputs.mode == 'prerelease' && steps.pre_ts.outputs.count != '0'
+        run: npx nx run-many -t build --projects="${STEPS_PRE_TS_OUTPUTS_PROJECTS}"
+        env:
+          STEPS_PRE_TS_OUTPUTS_PROJECTS: ${{ steps.pre_ts.outputs.projects }}
+
+      - name: Test TypeScript packages in scope (prerelease)
+        if: steps.meta.outputs.mode == 'prerelease' && steps.pre_ts.outputs.count != '0'
+        run: npx nx run-many -t test --projects="${STEPS_PRE_TS_OUTPUTS_PROJECTS}"
+        env:
+          STEPS_PRE_TS_OUTPUTS_PROJECTS: ${{ steps.pre_ts.outputs.projects }}
+
+      # Upload BOTH dist/ AND the canary-bumped package.json files. The bumps
+      # applied by prepare-release.ts (above) live only on this runner's disk
+      # — they are NOT committed. The unified publish job does a fresh
+      # `actions/checkout` and would otherwise see the ORIGINAL versions,
+      # causing `pnpm pack` to produce a tarball with the wrong version that
+      # no longer matches the TARBALL_NAME computed from packages_json.
+      # Including the bumped package.json files in this artifact lets the
+      # download step overlay them into the freshly checked-out workspace
+      # before `pnpm pack` runs. CRITICAL — do not remove without re-thinking
+      # the canary version-restore mechanism.
+      - name: Upload TypeScript build artifacts (prerelease)
+        if: steps.meta.outputs.mode == 'prerelease' && steps.pre_ts.outputs.count != '0'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: ts-canary-artifacts
+          path: |
+            sdks/typescript/packages/*/dist/
+            integrations/*/typescript/dist/
+            integrations/**/typescript/dist/
+            middlewares/*/dist/
+            sdks/typescript/packages/*/package.json
+            integrations/*/typescript/package.json
+            integrations/**/typescript/package.json
+            middlewares/*/package.json
+          retention-days: 1
+
+      - name: Build Python packages (prerelease)
+        if: steps.meta.outputs.mode == 'prerelease' && steps.pre_py.outputs.has_packages == 'true'
+        run: |
+          PY_PACKAGES=$(jq -c '[.packages[] | select(.ecosystem == "python")]' /tmp/bump-result.json)
+          while read -r pkg; do
+            FILE=$(echo "$pkg" | jq -r '.file')
+            DIR=$(dirname "$FILE")
+            BUILD_SYSTEM=$(echo "$pkg" | jq -r '.buildSystem // "uv"')
+            echo "Building Python canary from $DIR"
+            cd "$DIR"
+            if [ "$BUILD_SYSTEM" = "poetry" ]; then
+              poetry build
+            else
+              uv build
+            fi
+            cd "$GITHUB_WORKSPACE"
+          done < <(echo "$PY_PACKAGES" | jq -c '.[]')
+
+      - name: Upload Python build artifacts (prerelease)
+        if: steps.meta.outputs.mode == 'prerelease' && steps.pre_py.outputs.has_packages == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: py-canary-artifacts
+          path: |
+            sdks/python/dist/
+            sdks/python/*/dist/
+            integrations/*/python/dist/
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload bump result (prerelease)
+        if: steps.meta.outputs.mode == 'prerelease'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: bump-result
+          path: /tmp/bump-result.json
           retention-days: 1
 
   publish:
     needs: build
+    # Single publish job for BOTH modes. Runs whenever the build job has
+    # something to publish (stable: detected packages; prerelease: in-scope
+    # packages from prepare-release.ts) AND we are not in dry_run mode.
     if: >
-      (needs.build.outputs.ts_count != '0' || needs.build.outputs.py_count != '0') &&
-      (github.event_name == 'workflow_dispatch' && inputs.dry_run != true || github.event_name != 'workflow_dispatch')
+      ((needs.build.outputs.mode == 'stable' &&
+         (needs.build.outputs.ts_count != '0' || needs.build.outputs.py_count != '0')) ||
+       (needs.build.outputs.mode == 'prerelease' &&
+         (needs.build.outputs.pre_ts_count != '0' || needs.build.outputs.pre_has_py_packages == 'true'))) &&
+      (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
     runs-on: ubuntu-latest
     # 30min covers worst-case 12-package release with 60s/package CDN verification budget
     timeout-minutes: 30
@@ -251,38 +781,49 @@ jobs:
     # Renaming this file, this `environment:` value, or the workflow path
     # breaks npm publishing for every @ag-ui/* package silently until the
     # trusted-publisher config on npmjs.org is updated to match.
+    # The GitHub Environment's deployment branch policy must allow prerelease
+    # workflow_dispatch refs; stable releases remain main-only via the build
+    # job guard.
     environment: npm
     permissions:
       contents: write
       id-token: write
     steps:
-      - name: Checkout merged main
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - name: Checkout release ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ needs.build.outputs.mode == 'prerelease' && github.ref || 'main' }}
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: false
 
       # --- TypeScript publish ---
       - name: Setup pnpm
-        if: needs.build.outputs.ts_count != '0'
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+        if: needs.build.outputs.ts_count != '0' || needs.build.outputs.pre_ts_count != '0'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
         with:
           version: "10.33.4"
 
       - name: Setup Node
-        if: needs.build.outputs.ts_count != '0'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        if: needs.build.outputs.ts_count != '0' || needs.build.outputs.pre_ts_count != '0'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: "22"
+          node-version-file: ".node-version"
           registry-url: https://registry.npmjs.org
 
-      - name: Download TypeScript build artifacts
-        if: needs.build.outputs.ts_count != '0'
+      # Stable: download stable ts artifacts.
+      - name: Download TypeScript build artifacts (stable)
+        if: needs.build.outputs.mode == 'stable' && needs.build.outputs.ts_count != '0'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           name: ts-build-artifacts
+
+      # Prerelease: download canary artifacts (dist/ + bumped package.json files).
+      - name: Download TypeScript build artifacts (prerelease)
+        if: needs.build.outputs.mode == 'prerelease' && needs.build.outputs.pre_ts_count != '0'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: ts-canary-artifacts
 
       # pnpm pack needs the full workspace installed so that workspace:* protocol
       # deps get rewritten to real versions in the published tarball.
@@ -293,10 +834,48 @@ jobs:
       # artifacts are downloaded from the build job, so prepack/prepublishOnly
       # scripts have no work to do anyway.)
       - name: Install dependencies (no lifecycle scripts)
-        if: needs.build.outputs.ts_count != '0'
+        if: needs.build.outputs.ts_count != '0' || needs.build.outputs.pre_ts_count != '0'
         run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Publish TypeScript packages
-        if: needs.build.outputs.ts_count != '0'
+
+      # Verify the canary-bumped package.json files were actually restored from
+      # the artifact. prepare-release.ts bumps versions in place without
+      # committing, so the freshly checked-out workspace had ORIGINAL versions.
+      # The artifact MUST overlay the bumped package.json onto each package
+      # directory before `pnpm pack` reads the on-disk version. If this check
+      # fails, the build job's upload glob is no longer covering the package's
+      # path — fail loud rather than silently publishing the wrong version
+      # under the `canary` dist-tag.
+      - name: Verify canary versions restored from artifact (prerelease)
+        if: needs.build.outputs.mode == 'prerelease' && needs.build.outputs.pre_ts_count != '0'
+        env:
+          TS_PACKAGES: ${{ needs.build.outputs.pre_ts_packages_json }}
+        run: |
+          echo "$TS_PACKAGES" > /tmp/ts-packages.json
+          MISMATCH=""
+          for PROJECT in $(jq -r '.[].name' /tmp/ts-packages.json); do
+            PKG_PATH=$(jq -r --arg n "$PROJECT" '.[] | select(.name == $n) | .path' /tmp/ts-packages.json)
+            EXPECTED=$(jq -r --arg n "$PROJECT" '.[] | select(.name == $n) | .version' /tmp/ts-packages.json)
+            if [ ! -f "${PKG_PATH}/package.json" ]; then
+              echo "::error::Missing package.json at ${PKG_PATH} for ${PROJECT}"
+              MISMATCH="${MISMATCH} ${PROJECT}"
+              continue
+            fi
+            ACTUAL=$(jq -r '.version' "${PKG_PATH}/package.json")
+            if [ "$ACTUAL" != "$EXPECTED" ]; then
+              echo "::error::Canary version not restored for ${PROJECT}: on-disk=${ACTUAL}, expected=${EXPECTED}"
+              echo "::error::The build job's upload-artifact step must include ${PKG_PATH}/package.json in its path list."
+              MISMATCH="${MISMATCH} ${PROJECT}"
+            else
+              echo "OK: ${PROJECT}@${EXPECTED} restored at ${PKG_PATH}"
+            fi
+          done
+          if [ -n "$MISMATCH" ]; then
+            echo "::error::Canary version restore check failed for:${MISMATCH}"
+            exit 1
+          fi
+
+      - name: Publish TypeScript packages (stable)
+        if: needs.build.outputs.mode == 'stable' && needs.build.outputs.ts_count != '0'
         env:
           # Empty string is required — any value here (even an expired token)
           # makes npm fall back to token auth and silently skip OIDC. The
@@ -355,24 +934,30 @@ jobs:
                 # Verify publish actually landed on the registry. Catches the
                 # silent-OIDC-fallback failure mode (npm returns 0 but the
                 # version never propagated) and transient registry/CDN issues.
-                # 6 attempts × 10s = up to 60s of CDN propagation tolerance. npm CDN can lag 30-60s
-                # during peak hours; 15s was too aggressive and produced false-positive failures.
+                # Budget comes from NPM_VISIBILITY_ATTEMPTS × NPM_VISIBILITY_INTERVAL_SECONDS
+                # (see the workflow-level env block for why it is set where it is).
                 PUBLISH_VERIFIED=0
                 VIEW_STDERR=$(mktemp)
                 VIEW_STDOUT=$(mktemp)
-                for ATTEMPT in 1 2 3 4 5 6; do
-                  if npm view "${PROJECT}@${PKG_VERSION}" version --registry=https://registry.npmjs.org/ >"$VIEW_STDOUT" 2>"$VIEW_STDERR"; then
+                for ATTEMPT in $(seq 1 "$NPM_VISIBILITY_ATTEMPTS"); do
+                  # exit 0 alone is not sufficient — npm view can return 0 with
+                  # empty stdout (e.g. when the registry serves a stale doc that
+                  # lacks the new version under a dist-tag) or with a different
+                  # version string (cache inversion across CDN edges). Require
+                  # an exact line match against the version we just published.
+                  if npm view "${PROJECT}@${PKG_VERSION}" version --registry=https://registry.npmjs.org/ >"$VIEW_STDOUT" 2>"$VIEW_STDERR" \
+                    && grep -qxF "$PKG_VERSION" "$VIEW_STDOUT"; then
                     PUBLISH_VERIFIED=1
                     break
                   fi
-                  if [ "$ATTEMPT" -lt 6 ]; then
-                    sleep 10
+                  if [ "$ATTEMPT" -lt "$NPM_VISIBILITY_ATTEMPTS" ]; then
+                    sleep "$NPM_VISIBILITY_INTERVAL_SECONDS"
                   fi
                 done
                 if [ "$PUBLISH_VERIFIED" -eq 1 ]; then
                   echo "::notice::PUBLISHED: ${PROJECT}@${PKG_VERSION}"
                 else
-                  echo "::error::Publish returned 0 but ${PROJECT}@${PKG_VERSION} not visible on registry after 6 attempts (60s)"
+                  echo "::error::Publish returned 0 but ${PROJECT}@${PKG_VERSION} not visible on registry after ${NPM_VISIBILITY_ATTEMPTS} attempts ($((NPM_VISIBILITY_ATTEMPTS * NPM_VISIBILITY_INTERVAL_SECONDS))s)"
                   echo "::error::Last npm view stderr (may be empty if npm routed error to stdout):"
                   if [ -s "$VIEW_STDERR" ]; then cat "$VIEW_STDERR"; else echo "  (empty)"; fi
                   echo "::error::Last npm view stdout:"
@@ -382,7 +967,17 @@ jobs:
                 rm -f "$VIEW_STDERR" "$VIEW_STDOUT"
               else
                 cat "$PUBLISH_LOG"
-                if grep -qiE "EPUBLISHCONFLICT|cannot publish over|previously published" "$PUBLISH_LOG"; then
+                # Benign "already published" detection. npm 11 surfaces this
+                # in several shapes depending on the registry edge: the legacy
+                # `EPUBLISHCONFLICT` error code, the human-readable "cannot
+                # publish over the previously published versions" message, an
+                # HTTP `E409` conflict, or a `403 Forbidden` paired with the
+                # cannot-publish-over wording. Accept all of them as benign
+                # here — the stable loop is allowed to be a no-op on retry
+                # because the version is immutable on npm. Do NOT widen this
+                # in the CANARY publish loop: canary versions are unique per
+                # run, so a conflict there is a real bug.
+                if grep -qiE "EPUBLISHCONFLICT|E409|cannot publish over|previously published|you cannot publish over the previously published versions|403 Forbidden.*cannot publish over" "$PUBLISH_LOG"; then
                   echo "::notice::SKIPPED (already published): ${PROJECT}@${PKG_VERSION}"
                 else
                   echo "FAILED (publish): ${PROJECT}"
@@ -398,21 +993,153 @@ jobs:
             echo "TS_PUBLISH_FAILED=true" >> "$GITHUB_ENV"
           fi
 
+      - name: Publish TypeScript canary (prerelease)
+        if: needs.build.outputs.mode == 'prerelease' && needs.build.outputs.pre_ts_count != '0'
+        env:
+          # Empty string is required — any value here (even an expired token)
+          # makes npm fall back to token auth and silently skip OIDC. The
+          # workflow's `id-token: write` + the `environment: npm` trusted
+          # publisher config on npmjs.org are what authenticate the upload.
+          NODE_AUTH_TOKEN: ""
+          INPUT_TS_PROJECTS: ${{ needs.build.outputs.pre_ts_projects }}
+          TS_PACKAGES: ${{ needs.build.outputs.pre_ts_packages_json }}
+        run: |
+          echo "Publishing TypeScript canary: ${INPUT_TS_PROJECTS}"
+          echo "$TS_PACKAGES" > /tmp/ts-packages.json
+          TS_FAILED=""
+          # Iterate per package — mirror the stable publish loop's pnpm pack +
+          # npx npm@11.15.0 publish mechanism so canary uses an OIDC-capable
+          # npm client (npm 10, bundled with Node 22, does NOT speak OIDC).
+          for PROJECT in $(jq -r '.[].name' /tmp/ts-packages.json); do
+            PKG_PATH=$(jq -r --arg n "$PROJECT" '.[] | select(.name == $n) | .path' /tmp/ts-packages.json)
+            PKG_VERSION=$(jq -r --arg n "$PROJECT" '.[] | select(.name == $n) | .version' /tmp/ts-packages.json)
+            if [ -z "$PKG_PATH" ] || [ "$PKG_PATH" = "null" ]; then
+              echo "::error::Could not resolve path for ${PROJECT} from pre_ts_packages_json output"
+              TS_FAILED="${TS_FAILED} ${PROJECT}"
+              continue
+            fi
+            if [ -z "$PKG_VERSION" ] || [ "$PKG_VERSION" = "null" ]; then
+              echo "::error::Could not resolve version for ${PROJECT} from pre_ts_packages_json output"
+              TS_FAILED="${TS_FAILED} ${PROJECT}"
+              continue
+            fi
+            echo "=== Publishing ${PROJECT}@${PKG_VERSION} from ${PKG_PATH} with --tag canary ==="
+            # Use pnpm pack + npx npm@11 publish for OIDC trusted publisher flow.
+            # pnpm v10's `publish` does not speak OIDC; npm 11.5.1+ does. We
+            # stay on Node 22 and pull npm 11 via npx for this command only.
+            # pnpm pack still runs from the workspace so workspace:* protocol
+            # deps get rewritten to real versions in the tarball.
+            # Clean stale tarballs from prior runs/retries to prevent pnpm pack
+            # from bundling a previous tarball into the new one.
+            rm -f "$PKG_PATH"/*.tgz
+            if ! (cd "$PKG_PATH" && pnpm pack); then
+              echo "FAILED (pack): ${PROJECT}"
+              TS_FAILED="${TS_FAILED} ${PROJECT}"
+              continue
+            fi
+            TARBALL_NAME=$(echo "$PROJECT" | sed -e 's/^@//' -e 's|/|-|g')-${PKG_VERSION}.tgz
+            PUBLISH_LOG=$(mktemp)
+            echo "Publishing tarball ${TARBALL_NAME}... (output buffered until command completes)"
+            if (cd "$PKG_PATH" && npx --yes npm@11.15.0 publish "$TARBALL_NAME" --tag canary --access public --provenance) >"$PUBLISH_LOG" 2>&1; then
+              cat "$PUBLISH_LOG"
+              # Verify publish actually landed on the registry. Mirrors the
+              # stable publish loop's verification. Catches the silent-OIDC-
+              # fallback failure mode (npm returns 0 but the version never
+              # propagated) and transient registry/CDN issues. Without this, a
+              # green workflow run can hide a publish that never actually
+              # reached the canary dist-tag.
+              # Same budget as the stable loop -- see the workflow-level env block.
+              PUBLISH_VERIFIED=0
+              VIEW_STDERR=$(mktemp)
+              VIEW_STDOUT=$(mktemp)
+              for ATTEMPT in $(seq 1 "$NPM_VISIBILITY_ATTEMPTS"); do
+                # exit 0 alone is not sufficient — npm view can return 0 with
+                # empty stdout (e.g. when the registry serves a stale doc that
+                # lacks the new version under a dist-tag) or with a different
+                # version string (cache inversion across CDN edges). Require
+                # an exact line match against the version we just published.
+                if npm view "${PROJECT}@${PKG_VERSION}" version --registry=https://registry.npmjs.org/ >"$VIEW_STDOUT" 2>"$VIEW_STDERR" \
+                  && grep -qxF "$PKG_VERSION" "$VIEW_STDOUT"; then
+                  PUBLISH_VERIFIED=1
+                  break
+                fi
+                if [ "$ATTEMPT" -lt "$NPM_VISIBILITY_ATTEMPTS" ]; then
+                  sleep "$NPM_VISIBILITY_INTERVAL_SECONDS"
+                fi
+              done
+              if [ "$PUBLISH_VERIFIED" -eq 1 ]; then
+                echo "::notice::PUBLISHED: ${PROJECT}@${PKG_VERSION} (canary)"
+              else
+                echo "::error::Canary publish returned 0 but ${PROJECT}@${PKG_VERSION} not visible on registry after ${NPM_VISIBILITY_ATTEMPTS} attempts ($((NPM_VISIBILITY_ATTEMPTS * NPM_VISIBILITY_INTERVAL_SECONDS))s)"
+                echo "::error::Last npm view stderr (may be empty if npm routed error to stdout):"
+                if [ -s "$VIEW_STDERR" ]; then cat "$VIEW_STDERR"; else echo "  (empty)"; fi
+                echo "::error::Last npm view stdout:"
+                if [ -s "$VIEW_STDOUT" ]; then cat "$VIEW_STDOUT"; else echo "  (empty)"; fi
+                TS_FAILED="${TS_FAILED} ${PROJECT}"
+              fi
+              rm -f "$VIEW_STDERR" "$VIEW_STDOUT"
+            else
+              cat "$PUBLISH_LOG"
+              # Canary publishes use unique per-run version suffixes (timestamp
+              # or user-provided), so EPUBLISHCONFLICT here is a real bug, not
+              # a benign retry — surface it as a failure.
+              echo "FAILED (publish): ${PROJECT}"
+              TS_FAILED="${TS_FAILED} ${PROJECT}"
+            fi
+            rm -f "$PUBLISH_LOG"
+          done
+          if [ -n "$TS_FAILED" ]; then
+            echo ""
+            echo "::error::The following TypeScript canary packages failed to publish:${TS_FAILED}"
+            echo "TS_PUBLISH_FAILED=true" >> "$GITHUB_ENV"
+          fi
+
       # --- Python publish ---
       - name: Install uv
-        if: needs.build.outputs.py_count != '0'
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        if: needs.build.outputs.py_count != '0' || needs.build.outputs.pre_has_py_packages == 'true'
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          # The only uv command in this job is `uv publish`, which uploads
+          # already-built artifacts and never writes to the uv cache. With
+          # caching left on (setup-uv defaults to `enable-cache: auto`,
+          # `ignore-nothing-to-cache: false`), the post step tries to save a
+          # cache directory that was never created and errors:
+          #
+          #   Cache path /home/runner/work/_temp/setup-uv-cache does not exist
+          #
+          # That error fails the whole `publish` job after every package has
+          # already shipped. It only surfaces when the cache key misses, so it
+          # hid behind key hits until run 31929982725 (2026-08-16), where the
+          # release's own pyproject.toml bump changed the key. The damage is
+          # not cosmetic: `publish-dotnet` gates on this job's result, and
+          # `publish-maven` chains off that, so a release carrying both a
+          # Python package and a .NET or Java package would ship npm + PyPI
+          # and then skip the NuGet and Maven lanes.
+          enable-cache: false
 
-      - name: Download Python build artifacts
-        if: needs.build.outputs.py_count != '0'
+      - name: Download Python build artifacts (stable)
+        if: needs.build.outputs.mode == 'stable' && needs.build.outputs.py_count != '0'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           name: py-build-artifacts
 
-      - name: Publish Python packages
-        if: needs.build.outputs.py_count != '0'
+      - name: Download Python build artifacts (prerelease)
+        if: needs.build.outputs.mode == 'prerelease' && needs.build.outputs.pre_has_py_packages == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: py-canary-artifacts
+
+      - name: Download bump result (prerelease)
+        if: needs.build.outputs.mode == 'prerelease' && needs.build.outputs.pre_has_py_packages == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: bump-result
+          path: /tmp/
+
+      - name: Publish Python packages (stable)
+        if: needs.build.outputs.mode == 'stable' && needs.build.outputs.py_count != '0'
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
           PY_PACKAGES: ${{ needs.build.outputs.py_packages }}
@@ -441,6 +1168,37 @@ jobs:
             echo "PY_PUBLISH_FAILED=true" >> "$GITHUB_ENV"
           fi
 
+      - name: Publish Python canary (prerelease)
+        if: needs.build.outputs.mode == 'prerelease' && needs.build.outputs.pre_has_py_packages == 'true'
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          PY_PACKAGES=$(jq -c '[.packages[] | select(.ecosystem == "python")]' /tmp/bump-result.json)
+          PY_COUNT=$(echo "$PY_PACKAGES" | jq 'length')
+          if [ "$PY_COUNT" -gt 0 ]; then
+            PY_FAILED=""
+            while read -r pkg; do
+              NAME=$(echo "$pkg" | jq -r '.name')
+              FILE=$(echo "$pkg" | jq -r '.file')
+              DIR=$(dirname "$FILE")
+              echo "=== Publishing Python canary ${NAME} from ${DIR} ==="
+              if [ -d "${DIR}/dist" ]; then
+                if ! uv publish "${DIR}/dist/*"; then
+                  echo "FAILED: ${NAME}"
+                  PY_FAILED="${PY_FAILED} ${NAME}"
+                fi
+              else
+                echo "WARNING: No dist/ found at ${DIR} — skipping"
+                PY_FAILED="${PY_FAILED} ${NAME}"
+              fi
+            done < <(echo "$PY_PACKAGES" | jq -c '.[]')
+            if [ -n "$PY_FAILED" ]; then
+              echo ""
+              echo "::error::The following Python canary packages failed to publish:${PY_FAILED}"
+              echo "PY_PUBLISH_FAILED=true" >> "$GITHUB_ENV"
+            fi
+          fi
+
       # Fail loud BEFORE creating git tags / GitHub Releases. If publish failed
       # partway through, we must NOT produce tags or releases for packages that
       # never made it to the registry — that's the orphan-tag bug (e.g. an
@@ -451,7 +1209,670 @@ jobs:
           echo "One or more packages failed to publish. See errors above."
           exit 1
 
-      # --- Git tags and GitHub Releases ---
+      # --- Git tags and GitHub Releases (stable only) ---
+      # Canary publishes intentionally do NOT produce git tags or GitHub
+      # Releases — they are throwaway versions identified solely by their
+      # canary.<suffix> npm dist-tag.
+      - name: Configure git
+        if: needs.build.outputs.mode != 'prerelease'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: Configure git credentials for push
+        if: needs.build.outputs.mode != 'prerelease'
+        run: git config --local url."https://x-access-token:$GITHUB_TOKEN@github.com/".insteadOf "https://github.com/"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push per-package git tags (TypeScript)
+        if: needs.build.outputs.mode != 'prerelease' && needs.build.outputs.ts_count != '0'
+        env:
+          TS_PACKAGES: ${{ needs.build.outputs.ts_packages }}
+        run: bash scripts/release/create-tags.sh "$TS_PACKAGES"
+
+      - name: Create and push per-package git tags (Python)
+        if: needs.build.outputs.mode != 'prerelease' && needs.build.outputs.py_count != '0'
+        env:
+          PY_PACKAGES: ${{ needs.build.outputs.py_packages }}
+        run: bash scripts/release/create-tags.sh "$PY_PACKAGES"
+
+      - name: Create GitHub Release (TypeScript)
+        if: needs.build.outputs.mode != 'prerelease' && needs.build.outputs.ts_count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TS_PACKAGES: ${{ needs.build.outputs.ts_packages }}
+        run: bash scripts/release/create-or-update-release.sh typescript "$TS_PACKAGES"
+
+      - name: Create GitHub Release (Python)
+        if: needs.build.outputs.mode != 'prerelease' && needs.build.outputs.py_count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PY_PACKAGES: ${{ needs.build.outputs.py_packages }}
+        run: bash scripts/release/create-or-update-release.sh python "$PY_PACKAGES"
+
+      - name: Reconcile GitHub Release (TypeScript) — safety net for partial failures
+        if: needs.build.outputs.mode != 'prerelease' && needs.build.outputs.ts_count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TS_PACKAGES: ${{ needs.build.outputs.ts_packages }}
+        run: bash scripts/release/reconcile-release.sh typescript "$TS_PACKAGES"
+
+      - name: Reconcile GitHub Release (Python) — safety net for partial failures
+        if: needs.build.outputs.mode != 'prerelease' && needs.build.outputs.py_count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PY_PACKAGES: ${{ needs.build.outputs.py_packages }}
+        run: bash scripts/release/reconcile-release.sh python "$PY_PACKAGES"
+
+      # On push-to-main we no longer have the merged PR's head ref on the event
+      # payload, so we can't tell whether release/next is what merged. Instead,
+      # clean up release/next whenever it still exists on origin after a stable
+      # publish — the delete is idempotent (no-op if the branch is already
+      # gone). Skipped on prerelease (canary) runs, which never touch
+      # release/next.
+      #
+      # Only the LAST registry lane of a run cleans up, so a mixed release does
+      # not delete the branch out from under a lane still to come. Order is
+      # publish → publish-dotnet → publish-maven, so this runs only when neither
+      # of the later lanes has anything to do.
+      - name: Delete release/next if present
+        if: >
+          needs.build.outputs.mode != 'prerelease' &&
+          needs.build.outputs.dotnet_count == '0' &&
+          needs.build.outputs.java_count == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push origin --delete release/next 2>/dev/null || echo "Branch already gone"
+
+      - name: Release summary (stable)
+        if: needs.build.outputs.mode == 'stable'
+        env:
+          TS_PACKAGES: ${{ needs.build.outputs.ts_packages }}
+          PY_PACKAGES: ${{ needs.build.outputs.py_packages }}
+        run: |
+          {
+            echo "## release / publish"
+            echo ""
+
+            if [ -n "$TS_PACKAGES" ] && [ "$(echo "$TS_PACKAGES" | jq 'length')" -gt 0 ]; then
+              echo "### npm"
+              echo ""
+              echo "$TS_PACKAGES" | jq -r '.[] | "- `\(.name)@\(.version)`"'
+              echo ""
+            fi
+
+            if [ -n "$PY_PACKAGES" ] && [ "$(echo "$PY_PACKAGES" | jq 'length')" -gt 0 ]; then
+              echo "### PyPI"
+              echo ""
+              echo "$PY_PACKAGES" | jq -r '.[] | "- `\(.name)@\(.version)`"'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Canary publish summary (prerelease)
+        if: needs.build.outputs.mode == 'prerelease'
+        env:
+          TS_PACKAGES: ${{ needs.build.outputs.pre_ts_packages_json }}
+        run: |
+          {
+            echo ""
+            echo "## Canary publish summary"
+            echo ""
+            if [ -n "$TS_PACKAGES" ] && [ "$(echo "$TS_PACKAGES" | jq 'length')" -gt 0 ]; then
+              echo "### npm — published"
+              echo ""
+              echo "$TS_PACKAGES" | jq -r '.[] | "```\nnpm install \(.name)@canary\n```"'
+              echo ""
+            fi
+            if [ -f /tmp/bump-result.json ]; then
+              PY_COUNT=$(jq '[.packages[] | select(.ecosystem == "python")] | length' /tmp/bump-result.json)
+              if [ "$PY_COUNT" -gt 0 ]; then
+                echo "### PyPI — published"
+                echo ""
+                jq -r '.packages[] | select(.ecosystem == "python") | "```\npip install \(.name)==\(.newVersion)\n```"' /tmp/bump-result.json
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-dotnet:
+    needs: [build, publish]
+    # The NuGet lane runs after npm/PyPI. That sequencing avoids racing over
+    # tags/GitHub Releases on mixed releases and prevents a NuGet publish after
+    # an earlier registry lane failed.
+    if: >
+      always() &&
+      needs.build.result == 'success' &&
+      (needs.publish.result == 'success' || needs.publish.result == 'skipped') &&
+      ((needs.build.outputs.mode == 'stable' && needs.build.outputs.dotnet_count != '0') ||
+       (needs.build.outputs.mode == 'prerelease' && needs.build.outputs.pre_dotnet_count != '0')) &&
+      (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    environment: nuget
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.build.outputs.mode == 'prerelease' && github.ref || 'main' }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Step08_Multimodal integration test reads ag-ui-logo.png, which is
+          # stored via Git LFS. Without the real bytes the snapshot diff fails.
+          lfs: true
+          persist-credentials: false
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Prepare NuGet package set
+        shell: bash
+        env:
+          MODE: ${{ needs.build.outputs.mode }}
+          DOTNET_PACKAGES: ${{ needs.build.outputs.dotnet_packages }}
+          PRE_DOTNET_PACKAGES: ${{ needs.build.outputs.pre_dotnet_packages_json }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = "prerelease" ]; then
+            printf '%s' "$PRE_DOTNET_PACKAGES" > dotnet-packages.json
+          else
+            printf '%s' "$DOTNET_PACKAGES" > dotnet-packages.json
+          fi
+          jq -e 'type == "array" and length > 0' dotnet-packages.json >/dev/null
+          echo "NuGet packages:"
+          jq -r '.[] | "- \(.name)@\(.version) from \(.path)"' dotnet-packages.json
+
+      - name: Run .NET tests
+        shell: bash
+        working-directory: sdks/dotnet
+        run: |
+          set -euo pipefail
+          dotnet test tests/AGUI.Abstractions.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.Client.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.Formatting.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.Protobuf.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.Server.UnitTests -c Release -p:SignAssembly=false
+          dotnet test tests/AGUI.Hosting.AspNetCore.IntegrationTests -c Release -p:SignAssembly=false
+
+      # The integration lives in its own solution with its own
+      # Directory.Build.props, so the SDK suites above do not cover it.
+      - name: Run claude-managed-agents .NET tests
+        if: >
+          contains(needs.build.outputs.dotnet_packages, 'AGUI.ClaudeManagedAgents') ||
+          contains(needs.build.outputs.pre_dotnet_packages_json, 'AGUI.ClaudeManagedAgents')
+        shell: bash
+        working-directory: integrations/claude-managed-agents/dotnet
+        run: dotnet test tests/AGUI.ClaudeManagedAgents.Tests -c Release
+
+      # Built from the detected set rather than a hand-kept list, so a package
+      # outside sdks/dotnet (an integration with its own Directory.Build.props)
+      # is not packed --no-build against a build that never happened.
+      - name: Build .NET packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read -r pkg; do
+            NAME=$(echo "$pkg" | jq -r '.name')
+            PKG_PATH=$(echo "$pkg" | jq -r '.path')
+            echo "Building ${NAME} from ${PKG_PATH}"
+            dotnet build "${PKG_PATH}/${NAME}.csproj" -c Release --no-incremental
+          done < <(jq -c '.[]' dotnet-packages.json)
+
+      - name: Pack NuGet packages
+        shell: bash
+        env:
+          MODE: ${{ needs.build.outputs.mode }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/nuget
+          while read -r pkg; do
+            NAME=$(echo "$pkg" | jq -r '.name')
+            VERSION=$(echo "$pkg" | jq -r '.version')
+            PKG_PATH=$(echo "$pkg" | jq -r '.path')
+            # Each package's own Directory.Build.props, from release.config.json's
+            # versionSource: a second .NET scope has a different base version.
+            PROPS=$(echo "$pkg" | jq -r '.file')
+            BASE_VERSION=$(sed -nE 's/.*<VersionPrefix[^>]*>([^<]+)<\/VersionPrefix>.*/\1/p' "$PROPS" | head -n1)
+            if [ -z "$BASE_VERSION" ]; then
+              echo "::error::Could not read VersionPrefix from ${PROPS} for ${NAME}"
+              exit 1
+            fi
+            CSPROJ="${PKG_PATH}/${NAME}.csproj"
+            EXTRA_ARGS=()
+            if [ "$MODE" = "prerelease" ]; then
+              SUFFIX="${VERSION#"$BASE_VERSION"-}"
+              if [ "$SUFFIX" = "$VERSION" ] || [ -z "$SUFFIX" ]; then
+                echo "::error::Could not derive VersionSuffix for ${NAME}@${VERSION} from VersionPrefix ${BASE_VERSION}"
+                exit 1
+              fi
+              EXTRA_ARGS+=("-p:VersionSuffix=${SUFFIX}")
+            fi
+            echo "Packing ${NAME}@${VERSION} from ${CSPROJ}"
+            dotnet pack "$CSPROJ" -c Release --no-build -o artifacts/nuget "${EXTRA_ARGS[@]}"
+            if [ ! -f "artifacts/nuget/${NAME}.${VERSION}.nupkg" ]; then
+              echo "::error::Expected artifacts/nuget/${NAME}.${VERSION}.nupkg after pack"
+              exit 1
+            fi
+          done < <(jq -c '.[]' dotnet-packages.json)
+          ls -la artifacts/nuget
+
+      # ── Author signing (pack → SIGN → push) ────────────────────────────────
+      # Author-signs the packed *.nupkg in place with a DigiCert code-signing
+      # certificate stored (non-exportable, RSA-HSM) in Azure Key Vault, via
+      # NuGetKeyVaultSignTool + GitHub OIDC (no long-lived secret). This is the
+      # *author* signature that flips packages to "signed" on nuget.org;
+      # nuget.org's *repository* signature is applied automatically on push and
+      # is independent of this. Symbol packages (*.snupkg) are intentionally not
+      # author-signed, and assembly strong-naming (AGUI.snk) is a separate,
+      # untouched concern.
+      # Gated on the SIGNING_PROVIDER variable (set on the `nuget` environment):
+      #   unset / 'none'  → no signing (safe default; inert until provisioned)
+      #   'keyvault'      → sign via Azure Key Vault + NuGetKeyVaultSignTool
+      # Required config (see sdks/dotnet/docs/signing.md): the secrets
+      # AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID,
+      # AZURE_KEY_VAULT_URL, CODE_SIGNING_CERT_NAME on the `nuget` environment;
+      # plus the App Registration granted Key Vault "Crypto User" + "Certificate
+      # User" roles on the vault, and the cert registered on the nuget.org owner.
+      # NOTE: inert until SIGNING_PROVIDER=keyvault — safe to merge ahead of
+      # provisioning.
+
+      # Fail fast with an explicit list if signing is enabled but its
+      # configuration is incomplete — so a half-provisioned setup errors here
+      # with actionable output instead of deep inside the signing tool. Lists
+      # exactly which secrets the `nuget` environment still needs. See
+      # sdks/dotnet/docs/signing.md.
+      - name: Preflight — validate signing configuration
+        if: vars.SIGNING_PROVIDER != '' && vars.SIGNING_PROVIDER != 'none'
+        shell: bash
+        env:
+          PROVIDER: ${{ vars.SIGNING_PROVIDER }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_KEY_VAULT_URL: ${{ secrets.AZURE_KEY_VAULT_URL }}
+          CODE_SIGNING_CERT_NAME: ${{ secrets.CODE_SIGNING_CERT_NAME }}
+        run: |
+          set -euo pipefail
+          if [ "$PROVIDER" != "keyvault" ]; then
+            echo "::error::Unknown SIGNING_PROVIDER '${PROVIDER}' (expected 'none' or 'keyvault')"
+            exit 1
+          fi
+          missing=()
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_KEY_VAULT_URL CODE_SIGNING_CERT_NAME; do
+            if [ -z "${!name}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::SIGNING_PROVIDER='keyvault' but the 'nuget' environment is missing: ${missing[*]}"
+            echo "Provision these (see sdks/dotnet/docs/signing.md) before enabling signing."
+            exit 1
+          fi
+          echo "Signing configuration for 'keyvault' is complete."
+
+      # OIDC login for Key Vault access — reuses the job's id-token: write; no
+      # long-lived client secret is stored.
+      - name: Azure login (OIDC)
+        if: vars.SIGNING_PROVIDER == 'keyvault'
+        uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c  # v3.0.2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Author-sign each *.nupkg with the Key Vault cert. NuGetKeyVaultSignTool
+      # signs one file per call, so we loop; *.snupkg are excluded. The private
+      # key never leaves the HSM — signing is a keys/sign op inside the vault.
+      - name: Author-sign packages (Azure Key Vault)
+        if: vars.SIGNING_PROVIDER == 'keyvault'
+        shell: pwsh
+        env:
+          AZURE_KEY_VAULT_URL: ${{ secrets.AZURE_KEY_VAULT_URL }}
+          CODE_SIGNING_CERT_NAME: ${{ secrets.CODE_SIGNING_CERT_NAME }}
+        run: |
+          dotnet tool install --global NuGetKeyVaultSignTool
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to install NuGetKeyVaultSignTool' }
+          $toolsDir = Join-Path $env:USERPROFILE '.dotnet\tools'
+          if ($env:PATH -notlike "*$toolsDir*") { $env:PATH = "$toolsDir;$env:PATH" }
+
+          # Short-lived Key Vault data-plane token from the OIDC login context.
+          $token = az account get-access-token --resource https://vault.azure.net --query accessToken -o tsv
+          if (-not $token) { throw 'Failed to obtain Key Vault access token' }
+          Write-Output "::add-mask::$token"
+
+          $pkgs = Get-ChildItem -Path artifacts/nuget -File | Where-Object { $_.Extension -eq '.nupkg' }
+          if ($pkgs.Count -eq 0) { throw 'No .nupkg found to sign' }
+          foreach ($pkg in $pkgs) {
+            Write-Host "Signing $($pkg.Name)"
+            NuGetKeyVaultSignTool sign $pkg.FullName `
+              --file-digest sha256 `
+              --timestamp-rfc3161 http://timestamp.digicert.com `
+              --timestamp-digest sha256 `
+              --azure-key-vault-url $env:AZURE_KEY_VAULT_URL `
+              --azure-key-vault-certificate $env:CODE_SIGNING_CERT_NAME `
+              --azure-key-vault-accesstoken $token
+            if ($LASTEXITCODE -ne 0) { throw "Signing failed for $($pkg.Name)" }
+          }
+
+      # Fail the release before publishing if signing was requested but didn't
+      # actually apply (verifies the author signature chains to a trusted root).
+      - name: Verify packages are signed
+        if: vars.SIGNING_PROVIDER == 'keyvault'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(artifacts/nuget/*.nupkg)
+          if [ ${#pkgs[@]} -eq 0 ]; then
+            echo "::error::No .nupkg found to verify after signing"
+            exit 1
+          fi
+          for pkg in "${pkgs[@]}"; do
+            echo "Verifying signature: ${pkg}"
+            dotnet nuget verify "${pkg}" --all
+          done
+
+      - name: NuGet login
+        id: nuget-login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841  # v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Push NuGet packages
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          dotnet nuget push artifacts/nuget/*.nupkg \
+            --api-key "$NUGET_API_KEY" \
+            --source https://www.nuget.org/api/v2/package \
+            --skip-duplicate
+          if compgen -G "artifacts/nuget/*.snupkg" > /dev/null; then
+            dotnet nuget push artifacts/nuget/*.snupkg \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          fi
+
+      - name: Verify NuGet packages are visible
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MAX_WAIT_SECONDS=900
+          SLEEP_SECONDS=15
+          START_SECONDS=$(date +%s)
+          MISSING_PACKAGES=$(mktemp)
+          jq -c '.[]' dotnet-packages.json > "$MISSING_PACKAGES"
+
+          while true; do
+            NEXT_MISSING=$(mktemp)
+
+            while read -r pkg; do
+              NAME=$(echo "$pkg" | jq -r '.name')
+              VERSION=$(echo "$pkg" | jq -r '.version')
+              LOWER_NAME=$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')
+              LOWER_VERSION=$(printf '%s' "$VERSION" | tr '[:upper:]' '[:lower:]')
+              URL="https://api.nuget.org/v3-flatcontainer/${LOWER_NAME}/${LOWER_VERSION}/${LOWER_NAME}.${LOWER_VERSION}.nupkg"
+
+              if curl -fsSL -o /dev/null "$URL" 2>/dev/null; then
+                echo "::notice::PUBLISHED: ${NAME}@${VERSION}"
+              else
+                echo "$pkg" >> "$NEXT_MISSING"
+              fi
+            done < "$MISSING_PACKAGES"
+
+            if [ ! -s "$NEXT_MISSING" ]; then
+              rm -f "$MISSING_PACKAGES" "$NEXT_MISSING"
+              break
+            fi
+
+            NOW_SECONDS=$(date +%s)
+            ELAPSED_SECONDS=$((NOW_SECONDS - START_SECONDS))
+            if [ "$ELAPSED_SECONDS" -ge "$MAX_WAIT_SECONDS" ]; then
+              echo "::error::NuGet verification timed out after ${ELAPSED_SECONDS}s waiting for:"
+              jq -r '. | "- \(.name)@\(.version)"' "$NEXT_MISSING"
+              exit 1
+            fi
+
+            REMAINING_COUNT=$(wc -l < "$NEXT_MISSING" | tr -d ' ')
+            echo "::notice::Waiting for ${REMAINING_COUNT} NuGet package(s) to become visible after ${ELAPSED_SECONDS}s"
+            mv "$NEXT_MISSING" "$MISSING_PACKAGES"
+            sleep "$SLEEP_SECONDS"
+          done
+
+      - name: Configure git
+        if: needs.build.outputs.mode != 'prerelease'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: Configure git credentials for push
+        if: needs.build.outputs.mode != 'prerelease'
+        run: git config --local url."https://x-access-token:$env:GITHUB_TOKEN@github.com/".insteadOf "https://github.com/"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push per-package git tags (.NET)
+        if: needs.build.outputs.mode != 'prerelease'
+        shell: bash
+        env:
+          DOTNET_PACKAGES: ${{ needs.build.outputs.dotnet_packages }}
+        run: bash scripts/release/create-tags.sh "$DOTNET_PACKAGES"
+
+      - name: Create GitHub Release (.NET)
+        if: needs.build.outputs.mode != 'prerelease'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOTNET_PACKAGES: ${{ needs.build.outputs.dotnet_packages }}
+        run: bash scripts/release/create-or-update-release.sh dotnet "$DOTNET_PACKAGES"
+
+      - name: Reconcile GitHub Release (.NET) — safety net for partial failures
+        if: needs.build.outputs.mode != 'prerelease'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOTNET_PACKAGES: ${{ needs.build.outputs.dotnet_packages }}
+        run: bash scripts/release/reconcile-release.sh dotnet "$DOTNET_PACKAGES"
+
+      # Only if the Maven lane (which runs after this one) has nothing to do —
+      # see the same step in the `publish` job.
+      - name: Delete release/next if present
+        if: needs.build.outputs.mode != 'prerelease' && needs.build.outputs.java_count == '0'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push origin --delete release/next 2>/dev/null || echo "Branch already gone"
+
+      - name: Release summary (.NET stable)
+        if: needs.build.outputs.mode == 'stable'
+        shell: bash
+        env:
+          DOTNET_PACKAGES: ${{ needs.build.outputs.dotnet_packages }}
+        run: |
+          {
+            echo "## release / publish — NuGet"
+            echo ""
+            echo "$DOTNET_PACKAGES" | jq -r '.[] | "- `\(.name)@\(.version)`"'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Canary publish summary (.NET prerelease)
+        if: needs.build.outputs.mode == 'prerelease'
+        shell: bash
+        env:
+          DOTNET_PACKAGES: ${{ needs.build.outputs.pre_dotnet_packages_json }}
+        run: |
+          {
+            echo ""
+            echo "## Canary publish summary — NuGet"
+            echo ""
+            echo "$DOTNET_PACKAGES" | jq -r '.[] | "```\ndotnet add package \(.name) --version \(.version)\n```"'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-maven:
+    needs: [build, publish, publish-dotnet]
+    # Last registry lane. Sequenced after npm/PyPI and NuGet for the same reason
+    # publish-dotnet is sequenced after publish: it avoids racing over tags and
+    # the shared daily GitHub Release, and it stops a Maven publish from going
+    # out after an earlier lane already failed.
+    #
+    # STABLE ONLY — see the workflow header. There is no prerelease arm because
+    # Maven Central has no canary channel; the build job rejects a prerelease
+    # dispatch that resolves to a Maven scope before reaching this point.
+    if: >
+      always() &&
+      needs.build.result == 'success' &&
+      (needs.publish.result == 'success' || needs.publish.result == 'skipped') &&
+      (needs['publish-dotnet'].result == 'success' || needs['publish-dotnet'].result == 'skipped') &&
+      needs.build.outputs.mode == 'stable' &&
+      needs.build.outputs.java_count != '0' &&
+      (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
+    name: Publish to Maven Central
+    runs-on: ubuntu-latest
+    # Central's publishing portal validates synchronously when the pom sets
+    # <waitUntil>published</waitUntil>, which can take tens of minutes.
+    timeout-minutes: 60
+    environment: maven
+    permissions:
+      # Pushes the per-package git tags and creates/updates the daily GitHub
+      # Release. No id-token: Maven Central authenticates with the Sonatype user
+      # token, not OIDC.
+      contents: write  # git tags + daily GitHub Release
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: maven
+          # Writes ~/.m2/settings.xml with a "central" server whose credentials
+          # come from the env vars named below. The id must match the reactor
+          # pom's central-publishing-maven-plugin <publishingServerId>.
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_PASSWORD
+          # Names the env var maven-gpg-plugin reads the passphrase from.
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      - name: Prepare Maven package set
+        env:
+          JAVA_PACKAGES: ${{ needs.build.outputs.java_packages }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$JAVA_PACKAGES" > maven-packages.json
+          jq -e 'type == "array" and length > 0' maven-packages.json >/dev/null
+          echo "Maven packages:"
+          jq -r '.[] | "- \(.groupId):\(.name):\(.version) from \(.path)"' maven-packages.json
+
+      # The shared GPG_PRIVATE_KEY secret is stored base64-encoded for the
+      # Kotlin SDK's JReleaser flow (see sdks/community/kotlin/publish.sh), and
+      # setup-java's `gpg-private-key` input only accepts armored text. Import it
+      # here instead, accepting either form, so both JVM SDKs keep signing with
+      # the same repo-level key.
+      - name: Import GPG signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "::error::GPG_PRIVATE_KEY is empty — cannot sign artifacts for Maven Central"
+            exit 1
+          fi
+
+          if printf '%s' "$GPG_PRIVATE_KEY" | grep -q 'BEGIN PGP PRIVATE KEY BLOCK'; then
+            printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          else
+            printf '%s' "$GPG_PRIVATE_KEY" | base64 --decode | gpg --batch --import
+          fi
+
+          gpg --batch --list-secret-keys --keyid-format=long
+
+      # Tests already ran in the secretless build job at this same SHA;
+      # -DskipTests keeps test code out of the credential-bearing process tree.
+      - name: Deploy to Maven Central
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          # One deploy per reactor, matching the build job's grouping.
+          while read -r pom; do
+            echo "🚀 Deploying Maven reactor ${pom} to Maven Central..."
+            mvn -B -f "$pom" -Prelease deploy -DskipTests
+          done < <(jq -r '[.[].file] | unique | .[]' maven-packages.json)
+
+      # The central plugin's <waitUntil>published</waitUntil> returns once the
+      # portal has published, but repo1 sync lags behind that by minutes. Verify
+      # each artifact is actually resolvable before tagging, so a git tag never
+      # points at a release nobody can consume — the Maven equivalent of the
+      # npm/NuGet lanes' registry-visibility checks.
+      - name: Verify Maven Central artifacts are visible
+        run: |
+          set -euo pipefail
+
+          MAX_WAIT_SECONDS=900
+          SLEEP_SECONDS=15
+          START_SECONDS=$(date +%s)
+          MISSING_PACKAGES=$(mktemp)
+          jq -c '.[]' maven-packages.json > "$MISSING_PACKAGES"
+
+          while true; do
+            NEXT_MISSING=$(mktemp)
+
+            while read -r pkg; do
+              NAME=$(echo "$pkg" | jq -r '.name')
+              VERSION=$(echo "$pkg" | jq -r '.version')
+              GROUP_ID=$(echo "$pkg" | jq -r '.groupId')
+              GROUP_PATH=$(printf '%s' "$GROUP_ID" | tr '.' '/')
+              URL="https://repo1.maven.org/maven2/${GROUP_PATH}/${NAME}/${VERSION}/${NAME}-${VERSION}.pom"
+
+              if curl -fsSL -o /dev/null "$URL" 2>/dev/null; then
+                echo "::notice::PUBLISHED: ${GROUP_ID}:${NAME}:${VERSION}"
+              else
+                echo "$pkg" >> "$NEXT_MISSING"
+              fi
+            done < "$MISSING_PACKAGES"
+
+            if [ ! -s "$NEXT_MISSING" ]; then
+              rm -f "$MISSING_PACKAGES" "$NEXT_MISSING"
+              break
+            fi
+
+            NOW_SECONDS=$(date +%s)
+            ELAPSED_SECONDS=$((NOW_SECONDS - START_SECONDS))
+            if [ "$ELAPSED_SECONDS" -ge "$MAX_WAIT_SECONDS" ]; then
+              echo "::error::Maven Central verification timed out after ${ELAPSED_SECONDS}s waiting for:"
+              jq -r '. | "- \(.groupId):\(.name):\(.version)"' "$NEXT_MISSING"
+              exit 1
+            fi
+
+            REMAINING_COUNT=$(wc -l < "$NEXT_MISSING" | tr -d ' ')
+            echo "::notice::Waiting for ${REMAINING_COUNT} Maven artifact(s) to sync to repo1 after ${ELAPSED_SECONDS}s"
+            mv "$NEXT_MISSING" "$MISSING_PACKAGES"
+            sleep "$SLEEP_SECONDS"
+          done
+
       - name: Configure git
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
@@ -462,72 +1883,359 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create and push per-package git tags (TypeScript)
-        if: needs.build.outputs.ts_count != '0'
+      - name: Create and push per-package git tags (Maven)
         env:
-          TS_PACKAGES: ${{ needs.build.outputs.ts_packages }}
-        run: bash scripts/release/create-tags.sh "$TS_PACKAGES"
+          JAVA_PACKAGES: ${{ needs.build.outputs.java_packages }}
+        run: bash scripts/release/create-tags.sh "$JAVA_PACKAGES"
 
-      - name: Create and push per-package git tags (Python)
-        if: needs.build.outputs.py_count != '0'
-        env:
-          PY_PACKAGES: ${{ needs.build.outputs.py_packages }}
-        run: bash scripts/release/create-tags.sh "$PY_PACKAGES"
-
-      - name: Create GitHub Release (TypeScript)
-        if: needs.build.outputs.ts_count != '0'
+      - name: Create GitHub Release (Maven)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TS_PACKAGES: ${{ needs.build.outputs.ts_packages }}
-        run: bash scripts/release/create-or-update-release.sh typescript "$TS_PACKAGES"
+          JAVA_PACKAGES: ${{ needs.build.outputs.java_packages }}
+        run: bash scripts/release/create-or-update-release.sh maven "$JAVA_PACKAGES"
 
-      - name: Create GitHub Release (Python)
-        if: needs.build.outputs.py_count != '0'
+      - name: Reconcile GitHub Release (Maven) — safety net for partial failures
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PY_PACKAGES: ${{ needs.build.outputs.py_packages }}
-        run: bash scripts/release/create-or-update-release.sh python "$PY_PACKAGES"
+          JAVA_PACKAGES: ${{ needs.build.outputs.java_packages }}
+        run: bash scripts/release/reconcile-release.sh maven "$JAVA_PACKAGES"
 
-      - name: Reconcile GitHub Release (TypeScript) — safety net for partial failures
-        if: needs.build.outputs.ts_count != '0'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TS_PACKAGES: ${{ needs.build.outputs.ts_packages }}
-        run: bash scripts/release/reconcile-release.sh typescript "$TS_PACKAGES"
-
-      - name: Reconcile GitHub Release (Python) — safety net for partial failures
-        if: needs.build.outputs.py_count != '0'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PY_PACKAGES: ${{ needs.build.outputs.py_packages }}
-        run: bash scripts/release/reconcile-release.sh python "$PY_PACKAGES"
-
-      - name: Delete release/next if that's what was merged
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'release/next'
+      # Last lane in the run, so cleanup is unconditional here — see the same
+      # step in the `publish` and `publish-dotnet` jobs.
+      - name: Delete release/next if present
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git push origin --delete release/next 2>/dev/null || echo "Branch already gone"
 
-      - name: Release summary
+      - name: Release summary (Maven stable)
         env:
-          TS_PACKAGES: ${{ needs.build.outputs.ts_packages }}
-          PY_PACKAGES: ${{ needs.build.outputs.py_packages }}
+          JAVA_PACKAGES: ${{ needs.build.outputs.java_packages }}
         run: |
           {
-            echo "## release / publish"
+            echo "## release / publish — Maven Central"
             echo ""
+            echo "$JAVA_PACKAGES" | jq -r '.[] | "- `\(.groupId):\(.name):\(.version)`"'
+            echo ""
+            echo "Artifacts appear at https://central.sonatype.com/namespace/com.ag-ui.community"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-            if [ "$(echo "$TS_PACKAGES" | jq 'length')" -gt 0 ]; then
-              echo "### npm"
-              echo ""
-              echo "$TS_PACKAGES" | jq -r '.[] | "- `\(.name)@\(.version)`"'
-              echo ""
+  # Post-release #engr Slack notification. Ported from CopilotKit's `notify`
+  # job. Runs after build, publish, and publish-dotnet via always() so it fires
+  # on success, failure, OR a skipped publish — the pure builder
+  # (scripts/release/build-release-notification.ts) decides what (if anything)
+  # to post from the job results + the event-derived release intent.
+  #
+  # DIVERGENCE FROM CPK: ag-ui publishes npm and PyPI from the SINGLE `publish`
+  # job, while NuGet publishes from a separate Windows-only `publish-dotnet`
+  # job. Lane attribution comes from the published-package SETS plus the
+  # event-derived intent gates.
+  notify:
+    needs: [build, publish, publish-dotnet, publish-maven]
+    # Run on every real-release context: a push-to-main (merged release PR /
+    # version-bump) or a non-dry-run workflow_dispatch. Skipped on dry-run
+    # dispatches (the builder also suppresses dry-run, but gating the job off
+    # avoids a needless runner). always() ensures we still notify when build
+    # or publish FAILED (the whole point of the failure arms).
+    if: >
+      always() &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.dry_run != true))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    # SLACK_WEBHOOK MUST live at JOB level: GitHub Actions does NOT expose a
+    # step's own `env:` to that step's `if:` expression — only workflow- and
+    # job-level env is visible there. The `Post to #engr` and `Notifier
+    # self-watchdog` steps gate on `env.SLACK_WEBHOOK != ''`, so a step-level
+    # definition would make that guard ALWAYS false and the steps would never
+    # run, even with the secret set.
+    env:
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_ENGR }}
+    steps:
+      # Compute the event-derived release intent FIRST, before checkout/install,
+      # so its outputs survive an infra failure in a later step (this ordering
+      # was a fix on the CPK side: a checkout/install failure must not blind the
+      # failure arms). For a push we diff the compare-range; for a dispatch we
+      # derive intent from the mode/scope inputs.
+      - name: Compute release intent
+        id: intent
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          SHA_BEFORE: ${{ github.event.before }}
+          SHA_AFTER: ${{ github.event.after }}
+          INPUT_SCOPE: ${{ inputs.scope }}
+        run: |
+          set -uo pipefail
+          NPM_INTENDED=false
+          PY_INTENDED=false
+          NUGET_INTENDED=false
+          MAVEN_INTENDED=false
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # A stable dispatch intends the scope's lane. With no scope (full
+            # stable run) intend ALL lanes. A prerelease dispatch is canary —
+            # canary (prerelease) is FULLY suppressed by the builder (mode ==
+            # "prerelease" → no post on ANY lane). Intent is computed
+            # uniformly here regardless of mode, but a prerelease produces no
+            # notification on any lane. (INPUT_MODE is not read here: the
+            # builder applies the canary/stable suppression from MODE; this step
+            # only computes per-lane FAILURE intent.)
+            SCOPE="${INPUT_SCOPE:-}"
+            if [ -z "$SCOPE" ]; then
+              NPM_INTENDED=true
+              PY_INTENDED=true
+              NUGET_INTENDED=true
+              MAVEN_INTENDED=true
+            else
+              # Map the dispatch scope to its ecosystem. The explicit NuGet and
+              # Maven arms catch the .NET and Maven scopes. The *-py glob catches
+              # the sdk-py / integration-*-py PyPI scopes; the explicit Python
+              # names cover PyPI scopes that do NOT end in -py. Everything else
+              # is npm. This only affects FAILURE paging — success arms use the
+              # real published-package sets, not this heuristic.
+              #
+              # This step runs BEFORE checkout (see the job comment above), so
+              # release.config.json is NOT on disk here and cannot be consulted
+              # at runtime — the python scopes are projected statically below.
+              # verify-release-scope-dropdowns.sh asserts this list maps every
+              # config scope to the correct ecosystem, so it cannot drift.
+              case "$SCOPE" in
+                integration-claude-managed-agents-dotnet|sdk-dotnet)
+                  NUGET_INTENDED=true ;;
+                sdk-java)
+                  MAVEN_INTENDED=true ;;
+                integration-agent-spec|integration-langroid|sdk-py-a2ui-toolkit)
+                  PY_INTENDED=true ;;
+                *-py)
+                  PY_INTENDED=true ;;
+                *)
+                  NPM_INTENDED=true ;;
+              esac
             fi
+          else
+            # push event: diff the compare-range for changed manifest files.
+            # Fail TOWARD paging (intended=true + ::warning::) on any API error
+            # so an outage never silently swallows a real release failure.
+            FILES=""
+            if [ -n "$SHA_BEFORE" ] && [ -n "$SHA_AFTER" ]; then
+              if ! FILES=$(gh api "repos/${REPO}/compare/${SHA_BEFORE}...${SHA_AFTER}" --jq '.files[].filename' 2>/dev/null); then
+                echo "::warning::Could not resolve changed files for ${SHA_BEFORE}...${SHA_AFTER} — failing toward paging (all lanes intended)."
+                NPM_INTENDED=true
+                PY_INTENDED=true
+                NUGET_INTENDED=true
+                MAVEN_INTENDED=true
+                FILES=""
+              fi
+            else
+              echo "::warning::Missing before/after SHAs on push event — failing toward paging (all lanes intended)."
+              NPM_INTENDED=true
+              PY_INTENDED=true
+              NUGET_INTENDED=true
+              MAVEN_INTENDED=true
+            fi
+            # Intent here means "the compare-range TOUCHED a package.json /
+            # pyproject.toml", NOT "a version was actually bumped". This signal
+            # is now the BUILD-FAILURE FALLBACK for the builder's failure arms,
+            # NOT the primary failure gate: the builder keys each failure arm off
+            # the DETECTED PACKAGE SET (ts_packages / py_packages) — the
+            # authoritative "this lane actually attempted a release" signal — and
+            # consults this intent ONLY when the build failed before detection
+            # could populate that set (so an early build failure on an intended
+            # release still pages, never toward silence). Because the success
+            # path and the primary failure path both key off the detected set,
+            # the old "manifest touched but version not bumped" false-positive
+            # (e.g. a dependabot dependency bump) no longer pages on a SUCCESSFUL
+            # build that detected no packages; it can only contribute via this
+            # fallback when the build itself failed.
+            if [ -n "$FILES" ]; then
+              # The GitHub compare endpoint returns AT MOST 300 files in .files
+              # and does NOT paginate them. On a large merge where a bumped
+              # package.json / pyproject.toml falls beyond file #300 it would be
+              # absent from this list, the grep would find nothing, and intent
+              # would compute false — which (combined with an early build failure
+              # before detection) could swallow a real release-failure page. So
+              # when the list is truncated (>= 300 filenames) fail TOWARD paging:
+              # intend BOTH lanes and warn, rather than trust an incomplete list.
+              FILE_COUNT=$(printf '%s\n' "$FILES" | grep -c .)
+              if [ "$FILE_COUNT" -ge 300 ]; then
+                echo "::warning::Compare response for ${SHA_BEFORE}...${SHA_AFTER} returned ${FILE_COUNT} files (>= the 300-file compare-API cap, which does not paginate) — failing toward paging (all lanes intended) since a manifest bump may be truncated out of the list."
+                NPM_INTENDED=true
+                PY_INTENDED=true
+                NUGET_INTENDED=true
+                MAVEN_INTENDED=true
+              else
+                if echo "$FILES" | grep -qE '(^|/)package\.json$'; then
+                  NPM_INTENDED=true
+                fi
+                if echo "$FILES" | grep -qE '(^|/)pyproject\.toml$'; then
+                  PY_INTENDED=true
+                fi
+                # Every enrolled .NET versionSource. A .NET version lives in a
+                # Directory.Build.props rather than in a manifest the globs above
+                # catch, so this list is static and must cover each .NET scope —
+                # otherwise a failed build on an integration's version bump reads
+                # as "NuGet was never intended" and the failure page is swallowed.
+                # verify-release-scope-dropdowns.sh keeps it in step with
+                # release.config.json (and with the push trigger's paths).
+                DOTNET_VERSION_SOURCES="sdks/dotnet/Directory.Build.props integrations/claude-managed-agents/dotnet/Directory.Build.props"
+                for props in $DOTNET_VERSION_SOURCES; do
+                  if printf '%s\n' "$FILES" | grep -qxF "$props"; then
+                    NUGET_INTENDED=true
+                  fi
+                done
+                # Every enrolled Maven reactor pom, for the same reason as the
+                # .NET list above: a Maven version lives in a pom.xml that the
+                # package.json / pyproject.toml globs do not catch, so without
+                # this a failed build on a Maven bump reads as "Maven Central was
+                # never intended" and the failure page is swallowed. Kept in step
+                # with release.config.json by verify-release-scope-dropdowns.sh.
+                MAVEN_VERSION_SOURCES="sdks/community/java/ag-ui/pom.xml"
+                for pom in $MAVEN_VERSION_SOURCES; do
+                  if printf '%s\n' "$FILES" | grep -qxF "$pom"; then
+                    MAVEN_INTENDED=true
+                  fi
+                done
+              fi
+            fi
+          fi
 
-            if [ "$(echo "$PY_PACKAGES" | jq 'length')" -gt 0 ]; then
-              echo "### PyPI"
+          {
+            echo "npm_intended=$NPM_INTENDED"
+            echo "py_intended=$PY_INTENDED"
+            echo "nuget_intended=$NUGET_INTENDED"
+            echo "maven_intended=$MAVEN_INTENDED"
+          } >> "$GITHUB_OUTPUT"
+          echo "npm_intended=$NPM_INTENDED py_intended=$PY_INTENDED nuget_intended=$NUGET_INTENDED maven_intended=$MAVEN_INTENDED"
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: "10.33.4"
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install dependencies (no lifecycle scripts)
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Build release notification message
+        id: build_message
+        env:
+          MODE: ${{ needs.build.outputs.mode }}
+          NPM_RESULT: ${{ needs.publish.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          NPM_INTENDED: ${{ steps.intent.outputs.npm_intended }}
+          TS_PACKAGES: ${{ needs.build.outputs.ts_packages }}
+          TS_GROUPS: ${{ needs.build.outputs.ts_groups_json }}
+          PY_INTENDED: ${{ steps.intent.outputs.py_intended }}
+          PY_RESULT: ${{ needs.publish.result }}
+          PY_BUILD_RESULT: ${{ needs.build.result }}
+          PY_PACKAGES: ${{ needs.build.outputs.py_packages }}
+          NUGET_INTENDED: ${{ steps.intent.outputs.nuget_intended }}
+          NUGET_RESULT: ${{ needs['publish-dotnet'].result }}
+          NUGET_BUILD_RESULT: ${{ needs.build.result }}
+          NUGET_PACKAGES: ${{ needs.build.outputs.dotnet_packages }}
+          MAVEN_INTENDED: ${{ steps.intent.outputs.maven_intended }}
+          MAVEN_RESULT: ${{ needs['publish-maven'].result }}
+          MAVEN_BUILD_RESULT: ${{ needs.build.result }}
+          MAVEN_PACKAGES: ${{ needs.build.outputs.java_packages }}
+          SCOPE: ${{ needs.build.outputs.scope }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          NPM_ORG_URL: https://www.npmjs.com/org/ag-ui
+          PY_BASE_URL: https://pypi.org/project
+          NUGET_BASE_URL: https://www.nuget.org/packages
+          MAVEN_BASE_URL: https://central.sonatype.com/artifact
+        run: pnpm tsx scripts/release/build-release-notification.ts
+
+      - name: Post to #engr
+        # Guard so an unset webhook is a clean no-op rather than a failure: the
+        # secret is unset until the #engr incoming webhook is provisioned, and a
+        # release must not go red merely because alerting isn't wired yet.
+        if: steps.build_message.outputs.should_post == 'true' && env.SLACK_WEBHOOK != ''
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_ENGR }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": ${{ toJSON(steps.build_message.outputs.message) }}
+            }
+
+      # Self-watchdog: if the notify job ITSELF failed (e.g. the message build
+      # or install step errored) on a real release attempt, best-effort ping
+      # #engr so a broken notifier doesn't fail silently. Gated off dry-run and
+      # only fires when the event intended a release on either lane.
+      - name: Notifier self-watchdog (best-effort)
+        # Fires unless intent is explicitly false on BOTH lanes, so an
+        # intent-step crash (empty outputs) still pages — never toward silence.
+        # Canary (prerelease) runs are FULLY suppressed on BOTH lanes — including
+        # this watchdog — so a notify-job failure during a prerelease dispatch
+        # never pings "notifier failed" on a canary run.
+        if: >
+          failure() &&
+          inputs.dry_run != true &&
+          needs.build.outputs.mode != 'prerelease' &&
+          (steps.intent.outputs.npm_intended != 'false' ||
+           steps.intent.outputs.py_intended != 'false' ||
+           steps.intent.outputs.nuget_intended != 'false' ||
+           steps.intent.outputs.maven_intended != 'false') &&
+          env.SLACK_WEBHOOK != ''
+        continue-on-error: true
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_ENGR }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "⚠️ *ag-ui release notifier failed* — could not determine release status. Check the run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+
+  # Dry-run summary — surfaces what WOULD have been published. Runs only
+  # when dry_run=true on workflow_dispatch (stable detection still runs, but
+  # the publish job is gated off; prerelease bump still runs in the build
+  # job, so we can summarize the planned canary set here).
+  dry_run_summary:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Dry-run summary
+        env:
+          MODE: ${{ needs.build.outputs.mode }}
+          DOTNET_PACKAGES: ${{ needs.build.outputs.dotnet_packages }}
+          PRE_DOTNET_PACKAGES: ${{ needs.build.outputs.pre_dotnet_packages_json }}
+          JAVA_PACKAGES: ${{ needs.build.outputs.java_packages }}
+        run: |
+          {
+            echo ""
+            echo "**DRY RUN** (mode=${MODE}) — no packages were published"
+            if [ "$MODE" = "stable" ] && [ -n "$DOTNET_PACKAGES" ] && [ "$(echo "$DOTNET_PACKAGES" | jq 'length')" -gt 0 ]; then
               echo ""
-              echo "$PY_PACKAGES" | jq -r '.[] | "- `\(.name)@\(.version)`"'
+              echo "### NuGet"
+              echo "$DOTNET_PACKAGES" | jq -r '.[] | "- `\(.name)@\(.version)`"'
+            fi
+            if [ "$MODE" = "stable" ] && [ -n "$JAVA_PACKAGES" ] && [ "$(echo "$JAVA_PACKAGES" | jq 'length')" -gt 0 ]; then
+              echo ""
+              echo "### Maven Central"
+              echo "$JAVA_PACKAGES" | jq -r '.[] | "- `\(.groupId):\(.name):\(.version)`"'
+            fi
+            if [ "$MODE" = "prerelease" ] && [ -n "$PRE_DOTNET_PACKAGES" ] && [ "$(echo "$PRE_DOTNET_PACKAGES" | jq 'length')" -gt 0 ]; then
+              echo ""
+              echo "### NuGet canary"
+              echo "$PRE_DOTNET_PACKAGES" | jq -r '.[] | "- `\(.name)@\(.version)`"'
             fi
           } >> "$GITHUB_STEP_SUMMARY"

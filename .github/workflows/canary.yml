@@ -1,0 +1,272 @@
+name: canary / publish
+
+# Discoverable, one-click canary publisher. Surfaces in the Actions tab so any
+# maintainer can publish a prerelease of the branch they're working on without
+# learning the manual `canary/*` branch + dispatch dance.
+#
+# IMPORTANT: this workflow does NOT publish to npm itself. It ORCHESTRATES
+# publish-release.yml, which holds the SINGLE npm OIDC trusted-publisher binding
+# (see that file's header). Adding a second npm-publishing entry point would
+# break OIDC for every @ag-ui/* package.
+#
+# Why a separate orchestrator instead of a flag inside publish-release.yml:
+#   The `npm` GitHub Environment's deployment-branch policy is evaluated against
+#   the ref a run is TRIGGERED on — NOT against branches created mid-run. So
+#   publish-release.yml can only publish a canary when its run's ref already
+#   matches the policy (`canary/*`). Creating a branch inside a run triggered on
+#   `feature/*` does not change that run's ref, so it would still be rejected.
+#   This workflow therefore runs on any non-main branch, mirrors it to a
+#   short-lived `canary/<slug>` ref, dispatches publish-release.yml ON that ref
+#   (clearing the env gate), waits for it, then deletes the ref.
+#
+# Token: the branch create/delete and the cross-workflow dispatch use the
+# devops-bot GitHub App token, NOT the default GITHUB_TOKEN. Events authenticated
+# with GITHUB_TOKEN do not start new workflow runs (recursion prevention), so the
+# delegated publish-release run would silently never fire.
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "Package scope to publish a canary for. Regenerated from scripts/release/release.config.json — do NOT hand-edit (the release-scope-dropdown-sync CI guard enforces parity)."
+        required: true
+        type: choice
+        options:
+          - integration-a2a
+          - integration-adk-py
+          - integration-adk-ts
+          - integration-ag2
+          - integration-agent-spec
+          - integration-agno
+          - integration-aws-strands-py
+          - integration-aws-strands-ts
+          - integration-claude-agent-sdk-py
+          - integration-claude-agent-sdk-ts
+          - integration-claude-managed-agents-dotnet
+          - integration-claude-managed-agents-py
+          - integration-claude-managed-agents-ts
+          - integration-cloudflare-agents
+          - integration-crewai-py
+          - integration-crewai-ts
+          - integration-langchain
+          - integration-langgraph-py
+          - integration-langgraph-ts
+          - integration-langroid
+          - integration-llama-index
+          - integration-mastra
+          - integration-pydantic-ai
+          - integration-spring-ai
+          - integration-watsonx-py
+          - integration-watsonx-ts
+          - middleware-a2a
+          - middleware-a2ui
+          - middleware-mcp
+          - middleware-mcp-apps
+          - sdk-py
+          - sdk-py-a2ui-toolkit
+          - sdk-dotnet
+          - sdk-java
+          - sdk-ts
+          - sdk-ts-a2ui-toolkit
+          - create-ag-ui-app
+      suffix:
+        description: "Prerelease suffix (e.g. 'fix-user-issue'); blank = unix timestamp. Allowed: [a-zA-Z0-9._-]+. Reuse a suffix only if the base version moved, else the publish collides."
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run: build + detect but do NOT publish to registries. Useful for previewing what would ship."
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  # Serialize repeated dispatches on the same source branch. Cross-branch ref
+  # races are independently prevented by making the canary ref unique per run
+  # (slug + github.run_id, see the slug step below).
+  group: canary-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  # The job's own GITHUB_TOKEN does nothing privileged — every write goes through
+  # the App token minted below.
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Guard ref
+        # Canary publishes are for non-main BRANCHES only. Block main (use the
+        # stable release flow) and block non-branch refs such as tags (a tag
+        # dispatch would otherwise canary-publish from the tagged commit).
+        if: github.ref == 'refs/heads/main' || !startsWith(github.ref, 'refs/heads/')
+        run: |
+          echo "::error::Canary publishes are for non-main branches only (got '${{ github.ref }}'). To release from main, use the 'release / publish' workflow with mode=stable."
+          exit 1
+
+      - name: Validate suffix
+        if: inputs.suffix != ''
+        env:
+          SUFFIX: ${{ inputs.suffix }}
+        run: |
+          set -euo pipefail
+          # Validate BEFORE any side effect (token mint, ref creation) so a bad
+          # suffix can't leave an orphaned canary ref behind. Bash regex matches
+          # the WHOLE string (grep matches per line and would accept a multi-line
+          # value whose first line is valid).
+          if ! [[ "$SUFFIX" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+            echo "::error::Invalid suffix '$SUFFIX'. Allowed: [a-zA-Z0-9._-]+ (blank = unix timestamp)."
+            exit 1
+          fi
+
+      - name: Mint devops-bot token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: "3877599"
+          private-key: ${{ secrets.DEVOPS_BOT_PRIVATE_KEY }}
+          # Scope the app token to only what this workflow uses, instead of
+          # inheriting the app installation's blanket permissions (zizmor
+          # github-app). contents:write creates/deletes the canary ref;
+          # actions:write dispatches publish-release.yml and reads its run.
+          permission-contents: write
+          permission-actions: write
+
+      - name: Compute canary branch name
+        id: slug
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Byte-deterministic (LC_ALL=C) transform collapsing the source ref to a
+          # single path segment under canary/ so it matches the `canary/*`
+          # deployment-branch policy. tr -s collapses same-char runs (so no `..`),
+          # and the sed fully strips any leading/trailing `.`/`-` runs.
+          export LC_ALL=C
+          SLUG=$(printf '%s' "$REF_NAME" | tr '/' '-' | tr -c 'a-zA-Z0-9._-' '-' | tr -s '.-')
+          SLUG=$(printf '%s' "$SLUG" | sed -E 's/^[.-]+//; s/[.-]+$//')
+          if [ -z "$SLUG" ]; then
+            echo "::error::Could not derive a canary slug from ref '$REF_NAME'"
+            exit 1
+          fi
+          # Append run id AND attempt so every dispatch — including a re-run of
+          # this same orchestration — owns a UNIQUE canary ref. This prevents two
+          # dispatches whose source branches slugify to the same value (or a
+          # re-run reusing the run id) from racing one shared ref, and keeps run
+          # discovery below unambiguous (exactly one publish run per ref).
+          REF_SUFFIX="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "branch=canary/${SLUG}-${REF_SUFFIX}" >> "$GITHUB_OUTPUT"
+          echo "Canary branch: canary/${SLUG}-${REF_SUFFIX}"
+
+      - name: Create or update canary ref
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: ${{ steps.slug.outputs.branch }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Point canary/<slug> at the dispatched ref's HEAD. The ref is unique
+          # per run, so it should not pre-exist; only force-update on the specific
+          # "already exists" case (e.g. a re-run reusing the run id). Any OTHER
+          # failure (auth, rate limit, 5xx) must surface, not be silently retried.
+          ERR=$(mktemp)
+          if gh api --silent -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/heads/${BRANCH}" -f sha="$SHA" 2>"$ERR"; then
+            echo "Created ${BRANCH} at ${SHA}"
+          elif grep -qi "already exists" "$ERR"; then
+            echo "Ref ${BRANCH} already exists; force-updating to ${SHA}"
+            gh api --silent -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/heads/${BRANCH}" \
+              -f sha="$SHA" -F force=true
+          else
+            echo "::error::Failed to create canary ref ${BRANCH}:"
+            cat "$ERR" >&2
+            exit 1
+          fi
+
+      - name: Dispatch publish-release.yml on the canary ref and wait
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: ${{ steps.slug.outputs.branch }}
+          SCOPE: ${{ inputs.scope }}
+          SUFFIX: ${{ inputs.suffix }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          # (suffix already validated in the "Validate suffix" step above, before
+          # the canary ref was created)
+          gh workflow run publish-release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$BRANCH" \
+            -f mode=prerelease \
+            -f scope="$SCOPE" \
+            -f suffix="$SUFFIX" \
+            -f dry_run="$DRY_RUN"
+
+          # The canary ref is unique to this run+attempt, so there is exactly ONE
+          # publish-release dispatch on it — no timestamp watermark needed (which
+          # also sidesteps runner/server clock-skew). Poll until it indexes
+          # (30 x 6s = 3 min tolerance for Actions indexing lag). --limit is
+          # defensive headroom; the branch/workflow/event filters are applied
+          # server-side so the matching run is never crowded out.
+          RUN_ID=""
+          for _ in $(seq 1 30); do
+            sleep 6
+            RUN_ID=$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow=publish-release.yml \
+              --branch "$BRANCH" \
+              --event workflow_dispatch \
+              --limit 100 \
+              --json databaseId \
+              --jq 'sort_by(.databaseId) | last | .databaseId // empty') || RUN_ID=""
+            if [ -n "$RUN_ID" ]; then
+              break
+            fi
+          done
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::Dispatched publish-release run never appeared on ${BRANCH}. Leaving the ref in place for debugging; delete it manually once resolved."
+            exit 1
+          fi
+
+          # Mark located BEFORE the watch so cleanup runs even if the publish
+          # fails — but is skipped entirely if we never tracked a run (so we
+          # never delete a ref a still-pending run may need).
+          echo "located=true" >> "$GITHUB_OUTPUT"
+
+          RUN_URL=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json url --jq .url)
+          echo "Delegated publish run: ${RUN_URL}"
+          {
+            echo "## Canary publish"
+            echo ""
+            echo "- **Scope:** \`${SCOPE}\`"
+            echo "- **Source branch:** \`${GITHUB_REF_NAME}\`"
+            echo "- **Delegated run:** ${RUN_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # --exit-status propagates the publish run's failure to this job.
+          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status
+
+      - name: Delete canary ref
+        # Clean up only when we actually tracked a dispatched run (located=true),
+        # even if that run then failed. If the run was never located, the ref is
+        # deliberately left in place — deleting it could yank the ref out from
+        # under a publish run that is still about to start.
+        if: always() && steps.dispatch.outputs.located == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: ${{ steps.slug.outputs.branch }}
+        run: |
+          # Best-effort cleanup: never fail the job on a delete hiccup, but do
+          # surface a real error instead of masking every failure as "gone".
+          set -uo pipefail
+          ERR=$(mktemp)
+          if gh api --silent -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${BRANCH}" 2>"$ERR"; then
+            echo "Deleted ${BRANCH}"
+          elif grep -qiE "not found|does not exist" "$ERR"; then
+            echo "Branch ${BRANCH} already gone"
+          else
+            echo "::warning::Failed to delete canary ref ${BRANCH} (manual cleanup may be needed):"
+            cat "$ERR" >&2
+          fi

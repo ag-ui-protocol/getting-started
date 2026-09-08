@@ -1,0 +1,12 @@
+﻿[
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "Event compaction reduces noise in an event stream. It merges TEXT_MESSAGE_CONTENT sequences into snapshots and collapses STATE_DELTA events into a final STATE_SNAPSHOT."
+      }
+    ],
+    "messageId": "guid_Id_2"
+  }
+]

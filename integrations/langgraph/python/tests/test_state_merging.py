@@ -2,6 +2,7 @@
 
 Covers basic merging, tool deduplication, and the orphaned-tools fix for #1412.
 """
+import unittest
 import pytest
 from unittest.mock import MagicMock
 
@@ -53,7 +54,7 @@ def tool_name(t):
     return t.get("name") if isinstance(t, dict) else getattr(t, "name", None)
 
 
-class TestLanggraphDefaultMergeState:
+class TestLanggraphDefaultMergeState(unittest.TestCase):
 
     def test_basic_merge_messages_appended(self):
         agent = make_agent()
@@ -178,3 +179,69 @@ class TestLanggraphDefaultMergeState:
         assert "ag-ui" in result
         assert result["ag-ui"]["tools"] == result["tools"]
         assert result["ag-ui"]["context"] == ctx
+
+    # Forwarded props that must be surfaced into ag-ui state, keyed by the
+    # forwarded_props key (as it arrives after run()'s camel->snake conversion)
+    # mapped to (the ag-ui state key it lands under, a sample value).
+    # To wire a new forwarded prop into ag-ui state, add it here AND in
+    # langgraph_default_merge_state — both the test and the absence check below
+    # then cover it automatically.
+    FORWARDED_PROPS_TO_AGUI = {
+        # injectA2UITool -> camel_to_snake -> inject_a2_u_i_tool (A2UI middleware)
+        "inject_a2_u_i_tool": ("inject_a2ui_tool", "render_a2ui"),
+    }
+
+    def test_camel_to_snake_key_contract(self):
+        """Pin the load-bearing wire-key conversion. run() snake-cases forwarded_props
+        keys, so the merge step keys off the CONVERTED name. The tests below feed the
+        converted key directly; this test guarantees the conversion actually produces
+        that key from the real camelCase wire name. If camel_to_snake ever changed
+        (e.g. collapsing the capital run to "inject_a2ui_tool"), the feature would break
+        silently while the table-driven tests still passed — this assertion catches it."""
+        from ag_ui_langgraph.utils import camel_to_snake
+        assert camel_to_snake("injectA2UITool") == "inject_a2_u_i_tool"
+
+    def test_forwarded_props_surface_into_ag_ui_state(self):
+        """Each configured forwarded prop lands under its ag-ui state key."""
+        agent = make_agent()
+        forwarded = {fp: sample for fp, (_, sample) in self.FORWARDED_PROPS_TO_AGUI.items()}
+        result = agent.langgraph_default_merge_state(
+            {"messages": []}, [], make_input(forwarded_props=forwarded)
+        )
+        for _, (agui_key, sample) in self.FORWARDED_PROPS_TO_AGUI.items():
+            assert result["ag-ui"][agui_key] == sample
+
+    def test_forwarded_props_absent_by_default(self):
+        """With no forwarded props, none of the ag-ui state keys are present."""
+        agent = make_agent()
+        result = agent.langgraph_default_merge_state({"messages": []}, [], make_input())
+        for _, (agui_key, _sample) in self.FORWARDED_PROPS_TO_AGUI.items():
+            assert agui_key not in result["ag-ui"]
+
+    # Must stay byte-identical to the A2UI middleware's exported
+    # A2UI_SCHEMA_CONTEXT_DESCRIPTION (middlewares/a2ui-middleware/src/index.ts).
+    # The connector matches the schema context entry by exact string equality, so
+    # any drift silently routes the schema into the system prompt instead of state.
+    A2UI_SCHEMA_CONTEXT_DESCRIPTION = (
+        "A2UI Component Schema — available components for generating UI surfaces. "
+        "Use these component names and properties when creating A2UI operations."
+    )
+
+    def test_a2ui_schema_context_routed_into_ag_ui_state(self):
+        """A context entry carrying the middleware's schema description is lifted into
+        ag-ui.a2ui_schema and removed from the regular context list."""
+        agent = make_agent()
+        schema_value = '{"components": ["Card", "Button"]}'
+        ctx = [
+            Context(description="unrelated", value="keep me"),
+            Context(description=self.A2UI_SCHEMA_CONTEXT_DESCRIPTION, value=schema_value),
+        ]
+        result = agent.langgraph_default_merge_state({"messages": []}, [], make_input(context=ctx))
+        assert result["ag-ui"]["a2ui_schema"] == schema_value
+        # The schema entry must NOT remain in regular context.
+        descriptions = [
+            c.description if hasattr(c, "description") else c.get("description")
+            for c in result["ag-ui"]["context"]
+        ]
+        assert self.A2UI_SCHEMA_CONTEXT_DESCRIPTION not in descriptions
+        assert "unrelated" in descriptions

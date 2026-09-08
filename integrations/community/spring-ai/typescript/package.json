@@ -2,6 +2,7 @@
   "name": "@ag-ui/spring-ai",
   "author": "Pascal Wilbrink<pascal.wilbrink@gmail.com>",
   "version": "0.0.2",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/ag-ui-protocol/ag-ui.git"
@@ -48,8 +49,8 @@
   },
   "exports": {
     ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "require": "./dist/index.js",
+      "import": "./dist/index.mjs"
     },
     "./package.json": "./package.json"
   }

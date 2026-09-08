@@ -1,0 +1,29 @@
+﻿{
+  "threadId": "thread_Id_2",
+  "runId": "run_Id_2",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Please approve expense report EXP-2024-001"
+    },
+    {
+      "role": "assistant",
+      "toolCalls": [
+        {
+          "id": "call_Id_1",
+          "type": "function",
+          "function": {
+            "name": "request_approval",
+            "arguments": "{\u0022request\u0022:{\u0022approval_Id_1\u0022:\u0022ficc_Id_1\u0022,\u0022function_name\u0022:\u0022ApproveExpenseReport\u0022,\u0022function_arguments\u0022:{\u0022expenseReportId\u0022:\u0022EXP-2024-001\u0022},\u0022message\u0022:\u0022Approve execution of \\u0027ApproveExpenseReport\\u0027?\u0022}}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\u0022approval_Id_1\u0022:\u0022ficc_Id_1\u0022,\u0022approved\u0022:true}",
+      "toolCallId": "call_Id_1",
+      "id": "call_Id_1"
+    }
+  ]
+}

@@ -1,0 +1,488 @@
+﻿[
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "functionCall",
+        "name": "get_weather",
+        "arguments": {
+          "city": "Paris"
+        },
+        "informationalOnly": true,
+        "callId": "call_Id_2"
+      }
+    ],
+    "responseId": "guid_Id_3",
+    "messageId": "guid_Id_3"
+  },
+  {
+    "role": "tool",
+    "contents": [
+      {
+        "$type": "functionResult",
+        "result": "Paris: 18C, rainy",
+        "callId": "call_Id_2"
+      }
+    ],
+    "responseId": "guid_Id_2",
+    "messageId": "guid_Id_2"
+  },
+  {
+    "contents": [],
+    "responseId": "",
+    "messageId": "",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": ""
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "1"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": ")"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " Your"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " current"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " city"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": ":"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " Tokyo"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": ","
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " Japan"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": ".\n"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "2"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": ")"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " Weather"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " in"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " Paris"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": ":"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " "
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "18"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "\u00B0C"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": ","
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " rainy"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": ".\n\n"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "Would"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " you"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " like"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " a"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " forecast"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " or"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " more"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " details"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " for"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " either"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " location"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "?"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "finishReason": "stop",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "usage",
+        "details": {
+          "inputTokenCount": 243,
+          "outputTokenCount": 172,
+          "cachedInputTokenCount": 0,
+          "reasoningTokenCount": 128,
+          "additionalCounts": {
+            "InputTokenDetails.AudioTokenCount": 0,
+            "OutputTokenDetails.AudioTokenCount": 0,
+            "OutputTokenDetails.AcceptedPredictionTokenCount": 0,
+            "OutputTokenDetails.RejectedPredictionTokenCount": 0
+          }
+        }
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "finishReason": "stop",
+    "modelId": ""
+  }
+]

@@ -23,6 +23,7 @@ from google.adk.apps import App, ResumabilityConfig
 
 from ag_ui_adk import ADKAgent
 from ag_ui_adk.session_manager import INVOCATION_ID_STATE_KEY, SessionManager
+from tests.constants import LIVE_TEST_MODEL
 
 
 class TestInvocationIdNotPassedForStandaloneLlmAgent:
@@ -39,7 +40,7 @@ class TestInvocationIdNotPassedForStandaloneLlmAgent:
     def simple_agent(self):
         return LlmAgent(
             name="test_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="You are a helpful assistant.",
         )
 
@@ -473,17 +474,17 @@ class TestInvocationIdNotPassedForLlmAgentWithTransferTargets:
     def llm_agent_with_transfer_targets(self):
         target_a = LlmAgent(
             name="agent_a",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="You handle task A.",
         )
         target_b = LlmAgent(
             name="agent_b",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="You handle task B.",
         )
         return LlmAgent(
             name="router_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="Route to the appropriate agent.",
             sub_agents=[target_a, target_b],
         )

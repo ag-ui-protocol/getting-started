@@ -5,6 +5,7 @@ use serde::Deserialize;
 use std::time::Duration;
 
 #[tokio::test]
+#[ignore = "requires a live external SSE service (httpbun.org); not provided in CI"]
 async fn test_sse_with_httpbun() {
     // Create a reqwest client
     let client = Client::new();
@@ -66,6 +67,7 @@ async fn test_sse_with_httpbun() {
 }
 
 #[tokio::test]
+#[ignore = "requires a live external SSE service (sse.dev); not provided in CI"]
 async fn test_sse_with_json_data() {
     // Create a reqwest client
     let client = Client::new();

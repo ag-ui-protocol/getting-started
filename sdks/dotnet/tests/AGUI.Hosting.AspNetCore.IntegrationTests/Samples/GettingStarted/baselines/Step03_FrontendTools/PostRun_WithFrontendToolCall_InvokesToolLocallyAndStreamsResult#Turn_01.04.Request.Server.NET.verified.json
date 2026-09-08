@@ -1,0 +1,22 @@
+﻿{
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "What are some fun things to do near me?"
+        }
+      ]
+    }
+  ],
+  "options": {
+    "tools": [
+      {
+        "type": "DefaultAIFunctionDeclaration",
+        "name": "GetUserLocation",
+        "description": "Get the user\u0027s current location from GPS."
+      }
+    ]
+  }
+}

@@ -1,0 +1,665 @@
+[
+  [
+    {
+      "contents": [],
+      "responseId": "",
+      "messageId": "",
+      "createdAt": "1970-01-01T00:00:00+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "messageId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "createdAt": "2026-06-17T17:44:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "messageId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "createdAt": "2026-06-17T17:44:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "messageId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "createdAt": "2026-06-17T17:44:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "messageId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "createdAt": "2026-06-17T17:44:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "messageId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "createdAt": "2026-06-17T17:44:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "messageId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "createdAt": "2026-06-17T17:44:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "messageId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "createdAt": "2026-06-17T17:44:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "messageId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "createdAt": "2026-06-17T17:44:32+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "messageId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "createdAt": "2026-06-17T17:44:32+00:00",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "usage",
+          "details": {
+            "inputTokenCount": 184,
+            "outputTokenCount": 116,
+            "totalTokenCount": 300,
+            "cachedInputTokenCount": 0,
+            "reasoningTokenCount": 64,
+            "additionalCounts": {
+              "InputTokenDetails.AudioTokenCount": 0,
+              "OutputTokenDetails.AudioTokenCount": 0,
+              "OutputTokenDetails.AcceptedPredictionTokenCount": 0,
+              "OutputTokenDetails.RejectedPredictionTokenCount": 0
+            }
+          }
+        }
+      ],
+      "responseId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "messageId": "chatcmpl-DrobQR8JJAUB1NviUDOTXMYREeHuv",
+      "createdAt": "2026-06-17T17:44:32+00:00",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "get_user_location",
+          "arguments": {},
+          "informationalOnly": false,
+          "callId": "call_6hNTZEJvL85KXc67ssN6o7Gi"
+        },
+        {
+          "$type": "functionCall",
+          "name": "get_weather",
+          "arguments": {
+            "city": "Paris"
+          },
+          "informationalOnly": false,
+          "callId": "call_WnLyaBWD0xceJDiSxpywJjmU"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "createdAt": "1970-01-01T00:00:00+00:00",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    }
+  ],
+  [
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "get_weather",
+          "arguments": {
+            "city": "Paris"
+          },
+          "informationalOnly": true,
+          "callId": "call_WnLyaBWD0xceJDiSxpywJjmU"
+        }
+      ],
+      "responseId": "59806fcc6ac245cfa8500f7eca7fdd15",
+      "messageId": "59806fcc6ac245cfa8500f7eca7fdd15",
+      "createdAt": "2026-06-17T17:44:34.3372451+00:00"
+    },
+    {
+      "role": "tool",
+      "contents": [
+        {
+          "$type": "functionResult",
+          "result": "Paris: 18C, rainy",
+          "callId": "call_WnLyaBWD0xceJDiSxpywJjmU"
+        }
+      ],
+      "responseId": "dec4a8f529c94036b59b6004b2d52dbe",
+      "messageId": "dec4a8f529c94036b59b6004b2d52dbe",
+      "createdAt": "2026-06-17T17:44:34.3406064+00:00"
+    },
+    {
+      "contents": [],
+      "responseId": "",
+      "messageId": "",
+      "createdAt": "1970-01-01T00:00:00+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ""
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "1"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ")"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Your"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " current"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " city"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Tokyo"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ","
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Japan"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".\n"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "2"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ")"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Weather"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " in"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Paris"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "18"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "°C"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ","
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " rainy"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".\n\n"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Would"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " you"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " like"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " a"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " forecast"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " or"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " more"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " details"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " for"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " either"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " location"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "?"
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "finishReason": "stop",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "usage",
+          "details": {
+            "inputTokenCount": 243,
+            "outputTokenCount": 172,
+            "totalTokenCount": 415,
+            "cachedInputTokenCount": 0,
+            "reasoningTokenCount": 128,
+            "additionalCounts": {
+              "InputTokenDetails.AudioTokenCount": 0,
+              "OutputTokenDetails.AudioTokenCount": 0,
+              "OutputTokenDetails.AcceptedPredictionTokenCount": 0,
+              "OutputTokenDetails.RejectedPredictionTokenCount": 0
+            }
+          }
+        }
+      ],
+      "responseId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "messageId": "chatcmpl-DrobSoARkW89Bny1jah7pA4kkvCTt",
+      "createdAt": "2026-06-17T17:44:34+00:00",
+      "finishReason": "stop",
+      "modelId": ""
+    }
+  ]
+]

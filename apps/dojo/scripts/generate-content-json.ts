@@ -99,6 +99,7 @@ async function getFeatureFrontendFiles(featureId: string) {
 
 const integrationsFolderPath = "../../../integrations";
 const middlewaresFolderPath = "../../../middlewares";
+const sdksFolderPath = "../../../sdks";
 const agentFilesMapper: Record<
   string,
   (agentKeys: string[]) => Record<string, string[]>
@@ -173,6 +174,18 @@ const agentFilesMapper: Record<
         `/mastra/typescript/examples/src/mastra/agents/human-in-the-loop.ts`,
       ),
     ],
+    interrupt: [
+      path.join(
+        __dirname,
+        integrationsFolderPath,
+        `/mastra/typescript/examples/src/mastra/agents/interrupt.ts`,
+      ),
+      path.join(
+        __dirname,
+        integrationsFolderPath,
+        `/mastra/typescript/examples/src/mastra/tools/schedule-meeting-tool.ts`,
+      ),
+    ],
     tool_based_generative_ui: [
       path.join(
         __dirname,
@@ -180,14 +193,54 @@ const agentFilesMapper: Record<
         `/mastra/typescript/examples/src/mastra/agents/tool-based-generative-ui.ts`,
       ),
     ],
+    a2ui_dynamic_schema: [
+      path.join(
+        __dirname,
+        integrationsFolderPath,
+        `/mastra/typescript/examples/src/mastra/agents/a2ui.ts`,
+      ),
+    ],
+    a2ui_recovery: [
+      path.join(
+        __dirname,
+        integrationsFolderPath,
+        `/mastra/typescript/examples/src/mastra/agents/a2ui.ts`,
+      ),
+    ],
+    a2ui_fixed_schema: [
+      path.join(
+        __dirname,
+        integrationsFolderPath,
+        `/mastra/typescript/examples/src/mastra/agents/a2ui-fixed.ts`,
+      ),
+    ],
   }),
 
   "mastra-agent-local": () => ({
-    agentic_chat: [path.join(__dirname, "../src/mastra/agents/agentic-chat.ts")],
-    human_in_the_loop: [path.join(__dirname, "../src/mastra/agents/human-in-the-loop.ts")],
-    backend_tool_rendering: [path.join(__dirname, "../src/mastra/agents/backend-tool-rendering.ts")],
-    shared_state: [path.join(__dirname, "../src/mastra/agents/shared-state.ts")],
-    tool_based_generative_ui: [path.join(__dirname, "../src/mastra/agents/tool-based-generative-ui.ts")],
+    agentic_chat: [
+      path.join(__dirname, "../src/mastra/agents/agentic-chat.ts"),
+    ],
+    human_in_the_loop: [
+      path.join(__dirname, "../src/mastra/agents/human-in-the-loop.ts"),
+    ],
+    backend_tool_rendering: [
+      path.join(__dirname, "../src/mastra/agents/backend-tool-rendering.ts"),
+    ],
+    interrupt: [
+      path.join(__dirname, "../src/mastra/agents/interrupt.ts"),
+      path.join(__dirname, "../src/mastra/tools.ts"),
+    ],
+    shared_state: [
+      path.join(__dirname, "../src/mastra/agents/shared-state.ts"),
+    ],
+    tool_based_generative_ui: [
+      path.join(__dirname, "../src/mastra/agents/tool-based-generative-ui.ts"),
+    ],
+    a2ui_dynamic_schema: [path.join(__dirname, "../src/mastra/agents/a2ui.ts")],
+    a2ui_recovery: [path.join(__dirname, "../src/mastra/agents/a2ui.ts")],
+    a2ui_fixed_schema: [
+      path.join(__dirname, "../src/mastra/agents/a2ui-fixed.ts"),
+    ],
   }),
 
   "vercel-ai-sdk": () => ({
@@ -309,7 +362,33 @@ const agentFilesMapper: Record<
           path.join(
             __dirname,
             integrationsFolderPath,
-            `/crew-ai/python/ag_ui_crewai/examples/${agentId}.py`,
+            `/crew-ai/python/examples/agents/${agentId}.py`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
+  "crewai-conversational-flows": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            "/crew-ai/python/examples/agents/conversational.py",
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/crew-ai/python/examples/agents/${
+              agentId === "v1_agentic_chat"
+                ? "agentic_chat"
+                : agentId === "interrupt"
+                  ? "interrupt_flow"
+                  : agentId
+            }.py`,
           ),
         ],
       }),
@@ -340,7 +419,7 @@ const agentFilesMapper: Record<
             __dirname,
             integrationsFolderPath,
             `/aws-strands/python/examples/server/api/${agentId}.py`,
-          )
+          ),
         ],
       }),
       {},
@@ -403,6 +482,26 @@ const agentFilesMapper: Record<
       {},
     );
   },
+  "ag-ui-dotnet": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            sdksFolderPath,
+            `/dotnet/samples/AGUIClientServer/AGUIDojoServer/Program.cs`,
+          ),
+          path.join(
+            __dirname,
+            sdksFolderPath,
+            `/dotnet/samples/AGUIClientServer/AGUIDojoServer/ChatClientAgentFactory.cs`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
   "agent-spec-langgraph": (agentKeys: string[]) => {
     return agentKeys.reduce(
       (acc, agentId) => ({
@@ -435,9 +534,9 @@ const agentFilesMapper: Record<
   },
   // A2A integrations use runtime-configured agents without per-feature source files
   "a2a-basic": () => ({}),
-  "a2a": () => ({}),
+  a2a: () => ({}),
   // Built-in agent with A2UI middleware - uses dedicated API route
-  "builtin": () => ({}),
+  builtin: () => ({}),
   "claude-agent-sdk-python": (agentKeys: string[]) => {
     return agentKeys.reduce(
       (acc, agentId) => ({
@@ -468,8 +567,75 @@ const agentFilesMapper: Record<
       {},
     );
   },
+  // claude-managed-agents serves every feature from one server per language,
+  // driven by the shared agent specs.
+  "claude-managed-agents-dotnet": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/dotnet/examples/AGUIDojoServer/AgentSpecs.cs`,
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/dotnet/examples/AGUIDojoServer/ExampleAgents.cs`,
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/dotnet/examples/AGUIDojoServer/Program.cs`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
+  "claude-managed-agents-python": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/python/examples/agents.py`,
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/python/examples/server.py`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
+  "claude-managed-agents-typescript": (agentKeys: string[]) => {
+    return agentKeys.reduce(
+      (acc, agentId) => ({
+        ...acc,
+        [agentId]: [
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/typescript/examples/agents.ts`,
+          ),
+          path.join(
+            __dirname,
+            integrationsFolderPath,
+            `/claude-managed-agents/typescript/examples/server.ts`,
+          ),
+        ],
+      }),
+      {},
+    );
+  },
   // watsonx uses a single TS agent for all features — no per-feature server files
-  "watsonx": () => ({
+  watsonx: () => ({
     agentic_chat: [
       path.join(
         __dirname,
@@ -478,7 +644,7 @@ const agentFilesMapper: Record<
       ),
     ],
   }),
-  "langroid": (agentKeys: string[]) => {
+  langroid: (agentKeys: string[]) => {
     return agentKeys.reduce(
       (acc, agentId) => ({
         ...acc,
@@ -512,9 +678,10 @@ async function runGenerateContent() {
 
     // If agentsPerFeatures is empty but we have agentFilePaths, use the keys from agentFilePaths
     // This handles cases like Mastra where agents are dynamically discovered
-    const featureIds = agentsPerFeatures.length > 0
-      ? agentsPerFeatures
-      : Object.keys(agentFilePaths);
+    const featureIds =
+      agentsPerFeatures.length > 0
+        ? agentsPerFeatures
+        : Object.keys(agentFilePaths);
 
     // Per feature, assign all the frontend files like page.tsx as well as all agent files
     for (const featureId of featureIds) {
@@ -530,7 +697,7 @@ async function runGenerateContent() {
       // Filter out empty objects (files that weren't found)
       // @ts-expect-error -- redundant error about indexing of a new object.
       result[`${agentConfig.id}::${featureId}`] = allFiles.filter(
-        (file) => Object.keys(file).length > 0
+        (file) => Object.keys(file).length > 0,
       );
     }
   }
@@ -543,22 +710,30 @@ async function runGenerateContent() {
  * entries in agentFilesMapper. Returns true if valid, false otherwise.
  */
 function validateAgentFilesMapper(): boolean {
-  const menuIntegrationIds = menuIntegrations.map((integration) => integration.id);
+  const menuIntegrationIds = menuIntegrations.map(
+    (integration) => integration.id,
+  );
   const mapperKeys = new Set(Object.keys(agentFilesMapper));
 
   const missingEntries = menuIntegrationIds.filter((id) => !mapperKeys.has(id));
 
   if (missingEntries.length > 0) {
-    console.error("❌ Missing agentFilesMapper entries for the following integration IDs:");
+    console.error(
+      "❌ Missing agentFilesMapper entries for the following integration IDs:",
+    );
     console.error("");
     for (const id of missingEntries) {
       console.error(`   - ${id}`);
     }
     console.error("");
     console.error("Please add entries for these IDs in:");
-    console.error("   apps/dojo/scripts/generate-content-json.ts (agentFilesMapper object)");
+    console.error(
+      "   apps/dojo/scripts/generate-content-json.ts (agentFilesMapper object)",
+    );
     console.error("");
-    console.error("Then run `(p)npm run generate-content-json` in the apps/dojo folder.");
+    console.error(
+      "Then run `(p)npm run generate-content-json` in the apps/dojo folder.",
+    );
     console.error("");
     return false;
   }
@@ -603,11 +778,15 @@ function validateFeatureReadmes(): boolean {
     for (const { feature, integrations } of missingReadmes) {
       console.error(`   - ${feature}`);
       console.error(`     Used by: ${integrations.join(", ")}`);
-      console.error(`     Missing: ${path.relative(path.join(__dirname, ".."), path.join(resolveFeatureDir(feature), "README.mdx"))}`);
+      console.error(
+        `     Missing: ${path.relative(path.join(__dirname, ".."), path.join(resolveFeatureDir(feature), "README.mdx"))}`,
+      );
     }
     console.error("");
     console.error("Please create README.mdx files for these features.");
-    console.error("See apps/dojo/src/app/[integrationId]/feature/agentic_chat/README.mdx for an example.");
+    console.error(
+      "See apps/dojo/src/app/[integrationId]/feature/agentic_chat/README.mdx for an example.",
+    );
     console.error("");
     return false;
   }

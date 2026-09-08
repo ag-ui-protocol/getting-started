@@ -4,7 +4,7 @@ import 'dart:math';
 abstract class BackoffStrategy {
   /// Calculate the next delay based on attempt number.
   Duration nextDelay(int attempt);
-  
+
   /// Reset the backoff state.
   void reset();
 }
@@ -31,15 +31,15 @@ class ExponentialBackoff implements BackoffStrategy {
   Duration nextDelay(int attempt) {
     // Calculate base delay with exponential backoff
     final baseDelayMs = initialDelay.inMilliseconds * pow(multiplier, attempt);
-    
+
     // Cap at max delay
     final cappedDelayMs = min(baseDelayMs, maxDelay.inMilliseconds);
-    
+
     // Add jitter (±jitterFactor * delay)
     final jitterRange = cappedDelayMs * jitterFactor;
     final jitter = (_random.nextDouble() * 2 - 1) * jitterRange;
     final finalDelayMs = max(0, cappedDelayMs + jitter);
-    
+
     return Duration(milliseconds: finalDelayMs.round());
   }
 
@@ -57,7 +57,7 @@ class ExponentialBackoff implements BackoffStrategy {
 class LegacyBackoffStrategy implements BackoffStrategy {
   final ExponentialBackoff _delegate;
   int _attempt = 0;
-  
+
   LegacyBackoffStrategy({
     Duration initialDelay = const Duration(seconds: 1),
     Duration maxDelay = const Duration(seconds: 30),
@@ -69,7 +69,7 @@ class LegacyBackoffStrategy implements BackoffStrategy {
           multiplier: multiplier,
           jitterFactor: jitterFactor,
         );
-  
+
   /// Calculate the next delay with exponential backoff and jitter (stateful).
   /// This is the legacy method that maintains internal state.
   Duration nextDelayStateful() {
@@ -77,19 +77,19 @@ class LegacyBackoffStrategy implements BackoffStrategy {
     _attempt++;
     return delay;
   }
-  
+
   @override
   Duration nextDelay(int attempt) => _delegate.nextDelay(attempt);
-  
+
   @override
   void reset() {
     _attempt = 0;
     _delegate.reset();
   }
-  
+
   /// Get the current attempt number.
   int get attempt => _attempt;
-  
+
   // Delegate getters for compatibility
   Duration get initialDelay => _delegate.initialDelay;
   Duration get maxDelay => _delegate.maxDelay;

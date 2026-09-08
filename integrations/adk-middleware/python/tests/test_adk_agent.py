@@ -415,14 +415,37 @@ class TestADKAgent:
         async for event in adk_agent.run(sample_input):
             events.append(event)
 
-        # Should get RUN_STARTED, RUN_ERROR, and RUN_FINISHED
-        assert len(events) == 3
+        # Should get RUN_STARTED then RUN_ERROR, and NO trailing RUN_FINISHED.
+        # The AG-UI spec allows at most one terminal event per run; emitting
+        # RUN_FINISHED after RUN_ERROR makes @ag-ui/client's state machine throw
+        # ("The run has already errored"). See issue #1892.
+        assert len(events) == 2
         assert events[0].type == EventType.RUN_STARTED
         assert events[1].type == EventType.RUN_ERROR
-        assert events[2].type == EventType.RUN_FINISHED
         # Check that it's an error with meaningful content
         assert len(events[1].message) > 0
         assert events[1].code == 'BACKGROUND_EXECUTION_ERROR'
+
+    @pytest.mark.asyncio
+    async def test_errored_run_emits_single_terminal_event(self, adk_agent, sample_input):
+        """A run that errors mid-stream must emit exactly one terminal event.
+
+        Regression test for issue #1892: the background queue path emits
+        RUN_ERROR, after which the consumer loop must NOT fall through to its
+        unconditional RUN_FINISHED. Two terminal events violate the AG-UI spec
+        and are rejected by @ag-ui/client.
+        """
+        adk_agent._adk_agent.side_effect = Exception('boom mid-stream')
+
+        events = [event async for event in adk_agent.run(sample_input)]
+
+        terminal_types = [
+            e.type for e in events
+            if e.type in (EventType.RUN_FINISHED, EventType.RUN_ERROR)
+        ]
+        assert terminal_types == [EventType.RUN_ERROR], (
+            f"expected a single RUN_ERROR terminal event, got {terminal_types}"
+        )
 
     @pytest.mark.asyncio
     async def test_cleanup(self, adk_agent):

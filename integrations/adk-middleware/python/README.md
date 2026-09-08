@@ -390,7 +390,7 @@ from google.adk.agents import Agent
 
 hello_agent = LlmAgent(
     name='HelloAgent',
-    model='gemini-2.5-flash',
+    model='gemini-3.5-flash',
     description="An agent that greets users",
     instruction="""
     You are a friendly assistant that greets users.
@@ -403,7 +403,7 @@ hello_agent = LlmAgent(
 
 goodbye_agent = LlmAgent(
     name='GoodbyeAgent',
-    model='gemini-2.5-flash',
+    model='gemini-3.5-flash',
     description="An agent that says goodbye",
     instruction="""
     You are a friendly assistant that says goodbye to users.
@@ -417,7 +417,7 @@ goodbye_agent = LlmAgent(
 # create an agent
 agent = LlmAgent(
     name='QaAgent',
-    model='gemini-2.5-flash',
+    model='gemini-3.5-flash',
     description="The QaAgent helps users by answering their questions.",
     instruction="""
     You are a helpful assistant. Help users by answering their questions and assisting with their needs.

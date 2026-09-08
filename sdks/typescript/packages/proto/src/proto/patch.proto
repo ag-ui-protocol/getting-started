@@ -4,6 +4,9 @@ import "google/protobuf/struct.proto";
 
 package ag_ui;
 
+// C#-only option (ignored by the TypeScript and Python generators).
+option csharp_namespace = "AGUI.ProtocolBuffers";
+
 enum JsonPatchOperationType {
   ADD = 0;
   REMOVE = 1;

@@ -1,4 +1,5 @@
 import type { MenuIntegrationConfig } from "./types/integration";
+import { CREWAI_CONVERSATIONAL_FEATURES, CREWAI_FLOW_FEATURES } from "./crewai";
 export * from "./types/integration";
 
 /**
@@ -49,6 +50,15 @@ export const menuIntegrations = [
       "shared_state",
       "tool_based_generative_ui",
       "subgraphs",
+      // NOTE: no "deepagents_subagents" here. That demo needs the SUBAGENT_*
+      // lifecycle events, which only the Python integration (ag_ui_langgraph)
+      // emits. This Platform integration goes through the TypeScript
+      // @ag-ui/langgraph client, which has no subagent support, so the demo
+      // would silently degrade to a plain chat. It is exposed under
+      // langgraph-fastapi only.
+      "a2ui_dynamic_schema",
+      "a2ui_fixed_schema",
+      "a2ui_advanced",
     ],
   },
   {
@@ -67,6 +77,7 @@ export const menuIntegrations = [
       "shared_state",
       "tool_based_generative_ui",
       "subgraphs",
+      "deepagents_subagents",
       "a2ui_fixed_schema",
       "a2ui_dynamic_schema",
       "a2ui_advanced",
@@ -87,6 +98,10 @@ export const menuIntegrations = [
       "shared_state",
       "tool_based_generative_ui",
       "subgraphs",
+      "a2ui_dynamic_schema",
+      "a2ui_fixed_schema",
+      "a2ui_advanced",
+      "a2ui_recovery",
     ],
   },
   // {
@@ -107,7 +122,13 @@ export const menuIntegrations = [
       "v1_agentic_chat",
       "backend_tool_rendering",
       "human_in_the_loop",
+      "interrupt",
+      "shared_state",
       "tool_based_generative_ui",
+      "a2ui_dynamic_schema",
+      "a2ui_recovery",
+      "a2ui_fixed_schema",
+      "observational_memory",
     ],
   },
   {
@@ -118,8 +139,14 @@ export const menuIntegrations = [
       "v1_agentic_chat",
       "backend_tool_rendering",
       "human_in_the_loop",
+      "interrupt",
       "shared_state",
       "tool_based_generative_ui",
+      "background_agents",
+      "a2ui_dynamic_schema",
+      "a2ui_recovery",
+      "a2ui_fixed_schema",
+      "observational_memory",
     ],
   },
   {
@@ -139,6 +166,7 @@ export const menuIntegrations = [
     name: "Pydantic AI",
     features: [
       "agentic_chat",
+      "agentic_chat_multimodal",
       "v1_agentic_chat",
       "backend_tool_rendering",
       "human_in_the_loop",
@@ -160,6 +188,9 @@ export const menuIntegrations = [
       "predictive_state_updates",
       "shared_state",
       "tool_based_generative_ui",
+      "a2ui_fixed_schema",
+      "a2ui_dynamic_schema",
+      "a2ui_recovery",
     ],
   },
   {
@@ -174,11 +205,12 @@ export const menuIntegrations = [
       "predictive_state_updates",
       "shared_state",
       "tool_based_generative_ui",
+      "subgraphs",
     ],
   },
   {
-    id: "microsoft-agent-framework-python",
-    name: "Microsoft Agent Framework (Python)",
+    id: "ag-ui-dotnet",
+    name: "AG-UI .NET SDK",
     features: [
       "agentic_chat",
       "v1_agentic_chat",
@@ -188,6 +220,29 @@ export const menuIntegrations = [
       "predictive_state_updates",
       "shared_state",
       "tool_based_generative_ui",
+      "a2ui_fixed_schema",
+      "a2ui_dynamic_schema",
+      "a2ui_advanced",
+      "a2ui_recovery",
+    ],
+  },
+  {
+    id: "microsoft-agent-framework-python",
+    name: "Microsoft Agent Framework (Python)",
+    features: [
+      "agentic_chat",
+      "agentic_chat_multimodal",
+      "v1_agentic_chat",
+      "backend_tool_rendering",
+      "human_in_the_loop",
+      "agentic_generative_ui",
+      "predictive_state_updates",
+      "shared_state",
+      "tool_based_generative_ui",
+      "a2ui_dynamic_schema",
+      "a2ui_advanced",
+      "a2ui_recovery",
+      "a2ui_fixed_schema",
     ],
   },
   {
@@ -196,6 +251,7 @@ export const menuIntegrations = [
     features: [
       "agentic_chat",
       "v1_agentic_chat",
+      "agentic_chat_multimodal",
       "backend_tool_rendering",
       "human_in_the_loop",
       "agentic_generative_ui",
@@ -209,8 +265,13 @@ export const menuIntegrations = [
     features: [
       "agentic_chat",
       "v1_agentic_chat",
+      "agentic_chat_reasoning",
+      "agentic_chat_multimodal",
+      "agentic_generative_ui",
       "backend_tool_rendering",
       "human_in_the_loop",
+      "predictive_state_updates",
+      "shared_state",
       "tool_based_generative_ui",
     ],
   },
@@ -220,6 +281,7 @@ export const menuIntegrations = [
     features: [
       "agentic_chat",
       "v1_agentic_chat",
+      "agentic_chat_multimodal",
       "backend_tool_rendering",
       "human_in_the_loop",
       "agentic_generative_ui",
@@ -228,19 +290,13 @@ export const menuIntegrations = [
   },
   {
     id: "crewai",
-    name: "CrewAI",
-    features: [
-      "agentic_chat",
-      "v1_agentic_chat",
-      // "backend_tool_rendering",
-      "human_in_the_loop",
-      "agentic_generative_ui",
-      "predictive_state_updates",
-      "shared_state",
-      "tool_based_generative_ui",
-      "crew_chat",
-      "error_flow",
-    ],
+    name: "CrewAI Flows",
+    features: [...CREWAI_FLOW_FEATURES],
+  },
+  {
+    id: "crewai-conversational-flows",
+    name: "CrewAI Conversational Flows",
+    features: [...CREWAI_CONVERSATIONAL_FEATURES],
   },
   // {
   //   id: "builtin",
@@ -284,12 +340,21 @@ export const menuIntegrations = [
     features: [
       "agentic_chat",
       "agentic_chat_reasoning",
+      "agentic_chat_citations",
       "agentic_chat_multimodal",
       "v1_agentic_chat",
       "backend_tool_rendering",
       "agentic_generative_ui",
       "shared_state",
       "human_in_the_loop",
+      "interrupt",
+      "predictive_state_updates",
+      "tool_based_generative_ui",
+      "multi_agent",
+      "a2ui_dynamic_schema",
+      "a2ui_fixed_schema",
+      "a2ui_advanced",
+      "a2ui_recovery",
     ],
   },
   {
@@ -298,13 +363,21 @@ export const menuIntegrations = [
     features: [
       "agentic_chat",
       "agentic_chat_reasoning",
+      "agentic_chat_citations",
       "agentic_chat_multimodal",
       "v1_agentic_chat",
       "backend_tool_rendering",
       "agentic_generative_ui",
       "shared_state",
       "human_in_the_loop",
+      "interrupt",
+      "predictive_state_updates",
       "tool_based_generative_ui",
+      "multi_agent",
+      "a2ui_dynamic_schema",
+      "a2ui_fixed_schema",
+      "a2ui_advanced",
+      "a2ui_recovery",
     ],
   },
   {
@@ -330,6 +403,36 @@ export const menuIntegrations = [
     ],
   },
   {
+    id: "claude-managed-agents-dotnet",
+    name: "Claude Managed Agents (.NET)",
+    features: [
+      "agentic_chat",
+      "backend_tool_rendering",
+      "human_in_the_loop",
+      "tool_based_generative_ui",
+    ],
+  },
+  {
+    id: "claude-managed-agents-python",
+    name: "Claude Managed Agents (Python)",
+    features: [
+      "agentic_chat",
+      "backend_tool_rendering",
+      "human_in_the_loop",
+      "tool_based_generative_ui",
+    ],
+  },
+  {
+    id: "claude-managed-agents-typescript",
+    name: "Claude Managed Agents (Typescript)",
+    features: [
+      "agentic_chat",
+      "backend_tool_rendering",
+      "human_in_the_loop",
+      "tool_based_generative_ui",
+    ],
+  },
+  {
     id: "langroid",
     name: "Langroid",
     features: [
@@ -342,9 +445,6 @@ export const menuIntegrations = [
   {
     id: "watsonx",
     name: "IBM watsonx orchestrate",
-    features: [
-      "agentic_chat",
-      "v1_agentic_chat",
-    ],
+    features: ["agentic_chat", "v1_agentic_chat"],
   },
 ] as const satisfies MenuIntegrationConfig[];

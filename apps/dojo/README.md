@@ -31,7 +31,7 @@ The first time you want to run, you need to build all of the dojos dependencies 
 ```
 # from the ag-ui repository root
 pnpm i
-pnpm build --filter=demo-viewer
+pnpm build --projects=demo-viewer
 ```
 
 ### Run the Demo Viewer

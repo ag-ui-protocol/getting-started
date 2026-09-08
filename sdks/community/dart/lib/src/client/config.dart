@@ -16,22 +16,22 @@ import '../sse/backoff_strategy.dart';
 class AgUiClientConfig {
   /// Base URL for the AG-UI server.
   final String baseUrl;
-  
+
   /// Default headers to include with all requests
   final Map<String, String> defaultHeaders;
-  
+
   /// Request timeout duration
   final Duration requestTimeout;
-  
+
   /// Connection timeout for SSE
   final Duration connectionTimeout;
-  
+
   /// Backoff strategy for retries
   final BackoffStrategy backoffStrategy;
-  
+
   /// Maximum number of retry attempts
   final int maxRetries;
-  
+
   /// Whether to include credentials in requests
   final bool withCredentials;
 

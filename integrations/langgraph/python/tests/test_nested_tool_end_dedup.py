@@ -67,6 +67,22 @@ def _ai_chunk(*, name="", args="", tool_call_id="tc1", chunk_id="ai-msg-1"):
     return chunk
 
 
+def _text_chunk(content, *, chunk_id="ai-text-1"):
+    chunk = AIMessageChunk(content=content, id=chunk_id)
+    chunk.response_metadata = {}
+    chunk.tool_call_chunks = []
+    return chunk
+
+
+def _text_and_tool_start_chunk(content, *, name, tool_call_id, chunk_id="ai-text-1"):
+    chunk = AIMessageChunk(content=content, id=chunk_id)
+    chunk.response_metadata = {}
+    chunk.tool_call_chunks = [
+        {"name": name, "args": "", "id": tool_call_id, "index": 0}
+    ]
+    return chunk
+
+
 def _event(event_type, *, node="model", data=None, name=None):
     return {
         "event": event_type,
@@ -84,6 +100,22 @@ def _stream_start(name, tool_call_id, node="model"):
         "on_chat_model_stream",
         node=node,
         data={"chunk": _ai_chunk(name=name, args="", tool_call_id=tool_call_id)},
+    )
+
+
+def _stream_text(content, *, chunk_id="ai-text-1", node="model"):
+    return _event(
+        "on_chat_model_stream",
+        node=node,
+        data={"chunk": _text_chunk(content, chunk_id=chunk_id)},
+    )
+
+
+def _stream_text_and_start(content, name, tool_call_id, *, chunk_id="ai-text-1", node="model"):
+    return _event(
+        "on_chat_model_stream",
+        node=node,
+        data={"chunk": _text_and_tool_start_chunk(content, name=name, tool_call_id=tool_call_id, chunk_id=chunk_id)},
     )
 
 
@@ -288,6 +320,79 @@ class TestParallelToolCallVisibility(unittest.TestCase):
         # Args carries the input dict serialized.
         self.assertEqual(len(u_args), 1)
         self.assertIn("from_on_tool_end", u_args[0])
+
+
+class TestTextToToolCallTransition(unittest.TestCase):
+    def test_tool_start_after_text_chunk_is_not_dropped(self):
+        tool_call_id = "tc-search"
+
+        dispatched = asyncio.run(
+            _run_stream(
+                [
+                    _stream_text("I will check.", chunk_id="msg-text"),
+                    _stream_start("search", tool_call_id),
+                    _stream_args('{"q":"weather"}', tool_call_id),
+                    _stream_end(),
+                ]
+            )
+        )
+
+        event_types = [ev.type for ev in dispatched]
+        self.assertIn(EventType.TEXT_MESSAGE_START, event_types)
+        self.assertIn(EventType.TEXT_MESSAGE_CONTENT, event_types)
+        text_end_index = event_types.index(EventType.TEXT_MESSAGE_END)
+        tool_start_index = next(
+            index
+            for index, ev in enumerate(dispatched)
+            if ev.type == EventType.TOOL_CALL_START and ev.tool_call_id == tool_call_id
+        )
+
+        self.assertLess(text_end_index, tool_start_index)
+        text_content = [
+            ev.delta
+            for ev in dispatched
+            if ev.type == EventType.TEXT_MESSAGE_CONTENT
+        ]
+        self.assertEqual(text_content, ["I will check."])
+        starts, args_payloads, ends, _ = _filter_tool_events(dispatched, tool_call_id)
+        self.assertEqual(starts, 1)
+        self.assertEqual("".join(args_payloads), '{"q":"weather"}')
+        self.assertEqual(ends, 1)
+
+    def test_tool_start_chunk_preserves_trailing_text(self):
+        tool_call_id = "tc-search"
+
+        dispatched = asyncio.run(
+            _run_stream(
+                [
+                    _stream_text("I will", chunk_id="msg-text"),
+                    _stream_text_and_start(" check.", "search", tool_call_id, chunk_id="msg-text"),
+                    _stream_args('{"q":"weather"}', tool_call_id),
+                    _stream_end(),
+                ]
+            )
+        )
+
+        text_content = [
+            ev.delta
+            for ev in dispatched
+            if ev.type == EventType.TEXT_MESSAGE_CONTENT
+        ]
+        self.assertEqual(text_content, ["I will", " check."])
+
+        event_types = [ev.type for ev in dispatched]
+        text_end_index = event_types.index(EventType.TEXT_MESSAGE_END)
+        tool_start_index = next(
+            index
+            for index, ev in enumerate(dispatched)
+            if ev.type == EventType.TOOL_CALL_START and ev.tool_call_id == tool_call_id
+        )
+        self.assertLess(text_end_index, tool_start_index)
+
+        starts, args_payloads, ends, _ = _filter_tool_events(dispatched, tool_call_id)
+        self.assertEqual(starts, 1)
+        self.assertEqual("".join(args_payloads), '{"q":"weather"}')
+        self.assertEqual(ends, 1)
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@ from ag_ui.core import (
 )
 from ag_ui_adk import ADKAgent
 from ag_ui_adk.session_manager import SessionManager
+from tests.constants import LIVE_TEST_MODEL
 
 
 # =============================================================================
@@ -375,7 +376,7 @@ class TestLROSSEPersistenceIntegration:
         # Create agent that will use the LRO tool
         agent = LlmAgent(
             name="greeter",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="When asked to greet someone, use the get_greeting tool with their name.",
             tools=[AGUIToolset()],
         )
@@ -457,7 +458,7 @@ class TestLROSSEPersistenceIntegration:
 
         agent = LlmAgent(
             name="greeter",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="When asked to greet someone, use the get_greeting tool with their name.",
             tools=[AGUIToolset()],
         )

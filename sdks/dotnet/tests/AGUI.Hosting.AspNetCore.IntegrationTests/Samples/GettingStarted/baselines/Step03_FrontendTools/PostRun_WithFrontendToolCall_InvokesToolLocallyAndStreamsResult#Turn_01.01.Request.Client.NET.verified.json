@@ -1,0 +1,11 @@
+﻿[
+  {
+    "role": "user",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "What are some fun things to do near me?"
+      }
+    ]
+  }
+]

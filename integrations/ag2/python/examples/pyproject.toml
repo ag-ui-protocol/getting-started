@@ -5,7 +5,7 @@ description = "AG2 AG-UI protocol examples for the Dojo"
 readme = "README.md"
 requires-python = ">=3.10,<4.0"
 dependencies = [
-    "ag2[ag-ui,openai]>=0.11.1",
+    "ag2[ag-ui,openai]>=1.0.2,<2.0.0",
     "fastapi>=0.116.0",
     "uvicorn>=0.35.0",
     "python-dotenv>=0.9.0",

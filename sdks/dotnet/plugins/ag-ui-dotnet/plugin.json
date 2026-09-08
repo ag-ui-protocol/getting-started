@@ -1,0 +1,13 @@
+{
+  "name": "ag-ui-dotnet",
+  "description": "Skills for building apps with the AG-UI .NET SDK: streaming chat (stateless vs hosted agents), server tools, client tools, human-in-the-loop (approvals & interrupts), shared state, multimodal messages, reasoning traces, protobuf transport, and troubleshooting.",
+  "version": "0.1.0",
+  "author": {
+    "name": "AG-UI"
+  },
+  "homepage": "https://docs.ag-ui.com",
+  "repository": "https://github.com/ag-ui-protocol/ag-ui",
+  "license": "MIT",
+  "keywords": ["ag-ui", "dotnet", "csharp", "agent", "ai", "streaming", "tools", "mcp"],
+  "skills": "skills/"
+}

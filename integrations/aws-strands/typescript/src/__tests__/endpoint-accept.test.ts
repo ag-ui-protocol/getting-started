@@ -49,7 +49,7 @@ async function startApp(): Promise<{
     { path: "/" },
   );
   const server = await new Promise<import("http").Server>((resolve) => {
-    const s = app.listen(0, () => resolve(s));
+    const s = app.listen(0, "127.0.0.1", () => resolve(s));
   });
   const port = (server.address() as AddressInfo).port;
   return {
@@ -115,6 +115,35 @@ describe("addStrandsExpressEndpoint content negotiation", () => {
       const ct = await postWithAccept(
         port,
         "application/vnd.ag-ui.event+proto",
+      );
+      expect(ct.toLowerCase()).toContain("application/vnd.ag-ui.event+proto");
+    } finally {
+      await close();
+    }
+  });
+
+  it("returns SSE when protobuf is listed but explicitly refused with q=0", async () => {
+    const { port, close } = await startApp();
+    try {
+      const ct = await postWithAccept(
+        port,
+        "application/vnd.ag-ui.event+proto;q=0, text/event-stream",
+      );
+      expect(ct.toLowerCase()).toContain("text/event-stream");
+      expect(ct.toLowerCase()).not.toContain(
+        "application/vnd.ag-ui.event+proto",
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  it("still selects protobuf at a low but non-zero q-factor", async () => {
+    const { port, close } = await startApp();
+    try {
+      const ct = await postWithAccept(
+        port,
+        "application/vnd.ag-ui.event+proto;q=0.1",
       );
       expect(ct.toLowerCase()).toContain("application/vnd.ag-ui.event+proto");
     } finally {

@@ -82,7 +82,7 @@ const resultEnhancer: MiddlewareFunction = (input, next) => {
   });
 };
 
-const input: RunAgentInput = {
+const _input: RunAgentInput = {
   threadId: "example-thread",
   runId: "example-run",
   tools: [],
@@ -130,5 +130,5 @@ async function runExample() {
   return events;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-floating-promises
+ 
 runExample();

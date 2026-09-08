@@ -1,0 +1,28 @@
+[
+  {
+    "id": "root",
+    "component": "Row",
+    "children": {
+      "componentId": "hotel-card",
+      "path": "/hotels"
+    },
+    "gap": 16
+  },
+  {
+    "id": "hotel-card",
+    "component": "HotelCard",
+    "name": { "path": "name" },
+    "location": { "path": "location" },
+    "rating": { "path": "rating" },
+    "pricePerNight": { "path": "price" },
+    "action": {
+      "event": {
+        "name": "book_hotel",
+        "context": {
+          "hotelName": { "path": "name" },
+          "price": { "path": "price" }
+        }
+      }
+    }
+  }
+]

@@ -11,7 +11,7 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   spec.homepage = "https://docs.ag-ui.com/introduction"
 
-  spec.files = Dir.glob("{lib}/**/*")
+  spec.files = Dir.glob("{lib}/**/*") + ["LICENSE"]
   spec.require_paths = ["lib"]
 
   spec.required_ruby_version = ">= 3.0"

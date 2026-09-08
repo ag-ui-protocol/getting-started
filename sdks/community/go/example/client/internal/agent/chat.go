@@ -14,7 +14,7 @@ import (
 )
 
 func DefaultEndpoint() string {
-	return "http://localhost:8000/agentic"
+	return "http://localhost:8080/agentic"
 }
 
 func Chat(ctx context.Context, inputMsg string, endpoint string, send func(msg *message.Message)) error {

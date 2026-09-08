@@ -246,7 +246,17 @@ const allowFilter = new FilterToolCallsMiddleware({
 agent.use(allowFilter)
 ```
 
-You can also use `disallowedToolCalls` instead of `allowedToolCalls`.
+#### Block Specific Tools
+
+```typescript
+const blockFilter = new FilterToolCallsMiddleware({
+  disallowedToolCalls: ["deleteFile", "sendEmail"]
+})
+
+agent.use(blockFilter)
+```
+
+You must specify exactly one of `allowedToolCalls` or `disallowedToolCalls`. The constructor throws if both or neither are provided.
 
 ## Middleware Patterns
 

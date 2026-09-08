@@ -433,11 +433,29 @@ event = AgUiProtocol::Core::Events::ToolCallStartEvent.new(
 | `timestamp`         | `Time` (optional)   | Timestamp when the event was created. Default: `nil`.              |
 | `raw_event`         | `Object` (optional) | Original event data if this event was transformed. Default: `nil`. |
 
-## Thinking Events
+## Thinking Events (Deprecated)
+
+<Warning>
+  The `THINKING_*` events are deprecated and will be removed in version 1.0.0.
+  New implementations should use the `REASONING_*` events instead.
+</Warning>
 
 These events represent the lifecycle of an agent's thinking steps, conveying
 intermediate reasoning to the frontend without contributing to the final
 message.
+
+The following event types are deprecated:
+
+| Deprecated Event                | Replacement                 |
+| ------------------------------- | --------------------------- |
+| `THINKING_START`                | `REASONING_START`           |
+| `THINKING_END`                  | `REASONING_END`             |
+| `THINKING_TEXT_MESSAGE_START`   | `REASONING_MESSAGE_START`   |
+| `THINKING_TEXT_MESSAGE_CONTENT` | `REASONING_MESSAGE_CONTENT` |
+| `THINKING_TEXT_MESSAGE_END`     | `REASONING_MESSAGE_END`     |
+
+See [Reasoning Migration](/concepts/reasoning#migration-from-thinking-events)
+for detailed migration guidance.
 
 ### ThinkingEndEvent
 

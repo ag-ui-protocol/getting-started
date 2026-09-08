@@ -11,6 +11,7 @@ from ag_ui.core import (
 )
 
 from ag_ui_adk import ADKAgent
+from tests.constants import LIVE_TEST_MODEL
 
 
 class TestConcurrentLimits:
@@ -23,7 +24,7 @@ class TestConcurrentLimits:
         from google.adk.agents import LlmAgent
         return LlmAgent(
             name="test_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="Test agent for concurrent testing"
         )
 
@@ -204,7 +205,7 @@ class TestConcurrentLimits:
         """Test behavior with zero concurrent execution limit."""
         # Create ADK middleware with zero limit
         from google.adk.agents import LlmAgent
-        mock_agent = LlmAgent(name="test", model="gemini-2.0-flash", instruction="test")
+        mock_agent = LlmAgent(name="test", model=LIVE_TEST_MODEL, instruction="test")
 
         zero_limit_middleware = ADKAgent(
             adk_agent=mock_agent,
@@ -293,7 +294,7 @@ class TestConcurrentLimits:
     async def test_high_concurrent_limit(self):
         """Test behavior with very high concurrent limit."""
         from google.adk.agents import LlmAgent
-        mock_agent = LlmAgent(name="test", model="gemini-2.0-flash", instruction="test")
+        mock_agent = LlmAgent(name="test", model=LIVE_TEST_MODEL, instruction="test")
 
         high_limit_middleware = ADKAgent(
             adk_agent=mock_agent,

@@ -1,6 +1,7 @@
 {
   "name": "@ag-ui/claude-agent-sdk",
   "version": "0.0.3",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/ag-ui-protocol/ag-ui.git"

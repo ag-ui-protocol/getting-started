@@ -8,6 +8,51 @@ import type { Message as AguiMessage } from "@ag-ui/core";
 import { convertMessagesForStrandsSeed, buildStrandsSeed } from "../agent";
 
 describe("convertMessagesForStrandsSeed", () => {
+  it("seeds only real text from a content array", async () => {
+    const seed = await convertMessagesForStrandsSeed([
+      {
+        id: "u1",
+        role: "user",
+        content: [
+          { type: "text", text: "" },
+          { type: "text", text: null },
+          { type: "jsonBlock", text: "not the user's words" },
+          { type: "text", text: "keep me" },
+        ],
+      } as unknown as AguiMessage,
+    ]);
+    // Copying `text` off anything carrying the key sent the provider an empty
+    // block, a null, and a tool result's payload as if the user had typed it.
+    expect(seed).toEqual([{ role: "user", content: [{ text: "keep me" }] }]);
+  });
+
+  it("keeps a turn that yields no text so roles still alternate", async () => {
+    const seed = await convertMessagesForStrandsSeed([
+      { id: "u1", role: "user", content: "hello" },
+      { id: "a1", role: "assistant", content: "hi" },
+      {
+        id: "u2",
+        role: "user",
+        content: [{ type: "text", text: "" }],
+      },
+      { id: "a2", role: "assistant", content: "still here" },
+    ] as unknown as AguiMessage[]);
+
+    // Dropping the empty turn leaves ["user","assistant","assistant"], which
+    // the provider rejects just as surely as the blank text block that
+    // dropping it was meant to avoid.
+    expect(seed.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    const texts = seed.flatMap((m) =>
+      (m.content as { text?: string }[]).map((c) => c.text),
+    );
+    expect(texts).not.toContain("");
+  });
+
   it("drops system and developer messages", async () => {
     const seed = await convertMessagesForStrandsSeed([
       {
@@ -116,6 +161,64 @@ describe("convertMessagesForStrandsSeed", () => {
           toolUseId: "tc-2",
           status: "success",
           content: [{ text: "B" }],
+        },
+      },
+    ]);
+  });
+
+  it("carries a client-reported tool failure onto the seeded toolResult", async () => {
+    // Same producer as `_buildStrandsHistory` and the reconciler, so the status
+    // and the body come from `ToolMessage.error` together: the reason travels
+    // with the flag rather than the raw body standing in for it. Each result is
+    // stamped independently.
+    const seed = await convertMessagesForStrandsSeed([
+      { id: "u", role: "user", content: "lookup" } as unknown as AguiMessage,
+      {
+        id: "a",
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "tc-1",
+            type: "function",
+            function: { name: "s1", arguments: "{}" },
+          },
+          {
+            id: "tc-2",
+            type: "function",
+            function: { name: "s2", arguments: "{}" },
+          },
+        ],
+      } as unknown as AguiMessage,
+      {
+        id: "t1",
+        role: "tool",
+        toolCallId: "tc-1",
+        content: "ok",
+      } as unknown as AguiMessage,
+      {
+        id: "t2",
+        role: "tool",
+        toolCallId: "tc-2",
+        content: "tool failed: invalid id",
+        error: "invalid id",
+      } as unknown as AguiMessage,
+    ]);
+    expect(seed[2].content).toEqual([
+      {
+        toolResult: {
+          toolUseId: "tc-1",
+          status: "success",
+          content: [{ text: "ok" }],
+        },
+      },
+      {
+        toolResult: {
+          toolUseId: "tc-2",
+          status: "error",
+          content: [
+            { text: "Failed: invalid id (returned: tool failed: invalid id)" },
+          ],
         },
       },
     ]);

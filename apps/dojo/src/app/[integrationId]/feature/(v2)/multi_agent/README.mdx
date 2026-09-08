@@ -1,0 +1,80 @@
+# 🕸️ Multi-Agent (Graph Orchestration)
+
+## What This Demo Shows
+
+This demo runs a **Strands `Graph`** instead of a single agent. Three
+specialist agents are wired in sequence, and each one's turn is visible as it
+happens:
+
+`researcher` → `analyst` → `writer`
+
+The adapter detects that the wrapped object is an orchestrator rather than an
+`Agent`, drives the graph's own stream, and translates its node lifecycle into
+the AG-UI protocol. Both the Python and TypeScript bridges expose the same
+demo on the same endpoint path.
+
+## How to Interact
+
+Ask for anything you would like researched, for example
+"Research the benefits of remote work". As the graph runs:
+
+- Each pipeline card moves from **Waiting** to **Running** to **Done**, driven
+  by `STEP_STARTED` and `STEP_FINISHED`
+- A handoff row appears each time control moves between nodes
+- Each node's text streams into the chat as it is produced
+
+## Technical Details
+
+- Orchestrators are detected by probing for a missing `model` attribute.
+  `Graph` and `Swarm` expose `stream`/`stream_async` but no model accessor,
+  while a real `Agent` always resolves one, so the absence is unambiguous.
+  Nothing branches on a version string
+- Node lifecycle maps to `STEP_STARTED` / `STEP_FINISHED`, named
+  `<nodeType>:<nodeId>`
+- Handoffs are emitted as a `MultiAgentHandoff` CUSTOM event carrying
+  `from_nodes`, `to_nodes` and an optional `message`. Swarm sends
+  single-element lists with a message; Graph sends batch transitions without
+  one
+- The graph is built per run rather than once at startup. It holds execution
+  state on the instance, and a Python graph also carries node history across
+  executions, so a long-lived one would leak a previous run's conversation into
+  the next and would make two concurrent visitors interfere. The Python adapter
+  accepts a callable for exactly this. A directly passed instance is isolated
+  instead by restoring its leaf conversations after each run, recursing through
+  nested graphs; one whose leaves cannot be reached is refused rather than
+  reused, since a warning would not stop the leak
+- Only the latest user turn is forwarded. An orchestrator takes a task string
+  rather than a conversation, so this demo answers each question on its own
+  and does not carry chat history between turns
+- Per-thread agent caching, session managers and proxy-tool sync do not apply
+  on this path: a graph owns its own nodes, so there is no template to clone
+
+### Python only
+
+The Python bridge additionally forwards outcomes that would otherwise be
+invisible:
+
+- Text is tracked per node. A graph executes a batch of nodes as concurrent
+  tasks whose events arrive interleaved, so a single shared message id would
+  splice two nodes into one envelope
+- Node cancellation and node interruption become `MultiAgentNodeCancel` and
+  `MultiAgentNodeInterrupt` CUSTOM events, and a node that stops without
+  completing reports its outcome as `MultiAgentNodeStatus`. Without these a
+  cancelled node is indistinguishable from a successful one. The cancel and
+  interrupt events require a recent Strands release; on older ones the graph
+  simply never emits them and nothing is lost
+- A node that interrupts never emits a stop event, so its step is closed
+  before the run ends rather than left running in the UI. The run reports an
+  interrupt outcome rather than plain success, and answering it through the
+  protocol's resume entries continues the graph from its checkpoint. The
+  instance that paused is held for that thread until the interrupt resolves,
+  because the interrupt lives on it: a freshly built graph was never
+  interrupted and rejects the response
+- A nested graph or swarm node wraps its events a second time, so they are
+  unwrapped to the innermost agent event; reading one level reported a
+  successful run with no output at all
+- `STEP_FINISHED` reuses the node type remembered from the start event, since
+  the Python stop event carries only the node id
+
+The TypeScript SDK reports no node type on either event, so its step names use
+the default prefix on both sides of the pair.

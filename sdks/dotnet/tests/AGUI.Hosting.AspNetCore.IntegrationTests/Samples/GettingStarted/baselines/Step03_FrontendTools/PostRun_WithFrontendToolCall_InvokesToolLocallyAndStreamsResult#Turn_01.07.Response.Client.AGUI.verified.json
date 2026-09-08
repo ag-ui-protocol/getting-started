@@ -1,0 +1,105 @@
+﻿[
+  {
+    "type": "RUN_STARTED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1"
+  },
+  {
+    "type": "TOOL_CALL_START",
+    "parentMessageId": "",
+    "toolCallId": "call_Id_1",
+    "toolCallName": "GetUserLocation",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "GetUserLocation",
+          "arguments": {},
+          "informationalOnly": false,
+          "callId": "call_Id_1",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "",
+      "messageId": "",
+      "conversationId": null,
+      "finishReason": "tool_calls",
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TOOL_CALL_ARGS",
+    "toolCallId": "call_Id_1",
+    "delta": "{}",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "GetUserLocation",
+          "arguments": {},
+          "informationalOnly": false,
+          "callId": "call_Id_1",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "",
+      "messageId": "",
+      "conversationId": null,
+      "finishReason": "tool_calls",
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TOOL_CALL_END",
+    "toolCallId": "call_Id_1",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "GetUserLocation",
+          "arguments": {},
+          "informationalOnly": false,
+          "callId": "call_Id_1",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "",
+      "messageId": "",
+      "conversationId": null,
+      "finishReason": "tool_calls",
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "RUN_FINISHED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1",
+    "outcome": {
+      "type": "success"
+    },
+    "usage": [
+      {
+        "inputTokens": 131,
+        "outputTokens": 85,
+        "totalTokens": 216,
+        "reasoningTokens": 64,
+        "cachedInputTokens": 0
+      }
+    ]
+  }
+]

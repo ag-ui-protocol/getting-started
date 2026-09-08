@@ -29,12 +29,13 @@ from ag_ui.core import (
 from ag_ui_adk import ADKAgent
 from ag_ui_adk.session_manager import SessionManager
 from google.adk.agents import LlmAgent
+from tests.constants import LIVE_TEST_MODEL
 
 @pytest.fixture(autouse=True)
 def setup_llmock(llmock_server):
     """Ensure LLMock is running when no real API key is set."""
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = LIVE_TEST_MODEL
 
 
 # ---------------------------------------------------------------------------

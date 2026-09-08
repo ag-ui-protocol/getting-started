@@ -23,10 +23,11 @@ from ag_ui_adk.session_manager import SessionManager
 from google.adk.agents import LlmAgent
 from google.adk.agents.readonly_context import ReadonlyContext
 from google.adk.tools import ToolContext
+from tests.constants import LIVE_TEST_MODEL
 
 
 # Default model for live tests
-DEFAULT_MODEL = "gemini-2.0-flash"
+DEFAULT_MODEL = LIVE_TEST_MODEL
 
 
 async def collect_events(agent: ADKAgent, run_input: RunAgentInput) -> List[BaseEvent]:

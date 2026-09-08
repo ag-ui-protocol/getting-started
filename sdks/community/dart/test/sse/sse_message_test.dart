@@ -57,7 +57,8 @@ void main() {
       final message = SseMessage();
 
       final str = message.toString();
-      expect(str, equals('SseMessage(event: null, id: null, data: null, retry: null)'));
+      expect(str,
+          equals('SseMessage(event: null, id: null, data: null, retry: null)'));
     });
 
     test('creates message with only event', () {

@@ -6,12 +6,16 @@ This module bridges pyagentspec.tracing spans/events to AG-UI events
 telemetry package but adapts to the event shapes defined under
 `pyagentspec.tracing.events`.
 
-Notes/limitations for the pyagentspec.tracing version:
-- LLM streaming uses `LlmGenerationChunkReceived` with chunk_type MESSAGE only;
-  tool-call streaming chunks are not available in this event set.
-- Tool execution events in this namespace do not include `message_id` nor
-  `tool_call_id`; therefore, we do not emit AG-UI tool call lifecycle or
-  result events here.
+Notes for the pyagentspec.tracing version:
+- LLM streaming uses `LlmGenerationChunkReceived`, which may carry text content
+  and/or tool-call chunks; both are translated to AG-UI events.
+- Tool execution events (`ToolExecutionRequest`/`ToolExecutionResponse`) do not
+  carry a stable AG-UI `tool_call_id` of their own. We therefore correlate them:
+  for the langgraph runtime the AG-UI `tool_call_id` is recovered from the
+  request span's `tcid__` description, and for other runtimes the run-level
+  `request_id` is used directly. Given that correlation, we DO emit AG-UI tool
+  call lifecycle (`ToolCallChunkEvent`) and result (`ToolCallResultEvent`)
+  events here.
 """
 
 from __future__ import annotations
@@ -264,7 +268,28 @@ class AgUiSpanProcessor(SpanProcessor):
                     self._tool_run_id_to_tool_call_id[event.request_id] = tool_call_id
             case ToolExecutionResponse():
                 if self._runtime == "langgraph":
-                    tool_call_id = self._tool_run_id_to_tool_call_id[event.request_id]
+                    # The correlation map is populated from the matching
+                    # ToolExecutionRequest. If that request was never seen
+                    # (out-of-order events, or a request span lacking a
+                    # ``tcid__`` description), fall back to the run-level
+                    # request_id rather than raising a KeyError.
+                    if event.request_id in self._tool_run_id_to_tool_call_id:
+                        tool_call_id = self._tool_run_id_to_tool_call_id[event.request_id]
+                    else:
+                        # Correlation miss: no matching ToolExecutionRequest was
+                        # recorded for this request_id, so we cannot recover the
+                        # AG-UI tool_call_id the frontend issued. We surrogate the
+                        # raw request_id to avoid crashing, but the resulting tool
+                        # result will be orphaned (it references an id the client
+                        # never saw). Log it so the miss is observable.
+                        logger.warning(
+                            "AG-UI tool-call correlation miss: no ToolExecutionRequest "
+                            "recorded for request_id=%r; using the raw request_id as a "
+                            "surrogate tool_call_id. The emitted tool result may be "
+                            "orphaned because the frontend never saw this id.",
+                            event.request_id,
+                        )
+                        tool_call_id = event.request_id
                 else:
                     tool_call_id = event.request_id
                 content = _normalize_tool_output(event.outputs)

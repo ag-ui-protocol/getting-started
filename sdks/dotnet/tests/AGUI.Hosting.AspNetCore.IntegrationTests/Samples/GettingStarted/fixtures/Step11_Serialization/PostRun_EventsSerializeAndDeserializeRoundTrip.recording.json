@@ -1,0 +1,26 @@
+[
+  [
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "AG-UI events use a type discriminator for polymorphic serialization. Each event has a 'type' field that identifies its concrete type, enabling correct deserialization from JSON back to the proper .NET type."
+        }
+      ],
+      "messageId": "e7f25bf82f1544df8c13db20c7d926ea"
+    }
+  ],
+  [
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Event compaction reduces noise in an event stream. It merges TEXT_MESSAGE_CONTENT sequences into snapshots and collapses STATE_DELTA events into a final STATE_SNAPSHOT."
+        }
+      ],
+      "messageId": "003ba99f6a13467ca7f912365e54db6a"
+    }
+  ]
+]

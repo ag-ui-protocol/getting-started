@@ -1,8 +1,16 @@
-/// Base class for all AG-UI errors
-abstract class AgUiError implements Exception {
-  /// Human-readable error message
-  final String message;
+import '../internal/text.dart';
+import '../types/base.dart';
 
+/// Base class for runtime / transport / decoding AG-UI errors.
+///
+/// Extends the SDK-wide [AGUIError] root in `lib/src/types/base.dart`,
+/// so a consumer that catches `on AGUIError` will also catch every
+/// `AgUiError` subtype (transport, timeout, decoding, ...) along with
+/// `AGUIValidationError` from the factory boundary. Catching
+/// `on AgUiError` continues to scope strictly to runtime / transport /
+/// decoding — direct factory-side `AGUIValidationError` is NOT caught
+/// by `on AgUiError`. See README → "Errors" for the recipe.
+abstract class AgUiError extends AGUIError {
   /// Optional error details for debugging
   final Map<String, dynamic>? details;
 
@@ -10,7 +18,7 @@ abstract class AgUiError implements Exception {
   final Object? cause;
 
   const AgUiError(
-    this.message, {
+    super.message, {
     this.details,
     this.cause,
   });
@@ -72,15 +80,23 @@ class TransportError extends AgUiError {
   }
 }
 
-/// Error when operation times out
-class TimeoutError extends AgUiError {
+/// Error when operation times out.
+///
+/// Renamed from `TimeoutError` to avoid shadowing the built-in
+/// `dart:async.TimeoutError` (raised by `Future.timeout(...)` /
+/// `Stream.timeout(...)`). A consumer that imports both
+/// `package:ag_ui/ag_ui.dart` and `dart:async` would otherwise hit a
+/// symbol collision; the README "Errors" recipe used to inadvertently
+/// mask the built-in. The old `TimeoutError` name is preserved as a
+/// deprecated typedef bridge below — prefer this class.
+class AGUITimeoutError extends AgUiError {
   /// Duration that was exceeded
   final Duration? timeout;
 
   /// Operation that timed out
   final String? operation;
 
-  const TimeoutError(
+  const AGUITimeoutError(
     super.message, {
     this.timeout,
     this.operation,
@@ -91,7 +107,7 @@ class TimeoutError extends AgUiError {
   @override
   String toString() {
     final buffer = StringBuffer();
-    buffer.write('TimeoutError: $message');
+    buffer.write('AGUITimeoutError: $message');
     if (operation != null) {
       buffer.write(' (operation: $operation)');
     }
@@ -102,11 +118,22 @@ class TimeoutError extends AgUiError {
   }
 }
 
+/// Deprecated alias for [AGUITimeoutError].
+///
+/// The bare name `TimeoutError` shadows `dart:async.TimeoutError` when
+/// callers import both libraries. Migrate to [AGUITimeoutError]; this
+/// alias will be removed in 1.0.0.
+@Deprecated(
+  'Use AGUITimeoutError. The bare TimeoutError name shadows '
+  'dart:async.TimeoutError and will be removed in 1.0.0.',
+)
+typedef TimeoutError = AGUITimeoutError;
+
 /// Error when operation is cancelled
 class CancellationError extends AgUiError {
   /// Operation that was cancelled
   final String? operation;
-  
+
   /// Reason for cancellation
   final String? reason;
 
@@ -165,11 +192,19 @@ class DecodingError extends AgUiError {
     if (actualValue != null) {
       buffer.write(' (actual: ${actualValue.runtimeType})');
     }
+    if (cause != null) buffer.write('\nCaused by: $cause');
     return buffer.toString();
   }
 }
 
-/// Error validating input or output data
+/// Error validating input or output data.
+///
+/// Thrown by `Validators` (e.g. `Validators.requireNonEmpty`) — not by
+/// `fromJson` factories. The factory-side counterpart is
+/// `AGUIValidationError` in `lib/src/types/base.dart`, which has a
+/// different parent (does NOT extend `AgUiError`). When events flow
+/// through the public [EventDecoder] pipeline, both are caught and
+/// re-wrapped as `DecodingError`.
 class ValidationError extends AgUiError {
   /// Field that failed validation
   final String? field;
@@ -202,10 +237,11 @@ class ValidationError extends AgUiError {
     if (value != null) {
       final valueStr = value.toString();
       final excerpt = valueStr.length > 100
-          ? '${valueStr.substring(0, 100)}...'
+          ? '${safeTruncate(valueStr, 100)}...'
           : valueStr;
       buffer.write(' (value: $excerpt)');
     }
+    if (cause != null) buffer.write('\nCaused by: $cause');
     return buffer.toString();
   }
 }
@@ -284,6 +320,10 @@ class ServerError extends AgUiError {
   }
 }
 
+// TODO(1.0.0): Remove the following deprecated typedefs alongside the
+// THINKING_TEXT_MESSAGE_* deprecation sweep. Six aliases to delete:
+// AgUiHttpException, AgUiConnectionException, AgUiTimeoutException,
+// AgUiValidationException, AgUiClientException, TimeoutError.
 // Maintain backward compatibility with existing exception types
 @Deprecated('Use TransportError instead')
 typedef AgUiHttpException = TransportError;
@@ -291,8 +331,8 @@ typedef AgUiHttpException = TransportError;
 @Deprecated('Use TransportError instead')
 typedef AgUiConnectionException = TransportError;
 
-@Deprecated('Use TimeoutError instead')
-typedef AgUiTimeoutException = TimeoutError;
+@Deprecated('Use AGUITimeoutError instead')
+typedef AgUiTimeoutException = AGUITimeoutError;
 
 @Deprecated('Use ValidationError instead')
 typedef AgUiValidationException = ValidationError;

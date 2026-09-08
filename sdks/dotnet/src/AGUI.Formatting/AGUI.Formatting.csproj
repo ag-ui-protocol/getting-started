@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AGUI.Formatting</RootNamespace>
+    <PackageId>AGUI.Formatting</PackageId>
+    <Description>Wire-format abstractions and Server-Sent Events formatting for AG-UI event streams.</Description>
+    <PackageTags>$(PackageTags);formatting;sse;server-sent-events;streaming;transport</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(SignAssembly)' != 'true'">
+    <InternalsVisibleTo Include="AGUI.Formatting.UnitTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AGUI.Abstractions\AGUI.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Net.ServerSentEvents" />
+  </ItemGroup>
+
+  <!-- Shared helper compiled for every target framework. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)..\Shared\ArgumentNullThrowHelper.cs" Link="Internal\ArgumentNullThrowHelper.cs" />
+  </ItemGroup>
+
+  <!-- Compiler-feature polyfills compiled only where the BCL lacks them (init, required, etc.). -->
+  <ItemGroup Condition=" '$(TargetFramework)' == 'netstandard2.0' OR '$(TargetFramework)' == 'net472' ">
+    <Compile Include="$(MSBuildThisFileDirectory)..\Shared\Polyfills\*.cs" LinkBase="Internal\Polyfills" />
+  </ItemGroup>
+
+</Project>

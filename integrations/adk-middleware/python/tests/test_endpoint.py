@@ -430,7 +430,7 @@ class TestCreateADKApp:
 
         # Should call add_adk_fastapi_endpoint with correct parameters
         mock_add_endpoint.assert_called_once_with(
-            app, mock_agent, "/test", extract_headers = None, extract_state_from_request=None
+            app, mock_agent, "/test", extract_headers = None, extract_state_from_request=None, agent_resolver=None
         )
 
     @patch('ag_ui_adk.endpoint.add_adk_fastapi_endpoint')
@@ -442,7 +442,7 @@ class TestCreateADKApp:
 
         # Should call add_adk_fastapi_endpoint with extract_headers
         mock_add_endpoint.assert_called_once_with(
-            app, mock_agent, "/test", extract_headers = ['Authorization'], extract_state_from_request=extract_headers
+            app, mock_agent, "/test", extract_headers = ['Authorization'], extract_state_from_request=extract_headers, agent_resolver=None
         )
 
     def test_create_app_default_path(self, mock_agent):

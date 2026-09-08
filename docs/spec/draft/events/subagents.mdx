@@ -1,0 +1,127 @@
+---
+title: "Subagents"
+description: "Attribution, ownership, nesting, parallel execution, state and termination — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+An agent may delegate part of a run to another agent. Everything the delegate
+produces travels in the same stream, so a consumer needs to know which work
+belongs to whom without replaying the run.
+
+## Attribution
+
+`subagentRunId` identifies one invocation of a subagent. Events the subagent
+produces carry it; events the parent agent produces do not. An absent
+`subagentRunId` means the parent agent, and MUST NOT be spelled as `null`.
+
+An id identifies an *invocation*, not an agent. A producer MUST NOT reuse a
+`subagentRunId` for a second invocation within a run, even of the same subagent
+— the second invocation gets its own id. An id MAY reappear in a later run, when
+a suspended invocation is continued.
+
+Which events can carry attribution is a structural question, and the
+[schema](/spec/draft/schema#attributable) answers it. Read a tag on a standalone event
+— `STEP_*`, `CUSTOM`, `RAW`, the state events — as provenance: it records who
+produced the event, not that the producer owns a private copy of what the event
+touches.
+
+## Lifecycle
+
+`SUBAGENT_STARTED` announces an invocation, `SUBAGENT_FINISHED` closes it, and
+`SUBAGENT_ERROR` reports that it failed. All three carry the `subagentRunId`
+they concern, and a producer MUST NOT omit it.
+
+- A producer that announces an invocation MUST do so before any event attributed
+  to it.
+- A producer MUST NOT announce an invocation whose id is already active.
+- A producer MUST NOT reuse the id of an invocation that has already finished in
+  this run.
+- Every invocation a producer announces MUST be closed, by `SUBAGENT_FINISHED`
+  or `SUBAGENT_ERROR`, before the run finishes.
+
+A producer MAY attribute events without announcing anything. Such a stream tells
+a consumer which work belongs together but not when an invocation began or
+ended, and a consumer MUST accept it: `subagentRunId` is meaningful on its own,
+and requiring the lifecycle events would make grouping unavailable to producers
+that cannot report it. A producer that can report the lifecycle SHOULD, since a
+consumer can then show an invocation as running rather than inferring it from
+the events that happen to arrive.
+
+`SUBAGENT_ERROR` ends the invocation, not the run. A parent agent MAY handle a
+failed subagent and continue; that is why it is not `RUN_ERROR`.
+
+`SUBAGENT_FINISHED` reports why the segment ended. An absent outcome means
+success. A suspended outcome means the invocation is paused awaiting outside
+input — terminal for this stream but not for the invocation, which a later run
+MAY continue under the same id. A producer MUST NOT send an outcome value the
+schema does not describe, and MUST NOT attach interrupt ids to a success
+outcome.
+
+## Ownership
+
+Attribution is not advisory. Once an entity is opened under an owner, every
+event continuing it MUST agree about that owner.
+
+- A `TEXT_MESSAGE_CONTENT` or `TEXT_MESSAGE_END` MUST NOT carry a
+  `subagentRunId` that disagrees with the `TEXT_MESSAGE_START` that opened the
+  message. It MAY omit the tag: an untagged continuation continues whatever the
+  opener owns, and a producer that tags only the opener is still conformant.
+- The same holds for reasoning messages, for tool calls against their
+  `TOOL_CALL_START`, and for activity messages against the snapshot that opened
+  them.
+- A `STEP_FINISHED` MUST carry the same attribution as the `STEP_STARTED` it
+  closes. Steps are per-owner: a parent and a subagent MAY each have a step of
+  the same name open at once, and each closes its own.
+
+A consumer MUST reject a continuation whose tag disagrees with its opener.
+Accepting it would append one producer's content into another producer's
+message, which no consumer can detect afterwards. A continuation carrying no tag
+is not a disagreement and MUST be accepted.
+
+A tool call inherits the attribution of the message that held it. A producer
+MUST NOT attribute a tool call to one owner while the message carrying it is
+attributed to another.
+
+## Nesting and parallelism
+
+A subagent MAY itself delegate. `parentSubagentRunId` on `SUBAGENT_STARTED`
+names the invocation that spawned this one; absent means the parent agent
+spawned it directly. A producer MUST NOT name a parent invocation that has not
+been announced in this run.
+
+Invocations MAY run in parallel, and their events MAY interleave arbitrarily.
+Each invocation's entities are tracked separately, so two subagents MAY stream
+messages at the same time. A consumer MUST NOT assume that one invocation's
+events are contiguous, and MUST NOT close one invocation's entities because
+another invocation ended.
+
+## State
+
+State is run-scoped. A `STATE_SNAPSHOT` or `STATE_DELTA` a subagent sends
+updates the run's state exactly as one from the parent agent does, and a
+consumer MUST apply it that way.
+
+`subagentRunId` on a state event is provenance: it records which invocation
+produced the update. It MUST NOT be read as the subagent owning a private state
+of its own, and a consumer MUST NOT withhold the update from the run's state
+because a subagent sent it. There is no per-subagent state in this protocol.
+
+## Termination
+
+A run MUST NOT finish while an invocation is still active. A producer that
+reaches the end of its work with an invocation open has a bug: either the
+invocation ended and was not reported, or it did not end and the run is not
+over.
+
+`RUN_ERROR` ends everything. A consumer MUST treat every open invocation as
+abandoned when a run errors, and MUST NOT expect a closing event for any of
+them.
+
+When a run finishes with an interrupt outcome, the interrupts it carries MAY be
+attributed. An interrupt tagged with a `subagentRunId` was raised inside that
+invocation; an untagged one belongs to the parent agent. An invocation suspended
+because a descendant interrupted owns no interrupt of its own, so a suspended
+outcome MAY carry no interrupt ids at all.

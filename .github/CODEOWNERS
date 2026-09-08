@@ -3,16 +3,11 @@
 sdks/community/java @pascalwilbrink
 docs/sdk/java @pascalwilbrink
 
-sdks/community/kotlin @contextablemark
-docs/sdk/kotlin @contextablemark
-
 sdks/community/go @mattsp1290
 docs/sdk/go @mattsp1290
 
 sdks/community/dart @mattsp1290
 docs/sdk/dart @mattsp1290
-
-integrations/adk-middleware @contextablemark
 
 integrations/agent-spec @sonleoracle
 

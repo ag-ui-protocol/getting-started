@@ -172,6 +172,21 @@
           "role": "tool",
           "content": "72°F and sunny",
           "toolCallId": "call_01"
+        },
+        {
+          "id": "msg_09",
+          "role": "user",
+          "content": [
+            { "type": "text", "text": "Describe this image" },
+            {
+              "type": "image",
+              "source": {
+                "type": "url",
+                "value": "https://example.com/image.png",
+                "mimeType": "image/png"
+              }
+            }
+          ]
         }
       ]
     },
@@ -193,6 +208,49 @@
       "type": "RUN_FINISHED",
       "threadId": "thread_04",
       "runId": "run_04"
+    }
+  ],
+  "messages_snapshot_activity_reasoning": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "thread_04b",
+      "runId": "run_04b"
+    },
+    {
+      "type": "MESSAGES_SNAPSHOT",
+      "messages": [
+        {
+          "id": "msg_a1",
+          "role": "user",
+          "content": "Help me index this directory."
+        },
+        {
+          "id": "act_a1",
+          "role": "activity",
+          "activityType": "task.run",
+          "content": {
+            "title": "Indexing files",
+            "progress": 0.5
+          }
+        },
+        {
+          "id": "rsn_a1",
+          "role": "reasoning",
+          "content": "Considering the file types to skip.",
+          "encryptedValue": "ZW5jcnlwdGVkLXJlYXNvbmluZw=="
+        },
+        {
+          "id": "msg_a2",
+          "role": "assistant",
+          "content": "Indexing started.",
+          "encryptedValue": "ZW5jcnlwdGVkLWFzc2lzdGFudA=="
+        }
+      ]
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "thread_04b",
+      "runId": "run_04b"
     }
   ],
   "multiple_runs": [
@@ -436,6 +494,113 @@
       "type": "RUN_FINISHED",
       "threadId": "thread_11",
       "runId": "run_12"
+    }
+  ],
+  "activity_events": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "thread_12",
+      "runId": "run_13"
+    },
+    {
+      "type": "ACTIVITY_SNAPSHOT",
+      "messageId": "act_01",
+      "activityType": "task.run",
+      "content": {
+        "title": "Indexing files",
+        "progress": 0.0,
+        "items": []
+      },
+      "replace": true
+    },
+    {
+      "type": "ACTIVITY_DELTA",
+      "messageId": "act_01",
+      "activityType": "task.run",
+      "patch": [
+        {"op": "replace", "path": "/progress", "value": 0.5},
+        {"op": "add", "path": "/items/-", "value": "/foo.dart"}
+      ]
+    },
+    {
+      "type": "ACTIVITY_DELTA",
+      "messageId": "act_01",
+      "activityType": "task.run",
+      "patch": [
+        {"op": "replace", "path": "/progress", "value": 1.0}
+      ]
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "thread_12",
+      "runId": "run_13"
+    }
+  ],
+  "reasoning_events": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "thread_13",
+      "runId": "run_14"
+    },
+    {
+      "type": "REASONING_START",
+      "messageId": "rsn_01"
+    },
+    {
+      "type": "REASONING_MESSAGE_START",
+      "messageId": "rsn_01",
+      "role": "reasoning"
+    },
+    {
+      "type": "REASONING_MESSAGE_CONTENT",
+      "messageId": "rsn_01",
+      "delta": "Analyzing the request..."
+    },
+    {
+      "type": "REASONING_MESSAGE_CHUNK",
+      "messageId": "rsn_01",
+      "delta": " considering options."
+    },
+    {
+      "type": "REASONING_MESSAGE_END",
+      "messageId": "rsn_01"
+    },
+    {
+      "type": "REASONING_ENCRYPTED_VALUE",
+      "subtype": "message",
+      "entityId": "rsn_01",
+      "encryptedValue": "ZW5jcnlwdGVkLXBheWxvYWQ="
+    },
+    {
+      "type": "REASONING_END",
+      "messageId": "rsn_01"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "thread_13",
+      "runId": "run_14"
+    }
+  ],
+  "thinking_text_message_legacy": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "thread_14",
+      "runId": "run_15"
+    },
+    {
+      "type": "THINKING_TEXT_MESSAGE_START"
+    },
+    {
+      "type": "THINKING_TEXT_MESSAGE_CONTENT",
+      "delta": "Let me think..."
+    },
+    {
+      "type": "THINKING_TEXT_MESSAGE_END"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "thread_14",
+      "runId": "run_15"
     }
   ]
 }

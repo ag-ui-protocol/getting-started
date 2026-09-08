@@ -6,7 +6,11 @@ authors = [{ name = "Microsoft Agent Framework Team" }]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "agent-framework-ag-ui>=1.0.0b251117",
+    # [a2ui] pulls ag-ui-a2ui-toolkit, which the adapter imports lazily to enable the
+    # A2UI demos (catalog validation + surface building). agent-framework-openai supplies
+    # the OpenAI chat clients the agents use. Floor 1.2.0 is the first release with A2UI.
+    "agent-framework-ag-ui[a2ui]>=1.2.0",
+    "agent-framework-openai>=1.13.0",
     "python-dotenv>=1.0.0",
 ]
 

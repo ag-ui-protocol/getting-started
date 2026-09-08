@@ -37,7 +37,7 @@ import {
   LegacyActionExecutionMessage,
   LegacyResultMessage,
   LegacyActionExecutionResult,
-  LegacyRunError
+  LegacyRunError,
 } from "./types";
 import untruncateJson from "untruncate-json";
 
@@ -71,16 +71,16 @@ interface PredictStateValue {
 export const convertToLegacyEvents =
   (threadId: string, runId: string, agentName: string) =>
   (events$: Observable<BaseEvent>): Observable<LegacyRuntimeProtocolEvent> => {
-    let currentState: any = {};
+    let currentState: Record<string, unknown> = {};
     let running = true;
     let active = true;
     let nodeName = "";
     let syncedMessages: Message[] | null = null;
     let predictState: PredictStateValue[] | null = null;
     let currentToolCalls: ToolCall[] = [];
-    let toolCallNames: Record<string, string> = {};
+    const toolCallNames: Record<string, string> = {};
 
-    const updateCurrentState = (newState: any) => {
+    const updateCurrentState = (newState: Record<string, unknown>) => {
       // the legacy protocol will only support object state
       if (typeof newState === "object" && newState !== null) {
         if ("messages" in newState) {
@@ -160,7 +160,7 @@ export const convertToLegacyEvents =
             let didUpdateState = false;
 
             if (predictState) {
-              let currentPredictState = predictState.find(
+              const currentPredictState = predictState.find(
                 (s) => s.tool == currentToolCall.function.name,
               );
 
@@ -186,7 +186,10 @@ export const convertToLegacyEvents =
                     });
                     didUpdateState = true;
                   }
-                } catch (e) {}
+                } catch (_e) {
+                  // Partial predictive-state args are expected to be
+                  // unparseable until the tool call completes.
+                }
               }
             }
 
@@ -330,6 +333,22 @@ export const convertToLegacyEvents =
               return [];
             }
 
+            let legacyMessages: LegacyMessage[] | null = null;
+            if (syncedMessages) {
+              try {
+                legacyMessages = convertMessagesToLegacyFormat(syncedMessages);
+              } catch (error) {
+                // Surface the failure on the stream instead of tearing it down
+                // with an opaque JSON parsing error.
+                return [
+                  {
+                    type: LegacyRuntimeEventTypes.enum.RunError,
+                    message: (error as Error).message,
+                  } as LegacyRunError,
+                ];
+              }
+            }
+
             return [
               {
                 type: LegacyRuntimeEventTypes.enum.AgentStateMessage,
@@ -341,11 +360,7 @@ export const convertToLegacyEvents =
                 role: "assistant",
                 state: JSON.stringify({
                   ...currentState,
-                  ...(syncedMessages
-                    ? {
-                        messages: convertMessagesToLegacyFormat(syncedMessages),
-                      }
-                    : {}),
+                  ...(legacyMessages ? { messages: legacyMessages } : {}),
                 }),
                 active: false,
               } as LegacyAgentStateMessage,
@@ -424,10 +439,19 @@ export function convertMessagesToLegacyFormat(messages: Message[]): LegacyMessag
       }
       if (message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
         for (const toolCall of message.toolCalls) {
+          let parsedArguments: unknown;
+          try {
+            parsedArguments = JSON.parse(toolCall.function.arguments);
+          } catch (error) {
+            throw new Error(
+              `Failed to parse arguments for tool call '${toolCall.id}' ` +
+                `(${toolCall.function.name}): ${(error as Error).message}`,
+            );
+          }
           const actionExecutionMessage: LegacyActionExecutionMessage = {
             id: toolCall.id,
             name: toolCall.function.name,
-            arguments: JSON.parse(toolCall.function.arguments),
+            arguments: parsedArguments,
             parentMessageId: message.id,
           };
           result.push(actionExecutionMessage);

@@ -41,6 +41,21 @@ export const weatherTool = createTool({
 });
 
 const getWeather = async (location: string) => {
+  // Return deterministic canned weather data when AG_UI_MOCK_WEATHER is set so
+  // e2e runs don't depend on the live open-meteo API (which rate-limits CI's
+  // shared egress IPs). The dojo-e2e workflow sets this for the server process.
+  if (process.env.AG_UI_MOCK_WEATHER) {
+    return {
+      temperature: 21,
+      feelsLike: 20,
+      humidity: 65,
+      windSpeed: 12,
+      windGust: 18,
+      conditions: getWeatherCondition(1),
+      location,
+    };
+  }
+
   const geocodingUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1`;
   const geocodingResponse = await fetch(geocodingUrl);
   const geocodingData = (await geocodingResponse.json()) as GeocodingResponse;

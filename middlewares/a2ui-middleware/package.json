@@ -1,7 +1,8 @@
 {
   "name": "@ag-ui/a2ui-middleware",
   "author": "Markus Ecker",
-  "version": "0.0.5",
+  "version": "0.0.10",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/ag-ui-protocol/ag-ui.git"
@@ -31,6 +32,7 @@
     "rxjs": "7.8.1"
   },
   "dependencies": {
+    "@ag-ui/a2ui-toolkit": "workspace:*",
     "clarinet": "^0.12.6"
   },
   "devDependencies": {

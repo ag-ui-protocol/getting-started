@@ -11,7 +11,7 @@ plugins {
 
 // Group and version from gradle.properties
 group = findProperty("group")?.toString() ?: "com.ag-ui.community"
-version = "0.1.0"
+version = "0.4.1"
 
 repositories {
     google()

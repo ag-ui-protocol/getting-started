@@ -20,5 +20,6 @@ class SseMessage {
   });
 
   @override
-  String toString() => 'SseMessage(event: $event, id: $id, data: $data, retry: $retry)';
+  String toString() =>
+      'SseMessage(event: $event, id: $id, data: $data, retry: $retry)';
 }

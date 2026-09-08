@@ -2,6 +2,8 @@
 name = "ag_ui_watsonx"
 version = "0.0.1"
 description = "AG-UI integration for IBM watsonx orchestrate agents"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "AG-UI Contributors" }
 ]

@@ -1,6 +1,6 @@
 name: ag_ui
 description: Dart SDK for AG-UI protocol - standardizing agent-user interactions through event-based communication
-version: 0.1.0
+version: 0.3.0
 homepage: https://github.com/ag-ui-protocol/ag-ui
 repository: https://github.com/ag-ui-protocol/ag-ui/tree/main/sdks/community/dart
 issue_tracker: https://github.com/ag-ui-protocol/ag-ui/issues

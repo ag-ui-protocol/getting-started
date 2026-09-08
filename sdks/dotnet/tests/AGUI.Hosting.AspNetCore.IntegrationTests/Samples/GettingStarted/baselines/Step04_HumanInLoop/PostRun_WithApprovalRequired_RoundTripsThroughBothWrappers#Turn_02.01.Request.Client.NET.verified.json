@@ -1,0 +1,48 @@
+﻿[
+  {
+    "role": "user",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "Please approve expense report EXP-2024-001"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "toolApprovalRequest",
+        "toolCall": {
+          "$type": "functionCall",
+          "name": "ApproveExpenseReport",
+          "arguments": {
+            "expenseReportId": "EXP-2024-001"
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        },
+        "requestId": "ficc_Id_1"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "contents": [
+      {
+        "$type": "toolApprovalResponse",
+        "approved": true,
+        "toolCall": {
+          "$type": "functionCall",
+          "name": "ApproveExpenseReport",
+          "arguments": {
+            "expenseReportId": "EXP-2024-001"
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        },
+        "requestId": "ficc_Id_1"
+      }
+    ]
+  }
+]

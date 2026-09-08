@@ -1,0 +1,964 @@
+﻿[
+  {
+    "type": "RUN_STARTED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1"
+  },
+  {
+    "type": "TEXT_MESSAGE_START",
+    "messageId": "chatcmpl-Id_1",
+    "role": "assistant",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": "This",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "This",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " image",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " image",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " depicts",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " depicts",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " a",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " a",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " black",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " black",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " geometric",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " geometric",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " shape",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " shape",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " that",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " that",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " resembles",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " resembles",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " a",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " a",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " simplified",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " simplified",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " outline",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " outline",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " of",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " of",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " a",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " a",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " gemstone",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " gemstone",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " or",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " or",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " diamond",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " diamond",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": ".",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " It",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " It",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " consists",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " consists",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " of",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " of",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " angular",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " angular",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " lines",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " lines",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " and",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " and",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " facets",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " facets",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " that",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " that",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " inter",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " inter",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": "connect",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "connect",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " to",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " to",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " create",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " create",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " a",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " a",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " three",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " three",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": "-dimensional",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "-dimensional",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": ",",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ",",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " fac",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " fac",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": "eted",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "eted",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " appearance",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " appearance",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": ".",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "conversationId": null,
+      "finishReason": null,
+      "modelId": "",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_END",
+    "messageId": "chatcmpl-Id_1"
+  },
+  {
+    "type": "RUN_FINISHED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1",
+    "outcome": {
+      "type": "success"
+    },
+    "usage": [
+      {
+        "inputTokens": 220,
+        "outputTokens": 39,
+        "totalTokens": 259,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0
+      }
+    ]
+  }
+]

@@ -13,6 +13,7 @@ from ag_ui.core import (
 
 from ag_ui_adk import ADKAgent
 from ag_ui_adk.execution_state import ExecutionState
+from tests.constants import LIVE_TEST_MODEL
 
 
 class TestHITLToolTracking:
@@ -32,7 +33,7 @@ class TestHITLToolTracking:
         from google.adk.agents import LlmAgent
         return LlmAgent(
             name="test_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="Test agent"
         )
 
@@ -200,6 +201,58 @@ class TestHITLToolTracking:
             assert ("test_thread", "test_user") in adk_middleware._active_executions
             execution = adk_middleware._active_executions[("test_thread", "test_user")]
             assert execution.is_complete
+
+    @pytest.mark.asyncio
+    async def test_parent_cleanup_drops_stale_read_cache(
+        self, adk_middleware, sample_tool
+    ):
+        """The parent cleanup read must not use its pre-run session cache."""
+        input_data = RunAgentInput(
+            thread_id="test_thread",
+            run_id="run_1",
+            messages=[UserMessage(id="1", role="user", content="Test")],
+            tools=[sample_tool],
+            context=[],
+            state={},
+            forwarded_props={},
+        )
+
+        cache_disabled = False
+        original_disable = (
+            adk_middleware._session_manager.disable_session_read_cache
+        )
+
+        def disable_session_read_cache():
+            nonlocal cache_disabled
+            cache_disabled = True
+            original_disable()
+
+        async def mock_has_pending_tool_calls(*_args, **_kwargs):
+            return cache_disabled
+
+        async def mock_run_adk_in_background(*args, **kwargs):
+            await kwargs["event_queue"].put(None)
+
+        with patch.object(
+            adk_middleware._session_manager,
+            "disable_session_read_cache",
+            side_effect=disable_session_read_cache,
+        ), patch.object(
+            adk_middleware,
+            "_has_pending_tool_calls",
+            side_effect=mock_has_pending_tool_calls,
+        ), patch.object(
+            adk_middleware,
+            "_run_adk_in_background",
+            side_effect=mock_run_adk_in_background,
+        ):
+            async for _event in adk_middleware._start_new_execution(
+                input_data,
+            ):
+                pass
+
+        assert cache_disabled
+        assert ("test_thread", "test_user") in adk_middleware._active_executions
 
     @pytest.mark.asyncio
     async def test_session_not_cleaned_up_with_pending_tools(self, mock_adk_agent, sample_tool):

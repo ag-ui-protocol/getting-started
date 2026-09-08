@@ -68,8 +68,10 @@ from google.adk.models.llm_response import LlmResponse
 from google.adk.sessions import DatabaseSessionService, InMemorySessionService
 from google.genai import types
 
+from tests.constants import LIVE_TEST_MODEL
+
 # Default model for live tests (Gemini Flash — cheap and fast).
-DEFAULT_MODEL = "gemini-2.0-flash"
+DEFAULT_MODEL = LIVE_TEST_MODEL
 
 
 STALE_MARKER = "The session has been modified in storage since it was loaded"
@@ -664,8 +666,9 @@ class TestStaleSessionRegressionLiveLLM:
           - ``ResumabilityConfig(is_resumable=True)`` — the resumable HITL
             path keeps the runner alive after the LRO event, which is the
             configuration the original reporter was on (ADK >= 1.27)
-          - A real ``gemini-2.0-flash`` model that will be prompted to
-            call ``approve_action`` (a client/frontend tool)
+          - A real Gemini model (``LIVE_TEST_MODEL``, currently
+            ``gemini-3.5-flash``) that will be prompted to call
+            ``approve_action`` (a client/frontend tool)
 
         Assertions:
           1. No stale-session error is logged (the #1732 regression).

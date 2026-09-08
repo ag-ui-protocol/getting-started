@@ -104,9 +104,8 @@ class TestGetSchemaKeysFallback(unittest.TestCase):
         graph.config_specs = []
         graph.get_input_jsonschema.return_value = {"properties": {"foo": {}, "bar": {}}}
         graph.get_output_jsonschema.return_value = {"properties": {"baz": {}}}
-        config_schema_obj = MagicMock()
-        config_schema_obj.schema.return_value = {"properties": {"cfg": {}}}
-        graph.config_schema.return_value = config_schema_obj
+        # Production now prefers the non-deprecated get_config_jsonschema().
+        graph.get_config_jsonschema.return_value = {"properties": {"cfg": {}}}
         # context_schema is optional; set it to None so the hasattr branch short-circuits.
         graph.context_schema = None
         agent = self._make_agent(graph)

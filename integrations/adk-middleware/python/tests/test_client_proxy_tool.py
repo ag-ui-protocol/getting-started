@@ -454,7 +454,9 @@ class TestCleanSchemaForGenai:
         result = _clean_schema_for_genai(schema)
         assert result["title"] == "MyTool"
         assert result["default"] == {"key": "value"}
-        assert result["additionalProperties"] is False
+        # additionalProperties is stripped: the Gemini Developer API rejects it
+        # in function declarations with a 400 even though genai.Schema accepts it.
+        assert "additionalProperties" not in result
         assert result["minProperties"] == 1
         assert result["maxProperties"] == 10
         assert result["properties"]["amount"]["minimum"] == 0
@@ -598,6 +600,61 @@ class TestCleanSchemaForGenai:
         result = _clean_schema_for_genai(schema)
         assert result["enum"] == ['{"foo": 1}']
 
+    # --- Mapping tests: oneOf -> anyOf ---
+
+    def test_maps_oneof_to_anyof(self):
+        """oneOf is mapped to anyOf (genai accepts anyOf but not oneOf)."""
+        schema = {
+            "oneOf": [
+                {"type": "string"},
+                {"type": "number"},
+            ]
+        }
+        result = _clean_schema_for_genai(schema)
+        assert "oneOf" not in result
+        assert len(result["anyOf"]) == 2
+        assert result["anyOf"][0]["type"] == "string"
+        assert result["anyOf"][1]["type"] == "number"
+
+    def test_maps_oneof_recursively_and_cleans_branches(self):
+        """A nested oneOf (e.g. from a zod discriminatedUnion) is mapped to
+        anyOf and each branch is cleaned, so the union structure survives
+        instead of being dropped by the allowlist."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "description": "discriminated union",
+                    "oneOf": [
+                        {
+                            "$comment": "branch A",
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "kind": {"const": "a"},
+                            },
+                        },
+                        {
+                            "type": "object",
+                            "properties": {"kind": {"const": "b"}},
+                        },
+                    ],
+                }
+            },
+        }
+        result = _clean_schema_for_genai(schema)
+        config = result["properties"]["config"]
+        assert "oneOf" not in config
+        any_of = config["anyOf"]
+        assert len(any_of) == 2
+        # branches are recursively cleaned: $-keys / rejected keys stripped,
+        # const mapped to enum
+        assert "$comment" not in any_of[0]
+        assert "additionalProperties" not in any_of[0]
+        assert any_of[0]["properties"]["kind"]["enum"] == ["a"]
+        # the sibling description is preserved alongside the mapped anyOf
+        assert config["description"] == "discriminated union"
+
     # --- Edge cases ---
 
     def test_handles_non_dict_input(self):
@@ -733,8 +790,16 @@ class TestEndToEndSchemaValidation:
         assert query_prop.example == "machine learning"
         assert query_prop.default == "hello world"
 
-    def test_e2e_schema_with_additional_properties(self):
-        """Schema with additionalProperties passes model_validate (Google docs example)."""
+    def test_e2e_schema_with_additional_properties_stripped(self):
+        """additionalProperties is stripped from the function declaration.
+
+        The Gemini Developer API rejects ``additionalProperties`` in function
+        declarations with a 400 ("Unknown name additional_properties ... Cannot
+        find field"), even though ``genai.types.Schema`` accepts it as a model
+        field. zod-to-json-schema (CopilotKit / AG-UI frontend tools) emits it on
+        every object, so leaving it in breaks every client-supplied tool on the
+        Developer API. It must be stripped.
+        """
         tool = AGUITool(
             name="recipe_tool",
             description="Recipe schema per Google docs",
@@ -757,7 +822,66 @@ class TestEndToEndSchemaValidation:
 
         assert declaration is not None
         assert declaration.parameters is not None
-        assert declaration.parameters.additional_properties is False
+        # Stripped, not preserved — otherwise the Developer API 400s on this tool.
+        assert declaration.parameters.additional_properties is None
+
+    def test_e2e_dojo_hitl_tool_has_no_additional_properties_at_any_depth(self):
+        """Regression for the AG-UI HITL dojo "nothing renders" report.
+
+        CopilotKit's ``useHumanInTheLoop`` registers a frontend tool whose zod
+        schema is serialized via ``zodToJsonSchema(..., {$refStrategy: "none"})``,
+        which stamps ``additionalProperties: false`` on every object (root *and*
+        array items) plus a ``$schema`` key. Forwarded verbatim, the Gemini
+        Developer API returns 400 ("Unknown name additional_properties ... Cannot
+        find field"), the run emits RUN_ERROR, and no tool call reaches the UI.
+
+        The cleaned declaration must therefore contain ``additional_properties``
+        nowhere — at any nesting depth — while keeping the real schema intact.
+        """
+        tool = AGUITool(
+            name="generate_task_steps",
+            description="Generates a list of steps for the user to perform",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "description": {"type": "string"},
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["enabled", "disabled", "executing"],
+                                },
+                            },
+                            "required": ["description", "status"],
+                            "additionalProperties": False,  # nested — must also be stripped
+                        },
+                    }
+                },
+                "required": ["steps"],
+                "additionalProperties": False,  # root
+                "$schema": "http://json-schema.org/draft-07/schema#",
+            },
+        )
+        proxy = ClientProxyTool(ag_ui_tool=tool, event_queue=AsyncMock())
+        declaration = proxy._get_declaration()
+
+        assert declaration is not None
+        assert declaration.parameters is not None
+
+        # Serialize exactly as it goes on the wire to Gemini; the rejected key
+        # must appear at no depth (and neither must the $schema meta key).
+        dumped = declaration.parameters.model_dump_json(by_alias=True, exclude_none=True)
+        assert "additionalProperties" not in dumped
+        assert "additional_properties" not in dumped
+        assert "$schema" not in dumped
+
+        # The real schema survived: steps -> array of objects with the enum intact.
+        steps = declaration.parameters.properties["steps"]
+        assert steps.items is not None
+        assert steps.items.properties["status"].enum == ["enabled", "disabled", "executing"]
 
     def test_e2e_schema_with_const_mapped_to_enum(self):
         """Schema with const is mapped to enum and passes model_validate."""
@@ -949,7 +1073,9 @@ class TestEndToEndSchemaValidation:
         params = declaration.parameters
         # Valid fields preserved
         assert params.title == "DatabaseQuery"
-        assert params.additional_properties is False
+        # additionalProperties stripped (Developer API rejects it; see
+        # test_e2e_schema_with_additional_properties_stripped).
+        assert params.additional_properties is None
         assert params.min_properties == 1
         assert params.max_properties == 10
         # sql: examples[0] mapped to example, minLength/maxLength preserved
@@ -969,8 +1095,9 @@ class TestEndToEndSchemaValidation:
         assert format_prop.title == "Output Format"
         assert format_prop.enum == ["json", "csv", "table"]
         assert format_prop.default == "json"
-        # options: nested additionalProperties preserved
+        # options: nested additionalProperties also stripped (Developer API
+        # rejects it at any depth, not just the root).
         options_prop = params.properties["options"]
-        assert options_prop.additional_properties is True
+        assert options_prop.additional_properties is None
         # Invalid fields stripped at root level
         # (readOnly, writeOnly, deprecated, contentMediaType, dependentRequired)

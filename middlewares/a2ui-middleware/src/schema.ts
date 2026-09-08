@@ -848,28 +848,12 @@ export function tryParseA2UIOperations(text: string): A2UIParseResult | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
-  } catch (e) {
-    // Try double-parse (in case the text is a JSON-encoded string)
-    try {
-      const inner = JSON.parse(JSON.parse(text));
-      if (
-        typeof inner === "object" &&
-        inner !== null &&
-        !Array.isArray(inner) &&
-        Array.isArray((inner as Record<string, unknown>)[A2UI_OPERATIONS_KEY])
-      ) {
-        const obj = inner as Record<string, unknown>;
-        const result: A2UIParseResult = {
-          operations: obj[A2UI_OPERATIONS_KEY] as Array<
-            Record<string, unknown>
-          >,
-        };
-
-        return result;
-      }
-    } catch {
-      // Not double-encoded either
-    }
+  } catch {
+    // Not valid JSON at all. The legitimate "double-encoded" case is handled
+    // below — when ``parsed`` is a string after one successful JSON.parse, we
+    // try parsing it again. A second nested parse in this catch is dead code:
+    // ``JSON.parse(text)`` just threw, so calling it again on the same input
+    // throws the same way.
     return null;
   }
 
@@ -880,9 +864,15 @@ export function tryParseA2UIOperations(text: string): A2UIParseResult | null {
     Array.isArray((parsed as Record<string, unknown>)[A2UI_OPERATIONS_KEY])
   ) {
     const obj = parsed as Record<string, unknown>;
-    const result: A2UIParseResult = {
-      operations: obj[A2UI_OPERATIONS_KEY] as Array<Record<string, unknown>>,
-    };
+    // Filter non-object entries — downstream consumers (getOperationSurfaceId,
+    // createA2UIActivityEvents) read properties off each op and would crash on
+    // ``null``, primitives, or arrays sitting in the array.
+    const rawOps = obj[A2UI_OPERATIONS_KEY] as Array<unknown>;
+    const operations = rawOps.filter(
+      (op): op is Record<string, unknown> =>
+        typeof op === "object" && op !== null && !Array.isArray(op),
+    );
+    const result: A2UIParseResult = { operations };
 
     return result;
   }
@@ -898,11 +888,12 @@ export function tryParseA2UIOperations(text: string): A2UIParseResult | null {
         Array.isArray((inner as Record<string, unknown>)[A2UI_OPERATIONS_KEY])
       ) {
         const obj = inner as Record<string, unknown>;
-        const result: A2UIParseResult = {
-          operations: obj[A2UI_OPERATIONS_KEY] as Array<
-            Record<string, unknown>
-          >,
-        };
+        const rawOps = obj[A2UI_OPERATIONS_KEY] as Array<unknown>;
+        const operations = rawOps.filter(
+          (op): op is Record<string, unknown> =>
+            typeof op === "object" && op !== null && !Array.isArray(op),
+        );
+        const result: A2UIParseResult = { operations };
         return result;
       }
     } catch {
@@ -962,5 +953,6 @@ export {
   extractCompleteItemsWithStatus,
   extractCompleteObject,
   extractCompleteA2UIOperations,
+  extractDataArrayItems,
   extractStringField,
 } from "./json-extract";

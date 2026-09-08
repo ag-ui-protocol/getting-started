@@ -37,7 +37,15 @@ const cardStyle: React.CSSProperties = {
   boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
 };
 
-function ActionButton({ label, doneLabel, action }: { label: string; doneLabel: string; action: any }) {
+function ActionButton({
+  label,
+  doneLabel,
+  action,
+}: {
+  label: string;
+  doneLabel: string;
+  action?: () => void;
+}) {
   const [done, setDone] = useState(false);
   return (
     <button
@@ -108,6 +116,10 @@ function Stars({ value, max = 5 }: { value: number; max?: number }) {
 
 // ─── Row ─────────────────────────────────────────────────────────────
 
+// A Row child is either a bare component id or a reference carrying its own
+// data path.
+type RowChild = string | { id: string; basePath?: string };
+
 export const Row = createReactComponent(RowApi, ({ props, buildChild }) => {
   const items = Array.isArray(props.children) ? props.children : [];
   return (
@@ -121,7 +133,7 @@ export const Row = createReactComponent(RowApi, ({ props, buildChild }) => {
         width: "100%",
       }}
     >
-      {items.map((item: any, i: number) => {
+      {items.map((item: RowChild, i: number) => {
         if (typeof item === "string")
           return <div key={`${item}-${i}`} style={{ flexShrink: 0, display: "flex" }}>{buildChild(item)}</div>;
         if (item && typeof item === "object" && "id" in item)
@@ -147,6 +159,11 @@ export const FlightCard = createReactComponent(FlightCardApi, ({ props }) => {
       {/* Header: airline + price */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {/* DEFERRED (PNI-307): plain <img> kept to preserve the exact
+              request and layout semantics for this agent-provided remote URL;
+              converting to next/image (sizing, loading and src handling
+              differ) is out of scope for this behavior-preserving pass. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={props.airlineLogo as string}
             alt={props.airline as string}
@@ -272,6 +289,9 @@ export const TeamMemberCard = createReactComponent(TeamMemberCardApi, ({ props }
     <div style={cardStyle}>
       <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
         {props.avatarUrl ? (
+          /* DEFERRED (PNI-307): plain <img> kept — agent-provided remote URL;
+             see the flight-card note above. */
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={props.avatarUrl as string}
             alt={props.name as string}

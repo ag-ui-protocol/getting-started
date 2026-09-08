@@ -14,7 +14,8 @@
     "agentic_chat_multimodal": "./agents/agentic_chat_multimodal/agent.py:graph",
     "subgraphs": "./agents/subgraphs/agent.py:graph",
     "a2ui_fixed_schema": "./agents/a2ui_fixed_schema/agent.py:graph",
-    "a2ui_dynamic_schema": "./agents/a2ui_dynamic_schema/agent.py:graph"
+    "a2ui_dynamic_schema": "./agents/a2ui_dynamic_schema/agent.py:graph",
+    "deepagents_subagents": "./agents/deepagents_subagents/agent.py:graph"
   },
   "env": ".env"
 }

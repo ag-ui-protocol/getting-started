@@ -59,7 +59,7 @@ export const stateStreamingMiddleware = (...items: StateItem[]) => {
       if (!isPreToolCall(request)) {
         return handler(request);
       }
-      const modelWithState = request.model.withConfig({
+      const modelWithState = (request.model as any).withConfig({
         metadata: { predict_state: predictState },
       });
 

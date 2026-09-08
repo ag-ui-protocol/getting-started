@@ -2,6 +2,7 @@
   "name": "@ag-ui/a2a-middleware",
   "author": "Markus Ecker <markus.ecker@gmail.com>",
   "version": "0.0.2",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/ag-ui-protocol/ag-ui.git"
@@ -46,8 +47,8 @@
   },
   "exports": {
     ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "require": "./dist/index.js",
+      "import": "./dist/index.mjs"
     },
     "./package.json": "./package.json"
   }

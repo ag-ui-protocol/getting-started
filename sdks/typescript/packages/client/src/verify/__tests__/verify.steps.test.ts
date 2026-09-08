@@ -1,6 +1,4 @@
 import { Subject } from "rxjs";
-import { toArray, catchError } from "rxjs/operators";
-import { firstValueFrom } from "rxjs";
 import { verifyEvents } from "../verify";
 import {
   BaseEvent,
@@ -8,7 +6,6 @@ import {
   AGUIError,
   RunStartedEvent,
   RunFinishedEvent,
-  RunErrorEvent,
   StepStartedEvent,
   StepFinishedEvent,
 } from "@ag-ui/core";
@@ -193,7 +190,7 @@ describe("verifyEvents steps", () => {
     const subscription = verifyEvents(false)(source$).subscribe({
       next: (event) => events.push(event),
       error: (err) => {
-        fail(`Should not have errored: ${err.message}`);
+        expect.fail(`Should not have errored: ${err.message}`);
       },
     });
 

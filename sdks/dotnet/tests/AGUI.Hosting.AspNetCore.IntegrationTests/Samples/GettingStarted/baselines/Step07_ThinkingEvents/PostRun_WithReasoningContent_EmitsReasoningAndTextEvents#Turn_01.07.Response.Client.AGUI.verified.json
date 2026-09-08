@@ -1,0 +1,4373 @@
+﻿[
+  {
+    "type": "RUN_STARTED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1"
+  },
+  {
+    "type": "REASONING_START",
+    "messageId": "msg_Id_3"
+  },
+  {
+    "type": "REASONING_MESSAGE_START",
+    "messageId": "msg_Id_3",
+    "role": "reasoning"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": "**Sol"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": "ving"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " heads"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": "/"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": "legs"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " problem"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": "**\n\nI"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " need"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " to"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " solve"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " heads"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " and"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " legs"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " problem"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " involving"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " chickens"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " and"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " rabbits"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": "."
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " I\u0027ve"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " established"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " that"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " total"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " number"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " of"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " heads"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " is"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " 20"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": ","
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " so"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " I"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " have"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " equation"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " c"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " \u002B"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " r"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " ="
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " 20"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " and"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " for"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " legs"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": ","
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " 2"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": "c"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " \u002B"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " 4"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": "r"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " ="
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " 56"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": "."
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " I"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " substitute"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " c"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " as"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " 20"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " -"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " r"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " into"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " second"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " equation"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " to"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " find"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " r"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " ="
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " 8"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " and"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " then"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " c"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " ="
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " 12"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": "."
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " I"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " could"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " also"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " show"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " method"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " of"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " calculating"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " extra"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " legs"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " to"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " verify"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": ","
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " linking"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " legs"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " difference"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " to"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " rabbit"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " numbers"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": "."
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " I\u0027ll"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " present"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " final"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " answer"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " with"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " reasoning"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": " steps"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_3",
+    "delta": "."
+  },
+  {
+    "type": "REASONING_MESSAGE_END",
+    "messageId": "msg_Id_3"
+  },
+  {
+    "type": "REASONING_END",
+    "messageId": "msg_Id_3"
+  },
+  {
+    "type": "TEXT_MESSAGE_START",
+    "messageId": "msg_Id_1",
+    "role": "assistant",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Let",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "Let",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Let",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " c",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " c",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " number",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " number",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " of",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " of",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " chickens",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " chickens",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " and",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " and",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " r",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " r",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " number",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " number",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " of",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " of",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " rabbits",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " rabbits",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ".\n\n",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".\n\n",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "Heads",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Heads",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ":",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " c",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " c",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " r",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " r",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "20",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "20",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "  \n",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "  \n",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "Leg",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Leg",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "s",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "s",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ":",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "2",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "2",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "c",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "c",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "4",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "4",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "r",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "r",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "56",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "56",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "\n\n",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "\n\n",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "From",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "From",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " the",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " the",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " first",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " first",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ",",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ",",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " c",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " c",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "20",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "20",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u2212",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u2212",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " r",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " r",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ".",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " Substitute",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Substitute",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " into",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " into",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " the",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " the",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " legs",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " legs",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " equation",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " equation",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ":\n",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":\n",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "2",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "2",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "(",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "(",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "20",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "20",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u2212",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u2212",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " r",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " r",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ")",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ")",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "4",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "4",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "r",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "r",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "56",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "56",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "  \n",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "  \n",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "40",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "40",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u2212",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u2212",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "2",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "2",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "r",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "r",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "4",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "4",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "r",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "r",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "56",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "56",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "  \n",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "  \n",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "40",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "40",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "2",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "2",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "r",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "r",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "56",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "56",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "  \n",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "  \n",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "2",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "2",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "r",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "r",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "16",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "16",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u2192",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u2192",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " r",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " r",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "8",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "8",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "\n\n",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "\n\n",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "Then",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Then",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " c",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " c",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "20",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "20",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u2212",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u2212",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "8",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "8",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "12",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "12",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ".\n\n",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".\n\n",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "Answer",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Answer",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ":",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "12",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "12",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " chickens",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " chickens",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " and",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " and",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "8",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "8",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " rabbits",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " rabbits",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ".\n\n",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".\n\n",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "(",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "(",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "Quick",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Quick",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " check",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " check",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ":",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "12",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "12",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " heads",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " heads",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "8",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "8",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " heads",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " heads",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "20",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "20",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ";",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ";",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "12",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "12",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "\u00B7",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "\u00B7",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "2",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "2",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "8",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "8",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "\u00B7",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "\u00B7",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "4",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "4",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "24",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "24",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "32",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "32",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " =",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "56",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "56",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " legs",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " legs",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ".)",
+    "rawEvent": {
+      "authorName": null,
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".)",
+          "annotations": null,
+          "additionalProperties": null
+        }
+      ],
+      "additionalProperties": null,
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "finishReason": null,
+      "modelId": "gpt-5-mini",
+      "continuationToken": null
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_END",
+    "messageId": "msg_Id_1"
+  },
+  {
+    "type": "RUN_FINISHED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1",
+    "outcome": {
+      "type": "success"
+    },
+    "usage": [
+      {
+        "model": "gpt-5-mini",
+        "inputTokens": 39,
+        "outputTokens": 345,
+        "totalTokens": 384,
+        "reasoningTokens": 128,
+        "cachedInputTokens": 0
+      }
+    ]
+  }
+]

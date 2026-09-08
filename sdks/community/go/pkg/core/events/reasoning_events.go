@@ -9,6 +9,9 @@ import (
 type ReasoningStartEvent struct {
 	*BaseEvent
 	MessageID string `json:"messageId"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewReasoningStartEvent creates a new reasoning start event.
@@ -39,6 +42,9 @@ func (e *ReasoningStartEvent) ToJSON() ([]byte, error) {
 type ReasoningEndEvent struct {
 	*BaseEvent
 	MessageID string `json:"messageId"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewReasoningEndEvent creates a new reasoning end event.
@@ -70,6 +76,9 @@ type ReasoningMessageStartEvent struct {
 	*BaseEvent
 	MessageID string `json:"messageId"`
 	Role      string `json:"role"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewReasoningMessageStartEvent creates a new reasoning message start event.
@@ -105,6 +114,9 @@ type ReasoningMessageContentEvent struct {
 	*BaseEvent
 	MessageID string `json:"messageId"`
 	Delta     string `json:"delta"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewReasoningMessageContentEvent creates a new reasoning message content event.
@@ -139,6 +151,9 @@ func (e *ReasoningMessageContentEvent) ToJSON() ([]byte, error) {
 type ReasoningMessageEndEvent struct {
 	*BaseEvent
 	MessageID string `json:"messageId"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewReasoningMessageEndEvent creates a new reasoning message end event.
@@ -170,6 +185,9 @@ type ReasoningMessageChunkEvent struct {
 	*BaseEvent
 	MessageID *string `json:"messageId,omitempty"`
 	Delta     *string `json:"delta,omitempty"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewReasoningMessageChunkEvent creates a new reasoning message chunk event.
@@ -231,6 +249,9 @@ type ReasoningEncryptedValueEvent struct {
 	Subtype        ReasoningEncryptedValueSubtype `json:"subtype"`
 	EntityID       string                         `json:"entityId"`
 	EncryptedValue string                         `json:"encryptedValue"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewReasoningEncryptedValueEvent creates a new reasoning encrypted value event.

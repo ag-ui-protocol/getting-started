@@ -19,8 +19,8 @@ class Encoder {
     return message.toJson();
   }
 
-  /// Encode ToolResult to JSON
-  Map<String, dynamic> encodeToolResult(ToolResult result) {
+  /// Encode ClientToolResult to JSON
+  Map<String, dynamic> encodeToolResult(ClientToolResult result) {
     return {
       'toolCallId': result.toolCallId,
       'result': result.result,
@@ -35,14 +35,18 @@ class Decoder {
   const Decoder();
 }
 
-/// ToolResult model for submitting tool execution results
-class ToolResult {
+/// ToolResult model for submitting tool execution results to the server.
+///
+/// Named [ClientToolResult] to distinguish it from [types/tool.dart:ToolResult],
+/// which models results received FROM the server (`content: String`). This
+/// class is for the outbound direction (`result: dynamic`, `metadata`).
+class ClientToolResult {
   final String toolCallId;
   final dynamic result;
   final String? error;
   final Map<String, dynamic>? metadata;
 
-  const ToolResult({
+  const ClientToolResult({
     required this.toolCallId,
     required this.result,
     this.error,

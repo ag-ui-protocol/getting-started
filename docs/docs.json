@@ -32,7 +32,8 @@
                   },
                   "quickstart/clients"
                 ]
-              }
+              },
+              "talk-to-us"
             ]
           },
           {
@@ -43,22 +44,31 @@
               "concepts/agents",
               "concepts/middleware",
               "concepts/messages",
+              "concepts/metadata",
               "concepts/reasoning",
               "concepts/state",
               "concepts/interrupts",
               "concepts/serialization",
               "concepts/tools",
+              "concepts/subagents",
               "concepts/capabilities",
               "concepts/generative-ui-specs"
             ]
           },
           {
             "group": "Draft Proposals",
-            "pages": ["drafts/overview", "drafts/generative-ui", "drafts/meta-events"]
+            "pages": [
+              "drafts/overview",
+              "drafts/generative-ui",
+              "drafts/meta-events"
+            ]
           },
           {
             "group": "Tutorials",
-            "pages": ["tutorials/cursor", "tutorials/debugging"]
+            "pages": [
+              "tutorials/cursor",
+              "tutorials/debugging"
+            ]
           },
           {
             "group": "Development",
@@ -66,7 +76,68 @@
               "development/updates",
               "development/roadmap",
               "development/contributing",
-              "talk-to-us"
+              "support"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "1.0 Specification (Draft)",
+        "groups": [
+          {
+            "group": "Specification",
+            "pages": [
+              "spec/draft/index",
+              "spec/draft/changelog",
+              "spec/draft/architecture"
+            ]
+          },
+          {
+            "group": "Base Protocol",
+            "pages": [
+              "spec/draft/basic/index",
+              "spec/draft/basic/run-input",
+              "spec/draft/basic/metadata",
+              {
+                "group": "Event Patterns",
+                "pages": [
+                  "spec/draft/basic/patterns/index",
+                  "spec/draft/basic/patterns/streaming",
+                  "spec/draft/basic/patterns/snapshots",
+                  "spec/draft/basic/patterns/interrupt-resume"
+                ]
+              },
+              {
+                "group": "Transports",
+                "pages": [
+                  "spec/draft/basic/transports/index",
+                  "spec/draft/basic/transports/http-sse",
+                  "spec/draft/basic/transports/http-protobuf"
+                ]
+              },
+              "spec/draft/basic/processing",
+              "spec/draft/basic/versioning"
+            ]
+          },
+          {
+            "group": "Event Streams",
+            "pages": [
+              "spec/draft/events/index",
+              "spec/draft/events/lifecycle",
+              "spec/draft/events/text-messages",
+              "spec/draft/events/tool-calls",
+              "spec/draft/events/reasoning",
+              "spec/draft/events/state",
+              "spec/draft/events/activity",
+              "spec/draft/events/subagents",
+              "spec/draft/events/passthrough"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "spec/draft/schema-files",
+              "spec/draft/schema"
             ]
           }
         ]
@@ -116,7 +187,39 @@
               },
               {
                 "group": "ag_ui.encoder",
-                "pages": ["sdk/python/encoder/overview"]
+                "pages": [
+                  "sdk/python/encoder/overview"
+                ]
+              }
+            ]
+          },
+          {
+            "group": ".NET",
+            "pages": [
+              {
+                "group": "AGUI.Abstractions",
+                "pages": [
+                  "sdk/dotnet/abstractions/overview",
+                  "sdk/dotnet/abstractions/types",
+                  "sdk/dotnet/abstractions/events",
+                  "sdk/dotnet/abstractions/multimodal-inputs"
+                ]
+              },
+              {
+                "group": "AGUI.Client",
+                "pages": [
+                  "sdk/dotnet/client/overview",
+                  "sdk/dotnet/client/chat-client",
+                  "sdk/dotnet/client/transport"
+                ]
+              },
+              {
+                "group": "AGUI.Server",
+                "pages": [
+                  "sdk/dotnet/hosting/overview",
+                  "sdk/dotnet/hosting/endpoints",
+                  "sdk/dotnet/hosting/extensibility"
+                ]
               }
             ]
           }
@@ -134,6 +237,11 @@
           "anchor": "Python SDK",
           "href": "https://docs.ag-ui.com/sdk/python/core/overview",
           "icon": "python"
+        },
+        {
+          "anchor": ".NET SDK",
+          "href": "https://docs.ag-ui.com/sdk/dotnet/abstractions/overview",
+          "icon": "/logo/dotnet.svg"
         }
       ]
     }
@@ -156,9 +264,6 @@
     }
   },
   "seo": {
-    "metatags": {
-      "og:image": "https://raw.githubusercontent.com/ag-ui-protocol/docs/logo/light.png"
-    },
     "indexing": "navigable"
   },
   "integrations": {
@@ -187,6 +292,26 @@
     {
       "source": "/quickstart/build",
       "destination": "/quickstart/server"
+    },
+    {
+      "source": "/spec/draft/overview",
+      "destination": "/spec/draft"
+    },
+    {
+      "source": "/spec/draft/lifecycle",
+      "destination": "/spec/draft/events/lifecycle"
+    },
+    {
+      "source": "/spec/draft/unknown-and-malformed",
+      "destination": "/spec/draft/basic/processing"
+    },
+    {
+      "source": "/spec/draft/subagents",
+      "destination": "/spec/draft/events/subagents"
+    },
+    {
+      "source": "/spec/draft/compatibility",
+      "destination": "/spec/draft/basic/versioning"
     }
   ]
 }

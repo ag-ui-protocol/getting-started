@@ -1,0 +1,48 @@
+# 🧠 Observational Memory
+
+## What This Demo Shows
+
+This demo showcases how **Mastra Observational Memory (OM)** surfaces through
+AG-UI as **activity events**. OM is a Mastra memory feature the developer
+enables on their own agent: background **Observer** / **Reflector** agents read
+the growing conversation, compress older turns into a dense **observation log**,
+and **activate** those observations into the context window — all out of band.
+
+When OM does this work, Mastra streams typed `data-om-*` chunks on the agent's
+stream. The Mastra bridge maps their lifecycle to AG-UI `ACTIVITY_SNAPSHOT` /
+`ACTIVITY_DELTA` events (`activityType: "mastra-observational-memory"`). A custom
+`renderActivityMessages` renderer draws a distinct **Observational Memory** card,
+separate from regular chat text.
+
+## How to Interact
+
+Just chat for a few turns and let the conversation grow — the suggestions are a
+good start:
+
+- "I'm planning a two-week trip through Japan in spring..."
+- "Tell me more about the food scene there, and remember I'm vegetarian."
+
+After a couple of exchanges the conversation crosses OM's (deliberately low)
+token threshold and you'll see an **Observational Memory** card appear, showing
+the Observer working, the observation summary it produced, token counts, and the
+compression ratio — then advancing to **Activated** when those observations move
+into the live context.
+
+## ✨ What's Happening Technically
+
+- The agent's `Memory` has `observationalMemory` enabled with low thresholds so
+  the Observer fires after a few short turns (a production agent uses much larger
+  windows).
+- OM emits `data-om-*` chunks on `fullStream` during the run. The bridge maps the
+  substantive lifecycle — `data-om-observation-*`, `data-om-buffering-*`, and
+  `data-om-activation` — to `ACTIVITY_SNAPSHOT` / `ACTIVITY_DELTA`. The OM
+  `cycleId` round-trips as the activity `messageId`.
+- In the async path, the buffering cycle and its activation share one `cycleId`,
+  so a single card advances **running → completed → activated**.
+- Surfacing is **opt-in** on the bridge (`observationalMemory`, default OFF). OM
+  itself is the developer's opt-in; the bridge stays silent about it unless asked.
+  With the toggle off, the `data-om-*` chunks are swallowed and nothing renders.
+
+The `content` shape (`cycleId`, `operationType`, `phase`, `status`,
+`observations`, token counts, …) is a sensible default proposed by the AG-UI
+bridge and is intended to be co-designed with Mastra.

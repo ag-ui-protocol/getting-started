@@ -21,7 +21,9 @@ void main() {
         expect(encoder.getContentType(), equals('text/event-stream'));
       });
 
-      test('creates encoder with protobuf support when accept header includes it', () {
+      test(
+          'creates encoder with protobuf support when accept header includes it',
+          () {
         final encoder = EventEncoder(
           accept: 'application/vnd.ag-ui.event+proto, text/event-stream',
         );
@@ -29,7 +31,8 @@ void main() {
         expect(encoder.getContentType(), equals(aguiMediaType));
       });
 
-      test('creates encoder without protobuf when accept header excludes it', () {
+      test('creates encoder without protobuf when accept header excludes it',
+          () {
         final encoder = EventEncoder(accept: 'text/event-stream');
         expect(encoder.acceptsProtobuf, isFalse);
         expect(encoder.getContentType(), equals('text/event-stream'));
@@ -44,14 +47,14 @@ void main() {
         );
 
         final encoded = encoder.encodeSSE(event);
-        
+
         expect(encoded, startsWith('data: '));
         expect(encoded, endsWith('\n\n'));
-        
+
         // Extract and parse JSON
         final jsonStr = encoded.substring(6, encoded.length - 2);
         final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-        
+
         expect(json['type'], equals('TEXT_MESSAGE_START'));
         expect(json['messageId'], equals('msg123'));
         expect(json['role'], equals('assistant'));
@@ -66,7 +69,7 @@ void main() {
         final encoded = encoder.encodeSSE(event);
         final jsonStr = encoded.substring(6, encoded.length - 2);
         final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-        
+
         expect(json['type'], equals('TEXT_MESSAGE_CONTENT'));
         expect(json['messageId'], equals('msg123'));
         expect(json['delta'], equals('Hello, world!'));
@@ -82,7 +85,7 @@ void main() {
         final encoded = encoder.encodeSSE(event);
         final jsonStr = encoded.substring(6, encoded.length - 2);
         final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-        
+
         expect(json['type'], equals('TOOL_CALL_START'));
         expect(json['toolCallId'], equals('tool456'));
         expect(json['toolCallName'], equals('search'));
@@ -98,7 +101,7 @@ void main() {
         final encoded = encoder.encodeSSE(event);
         final jsonStr = encoded.substring(6, encoded.length - 2);
         final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-        
+
         expect(json['type'], equals('RUN_STARTED'));
         expect(json['threadId'], equals('thread789'));
         expect(json['runId'], equals('run012'));
@@ -112,7 +115,7 @@ void main() {
         final encoded = encoder.encodeSSE(event);
         final jsonStr = encoded.substring(6, encoded.length - 2);
         final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-        
+
         expect(json['type'], equals('STATE_SNAPSHOT'));
         expect(json['snapshot'], equals({'counter': 42, 'name': 'test'}));
       });
@@ -134,7 +137,7 @@ void main() {
         final encoded = encoder.encodeSSE(event);
         final jsonStr = encoded.substring(6, encoded.length - 2);
         final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-        
+
         expect(json['type'], equals('MESSAGES_SNAPSHOT'));
         expect(json['messages'], isA<List>());
         expect(json['messages'].length, equals(2));
@@ -149,7 +152,7 @@ void main() {
         final encoded = encoder.encodeSSE(event);
         final jsonStr = encoded.substring(6, encoded.length - 2);
         final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-        
+
         expect(json['type'], equals('TEXT_MESSAGE_CHUNK'));
         expect(json['messageId'], equals('msg123'));
         expect(json.containsKey('role'), isFalse);
@@ -166,7 +169,7 @@ void main() {
         final encoded = encoder.encodeSSE(event);
         final jsonStr = encoded.substring(6, encoded.length - 2);
         final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-        
+
         expect(json['timestamp'], equals(timestamp));
       });
     });
@@ -179,7 +182,7 @@ void main() {
 
         final encoded = encoder.encode(event);
         final encodedSSE = encoder.encodeSSE(event);
-        
+
         expect(encoded, equals(encodedSSE));
       });
     });
@@ -193,7 +196,7 @@ void main() {
 
         final binary = encoder.encodeBinary(event);
         final decoded = utf8.decode(binary);
-        
+
         expect(decoded, startsWith('data: '));
         expect(decoded, endsWith('\n\n'));
         expect(decoded, contains('"type":"TEXT_MESSAGE_START"'));
@@ -210,7 +213,7 @@ void main() {
 
         final binary = encoder.encodeBinary(event);
         final decoded = utf8.decode(binary);
-        
+
         // Should fall back to SSE until protobuf is implemented
         expect(decoded, startsWith('data: '));
         expect(decoded, contains('"type":"TEXT_MESSAGE_START"'));
@@ -223,7 +226,7 @@ void main() {
           messageId: 'msg123',
           toolCallId: 'tool456',
           content: 'Search results: ...',
-          role: 'tool',
+          role: ToolCallResultRole.tool,
         );
 
         final encoded = encoder.encodeSSE(originalEvent);
@@ -278,7 +281,7 @@ void main() {
         final encoded = encoder.encodeSSE(event);
         final jsonStr = encoded.substring(6, encoded.length - 2);
         final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-        
+
         expect(json['delta'], equals('Line 1\nLine 2\nLine 3'));
       });
 
@@ -291,8 +294,9 @@ void main() {
         final encoded = encoder.encodeSSE(event);
         final jsonStr = encoded.substring(6, encoded.length - 2);
         final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-        
-        expect(json['delta'], equals('Special chars: "quotes", \\backslash\\, \ttab'));
+
+        expect(json['delta'],
+            equals('Special chars: "quotes", \\backslash\\, \ttab'));
       });
 
       test('handles unicode characters', () {
@@ -304,7 +308,7 @@ void main() {
         final encoded = encoder.encodeSSE(event);
         final jsonStr = encoded.substring(6, encoded.length - 2);
         final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-        
+
         expect(json['delta'], equals('Unicode: 你好 🌟 €'));
       });
     });

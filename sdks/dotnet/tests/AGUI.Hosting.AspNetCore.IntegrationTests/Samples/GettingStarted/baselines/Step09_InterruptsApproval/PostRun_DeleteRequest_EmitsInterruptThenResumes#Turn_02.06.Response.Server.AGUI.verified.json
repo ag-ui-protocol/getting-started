@@ -1,0 +1,330 @@
+﻿[
+  {
+    "type": "RUN_STARTED",
+    "threadId": "thread_Id_2",
+    "runId": "run_Id_2"
+  },
+  {
+    "type": "TOOL_CALL_START",
+    "parentMessageId": "guid_Id_1",
+    "toolCallId": "call_Id_1",
+    "toolCallName": "delete_file",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "delete_file",
+          "arguments": {
+            "filename": "report-draft.txt"
+          },
+          "informationalOnly": true,
+          "callId": "call_Id_1"
+        }
+      ],
+      "responseId": "guid_Id_1",
+      "messageId": "guid_Id_1"
+    }
+  },
+  {
+    "type": "TOOL_CALL_ARGS",
+    "toolCallId": "call_Id_1",
+    "delta": "{\n  \u0022filename\u0022: \u0022report-draft.txt\u0022\n}",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "delete_file",
+          "arguments": {
+            "filename": "report-draft.txt"
+          },
+          "informationalOnly": true,
+          "callId": "call_Id_1"
+        }
+      ],
+      "responseId": "guid_Id_1",
+      "messageId": "guid_Id_1"
+    }
+  },
+  {
+    "type": "TOOL_CALL_END",
+    "toolCallId": "call_Id_1",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "delete_file",
+          "arguments": {
+            "filename": "report-draft.txt"
+          },
+          "informationalOnly": true,
+          "callId": "call_Id_1"
+        }
+      ],
+      "responseId": "guid_Id_1",
+      "messageId": "guid_Id_1"
+    }
+  },
+  {
+    "type": "TOOL_CALL_RESULT",
+    "messageId": "call_Id_1",
+    "toolCallId": "call_Id_1",
+    "content": "\u0022File \u0027report-draft.txt\u0027 deleted successfully.\u0022",
+    "rawEvent": {
+      "role": "tool",
+      "contents": [
+        {
+          "$type": "functionResult",
+          "result": "File \u0027report-draft.txt\u0027 deleted successfully.",
+          "callId": "call_Id_1"
+        }
+      ],
+      "responseId": "guid_Id_2",
+      "messageId": "guid_Id_2"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_START",
+    "messageId": "chatcmpl-Id_2",
+    "role": "assistant",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ""
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": "Done",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Done"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " \u2014",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u2014"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " \u0022",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u0022"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": "report",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "report"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": "-d",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "-d"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": "raft",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "raft"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": ".txt",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".txt"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": "\u0022",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "\u0022"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " has",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " has"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " been",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " been"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": " deleted",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " deleted"
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_2",
+    "delta": ".",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "."
+        }
+      ],
+      "responseId": "chatcmpl-Id_2",
+      "messageId": "chatcmpl-Id_2",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_END",
+    "messageId": "chatcmpl-Id_2"
+  },
+  {
+    "type": "RUN_FINISHED",
+    "threadId": "thread_Id_2",
+    "runId": "run_Id_2",
+    "outcome": {
+      "type": "success"
+    },
+    "usage": [
+      {
+        "inputTokens": 224,
+        "outputTokens": 16,
+        "totalTokens": 240,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0
+      }
+    ]
+  }
+]

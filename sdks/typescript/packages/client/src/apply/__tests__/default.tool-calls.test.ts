@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { Subject } from "rxjs";
 import { toArray } from "rxjs/operators";
 import { firstValueFrom } from "rxjs";
@@ -20,7 +21,7 @@ const createAgent = (messages: Message[] = []) =>
   ({
     messages: messages.map((message) => ({ ...message })),
     state: {},
-  } as unknown as AbstractAgent);
+  }) as unknown as AbstractAgent;
 
 describe("defaultApplyEvents with tool calls", () => {
   it("should handle a single tool call correctly", async () => {
@@ -112,6 +113,78 @@ describe("defaultApplyEvents with tool calls", () => {
     expect(
       (stateUpdates[3].messages?.[0] as AssistantMessage).toolCalls?.[0]?.function?.arguments,
     ).toBe('{"query": "test search"}');
+  });
+
+  it("places a tool result immediately after its tool call even when the result arrives after a trailing assistant text", async () => {
+    // Reproduces the chat -> tool -> chat ordering hazard: the follow-up
+    // assistant text streams before the tool result is recorded. Appending the
+    // result would yield assistant(tool_call) -> text -> tool, which violates the
+    // provider contract (assistant tool_call must be immediately followed by its
+    // tool result) and surfaces as a 400 on the next turn.
+    const events$ = new Subject<BaseEvent>();
+    const initialState = {
+      messages: [],
+      state: {},
+      threadId: "test-thread",
+      runId: "test-run",
+      tools: [],
+      context: [],
+    };
+
+    const agent = createAgent(initialState.messages);
+    const result$ = defaultApplyEvents(initialState, events$, agent, []);
+    const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    // 1. assistant message with the tool call
+    events$.next({
+      type: EventType.TOOL_CALL_START,
+      toolCallId: "tool1",
+      toolCallName: "get_weather",
+    } as ToolCallStartEvent);
+    events$.next({
+      type: EventType.TOOL_CALL_END,
+      toolCallId: "tool1",
+    } as ToolCallEndEvent);
+    // 2. trailing assistant text streams BEFORE the result is recorded
+    events$.next({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: "text1",
+      role: "assistant",
+    } as any);
+    events$.next({
+      type: EventType.TEXT_MESSAGE_CONTENT,
+      messageId: "text1",
+      delta: "Here is the weather.",
+    } as any);
+    events$.next({
+      type: EventType.TEXT_MESSAGE_END,
+      messageId: "text1",
+    } as any);
+    // 3. tool result arrives last
+    events$.next({
+      type: EventType.TOOL_CALL_RESULT,
+      messageId: "res1",
+      toolCallId: "tool1",
+      content: "sunny",
+    } as ToolCallResultEvent);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    events$.complete();
+
+    const stateUpdates = await stateUpdatesPromise;
+    const finalMessages = stateUpdates[stateUpdates.length - 1].messages ?? [];
+
+    // Order must be assistant(tool_call) -> tool -> assistant(text)
+    expect(finalMessages.map((m) => m.role)).toEqual(["assistant", "tool", "assistant"]);
+
+    const ownerIndex = finalMessages.findIndex((m) =>
+      (m as AssistantMessage).toolCalls?.some((tc) => tc.id === "tool1"),
+    );
+    expect(ownerIndex).toBe(0);
+    // tool result sits directly after its owning assistant message
+    expect(finalMessages[ownerIndex + 1]?.role).toBe("tool");
+    expect((finalMessages[ownerIndex + 1] as any).toolCallId).toBe("tool1");
   });
 
   it("should handle multiple tool calls correctly", async () => {
@@ -502,7 +575,9 @@ describe("defaultApplyEvents with tool calls", () => {
     // Should have exactly 2 messages: one assistant (with both tool calls) and one tool result
     expect(finalState.messages?.length).toBe(2);
 
-    const assistantMsg = finalState.messages?.find((m) => m.role === "assistant") as AssistantMessage;
+    const assistantMsg = finalState.messages?.find(
+      (m) => m.role === "assistant",
+    ) as AssistantMessage;
     const toolMsg = finalState.messages?.find((m) => m.role === "tool");
 
     expect(assistantMsg).toBeDefined();
@@ -594,7 +669,9 @@ describe("defaultApplyEvents with tool calls", () => {
     // Should have 3 messages: 1 assistant (with both tool calls) + 2 tool results
     expect(finalState.messages?.length).toBe(3);
 
-    const assistantMsg = finalState.messages?.find((m) => m.role === "assistant") as AssistantMessage;
+    const assistantMsg = finalState.messages?.find(
+      (m) => m.role === "assistant",
+    ) as AssistantMessage;
     expect(assistantMsg).toBeDefined();
     expect(assistantMsg.id).toBe(parentMessageId);
     expect(assistantMsg.toolCalls?.length).toBe(2);
@@ -633,7 +710,7 @@ describe("defaultApplyEvents with tool calls", () => {
     events$.next({
       type: EventType.TOOL_CALL_ARGS,
       toolCallId: "tc-setup",
-      delta: '{}',
+      delta: "{}",
     } as ToolCallArgsEvent);
     events$.next({
       type: EventType.TOOL_CALL_END,
@@ -675,7 +752,9 @@ describe("defaultApplyEvents with tool calls", () => {
     expect(toolMsg?.id).toBe(collidingId);
 
     // The new assistant message should have fallen back to toolCallId, not collidingId
-    const assistantMsgs = finalState.messages?.filter((m) => m.role === "assistant") as AssistantMessage[];
+    const assistantMsgs = finalState.messages?.filter(
+      (m) => m.role === "assistant",
+    ) as AssistantMessage[];
     const collidingAssistant = assistantMsgs.find((m) =>
       m.toolCalls?.some((tc) => tc.id === "tc-collide"),
     );
@@ -734,5 +813,210 @@ describe("defaultApplyEvents with tool calls", () => {
     expect(msg.toolCalls?.length).toBe(1);
     expect(msg.toolCalls?.[0]?.id).toBe("tc-1");
     expect(msg.toolCalls?.[0]?.function?.name).toBe("lookup");
+  });
+
+  describe("TOOL_CALL_START idempotency", () => {
+    const runInput: RunAgentInput = {
+      messages: [],
+      state: {},
+      threadId: "test-thread",
+      runId: "test-run",
+      tools: [],
+      context: [],
+    };
+
+    // The assistant message an interrupted run leaves behind: the tool call is
+    // already in the agent's own message list, with its arguments fully
+    // streamed, before the next run starts.
+    const carriedOverAssistant = (): AssistantMessage => ({
+      id: "msg-1",
+      role: "assistant",
+      toolCalls: [
+        {
+          id: "tc-1",
+          type: "function",
+          function: { name: "openPolicyException", arguments: '{"txId":"t-9"}' },
+        },
+      ],
+    });
+
+    it("does not append a second entry when the same TOOL_CALL_START is applied twice", async () => {
+      const events$ = new Subject<BaseEvent>();
+      const agent = createAgent([]);
+      const result$ = defaultApplyEvents(runInput, events$, agent, []);
+      const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+      // The exact same event reaching the reducer twice — a run re-sync
+      // replaying it, or one stream delivered over two transports.
+      const start = {
+        type: EventType.TOOL_CALL_START,
+        toolCallId: "tc-1",
+        toolCallName: "search",
+        parentMessageId: "msg-1",
+      } as ToolCallStartEvent;
+
+      events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+      events$.next(start);
+      events$.next(start);
+      events$.next({
+        type: EventType.TOOL_CALL_ARGS,
+        toolCallId: "tc-1",
+        delta: '{"query":"x"}',
+      } as ToolCallArgsEvent);
+      events$.next({ type: EventType.TOOL_CALL_END, toolCallId: "tc-1" } as ToolCallEndEvent);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      events$.complete();
+
+      const stateUpdates = await stateUpdatesPromise;
+      const finalState = stateUpdates[stateUpdates.length - 1];
+
+      expect(finalState.messages?.length).toBe(1);
+      const msg = finalState.messages?.[0] as AssistantMessage;
+      expect(msg.toolCalls?.length).toBe(1);
+      expect(msg.toolCalls?.[0]?.id).toBe("tc-1");
+      // The single surviving copy carries the arguments — without the guard the
+      // deltas resolve to the first match and the second copy stays empty.
+      expect(msg.toolCalls?.[0]?.function?.arguments).toBe('{"query":"x"}');
+    });
+
+    it("does not append a second entry for a tool call the agent carries from a previous run", async () => {
+      const events$ = new Subject<BaseEvent>();
+      const agent = createAgent([carriedOverAssistant()]);
+      const result$ = defaultApplyEvents(runInput, events$, agent, []);
+      const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+      events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+      events$.next({
+        type: EventType.TOOL_CALL_START,
+        toolCallId: "tc-1",
+        toolCallName: "openPolicyException",
+        parentMessageId: "msg-1",
+      } as ToolCallStartEvent);
+      // The result is what forces a state emission after the replayed start —
+      // the replay itself is a no-op, and it mirrors the HITL flow where the
+      // result lands once the user has responded.
+      events$.next({
+        type: EventType.TOOL_CALL_RESULT,
+        messageId: "tm-1",
+        toolCallId: "tc-1",
+        content: "approved",
+      } as ToolCallResultEvent);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      events$.complete();
+
+      const stateUpdates = await stateUpdatesPromise;
+      const finalState = stateUpdates[stateUpdates.length - 1];
+
+      expect(finalState.messages?.length).toBe(2);
+      const msg = finalState.messages?.[0] as AssistantMessage;
+      expect(msg.id).toBe("msg-1");
+      expect(msg.toolCalls?.length).toBe(1);
+      // Arguments streamed on the previous run survive — a start event carries
+      // none, so overwriting them would blank the call out.
+      expect(msg.toolCalls?.[0]?.function?.arguments).toBe('{"txId":"t-9"}');
+    });
+
+    it("does not create a stray assistant message when a replayed start names an unknown parent", async () => {
+      // The dedupe has to run before the parent message is resolved: a replay
+      // whose parentMessageId is no longer in state would otherwise create a
+      // fresh assistant message to hang the duplicate off.
+      const events$ = new Subject<BaseEvent>();
+      const agent = createAgent([carriedOverAssistant()]);
+      const result$ = defaultApplyEvents(runInput, events$, agent, []);
+      const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+      events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+      events$.next({
+        type: EventType.TOOL_CALL_START,
+        toolCallId: "tc-1",
+        toolCallName: "openPolicyException",
+        parentMessageId: "msg-regenerated",
+      } as ToolCallStartEvent);
+      events$.next({
+        type: EventType.TOOL_CALL_RESULT,
+        messageId: "tm-1",
+        toolCallId: "tc-1",
+        content: "approved",
+      } as ToolCallResultEvent);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      events$.complete();
+
+      const stateUpdates = await stateUpdatesPromise;
+      const finalState = stateUpdates[stateUpdates.length - 1];
+
+      expect(finalState.messages?.map((m) => m.id)).toEqual(["msg-1", "tm-1"]);
+      const assistants = finalState.messages?.filter(
+        (m) => m.role === "assistant",
+      ) as AssistantMessage[];
+      expect(assistants.length).toBe(1);
+      expect(assistants[0].toolCalls?.length).toBe(1);
+    });
+
+    it("emits no state update at all for a replayed TOOL_CALL_START", async () => {
+      // Idempotent means nothing changes — not "changes to the same value".
+      // A spurious mutation would re-render every consumer of the transcript.
+      const events$ = new Subject<BaseEvent>();
+      const agent = createAgent([carriedOverAssistant()]);
+      const result$ = defaultApplyEvents(runInput, events$, agent, []);
+      const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+      events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+      events$.next({
+        type: EventType.TOOL_CALL_START,
+        toolCallId: "tc-1",
+        toolCallName: "openPolicyException",
+        parentMessageId: "msg-1",
+      } as ToolCallStartEvent);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      events$.complete();
+
+      expect(await stateUpdatesPromise).toEqual([]);
+    });
+
+    it("updates the existing entry in place when a start reuses an id under a different name", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const events$ = new Subject<BaseEvent>();
+        const agent = createAgent([]);
+        const result$ = defaultApplyEvents(runInput, events$, agent, []);
+        const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
+
+        events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+        events$.next({
+          type: EventType.TOOL_CALL_START,
+          toolCallId: "tc-1",
+          toolCallName: "search",
+        } as ToolCallStartEvent);
+        events$.next({
+          type: EventType.TOOL_CALL_ARGS,
+          toolCallId: "tc-1",
+          delta: '{"query":"x"}',
+        } as ToolCallArgsEvent);
+        events$.next({
+          type: EventType.TOOL_CALL_START,
+          toolCallId: "tc-1",
+          toolCallName: "lookup",
+        } as ToolCallStartEvent);
+
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        events$.complete();
+
+        const stateUpdates = await stateUpdatesPromise;
+        const finalState = stateUpdates[stateUpdates.length - 1];
+
+        expect(finalState.messages?.length).toBe(1);
+        const msg = finalState.messages?.[0] as AssistantMessage;
+        expect(msg.toolCalls?.length).toBe(1);
+        expect(msg.toolCalls?.[0]?.function?.name).toBe("lookup");
+        expect(msg.toolCalls?.[0]?.function?.arguments).toBe('{"query":"x"}');
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("tc-1"));
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
   });
 });

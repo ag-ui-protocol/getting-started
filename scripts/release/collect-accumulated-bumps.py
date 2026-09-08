@@ -2,8 +2,9 @@
 """
 collect-accumulated-bumps.py
 
-Walks every package.json and pyproject.toml that changed between two git refs
-and reports which ones had their version field bumped. Used to build a
+Walks every package.json, pyproject.toml, enrolled .NET Directory.Build.props and
+enrolled Maven reactor pom.xml
+that changed between two git refs and reports which ones had their version field bumped. Used to build a
 release PR's summary from the accumulated state of the release/next branch.
 
 Usage:
@@ -24,6 +25,7 @@ import re
 import subprocess
 import sys
 import tomllib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -75,16 +77,42 @@ def parse_pyproject(content: str) -> tuple[str | None, str | None]:
     return name, version
 
 
-def load_scope_map() -> dict[str, tuple[str, str]]:
-    """Map package path -> (scope name, ecosystem)."""
+def parse_directory_build_props(content: str) -> str | None:
+    match = re.search(r"<VersionPrefix(?:\s+[^>]*)?>([^<]+)</VersionPrefix>", content)
+    return match.group(1) if match else None
+
+
+def parse_maven_pom(content: str) -> str | None:
+    """Read the reactor version: the <version> that is a DIRECT child of <project>.
+
+    A pom carries <version> for its parent, every dependency and every plugin, so
+    a regex would read the wrong one. Parse the XML and take the direct child.
+    """
+    ns = "{http://maven.apache.org/POM/4.0.0}"
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError:
+        return None
+    version = root.findtext(f"{ns}version")
+    if version is None:
+        version = root.findtext("version")
+    return version.strip() if version and version.strip() else None
+
+
+def load_scope_maps() -> tuple[dict[str, tuple[str, str]], dict[str, tuple[str, list[dict]]]]:
+    """Map package path -> (scope name, ecosystem), and versionSource -> (scope, packages)."""
     with CONFIG_PATH.open("rb") as f:
         config = json.load(f)
 
     scope_map: dict[str, tuple[str, str]] = {}
+    version_source_map: dict[str, tuple[str, list[dict]]] = {}
     for scope_name, scope_data in config["scopes"].items():
         for pkg in scope_data["packages"]:
             scope_map[pkg["path"]] = (scope_name, pkg["ecosystem"])
-    return scope_map
+        version_source = scope_data.get("versionSource")
+        if version_source:
+            version_source_map[version_source] = (scope_name, scope_data["packages"])
+    return scope_map, version_source_map
 
 
 def find_scope(file_path: str, scope_map: dict[str, tuple[str, str]]) -> tuple[str, str] | None:
@@ -101,7 +129,7 @@ def main() -> None:
         sys.exit(1)
 
     base, head = sys.argv[1], sys.argv[2]
-    scope_map = load_scope_map()
+    scope_map, version_source_map = load_scope_maps()
 
     results: list[dict] = []
 
@@ -127,6 +155,43 @@ def main() -> None:
             if old_content is not None:
                 _, version_old = parse_pyproject(old_content)
             ecosystem_default = "python"
+
+        elif path in version_source_map and path.endswith(
+            ("Directory.Build.props", "pom.xml")
+        ):
+            # Shared-version sources: one file drives every package in the scope.
+            # A Maven MODULE pom is not in version_source_map (it only repeats
+            # its <parent><version>), so it falls through to the else and is
+            # correctly ignored rather than double-counted.
+            parse = (
+                parse_directory_build_props
+                if path.endswith("Directory.Build.props")
+                else parse_maven_pom
+            )
+            new_content = read_file_at_ref(head, path)
+            old_content = read_file_at_ref(base, path)
+            if new_content is None:
+                continue
+            version_new = parse(new_content)
+            if old_content is not None:
+                version_old = parse(old_content)
+            if not version_new or version_old == version_new:
+                continue
+
+            scope_name, packages = version_source_map[path]
+            for pkg in packages:
+                results.append(
+                    {
+                        "scope": scope_name,
+                        "name": pkg["name"],
+                        "path": pkg["path"],
+                        "file": path,
+                        "ecosystem": pkg["ecosystem"],
+                        "oldVersion": version_old or "(new)",
+                        "newVersion": version_new,
+                    }
+                )
+            continue
 
         else:
             continue

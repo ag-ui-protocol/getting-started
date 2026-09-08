@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+For requests to add A2UI rendering to AG-UI applications or to scaffold an
+AG-UI + A2UI quickstart, use `skills/ag-ui-a2ui-integration/SKILL.md`.
+
 ## Common Development Commands
 
 ### TypeScript SDK (Main Development)
@@ -79,7 +82,7 @@ AG-UI is an event-based protocol that standardizes agent-user interactions. The 
 ### Repository Structure
 - `/sdks/typescript/`: Main TypeScript implementation
   - `/packages/`: Core protocol packages (@ag-ui/core, @ag-ui/client, @ag-ui/encoder, @ag-ui/proto)
-- `/integrations/`: Framework integrations (langgraph, mastra, crewai, etc.)
+- `/integrations/`: Framework integrations (langgraph, mastra, crew-ai, etc.)
 - `/apps/`: Example applications including the AG-UI Dojo demo viewer
 - `/sdks/python/`: Python implementation of the protocol
 - `/docs/`: Documentation site content

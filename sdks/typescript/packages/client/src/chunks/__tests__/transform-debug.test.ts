@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import { of, concat, firstValueFrom } from "rxjs";
 import { toArray } from "rxjs/operators";
 import { transformChunks } from "../transform";
@@ -13,7 +13,7 @@ import {
 } from "@ag-ui/core";
 
 describe("transformChunks debug logging", () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: MockInstance<typeof console.debug>;
 
   beforeEach(() => {
     debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});

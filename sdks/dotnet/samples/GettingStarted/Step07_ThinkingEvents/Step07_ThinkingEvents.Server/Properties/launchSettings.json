@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "Step07_ThinkingEvents.Server": {
+      "commandName": "Project",
+      "applicationUrl": "http://localhost:5007"
+    }
+  }
+}

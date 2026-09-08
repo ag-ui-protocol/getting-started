@@ -47,6 +47,7 @@ from ag_ui.core import (
 from ag_ui_adk import ADKAgent
 from ag_ui_adk.event_translator import EventTranslator
 from ag_ui_adk.session_manager import SessionManager
+from tests.constants import LIVE_TEST_MODEL
 
 
 # =============================================================================
@@ -279,6 +280,112 @@ class TestEventTranslatorLroTracking:
         translator.lro_emitted_ids_by_name["some_tool"] = ["some-id"]
         translator.reset()
         assert translator.lro_emitted_ids_by_name == {}
+
+
+class TestLroDuplicateEmissionSuppression:
+    """Regression: a single logical LRO call streamed by ADK as a partial event
+    then a final event (with *different* IDs, per #1168) must emit exactly ONE
+    TOOL_CALL trio — not two. Otherwise the dojo renders the HITL card twice.
+    """
+
+    @pytest.fixture
+    def translator(self):
+        return EventTranslator()
+
+    def _event(self, fcs, *, partial):
+        """Build an ADK-style event. ``fcs`` is a list of (name, id) tuples."""
+        parts = []
+        for name, fid in fcs:
+            fc = MagicMock()
+            fc.id = fid
+            fc.name = name
+            fc.args = {"steps": [{"description": "x", "status": "enabled"}]}
+            part = MagicMock()
+            part.function_call = fc
+            part.text = None
+            parts.append(part)
+        evt = MagicMock()
+        evt.content = MagicMock()
+        evt.content.parts = parts
+        evt.long_running_tool_ids = [fid for _, fid in fcs]
+        evt.partial = partial
+        return evt
+
+    async def _starts(self, translator, evt):
+        ids = []
+        async for e in translator.translate_lro_function_calls(evt):
+            if e.type == EventType.TOOL_CALL_START:
+                ids.append(e.tool_call_id)
+        return ids
+
+    @pytest.mark.asyncio
+    async def test_partial_then_final_emits_once(self, translator):
+        """The non-partial twin (different id) is suppressed — one emission total."""
+        partial_ids = await self._starts(
+            translator, self._event([("generate_task_steps", "adk-AAA")], partial=True)
+        )
+        final_ids = await self._starts(
+            translator, self._event([("generate_task_steps", "adk-BBB")], partial=False)
+        )
+        assert partial_ids == ["adk-AAA"]
+        assert final_ids == [], "final twin must be suppressed (no duplicate render)"
+
+    @pytest.mark.asyncio
+    async def test_parallel_same_name_calls_not_oversuppressed(self, translator):
+        """Two genuinely parallel calls each emit once (partials), finals suppressed."""
+        partial_ids = await self._starts(
+            translator,
+            self._event(
+                [("generate_task_steps", "adk-A1"), ("generate_task_steps", "adk-A2")],
+                partial=True,
+            ),
+        )
+        final_ids = await self._starts(
+            translator,
+            self._event(
+                [("generate_task_steps", "adk-B1"), ("generate_task_steps", "adk-B2")],
+                partial=False,
+            ),
+        )
+        assert partial_ids == ["adk-A1", "adk-A2"]
+        assert final_ids == []  # both finals are twins of the two partials
+
+    @pytest.mark.asyncio
+    async def test_final_only_still_emits(self, translator):
+        """Non-streaming case (no partial twin): the final must still emit once."""
+        final_ids = await self._starts(
+            translator, self._event([("generate_task_steps", "adk-ONLY")], partial=False)
+        )
+        assert final_ids == ["adk-ONLY"]
+
+    @pytest.mark.asyncio
+    async def test_second_partial_replay_suppressed(self, translator):
+        """ADK can replay the call in a SECOND partial chunk (e.g. streaming
+        chunk + aggregated partial) with yet another ID — also a twin."""
+        first = await self._starts(
+            translator, self._event([("generate_task_steps", "adk-P1")], partial=True)
+        )
+        second = await self._starts(
+            translator, self._event([("generate_task_steps", "adk-P2")], partial=True)
+        )
+        final = await self._starts(
+            translator, self._event([("generate_task_steps", "adk-F1")], partial=False)
+        )
+        assert first == ["adk-P1"]
+        assert second == [], "second partial replay must be suppressed"
+        assert final == [], "final replay must be suppressed"
+
+    @pytest.mark.asyncio
+    async def test_reset_clears_replay_ledger(self, translator):
+        """After reset(), a same-name call in a new run emits again."""
+        await self._starts(
+            translator, self._event([("generate_task_steps", "adk-RUN1")], partial=True)
+        )
+        translator.reset()
+        ids = await self._starts(
+            translator, self._event([("generate_task_steps", "adk-RUN2")], partial=True)
+        )
+        assert ids == ["adk-RUN2"]
 
     @pytest.mark.asyncio
     async def test_lro_adk_request_credential_oauth2(self, translator):
@@ -1029,7 +1136,7 @@ class TestLROSSEIdRemapIntegration:
 
         agent = LlmAgent(
             name="approval_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction=(
                 "When asked to do anything, ALWAYS use the get_approval tool first. "
                 "Pass the action description as the 'action' parameter."
@@ -1149,7 +1256,7 @@ class TestLROSSEIdRemapIntegration:
 
         agent = LlmAgent(
             name="approval_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction=(
                 "When asked to do anything, ALWAYS use the get_approval tool first. "
                 "Pass the action description as the 'action' parameter."
@@ -1548,6 +1655,119 @@ class TestLroIdRemapStaleSessionRegression:
                 f"lro_tool_call_id_remap entries must be str->str; got "
                 f"{type(k)}->{type(v)}"
             )
+
+
+class TestLroNoDuplicateToolCallEndToEnd:
+    """End-to-end regression: a long-running client tool streamed by ADK as a
+    partial then final event (with different IDs, #1168) must surface exactly
+    ONE TOOL_CALL_START to the client — not two. The duplicate is cross-path:
+    the EventTranslator emits from the partial event while ADK separately
+    invokes the ClientProxyTool for the final, each with a different ID, so the
+    ID-based dedupe on both sides misses. Drives the real ADK runner + real
+    ClientProxyTool + real EventTranslator (no real LLM, no DB).
+    """
+
+    @pytest.fixture(autouse=True)
+    def reset_session_manager(self):
+        SessionManager.reset_instance()
+        yield
+        SessionManager.reset_instance()
+
+    def _scripted_lro_llm(self, tool_name: str, shape: str = "partial-final"):
+        from google.adk.models.base_llm import BaseLlm
+        from google.adk.models.llm_response import LlmResponse
+        from google.genai import types as gt
+
+        class _ScriptedLro(BaseLlm):
+            name_: str = tool_name
+            shape_: str = shape
+
+            async def generate_content_async(
+                self, llm_request, stream: bool = False
+            ) -> AsyncGenerator:
+                def mk(partial, turn_complete=None):
+                    return LlmResponse(
+                        content=gt.Content(
+                            role="model",
+                            parts=[gt.Part(function_call=gt.FunctionCall(
+                                name=self.name_, args={"action": "archive"}))],
+                        ),
+                        partial=partial,
+                        turn_complete=(not partial) if turn_complete is None else turn_complete,
+                    )
+                # Each yield gets a FRESH ID from ADK's
+                # populate_client_function_call_id — guaranteed divergence.
+                if self.shape_ == "two-partials":
+                    # streaming chunk + aggregated partial + persisted final
+                    yield mk(partial=True)
+                    yield mk(partial=True)
+                    yield mk(partial=False)
+                elif self.shape_ == "two-partials-no-final":
+                    # the "last event is partial, which is not expected" shape
+                    yield mk(partial=True)
+                    yield mk(partial=True, turn_complete=True)
+                else:  # partial-final
+                    yield mk(partial=True)
+                    yield mk(partial=False)
+
+        return _ScriptedLro(model=f"scripted-lro-{shape}")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "shape", ["partial-final", "two-partials", "two-partials-no-final"]
+    )
+    async def test_partial_plus_proxy_emits_single_tool_call(self, shape):
+        from ag_ui_adk.agui_toolset import AGUIToolset
+        from google.adk.agents import LlmAgent
+        from google.adk.apps import App, ResumabilityConfig
+
+        frontend_tool = AGUITool(
+            name="approve_action",
+            description="Ask the user to approve an action.",
+            parameters={
+                "type": "object",
+                "properties": {"action": {"type": "string"}},
+                "required": ["action"],
+            },
+        )
+        agent = LlmAgent(
+            name="hitl_dupe_agent",
+            model=self._scripted_lro_llm("approve_action", shape),
+            instruction="Call the tool when asked.",
+            tools=[AGUIToolset()],
+        )
+        adk_app = App(
+            name=f"app_{uuid.uuid4().hex[:8]}",
+            root_agent=agent,
+            resumability_config=ResumabilityConfig(is_resumable=True),
+        )
+        adk_agent = ADKAgent.from_app(
+            adk_app, user_id="u1", use_in_memory_services=True,
+        )
+
+        starts = []
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            async for event in adk_agent.run(
+                RunAgentInput(
+                    thread_id=f"t_{uuid.uuid4().hex[:8]}",
+                    run_id=str(uuid.uuid4()),
+                    state={},
+                    messages=[UserMessage(id=str(uuid.uuid4()), content="archive please")],
+                    tools=[frontend_tool],
+                    context=[],
+                    forwarded_props={},
+                )
+            ):
+                if event.type == EventType.TOOL_CALL_START:
+                    starts.append((event.tool_call_id, getattr(event, "tool_call_name", None)))
+
+        approve_starts = [s for s in starts if s[1] == "approve_action"]
+        assert len(approve_starts) == 1, (
+            f"Expected exactly one TOOL_CALL_START for approve_action, got "
+            f"{len(approve_starts)}: {approve_starts}. The partial→proxy "
+            f"cross-path duplicate (#1168) has regressed."
+        )
 
 
 # =============================================================================

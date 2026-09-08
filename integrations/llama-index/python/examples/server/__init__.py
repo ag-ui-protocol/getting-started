@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from .routers.agentic_chat import agentic_chat_router
+from .routers.agentic_chat_multimodal import agentic_chat_multimodal_router
 from .routers.human_in_the_loop import human_in_the_loop_router
 from .routers.agentic_generative_ui import agentic_generative_ui_router
 from .routers.shared_state import shared_state_router
@@ -14,6 +15,7 @@ from .routers.backend_tool_rendering import backend_tool_rendering_router
 app = FastAPI(title="AG-UI Llama-Index Endpoint")
 
 app.include_router(agentic_chat_router, prefix="/agentic_chat")
+app.include_router(agentic_chat_multimodal_router, prefix="/agentic_chat_multimodal")
 app.include_router(human_in_the_loop_router, prefix="/human_in_the_loop")
 app.include_router(agentic_generative_ui_router, prefix="/agentic_generative_ui")
 

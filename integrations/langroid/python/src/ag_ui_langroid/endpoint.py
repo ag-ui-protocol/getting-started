@@ -1,6 +1,8 @@
 """FastAPI endpoint utilities for Langroid integration."""
 
-from fastapi import FastAPI, Request
+from typing import Any
+
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ag_ui.core import RunAgentInput
@@ -9,14 +11,25 @@ from .agent import LangroidAgent
 
 
 def add_langroid_fastapi_endpoint(
-    app: FastAPI,
+    app: FastAPI | APIRouter,
     agent: LangroidAgent,
     path: str,
-    **kwargs
+    **kwargs: Any,
 ) -> None:
-    """Add a Langroid agent endpoint to FastAPI app."""
-    
-    @app.post(path)
+    """Add a Langroid agent endpoint to FastAPI app.
+
+    Args:
+        app: FastAPI application or APIRouter to register the routes on.
+        agent: Langroid agent to serve.
+        path: Path of the agent route.
+        **kwargs: Forwarded to ``app.post`` for the agent route (``name``,
+            ``tags``, ``operation_id``, ``dependencies``, ``include_in_schema``,
+            ...). They do not apply to the other routes this helper registers,
+            because values such as ``operation_id`` and ``name`` must stay
+            unique per operation.
+    """
+
+    @app.post(path, **kwargs)
     async def langroid_endpoint(input_data: RunAgentInput, request: Request):
         """Langroid agent endpoint."""
         accept_header = request.headers.get("accept")
@@ -41,7 +54,10 @@ def add_langroid_fastapi_endpoint(
             media_type=encoder.get_content_type()
         )
 
-    @app.get(f"{path}/health")
+    # Strip any trailing slash so a root path ("/") yields "/health", not "//health".
+    health_path = f"{path.rstrip('/')}/health"
+
+    @app.get(health_path)
     def health():
         """Health check."""
         return {
@@ -53,21 +69,38 @@ def add_langroid_fastapi_endpoint(
         }
 
 
-def create_langroid_app(agent: LangroidAgent, path: str = "/") -> FastAPI:
-    """Create a FastAPI app with a single Langroid agent endpoint."""
+def create_langroid_app(
+    agent: LangroidAgent,
+    path: str = "/",
+    origins: list[str] | None = None,
+    **kwargs: Any,
+) -> FastAPI:
+    """Create a FastAPI app with a single Langroid agent endpoint.
+
+    Args:
+        agent: The Langroid agent to serve.
+        path: Path for the agent endpoint (default: "/").
+        origins: Allowed CORS origins. Defaults to ``["*"]`` (wildcard) for local
+            development. Credentials are only enabled when explicit, non-wildcard
+            origins are supplied — a wildcard origin can never be combined with
+            ``allow_credentials=True``.
+        **kwargs: Forwarded to :func:`add_langroid_fastapi_endpoint`.
+    """
     app = FastAPI(title=f"Langroid - {agent.name}")
-    
+
     # Add CORS middleware
+    cors_origins = origins or ["*"]
+    is_wildcard = "*" in cors_origins
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials=bool(origins) and not is_wildcard,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     
     # Add the agent endpoint
-    add_langroid_fastapi_endpoint(app, agent, path)
+    add_langroid_fastapi_endpoint(app, agent, path, **kwargs)
     
     return app
 

@@ -1,0 +1,198 @@
+﻿[
+  {
+    "type": "RUN_STARTED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1"
+  },
+  {
+    "type": "TEXT_MESSAGE_START",
+    "messageId": "chatcmpl-Id_1",
+    "role": "assistant",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ""
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": "Hello",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Hello"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": "!",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "!"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " How",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " How"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " can",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " can"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " I",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " I"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " help",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " help"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " you",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " you"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": " today",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " today"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "chatcmpl-Id_1",
+    "delta": "?",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "?"
+        }
+      ],
+      "responseId": "chatcmpl-Id_1",
+      "messageId": "chatcmpl-Id_1",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_END",
+    "messageId": "chatcmpl-Id_1"
+  },
+  {
+    "type": "RUN_FINISHED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1",
+    "outcome": {
+      "type": "success"
+    },
+    "usage": [
+      {
+        "inputTokens": 7,
+        "outputTokens": 83,
+        "totalTokens": 90,
+        "reasoningTokens": 64,
+        "cachedInputTokens": 0
+      }
+    ]
+  }
+]

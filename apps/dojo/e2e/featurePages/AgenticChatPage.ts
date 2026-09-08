@@ -1,6 +1,6 @@
 import { Page, Locator, expect } from "@playwright/test";
 import { CopilotSelectors } from "../utils/copilot-selectors";
-import { sendChatMessage, awaitLLMResponseDone } from "../utils/copilot-actions";
+import { sendAndAwaitResponse } from "../utils/copilot-actions";
 import { DEFAULT_WELCOME_MESSAGE } from "../lib/constants";
 
 export class AgenticChatPage {
@@ -15,8 +15,7 @@ export class AgenticChatPage {
   constructor(page: Page) {
     this.page = page;
     this.openChatButton = CopilotSelectors.chatToggle(page);
-    this.agentGreeting = page
-      .getByText(DEFAULT_WELCOME_MESSAGE);
+    this.agentGreeting = page.getByText(DEFAULT_WELCOME_MESSAGE);
     this.chatInput = CopilotSelectors.chatTextarea(page);
     this.sendButton = CopilotSelectors.sendButton(page);
     this.agentMessage = CopilotSelectors.assistantMessages(page);
@@ -31,9 +30,29 @@ export class AgenticChatPage {
     }
   }
 
-  async sendMessage(message: string) {
-    await sendChatMessage(this.page, message);
-    await awaitLLMResponseDone(this.page);
+  async sendMessage(
+    message: string,
+    options: { assistantMessagesAdded?: number } = {},
+  ) {
+    const assistantMessageCountBefore = await this.agentMessage.count();
+
+    // Use the multi-turn-safe send. The previous `awaitLLMResponseDone`
+    // returned as soon as it saw `data-copilot-running="false"`, but on a
+    // multi-turn conversation that attribute still holds the PREVIOUS turn's
+    // finished state — so the wait could return before the new run started.
+    // The next send would then fire while the prior run was still active, the
+    // agent dropped it, and the user message never rendered (flaky timeout).
+    // `sendAndAwaitResponse` snapshots the assistant-message count and waits
+    // for a NEW response before treating the run as done, so each turn fully
+    // completes before the next send.
+    await sendAndAwaitResponse(this.page, message);
+
+    const assistantMessagesAdded = options.assistantMessagesAdded ?? 1;
+    if (assistantMessagesAdded > 1) {
+      await expect(this.agentMessage).toHaveCount(
+        assistantMessageCountBefore + assistantMessagesAdded,
+      );
+    }
   }
 
   async getGradientButtonByName(name: string | RegExp) {
@@ -45,12 +64,16 @@ export class AgenticChatPage {
   }
 
   async assertAgentReplyVisible(expectedText: RegExp | RegExp[]) {
-    const expectedTexts = Array.isArray(expectedText) ? expectedText : [expectedText];
+    const expectedTexts = Array.isArray(expectedText)
+      ? expectedText
+      : [expectedText];
     let lastError: unknown = null;
     for (const pattern of expectedTexts) {
       try {
-        const agentMessage = CopilotSelectors.assistantMessages(this.page).filter({
-          hasText: pattern
+        const agentMessage = CopilotSelectors.assistantMessages(
+          this.page,
+        ).filter({
+          hasText: pattern,
         });
         await expect(agentMessage.last()).toBeVisible();
         return; // At least one pattern matched, succeed

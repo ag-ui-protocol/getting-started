@@ -1,0 +1,13 @@
+﻿{
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Hello, tell me about serialization"
+        }
+      ]
+    }
+  ]
+}

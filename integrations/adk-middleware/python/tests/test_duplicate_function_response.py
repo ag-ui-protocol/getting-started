@@ -31,6 +31,7 @@ from google.genai import types
 
 from ag_ui_adk import ADKAgent
 from ag_ui_adk.session_manager import SessionManager
+from tests.constants import LIVE_TEST_MODEL
 
 
 class TestDuplicateFunctionResponseFix:
@@ -42,7 +43,7 @@ class TestDuplicateFunctionResponseFix:
         from google.adk.agents import LlmAgent
         return LlmAgent(
             name="test_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="Test agent for duplicate function_response fix"
         )
 

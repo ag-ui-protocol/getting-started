@@ -41,19 +41,32 @@ except (ImportError, AttributeError):
         "type", "format", "description", "nullable", "enum", "example",
         "items", "properties", "required", "default", "title", "pattern",
         "minimum", "maximum", "minItems", "maxItems", "minLength", "maxLength",
-        "minProperties", "maxProperties", "additionalProperties", "anyOf",
+        "minProperties", "maxProperties", "anyOf",
         "ref", "defs", "propertyOrdering",
     })
+
+
+# Keys that ``google.genai.types.Schema`` accepts as model fields (so the
+# allowlist above keeps them) but the Gemini ``generateContent`` function-calling
+# API rejects with a 400 ("Unknown name ... Cannot find field"). They must be
+# stripped explicitly. ``zod-to-json-schema`` (used by CopilotKit / AG-UI
+# frontend tools) emits ``additionalProperties: false`` on every object, so any
+# client-supplied tool trips this — manifesting as a RUN_ERROR and no tool call
+# reaching the UI. See ag-ui-protocol/ag-ui HITL dojo "nothing renders" report.
+_GENAI_REJECTED_SCHEMA_KEYS = frozenset({
+    "additionalProperties", "additional_properties",
+})
 
 
 def _clean_schema_for_genai(schema: Any) -> Any:
     """Recursively clean a JSON Schema dict for google.genai.types.Schema.
 
-    Three transformations:
+    Transformations:
     1. Strip ``$``-prefixed keys (``$schema``, ``$id``, ``$ref``, ``$defs``,
        ``$comment``) — these are JSON Schema infrastructure, never in genai.
-    2. Map ``examples`` → ``example`` (first element only) and
-       ``const`` → ``enum`` (single-value list), preserving useful context.
+    2. Map ``examples`` → ``example`` (first element only), ``const`` →
+       ``enum`` (single-value list), and ``oneOf`` → ``anyOf`` (genai accepts
+       ``anyOf`` but not ``oneOf``), preserving useful structure.
     3. Filter remaining keys to only those accepted by ``types.Schema``,
        using an allowlist derived from ``types.Schema.model_fields``.
     """
@@ -63,6 +76,10 @@ def _clean_schema_for_genai(schema: Any) -> Any:
             # Always strip $-prefixed keys
             if k.startswith("$"):
                 continue
+            # Strip keys the Gemini API rejects even though genai.Schema accepts
+            # them as model fields (e.g. additionalProperties from zod schemas).
+            if k in _GENAI_REJECTED_SCHEMA_KEYS:
+                continue
             # Map examples -> example (preserve first element as opaque data)
             if k == "examples" and isinstance(v, list) and v:
                 result["example"] = v[0]
@@ -70,6 +87,16 @@ def _clean_schema_for_genai(schema: Any) -> Any:
             # Map const -> enum (single-value list, stringified for genai)
             if k == "const":
                 result["enum"] = [v if isinstance(v, str) else json.dumps(v)]
+                continue
+            # Map oneOf -> anyOf. genai.types.Schema accepts ``anyOf`` but not
+            # ``oneOf``, so an unmapped ``oneOf`` would be dropped by the
+            # allowlist below — silently erasing the structure of discriminated
+            # unions (zod ``discriminatedUnion`` serializes to ``oneOf`` via
+            # zod-to-json-schema, used by CopilotKit / AG-UI frontend tools).
+            # For tool-argument schemas the distinction is immaterial: the model
+            # emits exactly one branch either way.
+            if k == "oneOf":
+                result["anyOf"] = _clean_schema_for_genai(v)
                 continue
             # Only keep keys that genai.types.Schema accepts
             if k not in _ALLOWED_SCHEMA_KEYS:
@@ -112,6 +139,8 @@ class ClientProxyTool(BaseTool):
         emitted_tool_call_ids: Optional[Set[str]] = None,
         translator_emitted_tool_call_ids: Optional[Set[str]] = None,
         long_running_tool_ids: Optional[Set[str]] = None,
+        translator_lro_emitted_ids_by_name: Optional[Dict[str, List[str]]] = None,
+        lro_finalized_by_name: Optional[Dict[str, int]] = None,
     ):
         """Initialize the client proxy tool.
 
@@ -151,6 +180,8 @@ class ClientProxyTool(BaseTool):
         self._emitted_tool_call_ids = emitted_tool_call_ids if emitted_tool_call_ids is not None else set()
         self._translator_emitted_tool_call_ids = translator_emitted_tool_call_ids if translator_emitted_tool_call_ids is not None else set()
         self._long_running_tool_ids = long_running_tool_ids if long_running_tool_ids is not None else set()
+        self._translator_lro_emitted_ids_by_name = translator_lro_emitted_ids_by_name if translator_lro_emitted_ids_by_name is not None else {}
+        self._lro_finalized_by_name = lro_finalized_by_name if lro_finalized_by_name is not None else {}
 
         # Create dynamic function with proper parameter signatures for ADK inspection
         # This allows ADK to extract parameters from user requests correctly
@@ -274,6 +305,23 @@ class ClientProxyTool(BaseTool):
             # the translator processes the event first, then ADK runs this proxy tool.
             if tool_call_id in self._translator_emitted_tool_call_ids:
                 logger.debug(f"Skipping TOOL_CALL emission for {tool_call_id} — already emitted by EventTranslator")
+                return None
+
+            # Cross-path twin suppression: under SSE streaming the translator
+            # emits this long-running call from the *partial* event with one ID
+            # and ADK then invokes this proxy with a *different* ID (#1168), so
+            # the ID guard above can't recognize them as the same logical call —
+            # the dojo then renders the HITL card twice. Match this invocation to
+            # an already-emitted partial by tool name, positionally (FIFO), so
+            # genuinely parallel same-name calls each still emit once.
+            emitted_partials = self._translator_lro_emitted_ids_by_name.get(self.name, [])
+            finalized = self._lro_finalized_by_name.get(self.name, 0)
+            if finalized < len(emitted_partials):
+                self._lro_finalized_by_name[self.name] = finalized + 1
+                logger.debug(
+                    f"Skipping proxy TOOL_CALL emission for '{self.name}' — twin of "
+                    f"streamed partial {emitted_partials[finalized]} (proxy id {tool_call_id})"
+                )
                 return None
 
             # Check if this tool has predictive state configuration

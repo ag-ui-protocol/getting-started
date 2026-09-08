@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFrameworks>net10.0</TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <IsAotCompatible>false</IsAotCompatible>
+    <NoWarn>$(NoWarn);CS7022</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.AI" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Verify.Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AGUI.Client\AGUI.Client.csproj" />
+    <ProjectReference Include="..\..\src\AGUI.Protobuf\AGUI.Protobuf.csproj" />
+    <ProjectReference Include="..\..\samples\AGUI.Samples.Shared\AGUI.Samples.Shared.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step01_GettingStarted\Step01_GettingStarted.Server\Step01_GettingStarted.Server.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step01_GettingStarted\Step01_GettingStarted.Client\Step01_GettingStarted.Client.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step02_BackendTools\Step02_BackendTools.Server\Step02_BackendTools.Server.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step02_BackendTools\Step02_BackendTools.Client\Step02_BackendTools.Client.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step03_FrontendTools\Step03_FrontendTools.Server\Step03_FrontendTools.Server.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step03_FrontendTools\Step03_FrontendTools.Client\Step03_FrontendTools.Client.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step04_HumanInLoop\Step04_HumanInLoop.Server\Step04_HumanInLoop.Server.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step04_HumanInLoop\Step04_HumanInLoop.Client\Step04_HumanInLoop.Client.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step05_StateManagement\Step05_StateManagement.Server\Step05_StateManagement.Server.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step05_StateManagement\Step05_StateManagement.Client\Step05_StateManagement.Client.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step06_RawEvents\Step06_RawEvents.Server\Step06_RawEvents.Server.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step06_RawEvents\Step06_RawEvents.Client\Step06_RawEvents.Client.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step07_ThinkingEvents\Step07_ThinkingEvents.Server\Step07_ThinkingEvents.Server.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step07_ThinkingEvents\Step07_ThinkingEvents.Client\Step07_ThinkingEvents.Client.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step08_MultimodalMessages\Step08_MultimodalMessages.Server\Step08_MultimodalMessages.Server.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step08_MultimodalMessages\Step08_MultimodalMessages.Client\Step08_MultimodalMessages.Client.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step09_InterruptsApproval\Step09_InterruptsApproval.Server\Step09_InterruptsApproval.Server.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step09_InterruptsApproval\Step09_InterruptsApproval.Client\Step09_InterruptsApproval.Client.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step10_InterruptsUserInput\Step10_InterruptsUserInput.Server\Step10_InterruptsUserInput.Server.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step10_InterruptsUserInput\Step10_InterruptsUserInput.Client\Step10_InterruptsUserInput.Client.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step11_Serialization\Step11_Serialization.Server\Step11_Serialization.Server.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step11_Serialization\Step11_Serialization.Client\Step11_Serialization.Client.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step12_ParallelToolCalls\Step12_ParallelToolCalls.Server\Step12_ParallelToolCalls.Server.csproj" />
+    <ProjectReference Include="..\..\samples\GettingStarted\Step12_ParallelToolCalls\Step12_ParallelToolCalls.Client\Step12_ParallelToolCalls.Client.csproj" />
+  </ItemGroup>
+
+</Project>

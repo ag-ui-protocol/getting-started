@@ -5,6 +5,9 @@ import 'base.dart';
 import 'message.dart';
 import 'tool.dart';
 
+// `kUnsetSentinel` (from `base.dart`) is the shared sentinel for all
+// `copyWith` methods in this file.
+
 /// Additional context for the agent
 class Context extends AGUIModel {
   final String description;
@@ -24,9 +27,9 @@ class Context extends AGUIModel {
 
   @override
   Map<String, dynamic> toJson() => {
-    'description': description,
-    'value': value,
-  };
+        'description': description,
+        'value': value,
+      };
 
   @override
   Context copyWith({
@@ -40,10 +43,15 @@ class Context extends AGUIModel {
   }
 }
 
-/// Input for running an agent
+/// Input for running an agent.
+///
+/// The optional [parentRunId] mirrors the canonical TS/Python
+/// `RunAgentInput.parentRunId` / `parent_run_id` field; it links the
+/// run to a parent run in nested-run scenarios.
 class RunAgentInput extends AGUIModel {
   final String threadId;
   final String runId;
+  final String? parentRunId;
   final dynamic state;
   final List<Message> messages;
   final List<Tool> tools;
@@ -53,6 +61,7 @@ class RunAgentInput extends AGUIModel {
   const RunAgentInput({
     required this.threadId,
     required this.runId,
+    this.parentRunId,
     this.state,
     required this.messages,
     required this.tools,
@@ -61,76 +70,160 @@ class RunAgentInput extends AGUIModel {
   });
 
   factory RunAgentInput.fromJson(Map<String, dynamic> json) {
-    // Handle both camelCase and snake_case field names
-    final threadId = JsonDecoder.optionalField<String>(json, 'threadId') ??
-        JsonDecoder.optionalField<String>(json, 'thread_id');
-    final runId = JsonDecoder.optionalField<String>(json, 'runId') ??
-        JsonDecoder.optionalField<String>(json, 'run_id');
-    
-    if (threadId == null) {
-      throw AGUIValidationError(
-        message: 'Missing required field: threadId or thread_id',
-        field: 'threadId',
-        json: json,
-      );
-    }
-    if (runId == null) {
-      throw AGUIValidationError(
-        message: 'Missing required field: runId or run_id',
-        field: 'runId',
-        json: json,
-      );
-    }
-    
     return RunAgentInput(
-      threadId: threadId,
-      runId: runId,
+      threadId: JsonDecoder.requireEitherField<String>(
+        json,
+        'threadId',
+        'thread_id',
+      ),
+      runId: JsonDecoder.requireEitherField<String>(
+        json,
+        'runId',
+        'run_id',
+      ),
+      parentRunId: JsonDecoder.optionalEitherField<String>(
+        json,
+        'parentRunId',
+        'parent_run_id',
+      ),
       state: json['state'],
-      messages: JsonDecoder.requireListField<Map<String, dynamic>>(
-        json,
-        'messages',
-      ).map((item) => Message.fromJson(item)).toList(),
-      tools: JsonDecoder.requireListField<Map<String, dynamic>>(
-        json,
-        'tools',
-      ).map((item) => Tool.fromJson(item)).toList(),
-      context: JsonDecoder.requireListField<Map<String, dynamic>>(
-        json,
-        'context',
-      ).map((item) => Context.fromJson(item)).toList(),
-      forwardedProps: json['forwardedProps'] ?? json['forwarded_props'],
+      messages: () {
+        final raw = JsonDecoder.requireListField<Map<String, dynamic>>(
+          json,
+          'messages',
+        );
+        final out = <Message>[];
+        for (var i = 0; i < raw.length; i++) {
+          try {
+            out.add(Message.fromJson(raw[i]));
+          } on AGUIValidationError catch (e) {
+            // Drop json: — the inner payload may carry encryptedValue or tool
+            // arguments. Preserve cause: when the inner error already cleared
+            // its own json: (e.json == null), meaning the inner factory was
+            // cipher-aware and the cause chain is safe to forward.
+            throw AGUIValidationError(
+              message: e.message,
+              field: 'messages[$i].${e.field ?? 'unknown'}',
+              value: e.value,
+              cause: e.json == null ? e : null,
+            );
+          } catch (e) {
+            throw AGUIValidationError(
+              message: 'Failed to decode message at index $i: $e',
+              field: 'messages[$i]',
+              cause: e,
+            );
+          }
+        }
+        return out;
+      }(),
+      tools: () {
+        final raw = JsonDecoder.requireListField<Map<String, dynamic>>(
+          json,
+          'tools',
+        );
+        final out = <Tool>[];
+        for (var i = 0; i < raw.length; i++) {
+          try {
+            out.add(Tool.fromJson(raw[i]));
+          } on AGUIValidationError catch (e) {
+            // Drop json: — tool arguments may be sensitive. Preserve cause:
+            // when e.json == null (inner factory already scrubbed it).
+            throw AGUIValidationError(
+              message: e.message,
+              field: 'tools[$i].${e.field ?? 'unknown'}',
+              value: e.value,
+              cause: e.json == null ? e : null,
+            );
+          } catch (e) {
+            throw AGUIValidationError(
+              message: 'Failed to decode tool at index $i: $e',
+              field: 'tools[$i]',
+              cause: e,
+            );
+          }
+        }
+        return out;
+      }(),
+      context: () {
+        final raw = JsonDecoder.requireListField<Map<String, dynamic>>(
+          json,
+          'context',
+        );
+        final out = <Context>[];
+        for (var i = 0; i < raw.length; i++) {
+          try {
+            out.add(Context.fromJson(raw[i]));
+          } on AGUIValidationError catch (e) {
+            // Drop json: — context values may carry sensitive data. Preserve
+            // cause: when e.json == null (inner factory already scrubbed it).
+            throw AGUIValidationError(
+              message: e.message,
+              field: 'context[$i].${e.field ?? 'unknown'}',
+              value: e.value,
+              cause: e.json == null ? e : null,
+            );
+          } catch (e) {
+            throw AGUIValidationError(
+              message: 'Failed to decode context at index $i: $e',
+              field: 'context[$i]',
+              cause: e,
+            );
+          }
+        }
+        return out;
+      }(),
+      // `forwardedProps` is intentionally `dynamic` (any JSON shape),
+      // so the inline KEY-presence chain is preferred over
+      // `optionalEitherField<T>` (which requires a concrete `T`). Behavior
+      // matches the helper: `camelKey` wins when the key is present (even
+      // when its value is explicitly `null`); `snake_case` is consulted
+      // ONLY when camelCase is entirely absent.
+      forwardedProps: json.containsKey('forwardedProps')
+          ? json['forwardedProps']
+          : json['forwarded_props'],
     );
   }
 
   @override
   Map<String, dynamic> toJson() => {
-    'threadId': threadId,
-    'runId': runId,
-    if (state != null) 'state': state,
-    'messages': messages.map((m) => m.toJson()).toList(),
-    'tools': tools.map((t) => t.toJson()).toList(),
-    'context': context.map((c) => c.toJson()).toList(),
-    if (forwardedProps != null) 'forwardedProps': forwardedProps,
-  };
+        'threadId': threadId,
+        'runId': runId,
+        if (parentRunId != null) 'parentRunId': parentRunId,
+        if (state != null) 'state': state,
+        'messages': messages.map((m) => m.toJson()).toList(),
+        'tools': tools.map((t) => t.toJson()).toList(),
+        'context': context.map((c) => c.toJson()).toList(),
+        if (forwardedProps != null) 'forwardedProps': forwardedProps,
+      };
 
+  // `parentRunId`, `state`, and `forwardedProps` are nullable —
+  // sentinel lets callers clear them explicitly via `copyWith(field: null)`.
+  // Mirrors the message-class sentinel in lib/src/types/message.dart.
   @override
   RunAgentInput copyWith({
     String? threadId,
     String? runId,
-    dynamic state,
+    Object? parentRunId = kUnsetSentinel,
+    Object? state = kUnsetSentinel,
     List<Message>? messages,
     List<Tool>? tools,
     List<Context>? context,
-    dynamic forwardedProps,
+    Object? forwardedProps = kUnsetSentinel,
   }) {
     return RunAgentInput(
       threadId: threadId ?? this.threadId,
       runId: runId ?? this.runId,
-      state: state ?? this.state,
+      parentRunId: identical(parentRunId, kUnsetSentinel)
+          ? this.parentRunId
+          : parentRunId as String?,
+      state: identical(state, kUnsetSentinel) ? this.state : state,
       messages: messages ?? this.messages,
       tools: tools ?? this.tools,
       context: context ?? this.context,
-      forwardedProps: forwardedProps ?? this.forwardedProps,
+      forwardedProps: identical(forwardedProps, kUnsetSentinel)
+          ? this.forwardedProps
+          : forwardedProps,
     );
   }
 }
@@ -148,51 +241,39 @@ class Run extends AGUIModel {
   });
 
   factory Run.fromJson(Map<String, dynamic> json) {
-    // Handle both camelCase and snake_case field names
-    final threadId = JsonDecoder.optionalField<String>(json, 'threadId') ??
-        JsonDecoder.optionalField<String>(json, 'thread_id');
-    final runId = JsonDecoder.optionalField<String>(json, 'runId') ??
-        JsonDecoder.optionalField<String>(json, 'run_id');
-    
-    if (threadId == null) {
-      throw AGUIValidationError(
-        message: 'Missing required field: threadId or thread_id',
-        field: 'threadId',
-        json: json,
-      );
-    }
-    if (runId == null) {
-      throw AGUIValidationError(
-        message: 'Missing required field: runId or run_id',
-        field: 'runId',
-        json: json,
-      );
-    }
-    
     return Run(
-      threadId: threadId,
-      runId: runId,
+      threadId: JsonDecoder.requireEitherField<String>(
+        json,
+        'threadId',
+        'thread_id',
+      ),
+      runId: JsonDecoder.requireEitherField<String>(
+        json,
+        'runId',
+        'run_id',
+      ),
       result: json['result'],
     );
   }
 
   @override
   Map<String, dynamic> toJson() => {
-    'threadId': threadId,
-    'runId': runId,
-    if (result != null) 'result': result,
-  };
+        'threadId': threadId,
+        'runId': runId,
+        if (result != null) 'result': result,
+      };
 
+  // `result` is nullable — sentinel for explicit-clear semantics.
   @override
   Run copyWith({
     String? threadId,
     String? runId,
-    dynamic result,
+    Object? result = kUnsetSentinel,
   }) {
     return Run(
       threadId: threadId ?? this.threadId,
       runId: runId ?? this.runId,
-      result: result ?? this.result,
+      result: identical(result, kUnsetSentinel) ? this.result : result,
     );
   }
 }

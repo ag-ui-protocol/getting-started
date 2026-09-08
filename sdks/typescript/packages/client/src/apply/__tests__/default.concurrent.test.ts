@@ -7,7 +7,6 @@ import {
   EventType,
   RunAgentInput,
   RunStartedEvent,
-  RunFinishedEvent,
   TextMessageStartEvent,
   TextMessageContentEvent,
   TextMessageEndEvent,

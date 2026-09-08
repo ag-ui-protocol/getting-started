@@ -1,0 +1,101 @@
+---
+title: "Overview"
+description: "Client package overview"
+---
+
+# AGUI.Client
+
+The AG-UI .NET Client SDK adapts an AG-UI endpoint to the standard
+`Microsoft.Extensions.AI.IChatClient` abstraction. Instead of introducing a new
+agent base class, `AGUI.Client` lets .NET applications consume an AG-UI server
+the same way they consume any other chat model.
+
+```bash
+dotnet add package AGUI.Client
+```
+
+<Note>
+  If you already use `Microsoft.Extensions.AI`, an AG-UI server is just another
+  `IChatClient`.
+</Note>
+
+## AGUIChatClient
+
+`AGUIChatClient` is the primary type in this package. It wraps an AG-UI
+HTTP+SSE endpoint and exposes both `GetStreamingResponseAsync` and
+`GetResponseAsync` from `IChatClient`.
+
+- [Construction](/sdk/dotnet/client/chat-client#construction) - Create a client
+  from `HttpClient` and an endpoint, or from a custom transport
+- [Streaming](/sdk/dotnet/client/chat-client#streaming-responses) - Consume
+  AG-UI events as `ChatResponseUpdate` values
+- [Stateless behavior](/sdk/dotnet/client/chat-client#statelessness-and-conversationid) -
+  Send full message history on every turn
+- [Thread continuity](/sdk/dotnet/client/chat-client#thread-continuity) - Keep a
+  stable thread or branch from a previous run
+- [Interrupts and approvals](/sdk/dotnet/client/chat-client#interrupts-and-approvals) -
+  Handle server pauses with standard MEAI content types
+
+<Card
+  title="AGUIChatClient Reference"
+  icon="comments"
+  href="/sdk/dotnet/client/chat-client"
+  color="#3B82F6"
+  iconType="solid"
+>
+  Consume an AG-UI endpoint through the Microsoft.Extensions.AI IChatClient API
+</Card>
+
+## Transport
+
+The client package includes a small transport abstraction for sending
+`RunAgentInput` requests and receiving AG-UI event streams. The default path
+uses HTTP POST and Server-Sent Events; custom transports are useful for tests or
+non-HTTP environments.
+
+- [IAGUITransport](/sdk/dotnet/client/transport#iaguitransport) - The transport
+  interface used by `AGUIChatClient`
+- [HTTP transport](/sdk/dotnet/client/transport#http-transport) - Built-in
+  HTTP+SSE behavior
+- [Custom transports](/sdk/dotnet/client/transport#custom-transports) - Plug in
+  an in-memory or alternative wire protocol
+
+<Card
+  title="Transport Reference"
+  icon="network-wired"
+  href="/sdk/dotnet/client/transport"
+  color="#3B82F6"
+  iconType="solid"
+>
+  Understand the AG-UI client transport contract and HTTP event stream
+</Card>
+
+## Stateless by design
+
+AG-UI endpoints are stateless from the .NET client's perspective. Each request
+sends the full message history, and returned `ChatResponseUpdate` objects do not
+surface a `ConversationId`. Updates are correlated by `ResponseId`, which maps
+to the AG-UI run id. The AG-UI thread id is available from the `RUN_STARTED`
+event and as `AdditionalProperties["agui_thread_id"]`.
+
+For the protocol types carried over the wire, see the
+[.NET event reference](/sdk/dotnet/abstractions/events).
+
+## Client verification
+
+Client tests protect the conversion between `Microsoft.Extensions.AI` and
+AG-UI. They verify that `ChatMessage` history becomes AG-UI messages,
+`ChatOptions.Tools` becomes AG-UI tools, caller-supplied AG-UI context,
+forwarded properties, and resume payloads are preserved, and `RUN_ERROR`
+events become MEAI `ErrorContent` updates.
+
+They also protect the stateless conversation contract: thread and run
+identifiers are preserved through AG-UI fields, returned updates clear
+`ConversationId`, and server-side tool calls are marked informational so the
+.NET client does not execute them locally.
+
+```bash
+cd sdks/dotnet
+dotnet test tests/AGUI.Client.UnitTests/
+dotnet test tests/AGUI.CrossLanguage.IntegrationTests/
+```

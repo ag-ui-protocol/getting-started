@@ -1,0 +1,11 @@
+﻿[
+  {
+    "role": "user",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "What\u0027s the weather in Paris and the current time in Tokyo?"
+      }
+    ]
+  }
+]

@@ -1,5 +1,25 @@
 name: Build Python Preview
 
+# Version-rewriting flow: "Rewrite pyproject.toml versions" below stamps a
+# 0.0.0.devN version into each package listed in PACKAGES in
+# scripts/rewrite-python-preview-versions.py before building, which puts those
+# pyprojects deliberately out of step with their committed uv.lock. That list is a
+# subset of the Python packages in scripts/release/release.config.json — read the
+# script for the current set rather than trusting a count here.
+#
+# Audited for lockfile safety, and the finding is that nothing here consumes or
+# writes a lockfile: `uv build` neither reads nor rewrites uv.lock, and the rewrite
+# script runs with --no-project. To re-audit after a uv bump: stale a lockfile
+# (bump its package's version in pyproject.toml only), run `uv build` in that
+# directory, and confirm uv.lock is byte-identical afterwards.
+#
+# Because nothing here reads a lockfile, this workflow does NOT run
+# .github/actions/assert-lockfiles-unchanged — there is no sync step for it to
+# guard. Add it alongside the first step that does sync.
+#
+# The toolchain pins below come from .github/python-toolchain.env like every other
+# Python workflow's.
+
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -11,6 +31,14 @@ concurrency:
 permissions:
   contents: read
 
+# Pinned Python build toolchain — see .github/python-toolchain.env, which is the
+# single place these two values are recorded, along with the green run they came
+# from. Change one, change them all: the python-toolchain-pins job in
+# lint-release-workflows.yml fails if any workflow's literal disagrees with that file.
+env:
+  UV_VERSION: "0.12.1"
+  PYTHON_VERSION: "3.12"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -19,14 +47,15 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
-          version: ">=0.8.0"
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Compute preview version
         id: version
@@ -37,7 +66,9 @@ jobs:
           echo "Preview version: ${VERSION}"
 
       - name: Rewrite pyproject.toml versions
-        run: uv run python scripts/rewrite-python-preview-versions.py ${STEPS_VERSION_OUTPUTS_VERSION}
+        # --no-project: the script is stdlib-only and there is no project at the
+        # repo root, so this states outright that no lockfile is consulted.
+        run: uv run --no-project python scripts/rewrite-python-preview-versions.py "${STEPS_VERSION_OUTPUTS_VERSION}"
         env:
           STEPS_VERSION_OUTPUTS_VERSION: ${{ steps.version.outputs.version }}
 

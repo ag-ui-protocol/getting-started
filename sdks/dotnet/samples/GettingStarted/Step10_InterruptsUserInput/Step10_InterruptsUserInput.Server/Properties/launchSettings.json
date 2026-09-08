@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "Step10_InterruptsUserInput.Server": {
+      "commandName": "Project",
+      "applicationUrl": "http://localhost:5010"
+    }
+  }
+}

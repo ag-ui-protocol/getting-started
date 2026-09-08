@@ -7,6 +7,148 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `add_adk_fastapi_endpoint()` and `create_adk_app()` accept extra keyword
+  arguments and forward them to `app.post` for the agent route (`name`,
+  `tags`, `operation_id`, `summary`, `dependencies`, `include_in_schema`,
+  ...), so an application can give the route the same metadata, OpenAPI
+  identity and dependencies as the rest of its API. The derived
+  `<path>/capabilities` and `/agents/state` routes keep their own identity,
+  because FastAPI requires a unique `operation_id` and `name` per operation.
+
+## [0.7.0] - 2026-06-22
+
+### Added
+
+- **FEATURE**: Endpoint-level agent resolver for FastAPI ADK middleware (#1846)
+  - `add_adk_fastapi_endpoint()` and `create_adk_app()` now accept an async
+    `agent_resolver(request, input_data)` hook that can select a request-scoped
+    `ADKAgent` after `extract_state_from_request` has merged request-derived
+    state. Returning `None` keeps the default agent.
+  - Resolver selection is applied consistently across the run endpoint,
+    the derived `<path>/capabilities` endpoint, and the experimental
+    `/agents/state` endpoint, keeping request routing, capability discovery,
+    and state lookup inside the same endpoint-layer abstraction boundary.
+  - New public helper `resolve_agent_from_message_history()` supports the
+    documented tool-result resumption convention: preserve the originating ADK
+    author as `AssistantMessage.name`, match the latest `ToolMessage` by
+    `tool_call_id`, and resolve that name against an application-owned agent
+    registry before falling back to normal routing.
+
+- **FEATURE**: A2UI (Agent-to-UI) generative-UI rendering for ADK agents (OSS-158, #1955)
+  - Adds a `render_a2ui` sub-agent tool (`A2UISubAgentTool`, `get_a2ui_tool()`) that lets an ADK agent emit A2UI v0.9 server-to-client operations (`createSurface` / `updateComponents` / `updateDataModel`), which the runtime detects and renders against a client-registered catalog. `plan_a2ui_injection()` decides when to auto-inject the `generate_a2ui` tool, giving ADK the same auto-injection behavior the AWS Strands middleware already has (Strands parity).
+  - Generation is wrapped in the `ag-ui-a2ui-toolkit` **recovery loop**: the model's free-form output is validated structurally and retried on structural errors up to a capped number of attempts; when recovery is exhausted the middleware surfaces a graceful A2UI **hard-failure envelope** rather than emitting a malformed tree.
+  - Reuses the A2A-free subset of Google's `a2ui-agent-sdk` for prompt construction and healing: `render_catalog_instructions()` wraps `render_as_llm_instructions` (renders the v0.9 envelope, common-types definitions, and catalog components into a prompt block), and `heal_json_arg()` wraps `parse_and_fix` (repairs smart quotes, trailing commas, and single-object wraps in the model's JSON). Validation deliberately stays on the toolkit's structural/lenient validator (not Google's strict `A2uiValidator`), because client-injected zod catalogs are not strict-resolvable.
+  - Import hygiene is enforced by `test_a2ui_import_hygiene.py`, which blocks `a2ui.a2a`, `a2ui.adk`, and `a2a` imports so the middleware stays A2A-free.
+  - **New dependencies**: `ag-ui-a2ui-toolkit>=0.0.3` and `a2ui-agent-sdk>=0.2.4,<0.3.0`. `a2ui-agent-sdk` floors `google-adk` at `>=1.28.1`, so the effective ADK floor is raised to `1.28.1` (the full `google-adk<3.0.0` range is retained — ADK 1.x and 2.x both supported).
+
+### Changed
+
+- **PERFORMANCE**: Cache session reads per execution to cut redundant `get_session` round-trips (#1880, #1890, thanks @he-yufeng)
+  - `SessionManager` now memoizes session reads in a short-lived, execution-local cache so repeated state accessors within one turn reuse a single fetch instead of re-pulling the full session (and event history) from the backing `SessionService` on every call — a notable latency win on remote backends like `VertexAiSessionService`. The cache is invalidated on writes and deliberately disabled before the runner and before the post-run HITL cleanup guard, where ADK can mutate session state outside `SessionManager`.
+- **CHORE**: Update the default model for the live tests to `gemini-3.5-flash`
+  - `gemini-2.0-flash` reached its shutdown date (2026-06-01) and `gemini-2.5-flash` is scheduled to shut down (2026-10-16), so the live/integration tests and documentation snippets now target the current stable flash GA, `gemini-3.5-flash`. The large file count is purely this model-string sweep — there are no library or runtime behavior changes.
+  - The test model is centralized in `tests/constants.py` as `LIVE_TEST_MODEL` (env-overridable via `ADK_TEST_MODEL`) so future cutovers are a one-line change instead of a sweep across every test file. A companion `LIVE_TEST_PRO_MODEL` (env-overridable via `ADK_TEST_PRO_MODEL`) holds the high-reasoning model at `gemini-2.5-pro` for now.
+  - The HITL resumption live test was hardened for determinism alongside the model bump: the agent instruction now mandates a single `plan_steps` tool call, `temperature` is `0.0`, and per-run `thread_id`s use a UUID instead of a second-resolution timestamp to avoid collisions under concurrent test load.
+
+### Fixed
+
+- **FIX**: `output_schema` text suppression now reaches agents used as Workflow
+  graph nodes (#1889, fixes #1860, thanks @he-yufeng). The #1390 suppression
+  walks the agent tree to find `LlmAgent`s with an `output_schema` and tells
+  `EventTranslator` to drop their `TEXT_MESSAGE_*` events, so the structured
+  JSON they emit never leaks into the chat transcript. The collector only
+  traversed `.sub_agents`, but an ADK 2.x `Workflow`'s child agents live in
+  `workflow.graph.nodes`, not `.sub_agents` — so an `output_schema` agent used
+  as a graph node (the canonical Workflow pattern) was never added to the
+  suppression set, and its structured output, including the streamed
+  `partial=True` chunks, leaked as visible text.
+  `ADKAgent._collect_output_schema_agent_names` now also descends into
+  `agent.graph.nodes` when present, leaving the existing `.sub_agents`
+  traversal unchanged.
+- **FIX**: Resume is gated until all of a turn's long-running results arrive
+  (#1935). When one model turn emits **multiple long-running tool calls** and
+  their results arrive in **separate submissions** (an instant frontend tool
+  resolves before a HITL one), ag-ui-adk resumed the model on the *first*
+  result. That replays a turn whose function-**call** parts outnumber its
+  function-**response** parts, which Gemini rejects server-side (`400
+  INVALID_ARGUMENT — number of function response parts [must] equal the number
+  of function call parts`). Where the provider tolerated the rearranged history
+  instead, ADK dropped the unanswered call and the model re-issued it under a
+  fresh id — a **duplicate HITL widget** on the client plus an orphaned
+  `pending_tool_calls` entry. The middleware now resumes **once**, after all of
+  the turn's long-running calls have results: earlier results are persisted to
+  the session (and merged in by ADK) but don't advance the model on their own.
+  The gate is scoped to the arriving turn's `invocation_id`, so a leaked or
+  orphaned pending entry from another turn can't stall the thread; persistence
+  happens before any pending/processed bookkeeping is mutated, so a failed
+  persist leaves the turn cleanly re-submittable.
+  - **New client-visible `RUN_ERROR` codes.** `PENDING_TOOL_CALLS` — a trailing
+    user/system message arrived while another long-running call from the same
+    turn was still unanswered; the middleware rejects it and mutates nothing
+    (resolve or cancel the open call, then resubmit) rather than forwarding an
+    under-answered turn (an opaque provider 400) and silently dropping the
+    message. `TOOL_RESULT_BUFFER_ERROR` — persisting a buffered result failed;
+    no state was changed, so the client can simply resubmit.
+  - **Scope/non-goals**: same-name parallel long-running calls resolved
+    *separately* remain unsupported (ADK's `_merge_function_response_events`
+    can't pair them); distinct-named staggered calls and same-name calls
+    resolved together in one submission both work. See #1334 / PR #1355.
+- **FIX**: `ADKAgent.run()` no longer emits `RUN_FINISHED` after `RUN_ERROR`
+  (#1892). When a tool raised mid-stream, the background queue path emitted
+  `RUN_ERROR` and the consumer loop then fell through to its unconditional
+  `RUN_FINISHED`, producing two terminal events for a single run.
+  `@ag-ui/client`'s state machine correctly rejects the second event with
+  "Cannot send event type 'RUN_FINISHED': The run has already errored". The
+  consumer loop now tracks whether a `RUN_ERROR` already flowed through the
+  queue and skips the trailing `RUN_FINISHED`, enforcing the AG-UI invariant of
+  at most one terminal event per run at the source rather than pushing it onto
+  every downstream SSE wrapper. This covers all queue-borne terminal errors
+  (tool throw, execution timeout, background-execution failure), not just the
+  tool-throw case. Thanks to @sunholo-voight-kampff for the detailed report.
+- **FIX**: HITL confirmation on a standalone `LlmAgent` root now re-executes the
+  original tool after the user confirms (#1839). Previously, for resumable
+  `LlmAgent` roots the #1534 pre-append workaround substituted `new_message`
+  with an empty-text placeholder that became the last user event in the
+  session. ADK's `_RequestConfirmationLlmRequestProcessor` reverse-scans for
+  the last user event and bails on the first one lacking `function_responses`,
+  so it never reached the pre-appended confirmation `FunctionResponse` — the
+  LLM was invoked instead and hallucinated an "awaiting confirmation" reply.
+  (The same workaround also hard-crashed `SequentialAgent`/`LoopAgent`
+  composites of `LlmAgent`s on confirmation with "No agent to transfer to".)
+  Confirmation responses (`adk_request_confirmation`) are now routed through
+  the direct `new_message` path — the same path ADK 2.0 Workflow roots already
+  take — making the `FunctionResponse` the trailing user event the processor
+  expects. Because `adk_request_confirmation` is a long-running tool that pauses
+  rather than ends the invocation, this does not re-trigger the `end_of_agent`
+  early-return that motivated the #1534 workaround for turn-ending
+  client/frontend tools. This is the `LlmAgent` cousin of the Workflow-root fix
+  in #1669; true ADK 2.0 Workflow roots are unaffected (they already bypass the
+  workaround).
+- **FIX**: Duplicate HITL tool-call emission under SSE streaming (long-running client tools)
+  - With SSE streaming (the default), ADK can deliver the *same logical* long-running client tool call **several times** — a streaming chunk (`partial=True`), an aggregated partial, the persisted final (`partial=False`) — and ADK separately **invokes the `ClientProxyTool`**, with `populate_client_function_call_id` assigning a **different ID to every replay** (#1168). Each replay produced its own `TOOL_CALL_START/ARGS/END` trio because every existing dedupe was keyed by tool-call ID — the dojo rendered the Human-in-the-Loop card **twice** (two cards, two different `adk-…` IDs visible in the event stream).
+  - **Translator** (`translate_lro_function_calls`): replays are now suppressed via a **high-water mark per tool name** — the Nth same-name LRO call *within one event* only emits if fewer than N calls for that name have been emitted this run (ledger: `lro_emitted_ids_by_name`). This uniformly covers second-partial replays, aggregated partials, and the final, regardless of `partial` flags. Genuinely parallel same-name calls arrive as multiple parts of *one* event, exceed the mark, and still emit individually; a later same-name event cannot be a real second call because an LRO pauses the invocation.
+  - **ClientProxyTool**: consults the translator's same ledger (shared into the proxy toolsets like the emitted-ID set already is) and suppresses its invocation when it is the positional twin of an already-streamed emission.
+  - The positional (FIFO) pairing is the same one `_extract_lro_id_remap` uses for ID remapping, so result-routing is unaffected; the non-streaming (final-only) path still emits normally.
+  - Reproduced deterministically with scripted `BaseLlm` streams driving the real runner + proxy + translator for all three shapes (`partial→final`, `partial→partial→final`, `partial→partial` — the "last event is partial" shape). End-to-end regression `TestLroNoDuplicateToolCallEndToEnd` is parametrized over all three; translator-level tests cover twin/second-partial/parallel/final-only/reset.
+  - Reproduced deterministically at the translator level (partial id-A then final id-B for one logical call → previously two `TOOL_CALL_START`, now one). New regression tests in `tests/test_lro_sse_id_remap.py` cover the partial→final twin, parallel same-name calls (no over-suppression), final-only emission, and reset.
+  - Also verified **live against google-adk 1.23.0 + Vertex**, where the partial(id-A)/final(id-B) replay occurs on **every** HITL turn (the unfixed translator emitted both → 100% duplicate cards in the dojo); with this fix the same stack emits exactly one. On google-adk 2.x the replay shape does not occur on this path.
+  - `examples/uv.lock` refreshed: it pinned `google-adk==1.23.0` (plus a similarly stale dependency set), so `uv run dev` served the demo on an ADK whose event shapes differ from the 2.x the middleware is developed and tested against — making this bug deterministic for example-server users yet invisible in development. The lock now resolves `google-adk 2.2.0` / `google-genai 2.8.0` (the old `aiohttp` pin also broke google-genai 2.8's SSE reader and was refreshed along with the rest).
+- **FIX**: Strip `additionalProperties` from client tool schemas before building Gemini function declarations
+  - CopilotKit / AG-UI frontend tools serialize their parameters with `zodToJsonSchema(..., {$refStrategy: "none"})`, which stamps `additionalProperties: false` on every object (root and nested). `_clean_schema_for_genai` allowlisted it because it is a field on `google.genai.types.Schema`, so it was forwarded verbatim. The Gemini **Developer API** rejects it in `function_declarations` with `400 INVALID_ARGUMENT` ("Unknown name \"additional_properties\" ... Cannot find field"), which surfaced as a `RUN_ERROR` and **no tool call reaching the UI** — e.g. the Human-in-the-Loop dojo demo rendered nothing for the ADK backend, while OpenAI-based backends (which tolerate the field) worked.
+  - `_clean_schema_for_genai` now strips `additionalProperties` / `additional_properties` at every depth via an explicit `_GENAI_REJECTED_SCHEMA_KEYS` denylist, closing both the dynamic `types.Schema.model_fields` allowlist and the static fallback. Gemini ignores `additionalProperties` for argument generation so no model behavior changes; **Vertex** already accepted the field, making this a no-op there and a fix on the Developer API.
+  - The middleware never read the value anywhere — it was only ever forwarded. The three #1495 tests that asserted pass-through (they validated `model_validate()` only, never a live request) were updated, and a regression test reproduces the exact dojo HITL tool schema and asserts `additional_properties` appears at no depth.
+
+- **FIX**: `adk_events_to_messages` now preserves `file_data` parts on user
+  events (#1771). Previously only the text part was extracted, so image,
+  audio, video, and document attachments were silently dropped from
+  `MESSAGES_SNAPSHOT` and disappeared from chat history after a page
+  refresh. MIME prefix dispatches to `ImageInputContent`, `AudioInputContent`,
+  `VideoInputContent`, or `DocumentInputContent`; `file_data` parts with no
+  `file_uri` are filtered out and text-only events still serialize as a
+  plain string. Thanks to @viktor-matic for the fix.
+
 ## [0.6.5] - 2026-05-28
 
 ### Fixed

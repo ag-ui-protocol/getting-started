@@ -1,0 +1,45 @@
+﻿[
+  {
+    "role": "user",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "Please setup my account"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "interruptRequest",
+        "reason": "input_required",
+        "message": "What username would you like to use?",
+        "responseSchema": {
+          "type": "object",
+          "properties": {
+            "response": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "response"
+          ]
+        },
+        "requestId": "call_Id_1"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "contents": [
+      {
+        "$type": "interruptResponse",
+        "payload": {
+          "response": "johndoe42"
+        },
+        "requestId": "call_Id_1"
+      }
+    ]
+  }
+]

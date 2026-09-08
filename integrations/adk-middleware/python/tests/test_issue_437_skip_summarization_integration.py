@@ -48,6 +48,7 @@ from ag_ui_adk import ADKAgent
 from ag_ui_adk.session_manager import SessionManager
 from google.adk.agents import LlmAgent
 from google.adk.tools import ToolContext
+from tests.constants import LIVE_TEST_MODEL
 
 
 @pytest.fixture(autouse=True)
@@ -100,7 +101,7 @@ class TestSkipSummarizationIntegration:
         """Create an ADK agent with the skip_summarization tool."""
         adk_agent = LlmAgent(
             name="weather_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="""You are a weather assistant.
             When asked about the weather, ALWAYS use the get_weather_with_skip_summarization tool.
             After the tool returns, do NOT repeat or summarize the result.
@@ -121,7 +122,7 @@ class TestSkipSummarizationIntegration:
         """Create an ADK agent with a normal tool (no skip_summarization)."""
         adk_agent = LlmAgent(
             name="temp_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="""You are a temperature assistant.
             When asked about the temperature, use the get_temperature tool.
             """,
@@ -406,7 +407,7 @@ class TestSkipSummarizationEdgeCases:
 
         adk_agent = LlmAgent(
             name="multi_tool_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="""You have two tools:
             - tool_with_skip: Use this when asked about "skip" queries
             - tool_without_skip: Use this when asked about "normal" queries
@@ -434,7 +435,7 @@ class TestSkipSummarizationEdgeCases:
 
         adk_agent = LlmAgent(
             name="timeout_test_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="Use the slow_skip_tool when asked to process anything.",
             tools=[slow_skip_tool],
         )
@@ -523,7 +524,7 @@ class TestSkipSummarizationReplayBug:
 
         adk_agent = LlmAgent(
             name="weather_skip_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="""You are a weather assistant.
             ALWAYS use the weather_skip_sum tool when asked about weather.
             After the tool returns, do NOT repeat or summarize the result.

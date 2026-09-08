@@ -3,6 +3,8 @@
 Covers all supported AI provider formats including the Bedrock Converse API
 fix for issue #1361.
 """
+import unittest
+from collections import UserDict
 import pytest
 
 from ag_ui_langgraph.utils import resolve_reasoning_content, resolve_encrypted_reasoning_content
@@ -19,7 +21,7 @@ class FakeChunk:
 # ---------------------------------------------------------------------------
 # resolve_reasoning_content
 # ---------------------------------------------------------------------------
-class TestResolveReasoningContent:
+class TestResolveReasoningContent(unittest.TestCase):
 
     def test_anthropic_old_format_thinking(self):
         """Old langchain-anthropic: { type: "thinking", thinking: "..." }"""
@@ -166,11 +168,50 @@ class TestResolveReasoningContent:
         )
         assert resolve_reasoning_content(chunk) is None
 
+    # DeepSeek / Qwen / xAI: additional_kwargs.reasoning_content as a plain string
+    def test_deepseek_reasoning_content_string(self):
+        """additional_kwargs.reasoning_content string should return reasoning at index 0."""
+        chunk = FakeChunk(
+            content=[],
+            additional_kwargs={"reasoning_content": "thinking step by step"},
+        )
+        result = resolve_reasoning_content(chunk)
+        assert result is not None
+        assert result["type"] == "text"
+        assert result["text"] == "thinking step by step"
+        assert result["index"] == 0
+
+    def test_deepseek_reasoning_content_empty_string_returns_none(self):
+        """Empty reasoning_content string should return None (no false positive)."""
+        chunk = FakeChunk(
+            content=[],
+            additional_kwargs={"reasoning_content": ""},
+        )
+        assert resolve_reasoning_content(chunk) is None
+
+    def test_deepseek_reasoning_content_non_string_returns_none(self):
+        """Non-string reasoning_content in additional_kwargs should return None."""
+        chunk = FakeChunk(
+            content=[],
+            additional_kwargs={"reasoning_content": {"unexpected": "dict"}},
+        )
+        assert resolve_reasoning_content(chunk) is None
+
+    def test_content_block_takes_priority_over_additional_kwargs(self):
+        """A valid content reasoning block wins over additional_kwargs.reasoning_content."""
+        chunk = FakeChunk(
+            content=[{"type": "thinking", "thinking": "from content block"}],
+            additional_kwargs={"reasoning_content": "from additional_kwargs"},
+        )
+        result = resolve_reasoning_content(chunk)
+        assert result is not None
+        assert result["text"] == "from content block"
+
 
 # ---------------------------------------------------------------------------
 # resolve_encrypted_reasoning_content
 # ---------------------------------------------------------------------------
-class TestResolveEncryptedReasoningContent:
+class TestResolveEncryptedReasoningContent(unittest.TestCase):
 
     def test_redacted_thinking_block(self):
         chunk = FakeChunk(content=[{"type": "redacted_thinking", "data": "encrypted_data_here"}])
@@ -191,3 +232,26 @@ class TestResolveEncryptedReasoningContent:
     def test_redacted_without_data(self):
         chunk = FakeChunk(content=[{"type": "redacted_thinking"}])
         assert resolve_encrypted_reasoning_content(chunk) is None
+
+    def test_string_content_block_does_not_raise(self):
+        """``list[str]`` is a first-class LangChain content shape, and this
+        function runs per streamed chunk in ``_handle_single_event`` with no
+        enclosing try — an unguarded ``.get`` here did not degrade one chunk,
+        it killed the stream. Rule 1 of the malformed-input contract on the
+        streaming leg. The sibling ``resolve_reasoning_content`` already
+        guarded its own block read.
+
+        Note this only ever inspects index 0, by pre-existing design: the
+        second case asserts None because the redacted block is not first, not
+        because a string anywhere disqualifies the chunk."""
+        for content in (["hello"], ["hello", {"type": "redacted_thinking", "data": "X"}]):
+            with self.subTest(content=content):
+                assert resolve_encrypted_reasoning_content(FakeChunk(content=content)) is None
+
+    def test_mapping_content_block_still_resolves(self):
+        """The guard this replaced was a truthiness check, so any duck-typed
+        mapping resolved through ``.get``. Tightening it to reject strings must
+        not also reject the mapping-backed blocks some providers return —
+        narrowing to ``dict`` would have."""
+        chunk = FakeChunk(content=[UserDict({"type": "redacted_thinking", "data": "ciphertext"})])
+        assert resolve_encrypted_reasoning_content(chunk) == "ciphertext"

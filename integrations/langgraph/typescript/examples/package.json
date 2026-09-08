@@ -3,13 +3,15 @@
   "version": "0.1.0",
   "description": "TypeScript examples for LangGraph agents with CopilotKit integration",
   "type": "module",
+  "packageManager": "pnpm@10.33.4",
   "scripts": {
     "build": "tsc",
-    "dev": "pnpx @langchain/langgraph-cli@1.1.13 dev",
+    "dev": "pnpx @langchain/langgraph-cli@1.2.3 dev",
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@copilotkit/sdk-js": "0.0.0-mme-ag-ui-0-0-46-20260227141603",
+    "@ag-ui/langgraph": "0.0.41",
+    "@copilotkit/sdk-js": "1.57.1",
     "@langchain/core": "^1.1.44",
     "@langchain/anthropic": "^0.3.0",
     "@langchain/google-genai": "^0.2.0",

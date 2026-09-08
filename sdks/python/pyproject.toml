@@ -1,7 +1,8 @@
 [project]
 name = "ag-ui-protocol"
-version = "0.1.18"
+version = "0.1.22"
 description = ""
+license-files = ["LICENSE"]
 authors = [
     { name = "Markus Ecker", email = "markus.ecker@gmail.com" }
 ]

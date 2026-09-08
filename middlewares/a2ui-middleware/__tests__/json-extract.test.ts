@@ -4,6 +4,7 @@ import {
   extractCompleteItemsWithStatus,
   extractCompleteObject,
   extractCompleteA2UIOperations,
+  extractDataArrayItems,
   extractStringField,
 } from "../src/json-extract";
 
@@ -98,6 +99,19 @@ describe("extractCompleteItemsWithStatus", () => {
       arrayClosed: true,
     });
   });
+
+  it("matches only the top-level key, not a nested same-named key", () => {
+    // Regression: a component may carry its own `components` field (e.g.
+    // catalog metadata) — the raw-indexOf scan would mis-target it. The
+    // top-level `components` array must always win.
+    const partial =
+      '{"surfaceId":"s","wrapper":{"components":[{"nested":true}]},"components":[{"id":"root","component":"Row"}]}';
+    const result = extractCompleteItemsWithStatus(partial, "components");
+    expect(result).toEqual({
+      items: [{ id: "root", component: "Row" }],
+      arrayClosed: true,
+    });
+  });
 });
 
 describe("extractCompleteObject", () => {
@@ -168,6 +182,25 @@ describe("extractCompleteObject", () => {
     // Simulates streaming: components done, data still arriving
     const partial = '{"surfaceId": "s1", "components": [{"id": "root"}], "data": {"form": {"name": "Mar';
     expect(extractCompleteObject(partial, "data")).toBeNull();
+  });
+
+  it("ignores a nested `data` property on a component and matches only the top-level key", () => {
+    // Regression: a component may legitimately carry its own `data` field
+    // (e.g. a Chart with `{"id":"c","component":"Chart","data":{"series":[1]}}`).
+    // The earlier raw-indexOf locator would match that nested `"data"` token
+    // first and return the component's data — wrong. The top-level
+    // updateDataModel must always reflect the args' OUTER `data` value.
+    const partial =
+      '{"surfaceId":"s","components":[{"id":"c","component":"Chart","data":{"series":[1,2]}}],"data":{"series":[9]}}';
+    expect(extractCompleteObject(partial, "data")).toEqual({ series: [9] });
+  });
+
+  it("ignores `data` value strings that happen to match the key spelling", () => {
+    // A value like `{"label":"data"}` must not be mistaken for the key. The
+    // scanner only matches when the next non-whitespace after the string is
+    // a colon — value strings are followed by `,` or `}`.
+    const partial = '{"label":"data","data":{"ok":true}}';
+    expect(extractCompleteObject(partial, "data")).toEqual({ ok: true });
   });
 });
 
@@ -271,5 +304,32 @@ describe("extractCompleteA2UIOperations", () => {
     const inner = JSON.stringify(ops);
     const outer = `{"a2ui_json": ${JSON.stringify(inner)}}`;
     expect(extractCompleteA2UIOperations(outer)).toEqual(ops);
+  });
+});
+
+describe("extractDataArrayItems", () => {
+  it("locates the top-level data object and streams its items", () => {
+    const partial =
+      '{"surfaceId":"s","components":[{"id":"root"}],"data":{"items":[{"name":"A"},{"name":"B"';
+    const result = extractDataArrayItems(partial, "items");
+    expect(result?.items).toEqual([{ name: "A" }]);
+    expect(result?.arrayClosed).toBe(false);
+  });
+
+  it("ignores a component's nested `data` field and uses the outer data object", () => {
+    // Regression: the previous raw-indexOf scoping would lock onto the
+    // component's `data` substring and stream `series` instead of the outer
+    // `items` array.
+    const partial =
+      '{"surfaceId":"s","components":[{"id":"c","component":"Chart","data":{"series":[1,2,3]}}],"data":{"items":[{"name":"A"}]}}';
+    const result = extractDataArrayItems(partial, "items");
+    expect(result?.items).toEqual([{ name: "A" }]);
+    expect(result?.arrayClosed).toBe(true);
+  });
+
+  it("returns null when the data value is not an object", () => {
+    // `data` is a string here, not an object — nothing to scope into.
+    const partial = '{"surfaceId":"s","data":"not-an-object"}';
+    expect(extractDataArrayItems(partial, "items")).toBeNull();
   });
 });

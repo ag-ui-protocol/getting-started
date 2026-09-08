@@ -51,7 +51,7 @@ The integration includes 5 example agents:
 cd integrations/claude-agent-sdk/python
 pip install -e .
 
-# Start server (port 8888)
+# Start server (port 8019)
 cd examples
 ANTHROPIC_API_KEY=sk-ant-xxx python server.py
 

@@ -2,6 +2,7 @@
 
 """Session manager that adds production features to ADK's native session service."""
 
+from contextvars import ContextVar
 from typing import Dict, Optional, Set, Any, Union, Iterable, Tuple
 import asyncio
 import logging
@@ -15,6 +16,10 @@ APP_NAME_STATE_KEY = "_ag_ui_app_name"
 USER_ID_STATE_KEY = "_ag_ui_user_id"
 CONTEXT_STATE_KEY = "_ag_ui_context"
 INVOCATION_ID_STATE_KEY = "_ag_ui_invocation_id"
+
+_SESSION_READ_CACHE: ContextVar[Optional[Dict[Tuple[str, str, str], Any]]] = (
+    ContextVar("ag_ui_adk_session_read_cache", default=None)
+)
 
 
 class SessionManager:
@@ -102,6 +107,46 @@ class SessionManager:
             f"thread_id_as_session_id: {use_thread_id_as_session_id}, "
             f"hitl_max_wait: {hitl_max_wait_seconds or 'unlimited'}s"
         )
+
+    def start_session_read_cache(self):
+        """Start a short-lived cache for repeated session reads in one execution."""
+        return _SESSION_READ_CACHE.set({})
+
+    def stop_session_read_cache(self, token) -> None:
+        _SESSION_READ_CACHE.reset(token)
+
+    def disable_session_read_cache(self) -> None:
+        """Disable session caching for the remainder of the current context."""
+        _SESSION_READ_CACHE.set(None)
+
+    def _cache_key(
+        self,
+        session_id: str,
+        app_name: str,
+        user_id: str,
+    ) -> Tuple[str, str, str]:
+        return (session_id, app_name, user_id)
+
+    def _cache_session(
+        self,
+        session_id: str,
+        app_name: str,
+        user_id: str,
+        session: Any,
+    ) -> None:
+        cache = _SESSION_READ_CACHE.get()
+        if cache is not None and session is not None:
+            cache[self._cache_key(session_id, app_name, user_id)] = session
+
+    def invalidate_session(
+        self,
+        session_id: str,
+        app_name: str,
+        user_id: str,
+    ) -> None:
+        cache = _SESSION_READ_CACHE.get()
+        if cache is not None:
+            cache.pop(self._cache_key(session_id, app_name, user_id), None)
 
     @classmethod
     def get_default(cls, **kwargs) -> "SessionManager":
@@ -222,6 +267,7 @@ class SessionManager:
                 state=state,
                 session_id=thread_id,
             )
+            self._cache_session(thread_id, app_name, user_id, session)
             logger.info(f"Created session with thread_id as session_id: {thread_id}")
             return session, thread_id
         except Exception as e:
@@ -261,6 +307,7 @@ class SessionManager:
             app_name=app_name,
             state=state,
         )
+        self._cache_session(session.id, app_name, user_id, session)
         logger.info(f"Created new session for thread {thread_id}: {session.id}")
         return session, session.id
 
@@ -293,6 +340,7 @@ class SessionManager:
                 # list_sessions returns ListSessionsResponse with .sessions attribute
                 for session in response.sessions:
                     if session.state and session.state.get(THREAD_ID_STATE_KEY) == thread_id:
+                        self._cache_session(session.id, app_name, user_id, session)
                         return session
             except Exception as e:
                 logger.error(f"Error listing sessions for thread_id lookup: {e}")
@@ -316,11 +364,18 @@ class SessionManager:
             Session object if found, None otherwise
         """
         try:
-            return await self._session_service.get_session(
+            cache = _SESSION_READ_CACHE.get()
+            cache_key = self._cache_key(session_id, app_name, user_id)
+            if cache is not None and cache_key in cache:
+                return cache[cache_key]
+
+            session = await self._session_service.get_session(
                 session_id=session_id,
                 app_name=app_name,
                 user_id=user_id
             )
+            self._cache_session(session_id, app_name, user_id, session)
+            return session
         except Exception as e:
             logger.error(f"Error getting session {session_id}: {e}")
             return None
@@ -348,7 +403,7 @@ class SessionManager:
             True if successful, False otherwise
         """
         try:
-            session = await self._session_service.get_session(
+            session = await self.get_session(
                 session_id=session_id,
                 app_name=app_name,
                 user_id=user_id
@@ -388,6 +443,7 @@ class SessionManager:
             
             # Apply changes through ADK's event system
             await self._session_service.append_event(session, event)
+            self.invalidate_session(session_id, app_name, user_id)
             
             logger.info(f"Updated state for session {app_name}:{session_id}")
             logger.debug(f"State updates: {state_updates}")
@@ -415,7 +471,7 @@ class SessionManager:
             Session state dictionary or None if session not found
         """
         try:
-            session = await self._session_service.get_session(
+            session = await self.get_session(
                 session_id=session_id,
                 app_name=app_name,
                 user_id=user_id
@@ -457,7 +513,7 @@ class SessionManager:
             Value for the key or default
         """
         try:
-            session = await self._session_service.get_session(
+            session = await self.get_session(
                 session_id=session_id,
                 app_name=app_name,
                 user_id=user_id
@@ -785,6 +841,7 @@ class SessionManager:
             except Exception as e:
                 logger.error(f"Failed to delete session {session_key}: {e}")
         
+        self.invalidate_session(session.id, session.app_name, session.user_id)
         self._untrack_session(session_key, session.user_id)
     
     def _start_cleanup_task(self):

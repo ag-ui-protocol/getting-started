@@ -1,0 +1,20 @@
+﻿{
+  "threadId": "thread_Id_1",
+  "runId": "run_Id_1",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What are some fun things to do near me?"
+    }
+  ],
+  "tools": [
+    {
+      "name": "GetUserLocation",
+      "description": "Get the user\u0027s current location from GPS.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+﻿{
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Please delete the file report-draft.txt"
+        }
+      ]
+    }
+  ]
+}

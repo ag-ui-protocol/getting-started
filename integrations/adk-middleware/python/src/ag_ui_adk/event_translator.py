@@ -16,6 +16,8 @@ from ag_ui.core import (
     ToolCallResultEvent, StateSnapshotEvent, StateDeltaEvent,
     CustomEvent, Message, UserMessage, AssistantMessage, ToolMessage, ReasoningMessage,
     ToolCall, FunctionCall,
+    ImageInputContent, AudioInputContent, VideoInputContent,
+    DocumentInputContent, InputContentUrlSource, TextInputContent,
     ReasoningStartEvent, ReasoningEndEvent,
     ReasoningMessageStartEvent, ReasoningMessageContentEvent, ReasoningMessageEndEvent,
     ReasoningEncryptedValueEvent,
@@ -25,6 +27,7 @@ from google.adk.events import Event as ADKEvent
 
 from .config import PredictStateMapping, normalize_predict_state
 from .serialization import serialize_tool_args
+from .utils.converters import _escape_json_pointer_token
 
 import logging
 logger = logging.getLogger(__name__)
@@ -60,6 +63,29 @@ def _check_thought_support() -> bool:
             _HAS_THOUGHT_SUPPORT = False
         _THOUGHT_SUPPORT_CHECKED = True
     return _HAS_THOUGHT_SUPPORT
+
+
+def _file_data_to_media_part(file_data):
+    """Convert an ADK file_data part to the right AG-UI media content type.
+
+    Dispatches on MIME type prefix: image/* → ImageInputContent,
+    audio/* → AudioInputContent, video/* → VideoInputContent,
+    everything else (documents, text, etc.) → DocumentInputContent.
+    Returns None when file_uri is missing.
+    """
+    uri = getattr(file_data, "file_uri", None)
+    if not uri:
+        return None
+    mime = getattr(file_data, "mime_type", None) or ""
+    source = InputContentUrlSource(value=uri, mimeType=mime or None)
+    if mime.startswith("image/"):
+        return ImageInputContent(source=source)
+    if mime.startswith("audio/"):
+        return AudioInputContent(source=source)
+    if mime.startswith("video/"):
+        return VideoInputContent(source=source)
+    return DocumentInputContent(source=source)
+
 
 def _coerce_tool_response(value: Any, _visited: Optional[set[int]] = None) -> Any:
     """Recursively convert arbitrary tool responses into JSON-serializable structures."""
@@ -225,6 +251,13 @@ class EventTranslator:
         # A list is used because the same tool can be called multiple times
         # in parallel (e.g. 5 concurrent create_item calls).
         self.lro_emitted_ids_by_name: Dict[str, List[str]] = {}
+        # This ledger doubles as the high-water mark for replay suppression in
+        # translate_lro_function_calls: ADK can replay the same logical LRO call
+        # across several events (streaming chunk, aggregated partial, persisted
+        # final) with a different ID each time (#1168); any same-name call whose
+        # position within its event does not exceed len(ledger[name]) is a
+        # replay and is suppressed. ClientProxyTool consults the same ledger to
+        # suppress its own cross-path twin (see client_proxy_tool.py).
 
         # Track reasoning message streaming state (for thought parts)
         self._is_reasoning: bool = False  # Whether we're currently in a reasoning block
@@ -241,6 +274,9 @@ class EventTranslator:
             self._predict_state_by_tool[mapping.tool].append(mapping)
         self._emitted_predict_state_for_tools: set[str] = set()  # Track which tools have had PredictState emitted
         self._emitted_confirm_for_tools: set[str] = set()  # Track which tools have had confirm_changes emitted
+        # Track tool call IDs we've already emitted a REASONING_ENCRYPTED_VALUE for,
+        # so partial/non-partial replays of the same function call don't duplicate it.
+        self._emitted_signature_tool_call_ids: set[str] = set()
 
         # Track tool call IDs that are associated with predictive state tools
         # We suppress TOOL_CALL_RESULT events for these since the frontend handles
@@ -403,7 +439,14 @@ class EventTranslator:
                         # Yield only non-LRO function call events
                         async for event in self._translate_function_calls(non_lro_calls):
                             yield event
-                        
+
+                    # Emit REASONING_ENCRYPTED_VALUE for thought signatures attached to
+                    # function_call parts. Gemini attaches the signature to the tool call
+                    # part (not the thought-text part), so the reasoning path above never
+                    # sees it. Runs for both LRO and non-LRO calls present in this event.
+                    async for event in self._translate_function_call_signatures(adk_event):
+                        yield event
+
             # Handle function responses and yield the tool response event
             # this is essential for scenerios when user has to render function response at frontend
             if hasattr(adk_event, 'get_function_responses'):
@@ -807,9 +850,34 @@ class EventTranslator:
 
         if adk_event.content and adk_event.content.parts:
             lro_ids = set(adk_event.long_running_tool_ids or [])
+            # High-water-mark dedupe across REPLAYED events. Under SSE streaming
+            # ADK can deliver the same logical LRO call several times — a
+            # streaming chunk (partial=True), an aggregated partial, and the
+            # persisted final (partial=False) — and assigns a *different* ID to
+            # each replay (#1168), so the ID-based guard below cannot recognize
+            # them as the same call and a duplicate TOOL_CALL trio renders the
+            # HITL card twice in the dojo. Instead, count same-name LRO calls
+            # positionally WITHIN this event: the Nth same-name call in an event
+            # is a replay if we already emitted >= N calls for that name in this
+            # run (the FIFO pairing _extract_lro_id_remap also uses). Genuinely
+            # parallel same-name calls arrive as multiple parts of ONE event, so
+            # they exceed the high-water mark and still emit individually. A
+            # second model turn calling the same tool again cannot occur within
+            # this runner stream — LRO pauses the invocation — so a same-name
+            # reappearance in a LATER event is always a replay.
+            seen_in_event: Dict[str, int] = {}
             for i, part in enumerate(adk_event.content.parts):
                 if part.function_call:
                     fc = part.function_call
+                    if getattr(fc, 'id', None) in lro_ids \
+                      and fc.id not in self.emitted_tool_call_ids:
+                        position = seen_in_event.get(fc.name, 0) + 1
+                        seen_in_event[fc.name] = position
+                        already_emitted = len(self.lro_emitted_ids_by_name.get(fc.name, []))
+                        if position <= already_emitted:
+                            # Replay of the position-th call — already emitted
+                            # (under a different ID); suppress the duplicate.
+                            continue
                     # Emit whenever the FC is LRO and hasn't already been emitted
                     # — by ClientProxyTool (1.18+ when ADK invokes the proxy) or
                     # by a previous call to this method (SSE streams an LRO event
@@ -853,6 +921,64 @@ class EventTranslator:
                         # Clean up tracking
                         self._active_tool_calls.pop(fc.id, None)
     
+    async def _translate_function_call_signatures(
+        self,
+        adk_event: ADKEvent,
+    ) -> AsyncGenerator[BaseEvent, None]:
+        """Emit REASONING_ENCRYPTED_VALUE for thought signatures on function_call parts.
+
+        Gemini attaches ``thought_signature`` (the encrypted chain-of-thought that
+        led to a tool call) to the ``function_call`` part rather than to the
+        thought-text part. The thought-text path in ``_translate_reasoning_content``
+        therefore never sees it, and the encrypted reasoning would be dropped.
+
+        This emits a ``ReasoningEncryptedValueEvent`` with ``subtype="tool-call"``
+        keyed by the tool call id, mirroring the ``subtype="message"`` emission for
+        thought-text signatures. Deduplicated per tool call id so partial/non-partial
+        replays of the same function call don't emit it twice.
+
+        Args:
+            adk_event: The ADK event whose parts may carry function-call signatures.
+
+        Yields:
+            ReasoningEncryptedValueEvent for each function_call part with a signature.
+        """
+        import base64
+
+        content = getattr(adk_event, "content", None)
+        parts = getattr(content, "parts", None) if content is not None else None
+        if not parts:
+            return
+
+        for part in parts:
+            func_call = getattr(part, "function_call", None)
+            sig = getattr(part, "thought_signature", None)
+            # thought_signature is always opaque bytes when present; anything else
+            # (e.g. None, or an unset attribute) means there is no signature.
+            if func_call is None or not isinstance(sig, (bytes, bytearray)):
+                continue
+
+            tool_call_id = getattr(func_call, "id", None)
+            if (
+                not isinstance(tool_call_id, str)
+                or not tool_call_id
+                or tool_call_id in self._emitted_signature_tool_call_ids
+            ):
+                continue
+            self._emitted_signature_tool_call_ids.add(tool_call_id)
+
+            encrypted_value = base64.b64encode(sig).decode("ascii")
+            yield ReasoningEncryptedValueEvent(
+                type=EventType.REASONING_ENCRYPTED_VALUE,
+                subtype="tool-call",
+                entity_id=tool_call_id,
+                encrypted_value=encrypted_value,
+            )
+            logger.debug(
+                "🧠 Emitted reasoning encrypted value (tool-call signature) for %s",
+                tool_call_id,
+            )
+
     async def _translate_function_calls(
         self,
         function_calls: list[types.FunctionCall],
@@ -1168,7 +1294,7 @@ class EventTranslator:
         for key, value in state_delta.items():
             patches.append({
                 "op": "add",
-                "path": f"/{key}",
+                "path": f"/{_escape_json_pointer_token(key)}",
                 "value": value
             })
         
@@ -1235,6 +1361,7 @@ class EventTranslator:
         self._emitted_predict_state_for_tools.clear()
         self._emitted_confirm_for_tools.clear()
         self._predictive_state_tool_call_ids.clear()
+        self._emitted_signature_tool_call_ids.clear()
         self._deferred_confirm_events.clear()
         # Reset reasoning state
         self._is_reasoning = False
@@ -1359,10 +1486,21 @@ def adk_events_to_messages(events: List[ADKEvent]) -> List[Message]:
         if author == "user":
             if not text_content:
                 continue
+            media_parts = [
+                part_obj
+                for p in content.parts
+                if getattr(p, "file_data", None)
+                for part_obj in [_file_data_to_media_part(p.file_data)]
+                if part_obj is not None
+            ]
+            user_content: object = (
+                [TextInputContent(text=text_content)] + media_parts
+                if media_parts else text_content
+            )
             user_message = UserMessage(
                 id=event_id,
                 role="user",
-                content=text_content
+                content=user_content,
             )
             messages.append(user_message)
 
@@ -1384,13 +1522,18 @@ def adk_events_to_messages(events: List[ADKEvent]) -> List[Message]:
 
             # Only emit assistant message if there is visible content or tool calls
             if text_content or tool_calls:
+                assistant_name = (
+                    author
+                    if isinstance(author, str) and author != "model"
+                    else None
+                )
                 assistant_message = AssistantMessage(
                     id=event_id,
                     role="assistant",
+                    name=assistant_name,
                     content=text_content if text_content else None,
                     tool_calls=tool_calls
                 )
                 messages.append(assistant_message)
 
     return messages
-        

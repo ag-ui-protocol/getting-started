@@ -20,7 +20,7 @@ Requires GOOGLE_API_KEY environment variable.
 
 import asyncio
 import os
-import time
+import uuid
 import pytest
 from typing import List, Optional
 
@@ -40,10 +40,11 @@ from ag_ui_adk.session_manager import SessionManager
 from google.adk.agents import Agent
 from google.adk.apps import App, ResumabilityConfig
 from google.genai import types
+from tests.constants import LIVE_TEST_MODEL
 
 
 # Use a fast model for tests
-DEFAULT_MODEL = "gemini-2.0-flash"
+DEFAULT_MODEL = LIVE_TEST_MODEL
 
 # Maximum retries when LLM doesn't call the tool (non-deterministic)
 MAX_TOOL_CALL_RETRIES = 3
@@ -121,13 +122,20 @@ class TestHITLResumptionTextOutput:
             model=DEFAULT_MODEL,
             name='hitl_text_output_agent',
             instruction="""You are a task planning agent.
-When asked to plan something, call the plan_steps tool to generate steps.
+
+When the user asks you to plan ANY task, you MUST immediately call the
+plan_steps tool to generate the steps. Call plan_steps before writing any
+text: never ask clarifying questions, never reply with a plan as plain
+text, and make exactly one plan_steps call per planning request.
+
 When you receive the tool result back, acknowledge the approved steps
 by listing each one and confirming execution. Always produce a text response
 after receiving tool results.""",
             tools=[AGUIToolset()],
             generate_content_config=types.GenerateContentConfig(
-                temperature=0.1,  # Low temperature for deterministic output
+                # temperature=0 makes the tool-call decision as deterministic as
+                # the API allows, so run 1 reliably emits a single plan_steps call.
+                temperature=0.0,
             ),
         )
 
@@ -189,7 +197,7 @@ after receiving tool results.""",
 
         # Retry loop since LLM may not always call the tool
         for attempt in range(1, MAX_TOOL_CALL_RETRIES + 1):
-            thread_id = f"test_hitl_text_{int(time.time())}_{attempt}"
+            thread_id = f"test_hitl_text_{uuid.uuid4().hex}_{attempt}"
 
             # Step 1: Send initial request to trigger tool call
             run_input_1 = RunAgentInput(
@@ -338,13 +346,17 @@ after receiving tool results.""",
         tool_call_id = None
 
         for attempt in range(1, MAX_TOOL_CALL_RETRIES + 1):
-            thread_id = f"test_hitl_both_{int(time.time())}_{attempt}"
+            thread_id = f"test_hitl_both_{uuid.uuid4().hex}_{attempt}"
 
             run_input_1 = RunAgentInput(
                 thread_id=thread_id,
                 run_id="run_1",
                 messages=[
-                    UserMessage(id="msg_1", role="user", content="Plan a 2-step task")
+                    UserMessage(
+                        id="msg_1",
+                        role="user",
+                        content="Use the plan_steps tool to plan a 2-step task for tidying a desk."
+                    )
                 ],
                 tools=[plan_tool],
                 context=[],
@@ -369,7 +381,11 @@ after receiving tool results.""",
             thread_id=thread_id,
             run_id="run_2",
             messages=[
-                UserMessage(id="msg_1", role="user", content="Plan a 2-step task"),
+                UserMessage(
+                    id="msg_1",
+                    role="user",
+                    content="Use the plan_steps tool to plan a 2-step task for tidying a desk."
+                ),
                 AssistantMessage(
                     id="msg_2",
                     role="assistant",

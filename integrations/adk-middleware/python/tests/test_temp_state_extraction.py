@@ -28,9 +28,10 @@ from google.adk.agents import LlmAgent
 from google.adk.sessions import InMemorySessionService
 from google.adk.sessions.state import State as ADKState
 from google.adk.tools import ToolContext
+from tests.constants import LIVE_TEST_MODEL
 
 
-DEFAULT_MODEL = "gemini-2.0-flash"
+DEFAULT_MODEL = LIVE_TEST_MODEL
 
 
 async def _collect(agent: ADKAgent, run_input: RunAgentInput) -> List[BaseEvent]:
@@ -174,6 +175,71 @@ class TestRequestStateSessionService:
         await inner.create_session(app_name="app", user_id="u", session_id="s")
         fetched = await wrapper.get_session(app_name="app", user_id="u", session_id="s")
         assert "temp:token" not in fetched.state
+
+    @pytest.mark.asyncio
+    async def test_flush_delegates_to_inner_service(self):
+        """flush() must propagate to the wrapped service — regression for #2206.
+
+        Without delegation, write-behind session services are silently never
+        flushed, causing data loss.
+        """
+        flushed = []
+
+        class BufferingSessionService(InMemorySessionService):
+            async def flush(self) -> None:
+                flushed.append(True)
+
+        inner = BufferingSessionService()
+        wrapper = RequestStateSessionService(inner)
+
+        await wrapper.flush()
+
+        assert flushed == [True], "flush() did not delegate to the inner service"
+
+    @pytest.mark.asyncio
+    async def test_flush_tolerates_inner_without_flush(self):
+        """flush() must not fail when inner service lacks flush (no-op gracefully)."""
+
+        class MinimalSessionService:
+            """A mock that has no flush method at all."""
+
+            async def create_session(self, **kwargs):
+                return None
+
+            async def get_session(self, **kwargs):
+                return None
+
+            async def list_sessions(self, **kwargs):
+                return []
+
+            async def delete_session(self, **kwargs):
+                pass
+
+            async def append_event(self, session, event):
+                return event
+
+        inner = MinimalSessionService()
+        wrapper = RequestStateSessionService(inner)
+
+        # Should not raise — just no-op
+        await wrapper.flush()
+
+    @pytest.mark.asyncio
+    async def test_flush_idempotent_no_state(self):
+        """Calling flush() with no pending state or sessions is a safe no-op."""
+        flushed = []
+
+        class BufferingSessionService(InMemorySessionService):
+            async def flush(self) -> None:
+                flushed.append(True)
+
+        wrapper = RequestStateSessionService(BufferingSessionService())
+
+        # Multiple flushes with no sessions/state
+        await wrapper.flush()
+        await wrapper.flush()
+
+        assert flushed == [True, True], "flush() should delegate every call"
 
 
 # ---------------------------------------------------------------------------

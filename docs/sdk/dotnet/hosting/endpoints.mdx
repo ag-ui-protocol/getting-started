@@ -1,0 +1,183 @@
+---
+title: "Endpoints"
+description: "Host an IChatClient as an AG-UI endpoint"
+---
+
+# Endpoints
+
+An AG-UI endpoint is a normal ASP.NET Core POST endpoint. It receives a
+`RunAgentInput`, calls an `IChatClient`, converts the streamed response to AG-UI
+events, and returns Server-Sent Events.
+
+## Register AG-UI services
+
+Call `AddAGUI()` during startup. It configures ASP.NET Core JSON options with
+the AG-UI source-generated serializer context and registers interrupt content
+types used by the `IChatClient` pipeline.
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddAGUI();
+// Register your Microsoft.Extensions.AI IChatClient here.
+
+var app = builder.Build();
+
+app.MapAGUI("/");
+
+app.Run();
+```
+
+## Endpoint pattern
+
+Every AG-UI endpoint follows the same five steps.
+
+<Steps>
+  <Step title="Receive RunAgentInput">
+    Map a POST endpoint that receives `[FromBody] RunAgentInput`.
+  </Step>
+
+  <Step title="Create ChatRequestContext">
+    Call `input.ToChatRequestContext(jsonSerializerOptions, streamOptions?)`.
+    The returned context exposes `ctx.Messages` and `ctx.ChatOptions`.
+  </Step>
+
+  <Step title="Call the IChatClient">
+    Pass `ctx.Messages` and `ctx.ChatOptions` to
+    `chatClient.GetStreamingResponseAsync(...)`.
+  </Step>
+
+  <Step title="Convert to AG-UI events">
+    Pipe the `ChatResponseUpdate` stream through
+    `.AsAGUIEventStreamAsync(ctx, cancellationToken)`.
+  </Step>
+
+  <Step title="Return Server-Sent Events">
+    Return `TypedResults.ServerSentEvents(WrapAsSseItems(events, ct))`.
+  </Step>
+</Steps>
+
+## Minimal endpoint
+
+This is the canonical endpoint shape used by the .NET samples.
+
+```csharp
+using System.Net.ServerSentEvents;
+using System.Runtime.CompilerServices;
+using AGUI.Abstractions;
+using AGUI.Server;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Options;
+
+using JsonOptions = Microsoft.AspNetCore.Http.Json.JsonOptions;
+
+namespace MyAgent.Server;
+
+internal static class AGUIEndpoint
+{
+    internal static IEndpointConventionBuilder MapAGUI(
+        this IEndpointRouteBuilder endpoints,
+        string pattern)
+    {
+        return endpoints.MapPost(pattern, (
+            [FromBody] RunAgentInput input,
+            [FromServices] IChatClient chatClient,
+            [FromServices] IOptions<JsonOptions> jsonOptions,
+            CancellationToken cancellationToken) =>
+        {
+            var jsonSerializerOptions = jsonOptions.Value.SerializerOptions;
+
+            var ctx = input.ToChatRequestContext(jsonSerializerOptions);
+
+            var updates = chatClient.GetStreamingResponseAsync(
+                ctx.Messages,
+                ctx.ChatOptions,
+                cancellationToken);
+
+            var events = updates.AsAGUIEventStreamAsync(ctx, cancellationToken);
+
+            return TypedResults.ServerSentEvents(
+                WrapAsSseItems(events, cancellationToken));
+        });
+    }
+
+    private static async IAsyncEnumerable<SseItem<BaseEvent>> WrapAsSseItems(
+        IAsyncEnumerable<BaseEvent> events,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await foreach (var evt in events
+            .WithCancellation(cancellationToken)
+            .ConfigureAwait(false))
+        {
+            yield return new SseItem<BaseEvent>(evt);
+        }
+    }
+}
+```
+
+## Key APIs
+
+### ToChatRequestContext
+
+`ToChatRequestContext` adapts the AG-UI request to the
+`Microsoft.Extensions.AI` request shape.
+
+```csharp
+var ctx = input.ToChatRequestContext(jsonSerializerOptions);
+```
+
+`ChatRequestContext` contains:
+
+- `ctx.Input` - the original `RunAgentInput`
+- `ctx.Messages` - converted `List<ChatMessage>`
+- `ctx.ChatOptions` - configured `ChatOptions`
+
+The original input is also available to downstream chat clients and tools at
+`ctx.ChatOptions.AdditionalProperties[AGUIConstants.RunAgentInputKey]`.
+
+<Tip>
+  Client-tool and approval-flow routing happens automatically. Client-declared
+  tools from `RunAgentInput.Tools` are installed on `ctx.ChatOptions.Tools` and
+  routed through the approval pipeline.
+</Tip>
+
+### AsAGUIEventStreamAsync
+
+`AsAGUIEventStreamAsync` converts streamed `ChatResponseUpdate` values into
+AG-UI `BaseEvent` values.
+
+```csharp
+var events = updates.AsAGUIEventStreamAsync(ctx, cancellationToken);
+```
+
+It emits run lifecycle events, maps text content to `TEXT_MESSAGE_*` events,
+maps `FunctionCallContent` and `FunctionResultContent` to tool events, maps
+`TextReasoningContent` to reasoning events, and passes through any `BaseEvent`
+stored in `ChatResponseUpdate.RawRepresentation`.
+
+### WrapAsSseItems
+
+ASP.NET Core's `TypedResults.ServerSentEvents` writes `SseItem<T>` values. The
+small helper wraps each AG-UI event in `SseItem<BaseEvent>`.
+
+```csharp
+return TypedResults.ServerSentEvents(
+    WrapAsSseItems(events, cancellationToken));
+```
+
+## Adding stream options
+
+Pass `AGUIStreamOptions` when the endpoint needs custom stream conversion.
+
+```csharp
+var streamOptions = new AGUIStreamOptions()
+    .MapResultAsStateSnapshot("write_document");
+
+var ctx = input.ToChatRequestContext(jsonSerializerOptions, streamOptions);
+```
+
+See [Extensibility](/sdk/dotnet/hosting/extensibility) for the available
+mapping hooks.

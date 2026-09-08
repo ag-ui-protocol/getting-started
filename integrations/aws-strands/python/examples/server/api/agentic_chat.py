@@ -15,6 +15,7 @@ os.environ["OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"] = "all"
 from strands import Agent
 from ag_ui_strands import StrandsAgent, create_strands_app
 from server.model_factory import create_model
+from server.settings import cors_origins
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent.parent.parent / '.env'
@@ -39,4 +40,4 @@ agui_agent = StrandsAgent(
     description="Conversational Strands agent with AG-UI streaming",
 )
 
-app = create_strands_app(agui_agent, "/")
+app = create_strands_app(agui_agent, "/", origins=cors_origins())

@@ -28,6 +28,7 @@ from google.genai import types
 from ag_ui_adk.utils.converters import (
     convert_ag_ui_messages_to_adk,
     convert_adk_event_to_ag_ui_message,
+    convert_message_content_to_parts,
     convert_state_to_json_patch,
     convert_json_patch_to_state,
     extract_text_from_content,
@@ -358,9 +359,42 @@ class TestConvertAGUIMessagesToADK:
         assert len(adk_events) == 1
         event = adk_events[0]
         assert event.id == "assistant_1"
-        assert event.author == "assistant"
+        assert event.author == "model"
         assert event.content.role == "model"  # ADK uses "model" for assistant
         assert event.content.parts[0].text == "I'm doing well, thank you!"
+
+    def test_convert_named_assistant_message_uses_name_as_author(self):
+        """Test converting named AssistantMessage to ADK event author."""
+        assistant_msg = AssistantMessage(
+            id="assistant_named_1",
+            role="assistant",
+            name="subagent1",
+            content="Handled by subagent1.",
+        )
+
+        adk_events = convert_ag_ui_messages_to_adk([assistant_msg])
+
+        assert len(adk_events) == 1
+        event = adk_events[0]
+        assert event.id == "assistant_named_1"
+        assert event.author == "subagent1"
+        assert event.content.role == "model"
+        assert event.content.parts[0].text == "Handled by subagent1."
+
+    def test_convert_unnamed_assistant_round_trip_does_not_synthesize_name(self):
+        """Test plain assistant messages round-trip without name='assistant'."""
+        assistant_msg = AssistantMessage(
+            id="assistant_plain_1",
+            role="assistant",
+            content="Plain assistant response.",
+        )
+
+        adk_event = convert_ag_ui_messages_to_adk([assistant_msg])[0]
+        round_trip_message = convert_adk_event_to_ag_ui_message(adk_event)
+
+        assert adk_event.author == "model"
+        assert isinstance(round_trip_message, AssistantMessage)
+        assert round_trip_message.name is None
 
     def test_convert_assistant_message_with_tool_calls(self):
         """Test converting an AssistantMessage with tool calls."""
@@ -598,6 +632,26 @@ class TestConvertAGUIMessagesToADK:
         func_response = event.content.parts[0].function_response
         assert func_response.response == {"result": '{"result": "success", "value": 42}'}
 
+    def test_binary_filename_maps_to_blob_display_name(self):
+        """Test that BinaryInputContent.filename is set as Blob.display_name."""
+        item = BinaryInputContent(
+            data=base64.b64encode(b"hello").decode(),
+            mime_type="application/pdf",
+            filename="report.pdf",
+        )
+        parts = convert_message_content_to_parts([item])
+        assert len(parts) == 1
+        assert parts[0].inline_data.display_name == "report.pdf"
+
+    def test_binary_without_filename_has_no_display_name(self):
+        """Test that Blob.display_name is None when filename is not provided."""
+        item = BinaryInputContent(
+            data=base64.b64encode(b"hello").decode(),
+            mime_type="application/pdf",
+        )
+        parts = convert_message_content_to_parts([item])
+        assert parts[0].inline_data.display_name is None
+
     def test_convert_empty_message_list(self):
         """Test converting an empty message list."""
         adk_events = convert_ag_ui_messages_to_adk([])
@@ -718,7 +772,28 @@ class TestConvertADKEventToAGUIMessage:
         assert result.id == "assistant_1"
         assert result.role == "assistant"
         assert result.content == "I can help you with that."
+        assert result.name is None
         assert result.tool_calls is None
+
+    def test_convert_agent_author_to_assistant_name(self):
+        """Test preserving concrete ADK agent authors as AssistantMessage.name."""
+        mock_event = MagicMock()
+        mock_event.id = "assistant_agent_1"
+        mock_event.author = "subagent1"
+        mock_event.content = MagicMock()
+
+        mock_part = MagicMock()
+        mock_part.text = "Handled by subagent1."
+        mock_part.function_call = None
+        mock_event.content.parts = [mock_part]
+
+        result = convert_adk_event_to_ag_ui_message(mock_event)
+
+        assert isinstance(result, AssistantMessage)
+        assert result.id == "assistant_agent_1"
+        assert result.role == "assistant"
+        assert result.name == "subagent1"
+        assert result.content == "Handled by subagent1."
 
     def test_convert_assistant_event_with_function_call(self):
         """Test converting assistant event with function call."""
@@ -739,6 +814,7 @@ class TestConvertADKEventToAGUIMessage:
 
         assert isinstance(result, AssistantMessage)
         assert result.content is None
+        assert result.name is None
         assert len(result.tool_calls) == 1
 
         tool_call = result.tool_calls[0]
@@ -890,15 +966,15 @@ class TestStateConversionFunctions:
 
         # Check each patch
         user_patch = next(p for p in patches if p["path"] == "/user_name")
-        assert user_patch["op"] == "replace"
+        assert user_patch["op"] == "add"
         assert user_patch["value"] == "John"
 
         status_patch = next(p for p in patches if p["path"] == "/status")
-        assert status_patch["op"] == "replace"
+        assert status_patch["op"] == "add"
         assert status_patch["value"] == "active"
 
         count_patch = next(p for p in patches if p["path"] == "/count")
-        assert count_patch["op"] == "replace"
+        assert count_patch["op"] == "add"
         assert count_patch["value"] == 42
 
     def test_convert_state_to_json_patch_with_none_values(self):
@@ -914,7 +990,7 @@ class TestStateConversionFunctions:
         assert len(patches) == 3
 
         keep_patch = next(p for p in patches if p["path"] == "/keep_this")
-        assert keep_patch["op"] == "replace"
+        assert keep_patch["op"] == "add"
         assert keep_patch["value"] == "value"
 
         remove_patch = next(p for p in patches if p["path"] == "/remove_this")
@@ -928,6 +1004,20 @@ class TestStateConversionFunctions:
         """Test converting empty state delta."""
         patches = convert_state_to_json_patch({})
         assert patches == []
+
+    def test_convert_state_to_json_patch_escapes_json_pointer_tokens(self):
+        """Test escaping slashes and tildes in top-level state keys."""
+        patches = convert_state_to_json_patch({
+            "user/name": "Eslam",
+            "config~version": 2,
+            "obsolete/key": None,
+        })
+
+        assert patches == [
+            {"op": "add", "path": "/user~1name", "value": "Eslam"},
+            {"op": "add", "path": "/config~0version", "value": 2},
+            {"op": "remove", "path": "/obsolete~1key"},
+        ]
 
     def test_convert_json_patch_to_state_basic(self):
         """Test converting JSON patch operations to state delta."""
@@ -977,6 +1067,26 @@ class TestStateConversionFunctions:
         state_delta = convert_json_patch_to_state([])
         assert state_delta == {}
 
+    def test_convert_json_patch_to_state_decodes_json_pointer_tokens(self):
+        """Test decoding escaped top-level state keys."""
+        patches = [
+            {"op": "add", "path": "/user~1name", "value": "Eslam"},
+            {"op": "replace", "path": "/config~0version", "value": 2},
+            {"op": "remove", "path": "/obsolete~1key"},
+        ]
+
+        assert convert_json_patch_to_state(patches) == {
+            "user/name": "Eslam",
+            "config~version": 2,
+            "obsolete/key": None,
+        }
+
+    def test_convert_json_patch_to_state_removes_one_leading_slash(self):
+        """Test that only the JSON Pointer root separator is removed."""
+        patches = [{"op": "add", "path": "//key", "value": "value"}]
+
+        assert convert_json_patch_to_state(patches) == {"/key": "value"}
+
     def test_convert_json_patch_to_state_malformed_patches(self):
         """Test converting malformed patches."""
         patches = [
@@ -999,7 +1109,9 @@ class TestStateConversionFunctions:
             "name": "Test",
             "active": True,
             "count": 100,
-            "remove_me": None
+            "remove_me": None,
+            "user/name": "Eslam",
+            "config~version": 2,
         }
 
         patches = convert_state_to_json_patch(original_state)

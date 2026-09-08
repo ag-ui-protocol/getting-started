@@ -26,6 +26,7 @@ from google.adk.sessions import InMemorySessionService
 
 from ag_ui_adk import ADKAgent
 from ag_ui_adk.session_manager import SessionManager
+from tests.constants import LIVE_TEST_MODEL
 
 
 class TestMultiInstanceHITL:
@@ -57,7 +58,7 @@ class TestMultiInstanceHITL:
     @pytest.fixture
     def instance_a(self, shared_session_service):
         """First ADKAgent instance (Pod A). Initializes the SessionManager singleton."""
-        agent = LlmAgent(name="test_agent", model="gemini-2.0-flash", instruction="Test")
+        agent = LlmAgent(name="test_agent", model=LIVE_TEST_MODEL, instruction="Test")
         return ADKAgent(
             adk_agent=agent,
             app_name="test_app",
@@ -68,7 +69,7 @@ class TestMultiInstanceHITL:
     @pytest.fixture
     def instance_b(self, shared_session_service, instance_a):
         """Second ADKAgent instance (Pod B). Depends on instance_a for singleton order."""
-        agent = LlmAgent(name="test_agent", model="gemini-2.0-flash", instruction="Test")
+        agent = LlmAgent(name="test_agent", model=LIVE_TEST_MODEL, instruction="Test")
         return ADKAgent(
             adk_agent=agent,
             app_name="test_app",

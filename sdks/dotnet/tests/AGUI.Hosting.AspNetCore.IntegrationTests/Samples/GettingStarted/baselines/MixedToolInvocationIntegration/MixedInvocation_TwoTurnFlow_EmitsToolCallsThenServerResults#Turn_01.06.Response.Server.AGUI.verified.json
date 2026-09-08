@@ -1,0 +1,204 @@
+﻿[
+  {
+    "type": "RUN_STARTED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1"
+  },
+  {
+    "type": "TOOL_CALL_START",
+    "parentMessageId": "",
+    "toolCallId": "call_Id_1",
+    "toolCallName": "get_user_location",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "get_user_location",
+          "arguments": {},
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        },
+        {
+          "$type": "functionCall",
+          "name": "get_weather",
+          "arguments": {
+            "city": "Paris"
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_2"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TOOL_CALL_ARGS",
+    "toolCallId": "call_Id_1",
+    "delta": "{}",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "get_user_location",
+          "arguments": {},
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        },
+        {
+          "$type": "functionCall",
+          "name": "get_weather",
+          "arguments": {
+            "city": "Paris"
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_2"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TOOL_CALL_END",
+    "toolCallId": "call_Id_1",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "get_user_location",
+          "arguments": {},
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        },
+        {
+          "$type": "functionCall",
+          "name": "get_weather",
+          "arguments": {
+            "city": "Paris"
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_2"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TOOL_CALL_START",
+    "parentMessageId": "",
+    "toolCallId": "call_Id_2",
+    "toolCallName": "get_weather",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "get_user_location",
+          "arguments": {},
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        },
+        {
+          "$type": "functionCall",
+          "name": "get_weather",
+          "arguments": {
+            "city": "Paris"
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_2"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TOOL_CALL_ARGS",
+    "toolCallId": "call_Id_2",
+    "delta": "{\n  \u0022city\u0022: \u0022Paris\u0022\n}",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "get_user_location",
+          "arguments": {},
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        },
+        {
+          "$type": "functionCall",
+          "name": "get_weather",
+          "arguments": {
+            "city": "Paris"
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_2"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TOOL_CALL_END",
+    "toolCallId": "call_Id_2",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "get_user_location",
+          "arguments": {},
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        },
+        {
+          "$type": "functionCall",
+          "name": "get_weather",
+          "arguments": {
+            "city": "Paris"
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_2"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "RUN_FINISHED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1",
+    "outcome": {
+      "type": "success"
+    },
+    "usage": [
+      {
+        "inputTokens": 184,
+        "outputTokens": 116,
+        "totalTokens": 300,
+        "reasoningTokens": 64,
+        "cachedInputTokens": 0
+      }
+    ]
+  }
+]

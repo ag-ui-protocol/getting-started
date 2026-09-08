@@ -23,7 +23,8 @@ void main() {
         'Test message',
         cause: cause,
       );
-      expect(error.toString(), contains('Caused by: Exception: Original error'));
+      expect(
+          error.toString(), contains('Caused by: Exception: Original error'));
     });
   });
 
@@ -34,7 +35,8 @@ void main() {
         endpoint: 'https://api.example.com/runs',
         statusCode: 500,
       );
-      expect(error.toString(), contains('endpoint: https://api.example.com/runs'));
+      expect(
+          error.toString(), contains('endpoint: https://api.example.com/runs'));
       expect(error.toString(), contains('status: 500'));
     });
 
@@ -58,15 +60,25 @@ void main() {
     });
   });
 
-  group('TimeoutError', () {
+  group('AGUITimeoutError', () {
     test('includes timeout duration', () {
-      final error = TimeoutError(
+      final error = AGUITimeoutError(
         'Operation timed out',
         timeout: Duration(seconds: 30),
         operation: 'POST /runs',
       );
       expect(error.toString(), contains('timeout: 30s'));
       expect(error.toString(), contains('operation: POST /runs'));
+    });
+
+    test('deprecated TimeoutError typedef resolves to AGUITimeoutError', () {
+      // Backward-compat: pre-rename callers using the bare name still work.
+      // ignore: deprecated_member_use_from_same_package
+      final TimeoutError error = AGUITimeoutError(
+        'Legacy alias',
+        timeout: Duration(seconds: 5),
+      );
+      expect(error, isA<AGUITimeoutError>());
     });
   });
 
@@ -141,7 +153,8 @@ void main() {
       );
       expect(error.toString(), contains('rule: run-lifecycle'));
       expect(error.toString(), contains('state: idle'));
-      expect(error.toString(), contains('expected: RUN_STARTED before other events'));
+      expect(error.toString(),
+          contains('expected: RUN_STARTED before other events'));
     });
   });
 

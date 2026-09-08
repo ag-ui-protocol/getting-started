@@ -15,34 +15,99 @@ export function extractCompleteItems(partial: string, dataKey: string): unknown[
 }
 
 /**
+ * Locate the start of the value for a TOP-LEVEL (root-depth=1) key in partial JSON.
+ *
+ * Returns the byte index of the first non-whitespace character AFTER the
+ * key's colon, or -1 if the key hasn't been seen at the root level yet.
+ *
+ * This is JSON-aware (driven by clarinet, not raw `indexOf`), so a key with
+ * the same name nested inside a component object (e.g. a component carrying
+ * its own `data` field) is correctly ignored — only the top-level key at
+ * `{"<key>": ...}` is matched.
+ */
+function findTopLevelValueStart(partial: string, key: string): number {
+  const target = `"${key}"`;
+  let i = 0;
+  let objectDepth = 0;
+  let arrayDepth = 0;
+  let inString = false;
+  let escape = false;
+
+  while (i < partial.length) {
+    const ch = partial[i];
+
+    if (escape) {
+      escape = false;
+      i++;
+      continue;
+    }
+
+    if (inString) {
+      if (ch === "\\") {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      // Opening quote of a string token. Only at the root level
+      // (objectDepth === 1, no enclosing array) can this be the top-level
+      // key we're looking for. We confirm by:
+      //   1. The substring at `i` equals `"<key>"`.
+      //   2. The next non-whitespace character after the closing quote is
+      //      ':' — distinguishing this from a value string that happens to
+      //      equal the key spelling.
+      if (objectDepth === 1 && arrayDepth === 0 && partial.startsWith(target, i)) {
+        let j = i + target.length;
+        while (j < partial.length && (partial[j] === " " || partial[j] === "\n" || partial[j] === "\r" || partial[j] === "\t")) {
+          j++;
+        }
+        if (j < partial.length && partial[j] === ":") {
+          // Skip the colon and any whitespace to land on the value's first
+          // non-whitespace character.
+          j++;
+          while (j < partial.length && (partial[j] === " " || partial[j] === "\n" || partial[j] === "\r" || partial[j] === "\t")) {
+            j++;
+          }
+          return j < partial.length ? j : -1;
+        }
+      }
+      inString = true;
+      i++;
+      continue;
+    }
+
+    if (ch === "{") objectDepth++;
+    else if (ch === "}") objectDepth--;
+    else if (ch === "[") arrayDepth++;
+    else if (ch === "]") arrayDepth--;
+
+    i++;
+  }
+
+  return -1;
+}
+
+/**
  * Extract a complete JSON object value for a given key from partially-streamed JSON.
  * Given partial JSON like `{"surfaceId": "s1", "data": {"form": {"name": "Alice"}}, "other":`
  * and dataKey "data", returns the parsed object `{"form": {"name": "Alice"}}` or null if
  * the object value is not yet fully closed.
+ *
+ * Only matches the key at the TOP LEVEL — a nested object that happens to
+ * carry the same key (e.g. a component with its own `data` property) is
+ * ignored. This keeps the streaming intercept correct even when component
+ * payloads contain JSON keys that overlap with the render_a2ui arg names.
  */
 export function extractCompleteObject(partial: string, dataKey: string): Record<string, unknown> | null {
-  // Find the opening '{' of the target object value using string search
-  const keyPattern = `"${dataKey}"`;
-  const keyIdx = partial.indexOf(keyPattern);
-  if (keyIdx === -1) return null;
-
-  // Skip past the key, colon, and whitespace to find the opening '{'
-  const afterKey = partial.indexOf(":", keyIdx + keyPattern.length);
-  if (afterKey === -1) return null;
-
-  let braceStart = -1;
-  for (let i = afterKey + 1; i < partial.length; i++) {
-    const ch = partial[i];
-    if (ch === "{") {
-      braceStart = i;
-      break;
-    }
-    if (ch !== " " && ch !== "\n" && ch !== "\r" && ch !== "\t") {
-      // Value is not an object (could be array, string, etc.)
-      return null;
-    }
-  }
+  const braceStart = findTopLevelValueStart(partial, dataKey);
   if (braceStart === -1) return null;
+  // findTopLevelValueStart returns the index of the value's opening token.
+  // For object values that's the '{' character.
+  if (partial[braceStart] !== "{") return null;
 
   // Use clarinet to find where the top-level object closes
   const substr = partial.substring(braceStart);
@@ -99,13 +164,13 @@ export function extractCompleteItemsWithStatus(
   partial: string,
   dataKey: string,
 ): { items: unknown[]; arrayClosed: boolean } | null {
-  // Find the opening '[' of the target array using string search
-  const keyPattern = `"${dataKey}"`;
-  const keyIdx = partial.indexOf(keyPattern);
-  if (keyIdx === -1) return null;
-
-  const bracketStart = partial.indexOf("[", keyIdx + keyPattern.length);
+  // Locate the opening '[' of the target array via a JSON-aware scan rather
+  // than raw indexOf — a component object that happens to contain a key with
+  // the same name (e.g. `"items"` deep in a component) must NOT be mistaken
+  // for the top-level array.
+  const bracketStart = findTopLevelValueStart(partial, dataKey);
   if (bracketStart === -1) return null;
+  if (partial[bracketStart] !== "[") return null;
 
   // Feed only the array portion to clarinet, so parser.position is relative to bracketStart
   const substr = partial.substring(bracketStart);
@@ -167,6 +232,39 @@ export function extractCompleteItemsWithStatus(
   } catch {
     return null;
   }
+}
+
+/**
+ * Incrementally extract complete items from the array at `data.<itemsKey>`
+ * inside partially-streamed render_a2ui args.
+ *
+ * The render_a2ui args look like:
+ *   `{"surfaceId":"s","components":[...],"data":{"items":[{...},{...}` (still streaming)
+ *
+ * We scope the search to the `data` object region first (so a `"items"` token
+ * that appears inside a component's `path` string — e.g. `"path":"/items"` —
+ * is never mistaken for the data array), then reuse the array-item extractor
+ * to return every fully-closed item parsed so far.
+ *
+ * Returns `{ items, arrayClosed }` or null when the data array hasn't started
+ * or no complete item exists yet.
+ */
+export function extractDataArrayItems(
+  partial: string,
+  itemsKey: string,
+): { items: unknown[]; arrayClosed: boolean } | null {
+  // Locate the TOP-LEVEL `data` object via clarinet so a component that
+  // carries its own `data` field (e.g. a Chart component with
+  // `{"id":"c","component":"Chart","data":{...}}`) doesn't get mis-scoped.
+  const dataBraceStart = findTopLevelValueStart(partial, "data");
+  if (dataBraceStart === -1) return null;
+  if (partial[dataBraceStart] !== "{") return null;
+
+  // Scope extraction to the data object substring so the items-array search
+  // (now also clarinet-driven for top-level keys) is rooted at the data
+  // object, never elsewhere in the args.
+  const dataSubstr = partial.substring(dataBraceStart);
+  return extractCompleteItemsWithStatus(dataSubstr, itemsKey);
 }
 
 /**

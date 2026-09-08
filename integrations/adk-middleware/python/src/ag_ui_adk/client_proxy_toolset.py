@@ -66,6 +66,17 @@ class ClientProxyToolset(BaseToolset):
         # DatabaseSessionService stale-marker race) for in-stream backend
         # tool calls. Assigned externally; see issue #1652.
         self._long_running_tool_ids: set[str] = set()
+        # The EventTranslator's name→[partial-emitted IDs] ledger. Assigned
+        # externally after the translator is created. Under SSE streaming the
+        # translator emits a long-running call from the partial event with one
+        # ID and ADK then invokes this proxy with a *different* ID (#1168), so
+        # the ID-based guard above can't tell they're the same logical call.
+        # The proxy matches its invocation to an already-emitted partial by name
+        # (positionally) to avoid emitting a duplicate TOOL_CALL trio.
+        self._translator_lro_emitted_ids_by_name: dict = {}
+        # Per-name count of proxy invocations already matched to a translator
+        # partial (shared across this toolset's proxies for the run).
+        self._lro_finalized_by_name: dict = {}
 
         logger.info(f"Initialized ClientProxyToolset with {len(ag_ui_tools)} tools (all long-running)")
 
@@ -101,6 +112,8 @@ class ClientProxyToolset(BaseToolset):
                     emitted_tool_call_ids=self._emitted_tool_call_ids,
                     translator_emitted_tool_call_ids=self._translator_emitted_tool_call_ids,
                     long_running_tool_ids=self._long_running_tool_ids,
+                    translator_lro_emitted_ids_by_name=self._translator_lro_emitted_ids_by_name,
+                    lro_finalized_by_name=self._lro_finalized_by_name,
                 )
                 proxy_tools.append(proxy_tool)
                 logger.info(f"[GET_TOOLS] Created proxy tool for '{ag_ui_tool.name}' (long-running)")

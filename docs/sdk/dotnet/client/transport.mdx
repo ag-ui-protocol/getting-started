@@ -1,0 +1,139 @@
+---
+title: "Transport"
+description: "AG-UI client transport abstraction and HTTP event stream"
+---
+
+# Transport
+
+`AGUI.Client` separates the chat client from the wire protocol with
+`IAGUITransport`. `AGUIChatClient` builds a `RunAgentInput`, passes it to the
+transport, and consumes the resulting AG-UI `BaseEvent` stream.
+
+```csharp
+using AGUI.Abstractions;
+using AGUI.Client;
+```
+
+## IAGUITransport
+
+`IAGUITransport` has a single method:
+
+```csharp
+public interface IAGUITransport
+{
+    IAsyncEnumerable<BaseEvent> SendAsync(
+        RunAgentInput input,
+        CancellationToken cancellationToken);
+}
+```
+
+The input contains the AG-UI thread id, run id, message history, tools, state,
+context, forwarded properties, and any resume entries for interrupted runs. The
+output is the ordered AG-UI event stream described in the
+[event reference](/sdk/dotnet/abstractions/events).
+
+## HTTP transport
+
+The `AGUIChatClientOptions(HttpClient, endpoint)` constructor creates the
+built-in HTTP transport internally:
+
+```csharp
+using AGUI.Client;
+using Microsoft.Extensions.AI;
+
+using HttpClient httpClient = new();
+IChatClient client = new AGUIChatClient(new(httpClient, "https://api.example.com/agent"));
+```
+
+The built-in transport sends the request as an HTTP `POST` whose body is the
+serialized `RunAgentInput`. The response is read as Server-Sent Events, and each
+SSE item is deserialized as a `BaseEvent`.
+
+<Note>
+  `AGUIHttpTransport` is the built-in HTTP+SSE implementation used by the
+  `AGUIChatClientOptions(HttpClient, endpoint)` constructor. Most applications do
+  not need to instantiate a transport directly.
+</Note>
+
+## Custom transports
+
+Implement `IAGUITransport` when you want to test without a server or use a
+different transport. Then pass the implementation to `AGUIChatClient`.
+
+```csharp
+using System.Runtime.CompilerServices;
+using AGUI.Abstractions;
+using AGUI.Client;
+using Microsoft.Extensions.AI;
+
+public sealed class InMemoryAGUITransport : IAGUITransport
+{
+    public List<RunAgentInput> Requests { get; } = [];
+
+    public async IAsyncEnumerable<BaseEvent> SendAsync(
+        RunAgentInput input,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        Requests.Add(input);
+        await Task.Yield();
+
+        string threadId = string.IsNullOrEmpty(input.ThreadId) ? "thread_1" : input.ThreadId;
+        string runId = string.IsNullOrEmpty(input.RunId) ? "run_1" : input.RunId;
+
+        yield return new RunStartedEvent { ThreadId = threadId, RunId = runId };
+        yield return new TextMessageStartEvent { MessageId = "msg_1", Role = AGUIRoles.Assistant };
+        yield return new TextMessageContentEvent { MessageId = "msg_1", Delta = "Hello from AG-UI" };
+        yield return new TextMessageEndEvent { MessageId = "msg_1" };
+        yield return new RunFinishedEvent { ThreadId = threadId, RunId = runId };
+    }
+}
+
+IAGUITransport transport = new InMemoryAGUITransport();
+IChatClient client = new AGUIChatClient(new() { Transport = transport });
+```
+
+## Event conversion
+
+The transport returns AG-UI protocol events. `AGUIChatClient` then converts them
+to `ChatResponseUpdate` values:
+
+- `RUN_STARTED` establishes the AG-UI thread id and run id.
+- Text message events become streamed text updates.
+- Tool call events become MEAI function call content.
+- Interrupt outcomes become `ToolApprovalRequestContent` or
+  `InterruptRequestContent`.
+- `RUN_ERROR` becomes an `ErrorContent` update. Its `message` maps to
+  `ErrorContent.Message`, and its optional `code` maps to
+  `ErrorContent.ErrorCode`. When the event carries partial `usage`, the client
+  also emits `UsageContent` updates so `ChatResponse.Usage` includes the tokens
+  consumed before the failure.
+
+`ResponseId` on each update corresponds to the AG-UI run id. The client clears
+`ConversationId` before yielding updates so callers continue sending full
+message history to stateless AG-UI servers.
+
+## Cancellation
+
+`SendAsync` receives the caller's `CancellationToken`. Custom transports should
+observe it while sending the request and while producing events:
+
+```csharp
+public async IAsyncEnumerable<BaseEvent> SendAsync(
+    RunAgentInput input,
+    [EnumeratorCancellation] CancellationToken cancellationToken)
+{
+    cancellationToken.ThrowIfCancellationRequested();
+
+    await Task.Delay(TimeSpan.FromMilliseconds(10), cancellationToken);
+    yield return new RunStartedEvent { ThreadId = input.ThreadId, RunId = input.RunId };
+
+    cancellationToken.ThrowIfCancellationRequested();
+    yield return new RunFinishedEvent { ThreadId = input.ThreadId, RunId = input.RunId };
+}
+```
+
+## Related references
+
+- [AGUIChatClient](/sdk/dotnet/client/chat-client)
+- [Events](/sdk/dotnet/abstractions/events)
+- [Core protocol types](/sdk/dotnet/abstractions/types)

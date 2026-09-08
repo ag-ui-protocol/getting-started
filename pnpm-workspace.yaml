@@ -2,6 +2,7 @@ packages:
   - apps/*
   - middlewares/*
   - sdks/typescript/packages/*
+  - sdks/dotnet/tests/CrossLanguage.Vitest
   - integrations/*/typescript
   - integrations/community/*/typescript
   - integrations/aws-strands/typescript/examples

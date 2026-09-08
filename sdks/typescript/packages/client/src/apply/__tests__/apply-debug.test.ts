@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import { Subject, firstValueFrom } from "rxjs";
 import { toArray } from "rxjs/operators";
 import {
@@ -7,14 +7,13 @@ import {
   Message,
   RunStartedEvent,
   TextMessageStartEvent,
-  TextMessageContentEvent,
   TextMessageEndEvent,
   RunFinishedEvent,
   RunAgentInput,
 } from "@ag-ui/core";
 import { defaultApplyEvents } from "../default";
 import { AbstractAgent } from "@/agent";
-import { createDebugLogger, DebugLogger } from "@/debug-logger";
+import { createDebugLogger } from "@/debug-logger";
 import { AgentSubscriber } from "@/agent/subscriber";
 
 const createAgent = (messages: Message[] = []) =>
@@ -33,7 +32,7 @@ const createInput = (): RunAgentInput => ({
 });
 
 describe("defaultApplyEvents debug logging", () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: MockInstance<typeof console.debug>;
 
   beforeEach(() => {
     debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});

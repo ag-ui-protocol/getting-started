@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:meta/meta.dart';
 
@@ -63,8 +65,15 @@ class AgUiClient {
   /// Returns a stream of [BaseEvent] objects representing the agent's response.
   ///
   /// Throws:
-  /// - [ValidationError] if the input is invalid
-  /// - [ConnectionException] if the connection fails
+  /// - [ValidationError] if the input is invalid (URL, message shape, etc.)
+  /// - [TransportError] if the HTTP/SSE connection fails or the server
+  ///   returns a non-success status
+  /// - [DecodingError] if an SSE payload cannot be decoded into a
+  ///   [BaseEvent]
+  /// - [CancellationError] if the request is cancelled via [cancelToken]
+  ///
+  /// All four extend [AGUIError] — catch that base for one-shot
+  /// handling.
   Stream<BaseEvent> runAgent(
     String endpoint,
     SimpleRunAgentInput input, {
@@ -73,11 +82,17 @@ class AgUiClient {
     // Validate inputs
     Validators.validateUrl(config.baseUrl, 'baseUrl');
     Validators.requireNonEmpty(endpoint, 'endpoint');
-    
-    final fullEndpoint = endpoint.startsWith('http') 
-        ? endpoint 
-        : '${config.baseUrl}/$endpoint';
-    
+
+    // Tighten the scheme test: `startsWith('http')` would accept httpfoo://
+    // and also skips the Validators.validateUrl defense-in-depth applied to
+    // config.baseUrl above. Run the same check for caller-supplied full URLs.
+    final isAbsolute =
+        endpoint.startsWith('http://') || endpoint.startsWith('https://');
+    if (isAbsolute) {
+      Validators.validateUrl(endpoint, 'endpoint');
+    }
+    final fullEndpoint = isAbsolute ? endpoint : '${config.baseUrl}/$endpoint';
+
     return _runAgentInternal(fullEndpoint, input, cancelToken: cancelToken);
   }
 
@@ -118,7 +133,8 @@ class AgUiClient {
     SimpleRunAgentInput input, {
     CancelToken? cancelToken,
   }) {
-    return runAgent('tool_based_generative_ui', input, cancelToken: cancelToken);
+    return runAgent('tool_based_generative_ui', input,
+        cancelToken: cancelToken);
   }
 
   /// Run the shared state agent.
@@ -138,7 +154,8 @@ class AgUiClient {
     SimpleRunAgentInput input, {
     CancelToken? cancelToken,
   }) {
-    return runAgent('predictive_state_updates', input, cancelToken: cancelToken);
+    return runAgent('predictive_state_updates', input,
+        cancelToken: cancelToken);
   }
 
   /// Internal implementation for running an agent
@@ -149,16 +166,30 @@ class AgUiClient {
   }) async* {
     final runId = input.runId ?? _generateRunId();
     cancelToken ??= CancelToken();
-    _requestTokens[runId] = cancelToken;
+
+    // Validate BEFORE registering in _requestTokens so a caller-supplied
+    // bad runId (empty, over-length, control chars) never enters the map.
+    _validateRunAgentInput(input);
+
+    // Reject a caller-supplied runId that collides with an in-flight run.
+    // `putIfAbsent` collapses the check-then-insert into a single map
+    // operation, eliminating the cross-tick race window that would exist
+    // between a `containsKey` check and the subsequent `[]=` assignment.
+    final existing = _requestTokens.putIfAbsent(runId, () => cancelToken!);
+    if (!identical(existing, cancelToken)) {
+      throw ValidationError(
+        'Duplicate runId "$runId": another run with the same id is in flight',
+        field: 'runId',
+        constraint: 'unique-in-flight',
+        value: runId,
+      );
+    }
 
     try {
-      // Validate input
-      _validateRunAgentInput(input);
-
       // Send POST request with RunAgentInput
       final headers = _buildHeaders();
       headers['Content-Type'] = 'application/json';
-      headers['Accept'] = 'text/event-stream';
+      headers.putIfAbsent('Accept', () => 'text/event-stream');
 
       final uri = Uri.parse(endpoint);
       final request = http.Request('POST', uri)
@@ -187,6 +218,7 @@ class AgUiClient {
       final sseClient = SseClient(
         idleTimeout: config.connectionTimeout,
         backoffStrategy: config.backoffStrategy,
+        maxDataCodeUnits: _streamAdapter.maxDataCodeUnits,
       );
       _activeStreams[runId] = sseClient;
 
@@ -200,16 +232,15 @@ class AgUiClient {
       yield* _transformSseStream(sseStream, runId);
     } on AgUiError {
       rethrow;
+    } on TimeoutException {
+      throw AGUITimeoutError(
+        'Agent request timed out',
+        timeout: config.requestTimeout,
+        operation: endpoint,
+      );
     } catch (e) {
       if (cancelToken.isCancelled) {
         throw CancellationError('Request was cancelled', operation: endpoint);
-      }
-      if (e is TimeoutException) {
-        throw TimeoutError(
-          'Agent request timed out',
-          timeout: config.requestTimeout,
-          operation: endpoint,
-        );
       }
       throw TransportError(
         'Failed to run agent',
@@ -222,41 +253,73 @@ class AgUiClient {
     }
   }
 
-  /// Send request with cancellation support
+  /// Send request with cancellation support.
+  ///
+  /// **Known limitation**: cancellation only drops the response at the
+  /// Dart completer level — the underlying HTTP connection is NOT aborted.
+  /// The `http.Client` interface does not expose per-request abort; closing
+  /// the shared `_httpClient` would affect all concurrent requests. In
+  /// practice the OS/server timeout eventually cleans up the socket. A
+  /// future refactor to per-request `IOClient` instances could add true
+  /// abort support.
+  ///
+  /// Late-arriving responses or errors from the HTTP future after
+  /// cancellation are silently swallowed by the `onError` handler below
+  /// to prevent unhandled-future-error warnings.
   Future<http.StreamedResponse> _sendWithCancellation(
     http.Request request,
     CancelToken cancelToken,
     Duration timeout,
   ) async {
-    // Create completer for cancellation
     final completer = Completer<http.StreamedResponse>();
-    
-    // Start the request
+
     final future = _httpClient.send(request).timeout(timeout);
-    
-    // Listen for cancellation
-    cancelToken.onCancel.then((_) {
+
+    unawaited(cancelToken.onCancel.then((_) {
       if (!completer.isCompleted) {
         completer.completeError(
-          CancellationError('Request cancelled', operation: request.url.toString()),
+          CancellationError('Request cancelled',
+              operation: request.url.toString()),
         );
       }
-    });
-    
-    // Complete with result or error
-    future.then(
+    }));
+
+    unawaited(future.then(
       (response) {
         if (!completer.isCompleted) {
           completer.complete(response);
+        } else {
+          // Late response after cancellation — caller already received
+          // CancellationError. Log so silent swallows are observable in
+          // dev tools / dart:developer listeners without surfacing to the
+          // stream consumer.
+          developer.log(
+            'Late HTTP response after cancellation; discarding '
+            '(status ${response.statusCode})',
+            name: 'ag_ui.client',
+          );
+          // Immediately subscribe-and-cancel to signal the underlying platform
+          // to close the socket. Do NOT await drain() — for SSE responses the
+          // body stream never ends until the server disconnects, so drain()
+          // would hold the socket open indefinitely.
+          unawaited(
+            response.stream.listen((_) {}).cancel().catchError((_) {}),
+          );
         }
       },
       onError: (Object error) {
         if (!completer.isCompleted) {
           completer.completeError(error);
+        } else {
+          // Late error after cancellation — log for debuggability.
+          developer.log(
+            'Late HTTP error after cancellation; discarded: $error',
+            name: 'ag_ui.client',
+          );
         }
       },
-    );
-    
+    ));
+
     return completer.future;
   }
 
@@ -267,54 +330,66 @@ class AgUiClient {
     if (token != null && !token.isCancelled) {
       token.cancel();
     }
-    
+
     // Close any active stream
     await _closeStream(runId);
   }
 
-  /// Transform SSE messages to typed AG-UI events
+  /// Transform SSE messages to typed AG-UI events.
+  ///
+  /// Lifecycle note: `_runAgentInternal` owns the `runId`/`SseClient` pair
+  /// and calls `_closeStream` in its own `finally` block. This method does
+  /// NOT clean up — do not add a `finally` here to avoid a redundant second
+  /// `_closeStream` call.
   Stream<BaseEvent> _transformSseStream(
     Stream<SseMessage> sseStream,
     String runId,
   ) async* {
-    try {
-      await for (final message in sseStream) {
-        if (message.data == null || message.data!.isEmpty) {
-          continue;
-        }
-
-        try {
-          // Parse the SSE data as JSON
-          final jsonData = json.decode(message.data!);
-          
-          // Use the stream adapter to convert to typed events
-          final events = _streamAdapter.adaptJsonToEvents(jsonData);
-          
-          for (final event in events) {
-            yield event;
-          }
-        } on AgUiError catch (e) {
-          // Re-throw AG-UI errors to the stream
-          yield* Stream.error(e);
-        } catch (e) {
-          // Wrap other errors
-          yield* Stream.error(DecodingError(
-            'Failed to decode SSE message',
-            field: 'message.data',
-            expectedType: 'BaseEvent',
-            actualValue: message.data,
-            cause: e,
-          ));
-        }
+    await for (final message in sseStream) {
+      if (message.data == null || message.data!.isEmpty) {
+        continue;
       }
-    } finally {
-      // Clean up when stream ends
-      await _closeStream(runId);
+      // Mirror the keep-alive filter in EventStreamAdapter.fromSseStream:
+      // some servers emit `data: :` as a keep-alive sentinel alongside
+      // spec-correct comment-only keep-alives. Passing it to json.decode
+      // raises FormatException and wraps it as a spurious DecodingError.
+      if (message.data!.trim() == ':') {
+        continue;
+      }
+
+      try {
+        // Parse the SSE data as JSON
+        final jsonData = json.decode(message.data!);
+
+        // Use the stream adapter to convert to typed events
+        final events = _streamAdapter.adaptJsonToEvents(jsonData);
+
+        for (final event in events) {
+          yield event;
+        }
+      } on AGUIError catch (e) {
+        // Re-throw any AG-UI error (AGUIValidationError, EncoderError,
+        // AgUiError, …) unchanged so field info is preserved. The former
+        // `on AgUiError` clause silently wrapped AGUIValidationError (which
+        // extends AGUIError but not AgUiError) as a generic DecodingError,
+        // discarding the structured field path.
+        yield* Stream.error(e);
+      } catch (e) {
+        // Wrap other errors
+        yield* Stream.error(DecodingError(
+          'Failed to decode SSE message',
+          field: 'message.data',
+          expectedType: 'BaseEvent',
+          // Avoid forwarding the raw payload — may contain encryptedValue.
+          actualValue: '<${message.data?.length ?? 0} chars>',
+          cause: e,
+        ));
+      }
     }
   }
 
   /// Send an HTTP request with retries
-  /// 
+  ///
   /// Exposed for testing HTTP retry logic
   @visibleForTesting
   Future<http.Response> sendRequest(
@@ -338,17 +413,15 @@ class AgUiClient {
         }
 
         final uri = Uri.parse(endpoint);
-        final request = http.Request(method, uri)
-          ..headers.addAll(headers);
+        final request = http.Request(method, uri)..headers.addAll(headers);
 
         if (body != null) {
           request.body = json.encode(body);
         }
 
-        final streamedResponse = await _httpClient
-            .send(request)
-            .timeout(config.requestTimeout);
-        
+        final streamedResponse =
+            await _httpClient.send(request).timeout(config.requestTimeout);
+
         final response = await http.Response.fromStream(streamedResponse);
 
         // Success or client error (don't retry)
@@ -371,7 +444,7 @@ class AgUiClient {
       } on TimeoutException {
         attempts++;
         if (attempts > config.maxRetries) {
-          throw TimeoutError(
+          throw AGUITimeoutError(
             'Request timed out after ${config.maxRetries} attempts',
             timeout: config.requestTimeout,
             operation: '$method $endpoint',
@@ -380,7 +453,7 @@ class AgUiClient {
         nextDelay = config.backoffStrategy.nextDelay(attempts);
       } catch (e) {
         if (e is AgUiError) rethrow;
-        
+
         attempts++;
         if (attempts > config.maxRetries) {
           throw TransportError(
@@ -407,7 +480,7 @@ class AgUiClient {
   ) {
     // Validate status code
     Validators.validateStatusCode(response.statusCode, endpoint, response.body);
-    
+
     try {
       final data = Validators.validateJson(
         json.decode(response.body),
@@ -429,32 +502,109 @@ class AgUiClient {
 
   /// Validate RunAgentInput
   void _validateRunAgentInput(SimpleRunAgentInput input) {
-    // Validate thread ID if present
+    // Validate thread ID if present — use validateThreadId (100-char cap) for
+    // consistency with validateRunId; both flow into the same map-key spaces.
     if (input.threadId != null) {
-      Validators.requireNonEmpty(input.threadId!, 'threadId');
+      Validators.validateThreadId(input.threadId!);
     }
-    
-    // Validate messages if present
+
+    // Validate caller-supplied runId if present — it flows into _activeStreams
+    // and _requestTokens as a map key, so an empty or oversized value must be
+    // rejected at the boundary rather than silently stored.
+    if (input.runId != null) {
+      Validators.validateRunId(input.runId!);
+    }
+
+    if (input.parentRunId != null) {
+      Validators.requireNonEmpty(input.parentRunId!, 'parentRunId');
+    }
+
+    // Validate messages using an exhaustive sealed switch so every concrete
+    // subtype is explicitly covered. A partial `is UserMessage` check implied
+    // validation coverage that didn't exist — this makes the boundary clear.
     if (input.messages != null) {
+      final seenMessageIds = <String>{};
       for (final message in input.messages!) {
-        if (message is UserMessage) {
-          Validators.validateMessageContent(message.content);
+        // `Message.id` is declared nullable (to accommodate inbound
+        // MESSAGES_SNAPSHOT payloads where the server may omit the field),
+        // but outbound messages MUST carry a non-empty id: the server uses
+        // it as the stable identity key for conversation history.
+        // `requireNonEmpty` rejects both null and empty-string.
+        Validators.requireNonEmpty(message.id, 'message.id');
+        if (!seenMessageIds.add(message.id!)) {
+          throw ValidationError(
+            'Duplicate message.id "${message.id}"',
+            field: 'message.id',
+            constraint: 'unique-id',
+            value: message.id,
+          );
+        }
+        switch (message) {
+          case UserMessage():
+            Validators.validateUserMessageContent(message.messageContent);
+          case AssistantMessage(:final content, :final toolCalls):
+            // content is String? on AssistantMessage (all other subtypes have
+            // non-nullable content) — guard avoids passing null to
+            // validateMessageContent on valid assistant messages that omit it.
+            if (content != null) Validators.validateMessageContent(content);
+            if (toolCalls != null) {
+              final seenToolCallIds = <String>{};
+              for (final tc in toolCalls) {
+                if (!seenToolCallIds.add(tc.id)) {
+                  throw ValidationError(
+                    'Duplicate toolCall.id "${tc.id}" within AssistantMessage',
+                    field: 'toolCall.id',
+                    constraint: 'unique-within-message',
+                    value: tc.id,
+                  );
+                }
+              }
+            }
+          case DeveloperMessage(:final content):
+            Validators.validateMessageContent(content);
+          case SystemMessage(:final content):
+            Validators.validateMessageContent(content);
+          case ToolMessage(:final content):
+            Validators.validateMessageContent(content);
+          case ReasoningMessage(:final content):
+            // content is String? on ReasoningMessage (optional reasoning text)
+            if (content != null) Validators.validateMessageContent(content);
+          case ActivityMessage():
+            // ActivityMessage carries structured activityContent (Map), not
+            // a string content field — nothing to validate here.
+            break;
         }
       }
     }
   }
 
-  /// Generate a unique run ID
+  /// Lazily initialized secure RNG, shared across all `_generateRunId`
+  /// calls on this instance. `Random.secure()` seeds from the OS CSPRNG
+  /// on first access; creating one per call wastes that OS round-trip.
+  static final _secureRandom = Random.secure();
+
+  /// Generate a unique run ID using a timestamp + 8 cryptographically
+  /// random bytes. The random suffix prevents collisions for concurrent
+  /// calls within the same millisecond, which is important because run IDs
+  /// are used as map keys in `_activeStreams` / `_requestTokens` — a
+  /// collision would silently overwrite an in-flight stream entry.
   String _generateRunId() {
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final random = DateTime.now().microsecond;
-    return 'run_${timestamp}_$random';
+    final hex = List.generate(
+      8,
+      (_) => _secureRandom.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
+    return 'run_${timestamp}_$hex';
   }
 
   /// Truncate response body for error messages
   String _truncateBody(String body, {int maxLength = 500}) {
+    if (maxLength <= 0) return '...';
     if (body.length <= maxLength) return body;
-    return '${body.substring(0, maxLength)}...';
+    var end = maxLength;
+    final cu = body.codeUnitAt(end - 1);
+    if (cu >= 0xD800 && cu <= 0xDBFF) end--; // avoid splitting surrogate pair
+    return '${body.substring(0, end)}...';
   }
 
   /// Build headers for requests
@@ -478,18 +628,30 @@ class AgUiClient {
       token.cancel();
     }
     _requestTokens.clear();
-    
+
     // Close all active streams
     final closeOps = _activeStreams.values.map((c) => c.close());
     await Future.wait(closeOps);
     _activeStreams.clear();
-    
+
     // Close HTTP client
     _httpClient.close();
   }
 }
 
-/// Cancel token for request cancellation
+/// Cancel token for request cancellation.
+///
+/// **One-shot contract**: a [CancelToken] must be used with exactly ONE
+/// request. Once [cancel] is called the token is permanently cancelled —
+/// passing the same token to a second [AgUiClient.runAgent] call will
+/// cause that call to see [isCancelled] as `true` immediately and
+/// complete with a [CancellationError] before the HTTP request is sent.
+///
+/// **Listener accumulation**: [_sendWithCancellation] attaches a single
+/// `.then` handler to [onCancel] per request via [unawaited]. Because
+/// [CancelToken] is one-shot (one request, one cancel), the handler is
+/// never re-attached across multiple calls, so no listener accumulation
+/// occurs as long as the one-shot contract is honored.
 class CancelToken {
   final _completer = Completer<void>();
   bool _isCancelled = false;
@@ -511,6 +673,7 @@ class CancelToken {
 class SimpleRunAgentInput {
   final String? threadId;
   final String? runId;
+  final String? parentRunId;
   final List<Message>? messages;
   final List<Tool>? tools;
   final List<Context>? context;
@@ -522,6 +685,7 @@ class SimpleRunAgentInput {
   const SimpleRunAgentInput({
     this.threadId,
     this.runId,
+    this.parentRunId,
     this.messages,
     this.tools,
     this.context,
@@ -532,14 +696,32 @@ class SimpleRunAgentInput {
   });
 
   Map<String, dynamic> toJson() {
+    // `state`, `messages`, `tools`, `context`, and `forwardedProps` are
+    // declared required (non-optional) by the canonical TS RunAgentInputSchema
+    // and the Python pydantic model. Always emit them — falling back to empty
+    // containers when null — so strict servers (pydantic BaseModel with
+    // required fields) do not reject the payload with 422. Optional fields
+    // (`threadId`, `runId`, `parentRunId`, `config`, `metadata`) are only
+    // emitted when set; the server treats their absence as "not provided".
+    assert(
+      state == null || state is Map<String, dynamic>,
+      'SimpleRunAgentInput.state must be Map<String, dynamic> or null; '
+      'got ${state.runtimeType}',
+    );
+    assert(
+      forwardedProps == null || forwardedProps is Map<String, dynamic>,
+      'SimpleRunAgentInput.forwardedProps must be Map<String, dynamic> or null; '
+      'got ${forwardedProps.runtimeType}',
+    );
     return {
-      if (threadId != null) 'thread_id': threadId,
-      if (runId != null) 'run_id': runId,
-      'state': state ?? {},
-      'messages': messages?.map((m) => m.toJson()).toList() ?? [],
-      'tools': tools?.map((t) => t.toJson()).toList() ?? [],
-      'context': context?.map((c) => c.toJson()).toList() ?? [],
-      'forwardedProps': forwardedProps ?? {},
+      if (threadId != null) 'threadId': threadId,
+      if (runId != null) 'runId': runId,
+      if (parentRunId != null) 'parentRunId': parentRunId,
+      'state': state ?? const <String, dynamic>{},
+      'messages': messages?.map((m) => m.toJson()).toList() ?? const <Map<String, dynamic>>[],
+      'tools': tools?.map((t) => t.toJson()).toList() ?? const <Map<String, dynamic>>[],
+      'context': context?.map((c) => c.toJson()).toList() ?? const <Map<String, dynamic>>[],
+      'forwardedProps': forwardedProps ?? const <String, dynamic>{},
       if (config != null) 'config': config,
       if (metadata != null) 'metadata': metadata,
     };

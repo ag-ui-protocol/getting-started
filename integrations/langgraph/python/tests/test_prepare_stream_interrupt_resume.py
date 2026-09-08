@@ -28,6 +28,7 @@ from tests._helpers import make_agent
 @dataclass
 class FakeInterrupt:
     value: Any
+    id: str = "fake-interrupt"
 
 
 @dataclass
@@ -49,6 +50,7 @@ def _make_input(
     messages,
     thread_id="t1",
     forwarded_props=None,
+    resume=None,
 ):
     """Build a RunAgentInput-compatible mock."""
     inp = MagicMock()
@@ -59,6 +61,7 @@ def _make_input(
     inp.context = []
     inp.run_id = "run-1"
     inp.forwarded_props = forwarded_props or {}
+    inp.resume = resume
     return inp
 
 
@@ -591,6 +594,172 @@ class TestResumeInputJSONParseLogging(unittest.IsolatedAsyncioTestCase):
         self.assertIn(malformed, formatted)
 
 
+class TestInterruptShortCircuitOutcomeLegacyOff(unittest.IsolatedAsyncioTestCase):
+    """When enable_legacy_on_interrupt_event=False, the short-circuit path
+    must emit RUN_FINISHED(outcome=interrupt) without CustomEvent(on_interrupt)."""
+
+    async def test_no_resume_short_circuit_no_legacy_custom_event(self):
+        from ag_ui_langgraph.agent import LangGraphAgent
+
+        agent = LangGraphAgent(
+            name="test",
+            graph=MagicMock(),
+            enable_legacy_on_interrupt_event=False,
+            emit_interrupt_outcome=True,
+        )
+        agent.active_run = {"id": "run-1", "mode": "start"}
+
+        checkpoint_messages = [
+            HumanMessage(id="h1", content="do something"),
+            AIMessage(
+                id="ai1",
+                content="",
+                tool_calls=[{"id": "tc-1", "name": "approval", "args": {}}],
+            ),
+        ]
+        state = _make_state(
+            messages=checkpoint_messages,
+            tasks=[FakeTask(interrupts=[FakeInterrupt(value="confirm?")])],
+        )
+
+        frontend_messages = [
+            UserMessage(id="h1", role="user", content="do something"),
+        ]
+        inp = _make_input(messages=frontend_messages, forwarded_props={})
+
+        agent.prepare_regenerate_stream = AsyncMock()
+        config = {"configurable": {"thread_id": "t1"}}
+
+        result = await agent.prepare_stream(inp, state, config)
+
+        self.assertIsNone(result.get("stream"))
+        events = result.get("events_to_dispatch", [])
+        types = [getattr(e, "type", None) for e in events]
+        self.assertIn(EventType.RUN_STARTED, types)
+        self.assertNotIn(EventType.CUSTOM, types)
+        self.assertIn(EventType.RUN_FINISHED, types)
+
+        finished_events = [e for e in events if getattr(e, "type", None) == EventType.RUN_FINISHED]
+        self.assertEqual(len(finished_events), 1)
+        self.assertEqual(finished_events[0].outcome.type, "interrupt")
+
+    async def test_no_resume_short_circuit_with_legacy_on(self):
+        agent = make_agent(emit_interrupt_outcome=True)
+        agent.active_run = {"id": "run-1", "mode": "start"}
+
+        checkpoint_messages = [
+            HumanMessage(id="h1", content="do something"),
+            AIMessage(
+                id="ai1",
+                content="",
+                tool_calls=[{"id": "tc-1", "name": "approval", "args": {}}],
+            ),
+        ]
+        state = _make_state(
+            messages=checkpoint_messages,
+            tasks=[FakeTask(interrupts=[FakeInterrupt(value="confirm?")])],
+        )
+
+        frontend_messages = [
+            UserMessage(id="h1", role="user", content="do something"),
+        ]
+        inp = _make_input(messages=frontend_messages, forwarded_props={})
+
+        agent.prepare_regenerate_stream = AsyncMock()
+        config = {"configurable": {"thread_id": "t1"}}
+
+        result = await agent.prepare_stream(inp, state, config)
+
+        events = result.get("events_to_dispatch", [])
+        types = [getattr(e, "type", None) for e in events]
+        self.assertIn(EventType.CUSTOM, types)
+        self.assertIn(EventType.RUN_FINISHED, types)
+
+        finished_events = [e for e in events if getattr(e, "type", None) == EventType.RUN_FINISHED]
+        self.assertEqual(finished_events[0].outcome.type, "interrupt")
+
+
+class TestInterruptShortCircuitDefault(unittest.IsolatedAsyncioTestCase):
+    """Default config (emit_interrupt_outcome=False) must short-circuit with a
+    plain RUN_FINISHED (no structured outcome) plus the legacy on_interrupt event
+    — released clients that resume via command.resume break when they see the
+    structured outcome. This lives in a unittest.TestCase so CI's
+    `unittest discover` actually collects it (test_interrupt_handling.py's
+    pytest-style classes are not collected by that runner)."""
+
+    async def test_default_short_circuit_emits_plain_run_finished(self):
+        agent = make_agent()  # emit_interrupt_outcome defaults False
+        agent.active_run = {"id": "run-1", "mode": "start"}
+
+        checkpoint_messages = [
+            HumanMessage(id="h1", content="do something"),
+            AIMessage(
+                id="ai1",
+                content="",
+                tool_calls=[{"id": "tc-1", "name": "approval", "args": {}}],
+            ),
+        ]
+        state = _make_state(
+            messages=checkpoint_messages,
+            tasks=[FakeTask(interrupts=[FakeInterrupt(value="confirm?")])],
+        )
+
+        frontend_messages = [UserMessage(id="h1", role="user", content="do something")]
+        inp = _make_input(messages=frontend_messages, forwarded_props={})
+
+        agent.prepare_regenerate_stream = AsyncMock()
+        config = {"configurable": {"thread_id": "t1"}}
+
+        result = await agent.prepare_stream(inp, state, config)
+
+        events = result.get("events_to_dispatch", [])
+        types = [getattr(e, "type", None) for e in events]
+        # Legacy on_interrupt still surfaces the interrupt by default.
+        self.assertIn(EventType.CUSTOM, types)
+        self.assertIn(EventType.RUN_FINISHED, types)
+
+        finished_events = [e for e in events if getattr(e, "type", None) == EventType.RUN_FINISHED]
+        self.assertEqual(len(finished_events), 1)
+        self.assertIsNone(getattr(finished_events[0], "outcome", None))
+
+    async def test_legacy_off_forces_outcome_even_when_emit_off(self):
+        """With BOTH the legacy on_interrupt event and emit_interrupt_outcome
+        off, the interrupt would be surfaced by neither channel — so the outcome
+        is forced on to avoid a silent swallow."""
+        from ag_ui_langgraph.agent import LangGraphAgent
+
+        agent = LangGraphAgent(
+            name="test",
+            graph=MagicMock(),
+            enable_legacy_on_interrupt_event=False,
+            # emit_interrupt_outcome defaults False
+        )
+        agent.active_run = {"id": "run-1", "mode": "start"}
+
+        state = _make_state(
+            messages=[
+                HumanMessage(id="h1", content="do something"),
+                AIMessage(id="ai1", content="", tool_calls=[{"id": "tc-1", "name": "approval", "args": {}}]),
+            ],
+            tasks=[FakeTask(interrupts=[FakeInterrupt(value="confirm?")])],
+        )
+        inp = _make_input(
+            messages=[UserMessage(id="h1", role="user", content="do something")],
+            forwarded_props={},
+        )
+        agent.prepare_regenerate_stream = AsyncMock()
+
+        result = await agent.prepare_stream(inp, state, {"configurable": {"thread_id": "t1"}})
+
+        events = result.get("events_to_dispatch", [])
+        types = [getattr(e, "type", None) for e in events]
+        self.assertNotIn(EventType.CUSTOM, types)
+        finished_events = [e for e in events if getattr(e, "type", None) == EventType.RUN_FINISHED]
+        self.assertEqual(len(finished_events), 1)
+        self.assertIsNotNone(getattr(finished_events[0], "outcome", None))
+        self.assertEqual(finished_events[0].outcome.type, "interrupt")
+
+
 class TestCheckpointSignature(unittest.TestCase):
     """Checkpoint mutation assertions must observe in-place mutations."""
 
@@ -614,3 +783,127 @@ class TestCheckpointSignature(unittest.TestCase):
         messages[0].tool_calls[0]["args"]["approved"] = True
 
         self.assertNotEqual(before, _checkpoint_signature(messages))
+
+
+@dataclass
+class FakeDelegationTask:
+    """A checkpoint task shaped like a deepagents `task` ToolNode dispatch.
+
+    Empirically (LangGraph 0.6-1.2) the task object itself carries NO
+    delegation marker — deepagents runs the subgraph inside the tool function,
+    so ``task.state`` stays None. The delegation evidence lives in the
+    CHECKPOINT MESSAGES instead: the spawning `task` tool call is still
+    pending. The tests below build those messages explicitly."""
+
+    name: str = "tools"
+    id: str = "55ff4651-74d3-1dfa-901e-854219cb0bc3"
+    interrupts: List[FakeInterrupt] = field(default_factory=list)
+    state: Any = None
+
+
+class TestNoResumeInterruptAttribution(unittest.IsolatedAsyncioTestCase):
+    """A fresh request on an interrupted thread re-attributes the interrupt.
+
+    The interrupt-ownership registry is per-run, so the short-circuit replay
+    started with nothing and re-emitted an untagged interrupt. Ownership is
+    derived from the checkpoint task holding the interrupt: a delegation's
+    task lane is exactly "<task.name>:<task.id>" — the outermost boundary the
+    interrupt surfaced through.
+    """
+
+    def _delegation_messages(self, call_name="task", args=None):
+        # The durable evidence: the spawning tool call is still pending in the
+        # checkpoint (no ToolMessage answers it) while the run sits
+        # interrupted — and it matches the deepagents task-call SHAPE
+        # (subagent_type in args), not merely the name.
+        if args is None:
+            args = {"subagent_type": "clock", "description": "tells time"}
+        return [
+            HumanMessage(id="h1", content="what time is it"),
+            AIMessage(
+                id="ai1",
+                content="",
+                tool_calls=[{"id": "call-1", "name": call_name, "args": args}],
+            ),
+        ]
+
+    async def _short_circuit(self, emit_subagent_events, call_name="task", args=None):
+        agent = make_agent(emit_subagent_events=emit_subagent_events)
+        agent.active_run = {"id": "run-1", "mode": "start"}
+        state = _make_state(
+            messages=self._delegation_messages(call_name, args),
+            tasks=[FakeDelegationTask(interrupts=[FakeInterrupt(value="approve?", id="int-9")])],
+        )
+        inp = _make_input(messages=[UserMessage(id="h1", role="user", content="what time is it")])
+        result = await agent.prepare_stream(inp, state, {"configurable": {"thread_id": "t1"}})
+        return result.get("events_to_dispatch", [])
+
+    async def test_the_replayed_interrupt_names_its_delegation_lane(self):
+        events = await self._short_circuit(emit_subagent_events=True)
+        custom = next(e for e in events if getattr(e, "type", None) == EventType.CUSTOM)
+        self.assertEqual(
+            custom.subagent_run_id, "tools:55ff4651-74d3-1dfa-901e-854219cb0bc3"
+        )
+
+    async def test_flag_off_replay_stays_untagged(self):
+        events = await self._short_circuit(emit_subagent_events=False)
+        custom = next(e for e in events if getattr(e, "type", None) == EventType.CUSTOM)
+        self.assertIsNone(custom.subagent_run_id)
+
+    async def test_a_root_toolnode_with_an_interrupting_tool_stays_untagged(self):
+        # The task NAME alone is not delegation evidence: a root ToolNode whose
+        # ordinary tool calls interrupt() is also named "tools". Its pending
+        # checkpoint call is that ORDINARY tool, not `task` — attributing it
+        # would invent a subagent that never existed.
+        events = await self._short_circuit(
+            emit_subagent_events=True, call_name="current_datetime", args={}
+        )
+        custom = next(e for e in events if getattr(e, "type", None) == EventType.CUSTOM)
+        self.assertIsNone(custom.subagent_run_id)
+
+    async def test_an_ordinary_root_tool_merely_named_task_stays_untagged(self):
+        # The NAME collision: a root ToolNode may legally expose an
+        # interrupting tool called "task". Its pending call lacks the
+        # deepagents shape (no subagent_type in args), so no subagent is
+        # invented on replay.
+        events = await self._short_circuit(
+            emit_subagent_events=True, call_name="task", args={}
+        )
+        custom = next(e for e in events if getattr(e, "type", None) == EventType.CUSTOM)
+        self.assertIsNone(custom.subagent_run_id)
+
+    async def test_a_declared_subgraph_named_tools_stays_untagged(self):
+        # A declared subgraph NODE named "tools" is dispatched by an edge, not
+        # by a tool call — no pending `task` call exists in the checkpoint, so
+        # nothing is attributed.
+        agent = make_agent(emit_subagent_events=True)
+        agent.active_run = {"id": "run-1", "mode": "start"}
+        state = _make_state(
+            messages=[HumanMessage(id="h1", content="hi")],
+            tasks=[FakeDelegationTask(
+                interrupts=[FakeInterrupt(value="approve?", id="int-4")],
+                state={"messages": []},  # subgraph-node checkpoint IS populated
+            )],
+        )
+        inp = _make_input(messages=[UserMessage(id="h1", role="user", content="hi")])
+        result = await agent.prepare_stream(inp, state, {"configurable": {"thread_id": "t1"}})
+        custom = next(
+            e for e in result.get("events_to_dispatch", [])
+            if getattr(e, "type", None) == EventType.CUSTOM
+        )
+        self.assertIsNone(custom.subagent_run_id)
+
+    async def test_a_root_interrupt_task_stays_untagged(self):
+        agent = make_agent(emit_subagent_events=True)
+        agent.active_run = {"id": "run-1", "mode": "start"}
+        state = _make_state(
+            messages=[HumanMessage(id="h1", content="hi")],
+            tasks=[FakeTask(interrupts=[FakeInterrupt(value="confirm?", id="int-2")])],
+        )
+        inp = _make_input(messages=[UserMessage(id="h1", role="user", content="hi")])
+        result = await agent.prepare_stream(inp, state, {"configurable": {"thread_id": "t1"}})
+        custom = next(
+            e for e in result.get("events_to_dispatch", [])
+            if getattr(e, "type", None) == EventType.CUSTOM
+        )
+        self.assertIsNone(custom.subagent_run_id)

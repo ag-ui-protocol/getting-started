@@ -30,6 +30,7 @@ from google.adk.apps import App, ResumabilityConfig
 
 from ag_ui_adk import ADKAgent
 from ag_ui_adk.session_manager import INVOCATION_ID_STATE_KEY, SessionManager
+from tests.constants import LIVE_TEST_MODEL
 
 
 def _make_mock_event(
@@ -104,12 +105,12 @@ class TestSequentialAgentHitlResumption:
         """Create a SequentialAgent with two LlmAgent sub-agents."""
         planner = LlmAgent(
             name="planner_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="You are a planning agent. Create a plan using approve_plan.",
         )
         executor = LlmAgent(
             name="executor_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="You are an executor. Execute the approved plan.",
         )
         return SequentialAgent(
@@ -466,12 +467,12 @@ class TestLlmAgentWithSequentialSubAgentHitlResumption:
         """LlmAgent root with a SequentialAgent sub-agent."""
         step1 = LlmAgent(
             name="step1_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="Step 1: gather requirements.",
         )
         step2 = LlmAgent(
             name="step2_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="Step 2: execute the plan.",
         )
         seq = SequentialAgent(
@@ -480,7 +481,7 @@ class TestLlmAgentWithSequentialSubAgentHitlResumption:
         )
         return LlmAgent(
             name="router",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="Route to the pipeline.",
             sub_agents=[seq],
         )
@@ -659,15 +660,15 @@ class TestNestedCompositeSubAgentDetection:
 
     def test_detects_sequential_agent_two_levels_deep(self):
         """LlmAgent → LlmAgent → SequentialAgent should need invocation_id."""
-        step1 = LlmAgent(name="step1", model="gemini-2.0-flash", instruction="Step 1")
-        step2 = LlmAgent(name="step2", model="gemini-2.0-flash", instruction="Step 2")
+        step1 = LlmAgent(name="step1", model=LIVE_TEST_MODEL, instruction="Step 1")
+        step2 = LlmAgent(name="step2", model=LIVE_TEST_MODEL, instruction="Step 2")
         pipeline = SequentialAgent(name="pipeline", sub_agents=[step1, step2])
         specialist = LlmAgent(
-            name="specialist", model="gemini-2.0-flash",
+            name="specialist", model=LIVE_TEST_MODEL,
             instruction="Run the pipeline.", sub_agents=[pipeline],
         )
         router = LlmAgent(
-            name="router", model="gemini-2.0-flash",
+            name="router", model=LIVE_TEST_MODEL,
             instruction="Route to specialist.", sub_agents=[specialist],
         )
         app = App(
@@ -680,10 +681,10 @@ class TestNestedCompositeSubAgentDetection:
     def test_standalone_llm_agents_still_return_false(self):
         """LlmAgent → LlmAgent (no composite anywhere) should NOT need invocation_id."""
         target = LlmAgent(
-            name="target", model="gemini-2.0-flash", instruction="Handle task.",
+            name="target", model=LIVE_TEST_MODEL, instruction="Handle task.",
         )
         router = LlmAgent(
-            name="router", model="gemini-2.0-flash",
+            name="router", model=LIVE_TEST_MODEL,
             instruction="Route.", sub_agents=[target],
         )
         app = App(
@@ -697,10 +698,10 @@ class TestNestedCompositeSubAgentDetection:
         """LlmAgent → LoopAgent should need invocation_id."""
         from google.adk.agents import LoopAgent
 
-        inner = LlmAgent(name="worker", model="gemini-2.0-flash", instruction="Work")
+        inner = LlmAgent(name="worker", model=LIVE_TEST_MODEL, instruction="Work")
         loop = LoopAgent(name="retry_loop", sub_agents=[inner], max_iterations=3)
         root = LlmAgent(
-            name="root", model="gemini-2.0-flash",
+            name="root", model=LIVE_TEST_MODEL,
             instruction="Delegate.", sub_agents=[loop],
         )
         app = App(
@@ -712,8 +713,8 @@ class TestNestedCompositeSubAgentDetection:
 
     def test_composite_root_still_detected(self):
         """SequentialAgent as root should still return True (baseline)."""
-        step1 = LlmAgent(name="s1", model="gemini-2.0-flash", instruction="Step 1")
-        step2 = LlmAgent(name="s2", model="gemini-2.0-flash", instruction="Step 2")
+        step1 = LlmAgent(name="s1", model=LIVE_TEST_MODEL, instruction="Step 1")
+        step2 = LlmAgent(name="s2", model=LIVE_TEST_MODEL, instruction="Step 2")
         root = SequentialAgent(name="seq_root", sub_agents=[step1, step2])
         app = App(
             name="test_composite_root", root_agent=root,

@@ -1,35 +1,155 @@
+import asyncio
 import uuid
-import copy
 import json
-from typing import Any, cast
+import weakref
+from typing import Any, Protocol, cast, runtime_checkable
 from crewai import Crew, Flow
 from crewai.flow import start
-from crewai.cli.crew_chat import (
+# The five crew-chat helpers moved from ``crewai.cli.crew_chat`` (crewai
+# 0.x - 1.14) to ``crewai.utilities.crew_chat`` (crewai 1.15+).
+# ``_capabilities`` probes both locations (new path first) so the crew-serving
+# path works across the whole ``crewai>=1.0`` floor. The module-level aliases
+# below are preserved so tests can patch ``crews.crew_chat_*`` by name.
+from ._capabilities import (
   initialize_chat_llm as crew_chat_initialize_chat_llm,
   generate_crew_chat_inputs as crew_chat_generate_crew_chat_inputs,
   generate_crew_tool_schema as crew_chat_generate_crew_tool_schema,
   build_system_message as crew_chat_build_system_message,
-  create_tool_function as crew_chat_create_tool_function
+  create_tool_function as crew_chat_create_tool_function,
 )
+# ``litellm`` is a DIRECT dependency of ag-ui-crewai: crewai moved it to the
+# optional ``crewai[litellm]`` extra at 1.0.0, so importing it ourselves keeps
+# ``acompletion`` resolvable regardless of crewai extras.
 from litellm import acompletion
-from ._env import _parse_env_float
+from ._config import (
+  DEFAULT_PROVIDER_TIMEOUT_SECONDS,
+  resolve_provider_timeout_seconds,
+)
+from ._copyutil import safe_deepcopy
 from .sdk import (
   copilotkit_stream,
   copilotkit_exit,
+  copilotkit_emit_state,
 )
 
-_CREW_INPUTS_CACHE = {}
+# Cache of generated chat-input schemas, keyed by the ``@CrewBase``
+# instance passed to ``add_crewai_crew_fastapi_endpoint``.
+#
+# Maps ``id(crew) -> (weakref.ref(crew, evict_cb), schema)``. ``id`` alone is
+# unsafe (CPython reuses ``id`` values after GC), and a ``WeakKeyDictionary``
+# keyed on the crew is ALSO unsafe: it keys by ``__eq__`` / ``__hash__``, so
+# two distinct-but-equal crew objects collapse to one entry and cross-serve
+# each other's schema. An ``id`` key plus a STRICT-IDENTITY weakref check fixes
+# both: ``evict_cb`` pops the entry the moment its referent is collected (so a
+# later ``id`` reuse can't inherit a stale schema), and reads only hit when the
+# stored ``ref() is crew``. Non-weak-referenceable crews are NOT cached —
+# pinning a strong reference to keep the ``id`` stable would leak the wrapper
+# for the process lifetime, so we regenerate instead.
+_CREW_INPUTS_CACHE: "dict[int, tuple[weakref.ref, Any]]" = {}
 
-# Per-read idle guard (seconds) for LiteLLM streaming requests. LiteLLM
-# forwards this to the underlying HTTP client, where it acts as a
-# *per-read* / socket-recv timeout — NOT a session-level ceiling. That means
-# a trickle-feeding server can still keep the coroutine alive indefinitely
-# by sending a single byte before each timeout expires; the session-level
-# cap for that scenario is enforced by ``AGUI_CREWAI_FLOW_TIMEOUT_SECONDS``
-# in ``endpoint.py``. Override this per-read guard with the
-# ``AGUI_CREWAI_LLM_TIMEOUT_SECONDS`` environment variable; set to a
-# non-positive value to disable it (the outer flow ceiling still applies).
-_DEFAULT_LLM_TIMEOUT_SECONDS = 120.0
+
+def _crew_inputs_cache_get(crew: Any) -> Any:
+    """Return the cached chat-input schema for ``crew`` or ``None`` on miss.
+
+    ``None`` is an unambiguous miss sentinel: ``generate_crew_chat_inputs``
+    always returns a populated ``ChatInputs`` object, never ``None``.
+
+    Strict-identity + liveness check: the stored weakref must still point
+    at *this exact* ``crew`` object. A dead weakref (referent collected)
+    or a mismatch (``id`` reused by a different object) is a miss, and the
+    stale entry is dropped so the caller regenerates rather than being
+    served another crew's schema.
+    """
+    entry = _CREW_INPUTS_CACHE.get(id(crew))
+    if entry is None:
+        return None
+    ref, schema = entry
+    if ref() is crew:
+        return schema
+    # Dead referent, or ``id`` reused by a DIFFERENT object: drop the
+    # stale entry so we regenerate.
+    _CREW_INPUTS_CACHE.pop(id(crew), None)
+    return None
+
+
+def _crew_inputs_cache_set(crew: Any, schema: Any) -> None:
+    """Cache ``schema`` for ``crew`` in the identity-safe store.
+
+    Non-weak-referenceable crews are intentionally not cached (see the
+    module comment) — no permanent strong reference is ever retained.
+    """
+    key = id(crew)
+
+    def _evict(dead_ref: "weakref.ref") -> None:
+        # Only evict if THIS entry is still the live one. Guards against
+        # popping a freshly-stored entry whose crew happens to reuse the
+        # collected crew's ``id``.
+        existing = _CREW_INPUTS_CACHE.get(key)
+        if existing is not None and existing[0] is dead_ref:
+            _CREW_INPUTS_CACHE.pop(key, None)
+
+    try:
+        ref = weakref.ref(crew, _evict)
+    except TypeError:
+        # Not weak-referenceable: skip caching entirely rather than pin a
+        # strong reference forever (which would leak the wrapper).
+        return
+    _CREW_INPUTS_CACHE[key] = (ref, schema)
+
+
+@runtime_checkable
+class CrewBaseInstance(Protocol):
+    """Structural type for a ``@CrewBase``-decorated crew instance.
+
+    ``add_crewai_crew_fastapi_endpoint`` and ``ChatWithCrewFlow`` require a
+    crew wrapper exposing a ``crew()`` factory that builds the underlying
+    :class:`crewai.Crew` — NOT a bare :class:`crewai.Crew`, which has no
+    ``.crew()`` factory (annotating the parameter as ``Crew`` was actively
+    misleading).
+
+    The protocol pins ONLY ``crew()`` — the single structural essential.
+    Name handling is deliberately left OUT of the protocol and delegated
+    to :func:`_read_crew_name`,
+    which accepts a real ``@CrewBase`` instance's ``_crew_name`` OR a
+    hand-rolled ``.name``. Requiring ``_crew_name`` in the protocol (as an
+    earlier round did) wrongly rejected the repo's own ``CrewChatCrew``
+    wrapper, which exposes only ``.name`` yet works at runtime.
+
+    ``@runtime_checkable`` lets callers/tests assert conformance via
+    ``isinstance`` (structural: method presence only).
+    """
+
+    def crew(self) -> Crew:  # pragma: no cover - structural protocol stub
+        ...
+
+
+def _read_crew_name(crew: Any) -> str:
+    """Return a non-empty crew name from a ``@CrewBase`` instance.
+
+    Accepts a hand-rolled ``.name`` OR crewai's canonical ``_crew_name``
+    (set by the ``@CrewBase`` decorator to the class name). crewai's
+    ``ChatInputs.crew_name`` is a required non-empty ``str`` and is used
+    as the crew tool's function name, so a missing/empty/non-string name
+    would raise a Pydantic validation error deep inside
+    ``generate_crew_chat_inputs``. Fail loudly here with an actionable
+    message instead.
+    """
+    for attr in ("name", "_crew_name"):
+        value = getattr(crew, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value
+    raise ValueError(
+        "Could not determine a crew name: the crew exposes neither a "
+        "non-empty ``name`` nor ``_crew_name`` attribute. Pass a "
+        "``@CrewBase``-decorated crew (crewai sets ``_crew_name`` to the "
+        "decorated class name) or set a non-empty ``name`` — crewai's "
+        "ChatInputs.crew_name requires a non-empty string."
+    )
+
+# Test-facing alias of the shipped per-read provider timeout. The knob, its env
+# variable and its policy are documented on ``_config``; kept here only because
+# ``tests/test_llm_timeout.py`` imports this name.
+_DEFAULT_LLM_TIMEOUT_SECONDS = DEFAULT_PROVIDER_TIMEOUT_SECONDS
 
 
 def _llm_timeout_seconds() -> float | None:
@@ -39,21 +159,46 @@ def _llm_timeout_seconds() -> float | None:
     and any other non-finite float is treated as unparseable and falls back
     to the default — ``float('nan') > 0`` is False, which would otherwise
     silently disable the guard. Mirrors the NaN handling in
-    ``endpoint._flow_timeout_seconds`` (R5 HIGH #1).
+    ``endpoint._flow_timeout_seconds``.
 
-    CR7 LOW: delegates to ``_env._parse_env_float`` so the three
-    env-parsed float helpers (flow ceiling / cancel-join ceiling / LLM
-    read timeout) share a single parse + policy path rather than
-    triplicating the scaffolding. CR8 MEDIUM: the helper lives on a
-    neutral ``_env`` module (rather than ``endpoint``) so we can
-    import it at module load time without a circular dependency
+    Delegates to ``_config.resolve_provider_timeout_seconds`` (itself over
+    ``_env._parse_env_float``) so the crew-chat flow and the shipped example
+    flows read ONE resolver for the same variable. ``_config`` is a leaf over
+    ``_env``, so importing it here cannot reintroduce the load cycle
     (``endpoint`` imports ``ChatWithCrewFlow`` from ``crews``).
     """
-    return _parse_env_float(
-        "AGUI_CREWAI_LLM_TIMEOUT_SECONDS",
-        _DEFAULT_LLM_TIMEOUT_SECONDS,
-        allow_disable=True,
-    )
+    return resolve_provider_timeout_seconds()
+
+
+def _crew_result_to_text(result: Any) -> str:
+    """Coerce a crew-run result to a string for ``state['outputs']`` and the
+    tool message content.
+
+    A crewai ``CrewOutput`` always has ``json_dict`` / ``pydantic`` / ``raw``
+    fields, and the first two are ``None`` for a text-only crew, so gating on
+    ``hasattr`` alone dropped the text and passed a non-string object
+    downstream. Gate on the value instead: an existing string verbatim, else a
+    non-None ``json_dict`` / ``pydantic`` serialized to JSON (``str`` would emit
+    a non-JSON repr), else a non-empty string ``raw``, else ``str(result)``.
+    """
+    if isinstance(result, str):
+        return result
+
+    json_dict = getattr(result, "json_dict", None)
+    if json_dict is not None:
+        return json.dumps(json_dict)
+
+    pydantic = getattr(result, "pydantic", None)
+    if pydantic is not None:
+        if hasattr(pydantic, "model_dump_json"):
+            return pydantic.model_dump_json()
+        return str(pydantic)
+
+    raw = getattr(result, "raw", None)
+    if isinstance(raw, str) and raw:
+        return raw
+
+    return str(result)
 
 
 CREW_EXIT_TOOL = {
@@ -75,31 +220,158 @@ class ChatWithCrewFlow(Flow):
 
     def __init__(
             self, *,
-            crew: Crew
+            crew: "CrewBaseInstance"
         ):
         super().__init__()
 
 
-        self.crew = copy.deepcopy(cast(Any, crew).crew())
+        # ``Crew`` is a Pydantic BaseModel carrying non-deep-copyable
+        # runtime state (memory / locks) in crewai 1.15.x, so
+        # a plain ``copy.deepcopy`` crashes. ``safe_deepcopy`` falls back to
+        # pinning those shared objects by reference while still isolating
+        # copyable state.
+        self.crew = safe_deepcopy(cast(Any, crew).crew(), what="crew")
 
         if self.crew.chat_llm is None:
             raise ValueError("Crew chat LLM is not set")
 
-        self.crew_name = crew.name
+        # Read the crew name from the real ``@CrewBase`` accessor
+        # (``_crew_name``) or a hand-rolled ``.name`` — never ``crew.name``
+        # unconditionally, which AttributeErrors on a real @CrewBase
+        # instance. Fails loudly with an actionable message if neither yields
+        # a usable non-empty name, rather than passing ``None`` into
+        # ``ChatInputs`` (validation error deep in ``generate_crew_chat_inputs``).
+        self.crew_name = _read_crew_name(crew)
         self.chat_llm = crew_chat_initialize_chat_llm(self.crew)
 
-        if crew.name not in _CREW_INPUTS_CACHE:
+        # Identity-safe cache keyed on the crew object itself, not
+        # ``id(crew)`` which is reused after GC.
+        cached = _crew_inputs_cache_get(crew)
+        if cached is None:
             self.crew_chat_inputs = crew_chat_generate_crew_chat_inputs(
                 self.crew,
                 self.crew_name,
                 self.chat_llm
             )
-            _CREW_INPUTS_CACHE[ crew.name] = self.crew_chat_inputs
+            _crew_inputs_cache_set(crew, self.crew_chat_inputs)
         else:
-            self.crew_chat_inputs = _CREW_INPUTS_CACHE[ crew.name]
+            self.crew_chat_inputs = cached
 
         self.crew_tool_schema = crew_chat_generate_crew_tool_schema(self.crew_chat_inputs)
         self.system_message = crew_chat_build_system_message(self.crew_chat_inputs)
+
+    def _completion_llm_kwargs(self) -> dict:
+        """Return the connection kwargs for a litellm ``acompletion`` call.
+
+        Passing the raw ``self.crew.chat_llm`` model STRING to ``acompletion``
+        drops the credentials/endpoint that ``initialize_chat_llm`` resolved
+        (litellm then falls back to environment/default credentials, breaking
+        local and self-hosted models), and forwarding only ``model`` /
+        ``api_key`` / ``base_url`` still drops ``api_base`` / ``api_version``
+        and the provider-specific ``additional_params`` — so custom-endpoint
+        (e.g. Azure) users hit the wrong endpoint. crewai's own
+        ``LLM._prepare_completion_params`` forwards the connection fields
+        (``api_base``, ``base_url``, ``api_version``, ``api_key``), the
+        generation config (``temperature``, ``top_p``, ``n``, ``stop``,
+        ``max_tokens``/``max_completion_tokens``, ``presence_penalty``,
+        ``frequency_penalty``, ``logit_bias``, ``response_format``, ``seed``,
+        ``logprobs``, ``top_logprobs``, ``reasoning_effort``) AND spreads
+        ``additional_params``; we mirror all of that here so both completion
+        call sites behave exactly the way ``generate_crew_chat_inputs`` does
+        (it drives the same LLM object).
+
+        Defensive: ``getattr`` with a fall back to the crew's model string
+        keeps the helper working if ``chat_llm`` was not resolved (e.g. in
+        unit tests that construct the flow via ``__new__``). Every field is
+        forwarded only when present/non-None so we never override litellm's
+        own resolution with ``None``. ``additional_params`` is spread first
+        so the explicit connection fields win on any key collision.
+        """
+        llm = getattr(self, "chat_llm", None)
+        model = getattr(llm, "model", None) or self.crew.chat_llm
+        kwargs: dict = {"model": model}
+
+        additional = getattr(llm, "additional_params", None)
+        if isinstance(additional, dict):
+            for key, value in additional.items():
+                if value is not None:
+                    kwargs[key] = value
+
+        # Connection fields AND generation config, matching what crewai's
+        # LLM._prepare_completion_params forwards. Without the generation
+        # config, a resolved chat_llm's temperature/max_tokens/etc. are
+        # silently dropped and litellm applies provider defaults (e.g.
+        # LLM(model="gpt-4o", temperature=0) would not be honored).
+        for attr in (
+            "api_key", "base_url", "api_base", "api_version",
+            "temperature", "top_p", "n", "stop",
+            "presence_penalty", "frequency_penalty", "logit_bias",
+            "response_format", "seed", "logprobs", "top_logprobs",
+            "reasoning_effort",
+        ):
+            value = getattr(llm, attr, None)
+            # Skip None and empty containers (crewai defaults `stop` to `[]`)
+            # so we never override litellm's own resolution with a no-op.
+            # temperature=0 and other explicit falsy-but-meaningful values
+            # (0, 0.0) are preserved.
+            if value is None or value == [] or value == {}:
+                continue
+            kwargs[attr] = value
+
+        # ONE token cap, matching crewai's own litellm call
+        # (``LLM._prepare_completion_params`` sends
+        # ``max_tokens or max_completion_tokens``). Forwarding both would hand
+        # litellm a pair the provider treats as mutually exclusive.
+        cap = getattr(llm, "max_tokens", None) or getattr(
+            llm, "max_completion_tokens", None
+        )
+        if cap is not None:
+            kwargs["max_tokens"] = cap
+        return kwargs
+
+    def _completion_timeout_seconds(self) -> float | None:
+        """Timeout for one ``acompletion``: the crew's own value, else the env one.
+
+        ``Crew(chat_llm=LLM(model=..., timeout=30))`` is the documented way to
+        bound this loop, so an explicitly-built timeout must win over the env
+        default rather than being silently replaced by it. Only a positive number
+        counts as explicit: crewai leaves ``timeout`` at ``None`` unless the
+        caller passed one, and a non-positive value is the env knob's own
+        "disabled" spelling, which is not what an LLM object expresses.
+        """
+        own = getattr(getattr(self, "chat_llm", None), "timeout", None)
+        if isinstance(own, (int, float)) and not isinstance(own, bool) and own > 0:
+            return own
+        return _llm_timeout_seconds()
+
+    def _completion_call_params(self, **call_owned: Any) -> dict:
+        """Build the FULL kwargs dict for one ``acompletion`` call.
+
+        ``_completion_llm_kwargs`` spreads the crewai ``LLM.additional_params``,
+        which legitimately may contain keys each ``chat()`` call site ALSO sets
+        explicitly — ``messages`` / ``tools`` / ``tool_choice`` / ``stream`` /
+        ``timeout`` / ``parallel_tool_calls``. Passing such a key both via
+        ``**connection`` AND as an explicit ``kw=`` argument raised
+        ``TypeError: acompletion() got multiple values for keyword argument``.
+
+        We funnel EVERYTHING through one dict here and let the CALL-OWNED
+        settings win over anything from ``additional_params`` (they are
+        the framework's fixed contract for the chat loop — e.g. we must
+        keep ``parallel_tool_calls=False`` and ``stream=True`` regardless
+        of user LLM extras). Call sites splat the result as
+        ``acompletion(**self._completion_call_params(...))`` and never mix
+        explicit ``kw=`` args with the splat, so no key is passed twice.
+
+        ONE exception to call-owned winning: a ``timeout`` of ``None``. That is the
+        env knob's "this integration passes no timeout" spelling, which must leave a
+        user's own ``additional_params["timeout"]`` in place rather than replace it
+        with nothing.
+        """
+        params = self._completion_llm_kwargs()
+        if "timeout" in call_owned and call_owned["timeout"] is None:
+            del call_owned["timeout"]
+        params.update(call_owned)  # call-owned settings win on collision.
+        return params
 
     @start()
     async def chat(self):
@@ -125,12 +397,13 @@ class ChatWithCrewFlow(Flow):
 
         response = await copilotkit_stream(
             await acompletion(
-                model=self.crew.chat_llm,
-                messages=messages,
-                tools=tools,
-                parallel_tool_calls=False,
-                stream=True,
-                timeout=_llm_timeout_seconds(),
+                **self._completion_call_params(
+                    messages=messages,
+                    tools=tools,
+                    parallel_tool_calls=False,
+                    stream=True,
+                    timeout=self._completion_timeout_seconds(),
+                )
             )
         )
 
@@ -142,22 +415,78 @@ class ChatWithCrewFlow(Flow):
                 # run the crew
                 crew_function = crew_chat_create_tool_function(self.crew, messages)
                 args = json.loads(message["tool_calls"][0]["function"]["arguments"])
-                result = crew_function(**args)
+                # ``crew_function`` is a SYNCHRONOUS ``crew.kickoff`` run.
+                # Calling it inline on the event loop blocked SSE flushing and
+                # prevented AGUI_CREWAI_FLOW_TIMEOUT_SECONDS / client-disconnect
+                # cancellation from firing until the crew returned. Offload it
+                # to a worker thread so frames keep flushing and the wall-clock
+                # ceiling / aclose() teardown can fire DURING the crew run.
+                # ``asyncio.to_thread`` copies the current contextvars (the
+                # scoped StreamFrame sink and ``flow_context``), so crew events
+                # still stream and ``copilotkit_*`` helpers keep working.
+                #
+                # Cancelling the awaiting coroutine (client disconnect / flow
+                # ceiling) UNBLOCKS this ``await`` but does NOT stop the worker
+                # thread — Python cannot interrupt a running thread. A
+                # disconnected crew run keeps executing (and burning LLM tokens)
+                # to completion in the background; only the coroutine's wait is
+                # torn down. Bounding the crew run itself is upstream-crewai work.
+                result = await asyncio.to_thread(crew_function, **args)
 
-                if isinstance(result, str):
-                    self.state["outputs"] = result
-                elif hasattr(result, "json_dict"):
-                    self.state["outputs"] = result.json_dict
-                elif hasattr(result, "raw"):
-                    self.state["outputs"] = result.raw
-                else:
-                    raise ValueError("Unexpected result type", type(result))
+                # Record the crew output as a string (see _crew_result_to_text)
+                # for both state["outputs"] and the tool message content.
+                output_text = _crew_result_to_text(result)
+                self.state["outputs"] = output_text
 
                 self.state["messages"].append({
                     "role": "tool",
-                    "content": result,
+                    "content": output_text,
                     "tool_call_id": message["tool_calls"][0]["id"]
                 })
+
+                # Surface the state mutation from the crew run so a
+                # StateSnapshotEvent reaches the bridge as soon as the crew
+                # output is applied, rather than only at method-finish. This
+                # emits ONE snapshot after the crew result lands; per-tool /
+                # intermediate mutations inside the crew run are not surfaced
+                # as discrete events here (they stream as crewai StreamFrames,
+                # but the translator drops crew/agent/task frames to stay
+                # behavior-preserving — surfacing them is a Parity-lane
+                # decision).
+                await copilotkit_emit_state(self.state)
+
+                # A backend tool result on its own leaves the assistant silent
+                # — the single-pass @start() chat had no follow-up completion
+                # after the crew tool ran. Issue a streamed follow-up so the
+                # assistant produces text about the crew result.
+                # ``tool_choice="none"`` forces a text answer, mirroring the
+                # crew_exit branch. LIMITATION: it also blocks tool chaining —
+                # the assistant cannot call a frontend action after a crew run,
+                # so "run the crew, then update the UI" is unreachable on this
+                # path. Allowing bounded tool re-entry here is future work.
+                response = await copilotkit_stream(
+                    await acompletion(
+                        **self._completion_call_params(
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": "The crew has finished running. "
+                                               "Use the tool result to answer the "
+                                               "user's request.",
+                                    "id": str(uuid.uuid4()) + "-system"
+                                },
+                                *self.state["messages"]
+                            ],
+                            tools=tools,
+                            parallel_tool_calls=False,
+                            stream=True,
+                            tool_choice="none",
+                            timeout=self._completion_timeout_seconds(),
+                        )
+                    )
+                )
+                message = cast(Any, response).choices[0]["message"]
+                self.state["messages"].append(message)
             elif message["tool_calls"][0]["function"]["name"] == CREW_EXIT_TOOL["function"]["name"]:
                 await copilotkit_exit()
                 self.state["messages"].append({
@@ -167,21 +496,22 @@ class ChatWithCrewFlow(Flow):
                 })
 
                 response = await copilotkit_stream(
-                    await acompletion( # pylint: disable=too-many-arguments
-                        model=self.crew.chat_llm,
-                        messages = [
-                            {
-                                "role": "system",
-                                "content": "Indicate to the user that the crew has exited",
-                                "id": str(uuid.uuid4()) + "-system"
-                            },
-                            *self.state["messages"]
-                        ],
-                        tools=tools,
-                        parallel_tool_calls=False,
-                        stream=True,
-                        tool_choice="none",
-                        timeout=_llm_timeout_seconds(),
+                    await acompletion(
+                        **self._completion_call_params(
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": "Indicate to the user that the crew has exited",
+                                    "id": str(uuid.uuid4()) + "-system"
+                                },
+                                *self.state["messages"]
+                            ],
+                            tools=tools,
+                            parallel_tool_calls=False,
+                            stream=True,
+                            tool_choice="none",
+                            timeout=self._completion_timeout_seconds(),
+                        )
                     )
                 )
                 message = cast(Any, response).choices[0]["message"]

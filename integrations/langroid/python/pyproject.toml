@@ -1,25 +1,33 @@
 [project]
-name = "ag_ui_langroid"
-version = "0.1.0"
+name = "ag-ui-langroid"
+version = "0.1.1"
+description = "Implementation of the AG-UI protocol for Langroid."
+readme = "README.md"
+requires-python = ">=3.10, <3.14"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "AG-UI Contributors" }
 ]
-requires-python = ">=3.10, <3.14"
+keywords = ["ag-ui", "langroid", "agent", "protocol", "llm", "streaming"]
 dependencies = [
     "ag-ui-protocol>=0.1.10",
     "fastapi>=0.115.12",
     "langroid>=0.1.0",
 ]
 
+[project.urls]
+Repository = "https://github.com/ag-ui-protocol/ag-ui"
+Homepage = "https://github.com/ag-ui-protocol/ag-ui"
+
 [tool.ag-ui.scripts]
 test = "python -m unittest discover tests"
-
-[build-system]
-requires = ["uv_build>=0.8.0,<0.9"]
-build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
     "httpx>=0.28.0",
 ]
 
+[build-system]
+requires = ["uv_build>=0.8.0,<0.9"]
+build-backend = "uv_build"

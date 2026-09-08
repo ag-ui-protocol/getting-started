@@ -62,15 +62,17 @@ export 'src/client/config.dart';
 export 'src/client/errors.dart';
 export 'src/client/validators.dart';
 
-// Client codec (hide ToolResult since it's defined in types/tool.dart)
-export 'src/encoder/client_codec.dart' hide ToolResult;
+// Client codec — ClientToolResult is an outbound-only model used by
+// Encoder.encodeToolResult; it must remain visible so callers can construct
+// values to pass to that method.
+export 'src/encoder/client_codec.dart';
 
 // Core exports will be added in subsequent tasks
 // export 'src/agent.dart';
 // export 'src/transport.dart';
 
 /// SDK version
-const String agUiVersion = '0.1.0';
+const String agUiVersion = '0.3.0';
 
 /// Initialize the AG-UI SDK
 void initAgUI() {

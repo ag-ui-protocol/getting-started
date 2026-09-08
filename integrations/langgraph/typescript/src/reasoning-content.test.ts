@@ -5,6 +5,8 @@
  */
 
 import { resolveReasoningContent, resolveEncryptedReasoningContent } from "./utils";
+import { LangGraphAgent } from "./agent";
+import { EventType } from "@ag-ui/client";
 
 describe("resolveReasoningContent", () => {
   it("should handle Anthropic old format (thinking)", () => {
@@ -211,5 +213,166 @@ describe("resolveEncryptedReasoningContent", () => {
         chunk: { content: [{ type: "redacted_thinking" }] },
       }),
     ).toBeNull();
+  });
+});
+
+// ─── Canonical reasoning id (snapshot reconciliation) ────────────────────────
+//
+// Since reasoning round-trips through MESSAGES_SNAPSHOT under the provider's
+// canonical block id (e.g. OpenAI `rs_…`), the streamed reasoning message must
+// open under that same id or the client renders the reasoning twice (the
+// langgraph-python dojo e2e strict-mode failure). The canonical id arrives on
+// the `response.reasoning_summary_part.added` chunk (empty text, id set).
+describe("resolveReasoningContent canonical id", () => {
+  it("surfaces the empty-text summary_part.added chunk and extracts the id", () => {
+    const eventData = {
+      chunk: {
+        content: [{
+          type: "reasoning",
+          id: "rs-canonical",
+          summary: [{ index: 0, type: "summary_text", text: "" }],
+          index: 0,
+        }],
+      },
+    };
+    const result = resolveReasoningContent(eventData);
+    expect(result).not.toBeNull();
+    expect(result!.text).toBe("");
+    expect(result!.id).toBe("rs-canonical");
+    expect(result!.index).toBe(0);
+  });
+
+  it("does not invent an id on text delta chunks", () => {
+    const eventData = {
+      chunk: {
+        content: [{
+          type: "reasoning",
+          summary: [{ index: 0, type: "summary_text", text: "Because X" }],
+          index: 0,
+        }],
+      },
+    };
+    const result = resolveReasoningContent(eventData);
+    expect(result!.text).toBe("Because X");
+    expect(result!.id).toBeUndefined();
+  });
+
+  it("attaches the id when text and id are both present", () => {
+    const eventData = {
+      chunk: {
+        content: [{
+          type: "reasoning",
+          id: "rs-canonical",
+          summary: [{ index: 0, type: "summary_text", text: "Hi" }],
+        }],
+      },
+    };
+    const result = resolveReasoningContent(eventData);
+    expect(result!.text).toBe("Hi");
+    expect(result!.id).toBe("rs-canonical");
+  });
+
+  it("surfaces the output_item.added shape (id, empty summary) as a text-less id carrier", () => {
+    // The only id carrier observed on the LangGraph Platform wire.
+    const eventData = {
+      chunk: {
+        content: [{ type: "reasoning", id: "rs-canonical", summary: [], index: 0 }],
+      },
+    };
+    const result = resolveReasoningContent(eventData);
+    expect(result).not.toBeNull();
+    expect(result!.text).toBe("");
+    expect(result!.id).toBe("rs-canonical");
+  });
+
+  it("drops empty-summary items without an id", () => {
+    const eventData = {
+      chunk: { content: [{ type: "reasoning", summary: [], index: 0 }] },
+    };
+    expect(resolveReasoningContent(eventData)).toBeNull();
+  });
+
+  it("drops the part.added shape when its id is null (platform wire shape)", () => {
+    const eventData = {
+      chunk: {
+        content: [{
+          type: "reasoning",
+          id: null,
+          summary: [{ index: 0, type: "summary_text", text: "" }],
+          index: 0,
+        }],
+      },
+    };
+    expect(resolveReasoningContent(eventData)).toBeNull();
+  });
+
+  it("does not reuse the item id for non-first summary parts", () => {
+    const eventData = {
+      chunk: {
+        content: [{
+          type: "reasoning",
+          id: "rs-canonical",
+          summary: [{ index: 1, type: "summary_text", text: "" }],
+          index: 0,
+        }],
+      },
+    };
+    const result = resolveReasoningContent(eventData);
+    expect(result).not.toBeNull();
+    expect(result!.index).toBe(1);
+    expect(result!.id).toBeUndefined();
+  });
+});
+
+describe("handleReasoningEvent canonical id", () => {
+  function buildAgent() {
+    const agent = new LangGraphAgent({
+      graphId: "test-graph",
+      deploymentUrl: "http://localhost:8000",
+    });
+    const dispatched: any[] = [];
+    (agent as any).dispatchEvent = (event: any) => {
+      dispatched.push(event);
+      return true;
+    };
+    return { agent, dispatched };
+  }
+
+  it("stashes the id from a text-less carrier without emitting anything", () => {
+    const { agent, dispatched } = buildAgent();
+    agent.handleReasoningEvent({ type: "text", text: "", index: 0, id: "rs-canonical" });
+    expect(dispatched).toHaveLength(0);
+  });
+
+  it("opens REASONING_START under the stashed canonical id on the first text delta", () => {
+    const { agent, dispatched } = buildAgent();
+    agent.handleReasoningEvent({ type: "text", text: "", index: 0, id: "rs-canonical" });
+    agent.handleReasoningEvent({ type: "text", text: "Because X", index: 0 });
+
+    const starts = dispatched.filter((e) => e.type === EventType.REASONING_START);
+    const contents = dispatched.filter(
+      (e) => e.type === EventType.REASONING_MESSAGE_CONTENT,
+    );
+    expect(starts).toHaveLength(1);
+    expect(starts[0].messageId).toBe("rs-canonical");
+    expect(contents).toHaveLength(1);
+    expect(contents[0].messageId).toBe("rs-canonical");
+    expect(contents[0].delta).toBe("Because X");
+  });
+
+  it("falls back to a random id when the stream carries none", () => {
+    const { agent, dispatched } = buildAgent();
+    agent.handleReasoningEvent({ type: "text", text: "thinking…", index: 0 });
+
+    const starts = dispatched.filter((e) => e.type === EventType.REASONING_START);
+    expect(starts).toHaveLength(1);
+    expect(starts[0].messageId).toBeTruthy();
+    expect(starts[0].messageId).not.toBe("rs-canonical");
+  });
+
+  it("still drops chunks with neither text nor id", () => {
+    const { agent, dispatched } = buildAgent();
+    agent.handleReasoningEvent({ type: "text", text: "", index: 0 });
+    expect(dispatched).toHaveLength(0);
   });
 });

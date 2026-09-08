@@ -1,0 +1,448 @@
+---
+title: "Types"
+description: "Documentation for the protocol types in AGUI.Abstractions"
+---
+
+# AGUI.Abstractions Types
+
+`AGUI.Abstractions` contains the protocol model shared by AG-UI .NET clients
+and servers. The JSON wire names are camel-case and match the AG-UI protocol.
+
+## RunAgentInput
+
+`RunAgentInput` is the request payload for running an agent. In the HTTP API, it
+is the body of the `POST` request.
+
+```csharp
+using System.Text.Json;
+using AGUI.Abstractions;
+
+var input = new RunAgentInput
+{
+    ThreadId = "thread-1",
+    RunId = "run-1",
+    Messages =
+    [
+        new AGUIUserMessage
+        {
+            Id = "msg-1",
+            Content = "Hello!"
+        }
+    ],
+    Tools =
+    [
+        new AGUITool
+        {
+            Name = "get_weather",
+            Description = "Get the weather for a city",
+            Parameters = JsonDocument.Parse("""
+                {
+                  "type": "object",
+                  "properties": {
+                    "city": { "type": "string" }
+                  },
+                  "required": ["city"]
+                }
+                """).RootElement.Clone()
+        }
+    ]
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `ThreadId` | `threadId` | `string` | ID of the conversation thread |
+| `RunId` | `runId` | `string` | ID of the current run |
+| `ParentRunId` | `parentRunId` | `string?` | Optional lineage pointer for branching or time travel |
+| `Messages` | `messages` | `IList<AGUIMessage>` | Conversation messages |
+| `Tools` | `tools` | `IList<AGUITool>?` | Tools available to the agent |
+| `State` | `state` | `JsonElement?` | Current frontend or agent state |
+| `Resume` | `resume` | `IList<AGUIResume>?` | Resume payloads for interrupted runs |
+| `Context` | `context` | `IList<AGUIContext>?` | Context objects provided to the agent |
+| `ForwardedProperties` | `forwardedProps` | `JsonElement` | Additional properties forwarded by the client |
+
+## AGUIResume
+
+One per-interrupt response inside `RunAgentInput.Resume`, addressing an
+interrupt from the previous run. See
+[Interrupts](/concepts/interrupts#resuming-a-run) for the full resume contract.
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `InterruptId` | `interruptId` | `string` | ID of the interrupt this entry addresses |
+| `Status` | `status` | `string` | `ResumeStatus.Resolved` if the user responded, `ResumeStatus.Cancelled` if they abandoned |
+| `Payload` | `payload` | `JsonElement?` | The response itself, validated against the interrupt's `responseSchema` |
+| `Metadata` | `metadata` | `JsonElement?` | Envelope data about the response — signatures, routing keys — never the answer itself |
+
+`Metadata` follows the same conventions as metadata everywhere else in the
+protocol: open by key, any JSON value allowed under a key including `null`, the
+object itself absent or an object but never `null` on the wire, and the
+`ag-ui` key (`AGUIMetadata.ReservedKey`) reserved. A resume entry is a request
+field, so nothing merges into it; see
+[Metadata](/concepts/metadata#resume-entries). For non-tool interrupts, the
+hosting layer carries it onto `InterruptResponseContent.Metadata`, and
+`AGUIChatClient` copies it from `InterruptResponseContent` onto the entry it
+sends. Tool-approval entries are translated through MEAI's own approval
+content types, which have no metadata surface — read it from the raw entry via
+`RunAgentInput.Resume` if you need it there.
+
+## Message Types
+
+Messages form a closed hierarchy rooted at `AGUIMessage`. The base type carries
+only the fields shared by every role: `Id`, `Role` and `Metadata`. Role-specific
+properties such as `content`, `name`, `encryptedValue`, `toolCalls`, and
+`toolCallId` are declared on the sealed role classes.
+
+<Note>
+  `Metadata` (`JsonElement?`, JSON field `metadata`) is carried by every message
+  role and by `AGUIToolCall`, and is omitted from the tables below for brevity.
+  It is open by key — any JSON value is allowed under a key, including `null` —
+  and the object itself may be absent but is never `null`.
+  `AGUIMetadata.ReservedKey` (`"ag-ui"`) is reserved for AG-UI's own use.
+  Metadata accumulates as a message is built from its events, and tool call
+  events accumulate onto the tool call itself; see
+  [Metadata](/concepts/metadata) for the merge rules.
+</Note>
+
+```csharp
+public abstract class AGUIMessage
+{
+    public string? Id { get; set; } // "id"
+    public abstract string Role { get; } // "role"
+    public JsonElement? Metadata { get; set; } // "metadata"
+}
+```
+
+### Roles
+
+The `Role` property returns one of the lowercase constants in `AGUIRoles`:
+
+| Constant | JSON value |
+| -------- | ---------- |
+| `AGUIRoles.Developer` | `developer` |
+| `AGUIRoles.System` | `system` |
+| `AGUIRoles.Assistant` | `assistant` |
+| `AGUIRoles.User` | `user` |
+| `AGUIRoles.Tool` | `tool` |
+| `AGUIRoles.Activity` | `activity` |
+| `AGUIRoles.Reasoning` | `reasoning` |
+
+### AGUIDeveloperMessage
+
+```csharp
+var message = new AGUIDeveloperMessage
+{
+    Id = "dev-1",
+    Content = "Prefer concise answers.",
+    Name = "policy"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Id` | `id` | `string?` | Message ID |
+| `Role` | `role` | `"developer"` | Fixed role discriminator |
+| `Content` | `content` | `string` | Developer instruction content |
+| `Name` | `name` | `string?` | Optional sender name |
+| `EncryptedValue` | `encryptedValue` | `string?` | Optional opaque encrypted value |
+
+### AGUISystemMessage
+
+```csharp
+var message = new AGUISystemMessage
+{
+    Id = "sys-1",
+    Content = "You are a helpful assistant.",
+    Name = "system"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Id` | `id` | `string?` | Message ID |
+| `Role` | `role` | `"system"` | Fixed role discriminator |
+| `Content` | `content` | `string` | System instruction content |
+| `Name` | `name` | `string?` | Optional sender name |
+| `EncryptedValue` | `encryptedValue` | `string?` | Optional opaque encrypted value |
+
+### AGUIAssistantMessage
+
+```csharp
+var message = new AGUIAssistantMessage
+{
+    Id = "asst-1",
+    Content = "I can help with that.",
+    ToolCalls =
+    [
+        new AGUIToolCall
+        {
+            Id = "call-1",
+            Function = new AGUIToolCallFunction
+            {
+                Name = "get_weather",
+                Arguments = """{"city":"Seattle"}"""
+            }
+        }
+    ]
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Id` | `id` | `string?` | Message ID |
+| `Role` | `role` | `"assistant"` | Fixed role discriminator |
+| `Content` | `content` | `string?` | Optional assistant text |
+| `Name` | `name` | `string?` | Optional assistant name |
+| `EncryptedValue` | `encryptedValue` | `string?` | Optional opaque encrypted value |
+| `ToolCalls` | `toolCalls` | `IList<AGUIToolCall>?` | Tool calls made in the message |
+
+### AGUIUserMessage
+
+`AGUIUserMessage.Content` is an `AGUIUserContent` value. It models the AG-UI
+wire union `string | InputContent[]`.
+
+```csharp
+var textOnly = new AGUIUserMessage
+{
+    Id = "user-1",
+    Content = "Summarize this image."
+};
+
+AGUIInputContent textPart = new AGUITextInputContent
+{
+    Text = "What is shown here?"
+};
+
+AGUIInputContent imagePart = new AGUIImageInputContent
+{
+    Source = new AGUIInputContentUrlSource
+    {
+        Value = "https://example.com/screen.png",
+        MimeType = "image/png"
+    }
+};
+
+var multimodal = new AGUIUserMessage
+{
+    Id = "user-2",
+    Content = [textPart, imagePart]
+};
+```
+
+`AGUIUserContent` supports implicit conversions from `string`,
+`List<AGUIInputContent>`, and `AGUIInputContent[]`. It also has a collection
+builder, so C# collection expressions work. For reading, it implements
+`IReadOnlyList<AGUIInputContent>`; a plain string is exposed as one
+`AGUITextInputContent` part.
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Id` | `id` | `string?` | Message ID |
+| `Role` | `role` | `"user"` | Fixed role discriminator |
+| `Content` | `content` | `AGUIUserContent` | Plain text or ordered multimodal parts |
+| `Name` | `name` | `string?` | Optional user name |
+| `EncryptedValue` | `encryptedValue` | `string?` | Optional opaque encrypted value |
+
+See [Multimodal Inputs](/sdk/dotnet/abstractions/multimodal-inputs) for the
+`AGUIInputContent` hierarchy.
+
+### AGUIToolMessage
+
+```csharp
+var message = new AGUIToolMessage
+{
+    Id = "tool-msg-1",
+    ToolCallId = "call-1",
+    Content = """{"temperature":72}"""
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Id` | `id` | `string?` | Message ID |
+| `Role` | `role` | `"tool"` | Fixed role discriminator |
+| `Content` | `content` | `string` | Tool result content |
+| `ToolCallId` | `toolCallId` | `string` | ID of the tool call this message answers |
+| `Error` | `error` | `string?` | Optional error message |
+| `EncryptedValue` | `encryptedValue` | `string?` | Optional opaque encrypted value |
+
+### AGUIActivityMessage
+
+```csharp
+var message = new AGUIActivityMessage
+{
+    Id = "activity-1",
+    ActivityType = "PLAN",
+    Content = JsonDocument.Parse("""{"status":"running"}""").RootElement.Clone()
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Id` | `id` | `string?` | Message ID |
+| `Role` | `role` | `"activity"` | Fixed role discriminator |
+| `ActivityType` | `activityType` | `string` | Activity discriminator for renderer selection |
+| `Content` | `content` | `JsonElement` | Structured activity payload |
+
+### AGUIReasoningMessage
+
+```csharp
+var message = new AGUIReasoningMessage
+{
+    Id = "reasoning-1",
+    Content = "Thinking through the problem..."
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Id` | `id` | `string?` | Message ID |
+| `Role` | `role` | `"reasoning"` | Fixed role discriminator |
+| `Content` | `content` | `string` | Reasoning text |
+| `EncryptedValue` | `encryptedValue` | `string?` | Optional opaque encrypted value |
+
+### AGUIToolCall
+
+```csharp
+var call = new AGUIToolCall
+{
+    Id = "call-1",
+    Type = "function",
+    Function = new AGUIToolCallFunction
+    {
+        Name = "get_weather",
+        Arguments = """{"city":"Seattle"}"""
+    }
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Id` | `id` | `string` | Tool call ID |
+| `Type` | `type` | `string` | Tool call type; defaults to `"function"` |
+| `Function` | `function` | `AGUIToolCallFunction` | Function name and JSON-encoded arguments |
+| `EncryptedValue` | `encryptedValue` | `string?` | Optional opaque encrypted value |
+
+`AGUIToolCallFunction` has `Name` (`name`) and `Arguments` (`arguments`).
+
+## Context
+
+`AGUIContext` represents a piece of contextual information provided to an agent.
+
+```csharp
+var context = new AGUIContext
+{
+    Description = "Current customer tier",
+    Value = "enterprise"
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Description` | `description` | `string` | Description of what the context represents |
+| `Value` | `value` | `string` | Context value |
+
+## Tool
+
+`AGUITool` defines a tool that an agent can call.
+
+```csharp
+var tool = new AGUITool
+{
+    Name = "get_weather",
+    Description = "Get the weather for a city",
+    Parameters = JsonDocument.Parse("""
+        {
+          "type": "object",
+          "properties": {
+            "city": { "type": "string" }
+          },
+          "required": ["city"]
+        }
+        """).RootElement.Clone(),
+    Metadata = JsonDocument.Parse("""{"ui":"compact"}""").RootElement.Clone()
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Name` | `name` | `string` | Tool name |
+| `Description` | `description` | `string?` | Optional tool description |
+| `Parameters` | `parameters` | `JsonElement` | JSON Schema for the tool parameters |
+| `Metadata` | `metadata` | `JsonElement?` | Optional arbitrary tool metadata |
+
+## State
+
+State is represented as `JsonElement?` on `RunAgentInput.State` and as
+`JsonElement` payloads in `StateSnapshotEvent` and `StateDeltaEvent`.
+
+```csharp
+input.State = JsonDocument.Parse("""{"draft":"hello"}""").RootElement.Clone();
+```
+
+The schema of the state is defined by the agent. The protocol only carries it.
+
+## AgentCapabilities
+
+`AgentCapabilities` is a structured declaration that an agent can expose so
+clients can discover what it supports. All fields are optional.
+
+```csharp
+var capabilities = new AgentCapabilities
+{
+    Identity = new IdentityCapabilities
+    {
+        Name = "Support Agent",
+        Version = "1.0.0"
+    },
+    Transport = new TransportCapabilities
+    {
+        Streaming = true,
+        Resumable = true
+    },
+    Tools = new ToolsCapabilities
+    {
+        Supported = true,
+        ClientProvided = true
+    },
+    Multimodal = new MultimodalCapabilities
+    {
+        Input = new MultimodalInputCapabilities
+        {
+            Image = true,
+            Audio = true,
+            Pdf = true
+        }
+    }
+};
+```
+
+| C# property | JSON field | Type | Description |
+| ----------- | ---------- | ---- | ----------- |
+| `Identity` | `identity` | `IdentityCapabilities?` | Agent identity and metadata |
+| `Transport` | `transport` | `TransportCapabilities?` | Streaming, websocket, binary, push, and resumability support |
+| `Tools` | `tools` | `ToolsCapabilities?` | Tool support and tool-calling configuration |
+| `Output` | `output` | `OutputCapabilities?` | Structured output and supported MIME types |
+| `State` | `state` | `StateCapabilities?` | Snapshot, delta, memory, and persistence support |
+| `MultiAgent` | `multiAgent` | `MultiAgentCapabilities?` | Delegation, handoffs, and sub-agent information |
+| `Reasoning` | `reasoning` | `ReasoningCapabilities?` | Reasoning, streaming, and encrypted reasoning support |
+| `Multimodal` | `multimodal` | `MultimodalCapabilities?` | Multimodal input and output support |
+| `Execution` | `execution` | `ExecutionCapabilities?` | Code execution and iteration/time limits |
+| `HumanInTheLoop` | `humanInTheLoop` | `HumanInTheLoopCapabilities?` | Approvals, interventions, feedback, interrupts, and approve-with-edits |
+| `Custom` | `custom` | `IDictionary<string, object?>?` | Integration-specific capabilities |
+
+See [Capabilities](/concepts/capabilities) for protocol-level concepts and
+usage patterns.
+
+## Serialization
+
+All protocol types are registered in `AGUIJsonSerializerContext`, a
+source-generated `JsonSerializerContext`. Use it when serializing protocol
+types in AOT-sensitive code.
+
+```csharp
+var json = JsonSerializer.Serialize(
+    input,
+    AGUIJsonSerializerContext.Default.RunAgentInput);
+```
+

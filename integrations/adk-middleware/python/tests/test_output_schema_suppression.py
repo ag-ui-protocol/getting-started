@@ -269,6 +269,29 @@ class TestCollectOutputSchemaAgentNames:
         result = ADKAgent._collect_output_schema_agent_names(root)
         assert result == {"classifier", "scorer"}
 
+    def test_workflow_graph_nodes_with_output_schema(self):
+        """ADK Workflow graph nodes are walked in addition to sub_agents."""
+        from google.adk.agents import LlmAgent, BaseAgent
+        from ag_ui_adk.adk_agent import ADKAgent
+
+        classifier = MagicMock(spec=LlmAgent)
+        classifier.name = "classifier"
+        classifier.output_schema = str
+        classifier.sub_agents = []
+
+        responder = MagicMock(spec=LlmAgent)
+        responder.name = "responder"
+        responder.output_schema = None
+        responder.sub_agents = []
+
+        workflow = MagicMock(spec=BaseAgent)
+        workflow.name = "wf"
+        workflow.sub_agents = []
+        workflow.graph = MagicMock(nodes=[classifier, responder])
+
+        result = ADKAgent._collect_output_schema_agent_names(workflow)
+        assert result == {"classifier"}
+
     def test_deeply_nested_agents(self):
         """output_schema agents are found at arbitrary depth."""
         from google.adk.agents import LlmAgent, BaseAgent

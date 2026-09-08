@@ -8,6 +8,7 @@ from google.adk.agents import LlmAgent
 from google.adk import tools as adk_tools
 import httpx
 import json
+import os
 
 # Compatibility shim for PreloadMemoryTool (renamed in newer ADK versions)
 try:
@@ -58,6 +59,23 @@ def get_weather_condition(code: int) -> str:
     return conditions.get(code, "Unknown")
 
 
+def _mock_weather(location: str) -> dict[str, str | float]:
+    """Return deterministic canned weather data for tests.
+
+    Used when ``AG_UI_MOCK_WEATHER`` is set so e2e runs don't depend on the
+    live open-meteo API (which rate-limits CI's shared egress IPs).
+    """
+    return {
+        "temperature": 21.0,
+        "feelsLike": 20.0,
+        "humidity": 65.0,
+        "windSpeed": 12.0,
+        "windGust": 18.0,
+        "conditions": get_weather_condition(1),
+        "location": location,
+    }
+
+
 async def get_weather(location: str) -> dict[str, str | float]:
     """Get current weather for a location.
 
@@ -68,6 +86,9 @@ async def get_weather(location: str) -> dict[str, str | float]:
         Dictionary with weather information including temperature, feels like,
         humidity, wind speed, wind gust, conditions, and location name.
     """
+    if os.getenv("AG_UI_MOCK_WEATHER"):
+        return _mock_weather(location)
+
     async with httpx.AsyncClient() as client:
         # Geocode the location
         geocoding_url = (

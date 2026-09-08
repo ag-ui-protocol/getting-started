@@ -7,17 +7,48 @@
  * the client.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { ToolUseBlock } from "@strands-agents/sdk";
-import type { AgentStreamEvent } from "@strands-agents/sdk";
+import type { AgentStreamEvent, ModelStreamEvent } from "@strands-agents/sdk";
 import { EventType, type RunAgentInput } from "@ag-ui/core";
 
+import { createProxyTool } from "../client-proxy-tool";
 import {
   collect,
   minimalRunInput,
+  realStrandsAgent,
   scriptedStrandsAgent,
   stream,
 } from "./helpers";
+
+/**
+ * The proxy the adapter registered for `set_color`, as the SDK hands it back on
+ * `AfterToolCallEvent.tool`. The placeholder suppression reads the executed
+ * tool, so an event carrying no tool describes a call that never ran a proxy.
+ */
+const SET_COLOR_PROXY = createProxyTool({
+  name: "set_color",
+  description: "Sets a UI color.",
+  parameters: { type: "object", properties: { color: { type: "string" } } },
+});
+
+/**
+ * Run with the adapter's error logging captured instead of printed.
+ *
+ * The forced-stop path logs `error(prefix, e)` by design; leaving it on stderr
+ * buries a real failure in expected noise.
+ */
+async function collectQuietly(
+  agent: ReturnType<typeof scriptedStrandsAgent>,
+  input?: RunAgentInput,
+) {
+  const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    return await collect(agent, input ?? minimalRunInput());
+  } finally {
+    spy.mockRestore();
+  }
+}
 
 function frontendToolInput(): RunAgentInput {
   return minimalRunInput({
@@ -54,7 +85,7 @@ const scriptedEvents: AgentStreamEvent[] = [
   {
     type: "afterToolCallEvent",
     toolUse: { toolUseId: "fe-1", name: "set_color", input: { color: "red" } },
-    tool: undefined,
+    tool: SET_COLOR_PROXY,
     result: {
       toolUseId: "fe-1",
       status: "success",
@@ -81,6 +112,49 @@ describe("continueAfterFrontendCall", () => {
     expect(content).not.toContain("after-tool");
   });
 
+  it("default (halt): trailing reasoning after a frontend tool call is suppressed", async () => {
+    // Reasoning belongs to the same turn as the trailing text above and is muted
+    // by the same flag. Driven through the real agent loop, because the mute has
+    // to land on the delta shape the SDK actually forwards.
+    const { agent } = realStrandsAgent([
+      [
+        { type: "modelMessageStartEvent", role: "assistant" },
+        {
+          type: "modelContentBlockStartEvent",
+          start: {
+            type: "toolUseStart",
+            toolUseId: "fe-1",
+            name: "set_color",
+          },
+        },
+        {
+          type: "modelContentBlockDeltaEvent",
+          delta: {
+            type: "toolUseInputDelta",
+            input: JSON.stringify({ color: "red" }),
+          },
+        },
+        { type: "modelContentBlockStopEvent" },
+        { type: "modelContentBlockStartEvent" },
+        {
+          type: "modelContentBlockDeltaEvent",
+          delta: { type: "reasoningContentDelta", text: "after-tool musing" },
+        },
+        { type: "modelContentBlockStopEvent" },
+        { type: "modelMessageStopEvent", stopReason: "toolUse" },
+      ] as ModelStreamEvent[],
+    ]);
+
+    const events = await collect(agent, frontendToolInput());
+
+    const kinds = events.map((e) => e.type);
+    expect(kinds).toContain(EventType.TOOL_CALL_END);
+    expect(kinds[kinds.length - 1]).toBe(EventType.RUN_FINISHED);
+    expect(kinds).not.toContain(EventType.REASONING_START);
+    expect(kinds).not.toContain(EventType.REASONING_MESSAGE_CONTENT);
+    expect(kinds).not.toContain(EventType.REASONING_MESSAGE_END);
+  });
+
   it("continueAfterFrontendCall=true: trailing text IS delivered to the client", async () => {
     const agent = scriptedStrandsAgent(scriptedEvents);
     (agent as unknown as { config: Record<string, unknown> }).config = {
@@ -103,39 +177,29 @@ describe("continueAfterFrontendCall", () => {
     // assistant message is produced. Our adapter should treat that as a
     // clean end-of-stream (not RUN_ERROR) as long as we've already
     // decided to halt because of a frontend tool call.
+    //
+    // The frontend tool call alone arms the halt, and nothing follows it: an
+    // `afterToolCallEvent` breaks the consume loop outright, so a throw
+    // scripted after one is never reached and the swallow is never driven.
+    // The window this test is about is the one in between, halt armed and the
+    // SDK raising before its after-call event arrives, which is exactly how a
+    // halted Strands cycle behaves.
     const block = new ToolUseBlock({
       name: "set_color",
       toolUseId: "fe-99",
       input: { color: "red" },
     });
-    const preEvents: AgentStreamEvent[] = [
-      block as unknown as AgentStreamEvent,
-      // afterToolCallEvent fires before the throw, flipping pendingHalt.
-      {
-        type: "afterToolCallEvent",
-        toolUse: {
-          toolUseId: "fe-99",
-          name: "set_color",
-          input: { color: "red" },
-        },
-        tool: undefined,
-        result: {
-          toolUseId: "fe-99",
-          status: "success",
-          content: [{ text: "Forwarded to client" }],
-        },
-      } as unknown as AgentStreamEvent,
-    ];
     const agent = scriptedStrandsAgent([], {
       stubOverrides: {
         stream: async function* () {
-          for (const e of preEvents) yield e;
+          yield block as unknown as AgentStreamEvent;
           throw new Error("Stream ended without completing a message");
         } as unknown as import("@strands-agents/sdk").Agent["stream"],
       },
     });
     const events = await collect(agent, frontendToolInput());
     const k = events.map((e) => e.type);
+    expect(k).toContain(EventType.TOOL_CALL_START);
     expect(k).toContain(EventType.TOOL_CALL_END);
     expect(k).not.toContain(EventType.RUN_ERROR);
     expect(k[k.length - 1]).toBe(EventType.RUN_FINISHED);
@@ -160,7 +224,7 @@ describe("continueAfterFrontendCall", () => {
           name: "set_color",
           input: { color: "blue" },
         },
-        tool: undefined,
+        tool: SET_COLOR_PROXY,
         result: {
           toolUseId: "fe-2",
           status: "success",
@@ -184,7 +248,9 @@ describe("continueAfterFrontendCall", () => {
     // Tightness check: the stream-end swallow added for frontend-halt
     // parity (agent.ts `if (pendingHalt || haltEventStream)`) must NOT
     // mask real model failures. Stream throws outside a halt context →
-    // RUN_ERROR must flow back to the client.
+    // RUN_ERROR must flow back to the client. A provider failure escaping
+    // the Strands stream is this bridge's forced stop, so it carries the
+    // code Python reports one under.
     const agent = scriptedStrandsAgent([], {
       stubOverrides: {
         stream: async function* () {
@@ -192,13 +258,13 @@ describe("continueAfterFrontendCall", () => {
         } as unknown as import("@strands-agents/sdk").Agent["stream"],
       },
     });
-    const events = await collect(agent);
+    const events = await collectQuietly(agent);
     const k = events.map((e) => e.type);
     const err = events.find(
       (e) => e.type === EventType.RUN_ERROR,
     ) as unknown as { code?: string; message?: string } | undefined;
     expect(err).toBeDefined();
-    expect(err?.code).toBe("STRANDS_ERROR");
+    expect(err?.code).toBe("STRANDS_FORCE_STOP");
     expect(err?.message).toContain("Bedrock upstream 500");
     // And no false RUN_FINISHED — the error is the terminator.
     expect(k[k.length - 1]).toBe(EventType.RUN_ERROR);
@@ -218,9 +284,11 @@ describe("continueAfterFrontendCall", () => {
       },
     });
     // No frontend tools advertised — adapter has no reason to halt.
-    const events = await collect(agent);
+    const events = await collectQuietly(agent);
     const err = events.find((e) => e.type === EventType.RUN_ERROR);
     expect(err).toBeDefined();
-    expect((err as unknown as { code?: string }).code).toBe("STRANDS_ERROR");
+    expect((err as unknown as { code?: string }).code).toBe(
+      "STRANDS_FORCE_STOP",
+    );
   });
 });

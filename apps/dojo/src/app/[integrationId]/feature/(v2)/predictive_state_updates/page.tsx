@@ -212,11 +212,23 @@ const DocumentEditor = () => {
   // Track when a run transitions from running to not running (replaces nodeName == "end")
   const wasRunning = useRef(false);
 
+  // NOTE (PNI-272): these effects read from the TipTap editor across the run
+  // lifecycle and are kept exactly as they were; the rule's remedy would change
+  // commit timing and the editor integration's shape.
+  //
+  // DEFERRED (PNI-307): the exhaustive-deps suppressions on all four effects
+  // below are deliberate for the same reason. Each effect is keyed to exactly
+  // one lifecycle signal (`isLoading` flips, agent document updates, editor
+  // text changes) and reads everything else as a snapshot at that moment.
+  // Adding the "missing" deps re-runs editor syncs mid-stream and can wipe or
+  // re-set TipTap content while a run is writing to it. Do not widen these
+  // dep arrays without regression tests for the run lifecycle.
   useEffect(() => {
     if (isLoading) {
       setCurrentDocument(editor?.getText() || "");
     }
     editor?.setEditable(!isLoading);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
 
   useEffect(() => {
@@ -230,6 +242,7 @@ const DocumentEditor = () => {
       }
     }
     wasRunning.current = isLoading;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
 
   useEffect(() => {
@@ -244,6 +257,7 @@ const DocumentEditor = () => {
         editor?.commands.setContent(markdown);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentState?.document]);
 
   const text = editor?.getText() || "";
@@ -257,6 +271,7 @@ const DocumentEditor = () => {
         document: text,
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
 
   // TODO(steve): Remove this when all agents have been updated to use write_document tool.
@@ -331,14 +346,14 @@ const DocumentEditor = () => {
 };
 
 interface ConfirmChangesProps {
-  args: any;
-  respond: any;
-  status: any;
+  args: { document?: string };
+  respond?: (result: unknown) => Promise<void>;
+  status: string;
   onReject: () => void;
   onConfirm: () => void;
 }
 
-function ConfirmChanges({ args, respond, status, onReject, onConfirm }: ConfirmChangesProps) {
+function ConfirmChanges({ args: _args, respond, status, onReject, onConfirm }: ConfirmChangesProps) {
   const [accepted, setAccepted] = useState<boolean | null>(null);
   return (
     <div

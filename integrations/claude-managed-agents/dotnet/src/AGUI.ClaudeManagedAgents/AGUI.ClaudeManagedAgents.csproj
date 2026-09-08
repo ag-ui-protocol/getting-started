@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net10.0;net9.0;net8.0</TargetFrameworks>
+    <RootNamespace>AGUI.ClaudeManagedAgents</RootNamespace>
+    <PackageId>AGUI.ClaudeManagedAgents</PackageId>
+    <Description>AG-UI integration for Claude Managed Agents (Anthropic hosted agent sessions).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Anthropic" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(AGUIDotnetSdkDir)src\AGUI.Abstractions\AGUI.Abstractions.csproj" />
+    <ProjectReference Include="$(AGUIDotnetSdkDir)src\AGUI.Formatting\AGUI.Formatting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AGUI.ClaudeManagedAgents.Tests" />
+  </ItemGroup>
+
+</Project>

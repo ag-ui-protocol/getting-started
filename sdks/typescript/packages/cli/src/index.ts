@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import inquirer from "inquirer";
 import { spawn } from "child_process";
+import { buildCopilotKitCreateArgs } from "./build-args";
 import fs from "fs";
 import path from "path";
 import { downloadTemplate } from "giget";
@@ -28,7 +29,7 @@ ${RESET}
 
 const description = `
 Quickly scaffold AG-UI enabled applications for your favorite agent frameworks.
-`
+`;
 
 async function createProject() {
   displayBanner();
@@ -46,8 +47,8 @@ async function createProject() {
     "llamaindex",
     "pydanticAi",
     "agno",
-    "adk"
-  ].some(flag => options[flag]);
+    "adk",
+  ].some((flag) => options[flag]);
 
   if (isFrameworkDefined) {
     await handleCopilotKitNextJs();
@@ -85,7 +86,6 @@ async function createProject() {
 
 async function handleCopilotKitNextJs() {
   const options = program.opts();
-  const frameworkArgs: string[] = [];
 
   const projectName = await inquirer.prompt([
     {
@@ -105,40 +105,10 @@ async function handleCopilotKitNextJs() {
     },
   ]);
 
-  // Translate options to CopilotKit framework flags
-  if (options.langgraphPy) {
-    frameworkArgs.push("-f", "langgraph-py");
-  } else if (options.langgraphJs) {
-    frameworkArgs.push("-f", "langgraph-js");
-  } else if (options.crewiAiFlows) {
-    frameworkArgs.push("-f", "flows");
-  } else if (options.mastra) {
-    frameworkArgs.push("-f", "mastra");
-  } else if (options.ag2) {
-    frameworkArgs.push("-f", "ag2");
-  } else if (options.llamaindex) {
-    frameworkArgs.push("-f", "llamaindex");
-  } else if (options.agno) {
-    frameworkArgs.push("-f", "agno");
-  } else if (options.pydanticAi) {
-    frameworkArgs.push("-f", "pydantic-ai");
-  } else if (options.adk) {
-    frameworkArgs.push("-f", "adk");
-  }
-
-  const copilotkit = spawn("npx",
-    [
-      "copilotkit@latest",
-      "create",
-      "--no-banner",
-      "-n", projectName.name,
-      ...frameworkArgs,
-    ],
-    {
-      stdio: "inherit",
-      shell: true,
-    },
-  );
+  const copilotkit = spawn("npx", buildCopilotKitCreateArgs(options, projectName.name), {
+    stdio: "inherit",
+    shell: true,
+  });
 
   copilotkit.on("close", (code) => {
     if (code !== 0) {
@@ -205,10 +175,7 @@ async function handleCliClient() {
 }
 
 // Metadata
-program
-  .name("create-ag-ui-app")
-  .description(description)
-  .version("0.0.36");
+program.name("create-ag-ui-app").description(description).version("0.0.36");
 
 // Add framework flags
 program
@@ -220,7 +187,7 @@ program
   .option("--llamaindex", "Use the LlamaIndex framework")
   .option("--agno", "Use the Agno framework")
   .option("--ag2", "Use the AG2 framework")
-  .option("--adk", "Use the ADK framework")
+  .option("--adk", "Use the ADK framework");
 
 program.action(async () => {
   await createProject();

@@ -1,0 +1,23 @@
+[project]
+name = "ag-ui-a2ui-toolkit"
+version = "0.0.4"
+description = "Framework-agnostic helpers for building A2UI subagent tools — op builders, prompt assembly, history walkers, and request/envelope orchestration shared across framework adapters."
+license-files = ["LICENSE"]
+authors = [
+    { name = "Ran Shem Tov", email = "ran@copilotkit.ai" }
+]
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10,<3.15"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.8.0,<0.9"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = "ag_ui_a2ui_toolkit"
+
+[tool.ag-ui.scripts]
+test = "python -m unittest discover tests"

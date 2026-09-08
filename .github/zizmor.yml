@@ -11,9 +11,3 @@ rules:
       # It does NOT execute fork code — it only consumes artifacts and PR
       # metadata. The trade-off is documented in the file's header comment.
       - publish-python-preview.yml
-      # Dependabot auto-merge: uses pull_request_target for write token.
-      # Does NOT checkout PR code. Actor-gated to dependabot[bot].
-      - dependabot-auto-merge.yml
-      # Dependabot major analysis: uses pull_request_target for PR comments.
-      # Does NOT checkout PR code. Actor-gated to dependabot[bot].
-      - dependabot-major-analysis.yml

@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "module": "esnext",
+    // The demos import the adapter by its package name, which only resolves
+    // through its `exports` map; the parent's "node" resolution cannot read one.
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["server"],
+  "exclude": ["node_modules"]
+}

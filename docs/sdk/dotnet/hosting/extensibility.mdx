@@ -1,0 +1,244 @@
+---
+title: "Extensibility"
+description: "Customize AG-UI stream conversion with AGUIStreamOptions"
+---
+
+# Extensibility
+
+`AGUIStreamOptions` customizes how `ChatResponseUpdate` streams are converted
+to AG-UI events. It is fluent and method-only: create an instance, register
+`Map*` hooks, and pass it to `ToChatRequestContext`.
+
+```csharp
+var streamOptions = new AGUIStreamOptions()
+    .MapResultAsStateSnapshot("create_plan");
+
+var ctx = input.ToChatRequestContext(jsonSerializerOptions, streamOptions);
+```
+
+Use stream options when your server needs to surface framework-specific content
+types, custom interrupts, state updates, or streaming tool-argument previews.
+
+## Built-in conversion
+
+You do not need stream options for the common path. The hosting layer already
+maps:
+
+- `TextContent` to `TEXT_MESSAGE_*`
+- `TextReasoningContent` to `REASONING_*`
+- `FunctionCallContent` to `TOOL_CALL_*`
+- `FunctionResultContent` to `TOOL_CALL_RESULT`
+- `ToolApprovalRequestContent` and `InterruptRequestContent` to interrupt
+  outcomes
+- `ChatResponseUpdate.RawRepresentation` containing a `BaseEvent` directly to
+  that event
+
+<Note>
+  If a `ChatResponseUpdate.RawRepresentation` is a `BaseEvent`, the hosting
+  layer emits it verbatim. This is often the simplest way for a custom
+  `IChatClient` wrapper to inject `StateSnapshotEvent`, `CustomEvent`, or
+  `RawEvent` values.
+</Note>
+
+## MapContent
+
+`MapContent(Func<AIContent, IEnumerable<BaseEvent>?> mapper)` receives an
+otherwise-unmapped `AIContent` and returns AG-UI events to emit. Return `null`
+to let the next mapper try the content.
+
+```csharp
+using AGUI.Abstractions;
+using AGUI.Server;
+using Microsoft.Extensions.AI;
+
+public sealed class WorkflowStepContent : AIContent
+{
+    public string StepName { get; set; } = string.Empty;
+}
+
+var streamOptions = new AGUIStreamOptions()
+    .MapContent(content =>
+        content is WorkflowStepContent step
+            ? [new StepStartedEvent { StepName = step.StepName }]
+            : null);
+```
+
+Use this for framework-specific content types such as workflow markers,
+progress notifications, or domain events.
+
+<Tip>
+  `TextReasoningContent` is already handled natively. The Step 07 sample emits
+  `TextReasoningContent`, and the hosting layer converts it to reasoning events
+  without custom `MapContent` configuration.
+</Tip>
+
+## MapInterrupt
+
+`MapInterrupt(Func<AIContent, AGUIInterrupt?> mapper)` receives an
+otherwise-unmapped `AIContent` and returns an `AGUIInterrupt` when the run needs
+user input. The hosting layer emits `RunFinishedEvent` with an interrupt
+outcome and stops the run. Return `null` to continue to the next mapper or to
+`MapContent`.
+
+```csharp
+using AGUI.Abstractions;
+using AGUI.Server;
+using Microsoft.Extensions.AI;
+
+public sealed class ConfirmationRequiredContent : AIContent
+{
+    public string RequestId { get; set; } = string.Empty;
+
+    public string Message { get; set; } = string.Empty;
+}
+
+var streamOptions = new AGUIStreamOptions()
+    .MapInterrupt(content =>
+        content is ConfirmationRequiredContent confirmation
+            ? new AGUIInterrupt
+            {
+                Id = confirmation.RequestId,
+                Reason = InterruptReasons.Confirmation,
+                Message = confirmation.Message,
+            }
+            : null);
+```
+
+Use this for custom human-in-the-loop content that is not represented by the
+built-in `InterruptRequestContent` or tool approval content.
+
+## MapCall
+
+`MapCall(string toolName, Func<FunctionCallContent, IEnumerable<BaseEvent>>
+mapper)` receives a matching `FunctionCallContent` and emits extra events after
+the normal tool call start, args, and end events.
+
+```csharp
+using System.Text.Json;
+using AGUI.Abstractions;
+using AGUI.Server;
+
+string? lastDocument = null;
+
+var streamOptions = new AGUIStreamOptions()
+    .MapCall("write_document", call =>
+    {
+        var document = call.Arguments?.TryGetValue("document", out var value) == true
+            ? value?.ToString()
+            : null;
+
+        if (string.IsNullOrEmpty(document) || document == lastDocument)
+        {
+            return [];
+        }
+
+        lastDocument = document;
+
+        var snapshot = JsonSerializer.SerializeToElement(new
+        {
+            document
+        });
+
+        return [new StateSnapshotEvent { Snapshot = snapshot }];
+    });
+```
+
+Use this for streaming tool-argument previews. For example, while a model is
+building arguments for `write_document`, the UI can update a live document
+preview before the server-side tool finishes.
+
+## MapResult
+
+`MapResult(string toolName, Func<FunctionResultContent,
+IEnumerable<BaseEvent>> mapper)` receives a matching tool result and emits
+extra events after the normal `ToolCallResultEvent`.
+
+```csharp
+using System.Text.Json;
+using AGUI.Abstractions;
+using AGUI.Server;
+
+var streamOptions = new AGUIStreamOptions()
+    .MapResult("save_recipe", result =>
+    {
+        var snapshot = JsonSerializer.SerializeToElement(new
+        {
+            saved = true,
+            recipe = result.Result,
+        });
+
+        return
+        [
+            new StateSnapshotEvent { Snapshot = snapshot },
+            new CustomEvent
+            {
+                Name = "recipe.saved",
+                Value = snapshot,
+            },
+        ];
+    });
+```
+
+Use this when a server-side tool result should also update state, activity, or
+application-specific UI.
+
+## State mapping helpers
+
+Two convenience methods cover the common state-management cases:
+
+```csharp
+var streamOptions = new AGUIStreamOptions()
+    .MapResultAsStateSnapshot("create_plan")
+    .MapResultAsStateDelta("update_plan_step");
+```
+
+- `MapResultAsStateSnapshot(toolName)` emits a `StateSnapshotEvent`
+- `MapResultAsStateDelta(toolName)` emits a `StateDeltaEvent`
+
+Both helpers expect `FunctionResultContent.Result` to be a `JsonElement`. If
+your tool returns another type, use `MapResult` and serialize the value
+yourself.
+
+## RawRepresentation pass-through
+
+For custom `IChatClient` wrappers, setting `RawRepresentation` to an AG-UI
+event is often simpler than defining a new `AIContent` type.
+
+```csharp
+using System.Text.Json;
+using AGUI.Abstractions;
+using Microsoft.Extensions.AI;
+
+var state = JsonSerializer.SerializeToElement(new
+{
+    status = "ready"
+});
+
+yield return new ChatResponseUpdate
+{
+    RawRepresentation = new StateSnapshotEvent
+    {
+        Snapshot = state,
+    },
+};
+```
+
+The converter emits the `StateSnapshotEvent` directly. If the raw event appears
+before a run has started, the hosting layer emits `RUN_STARTED` first.
+
+## Chaining
+
+You can register multiple `MapContent` or `MapInterrupt` callbacks. They are
+tried in registration order, and the first non-null result wins.
+
+```csharp
+var streamOptions = new AGUIStreamOptions()
+    .MapInterrupt(TryMapConfirmation)
+    .MapInterrupt(TryMapInputRequest)
+    .MapContent(TryMapWorkflowStep)
+    .MapContent(TryMapProgress);
+```
+
+Keep mappings small and focused. Use the built-in conversion for standard text,
+reasoning, tools, and interrupts, then add stream options only for the events
+that are specific to your server.

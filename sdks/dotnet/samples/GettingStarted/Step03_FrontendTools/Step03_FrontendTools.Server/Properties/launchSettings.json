@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "Step03_FrontendTools.Server": {
+      "commandName": "Project",
+      "applicationUrl": "http://localhost:5003"
+    }
+  }
+}

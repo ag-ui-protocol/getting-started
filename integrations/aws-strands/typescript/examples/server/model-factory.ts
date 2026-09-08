@@ -25,6 +25,22 @@ export interface CreateModelOptions {
    * Responses API drops reasoning blocks across multi-turn conversations.
    */
   reasoning?: boolean;
+  /**
+   * OpenAI API mode. Defaults to the SDK default (Responses). Pass `"chat"`
+   * for demos that need tool-call ARGUMENTS to stream incrementally — the
+   * Strands Responses adapter buffers `function_call_arguments.delta` and only
+   * emits the complete toolUse at `…arguments.done`, so e.g. A2UI progressive
+   * surface painting never streams on the Responses API.
+   */
+  openaiApi?: "chat" | "responses";
+  /**
+   * The provider's own hosted tools, e.g. `[{ type: "web_search" }]`.
+   * Responses API only, and the reason the citations demo runs on an OpenAI
+   * key: web search is the built-in whose annotations Strands maps to
+   * citations. The other providers have no equivalent and ignore it, so a demo
+   * that needs it should say so rather than silently degrading.
+   */
+  builtinTools?: Record<string, unknown>[];
 }
 
 export async function createModel(
@@ -49,8 +65,16 @@ export async function createModel(
     return new OpenAIModel({
       apiKey,
       modelId: process.env.MODEL_ID ?? "gpt-5.4",
-      ...(reasoning
-        ? { params: { reasoning: { effort: "medium", summary: "auto" } } }
+      ...(options.openaiApi ? { api: options.openaiApi } : {}),
+      ...(reasoning || options.builtinTools
+        ? {
+            params: {
+              ...(reasoning
+                ? { reasoning: { effort: "medium", summary: "auto" } }
+                : {}),
+              ...(options.builtinTools ? { tools: options.builtinTools } : {}),
+            },
+          }
         : {}),
       ...(baseURL ? { clientConfig: { baseURL } } : {}),
     });
@@ -70,6 +94,14 @@ export async function createModel(
     return new AnthropicModel({
       apiKey,
       modelId: process.env.MODEL_ID ?? "claude-sonnet-4-6",
+      // Anthropic emits no thinking blocks unless extended thinking is
+      // requested, so without this the reasoning demo silently degrades to a
+      // plain answer on MODEL_PROVIDER=anthropic.
+      ...(reasoning
+        ? {
+            params: { thinking: { type: "enabled", budget_tokens: 2000 } },
+          }
+        : {}),
     });
   }
 

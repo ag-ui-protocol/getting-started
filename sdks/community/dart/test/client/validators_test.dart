@@ -1,11 +1,13 @@
 import 'package:test/test.dart';
 import 'package:ag_ui/src/client/errors.dart';
 import 'package:ag_ui/src/client/validators.dart';
+import 'package:ag_ui/src/types/message.dart';
 
 void main() {
   group('Validators.requireNonEmpty', () {
     test('accepts non-empty strings', () {
-      expect(() => Validators.requireNonEmpty('value', 'field'), returnsNormally);
+      expect(
+          () => Validators.requireNonEmpty('value', 'field'), returnsNormally);
     });
 
     test('rejects null strings', () {
@@ -45,9 +47,13 @@ void main() {
 
   group('Validators.validateUrl', () {
     test('accepts valid HTTP URLs', () {
-      expect(() => Validators.validateUrl('http://example.com', 'url'), returnsNormally);
-      expect(() => Validators.validateUrl('https://api.example.com/path', 'url'), returnsNormally);
-      expect(() => Validators.validateUrl('https://example.com:8080', 'url'), returnsNormally);
+      expect(() => Validators.validateUrl('http://example.com', 'url'),
+          returnsNormally);
+      expect(
+          () => Validators.validateUrl('https://api.example.com/path', 'url'),
+          returnsNormally);
+      expect(() => Validators.validateUrl('https://example.com:8080', 'url'),
+          returnsNormally);
     });
 
     test('rejects invalid URLs', () {
@@ -74,6 +80,28 @@ void main() {
             .having((e) => e.constraint, 'constraint', 'non-empty')),
       );
     });
+
+    test('rejects credential-bearing URLs (userInfo component)', () {
+      expect(
+        () => Validators.validateUrl('http://user:pass@example.com', 'url'),
+        throwsA(isA<ValidationError>()
+            .having((e) => e.constraint, 'constraint', 'no-user-credentials')),
+      );
+      expect(
+        () => Validators.validateUrl('https://token@api.example.com', 'url'),
+        throwsA(isA<ValidationError>()
+            .having((e) => e.constraint, 'constraint', 'no-user-credentials')),
+      );
+    });
+
+    test('rejects bare-scheme URL http://', () {
+      // Uri.parse('http://').hasAuthority is true but host is '' — the
+      // uri.host.isEmpty check is load-bearing and must be exercised.
+      expect(
+        () => Validators.validateUrl('http://', 'baseUrl'),
+        throwsA(isA<ValidationError>()),
+      );
+    });
   });
 
   group('Validators.validateAgentId', () {
@@ -89,7 +117,8 @@ void main() {
         () => Validators.validateAgentId('agent@123'),
         throwsA(isA<ValidationError>()
             .having((e) => e.field, 'field', 'agentId')
-            .having((e) => e.constraint, 'constraint', 'alphanumeric-with-hyphens-underscores')),
+            .having((e) => e.constraint, 'constraint',
+                'alphanumeric-with-hyphens-underscores')),
       );
     });
 
@@ -124,7 +153,10 @@ void main() {
   group('Validators.validateRunId', () {
     test('accepts valid run IDs', () {
       expect(() => Validators.validateRunId('run-123'), returnsNormally);
-      expect(() => Validators.validateRunId('550e8400-e29b-41d4-a716-446655440000'), returnsNormally);
+      expect(
+          () =>
+              Validators.validateRunId('550e8400-e29b-41d4-a716-446655440000'),
+          returnsNormally);
     });
 
     test('rejects too long IDs', () {
@@ -147,7 +179,10 @@ void main() {
   group('Validators.validateThreadId', () {
     test('accepts valid thread IDs', () {
       expect(() => Validators.validateThreadId('thread-123'), returnsNormally);
-      expect(() => Validators.validateThreadId('550e8400-e29b-41d4-a716-446655440000'), returnsNormally);
+      expect(
+          () => Validators.validateThreadId(
+              '550e8400-e29b-41d4-a716-446655440000'),
+          returnsNormally);
     });
 
     test('rejects too long IDs', () {
@@ -160,27 +195,37 @@ void main() {
     });
   });
 
-  group('Validators.validateMessageContent', () {
-    test('accepts valid content types', () {
-      expect(() => Validators.validateMessageContent('Hello world'), returnsNormally);
-      expect(() => Validators.validateMessageContent({'text': 'Hello'}), returnsNormally);
-      expect(() => Validators.validateMessageContent(['item1', 'item2']), returnsNormally);
-    });
-
-    test('rejects null content', () {
+  group('Validators.validateUserMessageContent', () {
+    test('accepts text content', () {
       expect(
-        () => Validators.validateMessageContent(null),
-        throwsA(isA<ValidationError>()
-            .having((e) => e.field, 'field', 'content')
-            .having((e) => e.constraint, 'constraint', 'non-null')),
+        () => Validators.validateUserMessageContent(const TextContent('Hello')),
+        returnsNormally,
       );
     });
 
-    test('rejects invalid types', () {
+    test('accepts multimodal content with valid parts', () {
+      // Regression: multimodal content must validate, not throw on a null
+      // `content` getter as the retired validateMessageContent did.
+      final content = MultimodalContent([
+        TextInputContent('look'),
+        const ImageInputContent(
+          source: UrlSource(value: 'https://example.com/i.png'),
+        ),
+      ]);
       expect(
-        () => Validators.validateMessageContent(123),
+        () => Validators.validateUserMessageContent(content),
+        returnsNormally,
+      );
+    });
+
+    test('rejects empty parts list', () {
+      expect(
+        () => Validators.validateUserMessageContent(
+          const MultimodalContent([]),
+        ),
         throwsA(isA<ValidationError>()
-            .having((e) => e.constraint, 'constraint', 'valid-type')),
+            .having((e) => e.field, 'field', 'content')
+            .having((e) => e.constraint, 'constraint', 'non-empty')),
       );
     });
   });
@@ -188,8 +233,10 @@ void main() {
   group('Validators.validateTimeout', () {
     test('accepts valid timeouts', () {
       expect(() => Validators.validateTimeout(null), returnsNormally);
-      expect(() => Validators.validateTimeout(Duration(seconds: 30)), returnsNormally);
-      expect(() => Validators.validateTimeout(Duration(minutes: 5)), returnsNormally);
+      expect(() => Validators.validateTimeout(Duration(seconds: 30)),
+          returnsNormally);
+      expect(() => Validators.validateTimeout(Duration(minutes: 5)),
+          returnsNormally);
     });
 
     test('rejects negative timeouts', () {
@@ -240,7 +287,8 @@ void main() {
         () => Validators.validateJson(null, 'test'),
         throwsA(isA<DecodingError>()
             .having((e) => e.field, 'field', 'test')
-            .having((e) => e.expectedType, 'expectedType', 'Map<String, dynamic>')),
+            .having(
+                (e) => e.expectedType, 'expectedType', 'Map<String, dynamic>')),
       );
     });
 
@@ -249,16 +297,20 @@ void main() {
         () => Validators.validateJson('string', 'test'),
         throwsA(isA<DecodingError>()
             .having((e) => e.field, 'field', 'test')
-            .having((e) => e.expectedType, 'expectedType', 'Map<String, dynamic>')),
+            .having(
+                (e) => e.expectedType, 'expectedType', 'Map<String, dynamic>')),
       );
     });
   });
 
   group('Validators.validateEventType', () {
     test('accepts valid event types', () {
-      expect(() => Validators.validateEventType('RUN_STARTED'), returnsNormally);
-      expect(() => Validators.validateEventType('TEXT_MESSAGE_START'), returnsNormally);
-      expect(() => Validators.validateEventType('TOOL_CALL_END'), returnsNormally);
+      expect(
+          () => Validators.validateEventType('RUN_STARTED'), returnsNormally);
+      expect(() => Validators.validateEventType('TEXT_MESSAGE_START'),
+          returnsNormally);
+      expect(
+          () => Validators.validateEventType('TOOL_CALL_END'), returnsNormally);
     });
 
     test('rejects invalid formats', () {
@@ -283,9 +335,12 @@ void main() {
 
   group('Validators.validateStatusCode', () {
     test('accepts success status codes', () {
-      expect(() => Validators.validateStatusCode(200, '/api/test'), returnsNormally);
-      expect(() => Validators.validateStatusCode(201, '/api/test'), returnsNormally);
-      expect(() => Validators.validateStatusCode(204, '/api/test'), returnsNormally);
+      expect(() => Validators.validateStatusCode(200, '/api/test'),
+          returnsNormally);
+      expect(() => Validators.validateStatusCode(201, '/api/test'),
+          returnsNormally);
+      expect(() => Validators.validateStatusCode(204, '/api/test'),
+          returnsNormally);
     });
 
     test('throws on client errors', () {
@@ -328,8 +383,7 @@ void main() {
     test('rejects events without data field', () {
       expect(
         () => Validators.validateSseEvent({'id': '123'}),
-        throwsA(isA<DecodingError>()
-            .having((e) => e.field, 'field', 'data')),
+        throwsA(isA<DecodingError>().having((e) => e.field, 'field', 'data')),
       );
     });
   });
@@ -344,14 +398,16 @@ void main() {
 
     test('accepts RUN_STARTED after RUN_FINISHED', () {
       expect(
-        () => Validators.validateEventSequence('RUN_STARTED', 'RUN_FINISHED', 'finished'),
+        () => Validators.validateEventSequence(
+            'RUN_STARTED', 'RUN_FINISHED', 'finished'),
         returnsNormally,
       );
     });
 
     test('rejects RUN_STARTED in wrong sequence', () {
       expect(
-        () => Validators.validateEventSequence('RUN_STARTED', 'TEXT_MESSAGE_START', 'running'),
+        () => Validators.validateEventSequence(
+            'RUN_STARTED', 'TEXT_MESSAGE_START', 'running'),
         throwsA(isA<ProtocolViolationError>()
             .having((e) => e.rule, 'rule', 'run-lifecycle')),
       );
@@ -367,7 +423,8 @@ void main() {
 
     test('rejects tool calls outside of run', () {
       expect(
-        () => Validators.validateEventSequence('TOOL_CALL_START', 'RUN_FINISHED', 'idle'),
+        () => Validators.validateEventSequence(
+            'TOOL_CALL_START', 'RUN_FINISHED', 'idle'),
         throwsA(isA<ProtocolViolationError>()
             .having((e) => e.rule, 'rule', 'tool-call-lifecycle')),
       );
@@ -375,7 +432,8 @@ void main() {
 
     test('accepts tool calls within run', () {
       expect(
-        () => Validators.validateEventSequence('TOOL_CALL_START', 'RUN_STARTED', 'running'),
+        () => Validators.validateEventSequence(
+            'TOOL_CALL_START', 'RUN_STARTED', 'running'),
         returnsNormally,
       );
     });
@@ -412,8 +470,8 @@ void main() {
           'TestModel',
           (data) => TestModel(data['id'] as String, data['name'] as String),
         ),
-        throwsA(isA<DecodingError>()
-            .having((e) => e.field, 'field', 'TestModel')),
+        throwsA(
+            isA<DecodingError>().having((e) => e.field, 'field', 'TestModel')),
       );
     });
   });

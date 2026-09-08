@@ -70,6 +70,14 @@ func TestTextMessageChunkEvent(t *testing.T) {
 		assert.Equal(t, messageID, *event.MessageID)
 		assert.Equal(t, role, *event.Role)
 		assert.Equal(t, delta, *event.Delta)
+		assert.Nil(t, event.Name)
+	})
+
+	t.Run("WithChunkName", func(t *testing.T) {
+		event := NewTextMessageChunkEvent(nil, nil, nil).WithChunkName("research-agent")
+
+		assert.NotNil(t, event.Name)
+		assert.Equal(t, "research-agent", *event.Name)
 	})
 
 	t.Run("Validate", func(t *testing.T) {
@@ -88,6 +96,10 @@ func TestTextMessageChunkEvent(t *testing.T) {
 		// Valid - messageID without delta is allowed for chunks
 		event = NewTextMessageChunkEvent(&messageID, nil, nil)
 		assert.NoError(t, event.Validate())
+
+		// Valid - name alone is enough to identify the author of a chunk
+		event = NewTextMessageChunkEvent(nil, nil, nil).WithChunkName("research-agent")
+		assert.NoError(t, event.Validate())
 	})
 
 	t.Run("ToJSON", func(t *testing.T) {
@@ -95,7 +107,7 @@ func TestTextMessageChunkEvent(t *testing.T) {
 		role := "assistant"
 		delta := "Hello world"
 
-		event := NewTextMessageChunkEvent(&messageID, &role, &delta)
+		event := NewTextMessageChunkEvent(&messageID, &role, &delta).WithChunkName("research-agent")
 
 		jsonData, err := event.ToJSON()
 		require.NoError(t, err)
@@ -108,6 +120,28 @@ func TestTextMessageChunkEvent(t *testing.T) {
 		assert.Equal(t, "msg-123", decoded["messageId"])
 		assert.Equal(t, "assistant", decoded["role"])
 		assert.Equal(t, "Hello world", decoded["delta"])
+		assert.Equal(t, "research-agent", decoded["name"])
+
+		// Omitted name stays off the wire
+		event = NewTextMessageChunkEvent(&messageID, &role, &delta)
+		jsonData, err = event.ToJSON()
+		require.NoError(t, err)
+
+		decoded = map[string]interface{}{}
+		require.NoError(t, json.Unmarshal(jsonData, &decoded))
+		_, hasName := decoded["name"]
+		assert.False(t, hasName, "expected \"name\" to be omitted when unset")
+	})
+
+	t.Run("DecodeRoundTrip", func(t *testing.T) {
+		raw := []byte(`{"type":"TEXT_MESSAGE_CHUNK","messageId":"msg-123","role":"assistant","delta":"Hello","name":"research-agent"}`)
+
+		var decoded TextMessageChunkEvent
+		require.NoError(t, json.Unmarshal(raw, &decoded))
+
+		require.NotNil(t, decoded.Name)
+		assert.Equal(t, "research-agent", *decoded.Name)
+		assert.NoError(t, decoded.Validate())
 	})
 }
 

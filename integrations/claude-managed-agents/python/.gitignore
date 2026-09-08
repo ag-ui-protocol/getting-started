@@ -1,0 +1,10 @@
+build/
+dist/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+.env
+examples/.env
+examples/.managed-agents.json

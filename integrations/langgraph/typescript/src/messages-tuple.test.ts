@@ -14,7 +14,7 @@ import { EventType } from "@ag-ui/client";
 function createAgent() {
   const agent = new LangGraphAgent({
     graphId: "test-graph",
-    url: "http://localhost:8000",
+    deploymentUrl: "http://localhost:8000",
   });
 
   // Wire up a mock subscriber and activeRun so dispatchEvent works
@@ -70,7 +70,12 @@ describe("messages-tuple stream mode", () => {
 
       // Now a messages-tuple array should be skipped
       agent.handleSingleEvent([
-        { type: "AIMessageChunk", id: "msg-1", content: "Hello", response_metadata: {} },
+        {
+          type: "AIMessageChunk",
+          id: "msg-1",
+          content: "Hello",
+          response_metadata: {},
+        },
         {},
       ]);
 
@@ -93,7 +98,9 @@ describe("messages-tuple stream mode", () => {
         },
       });
 
-      expect(events.some((e) => e.type === EventType.TEXT_MESSAGE_START)).toBe(true);
+      expect(events.some((e) => e.type === EventType.TEXT_MESSAGE_START)).toBe(
+        true,
+      );
     });
   });
 
@@ -129,12 +136,22 @@ describe("messages-tuple stream mode", () => {
 
       // First chunk starts the message
       agent.handleSingleEvent([
-        { type: "AIMessageChunk", id: "msg-1", content: "Hello", response_metadata: {} },
+        {
+          type: "AIMessageChunk",
+          id: "msg-1",
+          content: "Hello",
+          response_metadata: {},
+        },
         {},
       ]);
       // Second chunk continues
       agent.handleSingleEvent([
-        { type: "AIMessageChunk", id: "msg-1", content: " world", response_metadata: {} },
+        {
+          type: "AIMessageChunk",
+          id: "msg-1",
+          content: " world",
+          response_metadata: {},
+        },
         {},
       ]);
 
@@ -149,7 +166,12 @@ describe("messages-tuple stream mode", () => {
       const { agent, events } = createAgent();
 
       agent.handleSingleEvent([
-        { type: "AIMessageChunk", id: "msg-1", content: "Hello", response_metadata: {} },
+        {
+          type: "AIMessageChunk",
+          id: "msg-1",
+          content: "Hello",
+          response_metadata: {},
+        },
         {},
       ]);
       agent.handleSingleEvent([
@@ -162,7 +184,9 @@ describe("messages-tuple stream mode", () => {
         {},
       ]);
 
-      const endEvents = events.filter((e) => e.type === EventType.TEXT_MESSAGE_END);
+      const endEvents = events.filter(
+        (e) => e.type === EventType.TEXT_MESSAGE_END,
+      );
       expect(endEvents).toHaveLength(1);
       expect(endEvents[0].messageId).toBe("msg-1");
     });
@@ -232,7 +256,9 @@ describe("messages-tuple stream mode", () => {
         {},
       ]);
 
-      const endEvents = events.filter((e) => e.type === EventType.TOOL_CALL_END);
+      const endEvents = events.filter(
+        (e) => e.type === EventType.TOOL_CALL_END,
+      );
       expect(endEvents).toHaveLength(1);
       expect(endEvents[0].toolCallId).toBe("tc-1");
     });
@@ -290,7 +316,12 @@ describe("messages-tuple stream mode", () => {
 
       // Start text
       agent.handleSingleEvent([
-        { type: "AIMessageChunk", id: "msg-1", content: "Let me search", response_metadata: {} },
+        {
+          type: "AIMessageChunk",
+          id: "msg-1",
+          content: "Let me search",
+          response_metadata: {},
+        },
         {},
       ]);
 
@@ -307,7 +338,9 @@ describe("messages-tuple stream mode", () => {
       ]);
 
       const textEnd = events.find((e) => e.type === EventType.TEXT_MESSAGE_END);
-      const toolStart = events.find((e) => e.type === EventType.TOOL_CALL_START);
+      const toolStart = events.find(
+        (e) => e.type === EventType.TOOL_CALL_START,
+      );
       expect(textEnd).toBeDefined();
       expect(toolStart).toBeDefined();
 
@@ -315,6 +348,481 @@ describe("messages-tuple stream mode", () => {
       const textEndIdx = events.indexOf(textEnd);
       const toolStartIdx = events.indexOf(toolStart);
       expect(textEndIdx).toBeLessThan(toolStartIdx);
+    });
+
+    it("reuses the same messageId for text that resumes after a tool call", () => {
+      const { agent, events } = createAgent();
+
+      // First text segment before tool call
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-1",
+          content: "Let me search",
+          response_metadata: {},
+        },
+        {},
+      ]);
+
+      // Tool call starts — ends the text message
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-1",
+          content: "",
+          tool_call_chunks: [{ id: "tc-1", name: "search", args: "" }],
+          response_metadata: {},
+        },
+        {},
+      ]);
+
+      // Tool call finishes
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-1",
+          content: "",
+          response_metadata: { finish_reason: "stop" },
+        },
+        {},
+      ]);
+
+      // Second text segment after tool call — chunk.id is different (new model invocation)
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-2",
+          content: "The result is 42",
+          response_metadata: {},
+        },
+        {},
+      ]);
+
+      const textStarts = events.filter(
+        (e) => e.type === EventType.TEXT_MESSAGE_START,
+      );
+      expect(textStarts.length).toBeGreaterThanOrEqual(1);
+      // All text message start events must share the same messageId
+      const firstId = textStarts[0].messageId;
+      for (const start of textStarts) {
+        expect(start.messageId).toBe(firstId);
+      }
+
+      // The content events after the tool call must also use the same messageId
+      const contentAfterTool = events.filter(
+        (e) =>
+          e.type === EventType.TEXT_MESSAGE_CONTENT &&
+          e.delta === "The result is 42",
+      );
+      expect(contentAfterTool).toHaveLength(1);
+      expect(contentAfterTool[0].messageId).toBe(firstId);
+    });
+  });
+
+  describe("handleMessagesTupleEvent events mode - stable messageId", () => {
+    it("reuses the same messageId for text that resumes after a tool call (events mode)", () => {
+      const { agent, events } = createAgent();
+
+      // First text segment
+      agent.handleSingleEvent({
+        event: "on_chat_model_stream",
+        metadata: { "emit-messages": true, "emit-tool-calls": true },
+        data: {
+          chunk: {
+            id: "msg-abc",
+            content: "Let me search",
+            tool_call_chunks: [],
+            response_metadata: {},
+          },
+        },
+      });
+
+      // Tool call arrives — triggers TEXT_MESSAGE_END + TOOL_CALL_START
+      agent.handleSingleEvent({
+        event: "on_chat_model_stream",
+        metadata: { "emit-messages": true, "emit-tool-calls": true },
+        data: {
+          chunk: {
+            id: "msg-abc",
+            content: "",
+            tool_call_chunks: [{ id: "tc-1", name: "search", args: "" }],
+            response_metadata: {},
+          },
+        },
+      });
+
+      // Tool call ends
+      agent.handleSingleEvent({
+        event: "on_chat_model_end",
+        metadata: { "emit-messages": true, "emit-tool-calls": true },
+        data: {},
+      });
+
+      // Second text segment — different chunk.id from new model invocation
+      agent.handleSingleEvent({
+        event: "on_chat_model_stream",
+        metadata: { "emit-messages": true, "emit-tool-calls": true },
+        data: {
+          chunk: {
+            id: "msg-xyz",
+            content: "The result is 42",
+            tool_call_chunks: [],
+            response_metadata: {},
+          },
+        },
+      });
+
+      const textStarts = events.filter(
+        (e) => e.type === EventType.TEXT_MESSAGE_START,
+      );
+      expect(textStarts.length).toBeGreaterThanOrEqual(1);
+      const firstId = textStarts[0].messageId;
+      for (const start of textStarts) {
+        expect(start.messageId).toBe(firstId);
+      }
+
+      const contentAfterTool = events.filter(
+        (e) =>
+          e.type === EventType.TEXT_MESSAGE_CONTENT &&
+          e.delta === "The result is 42",
+      );
+      expect(contentAfterTool).toHaveLength(1);
+      expect(contentAfterTool[0].messageId).toBe(firstId);
+    });
+
+    it("mints a fresh messageId when the graph transitions to a different node (events mode)", () => {
+      // Multi-node scenario covering the events-mode read site
+      // (on_chat_model_stream routed through handleSingleEvent's switch case,
+      // not through handleMessagesTupleEvent). Pairs with the messages-tuple
+      // multi-node test below.
+      const { agent, events } = createAgent();
+      (agent as any).activeRun.nodeName = "supervisor";
+
+      // 1. Supervisor emits its routing message.
+      agent.handleSingleEvent({
+        event: "on_chat_model_stream",
+        metadata: { "emit-messages": true, "emit-tool-calls": true },
+        data: {
+          chunk: {
+            id: "msg-sup",
+            content: "Routing to billing",
+            tool_call_chunks: [],
+            response_metadata: {},
+          },
+        },
+      });
+
+      // 2. Supervisor's LLM call ends, clearing messagesInProcess.
+      agent.handleSingleEvent({
+        event: "on_chat_model_end",
+        metadata: { "emit-messages": true, "emit-tool-calls": true },
+        data: {},
+      });
+
+      // 3. Graph transitions to billing. handleNodeChange clears the pinned
+      //    text message id, so the next text chunk mints fresh.
+      agent.handleNodeChange("billing");
+
+      // 4. Billing emits its response from a new LLM invocation.
+      agent.handleSingleEvent({
+        event: "on_chat_model_stream",
+        metadata: { "emit-messages": true, "emit-tool-calls": true },
+        data: {
+          chunk: {
+            id: "msg-bil",
+            content: "Here's your invoice",
+            tool_call_chunks: [],
+            response_metadata: {},
+          },
+        },
+      });
+
+      const textStarts = events.filter(
+        (e) => e.type === EventType.TEXT_MESSAGE_START,
+      );
+      expect(textStarts).toHaveLength(2);
+      expect(textStarts[0].messageId).toBe("msg-sup");
+      expect(textStarts[1].messageId).toBe("msg-bil");
+      expect(textStarts[0].messageId).not.toBe(textStarts[1].messageId);
+    });
+
+    it("reuses the same messageId across multiple text/tool cycles in one run", () => {
+      // Three text segments separated by two tool calls all share one
+      // messageId. Pins the invariant against any future "reset on tool end".
+      const { agent, events } = createAgent();
+
+      // Cycle 1: text → tool → finish
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-a",
+          content: "First",
+          response_metadata: {},
+        },
+        {},
+      ]);
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-a",
+          content: "",
+          tool_call_chunks: [{ id: "tc-1", name: "search", args: "" }],
+          response_metadata: {},
+        },
+        {},
+      ]);
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-a",
+          content: "",
+          response_metadata: { finish_reason: "stop" },
+        },
+        {},
+      ]);
+
+      // Cycle 2: text (new chunk id) → tool → finish
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-b",
+          content: "Second",
+          response_metadata: {},
+        },
+        {},
+      ]);
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-b",
+          content: "",
+          tool_call_chunks: [{ id: "tc-2", name: "search", args: "" }],
+          response_metadata: {},
+        },
+        {},
+      ]);
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-b",
+          content: "",
+          response_metadata: { finish_reason: "stop" },
+        },
+        {},
+      ]);
+
+      // Cycle 3: final text segment with a third chunk id
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-c",
+          content: "Third",
+          response_metadata: {},
+        },
+        {},
+      ]);
+
+      const textStarts = events.filter(
+        (e) => e.type === EventType.TEXT_MESSAGE_START,
+      );
+      expect(textStarts.length).toBeGreaterThanOrEqual(3);
+      const firstId = textStarts[0].messageId;
+      for (const start of textStarts) {
+        expect(start.messageId).toBe(firstId);
+      }
+
+      const deltasToId = new Map<string, string>();
+      for (const e of events) {
+        if (e.type === EventType.TEXT_MESSAGE_CONTENT) {
+          deltasToId.set(e.delta, e.messageId);
+        }
+      }
+      expect(deltasToId.get("First")).toBe(firstId);
+      expect(deltasToId.get("Second")).toBe(firstId);
+      expect(deltasToId.get("Third")).toBe(firstId);
+    });
+
+    it("does not reuse a prior run's messageId on a new run", () => {
+      // Mimic the run-boundary reset that runAgentStream performs at the
+      // start of each run by replacing activeRun wholesale.
+      const { agent, events } = createAgent();
+
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "run1-chunk",
+          content: "Hello",
+          response_metadata: {},
+        },
+        {},
+      ]);
+      const run1Starts = events.filter(
+        (e) => e.type === EventType.TEXT_MESSAGE_START,
+      );
+      expect(run1Starts).toHaveLength(1);
+      const run1Id = run1Starts[0].messageId;
+
+      // Run boundary: runAgentStream replaces activeRun with a fresh object
+      (agent as any).activeRun = {
+        id: "run-2",
+        threadId: "thread-1",
+        hasFunctionStreaming: false,
+      };
+      (agent as any).messagesInProcess = {};
+      events.length = 0;
+
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "run2-chunk",
+          content: "World",
+          response_metadata: {},
+        },
+        {},
+      ]);
+
+      const run2Starts = events.filter(
+        (e) => e.type === EventType.TEXT_MESSAGE_START,
+      );
+      expect(run2Starts).toHaveLength(1);
+      expect(run2Starts[0].messageId).not.toBe(run1Id);
+      expect(run2Starts[0].messageId).toBe("run2-chunk");
+    });
+
+    it("mints a fresh messageId when the graph transitions to a different node", () => {
+      // Different nodes within one run produce separate message bubbles.
+      // Mimics a supervisor → specialist agent flow. Drives the test through
+      // handleNodeChange (the same code path the outer event loop uses to
+      // update activeRun.nodeName) so the test covers the loop+handler
+      // interaction, not just the handler in isolation.
+      const { agent, events } = createAgent();
+      (agent as any).activeRun.nodeName = "supervisor";
+
+      // 1. Supervisor emits its routing message.
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-sup",
+          content: "Routing to billing",
+          response_metadata: {},
+        },
+        {},
+      ]);
+
+      // 2. Supervisor's stream finishes. Clears messagesInProcess so the next
+      //    text chunk enters the "new stream" branch.
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-sup",
+          content: "",
+          response_metadata: { finish_reason: "stop" },
+        },
+        {},
+      ]);
+
+      // 3. Graph transitions to the billing node. This is what the outer
+      //    loop does when it sees a different langgraph_node in event
+      //    metadata; we drive it directly to mimic that side effect.
+      agent.handleNodeChange("billing");
+
+      // 4. Billing emits its response. Different node, so fresh id.
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "msg-bil",
+          content: "Here's your invoice",
+          response_metadata: {},
+        },
+        {},
+      ]);
+
+      const textStarts = events.filter(
+        (e) => e.type === EventType.TEXT_MESSAGE_START,
+      );
+      expect(textStarts).toHaveLength(2);
+      expect(textStarts[0].messageId).toBe("msg-sup");
+      expect(textStarts[1].messageId).toBe("msg-bil");
+      expect(textStarts[0].messageId).not.toBe(textStarts[1].messageId);
+    });
+
+    it("reuses the same messageId across LLM invocations within a single node", () => {
+      // The canonical bug case from #1317: text → tool → text within one
+      // node, where the second text comes from a fresh LLM invocation with
+      // a different chunk.id. Confirms node-boundary scoping doesn't break
+      // the original fix.
+      const { agent, events } = createAgent();
+      (agent as any).activeRun.nodeName = "agent";
+
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "chunk-1",
+          content: "Let me search",
+          response_metadata: {},
+        },
+        {},
+      ]);
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "chunk-1",
+          content: "",
+          tool_call_chunks: [{ id: "tc-1", name: "search", args: "" }],
+          response_metadata: {},
+        },
+        {},
+      ]);
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "chunk-1",
+          content: "",
+          response_metadata: { finish_reason: "stop" },
+        },
+        {},
+      ]);
+      // No node change. Fresh LLM invocation, different chunk.id.
+      agent.handleSingleEvent([
+        {
+          type: "AIMessageChunk",
+          id: "chunk-2",
+          content: "The answer is 42",
+          response_metadata: {},
+        },
+        {},
+      ]);
+
+      const textStarts = events.filter(
+        (e) => e.type === EventType.TEXT_MESSAGE_START,
+      );
+      expect(textStarts.length).toBeGreaterThanOrEqual(2);
+      const firstId = textStarts[0].messageId;
+      for (const start of textStarts) {
+        expect(start.messageId).toBe(firstId);
+      }
+      expect(firstId).toBe("chunk-1");
+    });
+
+    it("ManuallyEmitMessage uses its own messageId and does not mutate currentTextMessageId", () => {
+      const { agent, events } = createAgent();
+      (agent as any).activeRun.currentTextMessageId = "stable-stream-id";
+
+      agent.handleSingleEvent({
+        event: "on_custom_event",
+        name: "manually_emit_message",
+        metadata: { "emit-messages": true, "emit-tool-calls": true },
+        data: { message_id: "user-supplied-id", message: "Hello" },
+      });
+
+      const textStarts = events.filter(
+        (e) => e.type === EventType.TEXT_MESSAGE_START,
+      );
+      expect(textStarts).toHaveLength(1);
+      expect(textStarts[0].messageId).toBe("user-supplied-id");
+      expect((agent as any).activeRun.currentTextMessageId).toBe(
+        "stable-stream-id",
+      );
     });
   });
 });

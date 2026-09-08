@@ -8,7 +8,7 @@ import {
   Assistant,
   Message as LangGraphMessage,
   Config,
-  Interrupt,
+  Interrupt as LangGraphInterrupt,
   Thread,
 } from "@langchain/langgraph-sdk";
 import { randomUUID } from "@ag-ui/client";
@@ -29,14 +29,22 @@ import {
 } from "./types";
 import {
   AbstractAgent,
+  AgentCapabilities,
   AgentConfig,
+  AgentSubscriber,
   CustomEvent,
   EventType,
+  Interrupt as AGUIInterrupt,
   MessagesSnapshotEvent,
   RawEvent,
+  ResumeEntry,
   RunAgentInput,
   RunErrorEvent,
   RunFinishedEvent,
+  TokenUsage,
+  aggregateTokenUsage,
+  tokenUsageFromLangChainMetadata,
+  RunFinishedInterruptOutcome,
   RunStartedEvent,
   StateDeltaEvent,
   StateSnapshotEvent,
@@ -56,7 +64,15 @@ import {
   ReasoningEndEvent,
   ReasoningEncryptedValueEvent,
 } from "@ag-ui/client";
-import { RunsStreamPayload } from "@langchain/langgraph-sdk/dist/types";
+import {
+  langGraphInterruptsToAGUI,
+  buildLgCommandResumeFromAgui,
+  reconcileLegacyResumeInterrupts,
+} from "./interrupts";
+import type {
+  Durability,
+  RunsStreamPayload,
+} from "@langchain/langgraph-sdk/dist/types";
 import {
   aguiMessagesToLangChain,
   DEFAULT_SCHEMA_KEYS,
@@ -68,7 +84,14 @@ import {
   resolveEncryptedReasoningContent,
 } from "@/utils";
 import { ToolMessage } from "@langchain/core/messages";
-import { ToolMessageFieldsWithToolCallId } from "@langchain/core/dist/messages/tool";
+
+type ToolMessageFieldsWithToolCallId = {
+  type?: string;
+  tool_call_id: string;
+  name?: string;
+  content: unknown;
+  id?: string;
+};
 
 export type ProcessedEvents =
   | TextMessageStartEvent
@@ -102,6 +125,9 @@ type RunAgentExtendedInput<
   forwardedProps?: Omit<RunsStreamPayload<TStreamMode, TSubgraphs>, "input"> & {
     nodeName?: string;
     threadMetadata?: Record<string, any>;
+    // A2UI tool-injection flag set by the A2UI middleware. Surfaced into
+    // ag-ui state so graphs/tools can read it directly.
+    injectA2UITool?: boolean | string;
   };
 };
 
@@ -139,9 +165,39 @@ export interface LangGraphAgentConfig extends AgentConfig {
    * variable that could be mutated by a different clone or request.
    */
   headerFactory?: () => Record<string, string>;
+  /** Emit legacy CUSTOM(name="on_interrupt") events alongside the terminating
+   *  RUN_FINISHED. Default true during the migration window. (The RUN_FINISHED
+   *  carries outcome={type:"interrupt"} only when `emitInterruptOutcome` is
+   *  enabled — or when this flag is false, which forces the outcome on to avoid
+   *  surfacing the interrupt via neither channel.) */
+  enableLegacyOnInterruptEvent?: boolean;
+  /**
+   * Terminate interrupted runs with the AG-UI structured outcome
+   * `RUN_FINISHED.outcome={type:"interrupt", interrupts:[...]}`.
+   *
+   * Default **false**. Opt-in: released clients that drive interrupts through
+   * the legacy `forwardedProps.command.resume` channel (e.g. CopilotKit's
+   * `useLangGraphInterrupt`, as of v1.60.x) stop sending any resume directive
+   * once they observe the structured outcome, which silently strands the run.
+   * Until those clients adopt `RunAgentInput.resume[]`, emitting the outcome by
+   * default would break them — so it must be explicitly enabled by clients that
+   * understand the canonical resume protocol. When false, interrupted runs end
+   * with a plain `RUN_FINISHED` (plus the legacy on_interrupt event), exactly as
+   * before structured interrupts existed.
+   */
+  emitInterruptOutcome?: boolean;
+  /**
+   * Emit the underlying LangGraph events on the AG-UI event stream.
+   *
+   * When disabled, RAW events are suppressed and `rawEvent` is removed from
+   * typed AG-UI events. AG-UI event metadata is preserved. Defaults to true.
+   */
+  emitRawEvents?: boolean;
 }
 
 const ROOT_SUBGRAPH_NAME = "root";
+const ASYNC_BOUNDARY_CHECKPOINT_ATTEMPTS = 3;
+const ASYNC_BOUNDARY_CHECKPOINT_RETRY_DELAY_MS = 25;
 
 export class LangGraphAgent extends AbstractAgent {
   client: LangGraphClient;
@@ -155,6 +211,10 @@ export class LangGraphAgent extends AbstractAgent {
   messagesInProcess: MessagesInProgressRecord;
   emittedToolCallStartIds: Set<string> = new Set();
   reasoningProcess: null | ReasoningInProgress;
+  // Canonical reasoning id (e.g. OpenAI `rs_…`) stashed from a text-less id
+  // carrier chunk, consumed when the first text delta opens the reasoning
+  // message. See handleReasoningEvent.
+  private pendingReasoningId?: string;
   activeRun?: RunMetadata;
   // Subgraph node names discovered dynamically from langgraph_checkpoint_ns
   private subgraphs: Set<string> = new Set();
@@ -172,10 +232,17 @@ export class LangGraphAgent extends AbstractAgent {
   subscriber: Subscriber<ProcessedEvents>;
   constantSchemaKeys: string[] = DEFAULT_SCHEMA_KEYS;
   config: LangGraphAgentConfig;
+  enableLegacyOnInterruptEvent: boolean;
+  emitInterruptOutcome: boolean;
+  emitRawEvents: boolean;
 
   constructor(config: LangGraphAgentConfig) {
     super(config);
     this.config = config;
+    this.enableLegacyOnInterruptEvent =
+      config.enableLegacyOnInterruptEvent ?? true;
+    this.emitInterruptOutcome = config.emitInterruptOutcome ?? false;
+    this.emitRawEvents = config.emitRawEvents ?? true;
     this.messagesInProcess = {};
     this.agentName = config.agentName;
     this.graphId = config.graphId;
@@ -230,6 +297,9 @@ export class LangGraphAgent extends AbstractAgent {
       constantSchemaKeys: [...this.constantSchemaKeys],
       headers: { ...this.headers },
       client: this.client,
+      enableLegacyOnInterruptEvent: this.enableLegacyOnInterruptEvent,
+      emitInterruptOutcome: this.emitInterruptOutcome,
+      emitRawEvents: this.emitRawEvents,
 
       assistant: this.assistant,
       activeRun: this.activeRun ? structuredClone(this.activeRun) : undefined,
@@ -266,8 +336,89 @@ export class LangGraphAgent extends AbstractAgent {
   }
 
   dispatchEvent(event: ProcessedEvents) {
+    if (!this.emitRawEvents) {
+      if (event.type === EventType.RAW) {
+        return false;
+      }
+
+      const eventWithoutRawEvent = { ...event };
+      delete eventWithoutRawEvent.rawEvent;
+      this.subscriber.next(eventWithoutRawEvent);
+      return true;
+    }
+
     this.subscriber.next(event);
     return true;
+  }
+
+  private dispatchInterruptFinish(args: {
+    threadId: string;
+    runId: string;
+    lgInterrupts: LangGraphInterrupt[];
+  }) {
+    const { threadId, runId, lgInterrupts } = args;
+    const aguiInterrupts: AGUIInterrupt[] = this.interruptsToAGUI(lgInterrupts);
+
+    if (this.enableLegacyOnInterruptEvent) {
+      for (const lg of lgInterrupts) {
+        this.dispatchEvent({
+          type: EventType.CUSTOM,
+          name: LangGraphEventTypes.OnInterrupt,
+          value:
+            typeof lg.value === "string" ? lg.value : JSON.stringify(lg.value),
+          rawEvent: lg,
+        });
+      }
+    }
+
+    // Emit the structured outcome when opted in, OR whenever the legacy
+    // on_interrupt event is disabled — otherwise the interrupt would be
+    // surfaced by neither channel and silently swallowed. By default
+    // (legacy on, emitInterruptOutcome off) this is a plain RUN_FINISHED:
+    // released clients that resume via forwardedProps.command.resume stop
+    // sending a resume directive when they see the structured outcome, so it
+    // stays opt-in until they adopt RunAgentInput.resume[]. See
+    // LangGraphAgentConfig.emitInterruptOutcome.
+    const includeOutcome =
+      this.emitInterruptOutcome || !this.enableLegacyOnInterruptEvent;
+    const usage = this.collectRunUsage();
+    this.dispatchEvent({
+      type: EventType.RUN_FINISHED,
+      threadId,
+      runId,
+      ...(includeOutcome
+        ? {
+            outcome: {
+              type: "interrupt",
+              interrupts: aguiInterrupts,
+            } satisfies RunFinishedInterruptOutcome,
+          }
+        : {}),
+      ...(usage ? { usage } : {}),
+    });
+  }
+
+  /**
+   * Aggregate accumulated per-call usage for the terminal event. Returns
+   * `undefined` (omitted field) when no provider usage was reported, so
+   * consumers can treat missing usage as "not measured" rather than zero.
+   */
+  protected collectRunUsage(): TokenUsage[] | undefined {
+    const aggregated = aggregateTokenUsage(this.activeRun?.usage ?? []);
+    return aggregated.length > 0 ? aggregated : undefined;
+  }
+
+  protected async onInitialize(
+    input: RunAgentInput,
+    subscribers: AgentSubscriber[],
+  ) {
+    // Back-compat: when emitInterruptOutcome is enabled, an interrupted run sets
+    // AbstractAgent.pendingInterrupts. A client still resuming via the legacy
+    // forwardedProps.command.resume channel never populates RunAgentInput.resume[],
+    // so the base lifecycle would reject the resume run. Drop the tracked
+    // interrupts for that case — runAgentStream resolves the legacy resume itself.
+    reconcileLegacyResumeInterrupts(this, input);
+    return super.onInitialize(input, subscribers);
   }
 
   run(input: RunAgentInput) {
@@ -291,7 +442,9 @@ export class LangGraphAgent extends AbstractAgent {
       threadId: input.threadId,
       hasFunctionStreaming: false,
       modelMadeToolCall: false,
+      usage: [],
     };
+    this.pendingReasoningId = undefined;
     // Reset per-run flags
     this.cancelRequested = false;
     this.cancelSent = false;
@@ -325,6 +478,78 @@ export class LangGraphAgent extends AbstractAgent {
       input,
       Array.isArray(streamMode) ? streamMode : [streamMode],
     );
+  }
+
+  private shapePayloadConfig(payloadConfig: LangGraphConfig | undefined) {
+    const contextSchemaKeys = new Set(
+      this.activeRun!.schemaKeys?.context ?? [],
+    );
+    const configurable = payloadConfig?.configurable ?? {};
+    const contextFromConfigurable: Record<string, unknown> = {};
+    const remainingConfigurable: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(configurable)) {
+      if (contextSchemaKeys.has(key)) {
+        contextFromConfigurable[key] = value;
+      } else {
+        remainingConfigurable[key] = value;
+      }
+    }
+
+    const finalConfig = payloadConfig
+      ? {
+          ...payloadConfig,
+          configurable:
+            Object.keys(remainingConfigurable).length > 0
+              ? remainingConfigurable
+              : undefined,
+        }
+      : undefined;
+    const hasContext = Object.keys(contextFromConfigurable).length > 0;
+    const hasConfigurable =
+      finalConfig?.configurable != null &&
+      Object.keys(finalConfig.configurable).length > 0;
+
+    if (hasContext && hasConfigurable) {
+      console.warn(
+        `[@ag-ui/langgraph] Dropping configurable keys not in context_schema: [${Object.keys(remainingConfigurable).join(", ")}]. Use context instead.`,
+      );
+    }
+
+    const configForPayloadBase = (() => {
+      if (!finalConfig) return undefined;
+      if (hasConfigurable && !hasContext) return finalConfig;
+      const { configurable: _stripped, ...configSansConfigurable } =
+        finalConfig;
+      return Object.keys(configSansConfigurable).length > 0
+        ? configSansConfigurable
+        : undefined;
+    })();
+
+    const forwardedHeaders = Object.fromEntries(
+      Object.entries(this.headers ?? {}).filter(([key]) =>
+        key.toLowerCase().startsWith("x-"),
+      ),
+    );
+    const configForPayload =
+      Object.keys(forwardedHeaders).length > 0
+        ? {
+            ...(configForPayloadBase ?? {}),
+            configurable: {
+              ...((
+                configForPayloadBase as {
+                  configurable?: Record<string, unknown>;
+                }
+              )?.configurable ?? {}),
+              copilotkit_forwarded_headers: forwardedHeaders,
+            },
+          }
+        : configForPayloadBase;
+
+    return {
+      config: configForPayload,
+      context: hasContext ? contextFromConfigurable : undefined,
+    };
   }
 
   async prepareRegenerateStream(
@@ -368,6 +593,9 @@ export class LangGraphAgent extends AbstractAgent {
       });
     }
 
+    const { config: configForPayload, context: payloadContext } =
+      this.shapePayloadConfig(payloadConfig);
+
     const payload = {
       ...(input.forwardedProps ?? {}),
       input: this.langGraphDefaultMergeState(
@@ -378,7 +606,8 @@ export class LangGraphAgent extends AbstractAgent {
       // @ts-ignore
       checkpointId: fork.checkpoint.checkpoint_id!,
       streamMode,
-      config: payloadConfig,
+      config: configForPayload,
+      ...(payloadContext ? { context: payloadContext } : {}),
     };
     return {
       streamResponse: this.client.runs.stream(
@@ -409,6 +638,22 @@ export class LangGraphAgent extends AbstractAgent {
 
     const nodeNameInput = forwardedProps?.nodeName;
     const threadId = inputThreadId ?? randomUUID();
+
+    const aguiResume: ResumeEntry[] | undefined =
+      input.resume && input.resume.length ? input.resume : undefined;
+    const legacyResume = forwardedProps?.command?.resume;
+
+    if (aguiResume && legacyResume !== undefined) {
+      console.warn(
+        "[@ag-ui/langgraph] both input.resume and forwardedProps.command.resume were provided; input.resume wins.",
+      );
+    } else if (!aguiResume && legacyResume !== undefined) {
+      console.warn(
+        "[@ag-ui/langgraph] forwardedProps.command.resume is deprecated; send RunAgentInput.resume[] instead.",
+      );
+    }
+
+    const hasResume = aguiResume !== undefined || legacyResume !== undefined;
 
     if (!this.assistant) {
       this.assistant = await this.getAssistant();
@@ -452,33 +697,76 @@ export class LangGraphAgent extends AbstractAgent {
       (m) => m.role !== "system",
     ).length;
 
-    if (stateNonSystemCount > inputNonSystemCount) {
-      let lastUserMessage: LangGraphMessage | null = null;
-      // Find the first user message by working backwards from the last message
-      for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === "user") {
-          lastUserMessage = aguiMessagesToLangChain([messages[i]])[0];
-          break;
+    // Skip regeneration detection when a resume is set — a resume from
+    // interrupt is explicitly NOT a regeneration. On the second interrupt-resume
+    // cycle the LangGraph thread state has accumulated tool/AI messages from the
+    // first interrupt while the frontend's input.messages hasn't, which would
+    // otherwise trigger the regeneration path and ignore the resume.
+    if (!hasResume && stateNonSystemCount > inputNonSystemCount) {
+      // A higher checkpoint count than the frontend sent does NOT always mean a
+      // regeneration. If an SSE stream dropped before MESSAGES_SNAPSHOT, the
+      // client never learned the persisted message IDs and resends the new user
+      // turn with a freshly generated UUID, making the checkpoint legitimately
+      // longer than the input even though this is a continuation. Routing that
+      // into regeneration calls getCheckpointByMessage with an ID that was never
+      // persisted, which throws "Message not found" and breaks the thread on
+      // every subsequent turn (#1278).
+      //
+      // Only treat the count mismatch as a regeneration when the incoming IDs are
+      // NOT already a subset of the checkpoint (a genuine edit) AND the last user
+      // message's ID actually exists in the checkpoint. Otherwise fall through to
+      // a normal continuation stream so the end-of-run MESSAGES_SNAPSHOT re-syncs
+      // the client. This continuation/regeneration decision mirrors the Python
+      // guard in prepare_stream. The outer count pre-filter differs only in which
+      // inputs enter this block (this side excludes system messages from both
+      // counts, Python only from the incoming side); both reach the same
+      // continuation-vs-regenerate decision for the recovery case.
+      const checkpointIds = new Set(
+        (agentStateMessages as LangGraphPlatformMessage[])
+          .map((m) => m.id)
+          .filter((id): id is string => Boolean(id)),
+      );
+      // Tool results are excluded from the comparison: connectors (e.g.
+      // CopilotKit) reassign tool-message IDs that won't match the checkpoint's
+      // placeholders. Human/AI IDs are stable and sufficient to distinguish a
+      // continuation from a genuine regeneration.
+      const incomingNonToolIds = messages
+        .filter((m) => m.role !== "tool" && Boolean(m.id))
+        .map((m) => m.id as string);
+      const isContinuation =
+        incomingNonToolIds.length > 0 &&
+        incomingNonToolIds.every((id) => checkpointIds.has(id));
+
+      if (!isContinuation) {
+        let lastUserMessage: LangGraphMessage | null = null;
+        let lastUserMessageId: string | undefined;
+        // Find the last user message by working backwards from the end.
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === "user") {
+            lastUserMessageId = messages[i].id;
+            lastUserMessage = aguiMessagesToLangChain([messages[i]])[0];
+            break;
+          }
+        }
+
+        if (
+          lastUserMessage &&
+          lastUserMessageId &&
+          checkpointIds.has(lastUserMessageId)
+        ) {
+          return this.prepareRegenerateStream(
+            { ...input, messageCheckpoint: lastUserMessage },
+            streamMode,
+          );
         }
       }
-
-      if (!lastUserMessage) {
-        return this.subscriber.error(
-          "No user message found in messages to regenerate",
-        );
-      }
-
-      return this.prepareRegenerateStream(
-        { ...input, messageCheckpoint: lastUserMessage },
-        streamMode,
-      );
     }
     this.activeRun!.graphInfo = await this.client.assistants.getGraph(
       this.assistant.assistant_id,
     );
 
     const mode =
-      !forwardedProps?.command?.resume &&
+      !hasResume &&
       threadId &&
       this.activeRun!.nodeName != "__end__" &&
       this.activeRun!.nodeName
@@ -513,126 +801,51 @@ export class LangGraphAgent extends AbstractAgent {
         schemaKeys: this.activeRun!.schemaKeys,
       });
     }
-    // @ts-ignore
-    const { command, ...restProps } = forwardedProps;
-    if (command?.resume && typeof command.resume === "string") {
+    // forwardedProps is optional on the input; the SSE-drop recovery now reaches
+    // this continuation path (instead of returning early via regenerate), so guard
+    // against an undefined value here rather than throwing on destructure.
+    const { command, ...restProps } = forwardedProps ?? {};
+
+    // Collect interrupts from ALL tasks, not just tasks[0] (fixes #1409).
+    // The SDK doesn't export a Task type, so we use `any` here.
+    const interrupts = (agentState.tasks ?? []).flatMap(
+      (t: any) => t.interrupts ?? [],
+    ) as LangGraphInterrupt[];
+
+    let effectiveCommand = command;
+
+    if (aguiResume) {
+      effectiveCommand = {
+        ...(command ?? {}),
+        resume: this.buildCommandResumeFromAgui(aguiResume, {
+          openInterrupts: this.interruptsToAGUI(interrupts),
+        }),
+      };
+    } else if (
+      effectiveCommand?.resume &&
+      typeof effectiveCommand.resume === "string"
+    ) {
       try {
-        command.resume = JSON.parse(command.resume);
+        effectiveCommand.resume = JSON.parse(effectiveCommand.resume);
       } catch {
         // Keep as string if not valid JSON
       }
     }
 
-    // Build context from configurable keys that match the graph's context_schema.
-    // RunAgentInput.context is a separate ag-ui concept (Array<{description, value}>)
-    // that already flows into the graph's input state via langGraphDefaultMergeState.
-    // It does NOT go into the payload-level context field.
-    const contextSchemaKeys = new Set(
-      this.activeRun!.schemaKeys?.context ?? [],
-    );
-    const configurable = payloadConfig?.configurable ?? {};
-
-    // Partition configurable: keys declared in context_schema go to context,
-    // the rest stay in configurable (for backward compat with older servers).
-    const contextFromConfigurable: Record<string, unknown> = {};
-    const remainingConfigurable: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(configurable)) {
-      if (contextSchemaKeys.has(key)) {
-        contextFromConfigurable[key] = value;
-      } else {
-        remainingConfigurable[key] = value;
-      }
-    }
-
-    // Build payload-level context ONLY from configurable keys matching context_schema.
-    // Do NOT spread RunAgentInput.context here — it is Array<{description, value}>,
-    // not Record<string, unknown>, and belongs in the graph's input state, not the
-    // payload-level context field.
-    const mergedContext = { ...contextFromConfigurable };
-
-    // Build final config: if remaining configurable is empty, omit it
-    const finalConfig = payloadConfig
-      ? {
-          ...payloadConfig,
-          configurable:
-            Object.keys(remainingConfigurable).length > 0
-              ? remainingConfigurable
-              : undefined,
-        }
-      : undefined;
-
-    // If both context and configurable would be present, context wins
-    // (matches langgraph-api >= 0.7.x expectation).
-    // If context is empty, omit it (backward compat with older servers).
-    const hasContext = Object.keys(mergedContext).length > 0;
-    const hasConfigurable =
-      finalConfig?.configurable != null &&
-      Object.keys(finalConfig.configurable).length > 0;
-
-    // Warn if non-schema configurable keys are being dropped because context wins
-    if (hasContext && hasConfigurable) {
-      const droppedKeys = Object.keys(remainingConfigurable);
-      if (droppedKeys.length > 0) {
-        console.warn(
-          `[@ag-ui/langgraph] Dropping configurable keys not in context_schema: [${droppedKeys.join(", ")}]. Use context instead.`,
-        );
-      }
-    }
-
-    // Strip configurable cleanly using destructuring to avoid leaving an
-    // explicit `configurable: undefined` key in the serialized payload.
-    const configForPayloadBase = (() => {
-      if (!finalConfig) return undefined;
-      if (hasConfigurable && !hasContext) return finalConfig; // old-style: configurable only
-      const { configurable: _stripped, ...configSansConfigurable } =
-        finalConfig;
-      return Object.keys(configSansConfigurable).length > 0
-        ? configSansConfigurable
-        : undefined;
-    })();
-
-    // Forward x-* request headers into payload.config.configurable so the
-    // Python middleware can extract them via _extract_forwarded_headers_from_config.
-    // This is infrastructure metadata (correlation IDs, x-aimock-context, etc.),
-    // NOT graph context, so it must ride in configurable regardless of whether
-    // context_schema wins. Only x-* headers are forwarded; auth/content-type
-    // headers stay on the HTTP wire via the onRequest hook.
-    const forwardedHeaders = Object.fromEntries(
-      Object.entries(this.headers ?? {}).filter(([k]) =>
-        k.toLowerCase().startsWith("x-"),
-      ),
-    );
-    const configForPayload =
-      Object.keys(forwardedHeaders).length > 0
-        ? {
-            ...(configForPayloadBase ?? {}),
-            configurable: {
-              ...((
-                configForPayloadBase as {
-                  configurable?: Record<string, unknown>;
-                }
-              )?.configurable ?? {}),
-              copilotkit_forwarded_headers: forwardedHeaders,
-            },
-          }
-        : configForPayloadBase;
+    const { config: configForPayload, context: payloadContext } =
+      this.shapePayloadConfig(payloadConfig);
 
     const payload: Record<string, unknown> = {
       ...restProps,
-      command,
+      command: effectiveCommand,
       streamMode,
       input: payloadInput,
       config: configForPayload,
-      ...(hasContext ? { context: mergedContext } : {}),
+      ...(payloadContext ? { context: payloadContext } : {}),
     };
 
     // If there are still outstanding unresolved interrupts, we must force resolution of them before moving forward
-    // Collect interrupts from ALL tasks, not just tasks[0] (fixes #1409).
-    // The SDK doesn't export a Task type, so we use `any` here.
-    const interrupts = (agentState.tasks ?? []).flatMap(
-      (t: any) => t.interrupts ?? [],
-    ) as Interrupt[];
-    if (interrupts?.length && !forwardedProps?.command?.resume) {
+    if (interrupts?.length && !hasResume) {
       this.dispatchEvent({
         type: EventType.RUN_STARTED,
         threadId,
@@ -640,23 +853,12 @@ export class LangGraphAgent extends AbstractAgent {
       });
       this.handleNodeChange(nodeNameInput);
 
-      interrupts.forEach((interrupt) => {
-        this.dispatchEvent({
-          type: EventType.CUSTOM,
-          name: LangGraphEventTypes.OnInterrupt,
-          value:
-            typeof interrupt.value === "string"
-              ? interrupt.value
-              : JSON.stringify(interrupt.value),
-          rawEvent: interrupt,
-        });
-      });
-
-      this.dispatchEvent({
-        type: EventType.RUN_FINISHED,
+      this.dispatchInterruptFinish({
         threadId,
         runId: input.runId,
+        lgInterrupts: interrupts,
       });
+
       return this.subscriber.complete();
     }
 
@@ -693,6 +895,10 @@ export class LangGraphAgent extends AbstractAgent {
 
     this.activeRun!.prevNodeName = null;
     let latestStateValues = {} as ThreadState<State>["values"];
+    // prepareStream's state is the ordered root boundary before any streamed
+    // chunk, including a first subgraph event that arrives before values mode.
+    let latestRootStateValues = state.values;
+    let hasOrderedRootStateValues = true;
     let updatedState = state;
 
     try {
@@ -784,6 +990,8 @@ export class LangGraphAgent extends AbstractAgent {
             ...latestStateValues,
             ...chunk.data,
           };
+          latestRootStateValues = chunk.data;
+          hasOrderedRootStateValues = true;
           continue;
         } else if (
           subgraphsStreamEnabled &&
@@ -797,9 +1005,24 @@ export class LangGraphAgent extends AbstractAgent {
         }
 
         const chunkData = chunk.data;
-        const metadata = chunkData.metadata ?? {};
+        // Once events-mode streaming is active, messages-tuple is a legacy
+        // fallback only. Skip it before the shared state-snapshot logic so an
+        // ignored late tuple cannot become a snapshot timing pulse.
+        if (isMessagesTupleEvent && this.eventsStreamActive) {
+          continue;
+        }
+        // messages-tuple chunks arrive as [AIMessageChunk, metadata] arrays;
+        // events-mode chunks are objects with metadata/event properties. Read
+        // metadata from the right slot so langgraph_node is extracted in both
+        // cases (otherwise messages-tuple-only flows never call
+        // handleNodeChange and node-scoped behavior degrades to no-op).
+        const metadata = Array.isArray(chunkData)
+          ? (chunkData[1] ?? {})
+          : (chunkData.metadata ?? {});
         const currentNodeName = metadata.langgraph_node;
-        const eventType = chunkData.event;
+        const eventType = Array.isArray(chunkData)
+          ? undefined
+          : chunkData.event;
 
         // Subgraph detection via langgraph_checkpoint_ns
         // ns format: "" | "node:uuid" | "node:uuid|inner:uuid"
@@ -811,7 +1034,22 @@ export class LangGraphAgent extends AbstractAgent {
 
         if (currentSubgraph !== this.currentSubgraph) {
           this.currentSubgraph = currentSubgraph;
-          await this.getStateAndMessagesSnapshots(threadId);
+          const boundaryCheckpointStep =
+            currentSubgraph === ROOT_SUBGRAPH_NAME &&
+            typeof metadata.langgraph_step === "number"
+              ? metadata.langgraph_step - 1
+              : undefined;
+          latestStateValues = await this.getStateAndMessagesSnapshots(
+            threadId,
+            latestRootStateValues,
+            hasOrderedRootStateValues,
+            boundaryCheckpointStep,
+            input.forwardedProps?.durability ?? "async",
+          );
+          // A root values snapshot describes the boundary that follows it. Do
+          // not reuse it after crossing that boundary: a subgraph may commit
+          // newer state before the next root values event arrives.
+          hasOrderedRootStateValues = false;
         }
 
         // Set server-assigned run id as soon as available
@@ -852,13 +1090,17 @@ export class LangGraphAgent extends AbstractAgent {
         // LangGraph JS doesn't emit `values` chunks with the latest state between
         // tool execution and run end, so without this update, intermediate
         // STATE_SNAPSHOTs go stale after a tool Command updates state.
+        // A root on_chain_end also advances the ordered root cache: when values
+        // mode is omitted, the next subgraph boundary snapshots straight from
+        // that cache, so it must carry the same merged output.
         if (
           eventType === LangGraphEventTypes.OnChainEnd &&
           chunkData.data?.output != null
         ) {
           const output: any = chunkData.data.output;
+          let outputUpdate: Record<string, any> | undefined;
           if (typeof output === "object" && !Array.isArray(output)) {
-            latestStateValues = { ...latestStateValues, ...output };
+            outputUpdate = output;
           } else if (Array.isArray(output)) {
             for (const item of output) {
               if (
@@ -868,11 +1110,17 @@ export class LangGraphAgent extends AbstractAgent {
                 (item as any).update &&
                 typeof (item as any).update === "object"
               ) {
-                latestStateValues = {
-                  ...latestStateValues,
-                  ...(item as any).update,
-                };
+                outputUpdate = { ...outputUpdate, ...(item as any).update };
               }
+            }
+          }
+          if (outputUpdate) {
+            latestStateValues = { ...latestStateValues, ...outputUpdate };
+            if (currentSubgraph === ROOT_SUBGRAPH_NAME) {
+              latestRootStateValues = {
+                ...latestRootStateValues,
+                ...outputUpdate,
+              };
             }
           }
         }
@@ -958,7 +1206,7 @@ export class LangGraphAgent extends AbstractAgent {
       // Collect interrupts from ALL tasks, not just tasks[0] (fixes #1409)
       const interrupts = (tasks ?? []).flatMap(
         (t: any) => t.interrupts ?? [],
-      ) as Interrupt[];
+      ) as LangGraphInterrupt[];
       const isEndNode = state.next.length === 0;
       const writes = state.metadata?.writes ?? {};
 
@@ -971,29 +1219,28 @@ export class LangGraphAgent extends AbstractAgent {
           : (state.next[0] ?? Object.keys(writes)[0]);
       }
 
-      interrupts.forEach((interrupt) => {
-        this.dispatchEvent({
-          type: EventType.CUSTOM,
-          name: LangGraphEventTypes.OnInterrupt,
-          value:
-            typeof interrupt.value === "string"
-              ? interrupt.value
-              : JSON.stringify(interrupt.value),
-          rawEvent: interrupt,
-        });
-      });
-
       this.handleNodeChange(newNodeName);
       // Immediately turn off new step
       this.handleNodeChange(undefined);
 
       await this.getStateAndMessagesSnapshots(threadId);
 
-      this.dispatchEvent({
-        type: EventType.RUN_FINISHED,
-        threadId,
-        runId: this.activeRun!.id,
-      });
+      if (interrupts.length) {
+        this.dispatchInterruptFinish({
+          threadId,
+          runId: this.activeRun!.id,
+          lgInterrupts: interrupts,
+        });
+      } else {
+        const usage = this.collectRunUsage();
+        this.dispatchEvent({
+          type: EventType.RUN_FINISHED,
+          threadId,
+          runId: this.activeRun!.id,
+          ...(usage ? { usage } : {}),
+        });
+      }
+
       // Reset cancel flags when run completes
       this.cancelRequested = false;
       this.cancelSent = false;
@@ -1004,9 +1251,47 @@ export class LangGraphAgent extends AbstractAgent {
     }
   }
 
-  private async getStateAndMessagesSnapshots(threadId: string): Promise<void> {
-    const state: ThreadState<State> =
-      await this.client.threads.getState(threadId);
+  private async getStateAndMessagesSnapshots(
+    threadId: string,
+    orderedStateValues?: ThreadState<State>["values"],
+    hasOrderedStateValues = false,
+    boundaryCheckpointStep?: number,
+    durability: Durability = "async",
+  ): Promise<ThreadState<State>["values"]> {
+    let state: ThreadState<State>;
+    if (hasOrderedStateValues) {
+      state = { values: orderedStateValues ?? {} } as ThreadState<State>;
+    } else if (boundaryCheckpointStep !== undefined) {
+      if (durability === "exit") {
+        throw new Error(
+          `Cannot snapshot LangGraph boundary step ${boundaryCheckpointStep} with durability "exit": the checkpoint is not persisted until the run exits`,
+        );
+      }
+
+      const attempts =
+        durability === "async" ? ASYNC_BOUNDARY_CHECKPOINT_ATTEMPTS : 1;
+      let boundaryState: ThreadState<State> | undefined;
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        [boundaryState] = await this.client.threads.getHistory(threadId, {
+          limit: 1,
+          metadata: { step: boundaryCheckpointStep },
+        });
+        if (boundaryState) break;
+        if (attempt < attempts - 1) {
+          await new Promise<void>((resolve) =>
+            setTimeout(resolve, ASYNC_BOUNDARY_CHECKPOINT_RETRY_DELAY_MS),
+          );
+        }
+      }
+      if (!boundaryState) {
+        throw new Error(
+          `No LangGraph checkpoint found for boundary step ${boundaryCheckpointStep}`,
+        );
+      }
+      state = boundaryState;
+    } else {
+      state = await this.client.threads.getState(threadId);
+    }
     this.dispatchEvent({
       type: EventType.STATE_SNAPSHOT,
       snapshot: this.getStateSnapshot(state),
@@ -1017,6 +1302,27 @@ export class LangGraphAgent extends AbstractAgent {
       type: EventType.MESSAGES_SNAPSHOT,
       messages: langchainMessagesToAgui(checkpointMessages),
     });
+    return state.values;
+  }
+
+  /**
+   * True when a tool call's originating assistant message is already present in
+   * the durable thread history (`this.messages`). On a HITL resume the client
+   * replays the full conversation, so the TOOL_CALL_START/ARGS/END triple for
+   * this tool call was already delivered in the prior run and must not be
+   * re-emitted by `OnToolEnd` (whose per-run `emittedToolCallStartIds` Set is
+   * reset on every run). `TOOL_CALL_RESULT` still fires normally. See #2014.
+   */
+  private toolCallAnnouncedInPriorRun(toolCallId: string | undefined): boolean {
+    if (!toolCallId) {
+      return false;
+    }
+    return (this.messages ?? []).some(
+      (message: any) =>
+        message?.role === "assistant" &&
+        Array.isArray(message.toolCalls) &&
+        message.toolCalls.some((toolCall: any) => toolCall?.id === toolCallId),
+    );
   }
 
   handleSingleEvent(event: any): void {
@@ -1039,6 +1345,21 @@ export class LangGraphAgent extends AbstractAgent {
       case LangGraphEventTypes.OnChatModelStream:
         let shouldEmitMessages = event.metadata["emit-messages"] ?? true;
         let shouldEmitToolCalls = event.metadata["emit-tool-calls"] ?? true;
+
+        // Capture provider-reported token usage. LangChain attaches
+        // `usage_metadata` to the final streamed chunk (the one that also
+        // carries `finish_reason`), so this must run *before* the finish-reason
+        // early return below or usage would be dropped.
+        const usageMetadata = (event.data.chunk as any).usage_metadata;
+        if (usageMetadata) {
+          const usageEntry = tokenUsageFromLangChainMetadata(usageMetadata, {
+            provider: event.metadata?.["ls_provider"],
+            model: event.metadata?.["ls_model_name"],
+          });
+          if (usageEntry) {
+            (this.activeRun!.usage ??= []).push(usageEntry);
+          }
+        }
 
         if (event.data.chunk.response_metadata.finish_reason) return;
         let currentStream = this.getMessageInProgress(this.activeRun!.id);
@@ -1177,14 +1498,15 @@ export class LangGraphAgent extends AbstractAgent {
         if (isMessageContentEvent && shouldEmitMessages) {
           // No existing message yet, also init the message
           if (!currentStream) {
+            const messageId = this.getOrPinTextMessageId(event.data.chunk.id);
             this.dispatchEvent({
               type: EventType.TEXT_MESSAGE_START,
               role: "assistant",
-              messageId: event.data.chunk.id,
+              messageId,
               rawEvent: event,
             });
             this.setMessageInProgress(this.activeRun!.id, {
-              id: event.data.chunk.id,
+              id: messageId,
               toolCallId: null,
               toolCallName: null,
             });
@@ -1311,7 +1633,12 @@ export class LangGraphAgent extends AbstractAgent {
           toolCallOutput.update?.messages
             .filter((message: MessageFields) => message.type === "tool")
             .forEach((message: MessageFields) => {
-              if (!this.activeRun!.hasFunctionStreaming) {
+              // Skip the synthetic START/ARGS on a HITL resume where the tool
+              // call was already announced in a prior run (#2014).
+              if (
+                !this.activeRun!.hasFunctionStreaming &&
+                !this.toolCallAnnouncedInPriorRun(message.tool_call_id)
+              ) {
                 this.dispatchEvent({
                   type: EventType.TOOL_CALL_START,
                   toolCallId: message.tool_call_id,
@@ -1348,8 +1675,12 @@ export class LangGraphAgent extends AbstractAgent {
 
         // Emit TOOL_CALL_START + ARGS + END for tool calls that were not
         // already handled by the streaming path. Uses emittedToolCallStartIds
-        // to avoid duplicates from parallel tool calls.
-        if (!this.emittedToolCallStartIds.has(toolCallOutput.tool_call_id)) {
+        // to avoid duplicates from parallel tool calls, and the durable
+        // thread history to avoid re-announcing on a HITL resume (#2014).
+        if (
+          !this.emittedToolCallStartIds.has(toolCallOutput.tool_call_id) &&
+          !this.toolCallAnnouncedInPriorRun(toolCallOutput.tool_call_id)
+        ) {
           this.emittedToolCallStartIds.add(toolCallOutput.tool_call_id);
           this.dispatchEvent({
             type: EventType.TOOL_CALL_START,
@@ -1487,13 +1818,14 @@ export class LangGraphAgent extends AbstractAgent {
     // Handle text content streaming
     if (content) {
       if (!currentStream) {
+        const messageId = this.getOrPinTextMessageId(chunk.id);
         this.dispatchEvent({
           type: EventType.TEXT_MESSAGE_START,
           role: "assistant",
-          messageId: chunk.id,
+          messageId,
         });
         this.setMessageInProgress(this.activeRun!.id, {
-          id: chunk.id,
+          id: messageId,
           toolCallId: null,
           toolCallName: null,
         });
@@ -1506,6 +1838,19 @@ export class LangGraphAgent extends AbstractAgent {
         delta: content,
       });
     }
+  }
+
+  protected interruptsToAGUI(
+    list: readonly LangGraphInterrupt[],
+  ): AGUIInterrupt[] {
+    return langGraphInterruptsToAGUI(list);
+  }
+
+  protected buildCommandResumeFromAgui(
+    entries: readonly ResumeEntry[],
+    _ctx: { openInterrupts: AGUIInterrupt[] },
+  ): unknown {
+    return buildLgCommandResumeFromAgui(entries);
   }
 
   // Request cancellation of the current run via LangGraph Platform SDK
@@ -1526,8 +1871,33 @@ export class LangGraphAgent extends AbstractAgent {
     super.abortRun();
   }
 
+  async getCapabilities(): Promise<AgentCapabilities> {
+    return {
+      identity: { type: "langgraph" },
+      humanInTheLoop: {
+        supported: true,
+        interrupts: true,
+        approveWithEdits: true,
+      },
+      state: { snapshots: true, deltas: false, persistentState: true },
+      transport: { streaming: true },
+    };
+  }
+
   handleReasoningEvent(reasoningData: LangGraphReasoning) {
-    if (!reasoningData || !reasoningData.type || !reasoningData.text) {
+    if (!reasoningData || !reasoningData.type) {
+      return;
+    }
+
+    // A text-less chunk is still meaningful when it carries the provider's
+    // canonical reasoning id (the `response.output_item.added` /
+    // `…summary_part.added` chunks): stash the id so the first text delta
+    // opens the reasoning message under it, WITHOUT opening a message here —
+    // a summary-less (store=true) reasoning item must keep rendering nothing.
+    if (!reasoningData.text) {
+      if (reasoningData.id) {
+        this.pendingReasoningId = reasoningData.id;
+      }
       return;
     }
 
@@ -1551,8 +1921,14 @@ export class LangGraphAgent extends AbstractAgent {
     }
 
     if (!this.reasoningProcess) {
-      // No thinking step yet. Start a new one
-      const messageId = randomUUID();
+      // No thinking step yet. Start a new one. Prefer the provider's
+      // canonical reasoning id (e.g. OpenAI `rs_…`) when the stream carried
+      // one: the snapshot converter re-emits this same reasoning under that
+      // id, and only a matching id lets the client reconcile the streamed
+      // copy with the snapshot copy instead of rendering both.
+      const messageId =
+        reasoningData.id ?? this.pendingReasoningId ?? randomUUID();
+      this.pendingReasoningId = undefined;
       this.dispatchEvent({
         type: EventType.REASONING_START,
         messageId,
@@ -1837,14 +2213,24 @@ export class LangGraphAgent extends AbstractAgent {
       return [...acc, mappedTool];
     }, []);
 
+    // Surface the A2UI tool-injection flag (set by the A2UI middleware via
+    // forwardedProps.injectA2UITool) into ag-ui state so graphs/tools can read
+    // it directly from state regardless of run mode. TS forwardedProps keys are
+    // not snake-cased, so the original camelCase key is used as-is.
+    const injectA2UITool = input.forwardedProps?.injectA2UITool;
+    const agUiState: StateEnrichment["ag-ui"] = {
+      tools: langGraphTools,
+      context: input.context,
+    };
+    if (injectA2UITool !== undefined) {
+      agUiState.inject_a2ui_tool = injectA2UITool;
+    }
+
     return {
       ...state,
       messages: newMessages,
       tools: langGraphTools,
-      "ag-ui": {
-        tools: langGraphTools,
-        context: input.context,
-      },
+      "ag-ui": agUiState,
       copilotkit: {
         ...(state as any).copilotkit,
         actions: langGraphTools,
@@ -1865,8 +2251,28 @@ export class LangGraphAgent extends AbstractAgent {
       if (nodeName) {
         this.startStep(nodeName);
       }
+      // Clear the pinned text message id: a new node should mint its own
+      // bubble. See RunMetadata.currentTextMessageId.
+      if (this.activeRun) {
+        this.activeRun.currentTextMessageId = undefined;
+      }
     }
     this.activeRun!.nodeName = nodeName;
+  }
+
+  /**
+   * Returns the messageId to use for a TEXT_MESSAGE_START emission, pinning
+   * the first id per node. chunk.id changes per LLM invocation, so a
+   * text→tool→text sequence within one node would otherwise render as
+   * multiple bubbles; pinning keeps them in one. handleNodeChange clears
+   * the pin on every node transition, so different nodes (e.g. a supervisor
+   * routing to specialist agents) get fresh ids and stay in separate
+   * bubbles. See #1317.
+   */
+  private getOrPinTextMessageId(fallbackId: string): string {
+    const messageId = this.activeRun!.currentTextMessageId ?? fallbackId;
+    this.activeRun!.currentTextMessageId = messageId;
+    return messageId;
   }
 
   startStep(nodeName: string) {

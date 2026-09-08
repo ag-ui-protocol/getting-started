@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import os
 from textwrap import dedent
 from zoneinfo import ZoneInfo
 
@@ -54,6 +55,23 @@ def get_weather_condition(code: int) -> str:
     return conditions.get(code, "Unknown")
 
 
+def _mock_weather(location: str) -> str:
+    """Return deterministic canned weather data for tests.
+
+    Used when ``AG_UI_MOCK_WEATHER`` is set so e2e runs don't depend on the
+    live open-meteo API (which rate-limits CI's shared egress IPs).
+    """
+    return json.dumps({
+        "temperature": 21.0,
+        "feelsLike": 20.0,
+        "humidity": 65.0,
+        "windSpeed": 12.0,
+        "windGust": 18.0,
+        "conditions": get_weather_condition(1),
+        "location": location,
+    })
+
+
 async def get_weather(location: str) -> str:
     """Get current weather for a location.
 
@@ -64,6 +82,9 @@ async def get_weather(location: str) -> str:
         Dictionary with weather information including temperature, feels like,
         humidity, wind speed, wind gust, conditions, and location name.
     """
+    if os.getenv("AG_UI_MOCK_WEATHER"):
+        return _mock_weather(location)
+
     async with httpx.AsyncClient() as client:
         # Geocode the location
         geocoding_url = (

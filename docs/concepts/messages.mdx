@@ -26,12 +26,17 @@ interface BaseMessage {
   content?: string // Optional text content of the message
   name?: string // Optional name of the sender
   encryptedContent?: string // Optional encrypted content for privacy-preserving state continuity
+  metadata?: Record<string, any> // Optional extra information attached to the message
 }
 ```
 
 The `role` discriminator can be `"user"`, `"assistant"`, `"system"`, `"tool"`,
 `"developer"`, `"activity"`, or `"reasoning"`. Concrete message types extend
 this shape with the fields they need.
+
+Every message type carries `metadata`, an optional open-by-key object that
+accumulates as the message is built from its events. Tool calls carry one of
+their own. See [Metadata](/concepts/metadata) for the rules.
 
 > The `encryptedContent` field enables privacy-preserving workflows where
 > sensitive content (such as reasoning chains) can be passed across turns

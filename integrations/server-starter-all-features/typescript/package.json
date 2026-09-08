@@ -2,6 +2,8 @@
   "name": "@ag-ui/server-starter-all-features",
   "author": "Markus Ecker <markus.ecker@gmail.com>",
   "version": "0.0.1",
+  "//": "private: this is a create-ag-ui-app scaffold template, intentionally excluded from the npm release pipeline (not a published package).",
+  "private": true,
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -38,8 +40,8 @@
   },
   "exports": {
     ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "require": "./dist/index.js",
+      "import": "./dist/index.mjs"
     },
     "./package.json": "./package.json"
   }

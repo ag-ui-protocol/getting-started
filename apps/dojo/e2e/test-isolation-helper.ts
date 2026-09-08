@@ -137,8 +137,10 @@ async function dumpLLMockJournal() {
 }
 
 // Extend base test with isolation setup and error monitoring
-export const test = base.extend<{}, {}>({
-  page: async ({ page }, use, testInfo) => {
+export const test = base.extend({
+  // Named `provide` rather than Playwright's conventional `use`: `use(...)` is
+  // React 19's hook, so eslint-plugin-react-hooks flags the bare call.
+  page: async ({ page }, provide, testInfo) => {
     // Before each test - ensure clean state
     await page.context().clearCookies();
     await page.context().clearPermissions();
@@ -191,7 +193,7 @@ export const test = base.extend<{}, {}>({
       }
     });
 
-    await use(page);
+    await provide(page);
 
     // On failure: dump what the LLM actually did so CI logs are actionable
     if (testInfo.status !== testInfo.expectedStatus) {

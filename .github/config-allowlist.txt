@@ -5,6 +5,7 @@ integrations/ag2/typescript/tsdown.config.ts
 integrations/agno/typescript/tsdown.config.ts
 integrations/aws-strands/typescript/tsdown.config.ts
 integrations/claude-agent-sdk/typescript/tsup.config.ts
+integrations/claude-managed-agents/typescript/tsdown.config.ts
 integrations/community/spring-ai/typescript/tsdown.config.ts
 integrations/crew-ai/typescript/tsdown.config.ts
 integrations/langchain/typescript/tsdown.config.ts
@@ -21,8 +22,10 @@ middlewares/a2a-middleware/tsdown.config.ts
 middlewares/a2ui-middleware/tsup.config.ts
 middlewares/event-throttle-middleware/tsdown.config.ts
 middlewares/mcp-apps-middleware/tsdown.config.ts
+middlewares/mcp-middleware/tsdown.config.ts
 middlewares/middleware-starter/tsdown.config.ts
 sdks/community/java/examples/copilot-app/next.config.ts
+sdks/typescript/packages/a2ui-toolkit/tsdown.config.ts
 sdks/typescript/packages/cli/tsdown.config.ts
 sdks/typescript/packages/client/tsdown.config.ts
 sdks/typescript/packages/core/tsdown.config.ts

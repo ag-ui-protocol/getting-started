@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>$(TargetFrameworksCore)</TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AGUI.Abstractions\AGUI.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Compatibility\Fixtures\**\*.json" />
+    <!-- Shared with the TypeScript and Python SDKs; see sdks/fixtures/README.md. Linked
+         rather than copied so there is one copy of the expectations for all three. -->
+    <EmbeddedResource Include="..\..\..\fixtures\null-omission.json"
+                      LogicalName="AGUI.Abstractions.UnitTests.CrossLanguageFixtures.null-omission.json" />
+  </ItemGroup>
+
+</Project>

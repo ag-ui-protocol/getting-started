@@ -186,7 +186,8 @@ void main() {
 
       // SSE spec: single leading space after colon is removed
       controller.add(utf8.encode('data: With space\n'));
-      controller.add(utf8.encode('data:  Two spaces\n')); // Only first space removed
+      controller
+          .add(utf8.encode('data:  Two spaces\n')); // Only first space removed
       controller.add(utf8.encode('data:No space\n'));
       controller.add(utf8.encode('\n'));
 

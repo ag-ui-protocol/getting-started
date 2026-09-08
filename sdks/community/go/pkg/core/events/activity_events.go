@@ -12,6 +12,9 @@ type ActivitySnapshotEvent struct {
 	ActivityType string `json:"activityType"`
 	Content      any    `json:"content"`
 	Replace      *bool  `json:"replace,omitempty"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewActivitySnapshotEvent creates a new activity snapshot event.
@@ -64,6 +67,9 @@ type ActivityDeltaEvent struct {
 	MessageID    string               `json:"messageId"`
 	ActivityType string               `json:"activityType"`
 	Patch        []JSONPatchOperation `json:"patch"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewActivityDeltaEvent creates a new activity delta event.

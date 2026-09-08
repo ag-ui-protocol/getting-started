@@ -35,7 +35,7 @@ export const parseProtoStream = (source$: Observable<HttpEvent>): Observable<Bas
       if (buffer.length > 0) {
         try {
           processBuffer();
-        } catch (error: unknown) {
+        } catch (_error: unknown) {
           console.warn("Incomplete or invalid protocol buffer data at stream end");
         }
       }

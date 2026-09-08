@@ -1,0 +1,26 @@
+# A2UI Error Recovery
+
+## What This Demo Shows
+
+Automatic, no-wipe recovery when a secondary LLM generates an **invalid** A2UI surface.
+
+1. **Server-side validation gate**: Each generated component tree is validated before it can paint. Invalid trees are suppressed — the user never sees a broken surface flash and disappear.
+2. **Structured-error feedback loop**: The validation errors are fed back to the generating sub-agent, which regenerates (up to a configurable cap, default 3 attempts).
+3. **No wipes**: Only a validated surface ever commits. Faulty attempts never paint, so there's no stream → error → wipe → retry flicker.
+4. **Tasteful hard-failure**: If every attempt fails, a clean failure state is shown and the conversation stays usable. Developers get full per-attempt detail; end users don't see transient noise.
+
+## How to Interact
+
+Two suggestions are wired for this demo:
+
+- **"Compare 3 luxury hotels with ratings and prices."** — the first generated surface references a UI template the model "forgot" to include (a dangling child reference). The gate rejects it, the error is fed back, and the **second attempt is valid** and paints. You see the recovered surface, not the broken one.
+- **"Compare 3 broken hotels with ratings and prices."** — every attempt is invalid, so the loop **exhausts** and the clean hard-failure state appears. The chat remains interactive afterward.
+
+## How It Works Technically
+
+- The **commit point is the component-tree close** — the only moment a tree is knowable as complete — where the middleware runs `validateA2UIComponents` and emits the surface **only if valid**.
+- On rejection, `augmentPromptWithValidationErrors` appends the machine-readable errors to the sub-agent's prompt and the adapter re-invokes it (`runA2UIGenerationWithRecovery`), never retrying after a validated paint.
+- Recovery is surfaced as an `a2ui_recovery` activity: a delayed "Retrying…" hint for slow/repeated retries, and a hard-failure state once the attempt cap is reached.
+- The retry cap, the threshold before the retry hint appears, and how much debug state is exposed are all configurable.
+
+This feature drives errors deterministically via ai-mock fixtures so the recovery and hard-failure paths can be demonstrated and tested reliably.

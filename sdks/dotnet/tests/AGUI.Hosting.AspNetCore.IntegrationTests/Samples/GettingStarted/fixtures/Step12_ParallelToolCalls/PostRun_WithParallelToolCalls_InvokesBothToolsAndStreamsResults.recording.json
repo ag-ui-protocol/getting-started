@@ -1,0 +1,726 @@
+[
+  [
+    {
+      "contents": [],
+      "responseId": "",
+      "messageId": "",
+      "createdAt": "1970-01-01T00:00:00+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "usage",
+          "details": {
+            "inputTokenCount": 191,
+            "outputTokenCount": 122,
+            "totalTokenCount": 313,
+            "cachedInputTokenCount": 0,
+            "reasoningTokenCount": 64,
+            "additionalCounts": {
+              "InputTokenDetails.AudioTokenCount": 0,
+              "OutputTokenDetails.AudioTokenCount": 0,
+              "OutputTokenDetails.AcceptedPredictionTokenCount": 0,
+              "OutputTokenDetails.RejectedPredictionTokenCount": 0
+            }
+          }
+        }
+      ],
+      "responseId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "messageId": "chatcmpl-DrtpgGxWD45gfLjVdjBIIn093QfL9",
+      "createdAt": "2026-06-17T23:19:36+00:00",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "get_weather",
+          "arguments": {
+            "city": "Paris"
+          },
+          "informationalOnly": true,
+          "callId": "call_Tj71JkwmiE7BtTRkIHTZH2oX"
+        },
+        {
+          "$type": "functionCall",
+          "name": "get_current_time",
+          "arguments": {
+            "timezone": "Asia/Tokyo"
+          },
+          "informationalOnly": true,
+          "callId": "call_iFeJW9CSUBLRMIhiJ6kyeVj2"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "createdAt": "1970-01-01T00:00:00+00:00",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    },
+    {
+      "role": "tool",
+      "contents": [
+        {
+          "$type": "functionResult",
+          "result": {
+            "City": "Paris",
+            "Conditions": "sunny",
+            "TemperatureCelsius": 22
+          },
+          "callId": "call_Tj71JkwmiE7BtTRkIHTZH2oX"
+        },
+        {
+          "$type": "functionResult",
+          "result": {
+            "Timezone": "Asia/Tokyo",
+            "CurrentTime": "2026-06-18 09:30 UTC"
+          },
+          "callId": "call_iFeJW9CSUBLRMIhiJ6kyeVj2"
+        }
+      ],
+      "responseId": "6983533358db466d8f396412e0b4cc22",
+      "messageId": "6983533358db466d8f396412e0b4cc22",
+      "createdAt": "2026-06-17T23:19:38.5234294+00:00"
+    },
+    {
+      "contents": [],
+      "responseId": "",
+      "messageId": "",
+      "createdAt": "1970-01-01T00:00:00+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ""
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "-"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Paris"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " sunny"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ","
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " about"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "22"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "°C"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ("
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "≈"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "72"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "°F"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ").\n"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "-"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Tokyo"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "202"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "6"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "-"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "06"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "-"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "18"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "18"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "30"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ("
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "J"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "ST"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " —"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " UTC"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "+"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "9"
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ")."
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "finishReason": "stop",
+      "modelId": ""
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "usage",
+          "details": {
+            "inputTokenCount": 304,
+            "outputTokenCount": 366,
+            "totalTokenCount": 670,
+            "cachedInputTokenCount": 0,
+            "reasoningTokenCount": 320,
+            "additionalCounts": {
+              "InputTokenDetails.AudioTokenCount": 0,
+              "OutputTokenDetails.AudioTokenCount": 0,
+              "OutputTokenDetails.AcceptedPredictionTokenCount": 0,
+              "OutputTokenDetails.RejectedPredictionTokenCount": 0
+            }
+          }
+        }
+      ],
+      "responseId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "messageId": "chatcmpl-DrtpiETWB1lOq0IDiOkljHY5wwmRJ",
+      "createdAt": "2026-06-17T23:19:38+00:00",
+      "finishReason": "stop",
+      "modelId": ""
+    }
+  ]
+]

@@ -1,0 +1,114 @@
+﻿[
+  {
+    "type": "RUN_STARTED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1"
+  },
+  {
+    "type": "TOOL_CALL_START",
+    "parentMessageId": "",
+    "toolCallId": "call_Id_1",
+    "toolCallName": "request_approval",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "request_approval",
+          "arguments": {
+            "request": {
+              "approval_Id_1": "ficc_Id_1",
+              "function_name": "ApproveExpenseReport",
+              "function_arguments": {
+                "expenseReportId": "EXP-2024-001"
+              },
+              "message": "Approve execution of \u0027ApproveExpenseReport\u0027?"
+            }
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TOOL_CALL_ARGS",
+    "toolCallId": "call_Id_1",
+    "delta": "{\n  \u0022request\u0022: {\n    \u0022approval_Id_1\u0022: \u0022ficc_Id_1\u0022,\n    \u0022function_name\u0022: \u0022ApproveExpenseReport\u0022,\n    \u0022function_arguments\u0022: {\n      \u0022expenseReportId\u0022: \u0022EXP-2024-001\u0022\n    },\n    \u0022message\u0022: \u0022Approve execution of \u0027ApproveExpenseReport\u0027?\u0022\n  }\n}",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "request_approval",
+          "arguments": {
+            "request": {
+              "approval_Id_1": "ficc_Id_1",
+              "function_name": "ApproveExpenseReport",
+              "function_arguments": {
+                "expenseReportId": "EXP-2024-001"
+              },
+              "message": "Approve execution of \u0027ApproveExpenseReport\u0027?"
+            }
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "TOOL_CALL_END",
+    "toolCallId": "call_Id_1",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "functionCall",
+          "name": "request_approval",
+          "arguments": {
+            "request": {
+              "approval_Id_1": "ficc_Id_1",
+              "function_name": "ApproveExpenseReport",
+              "function_arguments": {
+                "expenseReportId": "EXP-2024-001"
+              },
+              "message": "Approve execution of \u0027ApproveExpenseReport\u0027?"
+            }
+          },
+          "informationalOnly": false,
+          "callId": "call_Id_1"
+        }
+      ],
+      "responseId": "",
+      "messageId": "",
+      "finishReason": "tool_calls",
+      "modelId": ""
+    }
+  },
+  {
+    "type": "RUN_FINISHED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1",
+    "outcome": {
+      "type": "success"
+    },
+    "usage": [
+      {
+        "inputTokens": 146,
+        "outputTokens": 97,
+        "totalTokens": 243,
+        "reasoningTokens": 64,
+        "cachedInputTokens": 0
+      }
+    ]
+  }
+]

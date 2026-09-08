@@ -1,0 +1,11 @@
+﻿[
+  {
+    "role": "user",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "Two things, please: (1) what city am I in right now, and (2) what\u0027s the weather in Paris? Call get_user_location for #1 and get_weather for #2."
+      }
+    ]
+  }
+]

@@ -1,0 +1,268 @@
+﻿[
+  {
+    "contents": [],
+    "responseId": "",
+    "messageId": "",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": ""
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "I\u0027m"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " doing"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " well"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": ","
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " thanks"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " \u2014"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " ready"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " to"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " help"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "."
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " What"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " can"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " I"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " do"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " for"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " you"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": " today"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "?"
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "finishReason": "stop",
+    "modelId": ""
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "usage",
+        "details": {
+          "inputTokenCount": 30,
+          "outputTokenCount": 28,
+          "cachedInputTokenCount": 0,
+          "reasoningTokenCount": 0,
+          "additionalCounts": {
+            "InputTokenDetails.AudioTokenCount": 0,
+            "OutputTokenDetails.AudioTokenCount": 0,
+            "OutputTokenDetails.AcceptedPredictionTokenCount": 0,
+            "OutputTokenDetails.RejectedPredictionTokenCount": 0
+          }
+        }
+      }
+    ],
+    "responseId": "chatcmpl-Id_2",
+    "messageId": "chatcmpl-Id_2",
+    "finishReason": "stop",
+    "modelId": ""
+  }
+]

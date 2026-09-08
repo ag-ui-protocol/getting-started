@@ -31,6 +31,7 @@ from ag_ui_adk.session_manager import SessionManager
 from google.adk.agents import LlmAgent
 from google.adk.planners import BuiltInPlanner
 from google.genai import types
+from tests.constants import LIVE_TEST_MODEL
 
 
 @pytest.fixture(autouse=True)
@@ -67,7 +68,7 @@ class TestThoughtToReasoningIntegration:
         """Create an ADK agent with thinking enabled (include_thoughts=True)."""
         adk_agent = LlmAgent(
             name="thinking_agent",
-            model="gemini-2.5-flash",
+            model=LIVE_TEST_MODEL,
             instruction="""You are a careful reasoning assistant. For every question:
             1. First, think through the problem systematically
             2. Consider potential pitfalls or trick questions
@@ -95,7 +96,7 @@ class TestThoughtToReasoningIntegration:
         """Create an ADK agent without thinking enabled for comparison."""
         adk_agent = LlmAgent(
             name="non_thinking_agent",
-            model="gemini-2.5-flash",
+            model=LIVE_TEST_MODEL,
             instruction="""You are a helpful assistant. Answer questions directly and concisely.""",
         )
 

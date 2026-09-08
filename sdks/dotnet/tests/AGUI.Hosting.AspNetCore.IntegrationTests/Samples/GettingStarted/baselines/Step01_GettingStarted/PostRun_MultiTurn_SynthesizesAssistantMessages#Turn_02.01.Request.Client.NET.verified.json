@@ -1,0 +1,30 @@
+﻿[
+  {
+    "role": "user",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "Hello"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "Hello! How can I help you today?"
+      }
+    ],
+    "messageId": "chatcmpl-Id_1"
+  },
+  {
+    "role": "user",
+    "contents": [
+      {
+        "$type": "text",
+        "text": "How are you?"
+      }
+    ]
+  }
+]

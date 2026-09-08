@@ -1,0 +1,76 @@
+[
+  {
+    "type": "RUN_STARTED",
+    "timestamp": 1234567890,
+    "threadId": "thread-1234",
+    "runId": "run-5678"
+  },
+  {
+    "type": "RUN_FINISHED",
+    "timestamp": 1234567890,
+    "threadId": "thread-1234",
+    "runId": "run-5678"
+  },
+  {
+    "type": "RUN_ERROR",
+    "timestamp": 1234567890,
+    "message": "Failed to execute tool call"
+  },
+  {
+    "type": "RUN_ERROR",
+    "message": "API request failed",
+    "code": "API_ERROR"
+  },
+  {
+    "type": "STEP_STARTED",
+    "timestamp": 1234567890,
+    "stepName": "data_analysis"
+  },
+  {
+    "type": "STEP_STARTED",
+    "stepName": "process_payment"
+  },
+  {
+    "type": "STEP_FINISHED",
+    "timestamp": 1234567890,
+    "stepName": "data_analysis"
+  },
+  {
+    "type": "STEP_FINISHED",
+    "stepName": "process_payment"
+  },
+  {
+    "type": "RUN_FINISHED",
+    "timestamp": 1234567890,
+    "threadId": "thread-1234",
+    "runId": "run-5678",
+    "usage": [
+      {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "inputTokens": 11,
+        "outputTokens": 22,
+        "totalTokens": 33,
+        "reasoningTokens": 44,
+        "cachedInputTokens": 55
+      },
+      {
+        "provider": "anthropic",
+        "model": "claude-opus-4",
+        "inputTokens": 1
+      }
+    ]
+  },
+  {
+    "type": "RUN_ERROR",
+    "message": "API request failed",
+    "code": "API_ERROR",
+    "usage": [
+      {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "inputTokens": 120
+      }
+    ]
+  }
+]

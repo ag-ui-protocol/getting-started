@@ -27,7 +27,7 @@ plugins {
 //   - publish.sh script (reads dynamically)
 //   - GitHub Actions workflow (reads dynamically)
 // Only update these values here - they propagate automatically
-version = "0.4.0"
+version = "0.4.1"
 group = "com.ag-ui.community"
 
 allprojects {

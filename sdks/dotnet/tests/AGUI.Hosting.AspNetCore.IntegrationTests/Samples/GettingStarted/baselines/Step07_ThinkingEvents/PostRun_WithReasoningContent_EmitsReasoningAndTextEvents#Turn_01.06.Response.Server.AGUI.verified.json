@@ -1,0 +1,3425 @@
+﻿[
+  {
+    "type": "RUN_STARTED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1"
+  },
+  {
+    "type": "REASONING_START",
+    "messageId": "msg_Id_2"
+  },
+  {
+    "type": "REASONING_MESSAGE_START",
+    "messageId": "msg_Id_2",
+    "role": "reasoning"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": "**Sol"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": "ving"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " heads"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": "/"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": "legs"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " problem"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": "**\n\nI"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " need"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " to"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " solve"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " heads"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " and"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " legs"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " problem"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " involving"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " chickens"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " and"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " rabbits"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": "."
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " I\u0027ve"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " established"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " that"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " total"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " number"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " of"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " heads"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " is"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " 20"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": ","
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " so"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " I"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " have"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " equation"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " c"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " \u002B"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " r"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " ="
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " 20"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " and"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " for"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " legs"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": ","
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " 2"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": "c"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " \u002B"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " 4"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": "r"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " ="
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " 56"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": "."
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " I"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " substitute"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " c"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " as"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " 20"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " -"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " r"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " into"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " second"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " equation"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " to"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " find"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " r"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " ="
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " 8"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " and"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " then"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " c"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " ="
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " 12"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": "."
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " I"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " could"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " also"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " show"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " method"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " of"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " calculating"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " extra"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " legs"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " to"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " verify"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": ","
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " linking"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " legs"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " difference"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " to"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " rabbit"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " numbers"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": "."
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " I\u0027ll"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " present"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " the"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " final"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " answer"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " with"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " reasoning"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": " steps"
+  },
+  {
+    "type": "REASONING_MESSAGE_CONTENT",
+    "messageId": "msg_Id_2",
+    "delta": "."
+  },
+  {
+    "type": "REASONING_MESSAGE_END",
+    "messageId": "msg_Id_2"
+  },
+  {
+    "type": "REASONING_END",
+    "messageId": "msg_Id_2"
+  },
+  {
+    "type": "TEXT_MESSAGE_START",
+    "messageId": "msg_Id_1",
+    "role": "assistant",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Let"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "Let",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Let"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " c",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " c"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " number",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " number"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " of",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " of"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " chickens",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " chickens"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " and",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " and"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " r",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " r"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " number",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " number"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " of",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " of"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " rabbits",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " rabbits"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ".\n\n",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".\n\n"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "Heads",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Heads"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ":",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " c",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " c"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " r",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " r"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "20",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "20"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "  \n",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "  \n"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "Leg",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Leg"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "s",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "s"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ":",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "2",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "2"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "c",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "c"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "4",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "4"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "r",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "r"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "56",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "56"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "\n\n",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "\n\n"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "From",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "From"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " the",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " the"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " first",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " first"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ",",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ","
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " c",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " c"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "20",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "20"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u2212",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u2212"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " r",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " r"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ".",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "."
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " Substitute",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " Substitute"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " into",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " into"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " the",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " the"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " legs",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " legs"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " equation",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " equation"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ":\n",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":\n"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "2",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "2"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "(",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "("
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "20",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "20"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u2212",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u2212"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " r",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " r"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ")",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ")"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "4",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "4"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "r",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "r"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "56",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "56"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "  \n",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "  \n"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "40",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "40"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u2212",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u2212"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "2",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "2"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "r",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "r"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "4",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "4"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "r",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "r"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "56",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "56"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "  \n",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "  \n"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "40",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "40"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "2",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "2"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "r",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "r"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "56",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "56"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "  \n",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "  \n"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "2",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "2"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "r",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "r"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "16",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "16"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u2192",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u2192"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " r",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " r"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "8",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "8"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "\n\n",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "\n\n"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "Then",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Then"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " c",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " c"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "20",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "20"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u2212",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u2212"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "8",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "8"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "12",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "12"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ".\n\n",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".\n\n"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "Answer",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Answer"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ":",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "12",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "12"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " chickens",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " chickens"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " and",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " and"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "8",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "8"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " rabbits",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " rabbits"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ".\n\n",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".\n\n"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "(",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "("
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "Quick",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "Quick"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " check",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " check"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ":",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ":"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "12",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "12"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " heads",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " heads"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "8",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "8"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " heads",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " heads"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "20",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "20"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ";",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ";"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "12",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "12"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "\u00B7",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "\u00B7"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "2",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "2"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "8",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "8"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "\u00B7",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "\u00B7"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "4",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "4"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "24",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "24"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " \u002B",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " \u002B"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "32",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "32"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " =",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " ="
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " ",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " "
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": "56",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": "56"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": " legs",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": " legs"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_CONTENT",
+    "messageId": "msg_Id_1",
+    "delta": ".)",
+    "rawEvent": {
+      "role": "assistant",
+      "contents": [
+        {
+          "$type": "text",
+          "text": ".)"
+        }
+      ],
+      "responseId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "messageId": "msg_Id_1",
+      "conversationId": "resp_0e1ebfcdd5c10d6e006a32918d58508196aec4d72c990876d2",
+      "modelId": "gpt-5-mini"
+    }
+  },
+  {
+    "type": "TEXT_MESSAGE_END",
+    "messageId": "msg_Id_1"
+  },
+  {
+    "type": "RUN_FINISHED",
+    "threadId": "thread_Id_1",
+    "runId": "run_Id_1",
+    "outcome": {
+      "type": "success"
+    },
+    "usage": [
+      {
+        "model": "gpt-5-mini",
+        "inputTokens": 39,
+        "outputTokens": 345,
+        "totalTokens": 384,
+        "reasoningTokens": 128,
+        "cachedInputTokens": 0
+      }
+    ]
+  }
+]

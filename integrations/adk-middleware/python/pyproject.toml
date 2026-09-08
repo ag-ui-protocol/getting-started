@@ -1,15 +1,40 @@
 [project]
 name = "ag_ui_adk"
 description = "ADK Middleware for AG-UI Protocol"
-version = "0.6.5"
+version = "0.7.0"
+license-files = ["LICENSE"]
 readme = "README.md"
 authors = [
     { name = "Mark Fogle", email = "mark@contextable.com" }
 ]
 requires-python = ">=3.10, <3.15"
 dependencies = [
-    "ag-ui-protocol>=0.1.15",
-    "aiohttp>=3.12.0",
+    "ag-ui-protocol>=0.1.18",
+    # A2UI recovery/error-handling loop (OSS-158) — framework-agnostic validator +
+    # validate→retry loop shared with the LangGraph adapter and the a2ui-middleware
+    # paint gate. 0.0.3 carries the A2UIToolParams/guidelines API (OSS-248); published
+    # on PyPI, so no local source bridge is needed.
+    "ag-ui-a2ui-toolkit>=0.0.3",
+    # Google's A2UI Agent SDK (OSS-158): we reuse the two parts that are independent
+    # of its strict validator and safe to use with the client-supplied catalog as-is —
+    # catalog/prompt rendering (A2uiSchemaManager + catalog.render_as_llm_instructions,
+    # which bundles the common-types DEFINITIONS the injected catalog only references)
+    # and JSON healing (parse_and_fix). The strict A2uiValidator is NOT used:
+    # client-injected (zod-extracted) catalogs aren't strict-resolvable and a separate
+    # server catalog drifts, so validation stays with ag-ui-a2ui-toolkit (parity with
+    # the LangGraph A2UI demos); catalog conformance is a separate upstream item.
+    # We import ONLY the A2A-free subset (a2ui.schema / a2ui.parser / a2ui.basic_catalog);
+    # a2ui's top-level __init__ imports only .version and those subpackages import no
+    # `a2a` (enforced by tests/test_a2ui_import_hygiene.py), so we add NO a2a-sdk pin.
+    # a2ui-agent-sdk floors google-adk at >=1.28.1, so adding it raises our effective
+    # adk floor; we keep the full google-adk<3.0 range (do NOT cap at <2.0) so the
+    # package supports — and we test against — adk 2.x, which consumers use. adk 2.x
+    # pulls google-genai>=2.4 (2.8.x), whose async streaming calls aiohttp
+    # StreamReader.readline(max_line_length=) — only present in aiohttp >= 3.14.0 — so
+    # the aiohttp floor below is raised to keep live Gemini streaming working. (That's
+    # the real requirement; capping adk would just hide it.)
+    "a2ui-agent-sdk>=0.2.4,<0.3.0",
+    "aiohttp>=3.14.1",
     "asyncio>=3.4.3",
     "fastapi>=0.115.2",
     # Compatible with both google-adk 1.x and 2.x.
@@ -28,7 +53,14 @@ dependencies = [
     #                 because Workflow._run_impl rehydrates from new_message.parts only).
     # NodeInterruptedError (2.0-only) is a BaseException subclass, NOT an Exception, so
     # existing `except Exception:` blocks correctly let HITL interruption propagate.
-    "google-adk>=1.16.0,<3.0.0",
+    # Floor = a2ui-agent-sdk's own minimum (1.28.1), which is the TRUE resolver floor —
+    # the old 1.16.0 was dead weight (a2ui-agent-sdk overrode it). The middleware
+    # feature-detects the adk shape at runtime (_ADK_OVERRIDES_INVOCATION_ID,
+    # _adk_supports_streaming_fc_args) and version-gated tests skip where a feature is
+    # absent, so the whole [1.28.1, 3.0) range is genuinely supported. The lock pins
+    # 1.35.0 only as the dev/CI resolution — the version where the full suite runs
+    # unskipped — NOT a declared cap.
+    "google-adk>=1.28.1,<3.0.0",
     "pydantic>=2.11.7",
     # Primary SSE response implementation. Used unconditionally so the FastAPI
     # floor stays at >=0.115.2 (rather than the >=0.135.0 jump that would be

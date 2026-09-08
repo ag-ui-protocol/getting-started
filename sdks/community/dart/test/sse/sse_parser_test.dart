@@ -78,6 +78,43 @@ void main() {
         expect(messages[0].data, 'line 1\nline 2\nline 3');
       });
 
+      test('preserves leading newline when first data field is empty',
+          () async {
+        // Per WHATWG, every `data:` field appends `\n` before its value
+        // (with the trailing `\n` stripped at dispatch). An empty first
+        // `data:` followed by `data: x` MUST yield `"\nx"`, not `"x"`.
+        // Regression for the `_dataBuffer.isNotEmpty` heuristic that
+        // collapsed the empty-then-non-empty sequence pre-fix.
+        final lines = Stream.fromIterable([
+          'data:',
+          'data: x',
+          '',
+        ]);
+
+        final messages = await parser.parseLines(lines).toList();
+        expect(messages.length, 1);
+        expect(messages[0].data, '\nx');
+      });
+
+      test('event field replaces (not appends) on repeated event: lines',
+          () async {
+        // Per WHATWG, "If the field name is 'event', set the event type
+        // buffer to field value." Repeated `event:` lines within one
+        // dispatch block must REPLACE, not concatenate. Pre-fix, this
+        // produced `"firstsecond"`.
+        final lines = Stream.fromIterable([
+          'event: first',
+          'event: second',
+          'data: payload',
+          '',
+        ]);
+
+        final messages = await parser.parseLines(lines).toList();
+        expect(messages.length, 1);
+        expect(messages[0].event, 'second');
+        expect(messages[0].data, 'payload');
+      });
+
       test('ignores comments', () async {
         final lines = Stream.fromIterable([
           ': this is a comment',
@@ -179,6 +216,28 @@ void main() {
         expect(messages[0].id, isNull);
       });
 
+      test('ignores id containing NUL byte per WHATWG SSE spec', () async {
+        // WHATWG SSE spec: id values must not contain U+0000 (NUL).
+        // A NUL-bearing id is silently ignored; _lastEventId is not updated.
+        // Per spec, each dispatched message carries the current _lastEventId
+        // value, so the second message still inherits 'good-id'.
+        final lines = Stream.fromIterable([
+          'id: good-id',
+          'data: first',
+          '',
+          'id: bad\x00id',
+          'data: second',
+          '',
+        ]);
+
+        final messages = await parser.parseLines(lines).toList();
+        expect(messages.length, 2);
+        expect(messages[0].id, equals('good-id'));
+        // NUL id ignored — _lastEventId unchanged, second message inherits it
+        expect(messages[1].id, equals('good-id'));
+        expect(parser.lastEventId, equals('good-id'));
+      });
+
       test('ignores invalid retry values', () async {
         final lines = Stream.fromIterable([
           'retry: not-a-number',
@@ -232,7 +291,12 @@ void main() {
 
       test('removes BOM if present', () async {
         // UTF-8 BOM + data
-        final bytesWithBom = [0xEF, 0xBB, 0xBF, ...utf8.encode('data: test\n\n')];
+        final bytesWithBom = [
+          0xEF,
+          0xBB,
+          0xBF,
+          ...utf8.encode('data: test\n\n')
+        ];
         final stream = Stream.value(bytesWithBom);
 
         final messages = await parser.parseBytes(stream).toList();
@@ -258,7 +322,7 @@ void main() {
         // Test with \r\n (CRLF)
         final crlfBytes = utf8.encode('data: line1\r\ndata: line2\r\n\r\n');
         final crlfStream = Stream.value(crlfBytes);
-        
+
         final crlfMessages = await parser.parseBytes(crlfStream).toList();
         expect(crlfMessages.length, 1);
         expect(crlfMessages[0].data, 'line1\nline2');
@@ -269,10 +333,83 @@ void main() {
         // Test with \n (LF)
         final lfBytes = utf8.encode('data: line1\ndata: line2\n\n');
         final lfStream = Stream.value(lfBytes);
-        
+
         final lfMessages = await parser.parseBytes(lfStream).toList();
         expect(lfMessages.length, 1);
         expect(lfMessages[0].data, 'line1\nline2');
+      });
+    });
+
+    group('reset()', () {
+      test('clears sticky _lastEventId across independent streams', () async {
+        // I-1 regression: reset() must zero _lastEventId so a reused parser
+        // does not carry the prior connection's id into a new stream.
+        await parser
+            .parseLines(Stream.fromIterable(['id: abc', 'data: x', '']))
+            .toList();
+        expect(parser.lastEventId, equals('abc'));
+        parser.reset();
+        expect(parser.lastEventId, isNull);
+        // Subsequent stream without id: line must dispatch with null id.
+        final msgs = await parser
+            .parseLines(Stream.fromIterable(['data: y', '']))
+            .toList();
+        expect(msgs.single.id, isNull);
+        expect(parser.lastEventId, isNull);
+      });
+
+      test('reset() clears all buffer state, not just _lastEventId', () async {
+        // Partially fill the parser state (data: line without blank line).
+        final firstStream = parser.parseLines(
+          Stream.fromIterable(['id: xyz', 'data: partial']),
+        );
+        await firstStream.toList(); // consumes stream + end-of-stream flush
+        parser.reset();
+        // After reset, a fresh stream should parse cleanly with no carryover.
+        final msgs = await parser
+            .parseLines(Stream.fromIterable(['data: clean', '']))
+            .toList();
+        expect(msgs.single.data, equals('clean'));
+        expect(msgs.single.id, isNull); // _lastEventId was cleared
+      });
+    });
+
+    group('size caps', () {
+      test('rejects oversized data: field beyond maxDataCodeUnits (I-2)', () {
+        final parser = SseParser(maxDataCodeUnits: 16);
+        final lines = Stream.fromIterable([
+          'data: this string is longer than sixteen units',
+          '',
+        ]);
+        expect(
+          parser.parseLines(lines).toList(),
+          throwsA(isA<FormatException>()),
+        );
+      });
+
+      test('rejects oversized event: field beyond maxDataCodeUnits (I-2)',
+          () async {
+        final parser = SseParser(maxDataCodeUnits: 8);
+        final lines = Stream.fromIterable([
+          'event: very-long-event-name',
+          'data: x',
+          '',
+        ]);
+        expect(
+          parser.parseLines(lines).toList(),
+          throwsA(isA<FormatException>()),
+        );
+      });
+
+      test('silently ignores id: field longer than maxIdCodeUnits (I-2)',
+          () async {
+        final hugeId = 'x' * 2048; // well above 1024 cap
+        final parser = SseParser();
+        final messages = await parser
+            .parseLines(Stream.fromIterable(['id: $hugeId', 'data: y', '']))
+            .toList();
+        expect(messages.single.id, isNull); // oversized id dropped, not stored
+        expect(parser.lastEventId, isNull);
       });
     });
 
@@ -308,7 +445,8 @@ void main() {
 
         expect(messages[1].event, 'message');
         expect(messages[1].id, 'evt-002');
-        expect(messages[1].data, '{"from": "alice",\n "text": "Hello, world!",\n "timestamp": 1234567891}');
+        expect(messages[1].data,
+            '{"from": "alice",\n "text": "Hello, world!",\n "timestamp": 1234567891}');
 
         expect(messages[2].event, isNull);
         expect(messages[2].id, 'evt-002'); // Preserved from previous

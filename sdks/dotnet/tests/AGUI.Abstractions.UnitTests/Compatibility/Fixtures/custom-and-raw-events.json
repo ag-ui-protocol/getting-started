@@ -1,0 +1,61 @@
+[
+  {
+    "type": "CUSTOM",
+    "timestamp": 1234567890,
+    "name": "user_preference_updated",
+    "value": {
+      "theme": "dark",
+      "fontSize": "medium",
+      "notifications": true
+    }
+  },
+  {
+    "type": "CUSTOM",
+    "name": "heartbeat"
+  },
+  {
+    "type": "RAW",
+    "timestamp": 1234567890,
+    "event": {
+      "type": "user_action",
+      "action": "button_click",
+      "elementId": "submit-btn",
+      "timestamp": 1234567890
+    },
+    "source": "frontend"
+  },
+  {
+    "type": "RAW",
+    "event": {
+      "type": "analytics_event",
+      "session": {
+        "id": "sess-12345",
+        "user": {
+          "id": "user-456",
+          "attributes": {
+            "plan": "premium",
+            "signupDate": "2023-01-15",
+            "preferences": ["feature1", "feature2"]
+          }
+        },
+        "actions": [
+          {
+            "type": "page_view",
+            "path": "/home",
+            "timestamp": 1676480210000
+          },
+          {
+            "type": "button_click",
+            "elementId": "cta-1",
+            "timestamp": 1676480215000
+          }
+        ]
+      },
+      "metadata": {
+        "source": "web",
+        "version": "1.2.3",
+        "environment": "production"
+      }
+    }
+  }
+]

@@ -1,17 +1,18 @@
-"""Example: Agno Agent with Finance tools
+"""Example: Agno Agent with a weather tool
 
-This example shows how to create an Agno Agent with tools (YFinanceTools) and expose it in an AG-UI compatible way.
+This example shows how to create an Agno Agent with a backend weather tool and
+expose it in an AG-UI compatible way.
 """
 
 import json
+import os
 
 import httpx
-from agno.agent.agent import Agent
+from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 from agno.os import AgentOS
 from agno.os.interfaces.agui import AGUI
 from agno.tools import tool
-from agno.tools.yfinance import YFinanceTools
 
 
 def get_weather_condition(code: int) -> str:
@@ -56,6 +57,25 @@ def get_weather_condition(code: int) -> str:
     return conditions.get(code, "Unknown")
 
 
+def _mock_weather(location: str) -> str:
+    """Return deterministic canned weather data for tests.
+
+    Used when ``AG_UI_MOCK_WEATHER`` is set so e2e runs don't depend on the
+    live open-meteo API (which rate-limits CI's shared egress IPs).
+    """
+    return json.dumps(
+        {
+            "temperature": 21.0,
+            "feels_like": 20.0,
+            "humidity": 65.0,
+            "wind_speed": 12.0,
+            "windGust": 18.0,
+            "conditions": get_weather_condition(1),
+            "location": location,
+        }
+    )
+
+
 @tool(external_execution=False)
 async def get_weather(location: str) -> str:
     """Get current weather for a location.
@@ -67,6 +87,9 @@ async def get_weather(location: str) -> str:
         A json string with weather information including temperature, feels like,
         humidity, wind speed, wind gust, conditions, and location name.
     """
+    if os.getenv("AG_UI_MOCK_WEATHER"):
+        return _mock_weather(location)
+
     async with httpx.AsyncClient() as client:
         # Geocode the location
         geocoding_url = (

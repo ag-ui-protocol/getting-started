@@ -1,13 +1,15 @@
 ---
 title: "Types"
-description: "Documentation for the core types used in the Agent User Interaction Protocol (Ruby SDK)"
+description:
+  "Documentation for the core types used in the Agent User Interaction Protocol
+  (Ruby SDK)"
 ---
 
 # Core Types
 
 The Agent User Interaction Protocol Ruby SDK is built on a set of core types
-that represent the fundamental structures used throughout the system. This
-page documents these types and their properties.
+that represent the fundamental structures used throughout the system. This page
+documents these types and their properties.
 
 ## AudioInputContent
 
@@ -94,8 +96,7 @@ content = AgUiProtocol::Core::Types::ImageInputContent.new(
 
 `AgUiProtocol::Core::Types::InputContentDataSource`
 
-Represents a data source for multimodal input content using base64-encoded
-data.
+Represents a data source for multimodal input content using base64-encoded data.
 
 ```ruby
 
@@ -226,8 +227,12 @@ AgUiProtocol::Core::Types::Role # => ["developer", "system", "assistant",
 
 `AgUiProtocol::Core::Types::RunAgentInput`
 
-Input parameters for running an agent. In the HTTP API, this is the body of
-the `POST` request.
+Input parameters for running an agent. In the HTTP API, this is the body of the
+`POST` request.
+
+`tools` contains tools provided by the client for this run. Backend-defined
+tools should remain in the backend agent or framework configuration, and may be
+advertised separately through agent capabilities.
 
 ```ruby
 
@@ -251,7 +256,7 @@ input = AgUiProtocol::Core::Types::RunAgentInput.new(
 | `run_id`          | `String`                              | ID of the current run                                      |
 | `state`           | `Object`                              | Current state of the agent                                 |
 | `messages`        | `Array<BaseMessage, ActivityMessage>` | List of messages in the conversation                       |
-| `tools`           | `Array<Tool>`                         | List of tools available to the agent                       |
+| `tools`           | `Array<Tool>`                         | Client-provided tools available for this run               |
 | `context`         | `Array<Context>`                      | List of context objects provided to the agent              |
 | `forwarded_props` | `Object`                              | Additional properties forwarded to the agent               |
 | `parent_run_id`   | `String` (optional)                   | Lineage pointer for branching/time travel. Default: `nil`. |
@@ -425,7 +430,7 @@ content = AgUiProtocol::Core::Types::BinaryInputContent.new(
 ```
 
 > <strong>Validation:</strong> At least one of `id`, `url`, or `data` must be
-provided.
+> provided.
 
 | Property    | Type                | Description                                                    |
 | ----------- | ------------------- | -------------------------------------------------------------- |
@@ -541,15 +546,16 @@ msg = AgUiProtocol::Core::Types::UserMessage.new(
 
 ```
 
-| Property          | Type                                                                                                                                       | Description                                                                                                                                                                                                                                                                                                                                                                           |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`              | `String`                                                                                                                                   | Unique identifier for the message                                                                                                                                                                                                                                                                                                                                                     |
-| `content`         | `String, Array<TextInputContent, BinaryInputContent, ImageInputContent, AudioInputContent, VideoInputContent, DocumentInputContent, Hash>` | Accepted shapes: a String for plain text, or an Array whose elements are either *InputContent Models (TextInputContent, BinaryInputContent, ImageInputContent, AudioInputContent, VideoInputContent, DocumentInputContent) OR Hashes with a `type:` key (`text`, `binary`, `image`, `audio`, `video`, `document`); Hash entries are normalized internally to the corresponding Model. |
-| `name`            | `String` (optional)                                                                                                                        | Optional name of the sender. Default: `nil`.                                                                                                                                                                                                                                                                                                                                          |
-| `encrypted_value` | `String` (optional)                                                                                                                        | Encrypted content for zero-data-retention mode. Default: `nil`.                                                                                                                                                                                                                                                                                                                       |
+| Property          | Type                                                                                                                                       | Description                                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | `String`                                                                                                                                   | Unique identifier for the message                                                                                                                                                                                                                                                                                                                                                      |
+| `content`         | `String, Array<TextInputContent, BinaryInputContent, ImageInputContent, AudioInputContent, VideoInputContent, DocumentInputContent, Hash>` | Accepted shapes: a String for plain text, or an Array whose elements are either \*InputContent Models (TextInputContent, BinaryInputContent, ImageInputContent, AudioInputContent, VideoInputContent, DocumentInputContent) OR Hashes with a `type:` key (`text`, `binary`, `image`, `audio`, `video`, `document`); Hash entries are normalized internally to the corresponding Model. |
+| `name`            | `String` (optional)                                                                                                                        | Optional name of the sender. Default: `nil`.                                                                                                                                                                                                                                                                                                                                           |
+| `encrypted_value` | `String` (optional)                                                                                                                        | Encrypted content for zero-data-retention mode. Default: `nil`.                                                                                                                                                                                                                                                                                                                        |
 
 ## State
 
 `State` is represented as `Any`.
 
-The state type is flexible and can hold any data structure needed by the agent implementation.
+The state type is flexible and can hold any data structure needed by the agent
+implementation.

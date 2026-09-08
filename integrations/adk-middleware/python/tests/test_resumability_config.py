@@ -20,6 +20,7 @@ from ag_ui_adk import ADKAgent, AGUIToolset
 from ag_ui_adk.session_manager import SessionManager
 from google.adk.apps import App, ResumabilityConfig
 from google.adk.agents import LlmAgent
+from tests.constants import LIVE_TEST_MODEL
 
 
 class TestIsAdkResumable:
@@ -37,7 +38,7 @@ class TestIsAdkResumable:
         """Create a simple LlmAgent for testing."""
         return LlmAgent(
             name="test_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="You are a helpful assistant.",
         )
 
@@ -130,7 +131,7 @@ class TestLROHandlingWithResumability:
         """Create an agent with AGUIToolset."""
         return LlmAgent(
             name="planner_agent",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="You are a planning assistant. Always use approve_plan tool.",
             tools=[AGUIToolset(tool_filter=["approve_plan"])],
         )
@@ -272,7 +273,7 @@ class TestLROIntegration:
         """Test that HITL tool calls emit proper events without ResumabilityConfig."""
         agent = LlmAgent(
             name="planner",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="""You are a planning assistant.
             When asked to plan something, ALWAYS use the approve_plan tool with a plan object.
             Example: approve_plan(plan={"topic": "requested topic", "sections": ["Section 1", "Section 2"]})""",
@@ -324,7 +325,7 @@ class TestLROIntegration:
         """Test that HITL tool calls emit proper events WITH ResumabilityConfig."""
         agent = LlmAgent(
             name="planner",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="""You are a planning assistant.
             When asked to plan something, ALWAYS use the approve_plan tool with a plan object.
             Example: approve_plan(plan={"topic": "requested topic", "sections": ["Section 1", "Section 2"]})""",
@@ -370,7 +371,7 @@ class TestLROIntegration:
         """
         agent = LlmAgent(
             name="planner",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="""You are a planning assistant.
             When asked to plan something, use the approve_plan tool.
             After receiving approval, confirm the plan was approved.""",
@@ -486,7 +487,7 @@ class TestNestedAgentsWithResumability:
         # Sub-agent with its own AGUIToolset
         sub_agent = LlmAgent(
             name="researcher",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="You research topics and verify sources.",
             tools=[AGUIToolset(tool_filter=["verify_sources"])],
         )
@@ -494,7 +495,7 @@ class TestNestedAgentsWithResumability:
         # Root agent with AGUIToolset and sub-agent
         root_agent = LlmAgent(
             name="planner",
-            model="gemini-2.0-flash",
+            model=LIVE_TEST_MODEL,
             instruction="""You are a planning assistant.
             Use approve_plan to get user approval for plans.
             Delegate research to the researcher sub-agent.""",

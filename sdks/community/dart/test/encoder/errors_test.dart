@@ -109,7 +109,8 @@ void main() {
       expect(str, contains('Source (truncated):'));
       expect(str, contains('x' * 200));
       expect(str, contains('...'));
-      expect(str.contains('x' * 250), isFalse); // Full string should not be present
+      expect(str.contains('x' * 250),
+          isFalse); // Full string should not be present
     });
 
     test('toString handles short source without truncation', () {
@@ -172,7 +173,11 @@ void main() {
     });
 
     test('toString shows source type instead of value', () {
-      final complexObject = {'nested': {'data': [1, 2, 3]}};
+      final complexObject = {
+        'nested': {
+          'data': [1, 2, 3]
+        }
+      };
       final error = EncodeError(
         message: 'Complex object error',
         source: complexObject,
@@ -294,12 +299,15 @@ void main() {
       final str = error.toString();
       expect(str, contains('ValidationError: Null value error'));
       expect(str, contains('Field: optional_field'));
-      expect(str.contains('Value:'), isFalse); // Should not include value line when null
+      expect(str.contains('Value:'),
+          isFalse); // Should not include value line when null
     });
 
     test('handles complex value types', () {
       final complexValue = {
-        'nested': {'array': [1, 2, 3]},
+        'nested': {
+          'array': [1, 2, 3]
+        },
         'boolean': true,
       };
       final error = ValidationError(
@@ -308,7 +316,8 @@ void main() {
       );
 
       final str = error.toString();
-      expect(str, contains('Value: {nested: {array: [1, 2, 3]}, boolean: true}'));
+      expect(
+          str, contains('Value: {nested: {array: [1, 2, 3]}, boolean: true}'));
     });
   });
 

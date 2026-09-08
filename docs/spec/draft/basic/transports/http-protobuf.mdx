@@ -1,0 +1,79 @@
+---
+title: "HTTP + Protobuf"
+description: "The binary binding: the same POST, a stream of length-prefixed protobuf frames back — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+The binary binding, for consumers that want a compact wire. It shares the
+[SSE binding](/spec/draft/basic/transports/http-sse)'s request half entirely —
+the run input is the same JSON POST — and differs only in the response.
+
+## Negotiation
+
+- A client that wants this binding includes
+  `application/vnd.ag-ui.event+proto` in its `Accept` header, alongside
+  `text/event-stream`. Admission is what opts in — a wildcard range
+  (`*/*`, `application/*`) admits the media type too — so a client that
+  cannot consume protobuf MUST send an explicit `Accept` naming what it can,
+  rather than a wildcard or down-ranked entry: relative quality values
+  between the two media types are not consulted.
+- A producer that supports the binding SHOULD answer with it whenever the
+  client's `Accept` admits the media type with a positive quality, and MUST
+  answer SSE otherwise. A producer that does not support it ignores the media
+  type — which is why a client MUST always be prepared to receive SSE.
+- The response's `Content-Type` is exactly `application/vnd.ag-ui.event+proto`;
+  the consumer selects its parser by this header.
+
+## Framing
+
+The response body is a sequence of frames, each one protocol event:
+
+- A frame is a 4-byte length header — an unsigned 32-bit big-endian integer —
+  followed by exactly that many bytes of one encoded event.
+- Frames abut with no separator. A consumer MUST tolerate frames split across
+  transport chunks and multiple frames within one chunk.
+- A body that ends mid-frame is a
+  [truncated run](/spec/draft/basic/transports#truncation).
+
+## The wire schema
+
+The protobuf message definitions are generated from the same
+[JSON Schema](/spec/draft/schema-files) the SDKs are generated from; the wire
+schema is not a second source of truth. Cross-implementation parity is part of
+the conformance surface: a corpus of canonical events pins the encoded bytes,
+and every first-party encoder MUST reproduce the corpus byte for byte. (The
+corpus is the guarantee — two encoders handed the same *semantic* value may
+still order the entries of an open JSON object differently, which protobuf
+map encoding makes visible.)
+
+Semantics stay as close to the SSE binding as a binary wire allows:
+
+- An event decoded from a frame enters the same
+  [processing pipeline](/spec/draft/basic/processing) as an event parsed from
+  SSE — middleware first, enforcement after, identically.
+- Material the wire schema carries as open payloads — `RUN_FINISHED.outcome`,
+  metadata, state, `rawEvent` — survives decoding and reaches that pipeline:
+  an unrecognised outcome arriving on this binding is stripped by enforcement
+  with a warning, exactly as on SSE, and the binding MUST NOT reject it at
+  decode time.
+- The binary wire is inherently narrower for the rest. A *field* this build's
+  wire schema predates is skipped by protobuf decoding itself, silently — the
+  stripped-with-warning behaviour is fully observable only on the JSON wire.
+  The same narrowing covers protocol-legal open members the wire schema does
+  not model: a JSON Patch operation's extension members, which the JSON wire
+  MUST preserve, do not survive this one.
+  An *event* whose envelope arm this build predates carries no type string to
+  hand onward, so the binding drops the frame with a warning — the same
+  answer enforcement gives, spelled at the transport.
+- A frame whose bytes do not decode as a message is malformed transport
+  material and fatal to the stream. A body that simply ends mid-frame is not:
+  that is a [truncated run](/spec/draft/basic/transports#truncation).
+
+## Errors
+
+Identical to the [SSE binding](/spec/draft/basic/transports/http-sse#errors):
+rejection before the stream is an HTTP error status; failure inside the stream
+is `RUN_ERROR`, as a frame like any other.

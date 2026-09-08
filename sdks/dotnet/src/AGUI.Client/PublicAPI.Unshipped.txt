@@ -1,0 +1,20 @@
+#nullable enable
+AGUI.Client.AGUIChatClient
+AGUI.Client.AGUIClientInstrumentation
+const AGUI.Client.AGUIClientInstrumentation.ActivitySourceName = "Experimental.AGUI.Client" -> string!
+AGUI.Client.AGUIChatClient.AGUIChatClient(AGUI.Client.AGUIChatClientOptions! options) -> void
+AGUI.Client.AGUIChatClientOptions
+AGUI.Client.AGUIChatClientOptions.AGUIChatClientOptions() -> void
+AGUI.Client.AGUIChatClientOptions.AGUIChatClientOptions(System.Net.Http.HttpClient! httpClient, string! endpoint) -> void
+AGUI.Client.AGUIChatClientOptions.Transport.get -> AGUI.Client.IAGUITransport!
+AGUI.Client.AGUIChatClientOptions.Transport.init -> void
+AGUI.Client.AGUIChatClientOptions.JsonSerializerOptions.get -> System.Text.Json.JsonSerializerOptions?
+AGUI.Client.AGUIChatClientOptions.JsonSerializerOptions.init -> void
+AGUI.Client.IAGUITransport
+AGUI.Client.IAGUITransport.SendAsync(AGUI.Abstractions.RunAgentInput! input, System.Threading.CancellationToken cancellationToken) -> System.Collections.Generic.IAsyncEnumerable<AGUI.Abstractions.BaseEvent!>!
+override AGUI.Client.AGUIChatClient.GetResponseAsync(System.Collections.Generic.IEnumerable<Microsoft.Extensions.AI.ChatMessage!>! messages, Microsoft.Extensions.AI.ChatOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.AI.ChatResponse!>!
+override AGUI.Client.AGUIChatClient.GetStreamingResponseAsync(System.Collections.Generic.IEnumerable<Microsoft.Extensions.AI.ChatMessage!>! messages, Microsoft.Extensions.AI.ChatOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Microsoft.Extensions.AI.ChatResponseUpdate!>!
+AGUI.Client.AGUIEventStreamHandler
+AGUI.Client.AGUIEventStreamHandler.AGUIEventStreamHandler(System.Collections.Generic.IEnumerable<AGUI.Formatting.IAGUIEventStreamFormatter!>! formatters) -> void
+AGUI.Client.AGUIResponseExtensions
+static AGUI.Client.AGUIResponseExtensions.ReadAGUIEventStreamAsync(this System.Net.Http.HttpResponseMessage! response, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<AGUI.Abstractions.BaseEvent!>!
